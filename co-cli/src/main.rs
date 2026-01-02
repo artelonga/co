@@ -155,6 +155,12 @@ enum Commands {
         #[command(subcommand)]
         action: Option<ConfigAction>,
     },
+
+    /// Search and filter content
+    Locate {
+        #[command(subcommand)]
+        action: LocateAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -173,6 +179,26 @@ enum ConfigAction {
     Show,
     /// Set a configuration value
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum LocateAction {
+    /// Find content by frontmatter fields
+    Find {
+        /// Filters in field:value format (e.g., "status:todo")
+        #[arg(required = true)]
+        filters: Vec<String>,
+
+        /// Scope(s) to search in (comma-separated)
+        #[arg(short, long, value_name = "SCOPE")]
+        r#in: Option<String>,
+    },
+
+    /// Full-text search in content body
+    Search {
+        /// Search query
+        query: String,
+    },
 }
 
 fn main() {
@@ -202,5 +228,13 @@ fn main() {
         Commands::Archive { name } => commands::archive::run(&name),
         Commands::Repl => commands::repl::run(),
         Commands::Config { action } => commands::config::run(action),
+        Commands::Locate { action } => match action {
+            LocateAction::Find { filters, r#in } => {
+                commands::locate::find::run(&filters, r#in.as_deref())
+            }
+            LocateAction::Search { query } => {
+                commands::locate::search::run(&query)
+            }
+        },
     }
 }

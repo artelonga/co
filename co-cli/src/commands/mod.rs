@@ -9,6 +9,7 @@ pub mod init;
 pub mod lang;
 pub mod languages;
 pub mod list;
+pub mod locate;
 pub mod new;
 pub mod query;
 pub mod repl;

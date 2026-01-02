@@ -424,3 +424,242 @@ fn test_lang_sets_system_language() {
         "Config should contain system_language: pt"
     );
 }
+
+// ============================================================================
+// US-3.1: Query with Scope Filtering Tests
+// ============================================================================
+
+#[test]
+fn test_locate_find_global_query() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context with another task
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: todo\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Query all contexts (global query by default)
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "status:todo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[en]"))
+        .stdout(predicate::str::contains("[private]"))
+        .stdout(predicate::str::contains("task1"))
+        .stdout(predicate::str::contains("task2"));
+}
+
+#[test]
+fn test_locate_find_scoped_query_flag() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context with another task
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: todo\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Query only private context using --in flag
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "status:todo", "--in", "private"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[private]"))
+        .stdout(predicate::str::contains("task2"))
+        .stdout(predicate::str::contains("[en]").not())
+        .stdout(predicate::str::contains("task1").not());
+}
+
+#[test]
+fn test_locate_find_scoped_query_positional() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context with another task
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: todo\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Query using positional context syntax: `co locate find private status:todo`
+    // This should be equivalent to `--in private`
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "private", "status:todo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[private]"))
+        .stdout(predicate::str::contains("task2"))
+        .stdout(predicate::str::contains("[en]").not())
+        .stdout(predicate::str::contains("task1").not());
+}
+
+#[test]
+fn test_locate_find_nonexistent_context_errors() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context only
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+
+    // Query with non-existent context should error
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "nonexistent", "status:todo"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("Context 'nonexistent' not found"));
+}
+
+#[test]
+fn test_locate_find_multiple_contexts() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: todo\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Create company/ context (should be excluded)
+    let company_path = tmp.path().join("company");
+    std::fs::create_dir_all(company_path.join("tasks")).unwrap();
+    std::fs::write(
+        company_path.join("tasks/task3.md"),
+        "---\ntype: task\nid: task3\nstatus: todo\n---\n\n# Task 3\n",
+    )
+    .unwrap();
+
+    // Query multiple contexts using comma-separated --in flag
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "status:todo", "--in", "en,private"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("[en]"))
+        .stdout(predicate::str::contains("[private]"))
+        .stdout(predicate::str::contains("task1"))
+        .stdout(predicate::str::contains("task2"))
+        .stdout(predicate::str::contains("[company]").not())
+        .stdout(predicate::str::contains("task3").not());
+}
+
+#[test]
+fn test_locate_find_type_filter() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task and a definition
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::create_dir_all(en_path.join("definitions")).unwrap();
+
+    std::fs::write(
+        en_path.join("tasks/my-task.md"),
+        "---\ntype: task\nid: my-task\nstatus: todo\n---\n\n# My Task\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        en_path.join("definitions/hello.md"),
+        "---\ntype: definition\nid: hello\n---\n\nA greeting.\n",
+    )
+    .unwrap();
+
+    // Query for type:task should only return tasks
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "type:task"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("my-task"))
+        .stdout(predicate::str::contains("hello").not());
+
+    // Query for type:definition should only return definitions
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "find", "type:definition"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("hello"))
+        .stdout(predicate::str::contains("my-task").not());
+}
+
+#[test]
+fn test_locate_search_fulltext() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with tasks
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+
+    std::fs::write(
+        en_path.join("tasks/meeting.md"),
+        "---\ntype: task\nid: meeting\nstatus: todo\n---\n\n# Meeting Task\n\nWe have an important meeting tomorrow.\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        en_path.join("tasks/review.md"),
+        "---\ntype: task\nid: review\nstatus: todo\n---\n\n# Code Review\n\nReview the pull request.\n",
+    )
+    .unwrap();
+
+    // Search for "important meeting" should find the meeting task
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "search", "important meeting"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("meeting"))
+        .stdout(predicate::str::contains("review").not());
+}
