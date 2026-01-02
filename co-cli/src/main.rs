@@ -40,8 +40,51 @@ enum Commands {
         stats: bool,
     },
 
+    /// Create new content (task, definition, etc.)
+    New {
+        /// Content type (task, definition, etc.)
+        content_type: String,
+
+        /// Content name/id
+        name: String,
+
+        /// Target scope (context directory)
+        #[arg(short, long, value_name = "SCOPE")]
+        r#in: Option<String>,
+    },
+
+    /// Show content file
+    Show {
+        /// Content name/id to display
+        name: String,
+
+        /// Show only frontmatter metadata
+        #[arg(short, long)]
+        meta: bool,
+    },
+
     /// Show graph status and statistics
     Status,
+
+    /// Update content file frontmatter
+    Update {
+        /// Content name/id to update
+        name: String,
+
+        /// New status value
+        #[arg(short, long)]
+        status: Option<String>,
+    },
+
+    /// Delete content file
+    Delete {
+        /// Content name/id to delete
+        name: String,
+
+        /// Confirm deletion (required)
+        #[arg(long)]
+        confirm: bool,
+    },
 
     /// Query the graph with DSL
     Query {
@@ -138,7 +181,15 @@ fn main() {
     match cli.command {
         Commands::Init { name } => commands::init::run(&name),
         Commands::List { stats } => commands::list::run(stats),
+        Commands::New {
+            content_type,
+            name,
+            r#in,
+        } => commands::new::run(&content_type, &name, r#in.as_deref()),
+        Commands::Show { name, meta } => commands::show::run(&name, meta),
         Commands::Status => commands::status::run(),
+        Commands::Update { name, status } => commands::update::run(&name, status.as_deref()),
+        Commands::Delete { name, confirm } => commands::delete::run(&name, confirm),
         Commands::Query { query } => commands::query::run(&query),
         Commands::Define {
             id,

@@ -180,6 +180,204 @@ fn test_list_stats_shows_file_counts() {
 }
 
 // ============================================================================
+// US-2.1: Create Content Tests
+// ============================================================================
+
+#[test]
+fn test_new_creates_file_in_scope() {
+    let tmp = tempdir().unwrap();
+
+    // Create scope first
+    co_command()
+        .current_dir(tmp.path())
+        .args(["init", "private"])
+        .assert()
+        .success();
+
+    // Create a new task in that scope
+    co_command()
+        .current_dir(tmp.path())
+        .args(["new", "task", "my-task", "--in", "private"])
+        .assert()
+        .success();
+
+    // Verify file was created
+    let task_path = tmp.path().join("private/tasks/my-task.md");
+    assert!(task_path.exists(), "Task file should be created at private/tasks/my-task.md");
+}
+
+#[test]
+fn test_new_auto_populates_frontmatter() {
+    let tmp = tempdir().unwrap();
+
+    // Create scope first
+    co_command()
+        .current_dir(tmp.path())
+        .args(["init", "private"])
+        .assert()
+        .success();
+
+    // Create a new task
+    co_command()
+        .current_dir(tmp.path())
+        .args(["new", "task", "my-task", "--in", "private"])
+        .assert()
+        .success();
+
+    // Read the created file and verify frontmatter
+    let task_path = tmp.path().join("private/tasks/my-task.md");
+    let content = std::fs::read_to_string(&task_path).unwrap();
+
+    assert!(content.contains("schema_version: 2"), "Should have schema_version: 2");
+    assert!(content.contains("language: en"), "Should have language: en");
+    assert!(content.contains("scope: private"), "Should have scope: private");
+    assert!(content.contains("type: task"), "Should have type: task");
+    assert!(content.contains("status: todo"), "Should have status: todo");
+}
+
+#[test]
+fn test_new_defaults_to_en_scope() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ language directory (simulating existing language)
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(&en_path).unwrap();
+    std::fs::write(
+        en_path.join("README.md"),
+        "---\ntype: language\nid: en\n---\n# English\n",
+    )
+    .unwrap();
+
+    // Create a new task WITHOUT --in flag
+    co_command()
+        .current_dir(tmp.path())
+        .args(["new", "task", "foo"])
+        .assert()
+        .success();
+
+    // Verify file was created in en/tasks/
+    let task_path = tmp.path().join("en/tasks/foo.md");
+    assert!(task_path.exists(), "Task file should be created at en/tasks/foo.md");
+
+    // Verify scope is set to en
+    let content = std::fs::read_to_string(&task_path).unwrap();
+    assert!(content.contains("scope: en"), "Should have scope: en");
+}
+
+// ============================================================================
+// US-2.2: Read Content Tests
+// ============================================================================
+
+#[test]
+fn test_show_displays_content() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ with a task file
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/todo.md"),
+        "---\ntype: task\nid: todo\nstatus: todo\n---\n\n# My Task\n\nTask content here.\n",
+    )
+    .unwrap();
+
+    // Show the content
+    co_command()
+        .current_dir(tmp.path())
+        .args(["show", "todo"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("My Task"))
+        .stdout(predicate::str::contains("Task content here"));
+}
+
+#[test]
+fn test_show_meta_only() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ with a task file
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/todo.md"),
+        "---\ntype: task\nid: todo\nstatus: todo\n---\n\n# My Task\n\nTask content here.\n",
+    )
+    .unwrap();
+
+    // Show only metadata
+    co_command()
+        .current_dir(tmp.path())
+        .args(["show", "todo", "--meta"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("type: task"))
+        .stdout(predicate::str::contains("status: todo"))
+        .stdout(predicate::str::contains("My Task").not()); // Should NOT contain body content
+}
+
+// ============================================================================
+// US-2.3: Update Content Tests
+// ============================================================================
+
+#[test]
+fn test_update_changes_status() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ with a task file
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/todo.md"),
+        "---\ntype: task\nid: todo\nstatus: todo\n---\n\n# My Task\n",
+    )
+    .unwrap();
+
+    // Update the status
+    co_command()
+        .current_dir(tmp.path())
+        .args(["update", "todo", "--status", "done"])
+        .assert()
+        .success();
+
+    // Verify the file was updated
+    let content = std::fs::read_to_string(en_path.join("tasks/todo.md")).unwrap();
+    assert!(content.contains("status: done"), "Status should be updated to done");
+    assert!(!content.contains("status: todo"), "Old status should be replaced");
+}
+
+// ============================================================================
+// US-2.4: Delete Content Tests
+// ============================================================================
+
+#[test]
+fn test_delete_removes_file() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ with a task file
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    let task_path = en_path.join("tasks/old.md");
+    std::fs::write(
+        &task_path,
+        "---\ntype: task\nid: old\nstatus: todo\n---\n\n# Old Task\n",
+    )
+    .unwrap();
+
+    // Verify file exists before delete
+    assert!(task_path.exists(), "File should exist before delete");
+
+    // Delete with confirmation
+    co_command()
+        .current_dir(tmp.path())
+        .args(["delete", "old", "--confirm"])
+        .assert()
+        .success();
+
+    // Verify file was removed
+    assert!(!task_path.exists(), "File should be removed after delete");
+}
+
+// ============================================================================
 // US-1.3: Multilingual UI Support Tests
 // ============================================================================
 
