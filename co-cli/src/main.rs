@@ -157,9 +157,22 @@ enum Commands {
     },
 
     /// Search and filter content
+    ///
+    /// Unified command for locating content by frontmatter or body text.
+    ///
+    /// Examples:
+    ///   co locate status:todo           # Filter by frontmatter
+    ///   co locate "important meeting"   # Full-text search
+    ///   co locate status:todo meeting   # Combined filter + search
+    ///   co locate private status:todo   # Context + filter
     Locate {
-        #[command(subcommand)]
-        action: LocateAction,
+        /// Query terms (field:value for frontmatter, plain text for body search)
+        #[arg(required = true)]
+        query: Vec<String>,
+
+        /// Context(s) to search in (comma-separated)
+        #[arg(short, long, value_name = "CONTEXT")]
+        r#in: Option<String>,
     },
 }
 
@@ -179,26 +192,6 @@ enum ConfigAction {
     Show,
     /// Set a configuration value
     Set { key: String, value: String },
-}
-
-#[derive(Subcommand)]
-enum LocateAction {
-    /// Find content by frontmatter fields
-    Find {
-        /// Filters in field:value format (e.g., "status:todo")
-        #[arg(required = true)]
-        filters: Vec<String>,
-
-        /// Scope(s) to search in (comma-separated)
-        #[arg(short, long, value_name = "SCOPE")]
-        r#in: Option<String>,
-    },
-
-    /// Full-text search in content body
-    Search {
-        /// Search query
-        query: String,
-    },
 }
 
 fn main() {
@@ -228,13 +221,8 @@ fn main() {
         Commands::Archive { name } => commands::archive::run(&name),
         Commands::Repl => commands::repl::run(),
         Commands::Config { action } => commands::config::run(action),
-        Commands::Locate { action } => match action {
-            LocateAction::Find { filters, r#in } => {
-                commands::locate::find::run(&filters, r#in.as_deref())
-            }
-            LocateAction::Search { query } => {
-                commands::locate::search::run(&query)
-            }
-        },
+        Commands::Locate { query, r#in } => {
+            commands::locate::run(&query, r#in.as_deref())
+        }
     }
 }

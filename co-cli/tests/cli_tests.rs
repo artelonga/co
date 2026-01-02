@@ -426,11 +426,11 @@ fn test_lang_sets_system_language() {
 }
 
 // ============================================================================
-// US-3.1: Query with Scope Filtering Tests
+// US-3.1: Unified Locate Command Tests
 // ============================================================================
 
 #[test]
-fn test_locate_find_global_query() {
+fn test_locate_global_query() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context with a task
@@ -454,7 +454,7 @@ fn test_locate_find_global_query() {
     // Query all contexts (global query by default)
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "status:todo"])
+        .args(["locate", "status:todo"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[en]"))
@@ -464,7 +464,7 @@ fn test_locate_find_global_query() {
 }
 
 #[test]
-fn test_locate_find_scoped_query_flag() {
+fn test_locate_scoped_query_flag() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context with a task
@@ -488,7 +488,7 @@ fn test_locate_find_scoped_query_flag() {
     // Query only private context using --in flag
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "status:todo", "--in", "private"])
+        .args(["locate", "status:todo", "--in", "private"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[private]"))
@@ -498,7 +498,7 @@ fn test_locate_find_scoped_query_flag() {
 }
 
 #[test]
-fn test_locate_find_scoped_query_positional() {
+fn test_locate_scoped_query_positional() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context with a task
@@ -519,11 +519,10 @@ fn test_locate_find_scoped_query_positional() {
     )
     .unwrap();
 
-    // Query using positional context syntax: `co locate find private status:todo`
-    // This should be equivalent to `--in private`
+    // Query using positional context syntax: `co locate private status:todo`
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "private", "status:todo"])
+        .args(["locate", "private", "status:todo"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[private]"))
@@ -533,7 +532,7 @@ fn test_locate_find_scoped_query_positional() {
 }
 
 #[test]
-fn test_locate_find_nonexistent_context_errors() {
+fn test_locate_nonexistent_context_errors() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context only
@@ -543,14 +542,14 @@ fn test_locate_find_nonexistent_context_errors() {
     // Query with non-existent context should error
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "nonexistent", "status:todo"])
+        .args(["locate", "nonexistent", "status:todo"])
         .assert()
         .failure()
         .stderr(predicate::str::contains("Context 'nonexistent' not found"));
 }
 
 #[test]
-fn test_locate_find_multiple_contexts() {
+fn test_locate_multiple_contexts() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context
@@ -583,7 +582,7 @@ fn test_locate_find_multiple_contexts() {
     // Query multiple contexts using comma-separated --in flag
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "status:todo", "--in", "en,private"])
+        .args(["locate", "status:todo", "--in", "en,private"])
         .assert()
         .success()
         .stdout(predicate::str::contains("[en]"))
@@ -595,7 +594,7 @@ fn test_locate_find_multiple_contexts() {
 }
 
 #[test]
-fn test_locate_find_type_filter() {
+fn test_locate_type_filter() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context with a task and a definition
@@ -618,7 +617,7 @@ fn test_locate_find_type_filter() {
     // Query for type:task should only return tasks
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "type:task"])
+        .args(["locate", "type:task"])
         .assert()
         .success()
         .stdout(predicate::str::contains("my-task"))
@@ -627,7 +626,7 @@ fn test_locate_find_type_filter() {
     // Query for type:definition should only return definitions
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "find", "type:definition"])
+        .args(["locate", "type:definition"])
         .assert()
         .success()
         .stdout(predicate::str::contains("hello"))
@@ -635,7 +634,7 @@ fn test_locate_find_type_filter() {
 }
 
 #[test]
-fn test_locate_search_fulltext() {
+fn test_locate_fulltext_search() {
     let tmp = tempdir().unwrap();
 
     // Create en/ context with tasks
@@ -654,12 +653,42 @@ fn test_locate_search_fulltext() {
     )
     .unwrap();
 
-    // Search for "important meeting" should find the meeting task
+    // Search for "important meeting" (no colon = full-text search)
     co_command()
         .current_dir(tmp.path())
-        .args(["locate", "search", "important meeting"])
+        .args(["locate", "important meeting"])
         .assert()
         .success()
         .stdout(predicate::str::contains("meeting"))
         .stdout(predicate::str::contains("review").not());
+}
+
+#[test]
+fn test_locate_combined_filter_and_search() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with tasks
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+
+    std::fs::write(
+        en_path.join("tasks/meeting.md"),
+        "---\ntype: task\nid: meeting\nstatus: todo\n---\n\n# Meeting Task\n\nWe have an important meeting tomorrow.\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        en_path.join("tasks/done-meeting.md"),
+        "---\ntype: task\nid: done-meeting\nstatus: done\n---\n\n# Done Meeting\n\nAn important meeting that is done.\n",
+    )
+    .unwrap();
+
+    // Combined: filter by status:todo AND search for "important"
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "status:todo", "important"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("meeting"))
+        .stdout(predicate::str::contains("done-meeting").not());
 }
