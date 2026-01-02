@@ -1,0 +1,59 @@
+# CO - The Root Supertype
+# This is the self-referential definition of CO itself
+#
+# CO can describe itself in any of its language subtypes.
+# This file demonstrates the fractal nature of the system:
+# the definition uses the structure it defines.
+
+type: definition
+id: def-co
+symbol: co
+
+# CO inherits from itself conceptually (it IS the root)
+inherits: []
+
+# Canonical definition is in English, but all languages are equal
+canonical: english
+
+translations:
+  english:
+    term: "CO"
+    definition: |
+      The root supertype of the exegetic graph database.
+      All types inherit from CO. CO provides the primitives
+      for defining, translating, and relating concepts across
+      any language or symbolic system.
+    example: "type: definition inherits: co"
+
+  portuguese:
+    term: "CO"
+    definition: |
+      O supertipo raiz do banco de dados gráfico exegético.
+      Todos os tipos herdam de CO. CO fornece os primitivos
+      para definir, traduzir e relacionar conceitos em
+      qualquer idioma ou sistema simbólico.
+    example: "tipo: definição herda: co"
+
+  guarani-mbya:
+    term: "CO"
+    definition: |
+      Ñe'ẽ ypykue oĩva ha'e peteĩ teĩ, opaite mba'e
+      oñemboguapýva ichugui. CO ome'ẽ ñe'ẽ ñepyrũ
+      ha'anga, ñemongetarã ha joaju ñe'ẽ.
+    example: "mba'e: ñe'ẽanga oñemboguapy: co"
+
+  music:
+    term: "𝄞"
+    definition: |
+      The tonic - the fundamental pitch from which all
+      intervals and harmonies derive their meaning.
+      Like a key signature that gives context to every note.
+    example: "C major: all notes relate to C"
+
+  math:
+    term: "∀x: type(x) → inherits(x, CO)"
+    definition: |
+      The universal set from which all types derive.
+      For any element x, if x is a type, then x inherits
+      from CO. CO is the top element in the type lattice.
+    example: "CO ⊇ Language ⊇ Domain ⊇ Definition"

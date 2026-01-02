@@ -1,0 +1,48 @@
+[package]
+name = "co"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core library for CO - graph-based content management"
+repository.workspace = true
+
+# This crate can be used as a dependency in other projects
+# See README.md for usage instructions
+
+[dependencies]
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+bincode = { workspace = true }
+
+# Files
+memmap2 = { workspace = true }
+walkdir = { workspace = true }
+
+# Compression
+zstd = { workspace = true }
+
+# Time
+chrono = { workspace = true }
+
+# Utilities
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+xxhash-rust = { workspace = true }
+
+# Graph
+petgraph = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+default = []
+# Enable full graph traversal capabilities
+full-graph = []
+# Enable translation support
+translations = []
+# Enable all features
+all = ["full-graph", "translations"]

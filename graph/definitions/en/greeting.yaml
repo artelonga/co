@@ -1,0 +1,40 @@
+# Example Definition: Greeting
+# Demonstrates a concept defined across all languages
+
+type: definition
+id: def-greeting
+symbol: greeting
+
+inherits: [co]
+canonical: english
+
+translations:
+  english:
+    term: "hello"
+    definition: "A word or gesture used to greet someone"
+    example: "Hello, how are you?"
+
+  portuguese:
+    term: "olá"
+    definition: "Uma palavra ou gesto usado para cumprimentar alguém"
+    example: "Olá, como você está?"
+
+  guarani-mbya:
+    term: "mba'éichapa"
+    definition: "Ñe'ẽ ojeporúva og̃uahẽ hag̃ua avave"
+    example: "Mba'éichapa, mba'éichapa reiko?"
+
+  music:
+    term: "I-IV-V-I"
+    definition: "Harmonic resolution pattern signaling arrival/welcome"
+    example: "C-F-G-C cadence (arrival home)"
+
+  math:
+    term: "∃x: acknowledged(x)"
+    definition: "Existential quantifier asserting presence recognition"
+    example: "∃person: greeted(person) → acknowledged(person)"
+
+# Related concepts
+related:
+  - def-farewell
+  - def-acknowledgment

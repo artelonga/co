@@ -1,0 +1,47 @@
+# Portuguese Language Definition
+# A natural language subtype of CO
+
+type: language
+id: lang-portuguese
+symbol: portuguese
+
+inherits: [co]
+exegesis_type: natural
+iso_code: pt
+
+metadata:
+  name: Portuguese
+  native_name: Português
+  direction: ltr
+  script: Latin
+
+translations:
+  english:
+    term: "Portuguese"
+    definition: |
+      A Romance language originating from the Iberian Peninsula.
+      The official language of Portugal, Brazil, and several
+      African and Asian nations. Known for its rich literary tradition.
+    example: "Olá, como vai você?"
+
+  portuguese:
+    term: "Português"
+    definition: |
+      Uma língua românica originária da Península Ibérica.
+      Idioma oficial de Portugal, Brasil e vários países
+      africanos e asiáticos. Conhecida pela rica tradição literária.
+    example: "Olá, como vai você?"
+
+  guarani-mbya:
+    term: "Português ñe'ẽ"
+    definition: |
+      Peteĩ ñe'ẽ oúva Península Ibérica-gui.
+      Ñe'ẽ oficial Portugal ha Brasil pegua.
+    example: "Olá, como vai você?"
+
+primitives:
+  - saudação
+  - pergunta
+  - declaração
+  - comando
+  - condicional
