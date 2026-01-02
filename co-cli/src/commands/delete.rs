@@ -12,10 +12,7 @@ pub fn run(name: &str, confirm: bool) {
     let i18n = load_i18n();
 
     if !confirm {
-        eprintln!(
-            "{} Use --confirm to delete files",
-            "error:".red().bold()
-        );
+        eprintln!("{} Use --confirm to delete files", "error:".red().bold());
         std::process::exit(1);
     }
 
@@ -40,11 +37,10 @@ pub fn run(name: &str, confirm: bool) {
         }
         None => {
             eprintln!(
-                "{} {} '{}' {}",
+                "{} {} '{}' not found",
                 "error:".red().bold(),
                 i18n.type_label("content"),
-                name,
-                "not found"
+                name
             );
             std::process::exit(1);
         }

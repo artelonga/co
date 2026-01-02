@@ -29,11 +29,7 @@ pub fn run(name: &str) {
     let issues = co::validate::validate_file(&file_path, &ctx);
 
     if issues.is_empty() {
-        println!(
-            "{} {} is valid",
-            "✓".green().bold(),
-            file_path.display()
-        );
+        println!("{} {} is valid", "✓".green().bold(), file_path.display());
     } else {
         let mut error_count = 0;
         let mut warning_count = 0;
@@ -97,10 +93,8 @@ fn find_in_context(context_path: &Path, search_name: &str, id: &str) -> Option<s
                 if let Some(found) = find_in_directory(&path, search_name, id) {
                     return Some(found);
                 }
-            } else if path.is_file() {
-                if matches_file(&path, search_name, id) {
-                    return Some(path);
-                }
+            } else if path.is_file() && matches_file(&path, search_name, id) {
+                return Some(path);
             }
         }
     }
@@ -132,15 +126,15 @@ fn matches_file(path: &Path, search_name: &str, id: &str) -> bool {
     }
 
     // Check ID in frontmatter
-    if path.extension().map_or(false, |e| e == "md") {
+    if path.extension().is_some_and(|e| e == "md") {
         if let Ok(content) = fs::read_to_string(path) {
-            if content.starts_with("---") {
-                if let Some(end_idx) = content[3..].find("\n---") {
-                    let yaml_str = &content[4..end_idx + 3];
+            if let Some(rest) = content.strip_prefix("---") {
+                if let Some(end_idx) = rest.find("\n---") {
+                    let yaml_str = &rest[1..end_idx];
                     for line in yaml_str.lines() {
                         let line = line.trim();
-                        if line.starts_with("id:") {
-                            let file_id = line[3..].trim().trim_matches('"').trim_matches('\'');
+                        if let Some(id_value) = line.strip_prefix("id:") {
+                            let file_id = id_value.trim().trim_matches('"').trim_matches('\'');
                             if file_id == id {
                                 return true;
                             }
@@ -173,7 +167,7 @@ fn collect_ids_from_context(context_path: &Path, known_ids: &mut HashSet<String>
             let path = entry.path();
             if path.is_dir() {
                 collect_ids_from_directory(&path, known_ids);
-            } else if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            } else if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(id) = extract_id(&path) {
                     known_ids.insert(id);
                 }
@@ -187,7 +181,7 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(id) = extract_id(&path) {
                     known_ids.insert(id);
                 }
@@ -199,17 +193,14 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
 /// Extract ID from a file's frontmatter
 fn extract_id(path: &Path) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
-    if !content.starts_with("---") {
-        return None;
-    }
-
-    let end_idx = content[3..].find("\n---")?;
-    let yaml_str = &content[4..end_idx + 3];
+    let rest = content.strip_prefix("---")?;
+    let end_idx = rest.find("\n---")?;
+    let yaml_str = &rest[1..end_idx];
 
     for line in yaml_str.lines() {
         let line = line.trim();
-        if line.starts_with("id:") {
-            let id = line[3..].trim().trim_matches('"').trim_matches('\'');
+        if let Some(id_value) = line.strip_prefix("id:") {
+            let id = id_value.trim().trim_matches('"').trim_matches('\'');
             return Some(id.to_string());
         }
     }
@@ -223,5 +214,5 @@ fn extract_id(path: &Path) -> Option<String> {
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with('.'))
+        .is_some_and(|n| n.starts_with('.'))
 }

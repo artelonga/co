@@ -108,9 +108,18 @@ fn test_init_creates_context_readme() {
     assert!(readme_path.exists(), "README.md should exist");
 
     let readme = std::fs::read_to_string(&readme_path).unwrap();
-    assert!(readme.contains("type: context"), "README should contain type: context");
-    assert!(readme.contains("id: private"), "README should contain id: private");
-    assert!(readme.contains("language: english"), "README should contain language: english");
+    assert!(
+        readme.contains("type: context"),
+        "README should contain type: context"
+    );
+    assert!(
+        readme.contains("id: private"),
+        "README should contain id: private"
+    );
+    assert!(
+        readme.contains("language: english"),
+        "README should contain language: english"
+    );
 }
 
 #[test]
@@ -203,7 +212,10 @@ fn test_new_creates_file_in_scope() {
 
     // Verify file was created
     let task_path = tmp.path().join("private/tasks/my-task.md");
-    assert!(task_path.exists(), "Task file should be created at private/tasks/my-task.md");
+    assert!(
+        task_path.exists(),
+        "Task file should be created at private/tasks/my-task.md"
+    );
 }
 
 #[test]
@@ -228,9 +240,15 @@ fn test_new_auto_populates_frontmatter() {
     let task_path = tmp.path().join("private/tasks/my-task.md");
     let content = std::fs::read_to_string(&task_path).unwrap();
 
-    assert!(content.contains("schema_version: 2"), "Should have schema_version: 2");
+    assert!(
+        content.contains("schema_version: 2"),
+        "Should have schema_version: 2"
+    );
     assert!(content.contains("language: en"), "Should have language: en");
-    assert!(content.contains("scope: private"), "Should have scope: private");
+    assert!(
+        content.contains("scope: private"),
+        "Should have scope: private"
+    );
     assert!(content.contains("type: task"), "Should have type: task");
     assert!(content.contains("status: todo"), "Should have status: todo");
 }
@@ -257,7 +275,10 @@ fn test_new_defaults_to_en_scope() {
 
     // Verify file was created in en/tasks/
     let task_path = tmp.path().join("en/tasks/foo.md");
-    assert!(task_path.exists(), "Task file should be created at en/tasks/foo.md");
+    assert!(
+        task_path.exists(),
+        "Task file should be created at en/tasks/foo.md"
+    );
 
     // Verify scope is set to en
     let content = std::fs::read_to_string(&task_path).unwrap();
@@ -341,8 +362,14 @@ fn test_update_changes_status() {
 
     // Verify the file was updated
     let content = std::fs::read_to_string(en_path.join("tasks/todo.md")).unwrap();
-    assert!(content.contains("status: done"), "Status should be updated to done");
-    assert!(!content.contains("status: todo"), "Old status should be replaced");
+    assert!(
+        content.contains("status: done"),
+        "Status should be updated to done"
+    );
+    assert!(
+        !content.contains("status: todo"),
+        "Old status should be replaced"
+    );
 }
 
 // ============================================================================
@@ -720,7 +747,10 @@ fn test_locate_build_creates_index() {
 
     // Verify index file was created
     let index_path = tmp.path().join(".co/index.bin");
-    assert!(index_path.exists(), "Index file should be created at .co/index.bin");
+    assert!(
+        index_path.exists(),
+        "Index file should be created at .co/index.bin"
+    );
 }
 
 #[test]
@@ -838,9 +868,9 @@ fn test_locate_stats_shows_breakdown() {
         .args(["locate", "stats"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("3"))           // Total entries
-        .stdout(predicate::str::contains("en"))          // Scope breakdown
-        .stdout(predicate::str::contains("private"));    // Scope breakdown
+        .stdout(predicate::str::contains("3")) // Total entries
+        .stdout(predicate::str::contains("en")) // Scope breakdown
+        .stdout(predicate::str::contains("private")); // Scope breakdown
 }
 
 // ============================================================================
@@ -1007,4 +1037,118 @@ fn test_validate_unknown_type_warning() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Unknown type: custom-type"));
+}
+
+// ============================================================================
+// US-8.1: Interactive Lead Command Tests
+// ============================================================================
+
+#[test]
+fn test_lead_command_exists() {
+    // The command should exist and show help
+    co_command()
+        .args(["lead", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Interactive"));
+}
+
+#[test]
+fn test_lead_exits_on_quit() {
+    // Send "quit" command via stdin and verify exit
+    co_command()
+        .arg("lead")
+        .write_stdin("quit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Goodbye"));
+}
+
+#[test]
+fn test_lead_exits_on_exit() {
+    // Send "exit" command via stdin and verify exit
+    co_command()
+        .arg("lead")
+        .write_stdin("exit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Goodbye"));
+}
+
+#[test]
+fn test_lead_shows_prompt_with_scope() {
+    // REPL should show scope indicator in prompt
+    co_command()
+        .arg("lead")
+        .write_stdin("exit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("co ["));
+}
+
+#[test]
+fn test_lead_use_command_switches_scope() {
+    let tmp = tempdir().unwrap();
+
+    // Create private/ context
+    co_command()
+        .current_dir(tmp.path())
+        .args(["init", "private"])
+        .assert()
+        .success();
+
+    // Switch scope and verify prompt changes
+    co_command()
+        .current_dir(tmp.path())
+        .arg("lead")
+        .write_stdin("use private\nexit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("co [private]"));
+}
+
+#[test]
+fn test_lead_help_shows_commands() {
+    // Help command should list available commands
+    co_command()
+        .arg("lead")
+        .write_stdin("help\nexit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("use"))
+        .stdout(predicate::str::contains("exit"));
+}
+
+#[test]
+fn test_lead_status_command() {
+    // Status command should work in REPL
+    co_command()
+        .arg("lead")
+        .write_stdin("status\nexit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("CO Graph Status"));
+}
+
+#[test]
+fn test_lead_locate_command() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Locate command should work in REPL
+    co_command()
+        .current_dir(tmp.path())
+        .arg("lead")
+        .write_stdin("locate status:todo\nexit\n")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("task1"));
 }

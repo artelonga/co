@@ -60,7 +60,11 @@ pub fn run() {
     let co_dir = current_dir.join(".co");
     if !co_dir.exists() {
         if let Err(e) = fs::create_dir_all(&co_dir) {
-            eprintln!("{} Failed to create .co directory: {}", "error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to create .co directory: {}",
+                "error:".red().bold(),
+                e
+            );
             std::process::exit(1);
         }
     }
@@ -94,7 +98,7 @@ fn index_directory(dir: &Path, scope: &str, index: &mut Index) -> usize {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(entry) = create_index_entry(&path, scope) {
                     index.insert(entry);
                     count += 1;
@@ -174,5 +178,5 @@ fn create_index_entry(path: &Path, scope: &str) -> Option<IndexEntry> {
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with('.'))
+        .is_some_and(|n| n.starts_with('.'))
 }

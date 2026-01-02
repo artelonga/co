@@ -48,32 +48,27 @@ pub fn run(query: &[String], context_filter: Option<&str>) {
     // This distinguishes `co locate private status:todo` from `co locate "search term"`
     let has_subsequent_filters = query.len() > 1 && query[1..].iter().any(|a| a.contains(':'));
 
-    let (positional_context, query_args): (Option<&str>, &[String]) =
-        if !query.is_empty()
-            && !query[0].contains(':')
-            && !query[0].contains(' ')
-            && has_subsequent_filters
-        {
-            // First arg looks like a context name (followed by filters)
-            if !is_context_dir(&query[0]) {
-                eprintln!(
-                    "{} Context '{}' not found",
-                    "error:".red().bold(),
-                    query[0]
-                );
-                std::process::exit(1);
-            }
-            (Some(&query[0]), &query[1..])
-        } else if !query.is_empty()
-            && !query[0].contains(':')
-            && !query[0].contains(' ')
-            && is_context_dir(&query[0])
-        {
-            // First arg is an existing context (even without subsequent filters)
-            (Some(&query[0]), &query[1..])
-        } else {
-            (None, query)
-        };
+    let (positional_context, query_args): (Option<&str>, &[String]) = if !query.is_empty()
+        && !query[0].contains(':')
+        && !query[0].contains(' ')
+        && has_subsequent_filters
+    {
+        // First arg looks like a context name (followed by filters)
+        if !is_context_dir(&query[0]) {
+            eprintln!("{} Context '{}' not found", "error:".red().bold(), query[0]);
+            std::process::exit(1);
+        }
+        (Some(&query[0]), &query[1..])
+    } else if !query.is_empty()
+        && !query[0].contains(':')
+        && !query[0].contains(' ')
+        && is_context_dir(&query[0])
+    {
+        // First arg is an existing context (even without subsequent filters)
+        (Some(&query[0]), &query[1..])
+    } else {
+        (None, query)
+    };
 
     // Separate field filters (field:value) from search terms (plain text)
     let mut field_filters: Vec<(String, String)> = Vec::new();
@@ -141,7 +136,13 @@ fn find_content(
                     for type_dir in type_dirs.flatten() {
                         let type_path = type_dir.path();
                         if type_path.is_dir() {
-                            search_directory(&type_path, &context_name, filters, search_terms, &mut results);
+                            search_directory(
+                                &type_path,
+                                &context_name,
+                                filters,
+                                search_terms,
+                                &mut results,
+                            );
                         }
                     }
                 }
@@ -166,7 +167,7 @@ fn search_directory(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(item) = check_file(&path, context, filters, search_terms) {
                     results.push(item);
                 }
@@ -225,15 +226,12 @@ fn check_file(
     }
 
     // Get ID from frontmatter or filename
-    let id = string_fields
-        .get("id")
-        .cloned()
-        .unwrap_or_else(|| {
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        });
+    let id = string_fields.get("id").cloned().unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
 
     Some(ContentItem {
         context: context.to_string(),
@@ -245,7 +243,7 @@ fn check_file(
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with('.'))
+        .is_some_and(|n| n.starts_with('.'))
 }
 
 /// Check if a name corresponds to an existing context directory

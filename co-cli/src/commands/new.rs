@@ -18,11 +18,10 @@ pub fn run(content_type: &str, name: &str, scope: Option<&str>) {
     // Verify scope exists
     if !scope_path.exists() {
         eprintln!(
-            "{} {} '{}' {}",
+            "{} {} '{}' does not exist",
             "error:".red().bold(),
             i18n.type_label("context"),
-            scope_name,
-            "does not exist"
+            scope_name
         );
         std::process::exit(1);
     }

@@ -84,7 +84,7 @@ fn collect_ids_from_context(context_path: &Path, known_ids: &mut HashSet<String>
             let path = entry.path();
             if path.is_dir() {
                 collect_ids_from_directory(&path, known_ids);
-            } else if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            } else if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(id) = extract_id(&path) {
                     known_ids.insert(id);
                 }
@@ -98,7 +98,7 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(id) = extract_id(&path) {
                     known_ids.insert(id);
                 }
@@ -110,18 +110,15 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
 /// Extract ID from a file's frontmatter
 fn extract_id(path: &Path) -> Option<String> {
     let content = fs::read_to_string(path).ok()?;
-    if !content.starts_with("---") {
-        return None;
-    }
-
-    let end_idx = content[3..].find("\n---")?;
-    let yaml_str = &content[4..end_idx + 3];
+    let rest = content.strip_prefix("---")?;
+    let end_idx = rest.find("\n---")?;
+    let yaml_str = &rest[1..end_idx];
 
     // Simple extraction - look for "id:" line
     for line in yaml_str.lines() {
         let line = line.trim();
-        if line.starts_with("id:") {
-            let id = line[3..].trim().trim_matches('"').trim_matches('\'');
+        if let Some(id_value) = line.strip_prefix("id:") {
+            let id = id_value.trim().trim_matches('"').trim_matches('\'');
             return Some(id.to_string());
         }
     }
@@ -159,9 +156,9 @@ fn validate_context(
             let path = entry.path();
             if path.is_dir() {
                 validate_directory(&path, ctx, issues);
-            } else if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            } else if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 // Skip README files
-                if path.file_name().map_or(false, |n| n == "README.md") {
+                if path.file_name().is_some_and(|n| n == "README.md") {
                     continue;
                 }
                 let file_issues = co::validate::validate_file(&path, ctx);
@@ -172,15 +169,11 @@ fn validate_context(
 }
 
 /// Validate all files in a directory
-fn validate_directory(
-    dir: &Path,
-    ctx: &ValidationContext,
-    issues: &mut Vec<co::ValidationIssue>,
-) {
+fn validate_directory(dir: &Path, ctx: &ValidationContext, issues: &mut Vec<co::ValidationIssue>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 let file_issues = co::validate::validate_file(&path, ctx);
                 issues.extend(file_issues);
             }
@@ -214,8 +207,8 @@ fn count_files_in_context(context_path: &Path) -> usize {
             if path.is_dir() {
                 count += count_files_in_directory(&path);
             } else if path.is_file()
-                && path.extension().map_or(false, |e| e == "md")
-                && path.file_name().map_or(true, |n| n != "README.md")
+                && path.extension().is_some_and(|e| e == "md")
+                && path.file_name().is_none_or(|n| n != "README.md")
             {
                 count += 1;
             }
@@ -232,7 +225,7 @@ fn count_files_in_directory(dir: &Path) -> usize {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 count += 1;
             }
         }
@@ -245,5 +238,5 @@ fn count_files_in_directory(dir: &Path) -> usize {
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with('.'))
+        .is_some_and(|n| n.starts_with('.'))
 }

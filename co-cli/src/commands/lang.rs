@@ -44,7 +44,11 @@ fn set_language(lang: &str) {
     // Create .co directory if it doesn't exist
     let config_dir = Path::new(".co");
     if let Err(e) = fs::create_dir_all(config_dir) {
-        eprintln!("{} Failed to create .co directory: {}", "error:".red().bold(), e);
+        eprintln!(
+            "{} Failed to create .co directory: {}",
+            "error:".red().bold(),
+            e
+        );
         std::process::exit(1);
     }
 
@@ -57,7 +61,11 @@ fn set_language(lang: &str) {
         std::process::exit(1);
     }
 
-    println!("{} {}", "System language set to:".green(), lang.cyan().bold());
+    println!(
+        "{} {}",
+        "System language set to:".green(),
+        lang.cyan().bold()
+    );
 }
 
 /// Show current system language
@@ -70,7 +78,12 @@ fn show_language() {
                 if line.starts_with("system_language:") {
                     let lang = line.strip_prefix("system_language:").unwrap().trim();
                     let lang_name = get_language_name(lang);
-                    println!("{} {} ({})", "System language:".bold(), lang.cyan(), lang_name);
+                    println!(
+                        "{} {} ({})",
+                        "System language:".bold(),
+                        lang.cyan(),
+                        lang_name
+                    );
                     return;
                 }
             }

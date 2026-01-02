@@ -31,7 +31,7 @@ pub fn run(name: &str) {
     }
 
     // Create context directory
-    if let Err(e) = fs::create_dir_all(&context_path) {
+    if let Err(e) = fs::create_dir_all(context_path) {
         eprintln!(
             "{} Failed to create {}: {}",
             "error:".red().bold(),

@@ -19,6 +19,9 @@ serde_json = { workspace = true }
 serde_yaml = { workspace = true }
 colored = "2.0"
 comfy-table = { workspace = true }
+rustyline = "14"
+dirs = "5"
+atty = "0.2"
 
 [dev-dependencies]
 assert_cmd = "2.0"

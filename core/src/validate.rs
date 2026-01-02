@@ -105,6 +105,7 @@ impl ValidationContext {
 struct ValidatableFrontmatter {
     #[serde(rename = "type")]
     content_type: Option<String>,
+    #[allow(dead_code)]
     id: Option<String>,
     language: Option<String>,
     scope: Option<String>,
@@ -120,14 +121,20 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
     let content = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(e) => {
-            issues.push(ValidationIssue::error(path, format!("Cannot read file: {}", e)));
+            issues.push(ValidationIssue::error(
+                path,
+                format!("Cannot read file: {}", e),
+            ));
             return issues;
         }
     };
 
     // Check for frontmatter
     if !content.starts_with("---") {
-        issues.push(ValidationIssue::error(path, "No frontmatter found (file must start with ---)"));
+        issues.push(ValidationIssue::error(
+            path,
+            "No frontmatter found (file must start with ---)",
+        ));
         return issues;
     }
 
@@ -135,7 +142,10 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
     let end_idx = match content[3..].find("\n---") {
         Some(idx) => idx,
         None => {
-            issues.push(ValidationIssue::error(path, "Invalid frontmatter format: no closing ---"));
+            issues.push(ValidationIssue::error(
+                path,
+                "Invalid frontmatter format: no closing ---",
+            ));
             return issues;
         }
     };
@@ -146,14 +156,20 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
     let frontmatter: ValidatableFrontmatter = match serde_yaml::from_str(yaml_str) {
         Ok(fm) => fm,
         Err(e) => {
-            issues.push(ValidationIssue::error(path, format!("YAML parse error: {}", e)));
+            issues.push(ValidationIssue::error(
+                path,
+                format!("YAML parse error: {}", e),
+            ));
             return issues;
         }
     };
 
     // Task 5.1.1: Check required field: language
     if frontmatter.language.is_none() {
-        issues.push(ValidationIssue::error(path, "Missing required field: language"));
+        issues.push(ValidationIssue::error(
+            path,
+            "Missing required field: language",
+        ));
     }
 
     // Task 5.1.2: Check language exists (has lexicon directory)
@@ -202,7 +218,10 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
                 .unwrap_or("en");
             issues.push(ValidationIssue::warning(
                 path,
-                format!("Unknown type: {} (not in {}/ lexicon)", content_type, lang_dir),
+                format!(
+                    "Unknown type: {} (not in {}/ lexicon)",
+                    content_type, lang_dir
+                ),
             ));
         }
     }

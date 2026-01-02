@@ -44,11 +44,10 @@ pub fn run(name: &str, meta_only: bool) {
         }
         None => {
             eprintln!(
-                "{} {} '{}' {}",
+                "{} {} '{}' not found",
                 "error:".red().bold(),
                 i18n.type_label("content"),
-                name,
-                "not found"
+                name
             );
             std::process::exit(1);
         }
@@ -90,10 +89,7 @@ fn find_content_file(name: &str) -> Option<std::path::PathBuf> {
 
 /// Extract frontmatter from content
 fn extract_frontmatter(content: &str) -> Option<&str> {
-    if content.starts_with("---") {
-        if let Some(end) = content[3..].find("---") {
-            return Some(&content[4..end + 3]);
-        }
-    }
-    None
+    let rest = content.strip_prefix("---")?;
+    let end = rest.find("---")?;
+    Some(&rest[1..end])
 }

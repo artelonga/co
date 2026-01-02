@@ -17,20 +17,15 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
 /// The type of a context detected from its README frontmatter
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContextKind {
     /// A natural or formal language (e.g., english, math)
     Language,
     /// A user-defined context for content organization
     Context,
     /// Unknown or unrecognized type
+    #[default]
     Unknown,
-}
-
-impl Default for ContextKind {
-    fn default() -> Self {
-        ContextKind::Unknown
-    }
 }
 
 /// Backwards-compatible alias for ContextKind
@@ -71,7 +66,7 @@ impl Context {
     }
 
     /// Create a user-defined context
-    pub fn context(id: impl Into<String>, path: impl Into<PathBuf>) -> Self {
+    pub fn new_context(id: impl Into<String>, path: impl Into<PathBuf>) -> Self {
         Self::new(id, ContextKind::Context, path)
     }
 
@@ -114,7 +109,7 @@ mod tests {
 
     #[test]
     fn test_context_with_submodule() {
-        let ctx = Context::context("shared", "/path/to/shared").with_submodule(true);
+        let ctx = Context::new_context("shared", "/path/to/shared").with_submodule(true);
         assert!(ctx.is_submodule);
     }
 

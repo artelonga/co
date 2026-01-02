@@ -31,15 +31,41 @@ fn embedded_labels(lang: &str) -> UiLabels {
 
     // Add default English labels
     labels.types = HashMap::from([
-        ("context".to_string(), if lang == "pt" { "contexto".to_string() } else { "context".to_string() }),
-        ("definition".to_string(), if lang == "pt" { "definição".to_string() } else { "definition".to_string() }),
+        (
+            "context".to_string(),
+            if lang == "pt" {
+                "contexto".to_string()
+            } else {
+                "context".to_string()
+            },
+        ),
+        (
+            "definition".to_string(),
+            if lang == "pt" {
+                "definição".to_string()
+            } else {
+                "definition".to_string()
+            },
+        ),
     ]);
 
     labels.messages = HashMap::from([
-        ("context_initialized".to_string(),
-         if lang == "pt" { "Contexto Inicializado".to_string() } else { "Context Initialized".to_string() }),
-        ("already_exists".to_string(),
-         if lang == "pt" { "já existe".to_string() } else { "already exists".to_string() }),
+        (
+            "context_initialized".to_string(),
+            if lang == "pt" {
+                "Contexto Inicializado".to_string()
+            } else {
+                "Context Initialized".to_string()
+            },
+        ),
+        (
+            "already_exists".to_string(),
+            if lang == "pt" {
+                "já existe".to_string()
+            } else {
+                "already exists".to_string()
+            },
+        ),
     ]);
 
     labels
@@ -67,6 +93,7 @@ fn get_system_language() -> String {
 }
 
 /// Load UI labels for a specific language
+#[allow(dead_code)]
 pub fn load_labels(lang: &str) -> UiLabels {
     let path = format!("en/ui/{}.yaml", lang);
     if Path::new(&path).exists() {

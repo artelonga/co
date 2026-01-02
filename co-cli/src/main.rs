@@ -147,8 +147,15 @@ enum Commands {
         name: String,
     },
 
-    /// Enter interactive REPL mode
-    Repl,
+    /// Interactive exploration mode with scope context
+    ///
+    /// Enter an interactive shell with command history and scope switching.
+    ///
+    /// Examples:
+    ///   co lead              # Start interactive mode
+    ///   use private          # Switch to private scope
+    ///   locate status:todo   # Run commands in current scope
+    Lead,
 
     /// Show or edit configuration
     Config {
@@ -245,7 +252,7 @@ fn main() {
         Commands::Lang { language, list } => commands::lang::run(language, list),
         Commands::Index { action } => commands::index::run(action),
         Commands::Archive { name } => commands::archive::run(&name),
-        Commands::Repl => commands::repl::run(),
+        Commands::Lead => commands::lead::run(),
         Commands::Config { action } => commands::config::run(action),
         Commands::Locate { query, r#in } => {
             // Check if first arg is a subcommand (build, update, stats)

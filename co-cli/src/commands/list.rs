@@ -74,7 +74,7 @@ pub fn run(stats: bool) {
             })
             .collect();
 
-        items.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        items.sort_by_key(|a| a.file_name());
 
         for entry in items {
             let path = entry.path();
@@ -82,9 +82,8 @@ pub fn run(stats: bool) {
             let context_type = detect_type(&path);
 
             // Only show directories that have a recognized type
-            match context_type {
-                ContextType::Unknown => continue,
-                _ => {}
+            if let ContextType::Unknown = context_type {
+                continue;
             }
 
             found_any = true;

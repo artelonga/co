@@ -145,7 +145,11 @@ pub struct SemanticVersion {
 impl SemanticVersion {
     /// Create a new semantic version
     pub fn new(major: u32, minor: u32, patch: u32) -> Self {
-        Self { major, minor, patch }
+        Self {
+            major,
+            minor,
+            patch,
+        }
     }
 }
 

@@ -51,11 +51,10 @@ pub fn run(name: &str, status: Option<&str>) {
         }
         None => {
             eprintln!(
-                "{} {} '{}' {}",
+                "{} {} '{}' not found",
                 "error:".red().bold(),
                 i18n.type_label("content"),
-                name,
-                "not found"
+                name
             );
             std::process::exit(1);
         }

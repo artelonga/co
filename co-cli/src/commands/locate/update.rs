@@ -79,8 +79,7 @@ pub fn run() {
                 }
 
                 // Also index files directly in the scope root
-                let (u, a) =
-                    update_directory(&path, &scope_name, &mut index, &mut seen_ids);
+                let (u, a) = update_directory(&path, &scope_name, &mut index, &mut seen_ids);
                 updated_count += u;
                 added_count += a;
             }
@@ -122,11 +121,7 @@ pub fn run() {
             }
         }
         Err(e) => {
-            eprintln!(
-                "{} Failed to serialize index: {}",
-                "error:".red().bold(),
-                e
-            );
+            eprintln!("{} Failed to serialize index: {}", "error:".red().bold(), e);
             std::process::exit(1);
         }
     }
@@ -146,14 +141,22 @@ pub fn run() {
             println!(
                 "  {} {} updated",
                 updated_count.to_string().cyan(),
-                if updated_count == 1 { "entry" } else { "entries" }
+                if updated_count == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
             );
         }
         if removed_count > 0 {
             println!(
                 "  {} {} removed",
                 removed_count.to_string().cyan(),
-                if removed_count == 1 { "entry" } else { "entries" }
+                if removed_count == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
             );
         }
         println!("{} Index updated successfully", "success:".green().bold());
@@ -174,7 +177,7 @@ fn update_directory(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "md") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
                 if let Some(new_entry) = create_index_entry(&path, scope) {
                     seen_ids.insert(new_entry.id.clone());
 
@@ -264,5 +267,5 @@ fn create_index_entry(path: &Path, scope: &str) -> Option<IndexEntry> {
 fn is_hidden(path: &Path) -> bool {
     path.file_name()
         .and_then(|n| n.to_str())
-        .map_or(false, |n| n.starts_with('.'))
+        .is_some_and(|n| n.starts_with('.'))
 }

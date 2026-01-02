@@ -21,7 +21,10 @@ pub fn run() {
             Ok(bytes) => match Index::from_bytes(&bytes) {
                 Ok(idx) => idx,
                 Err(_) => {
-                    eprintln!("{}", "Index corrupted. Run `co locate build` to rebuild.".red());
+                    eprintln!(
+                        "{}",
+                        "Index corrupted. Run `co locate build` to rebuild.".red()
+                    );
                     std::process::exit(1);
                 }
             },
@@ -31,7 +34,10 @@ pub fn run() {
             }
         }
     } else {
-        println!("{}", "No index found. Run `co locate build` first.".yellow());
+        println!(
+            "{}",
+            "No index found. Run `co locate build` first.".yellow()
+        );
         return;
     };
 
@@ -51,7 +57,10 @@ pub fn run() {
     for entry in index.entries.values() {
         *by_scope.entry(&entry.scope).or_insert(0) += 1;
         *by_type.entry(&entry.node_type).or_insert(0) += 1;
-        let lang = entry.language.clone().unwrap_or_else(|| "unspecified".to_string());
+        let lang = entry
+            .language
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
         *by_language.entry(lang).or_insert(0) += 1;
     }
 
