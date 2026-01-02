@@ -6,10 +6,13 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::types::{LanguageSpec, Lexicon, TypeKind};
+
 /// Unique identifier for a node
 pub type NodeId = String;
 
 /// The type of a node in the graph
+#[deprecated(since = "0.2.0", note = "Use TypeKind from types module instead")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NodeType {
     /// The root node (CO itself)
@@ -32,6 +35,22 @@ pub enum NodeType {
 
     /// Generic content
     Content,
+}
+
+/// Convert deprecated NodeType to TypeKind for incremental migration
+#[allow(deprecated)]
+impl From<NodeType> for TypeKind {
+    fn from(node_type: NodeType) -> Self {
+        match node_type {
+            NodeType::Root => TypeKind::Root,
+            NodeType::Language => TypeKind::Language(LanguageSpec::default()),
+            NodeType::Domain => TypeKind::Domain,
+            NodeType::Definition => TypeKind::Definition,
+            NodeType::Task => TypeKind::Task,
+            NodeType::Project => TypeKind::Project,
+            NodeType::Content => TypeKind::Content,
+        }
+    }
 }
 
 /// A node in the CO graph
@@ -61,6 +80,9 @@ pub struct Node {
 
     /// Additional metadata
     pub metadata: HashMap<String, serde_yaml::Value>,
+
+    /// For language types: the lexicon containing type definitions
+    pub lexicon: Option<Lexicon>,
 }
 
 /// A translation of a node's content
@@ -88,6 +110,7 @@ impl Node {
             translations: HashMap::new(),
             file_path: None,
             metadata: HashMap::new(),
+            lexicon: None,
         }
     }
 
@@ -102,6 +125,7 @@ impl Node {
             translations: HashMap::new(),
             file_path: None,
             metadata: HashMap::new(),
+            lexicon: None,
         }
     }
 
@@ -116,6 +140,7 @@ impl Node {
             translations: HashMap::new(),
             file_path: None,
             metadata: HashMap::new(),
+            lexicon: None,
         }
     }
 
@@ -171,5 +196,55 @@ mod tests {
 
         let pt = node.translation("portuguese").unwrap();
         assert_eq!(pt.term, "olá");
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_nodetype_to_typekind_conversion() {
+        use crate::types::TypeKind;
+
+        // Existing code can migrate incrementally using From trait
+        let old_type = NodeType::Task;
+        let new_type: TypeKind = old_type.into();
+
+        assert!(matches!(new_type, TypeKind::Task));
+
+        // All variants should convert
+        assert!(matches!(TypeKind::from(NodeType::Root), TypeKind::Root));
+        assert!(matches!(TypeKind::from(NodeType::Language), TypeKind::Language(_)));
+        assert!(matches!(TypeKind::from(NodeType::Domain), TypeKind::Domain));
+        assert!(matches!(TypeKind::from(NodeType::Definition), TypeKind::Definition));
+        assert!(matches!(TypeKind::from(NodeType::Project), TypeKind::Project));
+        assert!(matches!(TypeKind::from(NodeType::Content), TypeKind::Content));
+    }
+
+    #[test]
+    fn test_node_with_lexicon() {
+        use crate::types::{Lexicon, SemanticVersion};
+
+        let mut node = Node::new("english".into(), NodeType::Language, "English".into());
+
+        // Add a lexicon representing all definitions in the English scope
+        let mut lexicon = Lexicon::new(SemanticVersion::new(1, 0, 0));
+
+        // Define terms with plain text content (from .md body, not frontmatter)
+        lexicon.define(
+            "hello",
+            "A common greeting used when meeting someone.",
+            "en/definitions/hello.md",
+        );
+
+        node.lexicon = Some(lexicon);
+
+        assert!(node.lexicon.is_some());
+        let lex = node.lexicon.as_ref().unwrap();
+        assert_eq!(lex.version.major, 1);
+        assert_eq!(lex.len(), 1);
+
+        // Query returns plain text content
+        assert_eq!(
+            lex.content("hello"),
+            Some("A common greeting used when meeting someone.")
+        );
     }
 }

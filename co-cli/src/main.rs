@@ -1,6 +1,7 @@
 //! CO CLI - Exegetic graph database interface
 //!
 //! Commands:
+//! - `co init` - Initialize a scope
 //! - `co status` - Show graph status
 //! - `co query` - Query the graph
 //! - `co define` - Create definitions
@@ -10,6 +11,7 @@
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod i18n;
 
 #[derive(Parser)]
 #[command(name = "co")]
@@ -25,6 +27,19 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Initialize a new scope
+    Init {
+        /// Scope name (e.g., "private", "org")
+        name: String,
+    },
+
+    /// List scopes and languages
+    List {
+        /// Show file counts per scope
+        #[arg(short, long)]
+        stats: bool,
+    },
+
     /// Show graph status and statistics
     Status,
 
@@ -58,8 +73,24 @@ enum Commands {
         to: String,
     },
 
-    /// List available languages
-    Languages,
+    /// Manage languages and UI translations
+    ///
+    /// Aliases: `lang`, `languages`
+    ///
+    /// Examples:
+    ///   co lang              # Show current system language
+    ///   co lang pt           # Set system language to Portuguese
+    ///   co lang --list       # List available languages
+    ///   co languages --list  # Same as above (alias)
+    #[command(visible_alias = "languages")]
+    Lang {
+        /// Language code to set (e.g., "pt", "en")
+        language: Option<String>,
+
+        /// List available UI translations
+        #[arg(short, long)]
+        list: bool,
+    },
 
     /// Rebuild the index
     Index {
@@ -105,6 +136,8 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Init { name } => commands::init::run(&name),
+        Commands::List { stats } => commands::list::run(stats),
         Commands::Status => commands::status::run(),
         Commands::Query { query } => commands::query::run(&query),
         Commands::Define {
@@ -113,7 +146,7 @@ fn main() {
             language,
         } => commands::define::run(&id, &symbol, &language),
         Commands::Translate { id, to } => commands::translate::run(&id, &to),
-        Commands::Languages => commands::languages::run(),
+        Commands::Lang { language, list } => commands::lang::run(language, list),
         Commands::Index { action } => commands::index::run(action),
         Commands::Archive { name } => commands::archive::run(&name),
         Commands::Repl => commands::repl::run(),

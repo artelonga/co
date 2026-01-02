@@ -1,0 +1,41 @@
+# English UI Labels for CO CLI
+# This is the base/fallback translation file
+
+lang: en
+
+types:
+  definition: definition
+  task: task
+  project: project
+  context: context
+  language: language
+  domain: domain
+  content: content
+
+fields:
+  type: type
+  id: id
+  status: status
+  priority: priority
+  language: language
+  created: created
+  updated: updated
+  tags: tags
+
+statuses:
+  active: active
+  done: done
+  archived: archived
+  pending: pending
+  blocked: blocked
+
+messages:
+  initialized: "Initialized successfully"
+  created: "Created successfully"
+  updated: "Updated successfully"
+  deleted: "Deleted successfully"
+  not_found: "Not found"
+  already_exists: "Already exists"
+  context_initialized: "Context Initialized"
+  system_language_set: "System language set to"
+  no_contexts_found: "No contexts or languages found"

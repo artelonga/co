@@ -1,9 +1,58 @@
 //! YAML frontmatter extraction
 //!
 //! Extract structured data from Markdown files with YAML frontmatter.
+//!
+//! # Flexibility
+//!
+//! Frontmatter is generic over the data type T. Extended types can define
+//! their own structs with additional fields. Use `#[serde(flatten)]` to
+//! extend BaseFrontmatter, or define completely custom structures.
+//!
+//! Core tests only verify universal fields (type, id). Extended types
+//! may have context-specific required/optional fields.
+//!
+//! ## Example: Extended Frontmatter
+//!
+//! ```ignore
+//! #[derive(Deserialize)]
+//! struct TaskFrontmatter {
+//!     #[serde(flatten)]
+//!     base: BaseFrontmatter,
+//!     status: String,           // Required for tasks
+//!     priority: Option<String>, // Optional
+//! }
+//! ```
 
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use thiserror::Error;
+
+/// Default schema version for frontmatter
+fn default_schema_version() -> u32 {
+    1
+}
+
+/// Base frontmatter structure with universal fields.
+///
+/// Only includes fields common to ALL content types.
+/// Extended types should define their own structs for type-specific fields.
+///
+/// - `type`: Content type identifier (required)
+/// - `id`: Unique identifier (required)
+/// - `schema_version`: For migration support (defaults to 1)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BaseFrontmatter {
+    /// Content type (definition, task, project, context, language, etc.)
+    #[serde(rename = "type")]
+    pub content_type: String,
+
+    /// Unique identifier for this content
+    pub id: String,
+
+    /// Schema version for migration support
+    /// Defaults to 1 for backward compatibility
+    #[serde(default = "default_schema_version")]
+    pub schema_version: u32,
+}
 
 /// Errors that can occur during frontmatter parsing
 #[derive(Error, Debug)]
@@ -123,5 +172,90 @@ status: todo
         let content = "# Just a heading\n\nSome content";
         let result: Result<Frontmatter<TestFrontmatter>, _> = Frontmatter::parse(content);
         assert!(matches!(result, Err(FrontmatterError::NotFound)));
+    }
+
+    #[test]
+    fn test_schema_version_defaults_to_1() {
+        // v0.1.0 files without schema_version should default to 1
+        let content = r#"---
+type: definition
+id: hello
+---
+
+A greeting.
+"#;
+
+        let fm: Frontmatter<BaseFrontmatter> = Frontmatter::parse(content).unwrap();
+        assert_eq!(fm.data.schema_version, 1);
+    }
+
+    #[test]
+    fn test_schema_version_explicit() {
+        // v0.2.0 files can specify schema_version: 2
+        let content = r#"---
+type: definition
+id: hello
+schema_version: 2
+---
+
+A greeting.
+"#;
+
+        let fm: Frontmatter<BaseFrontmatter> = Frontmatter::parse(content).unwrap();
+        assert_eq!(fm.data.schema_version, 2);
+    }
+
+    #[test]
+    fn test_extended_frontmatter_with_extra_fields() {
+        // Extended types can have additional fields beyond base
+        #[derive(Debug, Deserialize, PartialEq)]
+        struct ExtendedFrontmatter {
+            #[serde(rename = "type")]
+            content_type: String,
+            id: String,
+            // Extended fields - context-specific
+            status: String,
+            priority: Option<String>,
+            #[serde(default)]
+            tags: Vec<String>,
+        }
+
+        let content = r#"---
+type: task
+id: my-task
+status: active
+priority: high
+tags:
+  - urgent
+  - backend
+---
+
+Task description here.
+"#;
+
+        let fm: Frontmatter<ExtendedFrontmatter> = Frontmatter::parse(content).unwrap();
+        assert_eq!(fm.data.content_type, "task");
+        assert_eq!(fm.data.status, "active");
+        assert_eq!(fm.data.priority, Some("high".to_string()));
+        assert_eq!(fm.data.tags, vec!["urgent", "backend"]);
+    }
+
+    #[test]
+    fn test_base_frontmatter_ignores_extra_fields() {
+        // BaseFrontmatter only parses universal fields, ignores the rest
+        let content = r#"---
+type: task
+id: my-task
+status: active
+custom_field: ignored
+---
+
+Body.
+"#;
+
+        let fm: Frontmatter<BaseFrontmatter> = Frontmatter::parse(content).unwrap();
+        assert_eq!(fm.data.content_type, "task");
+        assert_eq!(fm.data.id, "my-task");
+        // Extra fields are simply not captured, no error
     }
 }

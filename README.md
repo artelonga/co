@@ -2,6 +2,19 @@
 
 Graph-based content management in Rust. Markdown files with YAML frontmatter, version controlled, human readable.
 
+## Prerequisites
+
+CO requires Rust and Cargo. Install using [rustup](https://doc.rust-lang.org/cargo/getting-started/installation.html):
+
+```bash
+curl https://sh.rustup.rs -sSf | sh
+```
+
+After installation, reload your terminal or run:
+```bash
+source ~/.cargo/env
+```
+
 ## Quick Start
 
 ```bash

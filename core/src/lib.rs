@@ -45,18 +45,25 @@ pub mod language;
 pub mod node;
 pub mod query;
 pub mod schema;
+pub mod scope;
 pub mod storage;
+pub mod types;
 
 // Re-export main types
 pub use edge::{Edge, EdgeType};
-pub use frontmatter::Frontmatter;
+pub use frontmatter::{BaseFrontmatter, Frontmatter};
 pub use graph::Graph;
 pub use index::Index;
-pub use language::Language;
+pub use language::{I18n, Language, UiLabels};
 pub use node::{Node, NodeId, NodeType};
 pub use query::Query;
 pub use schema::{Definition, Domain, Project, Task};
+pub use scope::{Context, ContextKind, Scope, ScopeKind};
 pub use storage::ContentStore;
+pub use types::{
+    Direction, ExegesisType, LanguageSpec, Lexicon, LexiconEntry, SemanticVersion, TypeKind,
+    TypeRef,
+};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";

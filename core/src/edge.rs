@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 /// The type of relationship between nodes
+#[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EdgeType {
     /// Node inherits from another (type hierarchy)

@@ -1,0 +1,41 @@
+# Portuguese UI Labels for CO CLI
+# Tradução para Português
+
+lang: pt
+
+types:
+  definition: definição
+  task: tarefa
+  project: projeto
+  context: contexto
+  language: idioma
+  domain: domínio
+  content: conteúdo
+
+fields:
+  type: tipo
+  id: id
+  status: estado
+  priority: prioridade
+  language: idioma
+  created: criado
+  updated: atualizado
+  tags: etiquetas
+
+statuses:
+  active: ativo
+  done: concluído
+  archived: arquivado
+  pending: pendente
+  blocked: bloqueado
+
+messages:
+  initialized: "Inicializado com sucesso"
+  created: "Criado com sucesso"
+  updated: "Atualizado com sucesso"
+  deleted: "Excluído com sucesso"
+  not_found: "Não encontrado"
+  already_exists: "Já existe"
+  context_initialized: "Contexto Inicializado"
+  system_language_set: "Idioma do sistema definido para"
+  no_contexts_found: "Nenhum contexto ou idioma encontrado"
