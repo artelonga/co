@@ -1,0 +1,61 @@
+# Guarani Mbya Language Definition
+# An indigenous natural language subtype of CO
+#
+# Guarani Mbya demonstrates cultural exegesis:
+# language as the embodiment of worldview and
+# relationship with the natural world.
+
+type: language
+id: lang-guarani-mbya
+symbol: guarani-mbya
+
+inherits: [co]
+exegesis_type: natural
+iso_code: gun
+
+metadata:
+  name: Guarani Mbya
+  native_name: Mbya ñe'ẽ
+  direction: ltr
+  script: Latin
+  family: Tupian
+  region: South America (Brazil, Argentina, Paraguay)
+
+translations:
+  english:
+    term: "Guarani Mbya"
+    definition: |
+      A Tupian language spoken by the Mbya Guarani people across
+      South America. One of the few indigenous languages with
+      significant speaker populations. Embodies a cosmovision
+      where language, nature, and spirituality are inseparable.
+    example: "Mba'éichapa, mba'éichapa reiko?"
+
+  portuguese:
+    term: "Guarani Mbya"
+    definition: |
+      Uma língua tupi falada pelo povo Mbya Guarani em toda
+      a América do Sul. Uma das poucas línguas indígenas com
+      populações significativas de falantes. Incorpora uma cosmovisão
+      onde linguagem, natureza e espiritualidade são inseparáveis.
+    example: "Mba'éichapa, mba'éichapa reiko?"
+
+  guarani-mbya:
+    term: "Mbya ñe'ẽ"
+    definition: |
+      Ore ñe'ẽ, Mbya kuéra ñe'ẽ. Ñe'ẽ oĩva ñande
+      reko ha ñande yvy rehe. Ñe'ẽ porã, ñe'ẽ marangatu.
+    example: "Mba'éichapa, mba'éichapa reiko?"
+
+primitives:
+  - ñe'ẽ (word/language)
+  - ayvu (speech/soul)
+  - porã (good/beautiful)
+  - mba'e (thing/being)
+  - reko (way of being)
+
+# Cultural concepts unique to Guarani worldview
+concepts:
+  - nhe'ẽ porã: beautiful words/true speech
+  - teko porã: the good way of living
+  - yvy marã e'ỹ: land without evil

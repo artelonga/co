@@ -1,0 +1,63 @@
+# Music Language Definition
+# A non-verbal language subtype of CO
+#
+# Music demonstrates that exegesis extends beyond text:
+# meaning can be extracted from and expressed through
+# non-verbal symbolic systems.
+
+type: language
+id: lang-music
+symbol: music
+
+inherits: [co]
+exegesis_type: non_verbal
+
+metadata:
+  name: Music
+  native_name: ♪ ♫
+  notation_systems:
+    - Western staff notation
+    - Nashville number system
+    - Tablature
+    - Lead sheets
+
+translations:
+  english:
+    term: "Music"
+    definition: |
+      A universal language of organized sound expressing emotion,
+      narrative, and abstract relationships through pitch, rhythm,
+      harmony, and timbre. Music communicates meaning that often
+      transcends verbal expression.
+    example: "C-E-G (major chord: stability, resolution)"
+
+  portuguese:
+    term: "Música"
+    definition: |
+      Uma linguagem universal de som organizado expressando emoção,
+      narrativa e relações abstratas através de altura, ritmo,
+      harmonia e timbre.
+    example: "C-E-G (acorde maior: estabilidade, resolução)"
+
+  music:
+    term: "𝄞"
+    definition: |
+      I - IV - V - I
+      The fundamental cadential motion expressing
+      departure, tension, and return.
+    example: "𝄞 𝅗𝅥 𝅘𝅥𝅮 𝅘𝅥𝅯"
+
+primitives:
+  - pitch (frequency)
+  - duration (rhythm)
+  - interval (relationship)
+  - chord (harmony)
+  - cadence (resolution)
+  - timbre (color)
+
+# Musical concepts as exegetic tools
+concepts:
+  - resolution: tension → stability (parallel to understanding)
+  - modulation: changing key (parallel to context shift)
+  - theme: recurring idea (parallel to definition)
+  - variation: transformed theme (parallel to translation)

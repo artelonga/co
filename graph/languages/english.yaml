@@ -1,0 +1,48 @@
+# English Language Definition
+# A natural language subtype of CO
+
+type: language
+id: lang-english
+symbol: english
+
+inherits: [co]
+exegesis_type: natural
+iso_code: en
+
+metadata:
+  name: English
+  native_name: English
+  direction: ltr
+  script: Latin
+
+translations:
+  english:
+    term: "English"
+    definition: |
+      A West Germanic language originating from Anglo-Saxon England.
+      The primary natural language for technical and scientific discourse
+      in the modern era. Serves as the default language for CO definitions.
+    example: "Hello, how are you?"
+
+  portuguese:
+    term: "Inglês"
+    definition: |
+      Uma língua germânica ocidental originária da Inglaterra anglo-saxã.
+      A principal língua natural para discurso técnico e científico
+      na era moderna.
+    example: "Hello, how are you?"
+
+  guarani-mbya:
+    term: "Inglês ñe'ẽ"
+    definition: |
+      Peteĩ ñe'ẽ oúva Inglaterra-gui. Ñe'ẽ ojeporúva
+      heta hendápe arapýpe ko'ág̃a.
+    example: "Hello, how are you?"
+
+# Linguistic primitives this language provides
+primitives:
+  - greeting
+  - question
+  - statement
+  - command
+  - conditional
