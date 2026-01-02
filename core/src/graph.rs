@@ -4,7 +4,8 @@
 //! and edges are relationships between them.
 
 use crate::edge::{Edge, EdgeType};
-use crate::node::{Node, NodeId, NodeType};
+use crate::node::{Node, NodeId};
+use crate::types::{LanguageSpec, TypeKind};
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
@@ -45,7 +46,7 @@ impl Graph {
     fn init_root(&mut self) {
         let root = Node::new(
             "co".into(),
-            NodeType::Root,
+            TypeKind::Root,
             "CO - the root supertype".into(),
         );
         let idx = self.inner.add_node(root);
@@ -87,7 +88,11 @@ impl Graph {
 
     /// Add a language node that inherits from CO
     pub fn add_language(&mut self, id: &str, name: &str) -> NodeIndex {
-        let node = Node::new(id.into(), NodeType::Language, name.into());
+        let node = Node::new(
+            id.into(),
+            TypeKind::Language(LanguageSpec::default()),
+            name.into(),
+        );
         let idx = self.add_node(node);
 
         // Language inherits from CO
@@ -103,7 +108,7 @@ impl Graph {
     pub fn add_domain(&mut self, id: &str, language_id: &str) -> Option<NodeIndex> {
         let lang_idx = *self.index.get(language_id)?;
 
-        let node = Node::new(id.into(), NodeType::Domain, id.into());
+        let node = Node::new(id.into(), TypeKind::Domain, id.into());
         let idx = self.add_node(node);
 
         // Domain inherits from language
@@ -154,7 +159,7 @@ impl Graph {
         self.inner
             .neighbors_directed(idx, petgraph::Direction::Incoming)
             .filter(|&neighbor_idx| {
-                matches!(self.inner[neighbor_idx].node_type, NodeType::Definition)
+                matches!(self.inner[neighbor_idx].node_type, TypeKind::Definition)
             })
             .map(|neighbor_idx| &self.inner[neighbor_idx])
             .collect()

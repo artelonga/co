@@ -55,10 +55,10 @@ pub use frontmatter::{BaseFrontmatter, Frontmatter};
 pub use graph::Graph;
 pub use index::{Index, IndexEntry};
 pub use language::{I18n, Language, UiLabels};
-pub use node::{Node, NodeId, NodeType};
+pub use node::{Node, NodeId};
 pub use query::Query;
 pub use schema::{Definition, Domain, Project, Task};
-pub use scope::{Context, ContextKind, Scope, ScopeKind};
+pub use scope::{Context, ContextKind};
 pub use storage::ContentStore;
 pub use types::{
     Direction, ExegesisType, LanguageSpec, Lexicon, LexiconEntry, SemanticVersion, TypeKind,

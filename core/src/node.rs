@@ -6,52 +6,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::types::{LanguageSpec, Lexicon, TypeKind};
+use crate::types::{Lexicon, TypeKind};
 
 /// Unique identifier for a node
 pub type NodeId = String;
-
-/// The type of a node in the graph
-#[deprecated(since = "0.2.0", note = "Use TypeKind from types module instead")]
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum NodeType {
-    /// The root node (CO itself)
-    Root,
-
-    /// A language type (English, Portuguese, Math, etc.)
-    Language,
-
-    /// A domain/project that instantiates a language
-    Domain,
-
-    /// A definition (exegetic abstraction)
-    Definition,
-
-    /// A task
-    Task,
-
-    /// A project
-    Project,
-
-    /// Generic content
-    Content,
-}
-
-/// Convert deprecated NodeType to TypeKind for incremental migration
-#[allow(deprecated)]
-impl From<NodeType> for TypeKind {
-    fn from(node_type: NodeType) -> Self {
-        match node_type {
-            NodeType::Root => TypeKind::Root,
-            NodeType::Language => TypeKind::Language(LanguageSpec::default()),
-            NodeType::Domain => TypeKind::Domain,
-            NodeType::Definition => TypeKind::Definition,
-            NodeType::Task => TypeKind::Task,
-            NodeType::Project => TypeKind::Project,
-            NodeType::Content => TypeKind::Content,
-        }
-    }
-}
 
 /// A node in the CO graph
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,8 +17,8 @@ pub struct Node {
     /// Unique identifier
     pub id: NodeId,
 
-    /// Type of this node
-    pub node_type: NodeType,
+    /// Type of this node (uses TypeKind from types module)
+    pub node_type: TypeKind,
 
     /// Human-readable name/title
     pub name: String,
@@ -100,7 +58,7 @@ pub struct Translation {
 
 impl Node {
     /// Create a new node
-    pub fn new(id: NodeId, node_type: NodeType, name: String) -> Self {
+    pub fn new(id: NodeId, node_type: TypeKind, name: String) -> Self {
         Node {
             id,
             node_type,
@@ -118,7 +76,7 @@ impl Node {
     pub fn definition(id: NodeId, symbol: String, meaning: String) -> Self {
         Node {
             id,
-            node_type: NodeType::Definition,
+            node_type: TypeKind::Definition,
             name: symbol.clone(),
             symbol: Some(symbol),
             meaning: Some(meaning),
@@ -133,7 +91,7 @@ impl Node {
     pub fn task(id: NodeId, title: String) -> Self {
         Node {
             id,
-            node_type: NodeType::Task,
+            node_type: TypeKind::Task,
             name: title,
             symbol: None,
             meaning: None,
@@ -163,18 +121,19 @@ impl Node {
 
     /// Check if this node is a language
     pub fn is_language(&self) -> bool {
-        matches!(self.node_type, NodeType::Language)
+        matches!(self.node_type, TypeKind::Language(_))
     }
 
     /// Check if this node is a definition
     pub fn is_definition(&self) -> bool {
-        matches!(self.node_type, NodeType::Definition)
+        matches!(self.node_type, TypeKind::Definition)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::{LanguageSpec, SemanticVersion};
 
     #[test]
     fn test_create_definition() {
@@ -199,30 +158,12 @@ mod tests {
     }
 
     #[test]
-    #[allow(deprecated)]
-    fn test_nodetype_to_typekind_conversion() {
-        use crate::types::TypeKind;
-
-        // Existing code can migrate incrementally using From trait
-        let old_type = NodeType::Task;
-        let new_type: TypeKind = old_type.into();
-
-        assert!(matches!(new_type, TypeKind::Task));
-
-        // All variants should convert
-        assert!(matches!(TypeKind::from(NodeType::Root), TypeKind::Root));
-        assert!(matches!(TypeKind::from(NodeType::Language), TypeKind::Language(_)));
-        assert!(matches!(TypeKind::from(NodeType::Domain), TypeKind::Domain));
-        assert!(matches!(TypeKind::from(NodeType::Definition), TypeKind::Definition));
-        assert!(matches!(TypeKind::from(NodeType::Project), TypeKind::Project));
-        assert!(matches!(TypeKind::from(NodeType::Content), TypeKind::Content));
-    }
-
-    #[test]
     fn test_node_with_lexicon() {
-        use crate::types::{Lexicon, SemanticVersion};
-
-        let mut node = Node::new("english".into(), NodeType::Language, "English".into());
+        let mut node = Node::new(
+            "english".into(),
+            TypeKind::Language(LanguageSpec::english()),
+            "English".into(),
+        );
 
         // Add a lexicon representing all definitions in the English scope
         let mut lexicon = Lexicon::new(SemanticVersion::new(1, 0, 0));
