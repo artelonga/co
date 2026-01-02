@@ -177,6 +177,18 @@ enum Commands {
         #[arg(short, long, value_name = "CONTEXT")]
         r#in: Option<String>,
     },
+
+    /// Validate content files for errors and warnings
+    ///
+    /// Checks frontmatter fields, references, and links.
+    ///
+    /// Examples:
+    ///   co validate all           # Validate all content
+    ///   co validate item my-task  # Validate specific item
+    Validate {
+        #[command(subcommand)]
+        action: ValidateAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -195,6 +207,17 @@ enum ConfigAction {
     Show,
     /// Set a configuration value
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum ValidateAction {
+    /// Validate all content files
+    All,
+    /// Validate a specific item
+    Item {
+        /// Content name/id to validate
+        name: String,
+    },
 }
 
 fn main() {
@@ -236,5 +259,9 @@ fn main() {
             }
             commands::locate::run(&query, r#in.as_deref())
         }
+        Commands::Validate { action } => match action {
+            ValidateAction::All => commands::validate::all::run(),
+            ValidateAction::Item { name } => commands::validate::item::run(&name),
+        },
     }
 }

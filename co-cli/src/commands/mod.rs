@@ -17,3 +17,4 @@ pub mod show;
 pub mod status;
 pub mod translate;
 pub mod update;
+pub mod validate;

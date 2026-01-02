@@ -48,6 +48,7 @@ pub mod schema;
 pub mod scope;
 pub mod storage;
 pub mod types;
+pub mod validate;
 
 // Re-export main types
 pub use edge::{Edge, EdgeType};
@@ -64,6 +65,7 @@ pub use types::{
     Direction, ExegesisType, LanguageSpec, Lexicon, LexiconEntry, SemanticVersion, TypeKind,
     TypeRef,
 };
+pub use validate::{Severity, ValidationContext, ValidationIssue, KNOWN_TYPES};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";
