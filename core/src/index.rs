@@ -22,8 +22,14 @@ pub struct IndexEntry {
     /// File modification time
     pub mtime: u64,
 
-    /// Extracted frontmatter fields for querying
-    pub fields: HashMap<String, serde_json::Value>,
+    /// Extracted frontmatter fields for querying (string values only)
+    pub fields: HashMap<String, String>,
+
+    /// Scope/context this entry belongs to (e.g., "en", "private")
+    pub scope: String,
+
+    /// Content language if specified in frontmatter
+    pub language: Option<String>,
 }
 
 /// The persistent index
@@ -96,7 +102,43 @@ mod tests {
             content_hash: 12345,
             mtime: 1234567890,
             fields: HashMap::new(),
+            scope: "en".to_string(),
+            language: Some("english".to_string()),
         }
+    }
+
+    #[test]
+    fn test_entry_with_scope_and_language() {
+        let entry = IndexEntry {
+            path: PathBuf::from("private/tasks/task-001.md"),
+            node_type: "task".to_string(),
+            id: "task-001".to_string(),
+            content_hash: 12345,
+            mtime: 1234567890,
+            fields: HashMap::new(),
+            scope: "private".to_string(),
+            language: Some("portuguese".to_string()),
+        };
+
+        assert_eq!(entry.scope, "private");
+        assert_eq!(entry.language, Some("portuguese".to_string()));
+    }
+
+    #[test]
+    fn test_entry_without_language() {
+        let entry = IndexEntry {
+            path: PathBuf::from("en/definitions/math.md"),
+            node_type: "definition".to_string(),
+            id: "math".to_string(),
+            content_hash: 99999,
+            mtime: 1234567890,
+            fields: HashMap::new(),
+            scope: "en".to_string(),
+            language: None,
+        };
+
+        assert_eq!(entry.scope, "en");
+        assert!(entry.language.is_none());
     }
 
     #[test]

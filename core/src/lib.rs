@@ -53,7 +53,7 @@ pub mod types;
 pub use edge::{Edge, EdgeType};
 pub use frontmatter::{BaseFrontmatter, Frontmatter};
 pub use graph::Graph;
-pub use index::Index;
+pub use index::{Index, IndexEntry};
 pub use language::{I18n, Language, UiLabels};
 pub use node::{Node, NodeId, NodeType};
 pub use query::Query;

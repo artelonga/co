@@ -692,3 +692,153 @@ fn test_locate_combined_filter_and_search() {
         .stdout(predicate::str::contains("meeting"))
         .stdout(predicate::str::contains("done-meeting").not());
 }
+
+// ============================================================================
+// US-3.2: Index Performance Tests
+// ============================================================================
+
+#[test]
+fn test_locate_build_creates_index() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\nlanguage: english\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Build index
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "build"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Index built"));
+
+    // Verify index file was created
+    let index_path = tmp.path().join(".co/index.bin");
+    assert!(index_path.exists(), "Index file should be created at .co/index.bin");
+}
+
+#[test]
+fn test_locate_build_indexes_all_scopes() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context with a task
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: done\nlanguage: portuguese\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Build index
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "build"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2 entries")); // Should index both files
+}
+
+#[test]
+fn test_locate_update_only_modified() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Build initial index
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "build"])
+        .assert()
+        .success();
+
+    // Modify the file
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: done\n---\n\n# Task 1 Updated\n",
+    )
+    .unwrap();
+
+    // Add a new file
+    std::fs::write(
+        en_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: todo\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+
+    // Update index
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "update"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("updated"))
+        .stdout(predicate::str::contains("added"));
+}
+
+#[test]
+fn test_locate_stats_shows_breakdown() {
+    let tmp = tempdir().unwrap();
+
+    // Create en/ context with a task
+    let en_path = tmp.path().join("en");
+    std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    std::fs::write(
+        en_path.join("tasks/task1.md"),
+        "---\ntype: task\nid: task1\nstatus: todo\nlanguage: english\n---\n\n# Task 1\n",
+    )
+    .unwrap();
+
+    // Create private/ context with tasks
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(private_path.join("tasks")).unwrap();
+    std::fs::write(
+        private_path.join("tasks/task2.md"),
+        "---\ntype: task\nid: task2\nstatus: done\nlanguage: portuguese\n---\n\n# Task 2\n",
+    )
+    .unwrap();
+    std::fs::write(
+        private_path.join("tasks/task3.md"),
+        "---\ntype: task\nid: task3\nstatus: todo\n---\n\n# Task 3\n",
+    )
+    .unwrap();
+
+    // Build index first
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "build"])
+        .assert()
+        .success();
+
+    // Show stats
+    co_command()
+        .current_dir(tmp.path())
+        .args(["locate", "stats"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("3"))           // Total entries
+        .stdout(predicate::str::contains("en"))          // Scope breakdown
+        .stdout(predicate::str::contains("private"));    // Scope breakdown
+}

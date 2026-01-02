@@ -156,7 +156,7 @@ enum Commands {
         action: Option<ConfigAction>,
     },
 
-    /// Search and filter content
+    /// Search and filter content, or manage index
     ///
     /// Unified command for locating content by frontmatter or body text.
     ///
@@ -165,8 +165,11 @@ enum Commands {
     ///   co locate "important meeting"   # Full-text search
     ///   co locate status:todo meeting   # Combined filter + search
     ///   co locate private status:todo   # Context + filter
+    ///   co locate build                 # Build search index
+    ///   co locate update                # Update index incrementally
+    ///   co locate stats                 # Show index statistics
     Locate {
-        /// Query terms (field:value for frontmatter, plain text for body search)
+        /// Query terms, or subcommand (build, update, stats)
         #[arg(required = true)]
         query: Vec<String>,
 
@@ -222,6 +225,15 @@ fn main() {
         Commands::Repl => commands::repl::run(),
         Commands::Config { action } => commands::config::run(action),
         Commands::Locate { query, r#in } => {
+            // Check if first arg is a subcommand (build, update, stats)
+            if let Some(first) = query.first() {
+                match first.as_str() {
+                    "build" => return commands::locate::build::run(),
+                    "update" => return commands::locate::update::run(),
+                    "stats" => return commands::locate::stats::run(),
+                    _ => {}
+                }
+            }
             commands::locate::run(&query, r#in.as_deref())
         }
     }

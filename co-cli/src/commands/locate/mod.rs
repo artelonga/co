@@ -1,4 +1,4 @@
-//! Locate command - unified content search
+//! Locate command - unified content search and index management
 //!
 //! Searches content by frontmatter fields and/or body text.
 //!
@@ -6,11 +6,21 @@
 //! - `field:value` - Filter by frontmatter field
 //! - Plain text - Full-text search in body
 //!
+//! Subcommands:
+//! - `build` - Build search index
+//! - `update` - Update index incrementally
+//! - `stats` - Show index statistics
+//!
 //! Examples:
 //!   co locate status:todo           # Filter by frontmatter
 //!   co locate "important meeting"   # Full-text search
 //!   co locate status:todo meeting   # Combined filter + search
 //!   co locate private status:todo   # Context + filter
+//!   co locate build                 # Build search index
+
+pub mod build;
+pub mod stats;
+pub mod update;
 
 use colored::Colorize;
 use serde::Deserialize;
