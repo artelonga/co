@@ -11,6 +11,7 @@ edition = "2021"
 license = "MIT"
 repository = "https://github.com/institutional-pointset/co"
 description = "Exegetic graph database for project development"
+publish = false
 
 [workspace.dependencies]
 # Serialization
