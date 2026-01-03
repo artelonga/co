@@ -196,6 +196,40 @@ enum Commands {
         #[command(subcommand)]
         action: ValidateAction,
     },
+
+    /// List and manage agents
+    ///
+    /// Agents are AI-powered extension interfaces.
+    ///
+    /// Examples:
+    ///   co agents                    # List all agents
+    ///   co agents type:researcher    # Filter by type
+    ///   co agents show researcher    # Show agent details
+    Agents {
+        #[command(subcommand)]
+        action: Option<AgentsSubcommand>,
+
+        /// Query filters (field:value)
+        #[arg(trailing_var_arg = true)]
+        query: Vec<String>,
+    },
+
+    /// List and manage tools
+    ///
+    /// Tools are deterministic script/utility extensions.
+    ///
+    /// Examples:
+    ///   co tools                   # List all tools
+    ///   co tools category:git      # Filter by category
+    ///   co tools show gh-wrapper   # Show tool details
+    Tools {
+        #[command(subcommand)]
+        action: Option<ToolsSubcommand>,
+
+        /// Query filters (field:value)
+        #[arg(trailing_var_arg = true)]
+        query: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -223,6 +257,24 @@ enum ValidateAction {
     /// Validate a specific item
     Item {
         /// Content name/id to validate
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentsSubcommand {
+    /// Show agent details
+    Show {
+        /// Agent name/id
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ToolsSubcommand {
+    /// Show tool details
+    Show {
+        /// Tool name/id
         name: String,
     },
 }
@@ -270,5 +322,21 @@ fn main() {
             ValidateAction::All => commands::validate::all::run(),
             ValidateAction::Item { name } => commands::validate::item::run(&name),
         },
+        Commands::Agents { action, query } => {
+            let agents_action = match action {
+                Some(AgentsSubcommand::Show { name }) => {
+                    commands::agents::AgentsAction::Show { name }
+                }
+                None => commands::agents::AgentsAction::List { query },
+            };
+            commands::agents::run(agents_action)
+        }
+        Commands::Tools { action, query } => {
+            let tools_action = match action {
+                Some(ToolsSubcommand::Show { name }) => commands::tools::ToolsAction::Show { name },
+                None => commands::tools::ToolsAction::List { query },
+            };
+            commands::tools::run(tools_action)
+        }
     }
 }

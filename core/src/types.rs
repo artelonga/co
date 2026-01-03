@@ -34,6 +34,9 @@ pub enum TypeKind {
     /// An agent (autonomous entity that can act on content)
     Agent,
 
+    /// A tool (deterministic script/utility)
+    Tool,
+
     /// Generic content
     Content,
 
@@ -397,6 +400,7 @@ mod tests {
         let task = TypeKind::Task;
         let project = TypeKind::Project;
         let agent = TypeKind::Agent;
+        let tool = TypeKind::Tool;
         let content = TypeKind::Content;
         let custom = TypeKind::Custom("my-type".to_string());
 
@@ -408,6 +412,7 @@ mod tests {
         assert!(matches!(task, TypeKind::Task));
         assert!(matches!(project, TypeKind::Project));
         assert!(matches!(agent, TypeKind::Agent));
+        assert!(matches!(tool, TypeKind::Tool));
         assert!(matches!(content, TypeKind::Content));
         assert!(matches!(custom, TypeKind::Custom(_)));
     }

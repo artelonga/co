@@ -1,0 +1,18 @@
+# Agent Schema
+# Defines property types for agent definitions
+name: agents
+version: 1
+properties:
+  type:
+    kind: text
+    required: true
+  model:
+    kind: text
+  capabilities:
+    kind: list
+  status:
+    kind: text
+  provider:
+    kind: text
+  url:
+    kind: link

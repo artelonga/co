@@ -1,0 +1,16 @@
+# Tool Schema
+# Defines property types for tool definitions
+name: tools
+version: 1
+properties:
+  category:
+    kind: text
+    required: true
+  command:
+    kind: text
+  status:
+    kind: text
+  dependencies:
+    kind: list
+  url:
+    kind: link

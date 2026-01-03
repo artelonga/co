@@ -38,6 +38,7 @@
 
 pub mod archive;
 pub mod edge;
+pub mod feature;
 pub mod frontmatter;
 pub mod graph;
 pub mod index;
@@ -66,6 +67,10 @@ pub use types::{
     TypeRef,
 };
 pub use validate::{Severity, ValidationContext, ValidationIssue, KNOWN_TYPES};
+
+// Feature system exports
+pub use feature::schema::{FeatureSchema, PropertyDef, PropertyKind};
+pub use feature::{Feature, FeatureRegistry};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";
