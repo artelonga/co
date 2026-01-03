@@ -67,6 +67,57 @@ impl FeatureSchema {
         serde_yaml::from_str(&content).map_err(|e| SchemaError::Parse(schema_path, e))
     }
 
+    /// Save schema to a feature directory
+    pub fn save(&self, dir: &Path) -> Result<(), SchemaError> {
+        let schema_path = dir.join("schema.yaml");
+        let content = serde_yaml::to_string(self)
+            .map_err(|e| SchemaError::Parse(schema_path.clone(), e))?;
+        std::fs::write(&schema_path, content)
+            .map_err(|e| SchemaError::Io(schema_path, e))
+    }
+
+    /// Add a property to the schema
+    pub fn add_property(&mut self, name: String, kind: PropertyKind, required: bool) {
+        self.properties.insert(name, PropertyDef { kind, required });
+        self.version += 1;
+    }
+
+    /// Remove a property from the schema
+    pub fn remove_property(&mut self, name: &str) -> bool {
+        if self.properties.remove(name).is_some() {
+            self.version += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Modify a property's attributes
+    pub fn modify_property(
+        &mut self,
+        name: &str,
+        kind: Option<PropertyKind>,
+        required: Option<bool>,
+    ) -> bool {
+        if let Some(prop) = self.properties.get_mut(name) {
+            if let Some(k) = kind {
+                prop.kind = k;
+            }
+            if let Some(r) = required {
+                prop.required = r;
+            }
+            self.version += 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get property count
+    pub fn property_count(&self) -> usize {
+        self.properties.len()
+    }
+
     /// Validate a frontmatter map against this schema
     pub fn validate(
         &self,

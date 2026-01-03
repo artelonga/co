@@ -14,6 +14,8 @@ pub mod list;
 pub mod locate;
 pub mod new;
 pub mod query;
+pub mod repo;
+pub mod schema;
 pub mod show;
 pub mod status;
 pub mod tools;

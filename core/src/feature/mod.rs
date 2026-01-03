@@ -62,6 +62,36 @@ impl FeatureRegistry {
             }
         }
 
+        // Scan root for any directory with schema.yaml (custom features like work/)
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    // Skip if already registered or hidden/special directories
+                    if registry.features.contains_key(&name)
+                        || name.starts_with('.')
+                        || name == "user"
+                        || name == "target"
+                    {
+                        continue;
+                    }
+                    // Only register if it has a schema.yaml
+                    if let Ok(schema) = schema::FeatureSchema::load(&path) {
+                        registry.features.insert(
+                            name.clone(),
+                            Feature {
+                                name,
+                                path,
+                                is_system: false,
+                                schema: Some(schema),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+
         // Also check user/ directory for user-defined features
         let user_dir = root.join("user");
         if user_dir.is_dir() {
@@ -104,6 +134,16 @@ impl FeatureRegistry {
     /// List all feature names
     pub fn names(&self) -> Vec<&str> {
         self.features.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Check if registry is empty
+    pub fn is_empty(&self) -> bool {
+        self.features.is_empty()
+    }
+
+    /// Get all features
+    pub fn all(&self) -> impl Iterator<Item = &Feature> {
+        self.features.values()
     }
 }
 

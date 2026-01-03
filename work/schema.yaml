@@ -1,0 +1,20 @@
+name: work
+version: 1
+properties:
+  status:
+    kind: text
+    required: true
+  epic:
+    kind: link
+  story:
+    kind: link
+  commit:
+    kind: text
+  assignee:
+    kind: text
+  priority:
+    kind: text
+
+# Content sections parsed from markdown body
+# user-story: ## As, ## I Need, ## To -> {user, feature, value}
+# task: ## Given, ## When, ## Then -> {system, action, outcome}

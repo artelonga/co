@@ -32,6 +32,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 uuid = { workspace = true }
 xxhash-rust = { workspace = true }
+dirs = "5"
 
 # Graph
 petgraph = { workspace = true }

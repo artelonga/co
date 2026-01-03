@@ -230,6 +230,36 @@ enum Commands {
         #[arg(trailing_var_arg = true)]
         query: Vec<String>,
     },
+
+    /// Manage feature type schemas
+    ///
+    /// View and modify property definitions for feature types.
+    ///
+    /// Examples:
+    ///   co schema list                                    # List all schemas
+    ///   co schema show work                               # Show work schema
+    ///   co schema add-property work priority:number       # Add property
+    ///   co schema remove-property work old_field --force  # Remove property
+    ///   co schema modify-property work status --required  # Modify property
+    Schema {
+        #[command(subcommand)]
+        action: SchemaSubcommand,
+    },
+
+    /// Manage registered repositories for federated queries
+    ///
+    /// Register repositories to enable cross-repo queries.
+    ///
+    /// Examples:
+    ///   co repo list                    # List registered repos
+    ///   co repo add . --alias work      # Register current dir
+    ///   co repo remove work             # Unregister a repo
+    ///   co repo tag work client         # Add tags to current repo
+    ///   co repo untag work              # Remove tags
+    Repo {
+        #[command(subcommand)]
+        action: RepoSubcommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -276,6 +306,100 @@ enum ToolsSubcommand {
     Show {
         /// Tool name/id
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum RepoSubcommand {
+    /// List registered repositories
+    List,
+
+    /// Add a repository
+    Add {
+        /// Path to repository (use . for current directory)
+        path: String,
+
+        /// Short alias for the repository
+        #[arg(long)]
+        alias: String,
+    },
+
+    /// Remove a repository
+    Remove {
+        /// Repository alias or path
+        identifier: String,
+    },
+
+    /// Add tags to current repository
+    Tag {
+        /// Tags to add
+        #[arg(required = true)]
+        tags: Vec<String>,
+    },
+
+    /// Remove tags from current repository
+    Untag {
+        /// Tags to remove
+        #[arg(required = true)]
+        tags: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SchemaSubcommand {
+    /// List all feature schemas
+    List,
+
+    /// Show a specific schema
+    Show {
+        /// Feature name
+        name: String,
+    },
+
+    /// Add a property to a schema
+    #[command(name = "add-property")]
+    AddProperty {
+        /// Feature name
+        feature: String,
+
+        /// Property definition (name:kind, e.g., "priority:number")
+        property: String,
+
+        /// Mark property as required
+        #[arg(long)]
+        required: bool,
+    },
+
+    /// Remove a property from a schema
+    #[command(name = "remove-property")]
+    RemoveProperty {
+        /// Feature name
+        feature: String,
+
+        /// Property name to remove
+        property: String,
+
+        /// Force removal without confirmation
+        #[arg(long)]
+        force: bool,
+    },
+
+    /// Modify a property in a schema
+    #[command(name = "modify-property")]
+    ModifyProperty {
+        /// Feature name
+        feature: String,
+
+        /// Property name to modify
+        property: String,
+
+        /// New property kind
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Set required status
+        #[arg(long)]
+        required: Option<bool>,
     },
 }
 
@@ -337,6 +461,66 @@ fn main() {
                 None => commands::tools::ToolsAction::List { query },
             };
             commands::tools::run(tools_action)
+        }
+        Commands::Schema { action } => {
+            let schema_action = match action {
+                SchemaSubcommand::List => commands::schema::SchemaAction::List,
+                SchemaSubcommand::Show { name } => commands::schema::SchemaAction::Show { name },
+                SchemaSubcommand::AddProperty {
+                    feature,
+                    property,
+                    required,
+                } => {
+                    // Parse property:kind format
+                    let parts: Vec<&str> = property.split(':').collect();
+                    if parts.len() != 2 {
+                        eprintln!("error: Property must be in format 'name:kind' (e.g., 'priority:number')");
+                        std::process::exit(1);
+                    }
+                    commands::schema::SchemaAction::AddProperty {
+                        feature,
+                        property: parts[0].to_string(),
+                        kind: parts[1].to_string(),
+                        required,
+                    }
+                }
+                SchemaSubcommand::RemoveProperty {
+                    feature,
+                    property,
+                    force,
+                } => commands::schema::SchemaAction::RemoveProperty {
+                    feature,
+                    property,
+                    force,
+                },
+                SchemaSubcommand::ModifyProperty {
+                    feature,
+                    property,
+                    kind,
+                    required,
+                } => commands::schema::SchemaAction::ModifyProperty {
+                    feature,
+                    property,
+                    kind,
+                    required,
+                },
+            };
+            commands::schema::run(schema_action)
+        }
+        Commands::Repo { action } => {
+            let repo_action = match action {
+                RepoSubcommand::List => commands::repo::RepoAction::List,
+                RepoSubcommand::Add { path, alias } => commands::repo::RepoAction::Add {
+                    path: std::path::PathBuf::from(path),
+                    alias,
+                },
+                RepoSubcommand::Remove { identifier } => {
+                    commands::repo::RepoAction::Remove { identifier }
+                }
+                RepoSubcommand::Tag { tags } => commands::repo::RepoAction::Tag { tags },
+                RepoSubcommand::Untag { tags } => commands::repo::RepoAction::Untag { tags },
+            };
+            commands::repo::run(repo_action)
         }
     }
 }

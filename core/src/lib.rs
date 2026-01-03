@@ -37,6 +37,8 @@
 //! ```
 
 pub mod archive;
+pub mod config;
+pub mod content;
 pub mod edge;
 pub mod feature;
 pub mod frontmatter;
@@ -52,6 +54,7 @@ pub mod types;
 pub mod validate;
 
 // Re-export main types
+pub use content::{specs_for_type, ParsedContent, SectionSpec};
 pub use edge::{Edge, EdgeType};
 pub use frontmatter::{BaseFrontmatter, Frontmatter};
 pub use graph::Graph;
@@ -71,6 +74,9 @@ pub use validate::{Severity, ValidationContext, ValidationIssue, KNOWN_TYPES};
 // Feature system exports
 pub use feature::schema::{FeatureSchema, PropertyDef, PropertyKind};
 pub use feature::{Feature, FeatureRegistry};
+
+// Config system exports
+pub use config::{GlobalConfig, GroupDef, GroupsConfig, RepoConfig, RepoLocalConfig};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";

@@ -2,6 +2,7 @@
 //!
 //! Validates frontmatter fields and references for content integrity.
 
+use crate::content::{specs_for_type, ParsedContent};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -63,7 +64,12 @@ pub const KNOWN_TYPES: &[&str] = &[
     "context",
     "language",
     "agent",
+    "tool",
     "content",
+    // Work item types (EPIC 13)
+    "user-story",
+    "epic",
+    "release",
 ];
 
 impl ValidationContext {
@@ -224,6 +230,20 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
                 ),
             ));
         }
+
+        // Task 13.2.3: Validate required content sections for user-story and task types
+        if let Some(specs) = specs_for_type(content_type) {
+            let body_start = end_idx + 7; // Skip past "\n---\n"
+            if body_start < content.len() {
+                let body = &content[body_start..];
+                let parsed = ParsedContent::parse(body, &specs);
+                let missing = parsed.validate(&specs);
+
+                for msg in missing {
+                    issues.push(ValidationIssue::warning(path, msg));
+                }
+            }
+        }
     }
 
     issues
@@ -292,11 +312,11 @@ mod tests {
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 ---
 
-Task content here.
+Definition content here.
 "#,
         );
 
@@ -315,12 +335,12 @@ Task content here.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 ---
 
-Task content here.
+Definition content here.
 "#,
         );
 
@@ -394,12 +414,12 @@ No closing delimiter."#,
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: nonexistent
 ---
 
-Task content here.
+Definition content here.
 "#,
         );
 
@@ -421,8 +441,8 @@ Task content here.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 ---
 
@@ -443,8 +463,8 @@ Content.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: portuguese
 ---
 
@@ -477,13 +497,13 @@ Content.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 scope: nonexistent
 ---
 
-Task content here.
+Definition content here.
 "#,
         );
 
@@ -502,8 +522,8 @@ Task content here.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 scope: private
 ---
@@ -554,18 +574,18 @@ Content.
         let dir = TempDir::new().unwrap();
         let mut ctx = create_context_with_dirs(&dir, &["en"]);
         // Add some known IDs
-        ctx.known_ids.insert("existing-task".to_string());
+        ctx.known_ids.insert("existing-def".to_string());
 
         let path = create_test_file(
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 ---
 
-This references [[other-task]] which does not exist.
+This references [[other-def]] which does not exist.
 "#,
         );
 
@@ -573,25 +593,25 @@ This references [[other-task]] which does not exist.
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].severity, Severity::Warning);
-        assert_eq!(issues[0].message, "Broken link: other-task");
+        assert_eq!(issues[0].message, "Broken link: other-def");
     }
 
     #[test]
     fn test_valid_link() {
         let dir = TempDir::new().unwrap();
         let mut ctx = create_context_with_dirs(&dir, &["en"]);
-        ctx.known_ids.insert("existing-task".to_string());
+        ctx.known_ids.insert("existing-def".to_string());
 
         let path = create_test_file(
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 ---
 
-This references [[existing-task]] which exists.
+This references [[existing-def]] which exists.
 "#,
         );
 
@@ -610,8 +630,8 @@ This references [[existing-task]] which exists.
             &dir,
             "test.md",
             r#"---
-type: task
-id: my-task
+type: definition
+id: my-def
 language: english
 ---
 
@@ -667,7 +687,16 @@ id: my-task
 language: english
 ---
 
-Valid task content.
+# My Task
+
+## Given
+a valid task setup
+
+## When
+the task runs
+
+## Then
+it completes successfully
 "#,
         );
 

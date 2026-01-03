@@ -6,6 +6,11 @@
 //! - `field:value` - Filter by frontmatter field
 //! - Plain text - Full-text search in body
 //!
+//! Federation filters (--in):
+//! - `@groupname` - Query repos in a group
+//! - `#tagname` - Query repos with a tag
+//! - `alias` - Query a specific registered repo
+//!
 //! Subcommands:
 //! - `build` - Build search index
 //! - `update` - Update index incrementally
@@ -16,12 +21,14 @@
 //!   co locate "important meeting"   # Full-text search
 //!   co locate status:todo meeting   # Combined filter + search
 //!   co locate private status:todo   # Context + filter
+//!   co locate --in @work status:todo  # Federated query across work group
 //!   co locate build                 # Build search index
 
 pub mod build;
 pub mod stats;
 pub mod update;
 
+use co::config::{resolve_repos, GlobalConfig, GroupsConfig};
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -30,6 +37,7 @@ use std::path::Path;
 
 /// Content item with context information
 struct ContentItem {
+    repo_alias: Option<String>,
     context: String,
     id: String,
 }
@@ -43,6 +51,14 @@ struct FilterableFrontmatter {
 
 /// Run the unified locate command
 pub fn run(query: &[String], context_filter: Option<&str>) {
+    // Check if this is a federated query (@group, #tag, or registered repo alias)
+    if let Some(filter) = context_filter {
+        if filter.starts_with('@') || filter.starts_with('#') || is_registered_repo(filter) {
+            run_federated(query, filter);
+            return;
+        }
+    }
+
     // Check if first argument is a positional context
     // It's a context if: no colon, no spaces, and there are subsequent filter args (with colons)
     // This distinguishes `co locate private status:todo` from `co locate "search term"`
@@ -105,6 +121,166 @@ pub fn run(query: &[String], context_filter: Option<&str>) {
             format!("[{}]", item.context).cyan(),
             item.id.white()
         );
+    }
+}
+
+/// Check if a filter matches a registered repository alias
+fn is_registered_repo(filter: &str) -> bool {
+    let global = GlobalConfig::load();
+    global.get_by_alias(filter).is_some()
+}
+
+/// Run a federated query across multiple repositories
+fn run_federated(query: &[String], filter: &str) {
+    let global = GlobalConfig::load();
+    let groups = GroupsConfig::load();
+
+    let repos = resolve_repos(filter, &global, &groups);
+
+    if repos.is_empty() {
+        if filter.starts_with('@') {
+            eprintln!(
+                "{} No repositories match group '{}'",
+                "error:".red().bold(),
+                &filter[1..]
+            );
+        } else if filter.starts_with('#') {
+            eprintln!(
+                "{} No repositories have tag '{}'",
+                "error:".red().bold(),
+                &filter[1..]
+            );
+        } else {
+            eprintln!(
+                "{} Repository '{}' not registered",
+                "error:".red().bold(),
+                filter
+            );
+        }
+        std::process::exit(1);
+    }
+
+    // Parse query
+    let mut field_filters: Vec<(String, String)> = Vec::new();
+    let mut search_terms: Vec<String> = Vec::new();
+
+    for arg in query {
+        if let Some(colon_pos) = arg.find(':') {
+            let field = &arg[..colon_pos];
+            let value = &arg[colon_pos + 1..];
+            field_filters.push((field.to_string(), value.to_string()));
+        } else {
+            search_terms.push(arg.to_lowercase());
+        }
+    }
+
+    let mut all_results = Vec::new();
+
+    for repo in &repos {
+        if !repo.path.exists() {
+            eprintln!(
+                "{} Repository '{}' path not found: {}",
+                "warning:".yellow().bold(),
+                repo.alias,
+                repo.path.display()
+            );
+            continue;
+        }
+
+        // Search in this repo
+        let results = find_content_in_repo(&repo.path, &repo.alias, &field_filters, &search_terms);
+        all_results.extend(results);
+    }
+
+    if all_results.is_empty() {
+        println!("{}", "No results found".yellow());
+        return;
+    }
+
+    // Display results with repo prefix
+    for item in all_results {
+        let prefix = if let Some(ref alias) = item.repo_alias {
+            format!("[{}:{}]", alias, item.context)
+        } else {
+            format!("[{}]", item.context)
+        };
+        println!("{} {}", prefix.cyan(), item.id.white());
+    }
+}
+
+/// Find content in a specific repository
+fn find_content_in_repo(
+    repo_root: &Path,
+    repo_alias: &str,
+    filters: &[(String, String)],
+    search_terms: &[String],
+) -> Vec<ContentItem> {
+    let mut results = Vec::new();
+
+    // Iterate through all directories (potential contexts)
+    if let Ok(entries) = fs::read_dir(repo_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() && !is_hidden(&path) {
+                let context_name = path.file_name().unwrap().to_string_lossy().to_string();
+
+                // Skip common non-content directories
+                if context_name == "target" || context_name == "node_modules" {
+                    continue;
+                }
+
+                // Search in type subdirectories
+                if let Ok(type_dirs) = fs::read_dir(&path) {
+                    for type_dir in type_dirs.flatten() {
+                        let type_path = type_dir.path();
+                        if type_path.is_dir() {
+                            search_directory_federated(
+                                &type_path,
+                                repo_alias,
+                                &context_name,
+                                filters,
+                                search_terms,
+                                &mut results,
+                            );
+                        }
+                    }
+                }
+
+                // Also search directly in the context root
+                search_directory_federated(
+                    &path,
+                    repo_alias,
+                    &context_name,
+                    filters,
+                    search_terms,
+                    &mut results,
+                );
+            }
+        }
+    }
+
+    results
+}
+
+/// Search a directory for matching content files (federated version)
+fn search_directory_federated(
+    dir: &Path,
+    repo_alias: &str,
+    context: &str,
+    filters: &[(String, String)],
+    search_terms: &[String],
+    results: &mut Vec<ContentItem>,
+) {
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
+                if let Some(mut item) = check_file(&path, context, filters, search_terms) {
+                    item.repo_alias = Some(repo_alias.to_string());
+                    results.push(item);
+                }
+            }
+        }
     }
 }
 
@@ -234,6 +410,7 @@ fn check_file(
     });
 
     Some(ContentItem {
+        repo_alias: None,
         context: context.to_string(),
         id,
     })

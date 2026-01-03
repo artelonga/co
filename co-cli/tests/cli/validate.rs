@@ -10,9 +10,26 @@ fn test_validate_all_valid_files() {
 
     let en_path = tmp.path().join("en");
     std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    // Task type requires Given/When/Then sections (EPIC 13)
     std::fs::write(
         en_path.join("tasks/task1.md"),
-        "---\ntype: task\nid: task1\nlanguage: english\n---\n\n# Task 1\n",
+        r#"---
+type: task
+id: task1
+language: english
+---
+
+# Task 1
+
+## Given
+a valid task
+
+## When
+validation runs
+
+## Then
+no issues found
+"#,
     )
     .unwrap();
 
@@ -110,9 +127,26 @@ fn test_validate_item_specific() {
 
     let en_path = tmp.path().join("en");
     std::fs::create_dir_all(en_path.join("tasks")).unwrap();
+    // Task type requires Given/When/Then sections (EPIC 13)
     std::fs::write(
         en_path.join("tasks/my-task.md"),
-        "---\ntype: task\nid: my-task\nlanguage: english\n---\n\n# My Task\n",
+        r#"---
+type: task
+id: my-task
+language: english
+---
+
+# My Task
+
+## Given
+a specific task
+
+## When
+item validation runs
+
+## Then
+task is valid
+"#,
     )
     .unwrap();
 

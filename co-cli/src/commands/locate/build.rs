@@ -2,7 +2,7 @@
 //!
 //! Scans all scopes and builds a persistent index at `.co/index.bin`.
 
-use co::{Index, IndexEntry};
+use co::{specs_for_type, Index, IndexEntry, ParsedContent};
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::hash_map::DefaultHasher;
@@ -159,6 +159,25 @@ fn create_index_entry(path: &Path, scope: &str) -> Option<IndexEntry> {
             fields.insert(key, i.to_string());
         } else if let Some(f) = value.as_f64() {
             fields.insert(key, f.to_string());
+        }
+    }
+
+    // Parse content sections for user-story and task types (EPIC 13)
+    if let Some(specs) = specs_for_type(&node_type) {
+        let body_start = end_idx + 7; // Skip past "\n---\n"
+        if body_start < content.len() {
+            let body = &content[body_start..];
+            let parsed = ParsedContent::parse(body, &specs);
+
+            // Add parsed sections to fields
+            for (field_name, section_content) in parsed.sections {
+                fields.insert(field_name, section_content);
+            }
+
+            // Add title if present
+            if let Some(title) = parsed.title {
+                fields.insert("title".to_string(), title);
+            }
         }
     }
 
