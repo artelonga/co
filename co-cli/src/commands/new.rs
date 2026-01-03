@@ -3,6 +3,7 @@
 //! Creates content files (tasks, definitions, etc.) in a specified context.
 
 use crate::i18n::load_i18n;
+use co::validate::ValidationContext;
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
@@ -22,6 +23,17 @@ pub fn run(content_type: &str, name: &str, scope: Option<&str>) {
             "error:".red().bold(),
             i18n.type_label("context"),
             scope_name
+        );
+        std::process::exit(1);
+    }
+
+    // Verify content type is known (built-in or registered via schema)
+    let ctx = ValidationContext::new(Path::new("."));
+    if !ctx.type_exists(content_type) {
+        eprintln!("{} Unknown type: '{}'", "error:".red().bold(), content_type);
+        eprintln!(
+            "{}",
+            "Create a schema.yaml with content_types to register custom types.".dimmed()
         );
         std::process::exit(1);
     }

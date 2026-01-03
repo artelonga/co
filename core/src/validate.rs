@@ -3,6 +3,7 @@
 //! Validates frontmatter fields and references for content integrity.
 
 use crate::content::{ParsedContent, specs_for_type};
+use crate::feature::FeatureRegistry;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -54,6 +55,8 @@ pub struct ValidationContext {
     pub root: PathBuf,
     /// Known content IDs (for link validation)
     pub known_ids: HashSet<String>,
+    /// Feature registry for extensible content types
+    pub feature_registry: Option<FeatureRegistry>,
 }
 
 /// Known built-in content types
@@ -75,15 +78,28 @@ pub const KNOWN_TYPES: &[&str] = &[
 impl ValidationContext {
     /// Create a new validation context
     pub fn new(root: impl Into<PathBuf>) -> Self {
+        let root_path = root.into();
+        let feature_registry = Some(FeatureRegistry::discover(&root_path));
         Self {
-            root: root.into(),
+            root: root_path,
             known_ids: HashSet::new(),
+            feature_registry,
         }
     }
 
     /// Check if a content type is known
+    ///
+    /// Checks both built-in types and types registered via feature schemas.
     pub fn type_exists(&self, content_type: &str) -> bool {
-        KNOWN_TYPES.contains(&content_type)
+        // Check built-in types first
+        if KNOWN_TYPES.contains(&content_type) {
+            return true;
+        }
+
+        // Check feature registry for custom types
+        self.feature_registry
+            .as_ref()
+            .is_some_and(|r| r.has_content_type(content_type))
     }
 
     /// Check if a language directory exists
@@ -763,5 +779,156 @@ Conteúdo.
         assert!(ctx.type_exists("agent"));
         assert!(ctx.type_exists("content"));
         assert!(!ctx.type_exists("unknown-type"));
+    }
+
+    // =========================================================================
+    // Issue #35: Extensible Content Types Tests
+    // =========================================================================
+
+    #[test]
+    fn test_custom_type_recognized_via_feature_registry() {
+        let dir = TempDir::new().unwrap();
+
+        // Create a custom "notes" feature with schema
+        let notes_dir = dir.path().join("notes");
+        fs::create_dir_all(&notes_dir).unwrap();
+        fs::write(
+            notes_dir.join("schema.yaml"),
+            r#"name: notes
+version: 1
+content_types:
+  - note
+properties:
+  status:
+    kind: text
+"#,
+        )
+        .unwrap();
+
+        // Create a file with custom "note" type
+        let en_dir = dir.path().join("en");
+        fs::create_dir_all(en_dir.join("notes")).unwrap();
+        let path = create_test_file(
+            &dir,
+            "en/notes/my-note.md",
+            r#"---
+type: note
+id: my-note
+language: english
+status: draft
+---
+
+# My Note
+
+Some content.
+"#,
+        );
+
+        // Context with feature registry should recognize "note" type
+        let ctx = create_context_with_dirs(&dir, &["en"]);
+        let issues = validate_file(&path, &ctx);
+
+        // Should NOT have "Unknown type: note" warning
+        let type_warnings: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("Unknown type: note"))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "Custom type 'note' should be recognized via FeatureRegistry, but got: {:?}",
+            type_warnings
+        );
+    }
+
+    #[test]
+    fn test_builtin_work_types_recognized() {
+        let dir = TempDir::new().unwrap();
+
+        // Create work directory with built-in types
+        let work_dir = dir.path().join("work");
+        fs::create_dir_all(&work_dir).unwrap();
+        fs::write(
+            work_dir.join("schema.yaml"),
+            r#"name: work
+version: 1
+content_types:
+  - epic
+  - user-story
+  - task
+  - use-case
+properties:
+  status:
+    kind: text
+    required: true
+"#,
+        )
+        .unwrap();
+
+        let en_dir = dir.path().join("en");
+        fs::create_dir_all(en_dir.join("epics")).unwrap();
+
+        // Test epic type
+        let path = create_test_file(
+            &dir,
+            "en/epics/my-epic.md",
+            r#"---
+type: epic
+id: my-epic
+language: english
+status: planned
+---
+
+# My Epic
+
+Epic description.
+"#,
+        );
+
+        let ctx = create_context_with_dirs(&dir, &["en"]);
+        let issues = validate_file(&path, &ctx);
+
+        // Should recognize "epic" as valid type
+        let type_warnings: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("Unknown type"))
+            .collect();
+        assert!(
+            type_warnings.is_empty(),
+            "Built-in 'epic' type should be recognized, but got: {:?}",
+            type_warnings
+        );
+    }
+
+    #[test]
+    fn test_truly_unknown_type_still_warns() {
+        let dir = TempDir::new().unwrap();
+        let ctx = create_context_with_dirs(&dir, &["en"]);
+
+        // Type that doesn't exist in any schema
+        let path = create_test_file(
+            &dir,
+            "test.md",
+            r#"---
+type: completely-made-up-type
+id: test
+language: english
+---
+
+Content.
+"#,
+        );
+
+        let issues = validate_file(&path, &ctx);
+
+        // Should warn about truly unknown type
+        let type_warnings: Vec<_> = issues
+            .iter()
+            .filter(|i| i.message.contains("Unknown type: completely-made-up-type"))
+            .collect();
+        assert_eq!(
+            type_warnings.len(),
+            1,
+            "Should warn about truly unknown type"
+        );
     }
 }

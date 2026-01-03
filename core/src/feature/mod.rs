@@ -145,6 +145,27 @@ impl FeatureRegistry {
     pub fn all(&self) -> impl Iterator<Item = &Feature> {
         self.features.values()
     }
+
+    /// Check if a content type is provided by any registered feature
+    ///
+    /// Searches through all feature schemas for the given content type.
+    pub fn has_content_type(&self, content_type: &str) -> bool {
+        self.features.values().any(|feature| {
+            feature
+                .schema
+                .as_ref()
+                .is_some_and(|s| s.has_content_type(content_type))
+        })
+    }
+
+    /// Get all content types from all registered features
+    pub fn content_types(&self) -> Vec<&str> {
+        self.features
+            .values()
+            .filter_map(|f| f.schema.as_ref())
+            .flat_map(|s| s.content_types.iter().map(|t| t.as_str()))
+            .collect()
+    }
 }
 
 impl Feature {

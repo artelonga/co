@@ -1,5 +1,10 @@
 name: work
 version: 1
+content_types:
+  - epic
+  - user-story
+  - task
+  - use-case
 properties:
   status:
     kind: text

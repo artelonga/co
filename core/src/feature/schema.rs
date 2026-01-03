@@ -44,6 +44,9 @@ pub struct FeatureSchema {
     /// Schema version
     #[serde(default = "default_version")]
     pub version: u32,
+    /// Content types this feature provides (e.g., ["epic", "user-story", "task"])
+    #[serde(default)]
+    pub content_types: Vec<String>,
     /// Property definitions
     #[serde(default)]
     pub properties: HashMap<String, PropertyDef>,
@@ -115,6 +118,11 @@ impl FeatureSchema {
     /// Get property count
     pub fn property_count(&self) -> usize {
         self.properties.len()
+    }
+
+    /// Check if this schema provides a specific content type
+    pub fn has_content_type(&self, content_type: &str) -> bool {
+        self.content_types.iter().any(|t| t == content_type)
     }
 
     /// Validate a frontmatter map against this schema
