@@ -260,6 +260,19 @@ enum Commands {
         #[command(subcommand)]
         action: RepoSubcommand,
     },
+
+    /// Manage spaces (contexts) for multi-repo workflows
+    ///
+    /// A space can be a registered git repo, a private folder,
+    /// or any directory with `.co/` configuration.
+    ///
+    /// Examples:
+    ///   co space list                   # List all spaces
+    ///   co space current                # Show current space details
+    Space {
+        #[command(subcommand)]
+        action: SpaceSubcommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -310,6 +323,14 @@ enum ToolsSubcommand {
 }
 
 #[derive(Subcommand)]
+enum SpaceSubcommand {
+    /// List all registered spaces
+    List,
+    /// Show current space details
+    Current,
+}
+
+#[derive(Subcommand)]
 enum RepoSubcommand {
     /// List registered repositories
     List,
@@ -322,6 +343,10 @@ enum RepoSubcommand {
         /// Short alias for the repository
         #[arg(long)]
         alias: String,
+
+        /// SSH host for git operations (e.g., "github-work", "github-personal")
+        #[arg(long)]
+        ssh_host: Option<String>,
     },
 
     /// Remove a repository
@@ -512,9 +537,14 @@ fn main() {
         Commands::Repo { action } => {
             let repo_action = match action {
                 RepoSubcommand::List => commands::repo::RepoAction::List,
-                RepoSubcommand::Add { path, alias } => commands::repo::RepoAction::Add {
+                RepoSubcommand::Add {
+                    path,
+                    alias,
+                    ssh_host,
+                } => commands::repo::RepoAction::Add {
                     path: std::path::PathBuf::from(path),
                     alias,
+                    ssh_host,
                 },
                 RepoSubcommand::Remove { identifier } => {
                     commands::repo::RepoAction::Remove { identifier }
@@ -523,6 +553,13 @@ fn main() {
                 RepoSubcommand::Untag { tags } => commands::repo::RepoAction::Untag { tags },
             };
             commands::repo::run(repo_action)
+        }
+        Commands::Space { action } => {
+            let space_action = match action {
+                SpaceSubcommand::List => commands::space::SpaceAction::List,
+                SpaceSubcommand::Current => commands::space::SpaceAction::Current,
+            };
+            commands::space::run(space_action)
         }
     }
 }

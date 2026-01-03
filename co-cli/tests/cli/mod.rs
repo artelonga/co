@@ -16,4 +16,5 @@ pub mod i18n;
 pub mod lead;
 pub mod locate;
 pub mod schema;
+pub mod space;
 pub mod validate;

@@ -17,6 +17,7 @@ pub mod query;
 pub mod repo;
 pub mod schema;
 pub mod show;
+pub mod space;
 pub mod status;
 pub mod tools;
 pub mod translate;

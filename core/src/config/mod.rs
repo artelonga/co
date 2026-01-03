@@ -7,13 +7,16 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-/// A registered repository
+/// A registered repository (space)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RepoConfig {
     /// Absolute path to the repository
     pub path: PathBuf,
     /// Short alias for the repo
     pub alias: String,
+    /// SSH host for git operations (e.g., "github-work", "github-personal")
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ssh_host: Option<String>,
 }
 
 /// Global CO configuration (~/.co/config.yaml)
@@ -72,10 +75,14 @@ impl GlobalConfig {
     }
 
     /// Add a repository
-    pub fn add_repo(&mut self, path: PathBuf, alias: String) {
+    pub fn add_repo(&mut self, path: PathBuf, alias: String, ssh_host: Option<String>) {
         // Remove any existing repo with same path or alias
         self.repos.retain(|r| r.path != path && r.alias != alias);
-        self.repos.push(RepoConfig { path, alias });
+        self.repos.push(RepoConfig {
+            path,
+            alias,
+            ssh_host,
+        });
     }
 
     /// Remove a repository by alias or path
@@ -89,6 +96,14 @@ impl GlobalConfig {
     /// Get repo by alias
     pub fn get_by_alias(&self, alias: &str) -> Option<&RepoConfig> {
         self.repos.iter().find(|r| r.alias == alias)
+    }
+
+    /// Detect the current space from the working directory
+    ///
+    /// Returns the repo whose path is a prefix of the current working directory.
+    pub fn detect_current_space(&self) -> Option<&RepoConfig> {
+        let cwd = std::env::current_dir().ok()?;
+        self.repos.iter().find(|repo| cwd.starts_with(&repo.path))
     }
 }
 
@@ -302,17 +317,50 @@ mod tests {
     fn test_global_config_add_remove_repo() {
         let mut config = GlobalConfig::default();
 
-        config.add_repo(PathBuf::from("/path/to/repo"), "myrepo".to_string());
+        config.add_repo(PathBuf::from("/path/to/repo"), "myrepo".to_string(), None);
         assert_eq!(config.repos.len(), 1);
         assert_eq!(config.repos[0].alias, "myrepo");
+        assert!(config.repos[0].ssh_host.is_none());
 
         // Adding same path with different alias replaces
-        config.add_repo(PathBuf::from("/path/to/repo"), "newname".to_string());
+        config.add_repo(
+            PathBuf::from("/path/to/repo"),
+            "newname".to_string(),
+            Some("github-work".to_string()),
+        );
         assert_eq!(config.repos.len(), 1);
         assert_eq!(config.repos[0].alias, "newname");
+        assert_eq!(config.repos[0].ssh_host.as_deref(), Some("github-work"));
 
         assert!(config.remove_repo("newname"));
         assert!(config.repos.is_empty());
+    }
+
+    #[test]
+    fn test_repo_config_ssh_host_serialization() {
+        let config = RepoConfig {
+            path: PathBuf::from("/path/to/repo"),
+            alias: "work".to_string(),
+            ssh_host: Some("github-work".to_string()),
+        };
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("ssh_host: github-work"));
+
+        let parsed: RepoConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.ssh_host, Some("github-work".to_string()));
+    }
+
+    #[test]
+    fn test_repo_config_without_ssh_host_backward_compatible() {
+        // Old config without ssh_host should still parse
+        let yaml = r#"
+path: /path/to/repo
+alias: work
+"#;
+        let config: RepoConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(config.alias, "work");
+        assert!(config.ssh_host.is_none());
     }
 
     #[test]

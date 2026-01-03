@@ -11,7 +11,11 @@ pub enum RepoAction {
     /// List registered repositories
     List,
     /// Add current directory as a repository
-    Add { path: PathBuf, alias: String },
+    Add {
+        path: PathBuf,
+        alias: String,
+        ssh_host: Option<String>,
+    },
     /// Remove a repository
     Remove { identifier: String },
     /// Add tags to current repository
@@ -24,7 +28,11 @@ pub enum RepoAction {
 pub fn run(action: RepoAction) {
     match action {
         RepoAction::List => list_repos(),
-        RepoAction::Add { path, alias } => add_repo(path, alias),
+        RepoAction::Add {
+            path,
+            alias,
+            ssh_host,
+        } => add_repo(path, alias, ssh_host),
         RepoAction::Remove { identifier } => remove_repo(&identifier),
         RepoAction::Tag { tags } => add_tags(tags),
         RepoAction::Untag { tags } => remove_tags(tags),
@@ -47,6 +55,9 @@ fn list_repos() {
     println!("{}", "Registered Repositories".bold());
     println!("{}", "═".repeat(60));
 
+    // Detect current space for highlighting
+    let current_space = config.detect_current_space();
+
     for repo in &config.repos {
         let local = RepoLocalConfig::load(&repo.path);
         let tags_str = if local.tags.is_empty() {
@@ -55,6 +66,12 @@ fn list_repos() {
             format!(" [{}]", local.tags.join(", "))
         };
 
+        let ssh_str = repo
+            .ssh_host
+            .as_ref()
+            .map(|h| format!(" ({})", h.green()))
+            .unwrap_or_default();
+
         let exists = repo.path.exists();
         let status = if exists {
             "".to_string()
@@ -62,11 +79,20 @@ fn list_repos() {
             " (not found)".red().to_string()
         };
 
+        // Mark current space with *
+        let marker = if current_space.is_some_and(|c| c.path == repo.path) {
+            "* ".green().to_string()
+        } else {
+            "  ".to_string()
+        };
+
         println!(
-            "  {} {} {}{}{}",
+            "{}{} {} {}{}{}{}",
+            marker,
             repo.alias.cyan().bold(),
             "→".dimmed(),
             repo.path.display(),
+            ssh_str,
             tags_str.dimmed(),
             status
         );
@@ -74,7 +100,7 @@ fn list_repos() {
 }
 
 /// Add a repository
-fn add_repo(path: PathBuf, alias: String) {
+fn add_repo(path: PathBuf, alias: String, ssh_host: Option<String>) {
     let abs_path = match path.canonicalize() {
         Ok(p) => p,
         Err(e) => {
@@ -108,18 +134,23 @@ fn add_repo(path: PathBuf, alias: String) {
     }
 
     let mut config = GlobalConfig::load();
-    config.add_repo(abs_path.clone(), alias.clone());
+    config.add_repo(abs_path.clone(), alias.clone(), ssh_host.clone());
 
     if let Err(e) = config.save() {
         eprintln!("{} Failed to save config: {}", "error:".red().bold(), e);
         std::process::exit(1);
     }
 
+    let ssh_msg = ssh_host
+        .map(|h| format!(" with SSH host '{}'", h.green()))
+        .unwrap_or_default();
+
     println!(
-        "{} Registered '{}' as '{}'",
+        "{} Registered '{}' as '{}'{}",
         "success:".green().bold(),
         abs_path.display(),
-        alias.cyan()
+        alias.cyan(),
+        ssh_msg
     );
 }
 
