@@ -8,8 +8,8 @@
 
 use crate::commands;
 use colored::Colorize;
-use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
+use rustyline::error::ReadlineError;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 

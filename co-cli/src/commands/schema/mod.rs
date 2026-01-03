@@ -2,8 +2,8 @@
 //!
 //! Manage feature type schemas.
 
-use co::feature::schema::PropertyKind;
 use co::FeatureRegistry;
+use co::feature::schema::PropertyKind;
 use colored::Colorize;
 use std::path::Path;
 
@@ -83,11 +83,7 @@ fn list_schemas() {
             .as_ref()
             .map(|s| s.property_count())
             .unwrap_or(0);
-        let version = feature
-            .schema
-            .as_ref()
-            .map(|s| s.version)
-            .unwrap_or(1);
+        let version = feature.schema.as_ref().map(|s| s.version).unwrap_or(1);
 
         let source = if feature.is_system { "system" } else { "user" };
 
@@ -117,11 +113,7 @@ fn show_schema(name: &str) {
     let schema = match &feature.schema {
         Some(s) => s,
         None => {
-            eprintln!(
-                "{} Feature '{}' has no schema",
-                "error:".red().bold(),
-                name
-            );
+            eprintln!("{} Feature '{}' has no schema", "error:".red().bold(), name);
             std::process::exit(1);
         }
     };
@@ -304,12 +296,7 @@ fn remove_property(feature_name: &str, property: &str, force: bool) {
 }
 
 /// Modify a property in a schema
-fn modify_property(
-    feature_name: &str,
-    property: &str,
-    kind: Option<&str>,
-    required: Option<bool>,
-) {
+fn modify_property(feature_name: &str, property: &str, kind: Option<&str>, required: Option<bool>) {
     let current_dir = Path::new(".");
     let registry = FeatureRegistry::discover(current_dir);
 

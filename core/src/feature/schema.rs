@@ -70,10 +70,9 @@ impl FeatureSchema {
     /// Save schema to a feature directory
     pub fn save(&self, dir: &Path) -> Result<(), SchemaError> {
         let schema_path = dir.join("schema.yaml");
-        let content = serde_yaml::to_string(self)
-            .map_err(|e| SchemaError::Parse(schema_path.clone(), e))?;
-        std::fs::write(&schema_path, content)
-            .map_err(|e| SchemaError::Io(schema_path, e))
+        let content =
+            serde_yaml::to_string(self).map_err(|e| SchemaError::Parse(schema_path.clone(), e))?;
+        std::fs::write(&schema_path, content).map_err(|e| SchemaError::Io(schema_path, e))
     }
 
     /// Add a property to the schema
@@ -134,10 +133,10 @@ impl FeatureSchema {
 
         // Validate property types
         for (name, value) in frontmatter {
-            if let Some(prop) = self.properties.get(name) {
-                if let Some(error) = self.validate_property_type(name, value, &prop.kind) {
-                    errors.push(error);
-                }
+            if let Some(prop) = self.properties.get(name)
+                && let Some(error) = self.validate_property_type(name, value, &prop.kind)
+            {
+                errors.push(error);
             }
             // Unknown properties are allowed (extensible)
         }

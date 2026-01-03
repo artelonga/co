@@ -84,10 +84,11 @@ fn collect_ids_from_context(context_path: &Path, known_ids: &mut HashSet<String>
             let path = entry.path();
             if path.is_dir() {
                 collect_ids_from_directory(&path, known_ids);
-            } else if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(id) = extract_id(&path) {
-                    known_ids.insert(id);
-                }
+            } else if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(id) = extract_id(&path)
+            {
+                known_ids.insert(id);
             }
         }
     }
@@ -98,10 +99,11 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(id) = extract_id(&path) {
-                    known_ids.insert(id);
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(id) = extract_id(&path)
+            {
+                known_ids.insert(id);
             }
         }
     }

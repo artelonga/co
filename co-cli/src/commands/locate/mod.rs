@@ -28,7 +28,7 @@ pub mod build;
 pub mod stats;
 pub mod update;
 
-use co::config::{resolve_repos, GlobalConfig, GroupsConfig};
+use co::config::{GlobalConfig, GroupsConfig, resolve_repos};
 use colored::Colorize;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -52,11 +52,11 @@ struct FilterableFrontmatter {
 /// Run the unified locate command
 pub fn run(query: &[String], context_filter: Option<&str>) {
     // Check if this is a federated query (@group, #tag, or registered repo alias)
-    if let Some(filter) = context_filter {
-        if filter.starts_with('@') || filter.starts_with('#') || is_registered_repo(filter) {
-            run_federated(query, filter);
-            return;
-        }
+    if let Some(filter) = context_filter
+        && (filter.starts_with('@') || filter.starts_with('#') || is_registered_repo(filter))
+    {
+        run_federated(query, filter);
+        return;
     }
 
     // Check if first argument is a positional context
@@ -138,17 +138,17 @@ fn run_federated(query: &[String], filter: &str) {
     let repos = resolve_repos(filter, &global, &groups);
 
     if repos.is_empty() {
-        if filter.starts_with('@') {
+        if let Some(group_name) = filter.strip_prefix('@') {
             eprintln!(
                 "{} No repositories match group '{}'",
                 "error:".red().bold(),
-                &filter[1..]
+                group_name
             );
-        } else if filter.starts_with('#') {
+        } else if let Some(tag) = filter.strip_prefix('#') {
             eprintln!(
                 "{} No repositories have tag '{}'",
                 "error:".red().bold(),
-                &filter[1..]
+                tag
             );
         } else {
             eprintln!(
@@ -274,11 +274,12 @@ fn search_directory_federated(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(mut item) = check_file(&path, context, filters, search_terms) {
-                    item.repo_alias = Some(repo_alias.to_string());
-                    results.push(item);
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(mut item) = check_file(&path, context, filters, search_terms)
+            {
+                item.repo_alias = Some(repo_alias.to_string());
+                results.push(item);
             }
         }
     }
@@ -301,10 +302,10 @@ fn find_content(
                 let context_name = path.file_name().unwrap().to_string_lossy().to_string();
 
                 // Skip if context filter is set and this context is not in the list
-                if let Some(allowed_contexts) = contexts {
-                    if !allowed_contexts.contains(&context_name.as_str()) {
-                        continue;
-                    }
+                if let Some(allowed_contexts) = contexts
+                    && !allowed_contexts.contains(&context_name.as_str())
+                {
+                    continue;
                 }
 
                 // Search in type subdirectories (tasks/, definitions/, etc.)
@@ -343,10 +344,11 @@ fn search_directory(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(item) = check_file(&path, context, filters, search_terms) {
-                    results.push(item);
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(item) = check_file(&path, context, filters, search_terms)
+            {
+                results.push(item);
             }
         }
     }

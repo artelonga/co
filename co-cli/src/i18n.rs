@@ -75,16 +75,16 @@ fn embedded_labels(lang: &str) -> UiLabels {
 fn get_system_language() -> String {
     let config_path = Path::new(".co/config.yaml");
 
-    if config_path.exists() {
-        if let Ok(content) = fs::read_to_string(config_path) {
-            for line in content.lines() {
-                if line.starts_with("system_language:") {
-                    return line
-                        .strip_prefix("system_language:")
-                        .unwrap()
-                        .trim()
-                        .to_string();
-                }
+    if config_path.exists()
+        && let Ok(content) = fs::read_to_string(config_path)
+    {
+        for line in content.lines() {
+            if line.starts_with("system_language:") {
+                return line
+                    .strip_prefix("system_language:")
+                    .unwrap()
+                    .trim()
+                    .to_string();
             }
         }
     }

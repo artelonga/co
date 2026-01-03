@@ -131,10 +131,11 @@ fn collect_tools(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(tool) = parse_tool(&path, is_user, filters) {
-                    results.push(tool);
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(tool) = parse_tool(&path, is_user, filters)
+            {
+                results.push(tool);
             }
         }
     }
@@ -270,17 +271,16 @@ fn run_show(name: &str) {
             let mut available = Vec::new();
             for dir in &["tools", "user/tools"] {
                 let path = Path::new(dir);
-                if path.is_dir() {
-                    if let Ok(entries) = fs::read_dir(path) {
-                        for entry in entries.flatten() {
-                            let entry_path = entry.path();
-                            if entry_path.is_file()
-                                && entry_path.extension().is_some_and(|e| e == "md")
-                            {
-                                if let Some(stem) = entry_path.file_stem() {
-                                    available.push(stem.to_string_lossy().to_string());
-                                }
-                            }
+                if path.is_dir()
+                    && let Ok(entries) = fs::read_dir(path)
+                {
+                    for entry in entries.flatten() {
+                        let entry_path = entry.path();
+                        if entry_path.is_file()
+                            && entry_path.extension().is_some_and(|e| e == "md")
+                            && let Some(stem) = entry_path.file_stem()
+                        {
+                            available.push(stem.to_string_lossy().to_string());
                         }
                     }
                 }

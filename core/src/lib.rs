@@ -54,7 +54,7 @@ pub mod types;
 pub mod validate;
 
 // Re-export main types
-pub use content::{specs_for_type, ParsedContent, SectionSpec};
+pub use content::{ParsedContent, SectionSpec, specs_for_type};
 pub use edge::{Edge, EdgeType};
 pub use frontmatter::{BaseFrontmatter, Frontmatter};
 pub use graph::Graph;
@@ -69,7 +69,7 @@ pub use types::{
     Direction, ExegesisType, LanguageSpec, Lexicon, LexiconEntry, SemanticVersion, TypeKind,
     TypeRef,
 };
-pub use validate::{Severity, ValidationContext, ValidationIssue, KNOWN_TYPES};
+pub use validate::{KNOWN_TYPES, Severity, ValidationContext, ValidationIssue};
 
 // Feature system exports
 pub use feature::schema::{FeatureSchema, PropertyDef, PropertyKind};

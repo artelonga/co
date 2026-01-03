@@ -2,7 +2,7 @@
 
 use co::language::Language;
 use colored::Colorize;
-use comfy_table::{presets::UTF8_FULL, Table};
+use comfy_table::{Table, presets::UTF8_FULL};
 
 #[allow(dead_code)]
 pub fn run() {

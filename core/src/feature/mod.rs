@@ -94,25 +94,25 @@ impl FeatureRegistry {
 
         // Also check user/ directory for user-defined features
         let user_dir = root.join("user");
-        if user_dir.is_dir() {
-            if let Ok(entries) = std::fs::read_dir(&user_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        let name = path.file_name().unwrap().to_string_lossy().to_string();
-                        // Only add if not already registered as system feature
-                        if !registry.features.contains_key(&name) {
-                            let schema = schema::FeatureSchema::load(&path).ok();
-                            registry.features.insert(
-                                name.clone(),
-                                Feature {
-                                    name,
-                                    path,
-                                    is_system: false,
-                                    schema,
-                                },
-                            );
-                        }
+        if user_dir.is_dir()
+            && let Ok(entries) = std::fs::read_dir(&user_dir)
+        {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    // Only add if not already registered as system feature
+                    if !registry.features.contains_key(&name) {
+                        let schema = schema::FeatureSchema::load(&path).ok();
+                        registry.features.insert(
+                            name.clone(),
+                            Feature {
+                                name,
+                                path,
+                                is_system: false,
+                                schema,
+                            },
+                        );
                     }
                 }
             }

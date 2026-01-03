@@ -61,13 +61,15 @@ impl ParsedContent {
 
         for line in lines {
             // Check for title (# heading)
-            if line.starts_with("# ") && result.title.is_none() {
-                result.title = Some(line[2..].trim().to_string());
+            if let Some(title) = line.strip_prefix("# ")
+                && result.title.is_none()
+            {
+                result.title = Some(title.trim().to_string());
                 continue;
             }
 
             // Check for section headers (## heading)
-            if line.starts_with("## ") {
+            if let Some(header_text) = line.strip_prefix("## ") {
                 // Save previous section if any
                 if let Some(ref field) = current_field {
                     let content = section_content.trim().to_string();
@@ -76,7 +78,7 @@ impl ParsedContent {
                     }
                 }
 
-                let header = line[3..].trim();
+                let header = header_text.trim();
                 let normalized = header.to_lowercase();
 
                 // Check if this matches any spec
@@ -203,7 +205,10 @@ agent appears in `co agents` output
         let parsed = ParsedContent::parse(content, &specs);
 
         assert_eq!(parsed.title, Some("Create user agent".to_string()));
-        assert_eq!(parsed.get("system"), Some("`user/agents/` directory exists"));
+        assert_eq!(
+            parsed.get("system"),
+            Some("`user/agents/` directory exists")
+        );
         assert_eq!(
             parsed.get("action"),
             Some("user adds `user/agents/my-agent.md`")

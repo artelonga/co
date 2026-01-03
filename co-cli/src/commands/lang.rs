@@ -22,7 +22,7 @@
 
 use co::language::Language;
 use colored::Colorize;
-use comfy_table::{presets::UTF8_FULL, Table};
+use comfy_table::{Table, presets::UTF8_FULL};
 use std::fs;
 use std::path::Path;
 
@@ -72,20 +72,20 @@ fn set_language(lang: &str) {
 fn show_language() {
     let config_path = Path::new(".co/config.yaml");
 
-    if config_path.exists() {
-        if let Ok(content) = fs::read_to_string(config_path) {
-            for line in content.lines() {
-                if line.starts_with("system_language:") {
-                    let lang = line.strip_prefix("system_language:").unwrap().trim();
-                    let lang_name = get_language_name(lang);
-                    println!(
-                        "{} {} ({})",
-                        "System language:".bold(),
-                        lang.cyan(),
-                        lang_name
-                    );
-                    return;
-                }
+    if config_path.exists()
+        && let Ok(content) = fs::read_to_string(config_path)
+    {
+        for line in content.lines() {
+            if line.starts_with("system_language:") {
+                let lang = line.strip_prefix("system_language:").unwrap().trim();
+                let lang_name = get_language_name(lang);
+                println!(
+                    "{} {} ({})",
+                    "System language:".bold(),
+                    lang.cyan(),
+                    lang_name
+                );
+                return;
             }
         }
     }

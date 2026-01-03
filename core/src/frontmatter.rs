@@ -23,7 +23,7 @@
 //! }
 //! ```
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use thiserror::Error;
 
 /// Default schema version for frontmatter

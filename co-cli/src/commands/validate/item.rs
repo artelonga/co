@@ -72,10 +72,11 @@ fn find_file(root: &Path, name: &str) -> Option<std::path::PathBuf> {
     if let Ok(entries) = fs::read_dir(root) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_dir() && !is_hidden(&path) {
-                if let Some(found) = find_in_context(&path, &search_name, name) {
-                    return Some(found);
-                }
+            if path.is_dir()
+                && !is_hidden(&path)
+                && let Some(found) = find_in_context(&path, &search_name, name)
+            {
+                return Some(found);
             }
         }
     }
@@ -119,27 +120,25 @@ fn find_in_directory(dir: &Path, search_name: &str, id: &str) -> Option<std::pat
 /// Check if file matches the search criteria
 fn matches_file(path: &Path, search_name: &str, id: &str) -> bool {
     // Check filename match
-    if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-        if filename == search_name {
-            return true;
-        }
+    if let Some(filename) = path.file_name().and_then(|n| n.to_str())
+        && filename == search_name
+    {
+        return true;
     }
 
     // Check ID in frontmatter
-    if path.extension().is_some_and(|e| e == "md") {
-        if let Ok(content) = fs::read_to_string(path) {
-            if let Some(rest) = content.strip_prefix("---") {
-                if let Some(end_idx) = rest.find("\n---") {
-                    let yaml_str = &rest[1..end_idx];
-                    for line in yaml_str.lines() {
-                        let line = line.trim();
-                        if let Some(id_value) = line.strip_prefix("id:") {
-                            let file_id = id_value.trim().trim_matches('"').trim_matches('\'');
-                            if file_id == id {
-                                return true;
-                            }
-                        }
-                    }
+    if path.extension().is_some_and(|e| e == "md")
+        && let Ok(content) = fs::read_to_string(path)
+        && let Some(rest) = content.strip_prefix("---")
+        && let Some(end_idx) = rest.find("\n---")
+    {
+        let yaml_str = &rest[1..end_idx];
+        for line in yaml_str.lines() {
+            let line = line.trim();
+            if let Some(id_value) = line.strip_prefix("id:") {
+                let file_id = id_value.trim().trim_matches('"').trim_matches('\'');
+                if file_id == id {
+                    return true;
                 }
             }
         }
@@ -167,10 +166,11 @@ fn collect_ids_from_context(context_path: &Path, known_ids: &mut HashSet<String>
             let path = entry.path();
             if path.is_dir() {
                 collect_ids_from_directory(&path, known_ids);
-            } else if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(id) = extract_id(&path) {
-                    known_ids.insert(id);
-                }
+            } else if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(id) = extract_id(&path)
+            {
+                known_ids.insert(id);
             }
         }
     }
@@ -181,10 +181,11 @@ fn collect_ids_from_directory(dir: &Path, known_ids: &mut HashSet<String>) {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(id) = extract_id(&path) {
-                    known_ids.insert(id);
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(id) = extract_id(&path)
+            {
+                known_ids.insert(id);
             }
         }
     }

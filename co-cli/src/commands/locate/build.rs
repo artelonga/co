@@ -2,11 +2,11 @@
 //!
 //! Scans all scopes and builds a persistent index at `.co/index.bin`.
 
-use co::{specs_for_type, Index, IndexEntry, ParsedContent};
+use co::{Index, IndexEntry, ParsedContent, specs_for_type};
 use colored::Colorize;
 use serde::Deserialize;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -58,15 +58,15 @@ pub fn run() {
 
     // Ensure .co directory exists
     let co_dir = current_dir.join(".co");
-    if !co_dir.exists() {
-        if let Err(e) = fs::create_dir_all(&co_dir) {
-            eprintln!(
-                "{} Failed to create .co directory: {}",
-                "error:".red().bold(),
-                e
-            );
-            std::process::exit(1);
-        }
+    if !co_dir.exists()
+        && let Err(e) = fs::create_dir_all(&co_dir)
+    {
+        eprintln!(
+            "{} Failed to create .co directory: {}",
+            "error:".red().bold(),
+            e
+        );
+        std::process::exit(1);
     }
 
     // Write index to .co/index.bin
@@ -98,11 +98,12 @@ fn index_directory(dir: &Path, scope: &str, index: &mut Index) -> usize {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(entry) = create_index_entry(&path, scope) {
-                    index.insert(entry);
-                    count += 1;
-                }
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(entry) = create_index_entry(&path, scope)
+            {
+                index.insert(entry);
+                count += 1;
             }
         }
     }

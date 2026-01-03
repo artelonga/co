@@ -11,22 +11,13 @@ pub enum RepoAction {
     /// List registered repositories
     List,
     /// Add current directory as a repository
-    Add {
-        path: PathBuf,
-        alias: String,
-    },
+    Add { path: PathBuf, alias: String },
     /// Remove a repository
-    Remove {
-        identifier: String,
-    },
+    Remove { identifier: String },
     /// Add tags to current repository
-    Tag {
-        tags: Vec<String>,
-    },
+    Tag { tags: Vec<String> },
     /// Remove tags from current repository
-    Untag {
-        tags: Vec<String>,
-    },
+    Untag { tags: Vec<String> },
 }
 
 /// Run repo command

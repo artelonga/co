@@ -79,14 +79,16 @@ impl ContentStore {
             .filter_map(|e| e.ok())
         {
             let path = entry.path();
-            if path.is_file() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if name.ends_with(pattern) || pattern == "*" {
-                        if let Ok(rel) = path.strip_prefix(&self.root) {
-                            files.push(rel.to_path_buf());
-                        }
-                    }
-                }
+            if !path.is_file() {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+                continue;
+            };
+            if (name.ends_with(pattern) || pattern == "*")
+                && let Ok(rel) = path.strip_prefix(&self.root)
+            {
+                files.push(rel.to_path_buf());
             }
         }
 

@@ -1,7 +1,7 @@
 //! Shared test utilities for CLI integration tests
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use assert_cmd::Command;
+use assert_cmd::cargo::cargo_bin_cmd;
 
 /// Create a command for the CO CLI
 pub fn co_command() -> Command {

@@ -474,7 +474,9 @@ fn main() {
                     // Parse property:kind format
                     let parts: Vec<&str> = property.split(':').collect();
                     if parts.len() != 2 {
-                        eprintln!("error: Property must be in format 'name:kind' (e.g., 'priority:number')");
+                        eprintln!(
+                            "error: Property must be in format 'name:kind' (e.g., 'priority:number')"
+                        );
                         std::process::exit(1);
                     }
                     commands::schema::SchemaAction::AddProperty {

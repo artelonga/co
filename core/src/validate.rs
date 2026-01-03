@@ -2,7 +2,7 @@
 //!
 //! Validates frontmatter fields and references for content integrity.
 
-use crate::content::{specs_for_type, ParsedContent};
+use crate::content::{ParsedContent, specs_for_type};
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -179,23 +179,23 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
     }
 
     // Task 5.1.2: Check language exists (has lexicon directory)
-    if let Some(ref lang) = frontmatter.language {
-        if !ctx.language_exists(lang) {
-            issues.push(ValidationIssue::error(
-                path,
-                format!("Unknown language: {} (no lexicon found)", lang),
-            ));
-        }
+    if let Some(ref lang) = frontmatter.language
+        && !ctx.language_exists(lang)
+    {
+        issues.push(ValidationIssue::error(
+            path,
+            format!("Unknown language: {} (no lexicon found)", lang),
+        ));
     }
 
     // Task 5.1.3: Check scope exists (if specified)
-    if let Some(ref scope) = frontmatter.scope {
-        if !ctx.scope_exists(scope) {
-            issues.push(ValidationIssue::error(
-                path,
-                format!("Unknown scope: {}", scope),
-            ));
-        }
+    if let Some(ref scope) = frontmatter.scope
+        && !ctx.scope_exists(scope)
+    {
+        issues.push(ValidationIssue::error(
+            path,
+            format!("Unknown scope: {}", scope),
+        ));
     }
 
     // Task 5.1.4: Check internal links [[reference]]

@@ -207,9 +207,8 @@ pub fn resolve_repos(
     global: &GlobalConfig,
     groups: &GroupsConfig,
 ) -> Vec<RepoConfig> {
-    if filter.starts_with('@') {
+    if let Some(group_name) = filter.strip_prefix('@') {
         // Group filter: @groupname
-        let group_name = &filter[1..];
         if let Some(group) = groups.get(group_name) {
             let mut result = Vec::new();
 
@@ -217,9 +216,10 @@ pub fn resolve_repos(
             for repo in &global.repos {
                 let local_config = RepoLocalConfig::load(&repo.path);
                 let has_tag = group.tags.iter().any(|t| local_config.tags.contains(t));
-                let in_list = group.repos.iter().any(|r| {
-                    r == &repo.alias || PathBuf::from(r) == repo.path
-                });
+                let in_list = group
+                    .repos
+                    .iter()
+                    .any(|r| r == &repo.alias || r.as_str() == repo.path.to_string_lossy());
 
                 if has_tag || in_list {
                     result.push(repo.clone());
@@ -229,9 +229,8 @@ pub fn resolve_repos(
             return result;
         }
         Vec::new()
-    } else if filter.starts_with('#') {
+    } else if let Some(tag) = filter.strip_prefix('#') {
         // Tag filter: #tagname
-        let tag = &filter[1..];
         global
             .repos
             .iter()

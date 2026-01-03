@@ -101,15 +101,15 @@ pub fn run() {
 
     // Ensure .co directory exists
     let co_dir = current_dir.join(".co");
-    if !co_dir.exists() {
-        if let Err(e) = fs::create_dir_all(&co_dir) {
-            eprintln!(
-                "{} Failed to create .co directory: {}",
-                "error:".red().bold(),
-                e
-            );
-            std::process::exit(1);
-        }
+    if !co_dir.exists()
+        && let Err(e) = fs::create_dir_all(&co_dir)
+    {
+        eprintln!(
+            "{} Failed to create .co directory: {}",
+            "error:".red().bold(),
+            e
+        );
+        std::process::exit(1);
     }
 
     // Write index
@@ -177,20 +177,21 @@ fn update_directory(
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().is_some_and(|e| e == "md") {
-                if let Some(new_entry) = create_index_entry(&path, scope) {
-                    seen_ids.insert(new_entry.id.clone());
+            if path.is_file()
+                && path.extension().is_some_and(|e| e == "md")
+                && let Some(new_entry) = create_index_entry(&path, scope)
+            {
+                seen_ids.insert(new_entry.id.clone());
 
-                    // Check if entry exists and has changed
-                    if let Some(existing) = index.get(&new_entry.id) {
-                        if existing.content_hash != new_entry.content_hash {
-                            index.insert(new_entry);
-                            updated += 1;
-                        }
-                    } else {
+                // Check if entry exists and has changed
+                if let Some(existing) = index.get(&new_entry.id) {
+                    if existing.content_hash != new_entry.content_hash {
                         index.insert(new_entry);
-                        added += 1;
+                        updated += 1;
                     }
+                } else {
+                    index.insert(new_entry);
+                    added += 1;
                 }
             }
         }
