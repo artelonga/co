@@ -373,6 +373,23 @@ enum Commands {
         #[arg(short, long)]
         name: Option<String>,
     },
+
+    /// Analyze content quality and generate suggestions
+    ///
+    /// Evaluates content against criteria and generates
+    /// improvement suggestions and interview questions.
+    ///
+    /// Examples:
+    ///   co analyze my-story         # Analyze content item
+    ///   co analyze my-task -v       # Verbose analysis
+    Analyze {
+        /// Content name/id to analyze
+        name: String,
+
+        /// Show verbose analysis details
+        #[arg(short, long)]
+        verbose: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -827,5 +844,6 @@ fn main() {
             context.as_deref(),
             name.as_deref(),
         ),
+        Commands::Analyze { name, verbose } => commands::analyze::run(&name, verbose),
     }
 }

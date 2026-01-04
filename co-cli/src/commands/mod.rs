@@ -1,6 +1,7 @@
 //! CLI command implementations
 
 pub mod agents;
+pub mod analyze;
 pub mod archive;
 pub mod collab;
 pub mod conduct;

@@ -9,6 +9,7 @@ pub fn co_command() -> Command {
 }
 
 // Test modules
+pub mod analyze;
 pub mod basic;
 pub mod content;
 pub mod create;
