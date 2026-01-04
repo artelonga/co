@@ -169,10 +169,28 @@ enum Commands {
         action: IndexAction,
     },
 
-    /// Archive old content
+    /// Archive content for storage (deindexed from co)
+    ///
+    /// Move content to archive directory with `indexed: false` tag.
+    /// Archived items are preserved but ignored by co locate/validate.
+    ///
+    /// Examples:
+    ///   co archive task-12.1.1           # Archive a task
+    ///   co archive task-1 --force        # Replace existing archive
+    ///   co archive restore task-12.1.1   # Restore from archive
+    ///   co archive list                  # List archived items
+    #[command(visible_alias = "ar")]
     Archive {
-        /// Archive name (e.g., "2024-Q4")
-        name: String,
+        #[command(subcommand)]
+        action: Option<ArchiveSubcommand>,
+
+        /// Content name/id to archive (when not using subcommand)
+        #[arg(required = false)]
+        name: Option<String>,
+
+        /// Force replace if already archived
+        #[arg(long)]
+        force: bool,
     },
 
     /// Interactive exploration mode with space context
@@ -408,6 +426,17 @@ enum ConfigAction {
     Show,
     /// Set a configuration value
     Set { key: String, value: String },
+}
+
+#[derive(Subcommand)]
+enum ArchiveSubcommand {
+    /// Restore content from archive
+    Restore {
+        /// Content name/id to restore
+        name: String,
+    },
+    /// List archived items
+    List,
 }
 
 #[derive(Subcommand)]
@@ -668,7 +697,27 @@ fn main() {
         Commands::Translate { id, to } => commands::translate::run(&id, &to),
         Commands::Lang { language, list } => commands::lang::run(language, list),
         Commands::Index { action } => commands::index::run(action),
-        Commands::Archive { name } => commands::archive::run(&name),
+        Commands::Archive {
+            action,
+            name,
+            force,
+        } => {
+            let archive_action = match action {
+                Some(ArchiveSubcommand::Restore { name }) => {
+                    commands::archive::ArchiveAction::Restore { name }
+                }
+                Some(ArchiveSubcommand::List) => commands::archive::ArchiveAction::List,
+                None => {
+                    if let Some(name) = name {
+                        commands::archive::ArchiveAction::Archive { name, force }
+                    } else {
+                        eprintln!("error: Missing content name. Usage: co archive <NAME>");
+                        std::process::exit(1);
+                    }
+                }
+            };
+            commands::archive::run(archive_action)
+        }
         Commands::Lead => commands::lead::run(),
         Commands::Config { action } => commands::config::run(action),
         Commands::Locate { query, r#in } => {

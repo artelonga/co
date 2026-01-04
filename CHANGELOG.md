@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-01-04
+
+### Added
+- **Archive & Storage** (#43)
+  - `co archive <item>` - Move content to archive with deindexing
+  - `co archive restore <item>` - Restore content from archive
+  - `co archive list` - List all archived items
+  - Directory structure mirrors original: `work/tasks/` → `work/archive/tasks/`
+  - Adds `archived_at` timestamp to frontmatter
+  - Adds `indexed: false` to exclude from co operations (locate, validate)
+  - `--force` flag to replace existing archived items
+  - Alias: `co ar` for quick access
+
 ## [0.19.0] - 2026-01-04
 
 ### Added
@@ -247,10 +260,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [x] #36 - GitHub as Source of Truth (sync issues/PRs)
 - [x] #38 - Plan & Execute Workflow
 - [x] #39 - Writer Agent System
-- [ ] #40 - Tools & Extensions
-- [ ] #41 - Analyze Command
+- [x] #40 - Tools & Extensions
+- [x] #41 - Analyze Command
 - [ ] #42 - Documentation Polish
-- [ ] #43 - Archive & Storage
+- [x] #43 - Archive & Storage
 - [x] #47 - Space Isolation & Commit Guards
 - [x] #48 - Collaborative Content Creation (User + Agent)
 - [x] #49 - Terminology Refactor (space/context/scope)
