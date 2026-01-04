@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod archive;
 pub mod collab;
+pub mod conduct;
 pub mod config;
 pub mod create;
 pub mod define;

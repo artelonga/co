@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-01-04
+
+### Added
+- **Plan & Execute Workflow** (#38)
+  - `co conduct plan <objective>` - Create structured use-case proposals with acceptance criteria
+  - `co conduct execute <id>` - Drive plans through git workflow states (todo → in-progress → review → done)
+  - Two modes: Manual (interactive prompts) or Assisted (skeleton for LLM)
+  - `--context FILE` to load context from a file
+  - `--repo <alias>` for cross-repo operations
+  - Auto-creates GitHub issue on plan creation
+  - Branch creation on execute, PR tracking via `gh` CLI
+  - Space-aware architecture with global repo registry
+
 ## [0.15.0] - 2026-01-04
 
 ### Added
@@ -195,7 +208,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Upcoming (v1.0)
 - [x] #36 - GitHub as Source of Truth (sync issues/PRs)
-- [ ] #38 - Plan & Execute Workflow
+- [x] #38 - Plan & Execute Workflow
 - [ ] #39 - Writer Agent System
 - [ ] #40 - Tools & Extensions
 - [ ] #41 - Analyze Command

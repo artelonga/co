@@ -327,6 +327,21 @@ enum Commands {
         #[command(subcommand)]
         action: CollabSubcommand,
     },
+
+    /// Plan and execute objectives through git workflow
+    ///
+    /// Two-phase workflow for structured development:
+    /// - Plan: Create structured use-case with acceptance criteria
+    /// - Execute: Drive plan through git states (todo → in-progress → review → done)
+    ///
+    /// Examples:
+    ///   co conduct plan "Add user authentication"
+    ///   co conduct plan "Feature X" --context context.md
+    ///   co conduct execute my-plan-id
+    Conduct {
+        #[command(subcommand)]
+        action: ConductSubcommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -427,6 +442,36 @@ enum CollabSubcommand {
         /// Specific issue numbers to pull
         #[arg(trailing_var_arg = true)]
         numbers: Vec<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConductSubcommand {
+    /// Create a structured plan from an objective
+    Plan {
+        /// The objective to plan
+        objective: String,
+
+        /// Target space within repo (default: work)
+        #[arg(short, long, value_name = "SPACE")]
+        r#in: Option<String>,
+
+        /// Target repo alias (default: detect from cwd)
+        #[arg(long)]
+        repo: Option<String>,
+
+        /// Context file path
+        #[arg(long)]
+        context: Option<String>,
+    },
+    /// Execute an approved plan through git workflow
+    Execute {
+        /// Plan ID to execute
+        id: String,
+
+        /// Target repo alias (default: detect from cwd)
+        #[arg(long)]
+        repo: Option<String>,
     },
 }
 
@@ -707,6 +752,25 @@ fn main() {
                 }
             };
             commands::collab::run(collab_action)
+        }
+        Commands::Conduct { action } => {
+            let conduct_action = match action {
+                ConductSubcommand::Plan {
+                    objective,
+                    r#in,
+                    repo,
+                    context,
+                } => commands::conduct::ConductAction::Plan {
+                    objective,
+                    space: r#in,
+                    repo,
+                    context,
+                },
+                ConductSubcommand::Execute { id, repo } => {
+                    commands::conduct::ConductAction::Execute { id, repo }
+                }
+            };
+            commands::conduct::run(conduct_action)
         }
     }
 }
