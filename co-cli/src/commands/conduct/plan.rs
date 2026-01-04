@@ -484,11 +484,26 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_id_handles_special_chars() {
-        let id = generate_id("User's Application Online!");
-        assert!(!id.contains('\''));
-        assert!(!id.contains('!'));
-        assert!(id.contains("user"));
+    fn test_generate_id_handles_all_forbidden_chars() {
+        use co::FORBIDDEN_ID_CHARS;
+
+        // Build an objective containing ALL forbidden characters
+        let forbidden_str: String = FORBIDDEN_ID_CHARS.iter().collect();
+        let objective = format!("test{}objective", forbidden_str);
+        let id = generate_id(&objective);
+
+        // Verify NONE of the forbidden chars remain in the generated ID
+        for c in FORBIDDEN_ID_CHARS {
+            assert!(
+                !id.contains(*c),
+                "Generated ID should not contain forbidden char '{}'",
+                c
+            );
+        }
+
+        // Verify the ID still contains expected parts
+        assert!(id.contains("test"));
+        assert!(id.contains("objective"));
     }
 
     #[test]

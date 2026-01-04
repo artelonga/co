@@ -93,3 +93,97 @@ pub const LANGUAGES: &[&str] = &["english", "portuguese", "guarani-mbya", "music
 
 /// Library version
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Characters explicitly forbidden in content IDs.
+///
+/// These characters are not allowed because they:
+/// - Break filesystem paths: `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`
+/// - Cause shell/parsing issues: `'`, `!`, `@`, `#`, `$`, `%`, `^`, `&`
+/// - Are whitespace: space, tab, newline, carriage return
+///
+/// Allowed characters: alphanumeric (a-z, A-Z, 0-9), hyphen (`-`), dot (`.`), underscore (`_`)
+pub const FORBIDDEN_ID_CHARS: &[char] = &[
+    '/', '\\', ':', '*', '?', '"', '<', '>', '|', // Filesystem-unsafe
+    '\'', '!', '@', '#', '$', '%', '^', '&', // Shell/special
+    ' ', '\t', '\n', '\r', // Whitespace
+];
+
+/// Check if a character is valid for content IDs.
+///
+/// Valid characters are:
+/// - Alphanumeric (a-z, A-Z, 0-9)
+/// - Hyphen (`-`)
+/// - Dot (`.`)
+/// - Underscore (`_`)
+#[inline]
+pub fn is_valid_id_char(c: char) -> bool {
+    c.is_alphanumeric() || c == '-' || c == '.' || c == '_'
+}
+
+/// Validate an ID string, returning any invalid characters found.
+///
+/// # Returns
+/// - `Ok(())` if the ID contains only valid characters
+/// - `Err(Vec<char>)` with the list of invalid characters found
+///
+/// # Example
+/// ```
+/// use co::validate_id;
+///
+/// assert!(validate_id("my-task-1").is_ok());
+/// assert!(validate_id("task-37.1").is_ok());
+/// assert!(validate_id("test/path").is_err());
+/// ```
+pub fn validate_id(id: &str) -> Result<(), Vec<char>> {
+    let invalid: Vec<char> = id.chars().filter(|c| !is_valid_id_char(*c)).collect();
+    if invalid.is_empty() {
+        Ok(())
+    } else {
+        Err(invalid)
+    }
+}
+
+#[cfg(test)]
+mod id_tests {
+    use super::*;
+
+    #[test]
+    fn test_forbidden_chars_are_explicit() {
+        // Test ALL forbidden characters are rejected
+        for c in FORBIDDEN_ID_CHARS {
+            assert!(
+                !is_valid_id_char(*c),
+                "Character '{}' should be forbidden",
+                c
+            );
+        }
+    }
+
+    #[test]
+    fn test_valid_id_chars() {
+        // Alphanumeric allowed
+        assert!(is_valid_id_char('a'));
+        assert!(is_valid_id_char('Z'));
+        assert!(is_valid_id_char('5'));
+        // Special allowed chars
+        assert!(is_valid_id_char('-'));
+        assert!(is_valid_id_char('.'));
+        assert!(is_valid_id_char('_'));
+    }
+
+    #[test]
+    fn test_validate_id_returns_invalid_chars() {
+        let result = validate_id("test/path:name");
+        assert!(result.is_err());
+        let invalid = result.unwrap_err();
+        assert!(invalid.contains(&'/'));
+        assert!(invalid.contains(&':'));
+    }
+
+    #[test]
+    fn test_validate_id_accepts_valid_id() {
+        assert!(validate_id("my-task-1").is_ok());
+        assert!(validate_id("task-37.1").is_ok());
+        assert!(validate_id("user_story").is_ok());
+    }
+}

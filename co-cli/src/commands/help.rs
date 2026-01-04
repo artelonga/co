@@ -61,11 +61,7 @@ fn list_topics() {
     println!();
     println!("{}", "Command reference:".bold());
     println!();
-    println!(
-        "  {}  {}",
-        "co --help".cyan(),
-        "List all commands".dimmed()
-    );
+    println!("  {}  {}", "co --help".cyan(), "List all commands".dimmed());
     println!(
         "  {}  {}",
         "co <command> --help".cyan(),

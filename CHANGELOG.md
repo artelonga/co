@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-01-04
+
+### Added
+- **Explicit Forbidden Character List** (#70)
+  - `FORBIDDEN_ID_CHARS` constant documenting all forbidden ID characters
+  - `is_valid_id_char()` function for character validation
+  - `validate_id()` function to check ID strings for invalid characters
+  - User-facing error messages in `co create` showing forbidden characters
+  - Comprehensive tests validating all forbidden characters are handled
+
+### Documentation
+- Added doc comments explaining forbidden character categories:
+  - Filesystem-unsafe: `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`
+  - Shell/special: `'`, `!`, `@`, `#`, `$`, `%`, `^`, `&`
+  - Whitespace: space, tab, newline, carriage return
+- Clarified allowed characters: alphanumeric, hyphen, dot, underscore
+
 ## [0.21.0] - 2026-01-04
 
 ### Added

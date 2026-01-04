@@ -6,6 +6,7 @@
 
 use crate::i18n::load_i18n;
 use co::validate::ValidationContext;
+use co::{FORBIDDEN_ID_CHARS, validate_id};
 use colored::Colorize;
 use std::fs;
 use std::io::{self, BufRead, Write};
@@ -38,6 +39,17 @@ pub fn run(content_type: &str, name: &str, space: Option<&str>, story: Option<&s
             "{}",
             "Create a schema.yaml with content_types to register custom types.".dimmed()
         );
+        std::process::exit(1);
+    }
+
+    // Validate content name has no forbidden characters
+    if let Err(invalid_chars) = validate_id(name) {
+        eprintln!(
+            "{} Invalid characters in name: {:?}",
+            "error:".red().bold(),
+            invalid_chars
+        );
+        eprintln!("{} Forbidden: {:?}", "hint:".dimmed(), FORBIDDEN_ID_CHARS);
         std::process::exit(1);
     }
 
