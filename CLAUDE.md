@@ -43,8 +43,9 @@ gh issue view <NUMBER> --comments
 1. Pick an issue from the backlog
 2. Create a branch: `git checkout -b <type>/issue-<number>-<description>`
 3. Implement following TDD (see below)
-4. Create PR referencing the issue
-5. Merge triggers version bump per policy
+4. **Include version bump in the same PR** (see Versioning below)
+5. Create PR referencing the issue with `Closes #<n>`
+6. Merge and clean up branches
 
 ### Branch Naming
 
@@ -55,9 +56,19 @@ gh issue view <NUMBER> --comments
 | Docs | `docs/issue-<n>-<desc>` | `docs/issue-42-readme` |
 | Refactor | `refactor/issue-<n>-<desc>` | `refactor/issue-49-terminology` |
 
+### After Merge - Cleanup
+
+**Always clean up after merge:**
+
+```bash
+git checkout main && git pull origin main
+git branch -d <branch-name>
+git push origin --delete <branch-name>
+```
+
 ## Versioning Policy (#53)
 
-**Issues drive releases.** Version bumps are determined by issue labels.
+**Version bump happens IN the issue PR.** One issue = one PR = one version bump.
 
 | Label | Version Bump | Example |
 |-------|--------------|---------|
@@ -67,13 +78,15 @@ gh issue view <NUMBER> --comments
 | `type:refactor` | Patch (x.y.**Z**) | 0.12.0 → 0.12.1 |
 | `type:chore` | No bump | - |
 
-### Version Bump Process
+### Version Bump (in same PR)
 
-After merging a feature/fix PR:
-1. Create version bump issue if needed
-2. Update `Cargo.toml` (workspace) and `co-cli/Cargo.toml`
-3. Update `CHANGELOG.md` with new version entry
-4. Create PR, merge, tag
+Before creating the PR, include these changes:
+
+1. Update `Cargo.toml` (workspace version)
+2. Update `co-cli/Cargo.toml` (version field)
+3. Add entry to `CHANGELOG.md`
+
+**Do NOT create separate issues/PRs for version bumps.**
 
 ## TDD: Red-Green-Refactor
 
