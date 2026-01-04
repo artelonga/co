@@ -1,16 +1,15 @@
-//! Initialize a new context
+//! Initialize a new context (project space)
 //!
 //! Creates a context directory at the repository root.
 //! All .md files within become lexicon entries, traversed recursively.
 //!
-//! # Terminology
-//!
-//! "Context" is the preferred term for agentic interoperability.
-//! The term "scope" is deprecated but may be aliased for backwards compatibility.
+//! Spaces are automatically added to .gitignore to prevent accidental
+//! commits to the co home repository.
 
 use crate::i18n::load_i18n;
 use colored::Colorize;
-use std::fs;
+use std::fs::{self, OpenOptions};
+use std::io::Write;
 use std::path::Path;
 
 /// Run the init command
@@ -66,8 +65,32 @@ A CO context for content management.
         std::process::exit(1);
     }
 
+    // Add to .gitignore (if exists) to prevent accidental commits to co home
+    let gitignore_path = Path::new(".gitignore");
+    let gitignore_entry = format!("{}/", name);
+    let mut added_to_gitignore = false;
+
+    if gitignore_path.exists()
+        && let Ok(contents) = fs::read_to_string(gitignore_path)
+    {
+        if !contents.lines().any(|line| line.trim() == gitignore_entry) {
+            if let Ok(mut file) = OpenOptions::new().append(true).open(gitignore_path) {
+                let entry = format!("\n# Space: {}\n{}\n", name, gitignore_entry);
+                if file.write_all(entry.as_bytes()).is_ok() {
+                    added_to_gitignore = true;
+                }
+            }
+        } else {
+            added_to_gitignore = true;
+        }
+    }
+
     println!("{}", i18n.message("context_initialized").bold().green());
     println!("{}", "─".repeat(30));
     println!("Created: {}/", name.cyan());
     println!("  └── README.md");
+
+    if added_to_gitignore {
+        println!("  └── {} added to .gitignore", gitignore_entry.dimmed());
+    }
 }

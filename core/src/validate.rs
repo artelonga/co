@@ -102,18 +102,36 @@ impl ValidationContext {
             .is_some_and(|r| r.has_content_type(content_type))
     }
 
-    /// Check if a language directory exists
+    /// Check if a language is valid
+    ///
+    /// Known languages (english, portuguese, etc.) are always valid.
+    /// Unknown languages require a corresponding directory to exist.
     pub fn language_exists(&self, language: &str) -> bool {
-        // Languages map to directories - check common patterns
-        // e.g., "english" -> "en/", "portuguese" -> "pt/"
-        let dir_name = match language {
-            "english" => "en",
-            "portuguese" => "pt",
-            "guarani-mbya" => "gun",
-            // For other languages, use the language name as-is
-            other => other,
-        };
-        self.root.join(dir_name).is_dir()
+        // Known languages and their directory codes
+        let known_languages = [
+            ("english", "en"),
+            ("en", "en"),
+            ("portuguese", "pt"),
+            ("pt", "pt"),
+            ("guarani-mbya", "gun"),
+            ("gun", "gun"),
+            ("spanish", "es"),
+            ("es", "es"),
+            ("french", "fr"),
+            ("fr", "fr"),
+            ("german", "de"),
+            ("de", "de"),
+        ];
+
+        // Check if it's a known language
+        for (name, _code) in &known_languages {
+            if language == *name {
+                return true;
+            }
+        }
+
+        // For unknown languages, check if directory exists
+        self.root.join(language).is_dir()
     }
 
     /// Check if a scope/context directory exists
@@ -499,9 +517,13 @@ Content.
         // Create "en" and "pt" directories
         let ctx = create_context_with_dirs(&dir, &["en", "pt"]);
 
+        // Known languages are always valid (no directory required)
         assert!(ctx.language_exists("english"));
         assert!(ctx.language_exists("portuguese"));
-        assert!(!ctx.language_exists("french"));
+        assert!(ctx.language_exists("french")); // Known language, valid even without fr/
+
+        // Unknown languages require a directory to exist
+        assert!(!ctx.language_exists("klingon")); // Unknown, no directory
     }
 
     // Task 5.1.3: Scope existence tests

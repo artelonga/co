@@ -3,3 +3,7 @@
 *.swp
 *.swo
 .co/
+
+# User spaces (project namespaces) - do not commit to co home
+# These are created via `co init <name>` and should live in their own repos
+monica/

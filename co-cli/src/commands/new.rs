@@ -39,7 +39,7 @@ pub fn run(content_type: &str, name: &str, scope: Option<&str>) {
     }
 
     // Create type directory (e.g., tasks/, definitions/)
-    let type_dir = scope_path.join(format!("{}s", content_type));
+    let type_dir = scope_path.join(pluralize(content_type));
     if let Err(e) = fs::create_dir_all(&type_dir) {
         eprintln!(
             "{} Failed to create {}: {}",
@@ -81,4 +81,25 @@ status: todo
     println!("{}", "Created".bold().green());
     println!("{}", "─".repeat(30));
     println!("  {}: {}", "file".cyan(), file_path.display());
+}
+
+/// Pluralize a content type name for directory naming
+fn pluralize(word: &str) -> String {
+    // Handle special cases
+    if word.ends_with("-story") {
+        return word.replace("-story", "-stories");
+    }
+    if word.ends_with("y")
+        && !word.ends_with("ey")
+        && !word.ends_with("ay")
+        && !word.ends_with("oy")
+    {
+        // Words ending in consonant + y: change y to ies
+        return format!("{}ies", &word[..word.len() - 1]);
+    }
+    if word.ends_with("s") || word.ends_with("x") || word.ends_with("ch") || word.ends_with("sh") {
+        return format!("{}es", word);
+    }
+    // Default: just add s
+    format!("{}s", word)
 }
