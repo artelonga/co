@@ -1,0 +1,144 @@
+# Changelog
+
+All notable changes to CO are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.12.0] - 2026-01-03
+
+### Added
+- **Spaces & Multi-Repo SSH** (#37, #45)
+  - `co space list` - List all registered spaces
+  - `co space current` - Show current space details
+  - `co repo add --ssh-host` - Configure SSH identity per repo
+  - Auto-detect current space from working directory
+- **Extensible Content Types** (#35, #44)
+  - Custom content types via `schema.yaml`
+  - `co schema list` - List all available types (built-in + custom)
+  - Validation support for custom types
+- **Auto-gitignore on init**
+  - `co init <name>` automatically adds space to `.gitignore`
+  - Prevents accidental commits of user spaces to co home
+
+### Fixed
+- Language validation now accepts known languages (english, portuguese, etc.) without requiring directory
+- Content type pluralization: `user-story` → `user-stories/` (not `user-storys/`)
+- Clippy warnings resolved for CI compliance (#46)
+
+## [0.11.0] - 2026-01-03
+
+### Added
+- **Work Item Types & Content Parsing** (#33, #34)
+  - User-story sections: `## As`, `## I Need`, `## To`
+  - Task sections: `## Given`, `## When`, `## Then`
+  - Built-in types: `user-story`, `task`, `epic`, `release`
+  - Content section validation for structured formats
+  - `work/schema.yaml` for work item type definitions
+
+## [0.10.0] - 2026-01-03
+
+### Added
+- **Feature System** (#31)
+  - Automatic discovery of `agents/` and `tools/` directories
+  - Schema-based content type registration via `schema.yaml`
+  - Feature registry for extensibility
+  - `co config show` displays discovered features
+
+### Fixed
+- Version updated to 0.10.1 with UI reorganization (#32)
+
+## [0.9.0] - 2026-01-02
+
+### Added
+- **Interactive REPL** (#28)
+  - `co lead` - Interactive exploration mode
+  - Commands: `status`, `locate`, `use <scope>`, `help`, `quit`
+  - Scope-aware prompts
+  - Real-time content navigation
+
+## [0.6.0] - 2026-01-02
+
+### Added
+- **Validation System** (#27)
+  - `co validate <item>` - Validate specific content
+  - `co validate all` - Validate entire workspace
+  - Frontmatter validation (required fields, types)
+  - Internal link validation (`[[references]]`)
+  - Language and scope existence checks
+  - Severity levels: Error, Warning
+
+## [0.5.0] - 2026-01-02
+
+### Added
+- **Index & Performance** (#25)
+  - SQLite-based content indexing
+  - `co locate build` - Build/rebuild index
+  - `co locate --stats` - Show index statistics
+  - Incremental index updates (only modified files)
+  - Full-text search via FTS5
+
+### Fixed
+- Deprecated exports removed, CI workflow fixed (#26)
+
+## [0.4.0] - 2026-01-02
+
+### Added
+- **Query System** (#23)
+  - `co locate` - Unified search command
+  - Filter by type: `co locate --type task`
+  - Filter by scope: `co locate --scope private`
+  - Full-text search: `co locate "search term"`
+  - Combined filters and search
+
+### Changed
+- Unified `find` and `search` into single `co locate` command (#24)
+
+## [0.3.0] - 2026-01-02
+
+### Added
+- **Content Management** (#22)
+  - `co new <type> <name>` - Create new content
+  - `co show <item>` - Display content
+  - `co update <item> --status <status>` - Update metadata
+  - `co delete <item>` - Remove content
+  - Frontmatter parsing with YAML support
+  - Content type detection
+
+## [0.2.0] - 2026-01-02
+
+### Added
+- **Language Foundations** (#21)
+  - Multi-language support (english, portuguese, guarani-mbya)
+  - Internationalization (i18n) for CLI messages
+  - `co lang <code>` - Set UI language
+  - `co languages` - List supported languages
+  - Lexicon structure for definitions
+  - Language-specific directories (`en/`, `pt/`, `gun/`)
+
+## [0.1.0] - 2026-01-02
+
+### Added
+- Initial release
+- Graph-based content management foundation
+- `co init <name>` - Initialize context
+- `co list` - List contexts and languages
+- `co status` - Show workspace status
+- Basic CLI structure with clap
+- Workspace configuration (`.co/config.yaml`)
+
+---
+
+## Roadmap
+
+### Upcoming (v1.0)
+- [ ] #36 - GitHub as Source of Truth (sync issues/PRs)
+- [ ] #38 - Plan & Execute Workflow
+- [ ] #39 - Writer Agent System
+- [ ] #40 - Tools & Extensions
+- [ ] #41 - Analyze Command
+- [ ] #42 - Documentation Polish
+- [ ] #43 - Archive & Storage
+- [ ] #47 - Space Isolation & Commit Guards
+- [ ] #48 - Collaborative Content Creation (User + Agent)
+- [ ] #49 - Terminology Refactor (space/context/scope)
