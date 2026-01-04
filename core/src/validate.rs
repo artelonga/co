@@ -64,7 +64,7 @@ pub const KNOWN_TYPES: &[&str] = &[
     "task",
     "definition",
     "project",
-    "context",
+    "space",
     "language",
     "agent",
     "tool",
@@ -134,9 +134,15 @@ impl ValidationContext {
         self.root.join(language).is_dir()
     }
 
-    /// Check if a scope/context directory exists
+    /// Check if a space directory exists
+    pub fn space_exists(&self, space: &str) -> bool {
+        self.root.join(space).is_dir()
+    }
+
+    /// Deprecated: use space_exists instead
+    #[deprecated(since = "0.13.1", note = "Use space_exists instead")]
     pub fn scope_exists(&self, scope: &str) -> bool {
-        self.root.join(scope).is_dir()
+        self.space_exists(scope)
     }
 }
 
@@ -222,13 +228,13 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
         ));
     }
 
-    // Task 5.1.3: Check scope exists (if specified)
+    // Task 5.1.3: Check space exists (if specified)
     if let Some(ref scope) = frontmatter.scope
-        && !ctx.scope_exists(scope)
+        && !ctx.space_exists(scope)
     {
         issues.push(ValidationIssue::error(
             path,
-            format!("Unknown scope: {}", scope),
+            format!("Unknown space: {}", scope),
         ));
     }
 
@@ -549,7 +555,7 @@ Definition content here.
 
         assert_eq!(issues.len(), 1);
         assert_eq!(issues[0].severity, Severity::Error);
-        assert_eq!(issues[0].message, "Unknown scope: nonexistent");
+        assert_eq!(issues[0].message, "Unknown space: nonexistent");
     }
 
     #[test]
@@ -796,7 +802,7 @@ Conteúdo.
         assert!(ctx.type_exists("task"));
         assert!(ctx.type_exists("definition"));
         assert!(ctx.type_exists("project"));
-        assert!(ctx.type_exists("context"));
+        assert!(ctx.type_exists("space"));
         assert!(ctx.type_exists("language"));
         assert!(ctx.type_exists("agent"));
         assert!(ctx.type_exists("content"));

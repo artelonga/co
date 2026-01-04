@@ -1,39 +1,39 @@
-//! List contexts and languages
+//! List spaces and languages
 //!
 //! Discovers directories at current location and identifies their types.
 //!
 //! # Terminology
 //!
-//! "Context" is the preferred term for agentic interoperability.
-//! Supports both "context" and legacy "scope" type in frontmatter.
+//! "Space" is the canonical term for namespace directories.
+//! Supports "space" and legacy "context"/"scope" types in frontmatter.
 
 use colored::Colorize;
 use std::fs;
 use std::path::Path;
 
-/// Context type detected from README frontmatter
+/// Space type detected from README frontmatter
 #[derive(Debug)]
-pub enum ContextType {
+pub enum SpaceType {
     Language,
-    Context,
+    Space,
     Unknown,
 }
 
-impl std::fmt::Display for ContextType {
+impl std::fmt::Display for SpaceType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ContextType::Language => write!(f, "language"),
-            ContextType::Context => write!(f, "context"),
-            ContextType::Unknown => write!(f, "unknown"),
+            SpaceType::Language => write!(f, "language"),
+            SpaceType::Space => write!(f, "space"),
+            SpaceType::Unknown => write!(f, "unknown"),
         }
     }
 }
 
 /// Detect the type of a directory from its README.md frontmatter
-fn detect_type(dir_path: &Path) -> ContextType {
+fn detect_type(dir_path: &Path) -> SpaceType {
     let readme_path = dir_path.join("README.md");
     if !readme_path.exists() {
-        return ContextType::Unknown;
+        return SpaceType::Unknown;
     }
 
     if let Ok(content) = fs::read_to_string(&readme_path) {
@@ -43,21 +43,21 @@ fn detect_type(dir_path: &Path) -> ContextType {
             if trimmed.starts_with("type:") {
                 let type_value = trimmed.strip_prefix("type:").unwrap().trim();
                 return match type_value {
-                    "language" => ContextType::Language,
-                    // Support both "context" and legacy "scope"
-                    "context" | "scope" => ContextType::Context,
-                    _ => ContextType::Unknown,
+                    "language" => SpaceType::Language,
+                    // Support "space" and legacy "context"/"scope"
+                    "space" | "context" | "scope" => SpaceType::Space,
+                    _ => SpaceType::Unknown,
                 };
             }
         }
     }
 
-    ContextType::Unknown
+    SpaceType::Unknown
 }
 
 /// Run the list command
 pub fn run(stats: bool) {
-    println!("{}", "CO Contexts".bold());
+    println!("{}", "CO Spaces".bold());
     println!("{}", "─".repeat(40));
 
     let current_dir = Path::new(".");
@@ -68,7 +68,7 @@ pub fn run(stats: bool) {
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
             .filter(|e| {
-                // Skip hidden directories and common non-context directories
+                // Skip hidden directories and common non-space directories
                 let name = e.file_name().to_string_lossy().to_string();
                 !name.starts_with('.') && name != "target" && name != "node_modules"
             })
@@ -79,10 +79,10 @@ pub fn run(stats: bool) {
         for entry in items {
             let path = entry.path();
             let name = entry.file_name().to_string_lossy().to_string();
-            let context_type = detect_type(&path);
+            let space_type = detect_type(&path);
 
             // Only show directories that have a recognized type
-            if let ContextType::Unknown = context_type {
+            if let SpaceType::Unknown = space_type {
                 continue;
             }
 
@@ -94,17 +94,17 @@ pub fn run(stats: bool) {
                 println!(
                     "  {} ({}) - {} files",
                     name.cyan(),
-                    context_type.to_string().yellow(),
+                    space_type.to_string().yellow(),
                     file_count
                 );
             } else {
-                println!("  {} ({})", name.cyan(), context_type.to_string().yellow());
+                println!("  {} ({})", name.cyan(), space_type.to_string().yellow());
             }
         }
     }
 
     if !found_any {
-        println!("  {}", "No contexts or languages found".dimmed());
+        println!("  {}", "No spaces or languages found".dimmed());
     }
 }
 

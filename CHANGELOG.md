@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.1] - 2026-01-04
+
+### Changed
+- **Terminology Refactor** (#49)
+  - Standardized terminology: "Space" is the canonical term for namespace directories
+  - Deprecated "scope" from system references (backwards-compatible aliases remain)
+  - "Context" now exclusively refers to user-provided content/prompts
+  - Renamed `core/src/scope.rs` → `core/src/space.rs`
+  - Updated all CLI help text, commands, and i18n labels
+  - Updated `type: context` → `type: space` in frontmatter
+  - All tests and validation messages updated
+
 ## [0.13.0] - 2026-01-03
 
 ### Added
@@ -167,5 +179,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - [ ] #42 - Documentation Polish
 - [ ] #43 - Archive & Storage
 - [ ] #47 - Space Isolation & Commit Guards
-- [ ] #48 - Collaborative Content Creation (User + Agent)
-- [ ] #49 - Terminology Refactor (space/context/scope)
+- [x] #48 - Collaborative Content Creation (User + Agent)
+- [x] #49 - Terminology Refactor (space/context/scope)

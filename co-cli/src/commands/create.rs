@@ -12,20 +12,20 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 
 /// Run the create command
-pub fn run(content_type: &str, name: &str, scope: Option<&str>, story: Option<&str>) {
+pub fn run(content_type: &str, name: &str, space: Option<&str>, story: Option<&str>) {
     let i18n = load_i18n();
 
-    // Determine target scope
-    let scope_name = scope.unwrap_or("en");
-    let scope_path = Path::new(scope_name);
+    // Determine target space
+    let space_name = space.unwrap_or("en");
+    let space_path = Path::new(space_name);
 
-    // Verify scope exists
-    if !scope_path.exists() {
+    // Verify space exists
+    if !space_path.exists() {
         eprintln!(
             "{} {} '{}' does not exist",
             "error:".red().bold(),
-            i18n.type_label("context"),
-            scope_name
+            i18n.type_label("space"),
+            space_name
         );
         std::process::exit(1);
     }
@@ -46,8 +46,8 @@ pub fn run(content_type: &str, name: &str, scope: Option<&str>, story: Option<&s
 
     // Create content based on role and type
     let content = match role.as_str() {
-        "agent" => create_skeleton(content_type, name, scope_name, story),
-        "user" => create_with_prompts(content_type, name, scope_name, story),
+        "agent" => create_skeleton(content_type, name, space_name, story),
+        "user" => create_with_prompts(content_type, name, space_name, story),
         _ => {
             eprintln!(
                 "{} Invalid role: '{}'. Use 'user' or 'agent'.",
@@ -59,7 +59,7 @@ pub fn run(content_type: &str, name: &str, scope: Option<&str>, story: Option<&s
     };
 
     // Create type directory
-    let type_dir = scope_path.join(pluralize(content_type));
+    let type_dir = space_path.join(pluralize(content_type));
     if let Err(e) = fs::create_dir_all(&type_dir) {
         eprintln!(
             "{} Failed to create {}: {}",
@@ -114,7 +114,7 @@ fn prompt_role() -> String {
 }
 
 /// Create skeleton content for agent role
-fn create_skeleton(content_type: &str, name: &str, scope: &str, story: Option<&str>) -> String {
+fn create_skeleton(content_type: &str, name: &str, space: &str, story: Option<&str>) -> String {
     let story_line = story
         .map(|s| format!("story: [[{}]]\n", s))
         .unwrap_or_default();
@@ -124,7 +124,7 @@ fn create_skeleton(content_type: &str, name: &str, scope: &str, story: Option<&s
             r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: user-story
 id: {}
 status: todo
@@ -144,13 +144,13 @@ status: todo
 ## To
 
 "#,
-            scope, name, story_line, name
+            space, name, story_line, name
         ),
         "task" => format!(
             r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: task
 id: {}
 status: todo
@@ -170,13 +170,13 @@ status: todo
 ## Then
 
 "#,
-            scope, name, story_line, name
+            space, name, story_line, name
         ),
         _ => format!(
             r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: {}
 id: {}
 status: todo
@@ -187,13 +187,13 @@ status: todo
 ## Prompt
 
 "#,
-            scope, content_type, name, story_line, name
+            space, content_type, name, story_line, name
         ),
     }
 }
 
 /// Create content with interactive prompts for user role
-fn create_with_prompts(content_type: &str, name: &str, scope: &str, story: Option<&str>) -> String {
+fn create_with_prompts(content_type: &str, name: &str, space: &str, story: Option<&str>) -> String {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
 
@@ -240,7 +240,7 @@ fn create_with_prompts(content_type: &str, name: &str, scope: &str, story: Optio
                 r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: user-story
 id: {}
 status: todo
@@ -260,7 +260,7 @@ status: todo
 ## To
 {}
 "#,
-                scope, name, story_line, name, context, as_a, i_need, so_that
+                space, name, story_line, name, context, as_a, i_need, so_that
             )
         }
         "task" => {
@@ -281,7 +281,7 @@ status: todo
                 r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: task
 id: {}
 status: todo
@@ -301,7 +301,7 @@ status: todo
 ## Then
 {}
 "#,
-                scope, name, story_line, name, context, given, when, then
+                space, name, story_line, name, context, given, when, then
             )
         }
         _ => {
@@ -310,7 +310,7 @@ status: todo
                 r#"---
 schema_version: 2
 language: en
-scope: {}
+space: {}
 type: {}
 id: {}
 status: todo
@@ -321,7 +321,7 @@ status: todo
 ## Prompt
 {}
 "#,
-                scope, content_type, name, story_line, name, context
+                space, content_type, name, story_line, name, context
             )
         }
     }

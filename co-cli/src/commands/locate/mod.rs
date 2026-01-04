@@ -20,7 +20,7 @@
 //!   co locate status:todo           # Filter by frontmatter
 //!   co locate "important meeting"   # Full-text search
 //!   co locate status:todo meeting   # Combined filter + search
-//!   co locate private status:todo   # Context + filter
+//!   co locate private status:todo   # Space + filter
 //!   co locate --in @work status:todo  # Federated query across work group
 //!   co locate build                 # Build search index
 
@@ -35,10 +35,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-/// Content item with context information
+/// Content item with space information
 struct ContentItem {
     repo_alias: Option<String>,
-    context: String,
+    space: String,
     id: String,
 }
 
@@ -50,37 +50,37 @@ struct FilterableFrontmatter {
 }
 
 /// Run the unified locate command
-pub fn run(query: &[String], context_filter: Option<&str>) {
+pub fn run(query: &[String], space_filter: Option<&str>) {
     // Check if this is a federated query (@group, #tag, or registered repo alias)
-    if let Some(filter) = context_filter
+    if let Some(filter) = space_filter
         && (filter.starts_with('@') || filter.starts_with('#') || is_registered_repo(filter))
     {
         run_federated(query, filter);
         return;
     }
 
-    // Check if first argument is a positional context
-    // It's a context if: no colon, no spaces, and there are subsequent filter args (with colons)
+    // Check if first argument is a positional space
+    // It's a space if: no colon, no spaces, and there are subsequent filter args (with colons)
     // This distinguishes `co locate private status:todo` from `co locate "search term"`
     let has_subsequent_filters = query.len() > 1 && query[1..].iter().any(|a| a.contains(':'));
 
-    let (positional_context, query_args): (Option<&str>, &[String]) = if !query.is_empty()
+    let (positional_space, query_args): (Option<&str>, &[String]) = if !query.is_empty()
         && !query[0].contains(':')
         && !query[0].contains(' ')
         && has_subsequent_filters
     {
-        // First arg looks like a context name (followed by filters)
-        if !is_context_dir(&query[0]) {
-            eprintln!("{} Context '{}' not found", "error:".red().bold(), query[0]);
+        // First arg looks like a space name (followed by filters)
+        if !is_space_dir(&query[0]) {
+            eprintln!("{} Space '{}' not found", "error:".red().bold(), query[0]);
             std::process::exit(1);
         }
         (Some(&query[0]), &query[1..])
     } else if !query.is_empty()
         && !query[0].contains(':')
         && !query[0].contains(' ')
-        && is_context_dir(&query[0])
+        && is_space_dir(&query[0])
     {
-        // First arg is an existing context (even without subsequent filters)
+        // First arg is an existing space (even without subsequent filters)
         (Some(&query[0]), &query[1..])
     } else {
         (None, query)
@@ -100,27 +100,23 @@ pub fn run(query: &[String], context_filter: Option<&str>) {
         }
     }
 
-    // Combine --in flag with positional context (--in takes precedence)
-    let effective_context = context_filter.or(positional_context);
+    // Combine --in flag with positional space (--in takes precedence)
+    let effective_space = space_filter.or(positional_space);
 
-    // Parse context filter (comma-separated)
-    let contexts: Option<Vec<&str>> = effective_context.map(|s| s.split(',').collect());
+    // Parse space filter (comma-separated)
+    let spaces: Option<Vec<&str>> = effective_space.map(|s| s.split(',').collect());
 
     // Collect all matching content
-    let results = find_content(&field_filters, &search_terms, contexts.as_deref());
+    let results = find_content(&field_filters, &search_terms, spaces.as_deref());
 
     if results.is_empty() {
         println!("{}", "No results found".yellow());
         return;
     }
 
-    // Display results with context prefix
+    // Display results with space prefix
     for item in results {
-        println!(
-            "{} {}",
-            format!("[{}]", item.context).cyan(),
-            item.id.white()
-        );
+        println!("{} {}", format!("[{}]", item.space).cyan(), item.id.white());
     }
 }
 
@@ -200,9 +196,9 @@ fn run_federated(query: &[String], filter: &str) {
     // Display results with repo prefix
     for item in all_results {
         let prefix = if let Some(ref alias) = item.repo_alias {
-            format!("[{}:{}]", alias, item.context)
+            format!("[{}:{}]", alias, item.space)
         } else {
-            format!("[{}]", item.context)
+            format!("[{}]", item.space)
         };
         println!("{} {}", prefix.cyan(), item.id.white());
     }
@@ -217,15 +213,15 @@ fn find_content_in_repo(
 ) -> Vec<ContentItem> {
     let mut results = Vec::new();
 
-    // Iterate through all directories (potential contexts)
+    // Iterate through all directories (potential spaces)
     if let Ok(entries) = fs::read_dir(repo_root) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() && !is_hidden(&path) {
-                let context_name = path.file_name().unwrap().to_string_lossy().to_string();
+                let space_name = path.file_name().unwrap().to_string_lossy().to_string();
 
                 // Skip common non-content directories
-                if context_name == "target" || context_name == "node_modules" {
+                if space_name == "target" || space_name == "node_modules" {
                     continue;
                 }
 
@@ -237,7 +233,7 @@ fn find_content_in_repo(
                             search_directory_federated(
                                 &type_path,
                                 repo_alias,
-                                &context_name,
+                                &space_name,
                                 filters,
                                 search_terms,
                                 &mut results,
@@ -246,11 +242,11 @@ fn find_content_in_repo(
                     }
                 }
 
-                // Also search directly in the context root
+                // Also search directly in the space root
                 search_directory_federated(
                     &path,
                     repo_alias,
-                    &context_name,
+                    &space_name,
                     filters,
                     search_terms,
                     &mut results,
@@ -266,7 +262,7 @@ fn find_content_in_repo(
 fn search_directory_federated(
     dir: &Path,
     repo_alias: &str,
-    context: &str,
+    space: &str,
     filters: &[(String, String)],
     search_terms: &[String],
     results: &mut Vec<ContentItem>,
@@ -276,7 +272,7 @@ fn search_directory_federated(
             let path = entry.path();
             if path.is_file()
                 && path.extension().is_some_and(|e| e == "md")
-                && let Some(mut item) = check_file(&path, context, filters, search_terms)
+                && let Some(mut item) = check_file(&path, space, filters, search_terms)
             {
                 item.repo_alias = Some(repo_alias.to_string());
                 results.push(item);
@@ -289,21 +285,21 @@ fn search_directory_federated(
 fn find_content(
     filters: &[(String, String)],
     search_terms: &[String],
-    contexts: Option<&[&str]>,
+    spaces: Option<&[&str]>,
 ) -> Vec<ContentItem> {
     let mut results = Vec::new();
     let current_dir = Path::new(".");
 
-    // Iterate through all directories (potential contexts)
+    // Iterate through all directories (potential spaces)
     if let Ok(entries) = fs::read_dir(current_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() && !is_hidden(&path) {
-                let context_name = path.file_name().unwrap().to_string_lossy().to_string();
+                let space_name = path.file_name().unwrap().to_string_lossy().to_string();
 
-                // Skip if context filter is set and this context is not in the list
-                if let Some(allowed_contexts) = contexts
-                    && !allowed_contexts.contains(&context_name.as_str())
+                // Skip if space filter is set and this space is not in the list
+                if let Some(allowed_spaces) = spaces
+                    && !allowed_spaces.contains(&space_name.as_str())
                 {
                     continue;
                 }
@@ -315,7 +311,7 @@ fn find_content(
                         if type_path.is_dir() {
                             search_directory(
                                 &type_path,
-                                &context_name,
+                                &space_name,
                                 filters,
                                 search_terms,
                                 &mut results,
@@ -324,8 +320,8 @@ fn find_content(
                     }
                 }
 
-                // Also search directly in the context root
-                search_directory(&path, &context_name, filters, search_terms, &mut results);
+                // Also search directly in the space root
+                search_directory(&path, &space_name, filters, search_terms, &mut results);
             }
         }
     }
@@ -336,7 +332,7 @@ fn find_content(
 /// Search a directory for matching content files
 fn search_directory(
     dir: &Path,
-    context: &str,
+    space: &str,
     filters: &[(String, String)],
     search_terms: &[String],
     results: &mut Vec<ContentItem>,
@@ -346,7 +342,7 @@ fn search_directory(
             let path = entry.path();
             if path.is_file()
                 && path.extension().is_some_and(|e| e == "md")
-                && let Some(item) = check_file(&path, context, filters, search_terms)
+                && let Some(item) = check_file(&path, space, filters, search_terms)
             {
                 results.push(item);
             }
@@ -357,7 +353,7 @@ fn search_directory(
 /// Check if a file matches the filters and search terms
 fn check_file(
     path: &Path,
-    context: &str,
+    space: &str,
     filters: &[(String, String)],
     search_terms: &[String],
 ) -> Option<ContentItem> {
@@ -413,7 +409,7 @@ fn check_file(
 
     Some(ContentItem {
         repo_alias: None,
-        context: context.to_string(),
+        space: space.to_string(),
         id,
     })
 }
@@ -425,8 +421,8 @@ fn is_hidden(path: &Path) -> bool {
         .is_some_and(|n| n.starts_with('.'))
 }
 
-/// Check if a name corresponds to an existing context directory
-fn is_context_dir(name: &str) -> bool {
+/// Check if a name corresponds to an existing space directory
+fn is_space_dir(name: &str) -> bool {
     let path = Path::new(name);
     path.is_dir() && !is_hidden(path)
 }

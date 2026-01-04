@@ -1,6 +1,6 @@
-//! Initialize a new context (project space)
+//! Initialize a new space
 //!
-//! Creates a context directory at the repository root.
+//! Creates a space directory at the repository root.
 //! All .md files within become lexicon entries, traversed recursively.
 //!
 //! Spaces are automatically added to .gitignore to prevent accidental
@@ -15,26 +15,26 @@ use std::path::Path;
 /// Run the init command
 pub fn run(name: &str) {
     let i18n = load_i18n();
-    let context_path = Path::new(name);
+    let space_path = Path::new(name);
 
-    // Check if context already exists
-    if context_path.exists() {
+    // Check if space already exists
+    if space_path.exists() {
         eprintln!(
             "{} {} '{}' {}",
             "error:".red().bold(),
-            i18n.type_label("context"),
+            i18n.type_label("space"),
             name,
             i18n.message("already_exists")
         );
         std::process::exit(1);
     }
 
-    // Create context directory
-    if let Err(e) = fs::create_dir_all(context_path) {
+    // Create space directory
+    if let Err(e) = fs::create_dir_all(space_path) {
         eprintln!(
             "{} Failed to create {}: {}",
             "error:".red().bold(),
-            context_path.display(),
+            space_path.display(),
             e
         );
         std::process::exit(1);
@@ -43,19 +43,19 @@ pub fn run(name: &str) {
     // Create README.md with frontmatter
     let readme_content = format!(
         r#"---
-type: context
+type: space
 id: {}
 language: english
 ---
 
 # {}
 
-A CO context for content management.
+A CO space for content management.
 "#,
         name, name
     );
 
-    let readme_path = context_path.join("README.md");
+    let readme_path = space_path.join("README.md");
     if let Err(e) = fs::write(&readme_path, readme_content) {
         eprintln!(
             "{} Failed to create README.md: {}",
@@ -85,7 +85,7 @@ A CO context for content management.
         }
     }
 
-    println!("{}", i18n.message("context_initialized").bold().green());
+    println!("{}", i18n.message("space_initialized").bold().green());
     println!("{}", "─".repeat(30));
     println!("Created: {}/", name.cyan());
     println!("  └── README.md");

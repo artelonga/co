@@ -1,7 +1,7 @@
 //! CO CLI - Exegetic graph database interface
 //!
 //! Commands:
-//! - `co init` - Initialize a scope
+//! - `co init` - Initialize a space
 //! - `co status` - Show graph status
 //! - `co query` - Query the graph
 //! - `co define` - Create definitions
@@ -27,15 +27,15 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Initialize a new scope
+    /// Initialize a new space
     Init {
-        /// Scope name (e.g., "private", "org")
+        /// Space name (e.g., "private", "work")
         name: String,
     },
 
-    /// List scopes and languages
+    /// List spaces and languages
     List {
-        /// Show file counts per scope
+        /// Show file counts per space
         #[arg(short, long)]
         stats: bool,
     },
@@ -48,8 +48,8 @@ enum Commands {
         /// Content name/id
         name: String,
 
-        /// Target scope (context directory)
-        #[arg(short, long, value_name = "SCOPE")]
+        /// Target space (directory)
+        #[arg(short, long, value_name = "SPACE")]
         r#in: Option<String>,
     },
 
@@ -68,8 +68,8 @@ enum Commands {
         /// Content name/id
         name: String,
 
-        /// Target scope (context directory)
-        #[arg(short, long, value_name = "SCOPE")]
+        /// Target space (directory)
+        #[arg(short, long, value_name = "SPACE")]
         r#in: Option<String>,
 
         /// Parent story ID (for tasks)
@@ -171,14 +171,14 @@ enum Commands {
         name: String,
     },
 
-    /// Interactive exploration mode with scope context
+    /// Interactive exploration mode with space context
     ///
-    /// Enter an interactive shell with command history and scope switching.
+    /// Enter an interactive shell with command history and space switching.
     ///
     /// Examples:
     ///   co lead              # Start interactive mode
-    ///   use private          # Switch to private scope
-    ///   locate status:todo   # Run commands in current scope
+    ///   use private          # Switch to private space
+    ///   locate status:todo   # Run commands in current space
     Lead,
 
     /// Show or edit configuration
@@ -195,7 +195,7 @@ enum Commands {
     ///   co locate status:todo           # Filter by frontmatter
     ///   co locate "important meeting"   # Full-text search
     ///   co locate status:todo meeting   # Combined filter + search
-    ///   co locate private status:todo   # Context + filter
+    ///   co locate private status:todo   # Space + filter
     ///   co locate build                 # Build search index
     ///   co locate update                # Update index incrementally
     ///   co locate stats                 # Show index statistics
@@ -204,8 +204,8 @@ enum Commands {
         #[arg(required = true)]
         query: Vec<String>,
 
-        /// Context(s) to search in (comma-separated)
-        #[arg(short, long, value_name = "CONTEXT")]
+        /// Space(s) to search in (comma-separated)
+        #[arg(short, long, value_name = "SPACE")]
         r#in: Option<String>,
     },
 
@@ -285,7 +285,7 @@ enum Commands {
         action: RepoSubcommand,
     },
 
-    /// Manage spaces (contexts) for multi-repo workflows
+    /// Manage spaces for multi-repo workflows
     ///
     /// A space can be a registered git repo, a private folder,
     /// or any directory with `.co/` configuration.

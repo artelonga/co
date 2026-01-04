@@ -11,9 +11,9 @@ pub fn co_command() -> Command {
 // Test modules
 pub mod basic;
 pub mod content;
-pub mod context;
 pub mod create;
 pub mod i18n;
+pub mod init;
 pub mod lead;
 pub mod locate;
 pub mod schema;

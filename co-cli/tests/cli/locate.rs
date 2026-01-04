@@ -113,7 +113,7 @@ fn test_locate_nonexistent_context_errors() {
         .args(["locate", "nonexistent", "status:todo"])
         .assert()
         .failure()
-        .stderr(predicate::str::contains("Context 'nonexistent' not found"));
+        .stderr(predicate::str::contains("Space 'nonexistent' not found"));
 }
 
 #[test]
@@ -278,7 +278,7 @@ fn test_locate_build_creates_index() {
 }
 
 #[test]
-fn test_locate_build_indexes_all_scopes() {
+fn test_locate_build_indexes_all_spaces() {
     let tmp = tempdir().unwrap();
 
     let en_path = tmp.path().join("en");

@@ -48,7 +48,7 @@ pub mod language;
 pub mod node;
 pub mod query;
 pub mod schema;
-pub mod scope;
+pub mod space;
 pub mod storage;
 pub mod types;
 pub mod validate;
@@ -63,7 +63,10 @@ pub use language::{I18n, Language, UiLabels};
 pub use node::{Node, NodeId};
 pub use query::Query;
 pub use schema::{Definition, Domain, Project, Task};
-pub use scope::{Context, ContextKind};
+pub use space::{Space, SpaceKind};
+// Deprecated aliases for backwards compatibility
+#[allow(deprecated)]
+pub use space::{Context, ContextKind, Scope, ScopeKind};
 pub use storage::ContentStore;
 pub use types::{
     Direction, ExegesisType, LanguageSpec, Lexicon, LexiconEntry, SemanticVersion, TypeKind,

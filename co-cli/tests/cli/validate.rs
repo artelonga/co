@@ -98,7 +98,7 @@ fn test_validate_unknown_scope_error() {
         .args(["validate", "all"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Unknown scope: nonexistent"));
+        .stdout(predicate::str::contains("Unknown space: nonexistent"));
 }
 
 #[test]

@@ -9,7 +9,7 @@ use tempfile::tempdir;
 // ============================================================================
 
 #[test]
-fn test_new_creates_file_in_scope() {
+fn test_new_creates_file_in_space() {
     let tmp = tempdir().unwrap();
 
     co_command()
@@ -49,13 +49,13 @@ fn test_new_auto_populates_frontmatter() {
 
     assert!(content.contains("schema_version: 2"));
     assert!(content.contains("language: en"));
-    assert!(content.contains("scope: private"));
+    assert!(content.contains("space: private"));
     assert!(content.contains("type: task"));
     assert!(content.contains("status: todo"));
 }
 
 #[test]
-fn test_new_defaults_to_en_scope() {
+fn test_new_defaults_to_en_space() {
     let tmp = tempdir().unwrap();
 
     let en_path = tmp.path().join("en");
@@ -76,7 +76,7 @@ fn test_new_defaults_to_en_scope() {
     assert!(task_path.exists());
 
     let content = std::fs::read_to_string(&task_path).unwrap();
-    assert!(content.contains("scope: en"));
+    assert!(content.contains("space: en"));
 }
 
 // ============================================================================

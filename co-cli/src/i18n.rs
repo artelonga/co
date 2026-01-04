@@ -22,7 +22,7 @@ pub fn load_i18n() -> I18n {
 /// Check if loaded I18n has actual translations
 fn has_translations(i18n: &I18n) -> bool {
     // If we can get a translated message, we have translations
-    i18n.message("context_initialized") != "context_initialized"
+    i18n.message("space_initialized") != "space_initialized"
 }
 
 /// Get embedded default labels for a language
@@ -32,11 +32,11 @@ fn embedded_labels(lang: &str) -> UiLabels {
     // Add default English labels
     labels.types = HashMap::from([
         (
-            "context".to_string(),
+            "space".to_string(),
             if lang == "pt" {
-                "contexto".to_string()
+                "espaço".to_string()
             } else {
-                "context".to_string()
+                "space".to_string()
             },
         ),
         (
@@ -51,11 +51,11 @@ fn embedded_labels(lang: &str) -> UiLabels {
 
     labels.messages = HashMap::from([
         (
-            "context_initialized".to_string(),
+            "space_initialized".to_string(),
             if lang == "pt" {
-                "Contexto Inicializado".to_string()
+                "Espaço Inicializado".to_string()
             } else {
-                "Context Initialized".to_string()
+                "Space Initialized".to_string()
             },
         ),
         (
