@@ -6,7 +6,7 @@ use tempfile::tempdir;
 
 #[test]
 fn test_english_ui_file_parseable() {
-    let content = include_str!("../../../ui/en.yaml");
+    let content = include_str!("../../../i18n/en.yaml");
     let labels: co::UiLabels = serde_yaml::from_str(content).expect("Should parse en.yaml");
     assert_eq!(labels.lang, "en");
     assert!(labels.types.contains_key("definition"));
@@ -16,7 +16,7 @@ fn test_english_ui_file_parseable() {
 
 #[test]
 fn test_portuguese_ui_file_parseable() {
-    let content = include_str!("../../../ui/pt.yaml");
+    let content = include_str!("../../../i18n/pt.yaml");
     let labels: co::UiLabels = serde_yaml::from_str(content).expect("Should parse pt.yaml");
     assert_eq!(labels.lang, "pt");
     assert_eq!(labels.type_label("definition"), "definição");

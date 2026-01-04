@@ -248,12 +248,12 @@ impl I18n {
         Self { current, fallback }
     }
 
-    /// Create I18n from language code, loading from ui/{lang}.yaml
+    /// Create I18n from language code, loading from i18n/{lang}.yaml
     pub fn load(lang: &str, base_path: impl AsRef<Path>) -> Result<Self, String> {
         let base = base_path.as_ref();
 
         // Load fallback (English)
-        let fallback_path = base.join("ui/en.yaml");
+        let fallback_path = base.join("i18n/en.yaml");
         let fallback = if fallback_path.exists() {
             UiLabels::from_file(&fallback_path)?
         } else {
@@ -261,7 +261,7 @@ impl I18n {
         };
 
         // Load current language
-        let current_path = base.join(format!("ui/{}.yaml", lang));
+        let current_path = base.join(format!("i18n/{}.yaml", lang));
         let current = if lang == "en" {
             fallback.clone()
         } else if current_path.exists() {

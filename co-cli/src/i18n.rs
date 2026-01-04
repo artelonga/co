@@ -95,7 +95,7 @@ fn get_system_language() -> String {
 /// Load UI labels for a specific language
 #[allow(dead_code)]
 pub fn load_labels(lang: &str) -> UiLabels {
-    let path = format!("ui/{}.yaml", lang);
+    let path = format!("i18n/{}.yaml", lang);
     if Path::new(&path).exists() {
         UiLabels::from_file(&path).unwrap_or_else(|_| embedded_labels(lang))
     } else {
