@@ -1,7 +1,7 @@
 //! Space discovery and management
 //!
 //! Spaces are directories that form a hierarchical namespace for content.
-//! They can be nested (e.g., `monica/`, `monica/en/`, `work/private/`).
+//! They can be nested (e.g., `private/`, `work/`, `work/private/`).
 //!
 //! # Terminology
 //!

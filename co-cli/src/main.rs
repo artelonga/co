@@ -11,6 +11,7 @@
 use clap::{Parser, Subcommand};
 
 mod commands;
+mod docs;
 mod i18n;
 
 #[derive(Parser)]
@@ -18,7 +19,8 @@ mod i18n;
 #[command(
     author,
     version,
-    about = "Exegetic graph database for project development"
+    about = "Exegetic graph database for project development",
+    disable_help_subcommand = true
 )]
 struct Cli {
     #[command(subcommand)]
@@ -407,6 +409,23 @@ enum Commands {
         /// Show verbose analysis details
         #[arg(short, long)]
         verbose: bool,
+    },
+
+    /// Get help on concepts, workflows, and commands
+    ///
+    /// Shows topic-based documentation for CO concepts.
+    /// Use `co --help` for command syntax reference.
+    ///
+    /// Examples:
+    ///   co help                    # List all help topics
+    ///   co help getting-started    # Quick start guide
+    ///   co help spaces             # Understanding spaces
+    ///   co help workflows          # Plan & Execute workflow
+    ///   co help work-items         # User-stories, tasks, etc.
+    #[command(visible_alias = "h")]
+    Help {
+        /// Topic name (optional)
+        topic: Option<String>,
     },
 }
 
@@ -894,5 +913,6 @@ fn main() {
             name.as_deref(),
         ),
         Commands::Analyze { name, verbose } => commands::analyze::run(&name, verbose),
+        Commands::Help { topic } => commands::help::run(topic.as_deref()),
     }
 }

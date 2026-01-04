@@ -70,13 +70,7 @@ git push origin --delete <branch-name>
 
 **Version bump happens IN the issue PR.** One issue = one PR = one version bump.
 
-| Label | Version Bump | Example |
-|-------|--------------|---------|
-| `type:feat` | Minor (x.**Y**.0) | 0.12.0 → 0.13.0 |
-| `type:fix` | Patch (x.y.**Z**) | 0.12.0 → 0.12.1 |
-| `type:docs` | Patch (x.y.**Z**) | 0.12.0 → 0.12.1 |
-| `type:refactor` | Patch (x.y.**Z**) | 0.12.0 → 0.12.1 |
-| `type:chore` | No bump | - |
+See **Issue Labels & Git Mapping** below for version bump rules per label type.
 
 ### Version Bump (in same PR)
 
@@ -225,20 +219,74 @@ co config show           # Show configuration
 
 | Term | Definition |
 |------|------------|
-| **Space** | Project namespace directory (`monica/`, `work/`) |
-| **Scope** | Subdirectory within a space (`private/`, `shared/`) |
+| **Space** | Project namespace directory (`private/`, `work/`, `public/`) |
 | **Context** | User-provided content/prompts |
+
+## Work Item Types
+
+CO uses structured work items for development tracking:
+
+| Type | Purpose | Format |
+|------|---------|--------|
+| **user-story** | Detailed request (feature or fix) | `AS A <role>, I NEED <feature>, SO THAT <benefit>` |
+| **task** | Sub-item within a user-story | `GIVEN <context>, WHEN <action>, THEN <result>` |
+| **epic** | Large feature grouping | Collection of related user-stories |
+| **release** | Version milestone | Groups completed work items |
+
+### Hierarchy
+
+```
+epic
+└── user-story (type:feat or type:fix)
+    ├── task (commit 1)
+    ├── task (commit 2)
+    └── task (commit 3)
+```
+
+A **user-story** becomes a GitHub issue with either `type:feat` or `type:fix` label.
+**Tasks** are implemented as commits within the user-story's PR.
+
+## Issue Labels & Git Mapping
+
+Labels drive branch naming, commit prefixes, and version bumps:
+
+| Label | Branch Prefix | Commit Prefix | Version Bump |
+|-------|---------------|---------------|--------------|
+| `type:feat` | `feat/issue-<n>-...` | `feat:` | Minor (x.**Y**.0) |
+| `type:fix` | `fix/issue-<n>-...` | `fix:` | Patch (x.y.**Z**) |
+| `type:docs` | `docs/issue-<n>-...` | `docs:` | Patch (x.y.**Z**) |
+| `type:refactor` | `refactor/issue-<n>-...` | `refactor:` | Patch (x.y.**Z**) |
+| `type:chore` | `chore/issue-<n>-...` | `chore:` | No bump |
+
+### Module Labels
+
+Combine with type labels to categorize by subsystem:
+
+| Label | Subsystem |
+|-------|-----------|
+| `module:content` | Content types and parsing |
+| `module:tools` | Tools and extensions |
+| `module:writer` | Writer agent system |
+| `module:collab` | GitHub/collaboration |
+| `module:space` | Spaces and namespaces |
+
+### Work Item → Git Flow
+
+| Work Item | Git Artifact | Notes |
+|-----------|--------------|-------|
+| user-story | Issue → Branch → PR | Label determines type (feat/fix) |
+| task | Commits within PR | One or more per user-story |
+| epic | GitHub Milestone | Groups user-stories |
+| release | Git tag | Semantic version (vX.Y.Z) |
 
 ## Open Issues (v1.0 Roadmap)
 
 Check current status: `gh issue list --state open --label "milestone:v1.0"`
 
-Priority order for v1.0:
-1. #48 - Collaborative Content Creation (User + Agent)
-2. #36 - GitHub as Source of Truth
-3. #47 - Space Isolation & Commit Guards
-4. #49 - Terminology Refactor
-5. #38-43 - Additional features
+Remaining v1.0 work:
+- #42 - Documentation Polish (current)
+- #53 - Versioning Policy (implemented, close when satisfied)
+- #70 - Forbidden character validation (new)
 
 ## Getting Help
 

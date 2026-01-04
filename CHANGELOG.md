@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-01-04
+
+### Added
+- **Documentation System** (#42)
+  - `co help` - Topic-based embedded documentation
+  - `co help getting-started` - Quick start guide
+  - `co help spaces` - Understanding spaces
+  - `co help workflows` - Plan & Execute, Write workflows
+  - `co help work-items` - User-stories, tasks, epics
+  - Alias: `co h` for quick access
+  - Added `clap_mangen` for future man page generation
+
+### Changed
+- Updated CLAUDE.md with work item types and git label mapping
+- Clarified work item hierarchy (epic → user-story → task)
+- Removed deprecated "scope" terminology from documentation
+
+### Fixed
+- Removed personal name references, using PRIVATE/PUBLIC/USER namespaces
+
 ## [0.20.0] - 2026-01-04
 
 ### Added

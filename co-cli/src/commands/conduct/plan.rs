@@ -485,10 +485,10 @@ mod tests {
 
     #[test]
     fn test_generate_id_handles_special_chars() {
-        let id = generate_id("Monica's UC Boulder Application!");
+        let id = generate_id("User's Application Online!");
         assert!(!id.contains('\''));
         assert!(!id.contains('!'));
-        assert!(id.contains("monica"));
+        assert!(id.contains("user"));
     }
 
     #[test]

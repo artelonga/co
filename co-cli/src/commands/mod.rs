@@ -10,6 +10,7 @@ pub mod create;
 pub mod define;
 pub mod delete;
 pub mod gh;
+pub mod help;
 pub mod index;
 pub mod init;
 pub mod lang;
