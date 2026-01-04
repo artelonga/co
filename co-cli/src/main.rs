@@ -617,6 +617,12 @@ enum RepoSubcommand {
         #[arg(required = true)]
         tags: Vec<String>,
     },
+
+    /// Switch active workspace context
+    Switch {
+        /// Repository alias to switch to, or "none" to clear
+        alias: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -838,6 +844,7 @@ fn main() {
                 }
                 RepoSubcommand::Tag { tags } => commands::repo::RepoAction::Tag { tags },
                 RepoSubcommand::Untag { tags } => commands::repo::RepoAction::Untag { tags },
+                RepoSubcommand::Switch { alias } => commands::repo::RepoAction::Switch { alias },
             };
             commands::repo::run(repo_action)
         }

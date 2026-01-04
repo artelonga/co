@@ -22,6 +22,8 @@ pub enum RepoAction {
     Tag { tags: Vec<String> },
     /// Remove tags from current repository
     Untag { tags: Vec<String> },
+    /// Switch active workspace context
+    Switch { alias: String },
 }
 
 /// Run repo command
@@ -36,6 +38,7 @@ pub fn run(action: RepoAction) {
         RepoAction::Remove { identifier } => remove_repo(&identifier),
         RepoAction::Tag { tags } => add_tags(tags),
         RepoAction::Untag { tags } => remove_tags(tags),
+        RepoAction::Switch { alias } => switch_repo(&alias),
     }
 }
 
@@ -226,5 +229,44 @@ fn remove_tags(tags: Vec<String>) {
         "{} Removed tags: {}",
         "success:".green().bold(),
         tags.join(", ").cyan()
+    );
+}
+
+/// Switch active workspace context
+fn switch_repo(alias: &str) {
+    let mut config = GlobalConfig::load();
+
+    // Handle clearing active repo
+    if alias == "none" || alias == "-" {
+        config.clear_active_repo();
+        if let Err(e) = config.save() {
+            eprintln!("{} Failed to save config: {}", "error:".red().bold(), e);
+            std::process::exit(1);
+        }
+        println!("{} Cleared active workspace", "success:".green().bold());
+        return;
+    }
+
+    // Try to set the active repo
+    if !config.set_active_repo(alias) {
+        eprintln!(
+            "{} Repository '{}' not found. Use 'co repo list' to see registered repos.",
+            "error:".red().bold(),
+            alias
+        );
+        std::process::exit(1);
+    }
+
+    if let Err(e) = config.save() {
+        eprintln!("{} Failed to save config: {}", "error:".red().bold(), e);
+        std::process::exit(1);
+    }
+
+    let repo = config.get_by_alias(alias).unwrap();
+    println!(
+        "{} Switched to '{}' ({})",
+        "success:".green().bold(),
+        alias.cyan(),
+        repo.path.display()
     );
 }

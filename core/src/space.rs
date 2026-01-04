@@ -24,6 +24,8 @@ pub enum SpaceLocation {
         space_name: String,
         /// Parent repository root (if detected)
         repo_root: Option<PathBuf>,
+        /// Whether the repo root is a git submodule
+        is_submodule: bool,
     },
     /// At the repository root (co home), not inside a space
     AtRepoRoot {
@@ -57,6 +59,11 @@ impl SpaceLocation {
                 repo_root = Some(dir.to_path_buf());
             }
 
+            // Check for .co/ (CO workspace root marker)
+            if dir.join(".co").is_dir() && repo_root.is_none() {
+                repo_root = Some(dir.to_path_buf());
+            }
+
             // Check for space marker (README.md with type: space)
             if space_found.is_none()
                 && let Some(name) = Self::is_space_dir(dir)
@@ -68,14 +75,29 @@ impl SpaceLocation {
         }
 
         match (space_found, repo_root) {
-            (Some((space_path, space_name)), repo_root) => SpaceLocation::InSpace {
-                space_path,
-                space_name,
-                repo_root,
-            },
+            (Some((space_path, space_name)), repo_root) => {
+                let is_submodule = repo_root
+                    .as_ref()
+                    .map(|r| Self::is_git_submodule(r))
+                    .unwrap_or(false);
+                SpaceLocation::InSpace {
+                    space_path,
+                    space_name,
+                    repo_root,
+                    is_submodule,
+                }
+            }
             (None, Some(repo_root)) => SpaceLocation::AtRepoRoot { repo_root },
             (None, None) => SpaceLocation::Unknown,
         }
+    }
+
+    /// Check if a directory is a git submodule
+    ///
+    /// Submodules have a .git FILE (not directory) that points to the parent's .git/modules/
+    pub fn is_git_submodule(dir: &Path) -> bool {
+        let git_path = dir.join(".git");
+        git_path.is_file()
     }
 
     /// Check if a directory is a space (has README.md with type: space)
@@ -114,6 +136,14 @@ impl SpaceLocation {
             SpaceLocation::InSpace { repo_root, .. } => repo_root.as_deref(),
             SpaceLocation::AtRepoRoot { repo_root } => Some(repo_root),
             SpaceLocation::Unknown => None,
+        }
+    }
+
+    /// Check if the current location is within a git submodule
+    pub fn is_submodule(&self) -> bool {
+        match self {
+            SpaceLocation::InSpace { is_submodule, .. } => *is_submodule,
+            _ => false,
         }
     }
 }
@@ -301,5 +331,113 @@ mod tests {
         assert!(matches!(location, SpaceLocation::Unknown));
         assert!(!location.is_in_space());
         assert!(!location.is_at_repo_root());
+    }
+
+    #[test]
+    fn test_space_location_detect_at_co_root() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create .co directory (CO workspace without git)
+        std::fs::create_dir(tmp.path().join(".co")).unwrap();
+
+        let location = SpaceLocation::detect(tmp.path());
+        assert!(location.is_at_repo_root());
+        assert_eq!(location.repo_root(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn test_space_location_git_and_co_present() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create both .git and .co directories
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+        std::fs::create_dir(tmp.path().join(".co")).unwrap();
+
+        let location = SpaceLocation::detect(tmp.path());
+        // Should detect as repo root (both markers present)
+        assert!(location.is_at_repo_root());
+        assert_eq!(location.repo_root(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn test_space_location_co_root_with_space() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create .co directory (CO workspace without git)
+        std::fs::create_dir(tmp.path().join(".co")).unwrap();
+
+        // Create a space directory with README
+        let space_path = tmp.path().join("myspace");
+        std::fs::create_dir(&space_path).unwrap();
+        std::fs::write(
+            space_path.join("README.md"),
+            "---\ntype: space\nid: myspace\n---\n",
+        )
+        .unwrap();
+
+        // Detect from inside the space
+        let location = SpaceLocation::detect(&space_path);
+        assert!(location.is_in_space());
+        assert_eq!(location.space_name(), Some("myspace"));
+        // repo_root should be the .co directory parent
+        assert_eq!(location.repo_root(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn test_submodule_detection_file_based() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create parent repo
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        // Create submodule directory with .git FILE (not directory)
+        let submodule_path = tmp.path().join("submodule");
+        std::fs::create_dir(&submodule_path).unwrap();
+        std::fs::write(
+            submodule_path.join(".git"),
+            "gitdir: ../.git/modules/submodule\n",
+        )
+        .unwrap();
+
+        assert!(SpaceLocation::is_git_submodule(&submodule_path));
+    }
+
+    #[test]
+    fn test_regular_repo_not_detected_as_submodule() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        assert!(!SpaceLocation::is_git_submodule(tmp.path()));
+    }
+
+    #[test]
+    fn test_space_location_in_space_detects_submodule() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create parent repo
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        // Create submodule with .git file
+        let submodule_path = tmp.path().join("mysubmodule");
+        std::fs::create_dir(&submodule_path).unwrap();
+        std::fs::write(
+            submodule_path.join(".git"),
+            "gitdir: ../.git/modules/mysubmodule\n",
+        )
+        .unwrap();
+
+        // Create a space inside the submodule
+        let space_path = submodule_path.join("myspace");
+        std::fs::create_dir(&space_path).unwrap();
+        std::fs::write(
+            space_path.join("README.md"),
+            "---\ntype: space\nid: myspace\n---\n",
+        )
+        .unwrap();
+
+        // Detect from inside the space
+        let location = SpaceLocation::detect(&space_path);
+        assert!(location.is_in_space());
+        assert!(location.is_submodule());
     }
 }

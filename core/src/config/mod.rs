@@ -28,6 +28,9 @@ pub struct GlobalConfig {
     /// Registered repositories
     #[serde(default)]
     pub repos: Vec<RepoConfig>,
+    /// Active repo alias (used when not in a registered repo directory)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_repo: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -104,6 +107,38 @@ impl GlobalConfig {
     pub fn detect_current_space(&self) -> Option<&RepoConfig> {
         let cwd = std::env::current_dir().ok()?;
         self.repos.iter().find(|repo| cwd.starts_with(&repo.path))
+    }
+
+    /// Set the active repository by alias
+    ///
+    /// Returns true if the alias exists and was set, false otherwise.
+    pub fn set_active_repo(&mut self, alias: &str) -> bool {
+        if self.get_by_alias(alias).is_some() {
+            self.active_repo = Some(alias.to_string());
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Clear the active repository
+    pub fn clear_active_repo(&mut self) {
+        self.active_repo = None;
+    }
+
+    /// Get the effective current space (detected from cwd or active)
+    ///
+    /// First tries to detect from current working directory, then falls back
+    /// to the explicitly set active repo.
+    pub fn effective_space(&self) -> Option<&RepoConfig> {
+        // First try to detect from cwd
+        if let Some(detected) = self.detect_current_space() {
+            return Some(detected);
+        }
+        // Fall back to explicitly set active repo
+        self.active_repo
+            .as_ref()
+            .and_then(|alias| self.get_by_alias(alias))
     }
 }
 
@@ -380,5 +415,63 @@ alias: work
 
         assert!(config.remove("work"));
         assert!(config.get("work").is_none());
+    }
+
+    #[test]
+    fn test_global_config_active_repo() {
+        let mut config = GlobalConfig::default();
+        config.add_repo(PathBuf::from("/path/to/repo"), "myrepo".to_string(), None);
+
+        // Initially no active repo
+        assert!(config.active_repo.is_none());
+
+        // Can set active repo
+        assert!(config.set_active_repo("myrepo"));
+        assert_eq!(config.active_repo, Some("myrepo".to_string()));
+
+        // Cannot set nonexistent repo
+        assert!(!config.set_active_repo("nonexistent"));
+        // Should still be myrepo
+        assert_eq!(config.active_repo, Some("myrepo".to_string()));
+
+        // Can clear active repo
+        config.clear_active_repo();
+        assert!(config.active_repo.is_none());
+    }
+
+    #[test]
+    fn test_global_config_effective_space() {
+        let mut config = GlobalConfig::default();
+        config.add_repo(PathBuf::from("/path/to/repo"), "myrepo".to_string(), None);
+
+        // With no cwd match and no active repo, effective_space is None
+        assert!(config.effective_space().is_none());
+
+        // With active repo set, effective_space returns it
+        config.set_active_repo("myrepo");
+        let effective = config.effective_space();
+        assert!(effective.is_some());
+        assert_eq!(effective.unwrap().alias, "myrepo");
+    }
+
+    #[test]
+    fn test_active_repo_serialization() {
+        let mut config = GlobalConfig::default();
+        config.add_repo(PathBuf::from("/path/to/repo"), "myrepo".to_string(), None);
+        config.set_active_repo("myrepo");
+
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        assert!(yaml.contains("active_repo: myrepo"));
+
+        let parsed: GlobalConfig = serde_yaml::from_str(&yaml).unwrap();
+        assert_eq!(parsed.active_repo, Some("myrepo".to_string()));
+    }
+
+    #[test]
+    fn test_active_repo_not_serialized_when_none() {
+        let config = GlobalConfig::default();
+        let yaml = serde_yaml::to_string(&config).unwrap();
+        // Should not contain active_repo when None
+        assert!(!yaml.contains("active_repo"));
     }
 }

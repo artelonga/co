@@ -245,7 +245,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "0.21.2"
+version = "0.22.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -266,7 +266,7 @@ dependencies = [
 
 [[package]]
 name = "co-cli"
-version = "0.21.2"
+version = "0.22.0"
 dependencies = [
  "assert_cmd",
  "atty",

@@ -27,7 +27,9 @@ fn test_space_current_outside_space() {
         .args(["space", "current"])
         .assert()
         .success()
-        .stdout(predicate::str::contains("Not in a registered space"));
+        .stdout(predicate::str::contains("Not in a CO workspace"))
+        .stdout(predicate::str::contains("co repo add"))
+        .stdout(predicate::str::contains("co repo switch"));
 }
 
 #[test]
@@ -48,5 +50,15 @@ fn test_repo_list_help() {
         .success()
         .stdout(predicate::str::contains("list"))
         .stdout(predicate::str::contains("add"))
-        .stdout(predicate::str::contains("remove"));
+        .stdout(predicate::str::contains("remove"))
+        .stdout(predicate::str::contains("switch"));
+}
+
+#[test]
+fn test_repo_switch_help() {
+    co_command()
+        .args(["repo", "switch", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Switch active workspace context"));
 }

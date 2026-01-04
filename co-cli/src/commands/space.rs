@@ -95,12 +95,14 @@ fn list_spaces() {
 fn show_current_space() {
     let config = GlobalConfig::load();
 
-    let Some(space) = config.detect_current_space() else {
-        println!("{}", "Not in a registered space.".yellow());
-        println!(
-            "{}",
-            "Use 'co repo add . --alias <name>' to register this directory.".dimmed()
-        );
+    // Check if we're in a detected space (from cwd)
+    let detected = config.detect_current_space();
+    let is_switched = detected.is_none() && config.active_repo.is_some();
+
+    // Get effective space (detected or active)
+    let Some(space) = config.effective_space() else {
+        // Not in any space - show helpful message
+        show_not_in_workspace_help(&config);
         return;
     };
 
@@ -110,7 +112,17 @@ fn show_current_space() {
     let is_git = space.path.join(".git").exists();
     let space_type = if is_git { "repo" } else { "private" };
 
-    println!("{} {}", "Current Space:".bold(), space.alias.cyan().bold());
+    // Show header with switched indicator if applicable
+    if is_switched {
+        println!(
+            "{} {} {}",
+            "Current Space:".bold(),
+            space.alias.cyan().bold(),
+            "(switched)".dimmed()
+        );
+    } else {
+        println!("{} {}", "Current Space:".bold(), space.alias.cyan().bold());
+    }
     println!("{}", "─".repeat(40));
     println!("  {:<10} {}", "Path:".dimmed(), space.path.display());
     println!("  {:<10} {}", "Type:".dimmed(), space_type);
@@ -138,6 +150,38 @@ fn show_current_space() {
 
         if !contexts.is_empty() {
             println!("  {:<10} {}", "Contexts:".dimmed(), contexts.join(", "));
+        }
+    }
+}
+
+/// Show helpful message when not in a CO workspace
+fn show_not_in_workspace_help(config: &GlobalConfig) {
+    let cwd = std::env::current_dir()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|_| ".".to_string());
+
+    println!("{}", "Not in a CO workspace.".yellow().bold());
+    println!();
+    println!("{}", "To use CO, you can:".dimmed());
+    println!("  1. {} to a registered workspace", "Navigate".cyan());
+    println!(
+        "  2. {} this directory: {}",
+        "Register".cyan(),
+        format!("co repo add {} --alias <name>", cwd).dimmed()
+    );
+    println!(
+        "  3. {} to a registered space: {}",
+        "Switch".cyan(),
+        "co repo switch <alias>".dimmed()
+    );
+    println!();
+
+    if config.repos.is_empty() {
+        println!("{}", "No workspaces registered yet.".dimmed());
+    } else {
+        println!("{}", "Registered workspaces:".dimmed());
+        for repo in &config.repos {
+            println!("  {} → {}", repo.alias.cyan(), repo.path.display());
         }
     }
 }

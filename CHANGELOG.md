@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-01-04
+
+### Added
+- **System-wide Installation & Namespace Detection** (#75)
+  - `.co/` directory now recognized as CO workspace root marker
+  - `co repo switch <alias>` to switch active workspace context
+  - Git submodule detection for nested repositories
+  - `is_submodule` field in `SpaceLocation::InSpace` variant
+  - `is_git_submodule()` and `is_submodule()` helper methods
+  - Enhanced `co space current` with helpful guidance when not in workspace
+  - `effective_space()` method combining detected and active workspaces
+  - `active_repo` field in `GlobalConfig` for workspace context persistence
+
+### Changed
+- `co space current` now shows "(switched)" indicator when using active workspace
+- Status command shows "(submodule)" indicator when in a git submodule
+- Improved error messages with actionable suggestions (Navigate, Register, Switch)
+
 ## [0.21.2] - 2026-01-04
 
 ### Changed

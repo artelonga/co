@@ -17,8 +17,15 @@ pub fn run() {
             space_name,
             space_path,
             repo_root,
+            is_submodule,
         } => {
-            println!("  {} {} (space)", "◆".cyan(), space_name.cyan().bold());
+            let submodule_marker = if *is_submodule { " (submodule)" } else { "" };
+            println!(
+                "  {} {} (space){}",
+                "◆".cyan(),
+                space_name.cyan().bold(),
+                submodule_marker.dimmed()
+            );
             println!("    Path: {}", space_path.display());
             if let Some(root) = repo_root {
                 println!("    Repo: {}", root.display().to_string().dimmed());
