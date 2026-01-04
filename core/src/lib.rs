@@ -63,7 +63,7 @@ pub use language::{I18n, Language, UiLabels};
 pub use node::{Node, NodeId};
 pub use query::Query;
 pub use schema::{Definition, Domain, Project, Task};
-pub use space::{Space, SpaceKind};
+pub use space::{Space, SpaceKind, SpaceLocation};
 // Deprecated aliases for backwards compatibility
 #[allow(deprecated)]
 pub use space::{Context, ContextKind, Scope, ScopeKind};

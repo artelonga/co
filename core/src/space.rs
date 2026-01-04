@@ -11,7 +11,112 @@
 //! The term "scope" is deprecated and aliased to Space for backwards compatibility.
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+/// Represents where the user is working relative to CO infrastructure
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpaceLocation {
+    /// Inside a space directory (project namespace)
+    InSpace {
+        /// The space directory path
+        space_path: PathBuf,
+        /// The space name (directory name)
+        space_name: String,
+        /// Parent repository root (if detected)
+        repo_root: Option<PathBuf>,
+    },
+    /// At the repository root (co home), not inside a space
+    AtRepoRoot {
+        /// The repository root path
+        repo_root: PathBuf,
+    },
+    /// Unknown location (not in a repo or space)
+    Unknown,
+}
+
+impl SpaceLocation {
+    /// Detect the current space location from the given directory
+    pub fn detect(from: &Path) -> Self {
+        let cwd = if from.is_absolute() {
+            from.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .ok()
+                .map(|c| c.join(from))
+                .unwrap_or_else(|| from.to_path_buf())
+        };
+
+        // Walk up the directory tree looking for markers
+        let mut current = Some(cwd.as_path());
+        let mut space_found: Option<(PathBuf, String)> = None;
+        let mut repo_root: Option<PathBuf> = None;
+
+        while let Some(dir) = current {
+            // Check for .git (repository root marker)
+            if dir.join(".git").exists() && repo_root.is_none() {
+                repo_root = Some(dir.to_path_buf());
+            }
+
+            // Check for space marker (README.md with type: space)
+            if space_found.is_none()
+                && let Some(name) = Self::is_space_dir(dir)
+            {
+                space_found = Some((dir.to_path_buf(), name));
+            }
+
+            current = dir.parent();
+        }
+
+        match (space_found, repo_root) {
+            (Some((space_path, space_name)), repo_root) => SpaceLocation::InSpace {
+                space_path,
+                space_name,
+                repo_root,
+            },
+            (None, Some(repo_root)) => SpaceLocation::AtRepoRoot { repo_root },
+            (None, None) => SpaceLocation::Unknown,
+        }
+    }
+
+    /// Check if a directory is a space (has README.md with type: space)
+    fn is_space_dir(dir: &Path) -> Option<String> {
+        let readme = dir.join("README.md");
+        if readme.exists()
+            && let Ok(content) = std::fs::read_to_string(&readme)
+            && content.contains("type: space")
+        {
+            return dir.file_name().map(|n| n.to_string_lossy().to_string());
+        }
+        None
+    }
+
+    /// Check if we're inside a space
+    pub fn is_in_space(&self) -> bool {
+        matches!(self, SpaceLocation::InSpace { .. })
+    }
+
+    /// Check if we're at the repo root (not in a space)
+    pub fn is_at_repo_root(&self) -> bool {
+        matches!(self, SpaceLocation::AtRepoRoot { .. })
+    }
+
+    /// Get the space name if we're in a space
+    pub fn space_name(&self) -> Option<&str> {
+        match self {
+            SpaceLocation::InSpace { space_name, .. } => Some(space_name),
+            _ => None,
+        }
+    }
+
+    /// Get the repo root if known
+    pub fn repo_root(&self) -> Option<&Path> {
+        match self {
+            SpaceLocation::InSpace { repo_root, .. } => repo_root.as_deref(),
+            SpaceLocation::AtRepoRoot { repo_root } => Some(repo_root),
+            SpaceLocation::Unknown => None,
+        }
+    }
+}
 
 /// The type of a space detected from its README frontmatter
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -95,6 +200,7 @@ impl Space {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_space_struct() {
@@ -122,5 +228,78 @@ mod tests {
     fn test_space_kind_default() {
         let kind: SpaceKind = Default::default();
         assert_eq!(kind, SpaceKind::Unknown);
+    }
+
+    #[test]
+    fn test_space_location_detect_at_repo_root() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create a .git directory to simulate repo root
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        let location = SpaceLocation::detect(tmp.path());
+        assert!(location.is_at_repo_root());
+        assert!(!location.is_in_space());
+        assert_eq!(location.repo_root(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn test_space_location_detect_in_space() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create repo with .git
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        // Create a space directory with README
+        let space_path = tmp.path().join("myspace");
+        std::fs::create_dir(&space_path).unwrap();
+        std::fs::write(
+            space_path.join("README.md"),
+            "---\ntype: space\nid: myspace\n---\n",
+        )
+        .unwrap();
+
+        // Detect from inside the space
+        let location = SpaceLocation::detect(&space_path);
+        assert!(location.is_in_space());
+        assert!(!location.is_at_repo_root());
+        assert_eq!(location.space_name(), Some("myspace"));
+        assert_eq!(location.repo_root(), Some(tmp.path()));
+    }
+
+    #[test]
+    fn test_space_location_detect_in_subdir_of_space() {
+        let tmp = TempDir::new().unwrap();
+
+        // Create repo with .git
+        std::fs::create_dir(tmp.path().join(".git")).unwrap();
+
+        // Create a space directory with README
+        let space_path = tmp.path().join("myspace");
+        std::fs::create_dir(&space_path).unwrap();
+        std::fs::write(
+            space_path.join("README.md"),
+            "---\ntype: space\nid: myspace\n---\n",
+        )
+        .unwrap();
+
+        // Create a subdirectory inside the space
+        let subdir = space_path.join("notes");
+        std::fs::create_dir(&subdir).unwrap();
+
+        // Detect from the subdirectory
+        let location = SpaceLocation::detect(&subdir);
+        assert!(location.is_in_space());
+        assert_eq!(location.space_name(), Some("myspace"));
+    }
+
+    #[test]
+    fn test_space_location_unknown() {
+        let tmp = TempDir::new().unwrap();
+        // No .git, no space markers
+        let location = SpaceLocation::detect(tmp.path());
+        assert!(matches!(location, SpaceLocation::Unknown));
+        assert!(!location.is_in_space());
+        assert!(!location.is_at_repo_root());
     }
 }

@@ -30,7 +30,11 @@ enum Commands {
     /// Initialize a new space
     Init {
         /// Space name (e.g., "private", "work")
-        name: String,
+        name: Option<String>,
+
+        /// Check for spaces that aren't gitignored (commit guard)
+        #[arg(long)]
+        check: bool,
     },
 
     /// List spaces and languages
@@ -456,7 +460,16 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init { name } => commands::init::run(&name),
+        Commands::Init { name, check } => {
+            if check {
+                commands::init::check_unprotected_spaces();
+            } else if let Some(name) = name {
+                commands::init::run(&name);
+            } else {
+                eprintln!("error: Missing space name. Usage: co init <NAME>");
+                std::process::exit(1);
+            }
+        }
         Commands::List { stats } => commands::list::run(stats),
         Commands::New {
             content_type,

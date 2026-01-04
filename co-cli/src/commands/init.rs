@@ -8,6 +8,7 @@
 
 use crate::i18n::load_i18n;
 use colored::Colorize;
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -92,5 +93,64 @@ A CO space for content management.
 
     if added_to_gitignore {
         println!("  └── {} added to .gitignore", gitignore_entry.dimmed());
+    }
+}
+
+/// Check for spaces that exist but aren't gitignored (commit guard)
+pub fn check_unprotected_spaces() {
+    let gitignore_path = Path::new(".gitignore");
+
+    // Load gitignored patterns
+    let gitignored: HashSet<String> = if gitignore_path.exists() {
+        fs::read_to_string(gitignore_path)
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.trim().is_empty() && !l.starts_with('#'))
+            .map(|l| l.trim().trim_end_matches('/').to_string())
+            .collect()
+    } else {
+        HashSet::new()
+    };
+
+    // Find directories that look like spaces (have README with type: space)
+    let mut unprotected = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(".") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden directories and common non-space dirs
+            if name.starts_with('.') || name == "target" || name == "node_modules" {
+                continue;
+            }
+
+            // Check if it looks like a space (has README with type: space)
+            let readme_path = path.join("README.md");
+            if readme_path.exists()
+                && let Ok(content) = fs::read_to_string(&readme_path)
+                && content.contains("type: space")
+                && !gitignored.contains(&name)
+            {
+                unprotected.push(name);
+            }
+        }
+    }
+
+    if unprotected.is_empty() {
+        println!("{}", "All spaces are protected.".green());
+    } else {
+        println!("{}", "Unprotected spaces (not gitignored):".yellow().bold());
+        for name in &unprotected {
+            println!("  {} {}", "⚠".yellow(), name);
+        }
+        println!(
+            "\n{}",
+            "Add these to .gitignore to prevent accidental commits.".dimmed()
+        );
     }
 }
