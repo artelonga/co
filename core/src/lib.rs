@@ -42,6 +42,7 @@ pub mod content;
 pub mod edge;
 pub mod feature;
 pub mod frontmatter;
+pub mod github;
 pub mod graph;
 pub mod index;
 pub mod language;
@@ -80,6 +81,9 @@ pub use feature::{Feature, FeatureRegistry};
 
 // Config system exports
 pub use config::{GlobalConfig, GroupDef, GroupsConfig, RepoConfig, RepoLocalConfig};
+
+// GitHub integration exports
+pub use github::{GhCli, GhError, GithubIssue, GithubLabel, GithubUser, MappedWorkItem};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";

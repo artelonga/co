@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-01-04
+
+### Added
+- **GitHub as Source of Truth** (#36)
+  - `co gh issue list` - List issues from GitHub repository
+  - `co gh issue show <number>` - Show issue details
+  - `co collab pull --all` - Pull all open issues to local markdown files
+  - `co collab pull <number>...` - Pull specific issues
+  - GitHub → CO mapping: labels to type/priority, assignees, state to status
+  - New `core/src/github/` module with types, mapping, and GhCli wrapper
+
 ## [0.14.0] - 2026-01-04
 
 ### Added
@@ -183,7 +194,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Roadmap
 
 ### Upcoming (v1.0)
-- [ ] #36 - GitHub as Source of Truth (sync issues/PRs)
+- [x] #36 - GitHub as Source of Truth (sync issues/PRs)
 - [ ] #38 - Plan & Execute Workflow
 - [ ] #39 - Writer Agent System
 - [ ] #40 - Tools & Extensions

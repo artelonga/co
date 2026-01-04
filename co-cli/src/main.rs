@@ -301,6 +301,32 @@ enum Commands {
         #[command(subcommand)]
         action: SpaceSubcommand,
     },
+
+    /// GitHub CLI wrapper for issue operations
+    ///
+    /// Low-level wrapper around the `gh` CLI tool.
+    /// Requires `gh` to be installed and authenticated.
+    ///
+    /// Examples:
+    ///   co gh issue list                # List open issues
+    ///   co gh issue list --state all    # List all issues
+    ///   co gh issue show 35             # Show issue #35
+    Gh {
+        #[command(subcommand)]
+        action: GhSubcommand,
+    },
+
+    /// Collaborate with GitHub for issue synchronization
+    ///
+    /// High-level commands for syncing GitHub issues with local content.
+    ///
+    /// Examples:
+    ///   co collab pull --all            # Pull all open issues to local files
+    ///   co collab pull 35 36            # Pull specific issues
+    Collab {
+        #[command(subcommand)]
+        action: CollabSubcommand,
+    },
 }
 
 #[derive(Subcommand)]
@@ -356,6 +382,52 @@ enum SpaceSubcommand {
     List,
     /// Show current space details
     Current,
+}
+
+#[derive(Subcommand)]
+enum GhSubcommand {
+    /// Issue operations
+    Issue {
+        #[command(subcommand)]
+        action: GhIssueAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum GhIssueAction {
+    /// List issues from the repository
+    List {
+        /// Filter by state: open, closed, all
+        #[arg(short, long, default_value = "open")]
+        state: String,
+
+        /// Filter by label
+        #[arg(short, long)]
+        label: Option<String>,
+
+        /// Maximum number of issues to show
+        #[arg(long, default_value = "30")]
+        limit: u32,
+    },
+    /// Show details of a specific issue
+    Show {
+        /// Issue number
+        number: u64,
+    },
+}
+
+#[derive(Subcommand)]
+enum CollabSubcommand {
+    /// Pull GitHub issues to local markdown files
+    Pull {
+        /// Pull all open issues
+        #[arg(long)]
+        all: bool,
+
+        /// Specific issue numbers to pull
+        #[arg(trailing_var_arg = true)]
+        numbers: Vec<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -603,6 +675,38 @@ fn main() {
                 SpaceSubcommand::Current => commands::space::SpaceAction::Current,
             };
             commands::space::run(space_action)
+        }
+        Commands::Gh { action } => {
+            let gh_action = match action {
+                GhSubcommand::Issue { action } => {
+                    let issue_action = match action {
+                        GhIssueAction::List {
+                            state,
+                            label,
+                            limit,
+                        } => commands::gh::issue::IssueAction::List {
+                            state,
+                            label,
+                            limit,
+                        },
+                        GhIssueAction::Show { number } => {
+                            commands::gh::issue::IssueAction::Show { number }
+                        }
+                    };
+                    commands::gh::GhAction::Issue {
+                        action: issue_action,
+                    }
+                }
+            };
+            commands::gh::run(gh_action)
+        }
+        Commands::Collab { action } => {
+            let collab_action = match action {
+                CollabSubcommand::Pull { all, numbers } => {
+                    commands::collab::CollabAction::Pull { all, numbers }
+                }
+            };
+            commands::collab::run(collab_action)
         }
     }
 }
