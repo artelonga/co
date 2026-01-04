@@ -53,6 +53,30 @@ enum Commands {
         r#in: Option<String>,
     },
 
+    /// Create content interactively with role selection
+    ///
+    /// Interactive command for collaborative content creation.
+    /// Prompts for role (user/agent) and structured input.
+    ///
+    /// Examples:
+    ///   co create user-story my-story --in private
+    ///   co create task my-task --in work --story parent-story
+    Create {
+        /// Content type (user-story, task, etc.)
+        content_type: String,
+
+        /// Content name/id
+        name: String,
+
+        /// Target scope (context directory)
+        #[arg(short, long, value_name = "SCOPE")]
+        r#in: Option<String>,
+
+        /// Parent story ID (for tasks)
+        #[arg(long)]
+        story: Option<String>,
+    },
+
     /// Show content file
     Show {
         /// Content name/id to display
@@ -439,6 +463,12 @@ fn main() {
             name,
             r#in,
         } => commands::new::run(&content_type, &name, r#in.as_deref()),
+        Commands::Create {
+            content_type,
+            name,
+            r#in,
+            story,
+        } => commands::create::run(&content_type, &name, r#in.as_deref(), story.as_deref()),
         Commands::Show { name, meta } => commands::show::run(&name, meta),
         Commands::Status => commands::status::run(),
         Commands::Update { name, status } => commands::update::run(&name, status.as_deref()),

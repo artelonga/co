@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-01-03
+
+### Added
+- **Collaborative Content Creation** (#48)
+  - `co create` - Interactive content creation with role selection
+  - User role: Structured prompts for user-stories (AS A / I NEED / SO THAT) and tasks (GIVEN / WHEN / THEN)
+  - Agent role: Creates skeleton templates for Claude Code to fill in
+  - `--story` flag to link tasks to parent user stories
+  - `## Prompt` section for context persistence
+
 ## [0.12.2] - 2026-01-04
 
 ### Added

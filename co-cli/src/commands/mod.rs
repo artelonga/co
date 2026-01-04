@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod archive;
 pub mod config;
+pub mod create;
 pub mod define;
 pub mod delete;
 pub mod index;
