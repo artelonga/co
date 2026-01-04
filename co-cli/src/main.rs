@@ -342,6 +342,37 @@ enum Commands {
         #[command(subcommand)]
         action: ConductSubcommand,
     },
+
+    /// Write content using an agent
+    ///
+    /// Invoke a writer agent to generate content based on its backend:
+    /// - manual: Interactive prompts for structured input
+    /// - claude: Creates skeleton template for Claude Code to fill
+    /// - ollama: Local model integration (future)
+    ///
+    /// Examples:
+    ///   co write user-story --agent writer --in private
+    ///   co write task --agent writer --context notes.md
+    Write {
+        /// Content type to generate (user-story, task, etc.)
+        content_type: String,
+
+        /// Agent to use for writing
+        #[arg(short, long, required = true)]
+        agent: String,
+
+        /// Target space (directory)
+        #[arg(short, long, value_name = "SPACE")]
+        r#in: Option<String>,
+
+        /// Additional context file
+        #[arg(long)]
+        context: Option<String>,
+
+        /// Content name/id (skips name prompt if provided)
+        #[arg(short, long)]
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -772,5 +803,18 @@ fn main() {
             };
             commands::conduct::run(conduct_action)
         }
+        Commands::Write {
+            content_type,
+            agent,
+            r#in,
+            context,
+            name,
+        } => commands::write::run(
+            &content_type,
+            &agent,
+            r#in.as_deref(),
+            context.as_deref(),
+            name.as_deref(),
+        ),
     }
 }

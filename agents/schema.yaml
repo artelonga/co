@@ -1,11 +1,14 @@
 # Agent Schema
 # Defines property types for agent definitions
 name: agents
-version: 1
+version: 2
 properties:
   type:
     kind: text
     required: true
+  backend:
+    kind: text
+    description: "Model backend: manual, claude, ollama"
   model:
     kind: text
   capabilities:
@@ -14,5 +17,8 @@ properties:
     kind: text
   provider:
     kind: text
+  context:
+    kind: list
+    description: "Context sources for the agent (e.g., work items, schemas)"
   url:
     kind: link

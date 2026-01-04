@@ -19,3 +19,4 @@ pub mod locate;
 pub mod schema;
 pub mod space;
 pub mod validate;
+pub mod write;
