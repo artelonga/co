@@ -2,6 +2,7 @@
 type: tool
 id: gh-wrapper
 category: git
+tool_type: deterministic
 command: gh
 status: active
 dependencies: gh

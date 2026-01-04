@@ -20,6 +20,7 @@ use std::path::Path;
 struct ToolItem {
     id: String,
     category: Option<String>,
+    tool_type: Option<String>,
     command: Option<String>,
     description: Option<String>,
     path: std::path::PathBuf,
@@ -31,6 +32,7 @@ struct ToolItem {
 struct ToolFrontmatter {
     id: Option<String>,
     category: Option<String>,
+    tool_type: Option<String>,
     command: Option<String>,
     #[serde(flatten)]
     fields: HashMap<String, serde_yaml::Value>,
@@ -41,6 +43,7 @@ pub fn run(action: ToolsAction) {
     match action {
         ToolsAction::List { query } => run_list(&query),
         ToolsAction::Show { name } => run_show(&name),
+        ToolsAction::Run { name, args } => run_tool(&name, &args),
     }
 }
 
@@ -48,6 +51,7 @@ pub fn run(action: ToolsAction) {
 pub enum ToolsAction {
     List { query: Vec<String> },
     Show { name: String },
+    Run { name: String, args: Vec<String> },
 }
 
 /// List tools with optional filtering
@@ -213,6 +217,7 @@ fn parse_tool(path: &Path, is_user: bool, filters: &[(String, String)]) -> Optio
     Some(ToolItem {
         id,
         category: frontmatter.category,
+        tool_type: frontmatter.tool_type,
         command: frontmatter.command,
         description,
         path: path.to_path_buf(),
@@ -290,6 +295,143 @@ fn run_show(name: &str) {
                 eprintln!("{} {}", "Available tools:".dimmed(), available.join(", "));
             }
 
+            std::process::exit(1);
+        }
+    }
+}
+
+/// Run a tool by name with arguments
+fn run_tool(name: &str, args: &[String]) {
+    // Load tool definition (user tools take precedence)
+    let tool = match load_tool(name) {
+        Some(t) => t,
+        None => {
+            eprintln!("{} Tool '{}' not found", "error:".red().bold(), name);
+            list_available_tools();
+            std::process::exit(1);
+        }
+    };
+
+    // Check tool_type (default to deterministic)
+    let tool_type = tool.tool_type.as_deref().unwrap_or("deterministic");
+
+    match tool_type {
+        "predictive" => {
+            eprintln!(
+                "{} Predictive tools not yet implemented",
+                "error:".red().bold()
+            );
+            eprintln!(
+                "{}",
+                "Future support: whisper, pdf-summarizer, video-transcriber".dimmed()
+            );
+            std::process::exit(1);
+        }
+        _ => {
+            // Default to deterministic behavior
+            // Require command field for deterministic tools
+            let command = match &tool.command {
+                Some(cmd) => cmd,
+                None => {
+                    eprintln!(
+                        "{} Tool '{}' has no executable command",
+                        "error:".red().bold(),
+                        name
+                    );
+                    eprintln!(
+                        "{}",
+                        "Add a 'command' field to the tool frontmatter".dimmed()
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            execute_command(command, args);
+        }
+    }
+}
+
+/// Load a tool by name from user/tools or tools directories
+fn load_tool(name: &str) -> Option<ToolItem> {
+    // Check user tools first (takes precedence)
+    let user_path = Path::new("user/tools").join(format!("{}.md", name));
+    if user_path.exists() {
+        return parse_tool(&user_path, true, &[]);
+    }
+
+    // Check system tools
+    let system_path = Path::new("tools").join(format!("{}.md", name));
+    if system_path.exists() {
+        return parse_tool(&system_path, false, &[]);
+    }
+
+    None
+}
+
+/// List available tools for error messages
+fn list_available_tools() {
+    let mut available = Vec::new();
+
+    for dir in &["tools", "user/tools"] {
+        let path = Path::new(dir);
+        if path.is_dir()
+            && let Ok(entries) = fs::read_dir(path)
+        {
+            for entry in entries.flatten() {
+                let entry_path = entry.path();
+                if entry_path.is_file()
+                    && entry_path.extension().is_some_and(|e| e == "md")
+                    && let Some(stem) = entry_path.file_stem()
+                {
+                    available.push(stem.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    if !available.is_empty() {
+        eprintln!("{} {}", "Available tools:".dimmed(), available.join(", "));
+    }
+}
+
+/// Execute a shell command with arguments
+fn execute_command(command: &str, args: &[String]) {
+    use std::process::Command;
+
+    // Split the command into program and initial args
+    let parts: Vec<&str> = command.split_whitespace().collect();
+    if parts.is_empty() {
+        eprintln!("{} Empty command", "error:".red().bold());
+        std::process::exit(1);
+    }
+
+    let program = parts[0];
+    let mut cmd = Command::new(program);
+
+    // Add command's built-in args
+    for arg in &parts[1..] {
+        cmd.arg(arg);
+    }
+
+    // Add user-provided args
+    for arg in args {
+        cmd.arg(arg);
+    }
+
+    // Execute and handle result
+    match cmd.status() {
+        Ok(status) => {
+            if !status.success() {
+                std::process::exit(status.code().unwrap_or(1));
+            }
+        }
+        Err(e) => {
+            eprintln!(
+                "{} Failed to execute '{}': {}",
+                "error:".red().bold(),
+                program,
+                e
+            );
             std::process::exit(1);
         }
     }

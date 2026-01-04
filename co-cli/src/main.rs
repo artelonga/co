@@ -420,6 +420,14 @@ enum ToolsSubcommand {
         /// Tool name/id
         name: String,
     },
+    /// Run a tool with arguments
+    Run {
+        /// Tool name/id
+        name: String,
+        /// Arguments to pass to the tool
+        #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -674,6 +682,9 @@ fn main() {
         Commands::Tools { action, query } => {
             let tools_action = match action {
                 Some(ToolsSubcommand::Show { name }) => commands::tools::ToolsAction::Show { name },
+                Some(ToolsSubcommand::Run { name, args }) => {
+                    commands::tools::ToolsAction::Run { name, args }
+                }
                 None => commands::tools::ToolsAction::List { query },
             };
             commands::tools::run(tools_action)

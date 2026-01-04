@@ -6,6 +6,10 @@ properties:
   category:
     kind: text
     required: true
+  tool_type:
+    kind: text
+    values: [deterministic, predictive]
+    default: deterministic
   command:
     kind: text
   status:

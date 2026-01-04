@@ -18,5 +18,6 @@ pub mod lead;
 pub mod locate;
 pub mod schema;
 pub mod space;
+pub mod tools;
 pub mod validate;
 pub mod write;

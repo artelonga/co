@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-01-04
+
+### Added
+- **Tools & Extensions** (#40)
+  - `co tools run <name> [args...]` - Execute a tool with arguments
+  - Tool types: `deterministic` (shell commands) and `predictive` (ML models, stub)
+  - User tools in `user/tools/` take precedence over system tools
+  - Tool schema extended with `tool_type` field
+  - Default behavior: deterministic when `tool_type` not specified
+  - Error handling: tool not found, missing command, execution failure
+
 ## [0.17.0] - 2026-01-04
 
 ### Added
