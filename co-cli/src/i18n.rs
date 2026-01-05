@@ -2,11 +2,17 @@
 //!
 //! Loads UI translations based on system language configuration.
 //! Falls back to embedded defaults when files are not available.
+//!
+//! Language configs are bundled in the binary using `include_str!()`,
+//! so CO works in any external folder without requiring source files.
 
 use co::{I18n, UiLabels};
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+
+// Embed full language configs in binary
+const ENGLISH_LABELS: &str = include_str!("../../i18n/en.yaml");
+const PORTUGUESE_LABELS: &str = include_str!("../../i18n/pt.yaml");
 
 /// Load I18n based on system configuration
 pub fn load_i18n() -> I18n {
@@ -27,48 +33,12 @@ fn has_translations(i18n: &I18n) -> bool {
 
 /// Get embedded default labels for a language
 fn embedded_labels(lang: &str) -> UiLabels {
-    let mut labels = UiLabels::new(lang);
+    let yaml = match lang {
+        "pt" => PORTUGUESE_LABELS,
+        _ => ENGLISH_LABELS,
+    };
 
-    // Add default English labels
-    labels.types = HashMap::from([
-        (
-            "space".to_string(),
-            if lang == "pt" {
-                "espaço".to_string()
-            } else {
-                "space".to_string()
-            },
-        ),
-        (
-            "definition".to_string(),
-            if lang == "pt" {
-                "definição".to_string()
-            } else {
-                "definition".to_string()
-            },
-        ),
-    ]);
-
-    labels.messages = HashMap::from([
-        (
-            "space_initialized".to_string(),
-            if lang == "pt" {
-                "Espaço Inicializado".to_string()
-            } else {
-                "Space Initialized".to_string()
-            },
-        ),
-        (
-            "already_exists".to_string(),
-            if lang == "pt" {
-                "já existe".to_string()
-            } else {
-                "already exists".to_string()
-            },
-        ),
-    ]);
-
-    labels
+    UiLabels::from_yaml(yaml).unwrap_or_else(|_| UiLabels::new(lang))
 }
 
 /// Get the configured system language, defaulting to "en"

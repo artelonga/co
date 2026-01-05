@@ -2,7 +2,6 @@
 //!
 //! Creates content files (tasks, definitions, etc.) in a specified space.
 
-use crate::i18n::load_i18n;
 use co::validate::ValidationContext;
 use colored::Colorize;
 use std::fs;
@@ -10,22 +9,29 @@ use std::path::Path;
 
 /// Run the new command
 pub fn run(content_type: &str, name: &str, space: Option<&str>) {
-    let i18n = load_i18n();
+    // Use current directory if no --in flag provided
+    let space_dir = space.unwrap_or(".");
+    let space_path = Path::new(space_dir);
 
-    // Determine target space
-    let space_name = space.unwrap_or("en");
-    let space_path = Path::new(space_name);
-
-    // Verify space exists
+    // Verify space exists (current dir always exists, but explicit ones might not)
     if !space_path.exists() {
         eprintln!(
-            "{} {} '{}' does not exist",
+            "{} Directory '{}' does not exist",
             "error:".red().bold(),
-            i18n.type_label("space"),
-            space_name
+            space_dir
         );
         std::process::exit(1);
     }
+
+    // Derive a sensible space name for frontmatter
+    let space_name = if space_dir == "." {
+        std::env::current_dir()
+            .ok()
+            .and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+            .unwrap_or_else(|| "root".to_string())
+    } else {
+        space_dir.to_string()
+    };
 
     // Verify content type is known (built-in or registered via schema)
     let ctx = ValidationContext::new(Path::new("."));

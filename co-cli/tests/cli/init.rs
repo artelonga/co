@@ -5,21 +5,26 @@ use predicates::prelude::*;
 use tempfile::tempdir;
 
 #[test]
-fn test_init_creates_space_directory() {
+fn test_init_creates_namespace_directory() {
     let tmp = tempdir().unwrap();
 
     co_command()
         .current_dir(tmp.path())
         .args(["init", "private"])
         .assert()
-        .success();
+        .success()
+        .stdout(predicate::str::contains("Created namespace"));
 
+    // Directory should exist
     assert!(tmp.path().join("private").exists());
-    assert!(tmp.path().join("private/README.md").exists());
+    assert!(tmp.path().join("private").is_dir());
+
+    // No README.md created - user organizes files however they want
+    assert!(!tmp.path().join("private/README.md").exists());
 }
 
 #[test]
-fn test_init_prevents_duplicate_space() {
+fn test_init_prevents_duplicate_directory() {
     let tmp = tempdir().unwrap();
 
     std::fs::create_dir(tmp.path().join("private")).unwrap();
@@ -33,29 +38,10 @@ fn test_init_prevents_duplicate_space() {
 }
 
 #[test]
-fn test_init_creates_space_readme() {
-    let tmp = tempdir().unwrap();
-
-    co_command()
-        .current_dir(tmp.path())
-        .args(["init", "private"])
-        .assert()
-        .success();
-
-    let readme_path = tmp.path().join("private/README.md");
-    assert!(readme_path.exists(), "README.md should exist");
-
-    let readme = std::fs::read_to_string(&readme_path).unwrap();
-    assert!(readme.contains("type: space"));
-    assert!(readme.contains("id: private"));
-    assert!(readme.contains("language: english"));
-}
-
-#[test]
 fn test_list_shows_spaces_and_languages() {
     let tmp = tempdir().unwrap();
 
-    // Create a language directory
+    // Create a language directory with README.md
     let en_path = tmp.path().join("en");
     std::fs::create_dir_all(&en_path).unwrap();
     std::fs::write(
@@ -64,12 +50,14 @@ fn test_list_shows_spaces_and_languages() {
     )
     .unwrap();
 
-    // Create a space
-    co_command()
-        .current_dir(tmp.path())
-        .args(["init", "private"])
-        .assert()
-        .success();
+    // Create a space directory with README.md (manually, since init no longer does this)
+    let private_path = tmp.path().join("private");
+    std::fs::create_dir_all(&private_path).unwrap();
+    std::fs::write(
+        private_path.join("README.md"),
+        "---\ntype: space\nid: private\n---\n# Private\n",
+    )
+    .unwrap();
 
     co_command()
         .current_dir(tmp.path())
@@ -86,13 +74,14 @@ fn test_list_shows_spaces_and_languages() {
 fn test_list_stats_shows_file_counts() {
     let tmp = tempdir().unwrap();
 
-    co_command()
-        .current_dir(tmp.path())
-        .args(["init", "private"])
-        .assert()
-        .success();
-
+    // Create a space with README (list requires type: space in README)
     let space_path = tmp.path().join("private");
+    std::fs::create_dir_all(&space_path).unwrap();
+    std::fs::write(
+        space_path.join("README.md"),
+        "---\ntype: space\nid: private\n---\n",
+    )
+    .unwrap();
     std::fs::write(
         space_path.join("word1.md"),
         "---\ntype: definition\n---\nA definition.",
@@ -114,7 +103,7 @@ fn test_list_stats_shows_file_counts() {
 }
 
 #[test]
-fn test_init_adds_to_gitignore_when_exists() {
+fn test_init_does_not_modify_gitignore() {
     let tmp = tempdir().unwrap();
 
     // Create .gitignore first
@@ -124,12 +113,12 @@ fn test_init_adds_to_gitignore_when_exists() {
         .current_dir(tmp.path())
         .args(["init", "myspace"])
         .assert()
-        .success()
-        .stdout(predicate::str::contains("myspace/").and(predicate::str::contains(".gitignore")));
+        .success();
 
-    // Verify it was added
+    // Verify .gitignore was NOT modified (simplified init)
     let gitignore = std::fs::read_to_string(tmp.path().join(".gitignore")).unwrap();
-    assert!(gitignore.contains("myspace/"));
+    assert!(!gitignore.contains("myspace/"));
+    assert_eq!(gitignore, "target/\n");
 }
 
 #[test]

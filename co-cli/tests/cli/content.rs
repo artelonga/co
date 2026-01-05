@@ -55,28 +55,24 @@ fn test_new_auto_populates_frontmatter() {
 }
 
 #[test]
-fn test_new_defaults_to_en_space() {
+fn test_new_defaults_to_current_directory() {
     let tmp = tempdir().unwrap();
 
-    let en_path = tmp.path().join("en");
-    std::fs::create_dir_all(&en_path).unwrap();
-    std::fs::write(
-        en_path.join("README.md"),
-        "---\ntype: language\nid: en\n---\n# English\n",
-    )
-    .unwrap();
-
+    // No need to create an 'en' directory - should work in current dir
     co_command()
         .current_dir(tmp.path())
         .args(["new", "task", "foo"])
         .assert()
         .success();
 
-    let task_path = tmp.path().join("en/tasks/foo.md");
+    // File should be created in current directory (tasks/)
+    let task_path = tmp.path().join("tasks/foo.md");
     assert!(task_path.exists());
 
+    // Space name in frontmatter should be the temp dir's name (not ".")
     let content = std::fs::read_to_string(&task_path).unwrap();
-    assert!(content.contains("space: en"));
+    assert!(content.contains("type: task"));
+    assert!(content.contains("id: foo"));
 }
 
 // ============================================================================

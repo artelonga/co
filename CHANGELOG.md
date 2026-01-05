@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-01-04
+
+### Fixed
+- **External Folder Support** (#77)
+  - Bundle language configs in binary using `include_str!()`
+  - CO now works properly in any registered workspace without source files
+  - `co init` simplified to just create directory (no README.md)
+  - `co new` defaults to current directory instead of 'en' space
+  - Namespaces are now simple directories users organize however they want
+
 ## [0.22.0] - 2026-01-04
 
 ### Added
