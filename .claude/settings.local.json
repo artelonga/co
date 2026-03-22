@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git checkout:*)",
+      "Bash(git pull:*)",
+      "Bash(gh issue:*)",
+      "Bash(cargo run:*)",
+      "Read(//Users/artelonga/projects/game/**)",
+      "Read(//Users/artelonga/.local/bin/**)",
+      "Bash(co auto:*)",
+      "Read(//usr/local/bin/**)",
+      "Read(//opt/homebrew/bin/**)",
+      "Read(//Users/artelonga/.npm-global/bin/**)",
+      "Read(//Users/artelonga/**)",
+      "Bash(PATH=\"/Users/artelonga/Library/Application Support/Claude/claude-code/2.1.78/claude.app/Contents/MacOS:$PATH\" co auto --space gp --workdir /Users/artelonga/projects/game --model opus)"
+    ]
+  }
+}
