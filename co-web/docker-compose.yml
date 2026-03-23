@@ -1,0 +1,49 @@
+services:
+  co-web:
+    build:
+      context: ..
+      dockerfile: co-web/Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - co_data:/data
+    environment:
+      - CO_WEB_DATA=/data
+      - CO_WEB_PORT=3000
+      - RUST_LOG=co_web=info,tower_http=info
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      start-period: 10s
+      retries: 3
+
+  # Optional: Caddy reverse proxy for HTTPS
+  # Uncomment to enable automatic TLS
+  # caddy:
+  #   image: caddy:2
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile
+  #     - caddy_data:/data
+  #     - caddy_config:/config
+  #   depends_on:
+  #     - co-web
+
+volumes:
+  co_data:
+  # caddy_data:
+  # caddy_config:

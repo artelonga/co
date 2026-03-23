@@ -1,0 +1,429 @@
+/* ===== Experiment Widget ===== */
+.experiment-pill {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #1a1d23;
+    color: #e5e7eb;
+    padding: 8px 14px;
+    border-radius: 24px;
+    font-size: 13px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    cursor: default;
+    user-select: none;
+}
+
+.experiment-pill-variant {
+    font-weight: 700;
+    background: rgba(99, 102, 241, 0.25);
+    color: #a5b4fc;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.experiment-pill-sep {
+    color: #4b5563;
+}
+
+.experiment-pill-btn {
+    background: none;
+    border: none;
+    color: #9ca3af;
+    font-size: 12px;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.15s;
+    font-family: inherit;
+}
+
+.experiment-pill-btn:hover {
+    color: #e5e7eb;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+/* ===== Variant Switcher Dropdown ===== */
+.experiment-dropdown {
+    position: fixed;
+    bottom: 60px;
+    right: 20px;
+    z-index: 1001;
+    background: #1a1d23;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    min-width: 180px;
+}
+
+.experiment-dropdown.hidden {
+    display: none;
+}
+
+.experiment-dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border: none;
+    background: none;
+    color: #d1d5db;
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    text-align: left;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.experiment-dropdown-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.experiment-dropdown-item.active {
+    background: rgba(99, 102, 241, 0.2);
+    color: #a5b4fc;
+}
+
+.experiment-dropdown-item-letter {
+    font-weight: 700;
+    font-size: 11px;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 2px 7px;
+    border-radius: 4px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.experiment-dropdown-item.active .experiment-dropdown-item-letter {
+    background: rgba(99, 102, 241, 0.3);
+}
+
+/* ===== Feedback Modal ===== */
+.experiment-feedback-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1002;
+    backdrop-filter: blur(3px);
+}
+
+.experiment-feedback-overlay.hidden {
+    display: none;
+}
+
+.experiment-feedback {
+    background: #ffffff;
+    border-radius: 12px;
+    width: 420px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15);
+}
+
+.experiment-feedback-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 24px 0;
+}
+
+.experiment-feedback-header h3 {
+    font-size: 16px;
+    font-weight: 600;
+    color: #111827;
+    margin: 0;
+}
+
+.experiment-feedback-close {
+    background: none;
+    border: none;
+    font-size: 22px;
+    color: #9ca3af;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+}
+
+.experiment-feedback-close:hover {
+    color: #374151;
+}
+
+.experiment-feedback-form {
+    padding: 20px 24px 24px;
+}
+
+.experiment-feedback-group {
+    margin-bottom: 16px;
+}
+
+.experiment-feedback-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.experiment-rating {
+    display: flex;
+    gap: 4px;
+}
+
+.experiment-rating-btn {
+    width: 40px;
+    height: 36px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 600;
+    color: #6b7280;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.experiment-rating-btn:hover {
+    border-color: #6366f1;
+    color: #6366f1;
+}
+
+.experiment-rating-btn.active {
+    background: #6366f1;
+    border-color: #6366f1;
+    color: white;
+}
+
+.experiment-variant-radio {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.experiment-variant-option {
+    flex: 1;
+}
+
+.experiment-variant-option input {
+    display: none;
+}
+
+.experiment-variant-option label {
+    display: block;
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    text-align: center;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+    text-transform: none;
+    letter-spacing: normal;
+    transition: all 0.15s;
+}
+
+.experiment-variant-option input:checked + label {
+    border-color: #6366f1;
+    background: #eef2ff;
+    color: #4338ca;
+}
+
+.experiment-feedback-group textarea {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    transition: border-color 0.15s;
+    box-sizing: border-box;
+}
+
+.experiment-feedback-group textarea:focus {
+    border-color: #6366f1;
+}
+
+.experiment-feedback-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid #f3f4f6;
+}
+
+.experiment-btn {
+    padding: 8px 18px;
+    border: none;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+
+.experiment-btn-secondary {
+    background: #f3f4f6;
+    color: #374151;
+}
+
+.experiment-btn-secondary:hover {
+    background: #e5e7eb;
+}
+
+.experiment-btn-primary {
+    background: #6366f1;
+    color: white;
+}
+
+.experiment-btn-primary:hover {
+    background: #4f46e5;
+}
+
+.experiment-toast {
+    position: fixed;
+    bottom: 70px;
+    right: 20px;
+    z-index: 1003;
+    background: #065f46;
+    color: white;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-family: inherit;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    animation: experiment-toast-in 0.3s ease;
+}
+
+.experiment-toast.hidden {
+    display: none;
+}
+
+@keyframes experiment-toast-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Palette Customizer Panel ===== */
+.experiment-palette {
+    position: fixed;
+    bottom: 60px;
+    right: 20px;
+    z-index: 1001;
+    background: #1a1d23;
+    border: 1px solid #374151;
+    border-radius: 8px;
+    padding: 12px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    min-width: 220px;
+}
+
+.experiment-palette.hidden {
+    display: none;
+}
+
+.experiment-palette-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.experiment-palette-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: #e5e7eb;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.experiment-palette-reset {
+    background: none;
+    border: 1px solid #4b5563;
+    color: #9ca3af;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+
+.experiment-palette-reset:hover {
+    color: #e5e7eb;
+    border-color: #6b7280;
+}
+
+.experiment-palette-colors {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.experiment-palette-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.experiment-palette-row label {
+    font-size: 12px;
+    color: #d1d5db;
+    white-space: nowrap;
+}
+
+.experiment-palette-input {
+    width: 32px;
+    height: 24px;
+    padding: 0;
+    border: 1px solid #4b5563;
+    border-radius: 4px;
+    background: transparent;
+    cursor: pointer;
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.experiment-palette-input::-webkit-color-swatch-wrapper {
+    padding: 1px;
+}
+
+.experiment-palette-input::-webkit-color-swatch {
+    border: none;
+    border-radius: 2px;
+}
+
+/* Checkbox styling in feedback form */
+.experiment-feedback-group input[type="checkbox"] {
+    margin-right: 6px;
+    vertical-align: middle;
+}
+
+.experiment-feedback-group > label:has(input[type="checkbox"]) {
+    cursor: pointer;
+    text-transform: none;
+    letter-spacing: normal;
+    font-size: 13px;
+    font-weight: 500;
+    color: #374151;
+}

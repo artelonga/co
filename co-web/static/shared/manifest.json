@@ -1,0 +1,21 @@
+{
+    "name": "Board",
+    "short_name": "Board",
+    "description": "Graph-based project management tool",
+    "start_url": "/",
+    "display": "standalone",
+    "background_color": "#1a1a2e",
+    "theme_color": "#6366f1",
+    "icons": [
+        {
+            "src": "/shared/icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "/shared/icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        }
+    ]
+}

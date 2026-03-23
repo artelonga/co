@@ -1,0 +1,210 @@
+use std::sync::{Arc, Mutex};
+
+use axum::body::Body;
+use axum::http::{Request, StatusCode, header};
+use http_body_util::BodyExt;
+use tempfile::tempdir;
+use tower::ServiceExt;
+
+use co_web::config::WebConfig;
+use co_web::experiment::ExperimentStore;
+use co_web::models::*;
+use co_web::server::{AppState, AppStateInner, build_router};
+use co_web::storage::Storage;
+extern crate co;
+
+fn test_config(dir: &std::path::Path) -> WebConfig {
+    WebConfig {
+        port: 3000,
+        data_dir: dir.to_str().unwrap().to_string(),
+        static_dir: "co-web/static".to_string(),
+        default_variant: "a".to_string(),
+        experiments: true,
+    }
+}
+
+fn build_test_app(dir: &std::path::Path) -> axum::Router {
+    let config = test_config(dir);
+    let mut storage = Storage::new(&config.data_dir);
+
+    // Create a project for tests
+    storage
+        .create_project(CreateProject {
+            name: "Concurrency Test".into(),
+            key: "CC".into(),
+            description: "".into(),
+        })
+        .unwrap();
+
+    let experiment = ExperimentStore::new(&config.data_dir);
+
+    let auth_store = co_web::auth::AuthStore::new(dir).unwrap();
+    let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
+    let state: AppState = Arc::new(AppStateInner {
+        storage: Mutex::new(storage),
+        experiment: Mutex::new(experiment),
+        config,
+        auth_store: Mutex::new(auth_store),
+        mail,
+    });
+
+    build_router(state)
+}
+
+#[tokio::test]
+async fn test_concurrent_task_creation() {
+    let dir = tempdir().unwrap();
+    let app = build_test_app(dir.path());
+
+    let mut handles = Vec::new();
+
+    for i in 0..10 {
+        let app = app.clone();
+        handles.push(tokio::spawn(async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/projects/CC/tasks")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            serde_json::to_string(&serde_json::json!({
+                                "title": format!("Concurrent task {i}"),
+                                "description": "Created concurrently"
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::CREATED);
+
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            let task: Task = serde_json::from_slice(&bytes).unwrap();
+            task.id
+        }));
+    }
+
+    let mut ids = Vec::new();
+    for handle in handles {
+        ids.push(handle.await.unwrap());
+    }
+
+    // All IDs should be unique
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), 10, "Expected 10 unique task IDs, got {:?}", ids);
+
+    // Verify total count
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/projects/CC/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let tasks: Vec<Task> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(tasks.len(), 10);
+}
+
+#[tokio::test]
+async fn test_concurrent_read_write() {
+    let dir = tempdir().unwrap();
+    let app = build_test_app(dir.path());
+
+    // Seed some tasks first
+    for i in 0..5 {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/projects/CC/tasks")
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        serde_json::to_string(&serde_json::json!({
+                            "title": format!("Seed task {i}"),
+                        }))
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+    }
+
+    let mut handles = Vec::new();
+
+    // Spawn readers
+    for _ in 0..5 {
+        let app = app.clone();
+        handles.push(tokio::spawn(async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .uri("/api/projects/CC/tasks")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::OK);
+            let bytes = response.into_body().collect().await.unwrap().to_bytes();
+            let tasks: Vec<Task> = serde_json::from_slice(&bytes).unwrap();
+            assert!(tasks.len() >= 5, "Expected at least 5 tasks");
+        }));
+    }
+
+    // Spawn writers simultaneously
+    for i in 0..5 {
+        let app = app.clone();
+        handles.push(tokio::spawn(async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/projects/CC/tasks")
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(
+                            serde_json::to_string(&serde_json::json!({
+                                "title": format!("Concurrent write {i}"),
+                            }))
+                            .unwrap(),
+                        ))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }));
+    }
+
+    // All should complete without panics
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    // Final state: 5 seed + 5 concurrent = 10
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/projects/CC/tasks")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let tasks: Vec<Task> = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(tasks.len(), 10);
+}

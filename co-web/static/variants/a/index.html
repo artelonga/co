@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Board</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="/shared/production.css">
+    <link rel="stylesheet" href="/shared/experiment.css">
+    <link rel="manifest" href="/shared/manifest.json">
+    <meta name="theme-color" content="#1a1a2e">
+</head>
+<body>
+    <div id="app" class="app">
+        <button class="hamburger-btn" id="hamburger-btn" aria-label="Menu">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+        </button>
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <span class="logo-mark">B</span>
+                <span class="logo-text">Projects</span>
+            </div>
+            <nav class="sidebar-nav" id="project-list"></nav>
+            <div class="sidebar-mini-calendar hidden" id="mini-calendar"></div>
+            <div class="sidebar-footer">
+                <button class="btn-icon" id="btn-new-project" title="New project">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+        <main class="main">
+            <header class="header" id="header">
+                <div class="header-left">
+                    <h1 id="project-name">Select a project</h1>
+                    <span class="header-desc" id="project-desc"></span>
+                </div>
+                <div class="header-right">
+                    <div class="view-tabs" id="view-tabs">
+                        <button class="view-tab active" data-view="kanban">Kanban</button>
+                        <button class="view-tab" data-view="table">Table</button>
+                        <button class="view-tab" data-view="timeline">Timeline</button>
+                        <button class="view-tab" data-view="calendar">Calendar</button>
+                        <button class="view-tab" data-view="dashboard">Dashboard</button>
+                    </div>
+                    <div class="view-tabs hidden" id="zoom-tabs">
+                        <button class="view-tab" data-zoom="week">Week</button>
+                        <button class="view-tab active" data-zoom="month">Month</button>
+                        <button class="view-tab" data-zoom="quarter">Quarter</button>
+                    </div>
+                    <div class="timeline-nav-buttons hidden" id="timeline-nav">
+                        <button class="timeline-nav-btn" id="btn-prev" title="Previous">&larr;</button>
+                        <button class="timeline-nav-btn" id="btn-today" title="Today">Today</button>
+                        <button class="timeline-nav-btn" id="btn-next" title="Next">&rarr;</button>
+                    </div>
+                    <label class="archive-toggle" id="archive-toggle" title="Show archived">
+                        <input type="checkbox" id="show-archived">
+                        <span class="archive-toggle-label">Archived</span>
+                    </label>
+                    <input type="search" class="search-input" id="search-input" placeholder="Filter tasks... (/)">
+                    <button class="btn btn-primary" id="btn-new-task">+ New Task</button>
+                </div>
+            </header>
+            <div class="content" id="content">
+                <div class="loading-spinner" id="loading-spinner">
+                    <div class="spinner"></div>
+                    <span>Loading...</span>
+                </div>
+                <div class="empty-state">
+                    <p>Select a project from the sidebar</p>
+                </div>
+            </div>
+        </main>
+        <!-- Activity Panel -->
+        <aside class="activity-panel hidden" id="activity-panel">
+            <div class="activity-panel-header">
+                <h3>Activity</h3>
+                <button class="activity-panel-close" id="activity-panel-close">&times;</button>
+            </div>
+            <div class="activity-panel-body" id="activity-list"></div>
+        </aside>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- Task Modal -->
+    <div id="modal-overlay" class="modal-overlay hidden">
+        <div class="modal" id="task-modal">
+            <div class="modal-header">
+                <h2 id="modal-title">New Task</h2>
+                <button class="modal-close" id="modal-close">&times;</button>
+            </div>
+            <form id="task-form">
+                <div class="form-group">
+                    <label for="task-title">Title</label>
+                    <input type="text" id="task-title" required autocomplete="off">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-status">Status</label>
+                        <select id="task-status">
+                            <option value="todo">To Do</option>
+                            <option value="in_progress">In Progress</option>
+                            <option value="in_review">In Review</option>
+                            <option value="done">Done</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="task-priority">Priority</label>
+                        <select id="task-priority">
+                            <option value="low">Low</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High</option>
+                            <option value="critical">Critical</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="task-due-date">Due Date</label>
+                        <input type="date" id="task-due-date">
+                    </div>
+                    <div class="form-group">
+                        <label for="task-parent">Parent Task</label>
+                        <select id="task-parent">
+                            <option value="">None</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="task-labels">Labels (comma-separated)</label>
+                    <input type="text" id="task-labels" placeholder="design, web, docs" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="task-description">Description</label>
+                    <textarea id="task-description" rows="4"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-danger hidden" id="btn-delete">Delete</button>
+                    <button type="button" class="btn btn-warning hidden" id="btn-archive">Archive</button>
+                    <div class="form-actions-right">
+                        <button type="button" class="btn btn-secondary" id="btn-cancel">Cancel</button>
+                        <button type="submit" class="btn btn-primary" id="btn-save">Save</button>
+                    </div>
+                </div>
+            </form>
+            <!-- Comments Section -->
+            <div class="comments-section" id="comments-section" style="display:none">
+                <h3 class="comments-title">Comments</h3>
+                <div class="comments-list" id="comments-list"></div>
+                <div class="comment-form">
+                    <input type="text" id="comment-author" placeholder="Name (optional)" autocomplete="off">
+                    <textarea id="comment-body" rows="2" placeholder="Add a comment..."></textarea>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-add-comment">Comment</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/app.js"></script>
+    <script src="/shared/experiment.js"></script>
+</body>
+</html>
