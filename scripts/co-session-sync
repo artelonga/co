@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+#
+# co-session-sync — Sync Claude Code session logs to the co-sessions repo
+#
+# Usage:
+#   co-session-sync              # Full sync (all sessions)
+#   co-session-sync --push       # Sync and push to remote
+#   co-session-sync --latest     # Sync only the most recent session
+#
+# Environment:
+#   CO_SESSIONS_REPO  Path to co-sessions repo (default: ~/projects/co-sessions)
+#   CO_PROJECT_DIR    Claude project dir (default: auto-detected)
+
+set -euo pipefail
+
+SESSIONS_REPO="${CO_SESSIONS_REPO:-$HOME/projects/co-sessions}"
+CLAUDE_DIR="$HOME/.claude/projects/-Users-yuri-projects-co"
+HISTORY_FILE="$HOME/.claude/history.jsonl"
+DO_PUSH=false
+LATEST_ONLY=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --push)   DO_PUSH=true ;;
+        --latest) LATEST_ONLY=true ;;
+    esac
+done
+
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo "→ $*" >&2; }
+
+[[ -d "$CLAUDE_DIR" ]] || die "Claude project dir not found: $CLAUDE_DIR"
+[[ -d "$SESSIONS_REPO/.git" ]] || die "Sessions repo not found: $SESSIONS_REPO"
+
+# ── Build session index ──
+
+build_session_metadata() {
+    local session_id="$1"
+    local jsonl_file="$CLAUDE_DIR/$session_id.jsonl"
+
+    if [[ ! -f "$jsonl_file" ]]; then
+        echo "{}"
+        return
+    fi
+
+    # Extract metadata from the transcript
+    python3 -c "
+import json, sys, os
+
+jsonl_path = '$jsonl_file'
+session_id = '$session_id'
+
+first_ts = None
+last_ts = None
+git_branch = None
+user_messages = []
+total_turns = 0
+
+with open(jsonl_path, 'r') as f:
+    for line in f:
+        try:
+            entry = json.loads(line.strip())
+        except:
+            continue
+
+        ts = entry.get('timestamp')
+        if ts and (first_ts is None or ts < first_ts):
+            first_ts = ts
+        if ts and (last_ts is None or ts > last_ts):
+            last_ts = ts
+
+        if entry.get('gitBranch'):
+            git_branch = entry['gitBranch']
+
+        if entry.get('type') == 'user':
+            msg = entry.get('message', {})
+            content = msg.get('content', '')
+            if isinstance(content, str) and content.strip():
+                user_messages.append(content.strip()[:120])
+                total_turns += 1
+
+size_bytes = os.path.getsize(jsonl_path)
+
+meta = {
+    'session_id': session_id,
+    'project': 'institutional-pointset/co',
+    'first_timestamp': first_ts,
+    'last_timestamp': last_ts,
+    'git_branch': git_branch,
+    'total_user_turns': total_turns,
+    'size_bytes': size_bytes,
+    'first_message': user_messages[0] if user_messages else None,
+    'messages_preview': user_messages[:5],
+}
+
+print(json.dumps(meta, indent=2))
+" 2>/dev/null || echo "{}"
+}
+
+# ── Sync sessions ──
+
+mkdir -p "$SESSIONS_REPO/sessions"
+mkdir -p "$SESSIONS_REPO/memory"
+
+# Determine which sessions to sync
+if $LATEST_ONLY; then
+    # Find the most recently modified .jsonl
+    SESSIONS=$(ls -t "$CLAUDE_DIR"/*.jsonl 2>/dev/null | head -1 | xargs -I{} basename {} .jsonl)
+else
+    SESSIONS=$(ls "$CLAUDE_DIR"/*.jsonl 2>/dev/null | xargs -I{} basename {} .jsonl)
+fi
+
+SYNCED=0
+
+for session_id in $SESSIONS; do
+    session_dir="$SESSIONS_REPO/sessions/$session_id"
+    mkdir -p "$session_dir"
+
+    # Copy main transcript
+    jsonl_src="$CLAUDE_DIR/$session_id.jsonl"
+    if [[ -f "$jsonl_src" ]]; then
+        cp "$jsonl_src" "$session_dir/transcript.jsonl"
+    fi
+
+    # Copy subagents
+    subagents_src="$CLAUDE_DIR/$session_id/subagents"
+    if [[ -d "$subagents_src" ]]; then
+        mkdir -p "$session_dir/subagents"
+        cp "$subagents_src"/* "$session_dir/subagents/" 2>/dev/null || true
+    fi
+
+    # Copy tool results
+    tools_src="$CLAUDE_DIR/$session_id/tool-results"
+    if [[ -d "$tools_src" ]]; then
+        mkdir -p "$session_dir/tool-results"
+        cp "$tools_src"/* "$session_dir/tool-results/" 2>/dev/null || true
+    fi
+
+    # Generate metadata
+    build_session_metadata "$session_id" > "$session_dir/metadata.json"
+
+    SYNCED=$((SYNCED + 1))
+    info "Synced: $session_id"
+done
+
+# Sync memory files
+if [[ -d "$CLAUDE_DIR/memory" ]]; then
+    cp "$CLAUDE_DIR/memory"/*.md "$SESSIONS_REPO/memory/" 2>/dev/null || true
+    info "Synced memory files"
+fi
+
+# Build global index
+info "Building session index..."
+python3 -c "
+import json, os, glob
+
+repo = '$SESSIONS_REPO'
+sessions = []
+
+for meta_file in sorted(glob.glob(os.path.join(repo, 'sessions', '*', 'metadata.json'))):
+    try:
+        with open(meta_file) as f:
+            meta = json.load(f)
+        if meta:
+            sessions.append(meta)
+    except:
+        pass
+
+# Sort by last_timestamp descending
+sessions.sort(key=lambda s: s.get('last_timestamp') or '', reverse=True)
+
+with open(os.path.join(repo, 'index.json'), 'w') as f:
+    json.dump({'total_sessions': len(sessions), 'sessions': sessions}, f, indent=2)
+
+print(f'Index: {len(sessions)} sessions')
+"
+
+# Git add and commit
+cd "$SESSIONS_REPO"
+git add -A
+if git diff --cached --quiet; then
+    info "No changes to commit"
+else
+    git commit -m "sync: $SYNCED session(s) from co project
+
+Synced at: $(date -u +%Y-%m-%dT%H:%M:%SZ)
+Sessions: $SYNCED" > /dev/null
+    info "Committed $SYNCED session(s)"
+fi
+
+# Push if requested
+if $DO_PUSH; then
+    git push -u origin main 2>/dev/null || git push -u origin HEAD:main 2>/dev/null
+    info "Pushed to remote"
+fi
+
+info "Done. Repo: $SESSIONS_REPO"

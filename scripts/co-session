@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+#
+# co-session — Launch a Claude Code session for a specific board task
+#
+# Usage:
+#   co-session UX-51              # Interactive session for task UX-51
+#   co-session UX-51 --continue   # Resume the last session for this task
+#   co-session UX-51 --plan       # Start in plan mode
+#   co-session list UX            # List all tasks for project UX
+#   co-session next               # Pick next unstarted task by priority
+#   co-session roadmap            # Show roadmap order
+#
+# Requires: curl, jq, claude (Claude Code CLI)
+
+set -euo pipefail
+
+CO_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export CO_SCRIPT_DIR
+
+# Source library
+# shellcheck disable=SC1091
+source "$CO_SCRIPT_DIR/lib/core.sh"
+source_lib board
+source_lib context
+source_lib session
+source_lib qa
+source_lib runner
+source_lib order
+source_lib process
+
+# ── Main ──
+
+case "${1:-}" in
+    ""|--help|-h)
+        echo "Usage:"
+        echo "  co-session <TASK-KEY>              Start session for task (e.g., UX-51)"
+        echo "  co-session <TASK-KEY> --continue    Resume last session for this task"
+        echo "  co-session <TASK-KEY> --plan         Start in plan mode"
+        echo "  co-session list <PROJECT-KEY>       List all tasks"
+        echo "  co-session next [PROJECT-KEY]       Pick next unstarted task"
+        echo "  co-session roadmap                  Show roadmap order"
+        exit 0
+        ;;
+    list)
+        task_list "${2:?Usage: co-session list <PROJECT-KEY>}"
+        exit 0
+        ;;
+    next)
+        next_key=$(pick_next "${2:-$CO_PROJECT_KEY}")
+        if [[ -z "$next_key" ]]; then
+            echo "All tasks are done!" >&2
+            exit 0
+        fi
+        info "Next task: $next_key"
+        exec "$0" "$next_key"
+        ;;
+    roadmap)
+        # Load phases and show order if pipeline.conf exists
+        if [[ -f "$CO_SCRIPT_DIR/pipeline.conf" ]]; then
+            order_load
+            order_show
+        else
+            echo "No pipeline.conf found — cannot show roadmap"
+        fi
+        exit 0
+        ;;
+esac
+
+# Parse task key
+TASK_KEY="$1"
+shift
+
+parse_task_key "$TASK_KEY"
+
+# Launch interactive session via process (preflight + tracking + sync)
+process_interactive "$CO_PROJECT_KEY" "$CO_TASK_ID" "$@"

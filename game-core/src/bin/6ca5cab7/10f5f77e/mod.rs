@@ -1,0 +1,16 @@
+#[path = "5751e048.rs"]
+pub mod balance;
+#[path = "b8158434/mod.rs"]
+pub mod cinema;
+#[path = "0900bc22.rs"]
+pub mod history_cmd;
+#[path = "fba2eac3.rs"]
+pub mod poker;
+#[path = "1900eab6.rs"]
+pub mod profile;
+#[path = "cced28c6.rs"]
+pub mod start;
+#[path = "2937013f.rs"]
+pub mod update;
+#[path = "0f2ed9e3.rs"]
+pub mod vim;

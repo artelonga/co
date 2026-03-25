@@ -22,6 +22,8 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         static_dir: "co-web/static".to_string(),
         default_variant: "a".to_string(),
         experiments: true,
+        plugins_dir: "plugins".to_string(),
+        game_db_path: None,
     }
 }
 
@@ -33,15 +35,21 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
 
     let auth_store = co_web::auth::AuthStore::new(dir).unwrap();
     let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
+    let game_db_path = dir.join("game_test.db");
+    let game_storage = std::sync::Arc::new(
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage")
+    );
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
         mail,
+        game_storage,
+        plugin_registry: game_core::plugin::PluginRegistry::new(),
     });
 
-    build_router(state)
+    build_router(state, None)
 }
 
 // --- Helper to read body ---

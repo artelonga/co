@@ -51,6 +51,8 @@ pub struct AppStateInner {
     pub config: WebConfig,
     pub auth_store: Mutex<AuthStore>,
     pub mail: Arc<dyn co::MailProvider>,
+    pub game_storage: Arc<game_core::storage::Storage>,
+    pub plugin_registry: game_core::plugin::PluginRegistry,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -171,11 +173,13 @@ fn validate_labels(labels: &[String]) -> Result<(), AppError> {
 
 // --- Router ---
 
-pub fn build_router(state: AppState) -> Router {
+pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) -> Router {
+    // --- co-web auth (email codes) ---
     let auth_api = Router::new()
         .route("/v1/auth/login", post(login_handler))
         .route("/v1/auth/verify", post(verify_handler));
 
+    // --- Task/project CRUD (co-web) ---
     let api = Router::new()
         .route("/projects", get(list_projects).post(create_project))
         .route("/projects/{key}", get(get_project))
@@ -194,10 +198,29 @@ pub fn build_router(state: AppState) -> Router {
         .route("/projects/{key}/tasks/bulk-delete", post(bulk_delete_tasks))
         .route("/health", get(health_check));
 
+    // --- Experiments ---
     let experiment_api = Router::new()
         .route("/experiment/variant", get(get_variant).post(switch_variant))
         .route("/experiment/feedback", post(submit_feedback))
         .route("/experiment/summary", get(get_summary));
+
+    // --- Game routes (from game/server) ---
+    use crate::game_routes;
+
+    let game_public = Router::new()
+        .route("/v1/health", get(game_routes::health))
+        .route("/v1/plugins", get(game_routes::list_plugins))
+        .route("/v1/auth/register", post(game_routes::register))
+        .route("/v1/auth/legacy-login", post(game_routes::legacy_login))
+        .route("/v1/games/{game_name}/leaderboard", get(game_routes::get_leaderboard))
+        .route("/v1/players/{username}", get(game_routes::get_player_profile));
+
+    let game_protected = Router::new()
+        .route("/v1/profile", get(game_routes::get_profile))
+        .route("/v1/wallet", get(game_routes::get_wallet))
+        .route("/v1/games/{game_name}/result", post(game_routes::record_game_result))
+        .route("/v1/games/{game_name}/stats", get(game_routes::get_game_stats))
+        .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     // Middleware stack
     let cors = CorsLayer::new()
@@ -205,10 +228,19 @@ pub fn build_router(state: AppState) -> Router {
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE]);
 
-    Router::new()
+    let mut router = Router::new()
         .nest("/api", api)
         .nest("/api", auth_api)
         .nest("/api", experiment_api)
+        .nest("/api", game_public)
+        .nest("/api", game_protected);
+
+    // Mount plugin routes if any plugins were loaded
+    if let Some(plugin_router) = plugin_routes {
+        router = router.nest("/api/v1/universes", plugin_router);
+    }
+
+    router
         .fallback(serve_variant_file)
         .with_state(state)
         .layer(DefaultBodyLimit::max(1_048_576)) // 1MB max body
@@ -260,15 +292,39 @@ pub async fn start_server(config: WebConfig) {
 
     let mail_provider: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
 
+    // Initialize game-core encrypted storage
+    let game_db_path = config.game_db_path.clone().unwrap_or_else(|| {
+        let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
+        data_dir.join("game").join("game.db").to_string_lossy().to_string()
+    });
+    let game_db_dir = std::path::Path::new(&game_db_path).parent().unwrap_or(std::path::Path::new("."));
+    std::fs::create_dir_all(game_db_dir).ok();
+    let game_storage = Arc::new(
+        game_core::storage::Storage::open(std::path::Path::new(&game_db_path))
+            .expect("Failed to open game storage")
+    );
+    tracing::info!("Game storage opened at {}", game_db_path);
+
+    // Load plugins
+    let plugins_dir = std::path::Path::new(&config.plugins_dir);
+    let (plugin_registry, plugin_router) =
+        crate::plugin_loader::load_plugins(plugins_dir, &game_storage);
+    let plugin_count = plugin_registry.len();
+    tracing::info!("Loaded {} plugin(s)", plugin_count);
+
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config: config.clone(),
         auth_store: Mutex::new(auth_store),
         mail: mail_provider,
+        game_storage,
+        plugin_registry,
     });
 
-    let app = build_router(state);
+    let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
+
+    let app = build_router(state, plugin_routes);
 
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);

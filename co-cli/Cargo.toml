@@ -25,6 +25,10 @@ comfy-table = { workspace = true }
 rustyline = "14"
 dirs = "5"
 atty = "0.2"
+co-engine = { path = "../co" }
+co-web = { path = "../co-web" }
+anyhow = { workspace = true }
+whoami = "1"
 
 [dev-dependencies]
 assert_cmd = "2.0"

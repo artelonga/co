@@ -1,0 +1,258 @@
+#!/usr/bin/env bash
+#
+# co-pipeline — Automated Execute → QA → Review pipeline for board tasks
+#
+# Modes:
+#   co-pipeline run [TASK-KEY]       Interactive Claude session for task
+#   co-pipeline auto [TASK-KEY]      Non-interactive execution (claude -p)
+#   co-pipeline cycle [TASK-KEY]     Auto with QA retry loop
+#   co-pipeline qa [TASK-KEY]        Run QA checks on current state
+#   co-pipeline review [TASK-KEY]    Show diff + summary for human review
+#   co-pipeline approve [TASK-KEY]   Mark task done, move to next
+#   co-pipeline reject [TASK-KEY]    Send task back with feedback
+#   co-pipeline next                 Show the next task to run
+#   co-pipeline batch [N]            Auto-execute N tasks sequentially
+#   co-pipeline parallel [N]         Run N tasks in parallel via worktrees
+#   co-pipeline status               Show pipeline status (all tasks by phase)
+#   co-pipeline order                Show execution order
+#   co-pipeline runs [--limit N]     List recent runs
+#   co-pipeline process <TASK>       Run canonical process (preflight → execute → qa → record)
+#   co-pipeline processes            List recent processes
+#
+# The pipeline for each task:
+#   1. EXECUTE  — Claude implements the task (interactive or auto)
+#   2. QA       — Automated checks (tests, clippy, fmt, playwright)
+#   3. REVIEW   — Human reviews diff, approves or rejects
+
+set -euo pipefail
+
+CO_SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+export CO_SCRIPT_DIR
+
+# Source library
+# shellcheck disable=SC1091
+source "$CO_SCRIPT_DIR/lib/core.sh"
+source_lib board
+source_lib context
+source_lib session
+source_lib qa
+source_lib order
+source_lib review
+source_lib runner
+source_lib parallel
+source_lib process
+
+# Load phase definitions
+order_load
+
+# ── Main ──
+
+case "${1:-}" in
+    ""|--help|-h)
+        echo "Usage:"
+        echo "  co-pipeline run <TASK>        Interactive Claude session for task"
+        echo "  co-pipeline auto <TASK>       Non-interactive execution (claude -p)"
+        echo "  co-pipeline cycle <TASK>      Auto with QA retry (re-runs on failure)"
+        echo "  co-pipeline qa [TASK]         Run QA checks"
+        echo "  co-pipeline review <TASK>     Show review summary"
+        echo "  co-pipeline approve <TASK>    Mark done, check epic, move on"
+        echo "  co-pipeline reject <TASK>     Send back to in_progress"
+        echo "  co-pipeline next              Show next task to run"
+        echo "  co-pipeline batch [N]         Auto-execute N tasks (default: 1)"
+        echo "  co-pipeline parallel [N]      Run N tasks in parallel (default: 3)"
+        echo "  co-pipeline status            Show all task statuses"
+        echo "  co-pipeline order             Show execution order"
+        echo "  co-pipeline runs [--limit N]  List recent runs"
+        echo "  co-pipeline process <TASK>    Run canonical process (preflight+execute+qa+record)"
+        echo "  co-pipeline processes         List recent processes"
+        exit 0
+        ;;
+
+    run)
+        parse_task_key "${2:?Usage: co-pipeline run <TASK>}"
+        session_interactive "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        ;;
+
+    auto)
+        parse_task_key "${2:?Usage: co-pipeline auto <TASK>}"
+        local_run_id=$(run_start "$CO_TASK_ID" "auto")
+        run_phase "$local_run_id" "execute"
+        session_auto "$CO_PROJECT_KEY" "$CO_TASK_ID"
+
+        run_phase "$local_run_id" "qa"
+        local phase
+        phase=$(order_phase_for_task "$CO_TASK_ID")
+        if qa_run "$CO_TASK_ID" "$phase"; then
+            task_set_status "$CO_PROJECT_KEY" "$CO_TASK_ID" "in_review"
+            info "Task $CO_PROJECT_KEY-$CO_TASK_ID → in_review (QA passed)"
+            run_phase "$local_run_id" "review"
+            review_show "$CO_PROJECT_KEY" "$CO_TASK_ID"
+            run_finish "$local_run_id" "success"
+        else
+            warn "Task $CO_PROJECT_KEY-$CO_TASK_ID stays in_progress (QA failed)"
+            info "Fix issues, then: co-pipeline qa $CO_PROJECT_KEY-$CO_TASK_ID"
+            run_finish "$local_run_id" "qa_failed"
+        fi
+        ;;
+
+    cycle)
+        parse_task_key "${2:?Usage: co-pipeline cycle <TASK>}"
+        local_run_id=$(run_start "$CO_TASK_ID" "cycle")
+        phase=$(order_phase_for_task "$CO_TASK_ID")
+
+        # First attempt
+        run_phase "$local_run_id" "execute"
+        session_auto "$CO_PROJECT_KEY" "$CO_TASK_ID"
+
+        run_phase "$local_run_id" "qa"
+        if ! qa_run "$CO_TASK_ID" "$phase"; then
+            # Retry with QA feedback
+            warn "QA failed — retrying with feedback..."
+            qa_feedback=$(cat "$QA_LOG" 2>/dev/null || echo "QA checks failed")
+            context_build_auto "$CO_PROJECT_KEY" "$CO_TASK_ID"
+            context_add_custom "QA Failure Feedback" "The following QA checks failed. Fix these issues:
+
+$qa_feedback"
+
+            run_phase "$local_run_id" "execute-retry"
+            session_auto "$CO_PROJECT_KEY" "$CO_TASK_ID"
+
+            run_phase "$local_run_id" "qa-retry"
+            qa_run "$CO_TASK_ID" "$phase"
+        fi
+
+        if qa_passed; then
+            task_set_status "$CO_PROJECT_KEY" "$CO_TASK_ID" "in_review"
+            run_finish "$local_run_id" "success"
+            review_show "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        else
+            run_finish "$local_run_id" "qa_failed"
+            warn "QA still failing after retry"
+        fi
+        ;;
+
+    qa)
+        if [[ -n "${2:-}" ]]; then
+            parse_task_key "$2"
+        else
+            # QA on whatever is in_progress
+            CO_TASK_ID=$(curl -sf "$CO_BOARD_API/projects/$CO_PROJECT_KEY/tasks?limit=500" \
+                | jq -r '[.[] | select(.status == "in_progress" and .parent)] | sort_by(.id) | .[0].id // empty')
+            [[ -z "$CO_TASK_ID" ]] && die "No in_progress tasks found"
+        fi
+        phase=$(order_phase_for_task "$CO_TASK_ID")
+        if qa_run "$CO_TASK_ID" "$phase"; then
+            task_set_status "$CO_PROJECT_KEY" "$CO_TASK_ID" "in_review"
+            info "Task $CO_PROJECT_KEY-$CO_TASK_ID → in_review (QA passed)"
+        else
+            warn "QA failed — task stays in_progress"
+        fi
+        ;;
+
+    review)
+        parse_task_key "${2:?Usage: co-pipeline review <TASK>}"
+        review_show "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        ;;
+
+    approve)
+        parse_task_key "${2:?Usage: co-pipeline approve <TASK>}"
+        review_approve "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        ;;
+
+    reject)
+        parse_task_key "${2:?Usage: co-pipeline reject <TASK>}"
+        review_reject "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        ;;
+
+    next)
+        next_id=$(order_next_task)
+        [[ -z "$next_id" ]] && die "All tasks complete!"
+        title=$(task_title "$CO_PROJECT_KEY" "$next_id")
+        info "Next task: $CO_PROJECT_KEY-$next_id — $title"
+        echo ""
+        echo "Choose mode:"
+        echo "  1) Interactive:  co-pipeline run $CO_PROJECT_KEY-$next_id"
+        echo "  2) Automatic:    co-pipeline auto $CO_PROJECT_KEY-$next_id"
+        echo "  3) Cycle (auto): co-pipeline cycle $CO_PROJECT_KEY-$next_id"
+        ;;
+
+    batch)
+        count="${2:-1}"
+        info "Batch mode: executing $count task(s)"
+        for ((i=1; i<=count; i++)); do
+            next_id=$(order_next_task)
+            [[ -z "$next_id" ]] && { info "All tasks complete!"; break; }
+            title=$(task_title "$CO_PROJECT_KEY" "$next_id")
+            info "[$i/$count] Task $CO_PROJECT_KEY-$next_id: $title"
+
+            local_run_id=$(run_start "$next_id" "batch")
+            run_phase "$local_run_id" "execute"
+            session_auto "$CO_PROJECT_KEY" "$next_id"
+
+            phase=$(order_phase_for_task "$next_id")
+            run_phase "$local_run_id" "qa"
+            if qa_run "$next_id" "$phase"; then
+                task_set_status "$CO_PROJECT_KEY" "$next_id" "in_review"
+                info "[$i/$count] $CO_PROJECT_KEY-$next_id → in_review (QA passed)"
+                run_finish "$local_run_id" "success"
+            else
+                warn "[$i/$count] $CO_PROJECT_KEY-$next_id QA failed — stopping batch"
+                run_finish "$local_run_id" "qa_failed"
+                break
+            fi
+        done
+        info "Batch complete. Review pending tasks: co-pipeline status"
+        ;;
+
+    parallel)
+        max="${2:-$CO_PARALLEL_MAX}"
+        info "Parallel mode: spawning up to $max task(s)"
+
+        # Collect next N todo tasks
+        task_ids=()
+        for ((i=0; i<max; i++)); do
+            next_id=$(order_next_task)
+            [[ -z "$next_id" ]] && break
+            task_ids+=("$next_id")
+            # Temporarily mark as in_progress so order_next_task skips it
+            task_set_status "$CO_PROJECT_KEY" "$next_id" "in_progress"
+        done
+
+        if [[ ${#task_ids[@]} -eq 0 ]]; then
+            die "No tasks available"
+        fi
+
+        info "Tasks: ${task_ids[*]}"
+        parallel_batch "$max" "${task_ids[@]}"
+        info "Parallel batch complete. Review: co-pipeline status"
+        ;;
+
+    status)
+        order_show_status
+        ;;
+
+    order)
+        order_show
+        ;;
+
+    runs)
+        limit=10
+        if [[ "${2:-}" == "--limit" ]] && [[ -n "${3:-}" ]]; then
+            limit="$3"
+        fi
+        run_list "$limit"
+        ;;
+
+    process)
+        parse_task_key "${2:?Usage: co-pipeline process <TASK>}"
+        process_auto "$CO_PROJECT_KEY" "$CO_TASK_ID"
+        ;;
+
+    processes)
+        process_list "${2:-10}"
+        ;;
+
+    *)
+        die "Unknown command: $1 (run co-pipeline --help)"
+        ;;
+esac

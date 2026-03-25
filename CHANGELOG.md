@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — co-web E2E Testing (UX-50 Epic)
+
+### co-web
+
+#### Added — UX-51: Initialize Playwright project
+- Playwright + @axe-core/playwright devDependencies in `co-web/package.json`
+- `playwright.config.ts` — baseURL localhost:3000, 9 projects (chromium/firefox/webkit × desktop/tablet/mobile)
+- Custom viewports: desktop (1280×720), tablet (768×1024), mobile (375×812)
+- `e2e/global-setup.ts` — builds binary, starts co-web, polls `/api/health`
+- `e2e/global-teardown.ts` — SIGTERM cleanup, skips if external server
+- `.gitignore` updated for node_modules, test-results, playwright-report
+- `npx playwright test --pass-with-no-tests` exits cleanly (code 0)
+
+---
+
 ## [0.22.1] - 2026-01-04
 
 ### Fixed

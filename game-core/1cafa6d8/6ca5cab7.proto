@@ -1,0 +1,239 @@
+syntax = "proto3";
+package game;
+
+// ============================================================
+// DATABASE METADATA
+// ============================================================
+
+message DbMeta {
+  uint32 schema_version = 1;
+  int64 created_at = 2;
+  int64 last_opened_at = 3;
+  string app_version = 4;
+}
+
+// ============================================================
+// USER IDENTITY
+// ============================================================
+
+message UserProfile {
+  string user_id = 1;
+  string display_name = 2;
+  int64 created_at = 3;
+  int64 last_login_at = 4;
+  UserStats stats = 5;
+  string username = 6;
+  string password_hash = 7;
+  string email = 8;
+}
+
+message UserStats {
+  uint64 hands_played = 1;
+  uint64 hands_won = 2;
+  uint64 total_chips_won = 3;
+  uint64 total_chips_lost = 4;
+  uint64 biggest_pot_won = 5;
+  uint32 best_hand_rank = 6;
+  uint64 sessions_played = 7;
+}
+
+// ============================================================
+// WALLET / CASH PERSISTENCE
+// ============================================================
+
+message Wallet {
+  string user_id = 1;
+  uint64 balance = 2;
+  int64 last_updated = 3;
+}
+
+message Transaction {
+  string tx_id = 1;
+  TransactionType tx_type = 2;
+  int64 amount = 3;
+  uint64 balance_after = 4;
+  int64 timestamp = 5;
+  string hand_id = 6;
+  string description = 7;
+}
+
+enum TransactionType {
+  TX_UNKNOWN = 0;
+  TX_INITIAL_GRANT = 1;
+  TX_HAND_WIN = 2;
+  TX_HAND_LOSS = 3;
+  TX_BLIND_POST = 4;
+  TX_REBUY = 5;
+  TX_DAILY_BONUS = 6;
+}
+
+// ============================================================
+// HAND HISTORY
+// ============================================================
+
+message HandRecord {
+  string hand_id = 1;
+  int64 started_at = 2;
+  int64 ended_at = 3;
+  uint32 small_blind = 4;
+  uint32 big_blind = 5;
+  uint32 dealer_position = 6;
+  repeated HandPlayer players = 7;
+  repeated uint32 community_cards = 8;
+  repeated BettingRoundRecord rounds = 9;
+  string winner_player_id = 10;
+  uint32 pot_amount = 11;
+  uint32 winning_hand_rank = 12;
+  string winning_hand_description = 13;
+}
+
+message HandPlayer {
+  string player_id = 1;
+  string name = 2;
+  uint32 chips_start = 3;
+  uint32 chips_end = 4;
+  uint32 seat_position = 5;
+  bool is_local = 6;
+  repeated uint32 hole_cards = 7;
+}
+
+message BettingRoundRecord {
+  uint32 round = 1;
+  repeated PlayerAction actions = 2;
+}
+
+message PlayerAction {
+  string player_id = 1;
+  ActionType action = 2;
+  uint32 amount = 3;
+  int64 timestamp = 4;
+}
+
+enum ActionType {
+  ACTION_UNKNOWN = 0;
+  ACTION_FOLD = 1;
+  ACTION_CHECK = 2;
+  ACTION_CALL = 3;
+  ACTION_RAISE = 4;
+  ACTION_ALL_IN = 5;
+  ACTION_POST_BLIND = 6;
+}
+
+// ============================================================
+// GAME CONFIGURATION
+// ============================================================
+
+message GameConfig {
+  uint32 width = 1;
+  uint32 height = 2;
+  uint32 min_width = 3;
+  uint32 min_height = 4;
+  uint32 small_blind = 5;
+  uint32 big_blind = 6;
+  uint32 starting_chips = 7;
+  uint32 max_players = 8;
+  uint32 min_players = 9;
+  uint32 action_timeout = 10;
+  uint32 ante = 11;
+}
+
+// ============================================================
+// THEME
+// ============================================================
+
+message Theme {
+  string name = 1;
+  string description = 2;
+  map<string, string> colors = 3;
+}
+
+// ============================================================
+// ROOM CONFIG
+// ============================================================
+
+message RoomConfig {
+  string name = 1;
+  uint32 max_players = 2;
+  uint32 min_players = 3;
+  uint32 small_blind = 4;
+  uint32 big_blind = 5;
+  uint32 starting_chips = 6;
+  bool auto_start = 7;
+  bool allow_rebuy = 8;
+  bool allow_spectators = 9;
+  ChatSettings chat = 10;
+}
+
+message ChatSettings {
+  bool enabled = 1;
+  uint32 max_message_length = 2;
+}
+
+// ============================================================
+// CARD DEFINITIONS
+// ============================================================
+
+message CardDefinitions {
+  repeated string rank_symbols = 1;
+  repeated string rank_names = 2;
+  repeated string suit_symbols = 3;
+  repeated string suit_unicode = 4;
+  repeated bool suit_is_red = 5;
+  repeated string hand_rank_names = 6;
+}
+
+// ============================================================
+// SESSION TRACKING
+// ============================================================
+
+message SessionRecord {
+  string session_id = 1;
+  string user_id = 2;
+  int64 started_at = 3;
+  int64 ended_at = 4;
+  string command = 5;
+  repeated UniverseVisit visits = 6;
+  uint64 duration_secs = 7;
+}
+
+message UniverseVisit {
+  string universe_name = 1;
+  int64 entered_at = 2;
+  int64 exited_at = 3;
+  uint64 duration_secs = 4;
+}
+
+// ============================================================
+// GAME STATS (generic per-game tracking)
+// ============================================================
+
+message GameStats {
+  string game_name = 1;
+  int64 high_score = 2;
+  uint64 games_played = 3;
+  int64 last_played_at = 4;
+}
+
+// ============================================================
+// TELEMETRY EVENTS
+// ============================================================
+
+enum TelemetryEventType {
+  EVENT_UNKNOWN = 0;
+  EVENT_LOGIN = 1;
+  EVENT_GAME_ENTER = 2;
+  EVENT_GAME_EXIT = 3;
+  EVENT_SESSION_END = 4;
+  EVENT_COMMAND_RUN = 5;
+  EVENT_FIRST_RUN = 6;
+}
+
+message TelemetryEvent {
+  string event_id = 1;
+  string user_id = 2;
+  string session_id = 3;
+  TelemetryEventType event_type = 4;
+  int64 timestamp = 5;
+  string target = 6;
+  map<string, string> metadata = 7;
+}

@@ -9,6 +9,7 @@
 //! - `co repl` - Interactive mode
 
 use clap::{Parser, Subcommand};
+use colored::Colorize;
 
 mod commands;
 mod docs;
@@ -29,6 +30,68 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Automated task execution pipeline
+    ///
+    /// Picks the next unblocked task, builds multi-layer context,
+    /// launches Claude Code with --dangerously-skip-permissions,
+    /// reviews against acceptance criteria, and cycles.
+    ///
+    /// Examples:
+    ///   co auto --space gp
+    ///   co auto --space gp --task GP-2
+    ///   co auto --space gp --cycle --max-tasks 3
+    ///   co auto --space gp --dry-run
+    ///   co auto --space gp --teams
+    Auto {
+        /// Target space containing tasks
+        #[arg(short, long, default_value = "gp")]
+        space: String,
+
+        /// Execute a specific task (e.g., GP-2)
+        #[arg(short, long)]
+        task: Option<String>,
+
+        /// Cycle through tasks continuously
+        #[arg(long)]
+        cycle: bool,
+
+        /// Dry run (show what would execute without running)
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Maximum tasks to process
+        #[arg(long)]
+        max_tasks: Option<usize>,
+
+        /// Enable Claude Code agent teams for parallel execution
+        #[arg(long)]
+        teams: bool,
+
+        /// Model to use (default: sonnet)
+        #[arg(long, default_value = "sonnet")]
+        model: String,
+
+        /// Timeout per task in seconds
+        #[arg(long, default_value = "600")]
+        timeout: u64,
+
+        /// Working directory for Claude Code
+        #[arg(short, long)]
+        workdir: Option<String>,
+
+        /// Explicit data directory (overrides workspace detection)
+        #[arg(long, env = "CO_DATA_DIR")]
+        data_dir: Option<String>,
+
+        /// CO workspace root (alternative to --data-dir)
+        #[arg(long, env = "CO_WORKSPACE")]
+        workspace: Option<String>,
+
+        /// Run headless (invisible -p mode instead of interactive session)
+        #[arg(long)]
+        headless: bool,
+    },
+
     /// Initialize a new space
     Init {
         /// Space name (e.g., "private", "work")
@@ -427,6 +490,215 @@ enum Commands {
         /// Topic name (optional)
         topic: Option<String>,
     },
+
+    /// Show CO teaser animation
+    ///
+    /// Displays a loading animation followed by title slides.
+    Teaser,
+
+    /// Start the project management board (web UI)
+    ///
+    /// Launches a local web server with Kanban/Calendar views.
+    /// Use subcommands to manage board data.
+    ///
+    /// Examples:
+    ///   co board                     # Start on default port 3000
+    ///   co board --port 8080         # Custom port
+    ///   co board export              # Export local edits to source tree
+    ///   co board reset --confirm     # Reset to embedded baseline
+    Board {
+        #[command(subcommand)]
+        action: Option<BoardSubcommand>,
+
+        /// Server port
+        #[arg(short, long, env = "CO_WEB_PORT", default_value_t = 3000)]
+        port: u16,
+
+        /// Data directory path
+        #[arg(short, long, env = "CO_WEB_DATA", default_value = "./data")]
+        data: String,
+
+        /// Static files directory
+        #[arg(short, long, env = "CO_WEB_STATIC", default_value = "co-web/static")]
+        static_dir: String,
+
+        /// Default experiment variant (a, b, or c)
+        #[arg(long, env = "CO_WEB_DEFAULT_VARIANT", default_value = "a")]
+        default_variant: String,
+    },
+
+    /// Pipeline engine: plan, execute, approve via Claude + GitHub
+    ///
+    /// Modular pipeline for LLM-powered GitHub workflows on any repository.
+    ///
+    /// Examples:
+    ///   co engine plan --repo owner/repo --title "Add feature"
+    ///   co engine execute --repo owner/repo --issue 42
+    ///   co engine approve --repo owner/repo --pr 15
+    ///   co engine auto --repo owner/repo --title "Add feature"
+    ///   co engine status
+    Engine {
+        #[command(subcommand)]
+        action: EngineSubcommand,
+
+        /// Path to Obsidian vault for context
+        #[arg(long, env = "CO_ENGINE_VAULT", global = true)]
+        vault: Option<std::path::PathBuf>,
+
+        /// Auto-approve all pipeline stages (no prompts)
+        #[arg(long, global = true)]
+        auto_approve: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum BoardSubcommand {
+    /// Export local board data to source tree for recompilation
+    ///
+    /// Copies data from the runtime directory back to co-web/data/
+    /// so it gets embedded in the next build.
+    ///
+    /// Examples:
+    ///   co board export                    # Export to default co-web/data/
+    ///   co board export --to ./my-data     # Export to custom path
+    Export {
+        /// Destination directory (default: co-web/data)
+        #[arg(long, default_value = "co-web/data")]
+        to: String,
+    },
+
+    /// Reset local data to embedded baseline
+    ///
+    /// Discards all local edits and restores the original data.
+    ///
+    /// Examples:
+    ///   co board reset --confirm
+    Reset {
+        /// Confirm destructive reset
+        #[arg(long)]
+        confirm: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum EngineSubcommand {
+    /// Create a GitHub issue from a description (Plan stage)
+    Plan {
+        /// Target repository (owner/repo)
+        #[arg(short, long)]
+        repo: String,
+
+        /// Issue title
+        #[arg(short, long)]
+        title: String,
+
+        /// Issue description / context
+        #[arg(short, long, default_value = "")]
+        description: String,
+    },
+
+    /// Implement an issue as a PR (Execute stage)
+    Execute {
+        /// Target repository (owner/repo)
+        #[arg(short, long)]
+        repo: String,
+
+        /// Issue number to implement
+        #[arg(short, long)]
+        issue: u64,
+
+        /// Local working directory for the repo
+        #[arg(short, long)]
+        workdir: Option<String>,
+    },
+
+    /// Review a pull request (Approve stage)
+    Approve {
+        /// Target repository (owner/repo)
+        #[arg(short, long)]
+        repo: String,
+
+        /// PR number to review
+        #[arg(short, long)]
+        pr: u64,
+    },
+
+    /// Run full pipeline: plan → execute → approve
+    Auto {
+        /// Target repository (owner/repo)
+        #[arg(short, long)]
+        repo: String,
+
+        /// Feature/fix title
+        #[arg(short, long)]
+        title: String,
+
+        /// Detailed description
+        #[arg(short, long, default_value = "")]
+        description: String,
+
+        /// Local working directory for the repo
+        #[arg(short, long)]
+        workdir: Option<String>,
+    },
+
+    /// Search Obsidian vault for context
+    Query {
+        /// Search query
+        query: String,
+    },
+
+    /// Show available tools and their status
+    Status,
+
+    /// Manage git identities for multi-account workflows
+    ///
+    /// Examples:
+    ///   co engine identity list
+    ///   co engine identity add --name work --github-user mywork --ssh-host github-work --email work@co.dev
+    ///   co engine identity switch work
+    Identity {
+        #[command(subcommand)]
+        action: IdentitySubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum IdentitySubcommand {
+    /// List all configured identities
+    List,
+
+    /// Show the active identity
+    Current,
+
+    /// Switch to a different identity
+    Switch {
+        /// Identity name to switch to
+        name: String,
+    },
+
+    /// Add a new identity
+    Add {
+        /// Identity name (e.g., "personal", "work")
+        #[arg(long)]
+        name: String,
+
+        /// GitHub username
+        #[arg(long)]
+        github_user: String,
+
+        /// SSH host alias (from ~/.ssh/config)
+        #[arg(long, default_value = "github.com")]
+        ssh_host: String,
+
+        /// Git commit email
+        #[arg(long)]
+        email: String,
+
+        /// Git commit name
+        #[arg(long)]
+        git_name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -687,6 +959,39 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Auto {
+            space,
+            task,
+            cycle,
+            dry_run,
+            max_tasks,
+            teams,
+            model,
+            timeout,
+            workdir,
+            data_dir,
+            workspace,
+            headless,
+        } => {
+            let config = commands::auto::AutoConfig {
+                space,
+                task_id: task,
+                cycle,
+                dry_run,
+                max_tasks,
+                teams,
+                model,
+                timeout_secs: timeout,
+                workdir,
+                data_dir,
+                workspace,
+                interactive: !headless,
+            };
+            if let Err(e) = commands::auto::run(config) {
+                eprintln!("{}: {}", "error".red().bold(), e);
+                std::process::exit(1);
+            }
+        }
         Commands::Init { name, check } => {
             if check {
                 commands::init::check_unprotected_spaces();
@@ -921,5 +1226,70 @@ fn main() {
         ),
         Commands::Analyze { name, verbose } => commands::analyze::run(&name, verbose),
         Commands::Help { topic } => commands::help::run(topic.as_deref()),
+        Commands::Teaser => commands::teaser::run(),
+        Commands::Board {
+            action,
+            port,
+            data,
+            static_dir,
+            default_variant,
+        } => match action {
+            Some(BoardSubcommand::Export { to }) => {
+                commands::board::export(&data, &to);
+            }
+            Some(BoardSubcommand::Reset { confirm }) => {
+                commands::board::reset(&data, confirm);
+            }
+            None => commands::board::run(port, data, static_dir, default_variant),
+        },
+        Commands::Engine {
+            action,
+            vault,
+            auto_approve,
+        } => {
+            let engine_action = match action {
+                EngineSubcommand::Plan {
+                    repo,
+                    title,
+                    description,
+                } => commands::engine::EngineAction::Plan {
+                    repo,
+                    title,
+                    description,
+                },
+                EngineSubcommand::Execute {
+                    repo,
+                    issue,
+                    workdir,
+                } => commands::engine::EngineAction::Execute {
+                    repo,
+                    issue,
+                    workdir,
+                },
+                EngineSubcommand::Approve { repo, pr } => {
+                    commands::engine::EngineAction::Approve { repo, pr }
+                }
+                EngineSubcommand::Auto {
+                    repo,
+                    title,
+                    description,
+                    workdir,
+                } => commands::engine::EngineAction::Auto {
+                    repo,
+                    title,
+                    description,
+                    workdir,
+                },
+                EngineSubcommand::Query { query } => {
+                    commands::engine::EngineAction::Query { query }
+                }
+                EngineSubcommand::Status => commands::engine::EngineAction::Status,
+                EngineSubcommand::Identity { action: id_action } => {
+                    commands::engine::run_identity(id_action);
+                    return;
+                }
+            };
+            commands::engine::run(engine_action, vault, auto_approve)
+        }
     }
 }

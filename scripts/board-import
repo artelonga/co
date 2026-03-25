@@ -1,0 +1,360 @@
+#!/usr/bin/env bash
+#
+# board-import — Export Jira data and import into the board API
+#
+# Usage:
+#   board-import export PQ2                              Export Jira project to YAML
+#   board-import load co-web/data/imports/pq2-export.yaml  Load YAML into board
+#   board-import load --dry-run <yaml>                    Preview what would be created
+#   board-import run PQ2                                  Export + load in one step
+#   board-import run --dry-run PQ2                        Export + dry-run load
+#
+# Requires: python3 (with PyYAML), curl, jq, pst, acli
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BOARD_API="${CO_BOARD_API:-http://localhost:3000/api}"
+IMPORT_DIR="${SCRIPT_DIR}/../co-web/data/imports"
+
+# ── Logging ──
+
+die()  { echo "error: $*" >&2; exit 1; }
+info() { echo "-> $*" >&2; }
+warn() { echo "!! $*" >&2; }
+
+# ── Dependency Check ──
+
+check_deps() {
+    local missing=()
+    for cmd in python3 curl jq; do
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "Missing required commands: ${missing[*]}"
+    fi
+}
+
+check_export_deps() {
+    local missing=()
+    for cmd in pst acli; do
+        command -v "$cmd" &>/dev/null || missing+=("$cmd")
+    done
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        die "Missing required commands for export: ${missing[*]}"
+    fi
+    # Check PyYAML
+    python3 -c "import yaml" 2>/dev/null || die "PyYAML not installed (pip3 install pyyaml)"
+}
+
+# ── Export ──
+
+do_export() {
+    local project_key="$1"
+    local output_path="${2:-}"
+
+    check_export_deps
+
+    if [[ -z "$output_path" ]]; then
+        local key_lower
+        key_lower=$(echo "$project_key" | tr '[:upper:]' '[:lower:]')
+        mkdir -p "$IMPORT_DIR"
+        output_path="$IMPORT_DIR/${key_lower}-export.yaml"
+    fi
+
+    info "Exporting $project_key to $output_path"
+    python3 "$SCRIPT_DIR/lib/jira-export.py" "$project_key" "$output_path"
+    info "Export complete: $output_path"
+    echo "$output_path"
+}
+
+# ── Load ──
+
+# Create project if it doesn't exist, return key
+ensure_project() {
+    local name="$1" key="$2" description="$3" dry_run="$4"
+
+    if [[ "$dry_run" == "true" ]]; then
+        info "[DRY-RUN] Would create project: $key ($name)"
+        return 0
+    fi
+
+    # Check if project already exists
+    local status_code
+    status_code=$(curl -s -o /dev/null -w "%{http_code}" "$BOARD_API/projects/$key")
+
+    if [[ "$status_code" == "200" ]]; then
+        info "Project $key already exists, skipping creation"
+    else
+        info "Creating project: $key ($name)"
+        local response
+        response=$(curl -sf -X POST "$BOARD_API/projects" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                --arg name "$name" \
+                --arg key "$key" \
+                --arg desc "$description" \
+                '{name: $name, key: $key, description: $desc}')" 2>&1) \
+            || die "Failed to create project $key: $response"
+        info "Project $key created"
+    fi
+}
+
+# Create a single task and return its board ID
+create_board_task() {
+    local project_key="$1" title="$2" status="$3" priority="$4"
+    local labels_json="$5" parent_id="$6" dry_run="$7" description="$8"
+
+    if [[ "$dry_run" == "true" ]]; then
+        # Return a fake ID for dry-run parent tracking
+        echo "0"
+        return 0
+    fi
+
+    local payload
+    if [[ -n "$parent_id" && "$parent_id" != "null" ]]; then
+        payload=$(jq -n \
+            --arg title "$title" \
+            --arg status "$status" \
+            --arg priority "$priority" \
+            --argjson labels "$labels_json" \
+            --argjson parent "$parent_id" \
+            --arg desc "$description" \
+            '{title: $title, description: $desc, status: $status, priority: $priority, labels: $labels, parent: $parent}')
+    else
+        payload=$(jq -n \
+            --arg title "$title" \
+            --arg status "$status" \
+            --arg priority "$priority" \
+            --argjson labels "$labels_json" \
+            --arg desc "$description" \
+            '{title: $title, description: $desc, status: $status, priority: $priority, labels: $labels}')
+    fi
+
+    local response
+    response=$(curl -sf -X POST "$BOARD_API/projects/$project_key/tasks" \
+        -H "Content-Type: application/json" \
+        -d "$payload" 2>&1) \
+        || die "Failed to create task '$title': $response"
+
+    echo "$response" | jq -r '.id'
+}
+
+# Process a single task node from the YAML (recursive via children)
+process_task_node() {
+    local project_key="$1" node_json="$2" parent_id="$3" dry_run="$4"
+    local counter_var="$5" total="$6"
+
+    local jira_key title type status priority is_orphan description due_date
+    jira_key=$(echo "$node_json" | jq -r '.jira_key')
+    title=$(echo "$node_json" | jq -r '.title')
+    type=$(echo "$node_json" | jq -r '.type // "task"')
+    status=$(echo "$node_json" | jq -r '.status // "todo"')
+    priority=$(echo "$node_json" | jq -r '.priority // "medium"')
+    is_orphan=$(echo "$node_json" | jq -r '.orphan // false')
+    description=$(echo "$node_json" | jq -r '.description // ""')
+    due_date=$(echo "$node_json" | jq -r '.due_date // ""')
+
+    # Build labels array
+    local labels=("$type" "jira:$jira_key")
+    if [[ "$is_orphan" == "true" ]]; then
+        labels+=("orphan")
+    fi
+    # Add extra labels (e.g., assignee) from enrichment
+    local extra_labels
+    extra_labels=$(echo "$node_json" | jq -r '.extra_labels // [] | .[]' 2>/dev/null)
+    while IFS= read -r lbl; do
+        [[ -n "$lbl" ]] && labels+=("$lbl")
+    done <<< "$extra_labels"
+
+    local labels_json
+    labels_json=$(printf '%s\n' "${labels[@]}" | jq -R . | jq -s .)
+
+    # Increment and show progress
+    eval "local count=\$$counter_var"
+    count=$((count + 1))
+    eval "$counter_var=$count"
+
+    if [[ "$dry_run" == "true" ]]; then
+        local parent_info=""
+        if [[ -n "$parent_id" && "$parent_id" != "null" ]]; then
+            parent_info=" (parent=$parent_id)"
+        fi
+        printf "  [DRY-RUN] %d/%d %-12s %-10s %s — %s%s\n" \
+            "$count" "$total" "$jira_key" "[$status]" "$type" "$title" "$parent_info" >&2
+        local board_id="0"
+    else
+        printf "  Creating %d/%d: %s — %s\n" "$count" "$total" "$jira_key" "$title" >&2
+        local board_id
+        board_id=$(create_board_task "$project_key" "$title" "$status" "$priority" \
+            "$labels_json" "$parent_id" "$dry_run" "$description")
+
+        # Set due_date via update if present (create doesn't support it directly in all cases)
+        if [[ -n "$due_date" && "$due_date" != "null" && "$board_id" != "0" ]]; then
+            curl -sf -X PUT "$BOARD_API/projects/$project_key/tasks/$board_id" \
+                -H "Content-Type: application/json" \
+                -d "$(jq -n --arg d "$due_date" '{due_date: $d}')" > /dev/null 2>&1 || true
+        fi
+    fi
+
+    # Process children
+    local children_count
+    children_count=$(echo "$node_json" | jq '.children // [] | length')
+
+    if [[ "$children_count" -gt 0 ]]; then
+        local i
+        for i in $(seq 0 $((children_count - 1))); do
+            local child_json
+            child_json=$(echo "$node_json" | jq ".children[$i]")
+            process_task_node "$project_key" "$child_json" "$board_id" "$dry_run" "$counter_var" "$total"
+        done
+    fi
+}
+
+do_load() {
+    local yaml_path="$1" dry_run="$2"
+
+    check_deps
+
+    [[ -f "$yaml_path" ]] || die "YAML file not found: $yaml_path"
+
+    info "Loading from: $yaml_path"
+    if [[ "$dry_run" == "true" ]]; then
+        info "DRY-RUN MODE — no changes will be made"
+    fi
+
+    # Parse YAML to JSON using Python
+    local json_data
+    json_data=$(python3 -c "
+import yaml, json, sys
+with open('$yaml_path') as f:
+    data = yaml.safe_load(f)
+json.dump(data, sys.stdout)
+") || die "Failed to parse YAML"
+
+    # Extract project info
+    local proj_name proj_key proj_desc
+    proj_name=$(echo "$json_data" | jq -r '.project.name')
+    proj_key=$(echo "$json_data" | jq -r '.project.key')
+    proj_desc=$(echo "$json_data" | jq -r '.project.description')
+
+    # Count total tasks (recursive)
+    local total
+    total=$(echo "$json_data" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+def count_tasks(nodes):
+    total = 0
+    for n in nodes:
+        total += 1
+        total += count_tasks(n.get('children', []))
+    return total
+print(count_tasks(data.get('tasks', [])))
+")
+
+    info "Project: $proj_key ($proj_name)"
+    info "Total tasks to create: $total"
+    echo "" >&2
+
+    # Create project
+    ensure_project "$proj_name" "$proj_key" "$proj_desc" "$dry_run"
+    echo "" >&2
+
+    # Process each top-level task (epics)
+    local task_count
+    task_count=$(echo "$json_data" | jq '.tasks | length')
+
+    # Use a temp file to track counter across subshell boundaries
+    export TASK_COUNTER=0
+
+    local i
+    for i in $(seq 0 $((task_count - 1))); do
+        local node_json
+        node_json=$(echo "$json_data" | jq ".tasks[$i]")
+        process_task_node "$proj_key" "$node_json" "" "$dry_run" "TASK_COUNTER" "$total"
+    done
+
+    echo "" >&2
+    if [[ "$dry_run" == "true" ]]; then
+        info "DRY-RUN complete. $TASK_COUNTER tasks would be created."
+    else
+        info "Load complete. $TASK_COUNTER tasks created in project $proj_key."
+    fi
+}
+
+# ── Main ──
+
+usage() {
+    cat <<'EOF'
+board-import — Export Jira data and import into the board API
+
+Usage:
+  board-import export <PROJECT_KEY>                    Export Jira project to YAML
+  board-import enrich <yaml> [output] [--concurrency N] Fetch descriptions & metadata from Jira
+  board-import load [--dry-run] <yaml_file>            Load YAML into board API
+  board-import run [--dry-run] <PROJECT_KEY>            Export + load in one step
+
+Examples:
+  board-import export PQ2
+  board-import enrich co-web/data/imports/pq2-export.yaml
+  board-import enrich co-web/data/imports/pq2-export.yaml enriched.yaml --concurrency 20
+  board-import load co-web/data/imports/pq2-export-enriched.yaml
+  board-import run PQ2
+
+Environment:
+  CO_BOARD_API   Board API base URL (default: http://localhost:3000/api)
+EOF
+}
+
+case "${1:-}" in
+    ""|--help|-h)
+        usage
+        exit 0
+        ;;
+    export)
+        shift
+        [[ -n "${1:-}" ]] || die "Usage: board-import export <PROJECT_KEY>"
+        do_export "$1"
+        ;;
+    enrich)
+        shift
+        enrich_input="${1:-}"
+        [[ -n "$enrich_input" ]] || die "Usage: board-import enrich <input_yaml> [output_yaml] [--concurrency N]"
+        shift
+        enrich_output="${1:-}"
+        if [[ -z "$enrich_output" || "$enrich_output" == --* ]]; then
+            enrich_output="${enrich_input%.yaml}-enriched.yaml"
+        else
+            shift
+        fi
+        info "Enriching $enrich_input → $enrich_output"
+        python3 "$SCRIPT_DIR/lib/jira-enrich.py" "$enrich_input" "$enrich_output" "$@"
+        info "Enrichment complete: $enrich_output"
+        ;;
+    load)
+        shift
+        load_args=()
+        while [[ $# -gt 0 ]]; do
+            load_args+=("$1")
+            shift
+        done
+        [[ ${#load_args[@]} -gt 0 ]] || die "Usage: board-import load [--dry-run] <yaml_file>"
+        python3 "$SCRIPT_DIR/lib/board-load.py" "${load_args[@]}"
+        ;;
+    run)
+        shift
+        dry_run="false"
+        if [[ "${1:-}" == "--dry-run" ]]; then
+            dry_run="true"
+            shift
+        fi
+        [[ -n "${1:-}" ]] || die "Usage: board-import run [--dry-run] <PROJECT_KEY>"
+        project_key="$1"
+        yaml_path=$(do_export "$project_key")
+        echo "" >&2
+        do_load "$yaml_path" "$dry_run"
+        ;;
+    *)
+        die "Unknown command: $1 (try --help)"
+        ;;
+esac

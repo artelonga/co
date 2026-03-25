@@ -4,6 +4,19 @@
 *.swo
 .co/
 
+# co-web runtime data (but allow embedded baseline)
+data/
+!co-web/data/
+
 # User spaces (project namespaces) - do not commit to co home
 # These are created via `co init <name>` and should live in their own repos
 monica/
+
+# Playwright / Node.js (co-web E2E tests)
+node_modules/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Parallel execution worktrees
+.worktrees/

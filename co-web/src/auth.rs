@@ -1,7 +1,14 @@
 use std::path::Path;
 
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+    Json,
+};
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use redb::{Database, TableDefinition};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -34,13 +41,69 @@ pub struct RateLimitEntry {
     pub requests: Vec<i64>,
 }
 
+/// JWT claims shared across auth flows.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct JwtClaims {
-    sub: String,
-    email: String,
-    tier: String,
-    exp: usize,
-    iat: usize,
+pub struct Claims {
+    pub sub: String,
+    pub email: String,
+    pub tier: String,
+    pub exp: usize,
+    pub iat: usize,
+}
+
+/// User ID extracted from JWT auth middleware.
+#[derive(Clone, Debug)]
+pub struct UserId(pub String);
+
+/// JSON error body returned by the auth middleware.
+#[derive(Serialize)]
+struct ErrorResponse {
+    error: String,
+}
+
+/// Reads `JWT_SECRET` from the environment, falling back to a development default.
+pub fn jwt_secret() -> String {
+    std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
+}
+
+/// Axum middleware that validates a Bearer JWT and injects [`UserId`] into
+/// request extensions. Returns 401 with a JSON error on failure.
+pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response, Response> {
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
+
+    let secret = jwt_secret();
+    let validation = Validation::new(Algorithm::HS256);
+
+    let token_data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )
+    .map_err(|e| match e.kind() {
+        jsonwebtoken::errors::ErrorKind::ExpiredSignature => unauthorized("Token expired"),
+        jsonwebtoken::errors::ErrorKind::InvalidSignature => {
+            unauthorized("Invalid token signature")
+        }
+        _ => unauthorized("Invalid token"),
+    })?;
+
+    req.extensions_mut().insert(UserId(token_data.claims.sub));
+    Ok(next.run(req).await)
+}
+
+fn unauthorized(msg: &str) -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(ErrorResponse {
+            error: msg.to_string(),
+        }),
+    )
+        .into_response()
 }
 
 pub struct AuthStore {
@@ -172,7 +235,7 @@ pub fn sign_jwt(
     let exp = (now.timestamp() + JWT_EXPIRY_SECS) as usize;
     let expires_at = now + chrono::Duration::seconds(JWT_EXPIRY_SECS);
 
-    let claims = JwtClaims {
+    let claims = Claims {
         sub: user_id.to_string(),
         email: email.to_string(),
         tier: tier.to_string(),
