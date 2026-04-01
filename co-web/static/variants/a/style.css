@@ -1488,6 +1488,15 @@ body {
     border-radius: 50%;
 }
 
+/* ===== Dependency Arrows SVG overlay ===== */
+.dep-arrows-svg {
+    position: absolute;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    z-index: 2;
+}
+
 /* Dashed extension through grid rows */
 .timeline-today-line {
     position: absolute;

@@ -1131,13 +1131,16 @@
         }
 
         // Build header
-        const headerCols = range.columns.map(col => {
+        const headerCols = range.columns.map((col, idx) => {
             if (col.type === 'week') {
+                // Quarter zoom: month label at first week of each month, week number below
+                const isFirst = idx === 0;
+                const showMonth = isFirst || col.date.getDate() <= 7;
+                const monthLabel = showMonth ? MONTH_NAMES[col.date.getMonth()] : '';
                 const wn = getWeekNumber(col.date);
-                const rangeLabel = `${col.date.getDate()}/${col.date.getMonth() + 1} - ${col.endDate.getDate()}/${col.endDate.getMonth() + 1}`;
                 return `<div class="timeline-date-col week-col">
-                    <span class="timeline-date-week-label">S${wn}</span>
-                    <span class="timeline-date-week-range">${rangeLabel}</span>
+                    <span class="timeline-date-month">${monthLabel || '&nbsp;'}</span>
+                    <span class="timeline-date-week-label">W${wn}</span>
                 </div>`;
             }
             const d = col.date;
@@ -1147,9 +1150,24 @@
             if (isToday) classes += ' today';
             if (weekend) classes += ' weekend';
 
-            const showMonth = d.getDate() === 1 || col === range.columns[0];
+            let topLabel;
+            if (state.zoom === 'month') {
+                // Month zoom: week number on Mondays or first column
+                const isMonday = d.getDay() === 1;
+                const isFirst = idx === 0;
+                topLabel = (isMonday || isFirst)
+                    ? `<span class="timeline-date-week-label">W${getWeekNumber(d)}</span>`
+                    : '<span class="timeline-date-week-label">&nbsp;</span>';
+            } else {
+                // Week zoom: month name on 1st or first column
+                const showMonth = d.getDate() === 1 || idx === 0;
+                topLabel = showMonth
+                    ? `<span class="timeline-date-month">${MONTH_NAMES[d.getMonth()]}</span>`
+                    : '<span class="timeline-date-month">&nbsp;</span>';
+            }
+
             return `<div class="${classes}">
-                ${showMonth ? `<span class="timeline-date-month">${MONTH_NAMES[d.getMonth()]}</span>` : '<span class="timeline-date-month">&nbsp;</span>'}
+                ${topLabel}
                 <span class="timeline-date-day">${d.getDate()}</span>
                 <span class="timeline-date-weekday">${DAY_NAMES[d.getDay()]}</span>
             </div>`;
@@ -1269,6 +1287,9 @@
         // Position task bars
         positionTaskBars(range, colWidth, today);
 
+        // Draw dependency arrows between parent and child tasks
+        renderDependencyArrows();
+
         // Place today marker
         placeTodayMarker(range, colWidth, today);
 
@@ -1356,6 +1377,78 @@
                 dot.addEventListener('click', () => openTaskModal(task.id));
             }
         }
+    }
+
+    // ===== Dependency Arrows (SVG overlay) =====
+    function renderDependencyArrows() {
+        const container = document.getElementById('timeline-container');
+        if (!container) return;
+
+        const existing = container.querySelector('.dep-arrows-svg');
+        if (existing) existing.remove();
+
+        const tasks = filteredTasks();
+        const taskMap = new Map(tasks.map(t => [t.id, t]));
+        const containerRect = container.getBoundingClientRect();
+        const scrollLeft = container.scrollLeft;
+        const scrollTop = container.scrollTop;
+
+        const arrows = [];
+        for (const task of tasks) {
+            if (!task.parent) continue;
+            const parentTask = taskMap.get(task.parent);
+            if (!parentTask) continue;
+
+            const parentBar = container.querySelector(`.timeline-task-bar[data-task-id="${parentTask.id}"]`);
+            const childBar = container.querySelector(`.timeline-task-bar[data-task-id="${task.id}"]`);
+            if (!parentBar || !childBar) continue;
+
+            const pRect = parentBar.getBoundingClientRect();
+            const cRect = childBar.getBoundingClientRect();
+
+            const x1 = pRect.right - containerRect.left + scrollLeft;
+            const y1 = pRect.top + pRect.height / 2 - containerRect.top + scrollTop;
+            const x2 = cRect.left - containerRect.left + scrollLeft;
+            const y2 = cRect.top + cRect.height / 2 - containerRect.top + scrollTop;
+
+            arrows.push({ x1, y1, x2, y2 });
+        }
+
+        if (arrows.length === 0) return;
+
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.classList.add('dep-arrows-svg');
+        svg.setAttribute('width', container.scrollWidth);
+        svg.setAttribute('height', container.scrollHeight);
+
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'dep-arrowhead');
+        marker.setAttribute('markerWidth', '8');
+        marker.setAttribute('markerHeight', '8');
+        marker.setAttribute('refX', '7');
+        marker.setAttribute('refY', '3');
+        marker.setAttribute('orient', 'auto');
+        const arrowTip = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        arrowTip.setAttribute('d', 'M0,0 L0,6 L8,3 z');
+        arrowTip.setAttribute('fill', '#94a3b8');
+        marker.appendChild(arrowTip);
+        defs.appendChild(marker);
+        svg.appendChild(defs);
+
+        for (const { x1, y1, x2, y2 } of arrows) {
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            const mx = x1 + (x2 - x1) * 0.5;
+            path.setAttribute('d', `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+            path.setAttribute('stroke', '#94a3b8');
+            path.setAttribute('stroke-width', '1.5');
+            path.setAttribute('stroke-dasharray', '4,3');
+            path.setAttribute('fill', 'none');
+            path.setAttribute('marker-end', 'url(#dep-arrowhead)');
+            svg.appendChild(path);
+        }
+
+        container.appendChild(svg);
     }
 
     function getColumnOffset(date, range, colWidth) {
