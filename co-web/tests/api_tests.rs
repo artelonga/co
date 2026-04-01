@@ -29,6 +29,18 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
     }
 }
 
+/// Generate a valid JWT for test write requests using the default dev secret.
+fn test_bearer() -> String {
+    let (token, _) = co_web::auth::sign_jwt(
+        "test-user",
+        "test@example.com",
+        "player",
+        "dev-secret-change-me",
+    )
+    .unwrap();
+    format!("Bearer {token}")
+}
+
 fn build_test_router(dir: &std::path::Path) -> axum::Router {
     let config = test_config(dir);
     let mut storage = Storage::new(&config.data_dir);
@@ -190,6 +202,7 @@ async fn test_create_task_api() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "New API task",
@@ -223,6 +236,7 @@ async fn test_update_task_api() {
                 .method("PUT")
                 .uri("/api/projects/DS/tasks/1")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "status": "done",
@@ -253,6 +267,7 @@ async fn test_delete_task_api() {
             Request::builder()
                 .method("DELETE")
                 .uri("/api/projects/DS/tasks/1")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -272,6 +287,7 @@ async fn test_delete_task_not_found() {
             Request::builder()
                 .method("DELETE")
                 .uri("/api/projects/DS/tasks/999")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -292,6 +308,7 @@ async fn test_create_project_api() {
                 .method("POST")
                 .uri("/api/projects")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "name": "New Project",
@@ -323,6 +340,7 @@ async fn test_create_duplicate_project_api() {
                 .method("POST")
                 .uri("/api/projects")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "name": "Duplicate",
@@ -351,6 +369,7 @@ async fn test_delete_project_api() {
             Request::builder()
                 .method("DELETE")
                 .uri("/api/projects/DS")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -370,6 +389,7 @@ async fn test_delete_project_not_found() {
             Request::builder()
                 .method("DELETE")
                 .uri("/api/projects/NOPE")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -438,6 +458,7 @@ async fn test_comments_api() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks/1/comments")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "author": "Test User",
@@ -457,7 +478,7 @@ async fn test_comments_api() {
     assert_eq!(comment.author, "Test User");
     assert_eq!(comment.body, "Great progress!");
 
-    // List comments
+    // List comments (public — no auth needed)
     let response = app
         .oneshot(
             Request::builder()
@@ -544,6 +565,37 @@ async fn test_tasks_with_archived_filter() {
     assert_eq!(tasks.len(), 7); // All seed tasks are non-archived
 }
 
+// --- Auth protection tests ---
+
+#[tokio::test]
+async fn test_write_without_auth_returns_401() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects/DS/tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&serde_json::json!({
+                        "title": "Should be blocked"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+    let body = body_to_string(response.into_body()).await;
+    let error: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert!(error["error"].is_string());
+}
+
 // --- Input Validation Tests ---
 
 #[tokio::test]
@@ -557,6 +609,7 @@ async fn test_create_task_empty_title() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "",
@@ -586,6 +639,7 @@ async fn test_create_task_whitespace_only_title() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "   ",
@@ -613,6 +667,7 @@ async fn test_create_task_oversized_title() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": long_title
@@ -638,6 +693,7 @@ async fn test_create_comment_empty_body() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks/1/comments")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "author": "Test",
@@ -664,6 +720,7 @@ async fn test_create_project_invalid_key() {
                 .method("POST")
                 .uri("/api/projects")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "name": "Bad Key Project",
@@ -691,6 +748,7 @@ async fn test_create_project_key_too_long() {
                 .method("POST")
                 .uri("/api/projects")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "name": "Long Key Project",
@@ -721,6 +779,7 @@ async fn test_xss_payload_in_task_title() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": xss_title
@@ -750,6 +809,7 @@ async fn test_sql_chars_in_fields() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "Robert'; DROP TABLE tasks;--",
@@ -782,6 +842,7 @@ async fn test_update_nonexistent_task() {
                 .method("PUT")
                 .uri("/api/projects/DS/tasks/9999")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "Ghost task"
@@ -809,6 +870,7 @@ async fn test_malformed_json_body() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from("{not valid json"))
                 .unwrap(),
         )
@@ -836,6 +898,7 @@ async fn test_bulk_update_empty_ids() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks/bulk-update")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "task_ids": [],
@@ -862,6 +925,7 @@ async fn test_bulk_delete_nonexistent_ids() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks/bulk-delete")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "task_ids": [9998, 9999]
@@ -889,6 +953,7 @@ async fn test_create_task_with_too_many_labels() {
                 .method("POST")
                 .uri("/api/projects/DS/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
                     serde_json::to_string(&serde_json::json!({
                         "title": "Too many labels",

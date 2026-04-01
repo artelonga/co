@@ -22,7 +22,21 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         experiments: true,
         plugins_dir: "plugins".to_string(),
         game_db_path: None,
+        universo_dir: "quilomboaraucaria".to_string(),
+        gestao_github_admins: vec!["artelonga".to_string()],
     }
+}
+
+/// Generate a valid JWT for test write requests using the default dev secret.
+fn test_bearer() -> String {
+    let (token, _) = co_web::auth::sign_jwt(
+        "test-user",
+        "test@example.com",
+        "player",
+        "dev-secret-change-me",
+    )
+    .unwrap();
+    format!("Bearer {token}")
 }
 
 fn build_test_app(dir: &std::path::Path) -> axum::Router {
@@ -44,7 +58,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
     let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
     let game_db_path = dir.join("game_test.db");
     let game_storage = std::sync::Arc::new(
-        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage")
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
@@ -75,6 +89,7 @@ async fn test_concurrent_task_creation() {
                         .method("POST")
                         .uri("/api/projects/CC/tasks")
                         .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::AUTHORIZATION, test_bearer())
                         .body(Body::from(
                             serde_json::to_string(&serde_json::json!({
                                 "title": format!("Concurrent task {i}"),
@@ -135,6 +150,7 @@ async fn test_concurrent_read_write() {
                     .method("POST")
                     .uri("/api/projects/CC/tasks")
                     .header(header::CONTENT_TYPE, "application/json")
+                    .header(header::AUTHORIZATION, test_bearer())
                     .body(Body::from(
                         serde_json::to_string(&serde_json::json!({
                             "title": format!("Seed task {i}"),
@@ -181,6 +197,7 @@ async fn test_concurrent_read_write() {
                         .method("POST")
                         .uri("/api/projects/CC/tasks")
                         .header(header::CONTENT_TYPE, "application/json")
+                        .header(header::AUTHORIZATION, test_bearer())
                         .body(Body::from(
                             serde_json::to_string(&serde_json::json!({
                                 "title": format!("Concurrent write {i}"),

@@ -4,7 +4,7 @@ use axum::Router;
 use axum::extract::{DefaultBodyLimit, Json, Path, Query, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, Method, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post, put};
 use rust_embed::Embed;
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
@@ -179,24 +179,30 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/v1/auth/login", post(login_handler))
         .route("/v1/auth/verify", post(verify_handler));
 
-    // --- Task/project CRUD (co-web) ---
-    let api = Router::new()
-        .route("/projects", get(list_projects).post(create_project))
-        .route("/projects/{key}", get(get_project).delete(delete_project))
-        .route("/projects/{key}/tasks", get(list_tasks).post(create_task))
-        .route(
-            "/projects/{key}/tasks/{id}",
-            get(get_task).put(update_task).delete(delete_task),
-        )
-        .route(
-            "/projects/{key}/tasks/{id}/comments",
-            get(list_comments).post(create_comment),
-        )
+    // --- Board public routes (GET — no auth required) ---
+    let board_public = Router::new()
+        .route("/projects", get(list_projects))
+        .route("/projects/{key}", get(get_project))
+        .route("/projects/{key}/tasks", get(list_tasks))
+        .route("/projects/{key}/tasks/{id}", get(get_task))
+        .route("/projects/{key}/tasks/{id}/comments", get(list_comments))
         .route("/projects/{key}/activity", get(list_activity))
         .route("/projects/{key}/dashboard", get(get_dashboard))
+        .route("/health", get(health_check));
+
+    // --- Board protected routes (write ops — JWT required) ---
+    let board_protected = Router::new()
+        .route("/projects", post(create_project))
+        .route("/projects/{key}", delete(delete_project))
+        .route("/projects/{key}/tasks", post(create_task))
+        .route(
+            "/projects/{key}/tasks/{id}",
+            put(update_task).delete(delete_task),
+        )
+        .route("/projects/{key}/tasks/{id}/comments", post(create_comment))
         .route("/projects/{key}/tasks/bulk-update", post(bulk_update_tasks))
         .route("/projects/{key}/tasks/bulk-delete", post(bulk_delete_tasks))
-        .route("/health", get(health_check));
+        .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     // --- Experiments ---
     let experiment_api = Router::new()
@@ -252,7 +258,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::Extension(allowed_admins));
 
     let mut router = Router::new()
-        .nest("/api", api)
+        .nest("/api", board_public)
+        .nest("/api", board_protected)
         .nest("/api", auth_api)
         .nest("/api", experiment_api)
         .nest("/api", game_public)
