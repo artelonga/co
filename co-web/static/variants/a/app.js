@@ -25,6 +25,8 @@
         miniCalDate: new Date(),
         collapsedSwimlanes: {},
         unscheduledCollapsed: false,
+        // Subtree expand/collapse (shared across views)
+        collapsedSubtasks: new Set(),
     };
 
     const STATUSES = [
@@ -221,6 +223,30 @@
         if (subs.length === 0) return null;
         const done = subs.filter(t => t.status === 'done').length;
         return { done, total: subs.length };
+    }
+
+    // ===== Subtree State (localStorage) =====
+    function loadSubtreeState(projectKey) {
+        try {
+            const raw = localStorage.getItem('co_subtree_' + projectKey);
+            state.collapsedSubtasks = new Set(raw ? JSON.parse(raw) : []);
+        } catch (e) {
+            state.collapsedSubtasks = new Set();
+        }
+    }
+
+    function saveSubtreeState() {
+        if (!state.currentProject) return;
+        localStorage.setItem('co_subtree_' + state.currentProject.key, JSON.stringify([...state.collapsedSubtasks]));
+    }
+
+    function toggleSubtree(taskId) {
+        if (state.collapsedSubtasks.has(taskId)) {
+            state.collapsedSubtasks.delete(taskId);
+        } else {
+            state.collapsedSubtasks.add(taskId);
+        }
+        saveSubtreeState();
     }
 
     function filteredTasks() {
@@ -514,9 +540,12 @@
         const content = $('#content');
         content.className = 'content';
         const tasks = filteredTasks();
+        const taskIds = new Set(tasks.map(t => t.id));
+        // Only root-level tasks appear as top-level cards; subtasks render inside parent
+        const rootTasks = tasks.filter(t => !t.parent || !taskIds.has(t.parent));
 
         content.innerHTML = `<div class="kanban">${STATUSES.map(s => {
-            const colTasks = tasks.filter(t => t.status === s.key);
+            const colTasks = rootTasks.filter(t => t.status === s.key);
             return `
                 <div class="kanban-column" data-status="${s.key}">
                     <div class="kanban-column-header">
@@ -532,13 +561,27 @@
 
         setupDragDrop();
         setupCardClicks();
+        setupSubtreeToggles();
     }
 
     function renderTaskCard(task) {
-        const sp = getSubtaskProgress(task);
+        const subtasks = getSubtasks(task);
         const parentTask = task.parent ? state.tasks.find(t => t.id === task.parent) : null;
         const parentKey = parentTask ? `${state.currentProject.key}-${parentTask.id}` : null;
         const overdue = task.status !== 'done' && isOverdue(task.due_date);
+        const hasSubtasks = subtasks.length > 0;
+        const collapsed = state.collapsedSubtasks.has(task.id);
+        const sp = hasSubtasks ? getSubtaskProgress(task) : null;
+
+        const subtaskHtml = hasSubtasks ? `
+            <div class="subtask-toggle" data-task-id="${task.id}">
+                <span class="subtask-chevron${collapsed ? '' : ' open'}">&#9660;</span>
+                <span class="subtask-toggle-label">${subtasks.length} subtask${subtasks.length !== 1 ? 's' : ''}</span>
+                ${sp ? `<span class="subtask-badge">${sp.done}/${sp.total}</span>` : ''}
+            </div>
+            <div class="subtask-list${collapsed ? ' hidden' : ''}">
+                ${subtasks.map(sub => renderSubtaskKanbanItem(sub)).join('')}
+            </div>` : '';
 
         return `
             <div class="task-card" draggable="true" data-task-id="${task.id}">
@@ -550,10 +593,21 @@
                 <div class="task-meta">
                     <span class="priority-dot ${task.priority}" title="${PRIORITY_LABELS[task.priority]}"></span>
                     ${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}
-                    ${sp ? `<span class="subtask-badge">${sp.done}/${sp.total}</span>` : ''}
                     ${task.due_date ? `<span class="due-date-badge${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
                 </div>
+                ${subtaskHtml}
             </div>`;
+    }
+
+    function renderSubtaskKanbanItem(task) {
+        const statusInfo = STATUSES.find(s => s.key === task.status);
+        const overdue = task.status !== 'done' && isOverdue(task.due_date);
+        return `<div class="subtask-item" data-task-id="${task.id}">
+            <span class="subtask-item-dot" style="background:${statusInfo ? statusInfo.color : '#94a3b8'}"></span>
+            <span class="subtask-item-key">${esc(task.key)}</span>
+            <span class="subtask-item-title">${esc(task.title)}</span>
+            ${task.due_date ? `<span class="subtask-item-due${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
+        </div>`;
     }
 
     // ===== Render: Calendar =====
@@ -662,6 +716,29 @@
         });
     }
 
+    // Build a depth-ordered list for a task group, respecting collapse state
+    function buildGroupHierarchy(groupTasks) {
+        const groupIds = new Set(groupTasks.map(t => t.id));
+        const childrenOf = {};
+        for (const t of groupTasks) {
+            if (t.parent && groupIds.has(t.parent)) {
+                if (!childrenOf[t.parent]) childrenOf[t.parent] = [];
+                childrenOf[t.parent].push(t);
+            }
+        }
+        const roots = groupTasks.filter(t => !t.parent || !groupIds.has(t.parent));
+        const result = [];
+        function flatten(task, depth) {
+            const children = childrenOf[task.id] || [];
+            result.push({ task, depth, hasGroupChildren: children.length > 0 });
+            if (!state.collapsedSubtasks.has(task.id)) {
+                for (const child of children) flatten(child, depth + 1);
+            }
+        }
+        for (const root of roots) flatten(root, 0);
+        return result;
+    }
+
     // ===== Render: Table =====
     function renderTable() {
         const content = $('#content');
@@ -735,18 +812,28 @@
             </tr></thead>`;
             html += '<tbody>';
 
-            for (const task of groupTasks) {
+            for (const { task, depth, hasGroupChildren } of buildGroupHierarchy(groupTasks)) {
                 const selected = state.selectedIds.has(task.id);
                 const overdue = task.status !== 'done' && isOverdue(task.due_date);
+                const collapsed = state.collapsedSubtasks.has(task.id);
+                const indent = depth * 20;
+                const connector = depth > 0 ? '<span class="tree-line">└─</span>' : '';
+                const toggleBtn = hasGroupChildren
+                    ? `<button class="tree-toggle" data-task-id="${task.id}" title="${collapsed ? 'Expand' : 'Collapse'}">${collapsed ? '▶' : '▼'}</button>`
+                    : '<span class="tree-toggle-spacer"></span>';
                 html += `
-                    <tr data-task-id="${task.id}" class="${selected ? 'selected' : ''}">
+                    <tr data-task-id="${task.id}" class="${selected ? 'selected' : ''}${depth > 0 ? ' subtask-row' : ''}">
                         <td>
                             <div class="row-checkbox">
                                 <input type="checkbox" class="task-cb" data-task-id="${task.id}" ${selected ? 'checked' : ''}>
                             </div>
                         </td>
                         <td><span class="cell-key">${esc(task.key)}</span></td>
-                        <td><span class="cell-title">${esc(task.title)}</span></td>
+                        <td>
+                            <div class="cell-title-tree" style="padding-left:${indent}px">
+                                ${connector}${toggleBtn}<span class="cell-title">${esc(task.title)}</span>
+                            </div>
+                        </td>
                         <td>
                             <span class="status-badge status-${task.status}" data-task-id="${task.id}">
                                 <span class="status-badge-dot"></span>
@@ -821,6 +908,15 @@
                 } else {
                     state.collapsedGroups.add(group);
                 }
+                renderTable();
+            });
+        });
+
+        // Tree toggle (subtask expand/collapse in table)
+        document.querySelectorAll('.tree-toggle').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleSubtree(parseInt(btn.dataset.taskId));
                 renderTable();
             });
         });
@@ -1063,8 +1159,15 @@
         const swimlanesHtml = STATUSES.map(s => {
             const laneTasks = grouped[s.key];
             const collapsed = state.collapsedSwimlanes[s.key] || false;
+            const laneIds = new Set(laneTasks.map(t => t.id));
+            // Root tasks: no parent in this same swimlane
+            const laneRoots = laneTasks.filter(t => !t.parent || !laneIds.has(t.parent));
 
-            const taskRows = laneTasks.map(t => {
+            const taskRows = laneRoots.map(t => {
+                const laneSubtasks = laneTasks.filter(sub => sub.parent === t.id);
+                const hasSubtasks = laneSubtasks.length > 0;
+                const subtreeCollapsed = state.collapsedSubtasks.has(t.id);
+
                 const gridCells = range.columns.map(col => {
                     let cls = 'timeline-grid-cell';
                     if (col.type === 'week') cls += ' week-col';
@@ -1072,8 +1175,33 @@
                     return `<div class="${cls}"></div>`;
                 }).join('');
 
+                const subRows = (hasSubtasks && !subtreeCollapsed) ? laneSubtasks.map(sub => {
+                    const subGridCells = range.columns.map(col => {
+                        let cls = 'timeline-grid-cell';
+                        if (col.type === 'week') cls += ' week-col';
+                        else if (isWeekend(col.date)) cls += ' weekend';
+                        return `<div class="${cls}"></div>`;
+                    }).join('');
+                    return `<div class="timeline-task-row timeline-subtask-row" data-task-id="${sub.id}">
+                        <div class="timeline-task-label timeline-subtask-label" data-task-id="${sub.id}">
+                            <span class="timeline-subtask-indent"></span>
+                            <span class="task-label-priority ${sub.priority}"></span>
+                            <span class="task-label-text">${esc(sub.title)}</span>
+                            <span class="task-label-key">${esc(sub.key)}</span>
+                        </div>
+                        <div class="timeline-task-grid" data-task-id="${sub.id}">
+                            ${subGridCells}
+                        </div>
+                    </div>`;
+                }).join('') : '';
+
+                const toggleBtn = hasSubtasks
+                    ? `<button class="timeline-subtree-toggle" data-task-id="${t.id}">${subtreeCollapsed ? '▶' : '▼'}</button>`
+                    : '';
+
                 return `<div class="timeline-task-row" data-task-id="${t.id}">
                     <div class="timeline-task-label" data-task-id="${t.id}">
+                        ${toggleBtn}
                         <span class="task-label-priority ${t.priority}"></span>
                         <span class="task-label-text">${esc(t.title)}</span>
                         <span class="task-label-key">${esc(t.key)}</span>
@@ -1081,8 +1209,13 @@
                     <div class="timeline-task-grid" data-task-id="${t.id}">
                         ${gridCells}
                     </div>
-                </div>`;
+                </div>${subRows}`;
             }).join('');
+
+            const totalRows = laneRoots.reduce((n, t) => {
+                const laneSubtasks = laneTasks.filter(sub => sub.parent === t.id);
+                return n + 1 + (state.collapsedSubtasks.has(t.id) ? 0 : laneSubtasks.length);
+            }, 0);
 
             return `<div class="timeline-swimlane" data-status="${s.key}">
                 <div class="timeline-swimlane-header" data-status="${s.key}">
@@ -1091,7 +1224,7 @@
                     <span class="swimlane-count">${laneTasks.length}</span>
                     <span class="swimlane-toggle${collapsed ? ' collapsed' : ''}">&#9660;</span>
                 </div>
-                <div class="timeline-swimlane-body${collapsed ? ' collapsed' : ''}" style="max-height:${collapsed ? '0' : laneTasks.length * 50 + 'px'}">
+                <div class="timeline-swimlane-body${collapsed ? ' collapsed' : ''}" style="max-height:${collapsed ? '0' : totalRows * 50 + 'px'}">
                     ${taskRows}
                 </div>
             </div>`;
@@ -1142,6 +1275,7 @@
         // Set up events
         setupTimelineEvents();
         setupSwimlaneToggles();
+        setupSubtreeToggles();
 
         // Scroll to today
         scrollToTodayInitial(range, colWidth, today);
@@ -1529,6 +1663,18 @@
         });
     }
 
+    // ===== Subtree Toggles (shared: kanban, table, timeline) =====
+    function setupSubtreeToggles() {
+        document.querySelectorAll('.subtask-toggle, .tree-toggle, .timeline-subtree-toggle').forEach(el => {
+            el.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const taskId = parseInt(el.dataset.taskId);
+                toggleSubtree(taskId);
+                renderContent();
+            });
+        });
+    }
+
     // ===== Render: Dashboard =====
     async function renderDashboard() {
         const content = $('#content');
@@ -1652,6 +1798,10 @@
         const deleteBtn = $('#btn-delete');
         const archiveBtn = $('#btn-archive');
 
+        // Remove any stale hierarchy info from previous open
+        const existingInfo = document.getElementById('task-hierarchy-info');
+        if (existingInfo) existingInfo.remove();
+
         if (taskId) {
             state.editingTaskId = taskId;
             const task = state.tasks.find(t => t.id === taskId);
@@ -1672,6 +1822,51 @@
                     archiveBtn.textContent = 'Desarquivar';
                 } else {
                     archiveBtn.textContent = 'Archive';
+                }
+            }
+
+            // Inject parent link + subtask list
+            const parentTask = task.parent ? state.tasks.find(t => t.id === task.parent) : null;
+            const subtasks = getSubtasks(task);
+            if (parentTask || subtasks.length > 0) {
+                const info = document.createElement('div');
+                info.id = 'task-hierarchy-info';
+                info.className = 'task-hierarchy-info';
+                let infoHtml = '';
+                if (parentTask) {
+                    const pKey = `${state.currentProject.key}-${parentTask.id}`;
+                    infoHtml += `<div class="hierarchy-parent">
+                        <span class="hierarchy-label">Parent:</span>
+                        <button class="hierarchy-link" data-task-id="${parentTask.id}">${esc(pKey)} — ${esc(parentTask.title)}</button>
+                    </div>`;
+                }
+                if (subtasks.length > 0) {
+                    const sp = getSubtaskProgress(task);
+                    infoHtml += `<div class="hierarchy-subtasks">
+                        <span class="hierarchy-label">Subtasks</span>
+                        ${sp ? `<span class="subtask-badge">${sp.done}/${sp.total}</span>` : ''}
+                        <div class="hierarchy-subtask-list">
+                            ${subtasks.map(sub => {
+                                const si = STATUSES.find(s => s.key === sub.status);
+                                return `<div class="hierarchy-subtask-item" data-task-id="${sub.id}">
+                                    <span class="subtask-item-dot" style="background:${si ? si.color : '#94a3b8'}"></span>
+                                    <span class="hierarchy-subtask-key">${esc(sub.key)}</span>
+                                    <span class="hierarchy-subtask-title">${esc(sub.title)}</span>
+                                    <span class="hierarchy-subtask-status status-${sub.status}">${STATUS_LABELS[sub.status]}</span>
+                                </div>`;
+                            }).join('')}
+                        </div>
+                    </div>`;
+                }
+                info.innerHTML = infoHtml;
+                document.querySelector('.modal-header').insertAdjacentElement('afterend', info);
+
+                info.querySelectorAll('.hierarchy-subtask-item').forEach(el => {
+                    el.addEventListener('click', () => openTaskModal(parseInt(el.dataset.taskId)));
+                });
+                const parentLink = info.querySelector('.hierarchy-link');
+                if (parentLink) {
+                    parentLink.addEventListener('click', () => openTaskModal(parseInt(parentLink.dataset.taskId)));
                 }
             }
 
@@ -1919,6 +2114,7 @@
     async function selectProject(key) {
         state.currentProject = state.projects.find(p => p.key === key);
         state.selectedIds.clear();
+        loadSubtreeState(key);
         showLoading();
         await refreshTasks();
         hideLoading();

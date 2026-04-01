@@ -1751,6 +1751,264 @@ body {
     gap: 8px;
 }
 
+/* ===== Subtask Expand/Collapse (Kanban) ===== */
+.subtask-toggle {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.subtask-toggle:hover { color: var(--text-primary); }
+
+.subtask-chevron {
+    display: inline-block;
+    font-size: 10px;
+    transition: transform 0.15s;
+    transform: rotate(-90deg);
+}
+
+.subtask-chevron.open {
+    transform: rotate(0deg);
+}
+
+.subtask-toggle-label { font-weight: 500; }
+
+.subtask-list {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.subtask-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    cursor: pointer;
+    font-size: 11px;
+    transition: background 0.1s;
+}
+
+.subtask-item:hover { background: var(--bg-hover); }
+
+.subtask-item-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.subtask-item-key {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.subtask-item-title {
+    color: var(--text-primary);
+    font-weight: 500;
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subtask-item-due {
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.subtask-item-due.overdue { color: var(--danger); font-weight: 600; }
+
+/* ===== Tree (Table view) ===== */
+.subtask-row td { background: #fafbfc; }
+.subtask-row:hover td { background: #f3f4f6; }
+
+.cell-title-tree {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.tree-line {
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+}
+
+.tree-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 9px;
+    color: var(--text-secondary);
+    padding: 0 2px;
+    line-height: 1;
+    flex-shrink: 0;
+    border-radius: 2px;
+    transition: background 0.1s;
+}
+
+.tree-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.tree-toggle-spacer {
+    display: inline-block;
+    width: 14px;
+    flex-shrink: 0;
+}
+
+/* ===== Timeline subtask rows ===== */
+.timeline-subtask-row .timeline-task-label {
+    background: #f8f9fc;
+}
+
+.timeline-subtask-indent {
+    display: inline-block;
+    width: 16px;
+    flex-shrink: 0;
+    border-left: 2px solid var(--border);
+    margin-left: 12px;
+    height: 16px;
+    position: relative;
+}
+
+.timeline-subtask-indent::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 8px;
+    height: 0;
+    border-bottom: 2px solid var(--border);
+}
+
+.timeline-subtree-toggle {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 9px;
+    color: var(--text-secondary);
+    padding: 0 3px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: color 0.1s;
+}
+
+.timeline-subtree-toggle:hover { color: var(--text-primary); }
+
+/* ===== Modal Hierarchy Info ===== */
+.task-hierarchy-info {
+    padding: 10px 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.hierarchy-parent {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+}
+
+.hierarchy-label {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.hierarchy-link {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 2px 8px;
+    font-size: 12px;
+    color: var(--accent);
+    cursor: pointer;
+    font-weight: 500;
+    transition: background 0.1s;
+}
+
+.hierarchy-link:hover { background: var(--accent-light); }
+
+.hierarchy-subtasks {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.hierarchy-subtasks > .hierarchy-label { margin-bottom: 2px; }
+
+.hierarchy-subtasks > .subtask-badge { align-self: flex-start; }
+
+.hierarchy-subtask-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.hierarchy-subtask-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.1s;
+    border: 1px solid transparent;
+}
+
+.hierarchy-subtask-item:hover {
+    background: var(--accent-light);
+    border-color: var(--accent);
+}
+
+.hierarchy-subtask-key {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.hierarchy-subtask-title {
+    flex: 1;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hierarchy-subtask-status {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 10px;
+    flex-shrink: 0;
+}
+
+.hierarchy-subtask-status.status-todo { background: var(--status-todo-bg); color: var(--status-todo-text); }
+.hierarchy-subtask-status.status-in_progress { background: var(--status-in_progress-bg); color: var(--status-in_progress-text); }
+.hierarchy-subtask-status.status-in_review { background: var(--status-in_review-bg); color: var(--status-in_review-text); }
+.hierarchy-subtask-status.status-done { background: var(--status-done-bg); color: var(--status-done-text); }
+
 /* ===== Utilities ===== */
 .hidden { display: none !important; }
 
