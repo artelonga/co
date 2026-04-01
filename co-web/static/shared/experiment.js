@@ -12,6 +12,17 @@
         { key: 'h', name: 'Terminal' },
     ];
 
+    const VARIANT_COLORS = {
+        a: { bg: '#f0f2f5', accent: '#6366f1' },
+        b: { bg: '#F5E6D3', accent: '#8B4513' },
+        c: { bg: '#1c1c1c', accent: '#d4a24c' },
+        d: { bg: '#18191b', accent: '#7b8fa0' },
+        e: { bg: '#000000', accent: '#00ff41' },
+        f: { bg: '#0d0221', accent: '#ff2a6d' },
+        g: { bg: '#f0f5e8', accent: '#4caf50' },
+        h: { bg: '#000000', accent: '#ffffff' },
+    };
+
     const PALETTE_KEYS = [
         { key: '--bg', label: 'Background' },
         { key: '--sidebar-bg', label: 'Sidebar' },
@@ -61,6 +72,102 @@
         });
     }
 
+    // --- Variant switch (swap CSS, no full reload) ---
+    async function applyVariantSwitch(variant) {
+        try {
+            await fetch('/api/experiment/variant', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ variant }),
+            });
+            resetPalette();
+            currentVariant = variant;
+            // Swap the stylesheet immediately so the new theme is applied without a page reload
+            const styleLink = document.querySelector('link[href="/style.css"], link[href^="/style.css?"]');
+            if (styleLink) {
+                styleLink.href = '/style.css?' + Date.now();
+            }
+            // Update header switcher UI to reflect new selection
+            renderHeaderSwitcher();
+        } catch (_err) {
+            showToast('Failed to switch variant');
+        }
+    }
+
+    // --- Header Palette Switcher ---
+    function swatchHtml(variantKey, dotClass) {
+        const colors = VARIANT_COLORS[variantKey];
+        if (!colors) return '';
+        return `<span class="${dotClass}" style="background:${colors.bg}"></span><span class="${dotClass}" style="background:${colors.accent}"></span>`;
+    }
+
+    function variantLabel(key) {
+        const v = VARIANTS.find(v => v.key === key);
+        return v ? v.name : key.toUpperCase();
+    }
+
+    function renderHeaderSwitcher() {
+        const slot = document.getElementById('palette-switcher');
+        if (!slot) return;
+
+        slot.innerHTML = '';
+
+        const btn = document.createElement('button');
+        btn.className = 'palette-switcher-btn';
+        btn.id = 'palette-switcher-toggle';
+        btn.setAttribute('aria-haspopup', 'listbox');
+        btn.innerHTML = `
+            <span class="palette-switcher-swatch">${swatchHtml(currentVariant, 'palette-switcher-swatch-dot')}</span>
+            <span class="palette-switcher-label">${esc(variantLabel(currentVariant))}</span>
+            <svg class="palette-switcher-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        `;
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'palette-switcher-dropdown hidden';
+        dropdown.id = 'palette-switcher-dropdown';
+        dropdown.setAttribute('role', 'listbox');
+        dropdown.innerHTML = VARIANTS.map(v => `
+            <button class="palette-switcher-item${v.key === currentVariant ? ' active' : ''}"
+                    data-variant="${v.key}"
+                    role="option"
+                    aria-selected="${v.key === currentVariant}">
+                <span class="palette-switcher-item-swatch">${swatchHtml(v.key, 'palette-switcher-item-dot')}</span>
+                <span class="palette-switcher-item-name">${esc(v.name)}</span>
+            </button>
+        `).join('');
+
+        slot.appendChild(btn);
+        slot.appendChild(dropdown);
+
+        let open = false;
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            open = !open;
+            dropdown.classList.toggle('hidden', !open);
+        });
+
+        dropdown.querySelectorAll('.palette-switcher-item').forEach(item => {
+            item.addEventListener('click', async () => {
+                const variant = item.dataset.variant;
+                open = false;
+                dropdown.classList.add('hidden');
+                if (variant !== currentVariant) {
+                    await applyVariantSwitch(variant);
+                }
+            });
+        });
+
+        document.addEventListener('click', () => {
+            if (open) {
+                open = false;
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        dropdown.addEventListener('click', (e) => e.stopPropagation());
+    }
+
     // --- Init ---
     async function init() {
         try {
@@ -73,6 +180,7 @@
         }
         loadPalette();
         renderWidget();
+        renderHeaderSwitcher();
     }
 
     // --- Render ---
@@ -226,21 +334,10 @@
         document.getElementById('exp-dropdown').querySelectorAll('.experiment-dropdown-item').forEach(btn => {
             btn.addEventListener('click', async () => {
                 const variant = btn.dataset.variant;
-                if (variant === currentVariant) {
-                    dropdownOpen = false;
-                    document.getElementById('exp-dropdown').classList.add('hidden');
-                    return;
-                }
-                try {
-                    await fetch('/api/experiment/variant', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ variant }),
-                    });
-                    resetPalette();
-                    window.location.reload();
-                } catch (err) {
-                    showToast('Failed to switch variant');
+                dropdownOpen = false;
+                document.getElementById('exp-dropdown').classList.add('hidden');
+                if (variant !== currentVariant) {
+                    await applyVariantSwitch(variant);
                 }
             });
         });
