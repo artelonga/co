@@ -182,7 +182,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Task/project CRUD (co-web) ---
     let api = Router::new()
         .route("/projects", get(list_projects).post(create_project))
-        .route("/projects/{key}", get(get_project))
+        .route("/projects/{key}", get(get_project).delete(delete_project))
         .route("/projects/{key}/tasks", get(list_tasks).post(create_task))
         .route(
             "/projects/{key}/tasks/{id}",
@@ -212,14 +212,26 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/v1/plugins", get(game_routes::list_plugins))
         .route("/v1/auth/register", post(game_routes::register))
         .route("/v1/auth/legacy-login", post(game_routes::legacy_login))
-        .route("/v1/games/{game_name}/leaderboard", get(game_routes::get_leaderboard))
-        .route("/v1/players/{username}", get(game_routes::get_player_profile));
+        .route(
+            "/v1/games/{game_name}/leaderboard",
+            get(game_routes::get_leaderboard),
+        )
+        .route(
+            "/v1/players/{username}",
+            get(game_routes::get_player_profile),
+        );
 
     let game_protected = Router::new()
         .route("/v1/profile", get(game_routes::get_profile))
         .route("/v1/wallet", get(game_routes::get_wallet))
-        .route("/v1/games/{game_name}/result", post(game_routes::record_game_result))
-        .route("/v1/games/{game_name}/stats", get(game_routes::get_game_stats))
+        .route(
+            "/v1/games/{game_name}/result",
+            post(game_routes::record_game_result),
+        )
+        .route(
+            "/v1/games/{game_name}/stats",
+            get(game_routes::get_game_stats),
+        )
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     // Middleware stack
@@ -228,12 +240,25 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
         .allow_headers([header::CONTENT_TYPE]);
 
+    // --- Quilombo community routes ---
+    let quilombo_api = crate::quilombo_routes::router();
+
+    // --- Gestão (admin) routes with GitHub auth ---
+    let github_token_cache = crate::github_auth::new_token_cache();
+    let allowed_admins =
+        crate::github_auth::AllowedAdmins(state.config.gestao_github_admins.clone());
+    let gestao_api = crate::gestao_routes::router()
+        .layer(axum::Extension(github_token_cache))
+        .layer(axum::Extension(allowed_admins));
+
     let mut router = Router::new()
         .nest("/api", api)
         .nest("/api", auth_api)
         .nest("/api", experiment_api)
         .nest("/api", game_public)
-        .nest("/api", game_protected);
+        .nest("/api", game_protected)
+        .nest("/api/v1/quilombo", quilombo_api)
+        .nest("/api/v1/gestao", gestao_api);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -295,19 +320,25 @@ pub async fn start_server(config: WebConfig) {
     // Initialize game-core encrypted storage
     let game_db_path = config.game_db_path.clone().unwrap_or_else(|| {
         let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        data_dir.join("game").join("game.db").to_string_lossy().to_string()
+        data_dir
+            .join("game")
+            .join("game.db")
+            .to_string_lossy()
+            .to_string()
     });
-    let game_db_dir = std::path::Path::new(&game_db_path).parent().unwrap_or(std::path::Path::new("."));
+    let game_db_dir = std::path::Path::new(&game_db_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
     std::fs::create_dir_all(game_db_dir).ok();
     let game_storage = Arc::new(
         game_core::storage::Storage::open(std::path::Path::new(&game_db_path))
-            .expect("Failed to open game storage")
+            .expect("Failed to open game storage"),
     );
     tracing::info!("Game storage opened at {}", game_db_path);
 
     // Load plugins
     let plugins_dir = std::path::Path::new(&config.plugins_dir);
-    let (plugin_registry, plugin_router) =
+    let (plugin_registry, _plugin_router) =
         crate::plugin_loader::load_plugins(plugins_dir, &game_storage);
     let plugin_count = plugin_registry.len();
     tracing::info!("Loaded {} plugin(s)", plugin_count);
@@ -541,6 +572,17 @@ async fn create_project(
         .create_project(body)
         .map(|p| (StatusCode::CREATED, Json(p)))
         .map_err(|e| AppError::Conflict(e.to_string()))
+}
+
+async fn delete_project(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<StatusCode, AppError> {
+    let mut storage = lock_storage(&state)?;
+    storage
+        .delete_project(&key)
+        .map(|_| StatusCode::NO_CONTENT)
+        .map_err(|_| AppError::NotFound(format!("Project '{}' not found", key)))
 }
 
 // --- Task Handlers ---

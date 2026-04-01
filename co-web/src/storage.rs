@@ -116,6 +116,14 @@ impl Storage {
                 )
                 .expect("Failed to run migration v2");
         }
+
+        // Quilombo community tables (v3)
+        crate::quilombo_storage::run_quilombo_migrations(&self.conn);
+    }
+
+    /// Access the underlying SQLite connection (for quilombo storage functions).
+    pub fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     pub fn schema_version(&self) -> i64 {
@@ -202,6 +210,26 @@ impl Storage {
             next_id: 1,
             archived: false,
         })
+    }
+
+    pub fn delete_project(&mut self, key: &str) -> anyhow::Result<()> {
+        let upper_key = key.to_uppercase();
+        if self.get_project(&upper_key).is_none() {
+            anyhow::bail!("Project '{}' not found", upper_key);
+        }
+
+        self.conn.execute(
+            "DELETE FROM activity_log WHERE project_key = ?1",
+            params![upper_key],
+        )?;
+        self.conn.execute(
+            "DELETE FROM tasks WHERE project_key = ?1",
+            params![upper_key],
+        )?;
+        self.conn
+            .execute("DELETE FROM projects WHERE key = ?1", params![upper_key])?;
+
+        Ok(())
     }
 
     // --- Tasks ---

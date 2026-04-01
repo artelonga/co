@@ -24,6 +24,8 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         experiments: true,
         plugins_dir: "plugins".to_string(),
         game_db_path: None,
+        universo_dir: "quilomboaraucaria".to_string(),
+        gestao_github_admins: vec!["artelonga".to_string()],
     }
 }
 
@@ -37,7 +39,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
     let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
     let game_db_path = dir.join("game_test.db");
     let game_storage = std::sync::Arc::new(
-        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage")
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
@@ -335,6 +337,67 @@ async fn test_create_duplicate_project_api() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+// --- Delete project tests ---
+
+#[tokio::test]
+async fn test_delete_project_api() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/projects/DS")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn test_delete_project_not_found() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/projects/NOPE")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_delete_project_cascades() {
+    let dir = tempdir().unwrap();
+    let config = test_config(dir.path());
+    let mut storage = Storage::new(&config.data_dir);
+    seed_data(&mut storage);
+
+    // Verify tasks exist before delete
+    let tasks_before = storage.list_tasks("DS");
+    assert!(!tasks_before.is_empty());
+
+    storage.delete_project("DS").unwrap();
+
+    // Project should be gone
+    assert!(storage.get_project("DS").is_none());
+
+    // Tasks should be gone
+    let tasks_after = storage.list_tasks("DS");
+    assert!(tasks_after.is_empty());
 }
 
 // --- New endpoint tests ---
