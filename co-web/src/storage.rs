@@ -747,12 +747,153 @@ impl Storage {
             &upper_key,
         );
 
+        let velocity = self.get_velocity(&upper_key);
+        let burndown = self.get_burndown(&upper_key);
+        let label_distribution = self.get_label_distribution(&upper_key);
+        let overdue_tasks_detail = self.get_overdue_tasks_detail(&upper_key);
+
         DashboardData {
             status_counts,
             overdue_count: overdue_count as u64,
             upcoming_tasks,
             recently_updated,
+            velocity,
+            burndown,
+            label_distribution,
+            overdue_tasks_detail,
         }
+    }
+
+    fn get_velocity(&self, project_key: &str) -> Vec<WeeklyVelocity> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT strftime('%Y-W%W', created_at) as week, COUNT(*) as count \
+             FROM activity_log \
+             WHERE project_key = ?1 \
+               AND action = 'field_changed' \
+               AND field = 'status' \
+               AND new_value = 'done' \
+               AND date(created_at) >= date('now', '-56 days') \
+             GROUP BY week \
+             ORDER BY week ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        match stmt.query_map(params![project_key], |row| {
+            Ok(WeeklyVelocity {
+                week: row.get(0)?,
+                count: row.get::<_, i64>(1)? as u64,
+            })
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    fn get_burndown(&self, project_key: &str) -> Vec<BurndownPoint> {
+        let today = chrono::Utc::now().date_naive();
+        let mut result = Vec::with_capacity(8);
+
+        for week_offset in (0i64..8).rev() {
+            let week_end = today - chrono::Duration::weeks(week_offset);
+            let week_label = week_end.format("%Y-W%V").to_string();
+            let week_end_str = week_end.to_string();
+
+            let total_created: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM tasks WHERE project_key = ?1 AND archived = 0 \
+                     AND date(created_at) <= ?2",
+                    params![project_key, week_end_str],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+
+            let total_done: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM activity_log \
+                     WHERE project_key = ?1 \
+                       AND action = 'field_changed' \
+                       AND field = 'status' \
+                       AND new_value = 'done' \
+                       AND date(created_at) <= ?2",
+                    params![project_key, week_end_str],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+
+            result.push(BurndownPoint {
+                date: week_label,
+                remaining: (total_created - total_done).max(0),
+                completed: total_done as u64,
+            });
+        }
+
+        result
+    }
+
+    fn get_label_distribution(&self, project_key: &str) -> Vec<LabelCount> {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT labels FROM tasks WHERE project_key = ?1 AND archived = 0")
+        {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        let label_strings: Vec<String> =
+            match stmt.query_map(params![project_key], |row| row.get(0)) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => return vec![],
+            };
+
+        let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+        for s in label_strings {
+            let labels: Vec<String> = serde_json::from_str(&s).unwrap_or_default();
+            for label in labels {
+                if !label.is_empty() {
+                    *counts.entry(label).or_insert(0) += 1;
+                }
+            }
+        }
+
+        let mut result: Vec<LabelCount> = counts
+            .into_iter()
+            .map(|(label, count)| LabelCount { label, count })
+            .collect();
+        result.sort_by(|a, b| b.count.cmp(&a.count));
+        result.truncate(10);
+        result
+    }
+
+    fn get_overdue_tasks_detail(&self, project_key: &str) -> Vec<OverdueTaskDetail> {
+        let today = chrono::Utc::now().date_naive();
+        let tasks = self.query_tasks(
+            "SELECT id, title, description, status, priority, due_date, parent, labels, \
+             created_at, updated_at, archived, project_key, assignee \
+             FROM tasks WHERE project_key = ?1 AND archived = 0 AND status != 'done' \
+             AND due_date IS NOT NULL AND due_date < date('now') \
+             ORDER BY due_date ASC LIMIT 20",
+            project_key,
+        );
+
+        tasks
+            .into_iter()
+            .filter_map(|t| {
+                let due = t.due_date?;
+                let days_overdue = (today - due).num_days();
+                Some(OverdueTaskDetail {
+                    id: t.id,
+                    key: t.key,
+                    title: t.title,
+                    due_date: due.to_string(),
+                    days_overdue,
+                    priority: t.priority.to_string(),
+                })
+            })
+            .collect()
     }
 
     fn get_status_counts(&self, project_key: &str) -> StatusCounts {

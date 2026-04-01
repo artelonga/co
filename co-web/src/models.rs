@@ -216,6 +216,10 @@ pub struct DashboardData {
     pub overdue_count: u64,
     pub upcoming_tasks: Vec<Task>,
     pub recently_updated: Vec<Task>,
+    pub velocity: Vec<WeeklyVelocity>,
+    pub burndown: Vec<BurndownPoint>,
+    pub label_distribution: Vec<LabelCount>,
+    pub overdue_tasks_detail: Vec<OverdueTaskDetail>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -225,6 +229,35 @@ pub struct StatusCounts {
     pub in_review: u64,
     pub done: u64,
     pub total: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WeeklyVelocity {
+    pub week: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BurndownPoint {
+    pub date: String,
+    pub remaining: i64,
+    pub completed: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LabelCount {
+    pub label: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OverdueTaskDetail {
+    pub id: u64,
+    pub key: String,
+    pub title: String,
+    pub due_date: String,
+    pub days_overdue: i64,
+    pub priority: String,
 }
 
 // --- Experiment ---
