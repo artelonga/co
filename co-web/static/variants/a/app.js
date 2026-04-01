@@ -1656,6 +1656,14 @@
 
     // ===== Card Clicks (Kanban) =====
     function setupCardClicks() {
+        // Subtask items click before card click to avoid bubbling to parent card
+        document.querySelectorAll('.subtask-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openTaskModal(parseInt(item.dataset.taskId));
+            });
+        });
+
         document.querySelectorAll('.task-card').forEach(card => {
             card.addEventListener('click', () => {
                 openTaskModal(parseInt(card.dataset.taskId));
