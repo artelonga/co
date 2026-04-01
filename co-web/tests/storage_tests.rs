@@ -113,6 +113,7 @@ fn test_create_and_list_tasks() {
                 due_date: None,
                 parent: None,
                 labels: vec!["test".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -155,6 +156,7 @@ fn test_task_ids_monotonically_increase() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -170,6 +172,7 @@ fn test_task_ids_monotonically_increase() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -203,6 +206,7 @@ fn test_get_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -242,6 +246,7 @@ fn test_update_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -259,6 +264,7 @@ fn test_update_task() {
                 parent: None,
                 labels: Some(vec!["done".into()]),
                 archived: None,
+                assignee: None,
             },
         )
         .unwrap();
@@ -299,6 +305,7 @@ fn test_delete_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -388,6 +395,7 @@ fn test_task_with_parent() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -403,6 +411,7 @@ fn test_task_with_parent() {
                 due_date: None,
                 parent: Some(parent.id),
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -453,6 +462,7 @@ fn test_comments() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -519,6 +529,7 @@ fn test_activity_log() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -543,6 +554,7 @@ fn test_activity_log() {
                 parent: None,
                 labels: None,
                 archived: None,
+                assignee: None,
             },
         )
         .unwrap();
@@ -579,6 +591,7 @@ fn test_archive_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -597,6 +610,7 @@ fn test_archive_task() {
                 due_date: None,
                 parent: None,
                 labels: None,
+                assignee: None,
             },
         )
         .unwrap();
@@ -636,6 +650,7 @@ fn test_bulk_operations() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
@@ -719,6 +734,7 @@ fn test_create_task_unicode_title() {
                 due_date: None,
                 parent: None,
                 labels: vec!["日本語".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -755,6 +771,7 @@ fn test_create_task_special_chars() {
                 due_date: None,
                 parent: None,
                 labels: vec!["a&b".into(), "c<d".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -792,6 +809,7 @@ fn test_activity_log_limit_cap() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
@@ -831,6 +849,7 @@ fn test_list_tasks_with_pagination() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
@@ -866,10 +885,10 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 2);
+    assert_eq!(storage.schema_version(), 5);
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 2);
+    assert_eq!(storage2.schema_version(), 5);
 }

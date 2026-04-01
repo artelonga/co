@@ -44,6 +44,8 @@ pub struct Task {
     pub description: String,
     #[serde(default)]
     pub archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +61,7 @@ pub struct CreateTask {
     pub parent: Option<u64>,
     #[serde(default)]
     pub labels: Vec<String>,
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +74,7 @@ pub struct UpdateTask {
     pub parent: Option<u64>,
     pub labels: Option<Vec<String>>,
     pub archived: Option<bool>,
+    pub assignee: Option<String>,
 }
 
 fn default_status() -> TaskStatus {

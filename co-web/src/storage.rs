@@ -117,8 +117,26 @@ impl Storage {
                 .expect("Failed to run migration v2");
         }
 
-        // Quilombo community tables (v3)
+        // Quilombo community tables (v3, v4)
         crate::quilombo_storage::run_quilombo_migrations(&self.conn);
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 5 {
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE tasks ADD COLUMN assignee TEXT;
+                     INSERT INTO schema_version (version) VALUES (5);",
+                )
+                .expect("Failed to run migration v5");
+        }
     }
 
     /// Access the underlying SQLite connection (for quilombo storage functions).
@@ -254,12 +272,12 @@ impl Storage {
 
         let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match archived {
             Some(archived_val) => (
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key \
+                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
                  FROM tasks WHERE project_key = ?1 AND archived = ?2 ORDER BY id LIMIT ?3 OFFSET ?4".to_string(),
                 vec![Box::new(upper_key), Box::new(archived_val as i64), Box::new(limit as i64), Box::new(offset as i64)],
             ),
             None => (
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key \
+                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
                  FROM tasks WHERE project_key = ?1 ORDER BY id LIMIT ?2 OFFSET ?3".to_string(),
                 vec![Box::new(upper_key), Box::new(limit as i64), Box::new(offset as i64)],
             ),
@@ -291,6 +309,7 @@ impl Storage {
                 created_at: parse_datetime(&row.get::<_, String>(8)?),
                 updated_at: parse_datetime(&row.get::<_, String>(9)?),
                 archived: row.get::<_, i64>(10)? != 0,
+                assignee: row.get(12)?,
             })
         })
         .expect("Failed to list tasks")
@@ -302,7 +321,7 @@ impl Storage {
         let upper_key = project_key.to_uppercase();
         self.conn
             .query_row(
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key \
+                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
                  FROM tasks WHERE project_key = ?1 AND id = ?2",
                 params![upper_key, id as i64],
                 |row| {
@@ -322,6 +341,7 @@ impl Storage {
                         created_at: parse_datetime(&row.get::<_, String>(8)?),
                         updated_at: parse_datetime(&row.get::<_, String>(9)?),
                         archived: row.get::<_, i64>(10)? != 0,
+                        assignee: row.get(12)?,
                     })
                 },
             )
@@ -346,8 +366,8 @@ impl Storage {
         )?;
 
         self.conn.execute(
-            "INSERT INTO tasks (project_key, id, title, description, status, priority, due_date, parent, labels, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            "INSERT INTO tasks (project_key, id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, assignee) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             params![
                 upper_key,
                 id as i64,
@@ -360,6 +380,7 @@ impl Storage {
                 labels_json,
                 now_str,
                 now_str,
+                create.assignee,
             ],
         )?;
 
@@ -386,6 +407,7 @@ impl Storage {
             updated_at: now,
             description: create.description,
             archived: false,
+            assignee: create.assignee,
         })
     }
 
@@ -455,14 +477,17 @@ impl Storage {
             }
             task.archived = archived;
         }
+        if update.assignee.is_some() {
+            task.assignee = update.assignee;
+        }
 
         task.updated_at = Utc::now();
         let labels_json = serde_json::to_string(&task.labels)?;
 
         self.conn.execute(
             "UPDATE tasks SET title = ?1, description = ?2, status = ?3, priority = ?4, \
-             due_date = ?5, parent = ?6, labels = ?7, updated_at = ?8, archived = ?9 \
-             WHERE project_key = ?10 AND id = ?11",
+             due_date = ?5, parent = ?6, labels = ?7, updated_at = ?8, archived = ?9, assignee = ?10 \
+             WHERE project_key = ?11 AND id = ?12",
             params![
                 task.title,
                 task.description,
@@ -473,6 +498,7 @@ impl Storage {
                 labels_json,
                 task.updated_at.to_rfc3339(),
                 task.archived as i64,
+                task.assignee,
                 task.project_key,
                 id as i64,
             ],
@@ -707,7 +733,7 @@ impl Storage {
             .unwrap_or(0);
 
         let upcoming_tasks = self.query_tasks(
-            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key \
+            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
              FROM tasks WHERE project_key = ?1 AND archived = 0 AND status != 'done' \
              AND due_date IS NOT NULL AND due_date BETWEEN date('now') AND date('now', '+7 days') \
              ORDER BY due_date ASC LIMIT 10",
@@ -715,7 +741,7 @@ impl Storage {
         );
 
         let recently_updated = self.query_tasks(
-            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key \
+            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
              FROM tasks WHERE project_key = ?1 AND archived = 0 \
              ORDER BY updated_at DESC LIMIT 10",
             &upper_key,
@@ -778,6 +804,7 @@ impl Storage {
                 created_at: parse_datetime(&row.get::<_, String>(8)?),
                 updated_at: parse_datetime(&row.get::<_, String>(9)?),
                 archived: row.get::<_, i64>(10)? != 0,
+                assignee: row.get(12)?,
             })
         })
         .expect("Failed to query tasks")
@@ -877,6 +904,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 4, 1),
             parent: None,
             labels: vec!["design".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Build component showcase".into(),
@@ -887,6 +915,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 4, 15),
             parent: None,
             labels: vec!["web".into(), "design".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Organize first design review".into(),
@@ -898,6 +927,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 5, 20),
             parent: None,
             labels: vec!["review".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Produce component catalog".into(),
@@ -909,6 +939,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 5, 1),
             parent: None,
             labels: vec!["docs".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Set up documentation site".into(),
@@ -919,6 +950,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 3, 10),
             parent: None,
             labels: vec!["marketing".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Select color palette".into(),
@@ -929,6 +961,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 3, 25),
             parent: Some(1),
             labels: vec!["design".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Design logo".into(),
@@ -938,6 +971,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 3, 28),
             parent: Some(1),
             labels: vec!["design".into()],
+            assignee: None,
         },
     ];
 
@@ -955,6 +989,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 4, 30),
             parent: None,
             labels: vec!["database".into(), "urgent".into()],
+            assignee: None,
         },
         CreateTask {
             title: "API documentation".into(),
@@ -964,6 +999,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 5, 15),
             parent: None,
             labels: vec!["docs".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Authentication module".into(),
@@ -974,6 +1010,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 6, 1),
             parent: None,
             labels: vec!["security".into(), "auth".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Rate limiting and throttling".into(),
@@ -984,6 +1021,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 7, 1),
             parent: None,
             labels: vec!["security".into()],
+            assignee: None,
         },
         CreateTask {
             title: "CI/CD pipeline setup".into(),
@@ -994,6 +1032,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 4, 15),
             parent: None,
             labels: vec!["devops".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Write migration scripts".into(),
@@ -1003,6 +1042,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 4, 10),
             parent: Some(1),
             labels: vec!["database".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Integration test suite".into(),
@@ -1012,6 +1052,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 5, 1),
             parent: Some(3),
             labels: vec!["testing".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Load testing workshop".into(),
@@ -1022,6 +1063,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 3, 8),
             parent: Some(1),
             labels: vec!["testing".into(), "performance".into()],
+            assignee: None,
         },
     ];
 
@@ -1047,6 +1089,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 6, 30),
             parent: None,
             labels: vec!["epic".into(), "launch".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Internal MVP".into(),
@@ -1059,6 +1102,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 5, 15),
             parent: Some(1),
             labels: vec!["mvp".into()],
+            assignee: None,
         },
         CreateTask {
             title: "Public MVP".into(),
@@ -1071,6 +1115,7 @@ pub fn seed_data(storage: &mut Storage) {
             due_date: NaiveDate::from_ymd_opt(2026, 6, 30),
             parent: Some(1),
             labels: vec!["mvp".into(), "public".into()],
+            assignee: None,
         },
     ];
 

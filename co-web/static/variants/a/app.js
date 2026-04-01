@@ -214,6 +214,13 @@
         return new Date(d + 'T23:59:59') < new Date();
     }
 
+    function assigneeInitials(name) {
+        if (!name) return '';
+        const parts = name.trim().split(/[\s@.]+/).filter(Boolean);
+        if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+        return parts[0].slice(0, 2).toUpperCase();
+    }
+
     function getSubtasks(task) {
         return state.tasks.filter(t => t.parent === task.id);
     }
@@ -594,6 +601,7 @@
                     <span class="priority-dot ${task.priority}" title="${PRIORITY_LABELS[task.priority]}"></span>
                     ${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}
                     ${task.due_date ? `<span class="due-date-badge${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
+                    ${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}
                 </div>
                 ${subtaskHtml}
             </div>`;
@@ -808,6 +816,7 @@
                 <th class="col-status"><div class="th-inner${sortClass('status')}" data-sort="status">Status${sortArrow('status')}</div></th>
                 <th class="col-priority"><div class="th-inner${sortClass('priority')}" data-sort="priority">Prioridade${sortArrow('priority')}</div></th>
                 <th class="col-due-date"><div class="th-inner${sortClass('due_date')}" data-sort="due_date">Data Limite${sortArrow('due_date')}</div></th>
+                <th class="col-assignee"><div class="th-inner">Responsável</div></th>
                 <th class="col-labels"><div class="th-inner${sortClass('labels')}" data-sort="labels">Labels${sortArrow('labels')}</div></th>
             </tr></thead>`;
             html += '<tbody>';
@@ -847,6 +856,7 @@
                             </span>
                         </td>
                         <td><span class="cell-due-date${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span></td>
+                        <td>${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}</td>
                         <td><span class="cell-labels">${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}</span></td>
                     </tr>`;
             }
@@ -1912,6 +1922,7 @@
             $('#task-status').value = task.status;
             $('#task-priority').value = task.priority;
             $('#task-due-date').value = task.due_date || '';
+            $('#task-assignee').value = task.assignee || '';
             $('#task-labels').value = task.labels.join(', ');
             $('#task-description').value = task.description || '';
             deleteBtn.classList.remove('hidden');
@@ -1979,6 +1990,7 @@
             form.reset();
             $('#task-status').value = 'todo';
             $('#task-priority').value = 'medium';
+            $('#task-assignee').value = '';
             deleteBtn.classList.add('hidden');
 
             if (archiveBtn) archiveBtn.classList.add('hidden');
@@ -2156,6 +2168,9 @@
             description: $('#task-description').value.trim(),
             labels: $('#task-labels').value.split(',').map(l => l.trim()).filter(Boolean),
         };
+
+        const assigneeVal = $('#task-assignee').value.trim();
+        if (assigneeVal) data.assignee = assigneeVal;
 
         const dueDate = $('#task-due-date').value;
         if (dueDate) data.due_date = dueDate;

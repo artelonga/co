@@ -1,0 +1,1804 @@
+openapi: 3.1.0
+info:
+  title: CO Web API
+  description: |
+    API unificada do CO — plataforma de gestão de conteúdo baseada em grafos.
+
+    ## Distribuição
+
+    A API é dividida em duas camadas:
+
+    ### Open Source (MIT) — Plataforma CO
+    Endpoints genéricos que funcionam para qualquer universo de conteúdo.
+    Código em `github.com/institutional-pointset/co`.
+
+    - `Plataforma` — Saúde, board de projetos, experimentos A/B
+    - `Autenticação` — JWT via email+código
+    - `Jogos` — Framework de jogos com plugins
+    - `Gestão` — CRUD de conteúdo via GitHub PAT (genérico)
+
+    ### Proprietary — Quilombo Araucária
+    Endpoints específicos da comunidade Quilombo Araucária.
+    Código nos módulos `quilombo_*`, conteúdo em repos privados.
+
+    - `Comunidade` — Auth por usuario+senha, perfil, missões, mensagens
+    - `Conteúdo` — Relatos, eventos, membros (leitura pública)
+    - `Admin` — Gestão de eventos, atividades (papel admin)
+
+    ## Autenticação
+
+    Três níveis de acesso:
+
+    - **Público** — sem autenticação
+    - **JWT** — `Authorization: Bearer {jwt}` (obtido via login)
+    - **GitHub** — `Authorization: Bearer ghp_xxxx` (PAT do GitHub)
+
+    ### Obtendo um JWT
+    ```bash
+    curl -X POST /api/v1/quilombo/auth/login \
+      -d '{"usuario":"yuri","senha":"********"}'
+    ```
+
+    ### Usando GitHub PAT
+    ```bash
+    curl -H "Authorization: Bearer ghp_xxxx" /api/v1/gestao/relatos
+    ```
+  version: 0.22.1
+  contact:
+    name: Arte Longa
+    email: yuri@artelonga.com.br
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8742
+    description: Desenvolvimento local
+  - url: https://quilomboaraucaria.org
+    description: Produção (Fly.io)
+
+tags:
+  # =============================================
+  # OPEN SOURCE (MIT) — Plataforma CO
+  # =============================================
+
+  # --- Público ---
+  - name: "CO: Saúde"
+    description: "[OSS] Verificação de status do servidor"
+  - name: "CO: Projetos"
+    description: "[OSS] Board de projetos e tarefas (co-web)"
+  - name: "CO: Experimentos"
+    description: "[OSS] Framework de experimentação A/B"
+  - name: "CO: Auth Email"
+    description: "[OSS] Autenticação via email + código de verificação"
+
+  # --- Jogos ---
+  - name: "CO: Jogos Públicos"
+    description: "[OSS] Leaderboards, perfis de jogadores, plugins"
+  - name: "CO: Jogos Protegidos"
+    description: "[OSS] Perfil, carteira e estatísticas (JWT)"
+
+  # --- Gestão (GitHub) ---
+  - name: "CO: Gestão - Publicação"
+    description: "[OSS] Validar e publicar conteúdo markdown (GitHub PAT)"
+  - name: "CO: Gestão - Relatos"
+    description: "[OSS] CRUD genérico de relatos (GitHub PAT)"
+  - name: "CO: Gestão - Eventos"
+    description: "[OSS] CRUD genérico de eventos (GitHub PAT)"
+  - name: "CO: Gestão - Membros"
+    description: "[OSS] CRUD genérico de membros (GitHub PAT)"
+  - name: "CO: Gestão - Quadro"
+    description: "[OSS] CRUD genérico de quadro/missões (GitHub PAT)"
+  - name: "CO: Gestão - Manifesto"
+    description: "[OSS] Manifesto Iceberg do universo (GitHub PAT)"
+
+  # =============================================
+  # PROPRIETARY — Quilombo Araucária
+  # =============================================
+
+  # --- Público ---
+  - name: "Quilombo: Conteúdo"
+    description: "[Proprietário] Leitura pública de relatos, eventos, membros"
+  - name: "Quilombo: Comentários"
+    description: "[Proprietário] Comentários em relatos e eventos (anônimo permitido)"
+  - name: "Quilombo: Contato"
+    description: "[Proprietário] Formulário de contato"
+
+  # --- JWT ---
+  - name: "Quilombo: Auth"
+    description: "[Proprietário] Login e cadastro por usuario+senha"
+  - name: "Quilombo: Perfil"
+    description: "[Proprietário] Gerenciamento de perfil do membro"
+  - name: "Quilombo: Missões"
+    description: "[Proprietário] Participação em missões comunitárias"
+  - name: "Quilombo: Mensagens"
+    description: "[Proprietário] Mensagens privadas entre membros"
+  - name: "Quilombo: Admin"
+    description: "[Proprietário] Painel admin (papel admin, JWT)"
+
+components:
+  securitySchemes:
+    bearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Token JWT obtido via login (comunidade ou email)
+    githubPAT:
+      type: http
+      scheme: bearer
+      description: GitHub Personal Access Token (gestão administrativa)
+
+  schemas:
+    # --- Erros ---
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: "Recurso não encontrado"
+
+    # --- Projetos / Tarefas ---
+    Task:
+      type: object
+      required: [id, key, project_key, title, status, priority, labels, created_at, updated_at, description, archived]
+      properties:
+        id:
+          type: integer
+          example: 1
+        key:
+          type: string
+          example: DS-1
+        project_key:
+          type: string
+          example: DS
+        title:
+          type: string
+          example: Define visual identity
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          example: "2026-04-30"
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        archived:
+          type: boolean
+          default: false
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+          example: "yuri@artelonga.com.br"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTask:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          default: ""
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+          default: todo
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+
+    UpdateTask:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        archived:
+          type: boolean
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+
+    # --- Saúde ---
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+          example: "0.22.1"
+
+    # --- Auth ---
+    LoginUsuario:
+      type: object
+      required: [usuario, senha]
+      properties:
+        usuario:
+          type: string
+          example: yuri
+        senha:
+          type: string
+          format: password
+
+    CriarUsuario:
+      type: object
+      required: [usuario, nome, senha]
+      properties:
+        usuario:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: "^[a-z0-9_]+$"
+          example: carlos
+        nome:
+          type: string
+          minLength: 2
+          example: Carlos Silva
+        senha:
+          type: string
+          format: password
+          minLength: 8
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        usuario:
+          $ref: "#/components/schemas/UsuarioResumo"
+
+    UsuarioResumo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        usuario:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+          enum: [admin, editor, membro]
+
+    # --- Usuário ---
+    Usuario:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        usuario:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+          enum: [admin, editor, membro]
+        bio:
+          type: string
+          nullable: true
+        foto_url:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+        atualizado_em:
+          type: string
+          format: date-time
+
+    Membro:
+      type: object
+      properties:
+        id:
+          type: string
+        usuario:
+          type: string
+        nome:
+          type: string
+        bio:
+          type: string
+          nullable: true
+        foto_url:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    AtualizarPerfil:
+      type: object
+      properties:
+        nome:
+          type: string
+        bio:
+          type: string
+        foto_url:
+          type: string
+
+    # --- Evento ---
+    Evento:
+      type: object
+      properties:
+        id:
+          type: integer
+        titulo:
+          type: string
+        data:
+          type: string
+          format: date
+        hora:
+          type: string
+          example: "14:00"
+        local:
+          type: string
+        descricao_md:
+          type: string
+        criado_por:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarEvento:
+      type: object
+      required: [titulo, data, hora, local]
+      properties:
+        titulo:
+          type: string
+        data:
+          type: string
+          format: date
+        hora:
+          type: string
+        local:
+          type: string
+        descricao_md:
+          type: string
+
+    AtualizarEvento:
+      type: object
+      properties:
+        titulo:
+          type: string
+        data:
+          type: string
+        hora:
+          type: string
+        local:
+          type: string
+        descricao_md:
+          type: string
+
+    # --- Missão ---
+    Missao:
+      type: object
+      properties:
+        id:
+          type: integer
+        titulo:
+          type: string
+        descricao:
+          type: string
+        objetivo:
+          type: string
+        status:
+          type: string
+          enum: [aberta, em_andamento, concluida, cancelada]
+        criado_por:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+        atualizado_em:
+          type: string
+          format: date-time
+        participantes:
+          type: integer
+          description: Contagem de participantes aprovados
+
+    CriarMissao:
+      type: object
+      required: [titulo]
+      properties:
+        titulo:
+          type: string
+        descricao:
+          type: string
+        objetivo:
+          type: string
+
+    Participacao:
+      type: object
+      properties:
+        id:
+          type: integer
+        missao_id:
+          type: integer
+        usuario_id:
+          type: string
+        status:
+          type: string
+          enum: [pendente, aprovado, recusado]
+        criado_em:
+          type: string
+          format: date-time
+
+    AtualizarParticipacao:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pendente, aprovado, recusado]
+
+    # --- Comentário ---
+    Comentario:
+      type: object
+      properties:
+        id:
+          type: integer
+        publicacao_slug:
+          type: string
+          nullable: true
+        evento_id:
+          type: integer
+          nullable: true
+        autor_id:
+          type: string
+          nullable: true
+        nome_exibicao:
+          type: string
+          nullable: true
+        conteudo:
+          type: string
+        anonimo:
+          type: boolean
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarComentario:
+      type: object
+      required: [conteudo]
+      properties:
+        publicacao_slug:
+          type: string
+        evento_id:
+          type: integer
+        nome_exibicao:
+          type: string
+        conteudo:
+          type: string
+          maxLength: 2000
+        anonimo:
+          type: boolean
+          default: true
+
+    # --- Mensagem ---
+    Mensagem:
+      type: object
+      properties:
+        id:
+          type: integer
+        remetente_id:
+          type: string
+          nullable: true
+        destinatario_id:
+          type: string
+          nullable: true
+        missao_id:
+          type: integer
+          nullable: true
+        assunto:
+          type: string
+        conteudo:
+          type: string
+        nome_remetente:
+          type: string
+          nullable: true
+        email_remetente:
+          type: string
+          nullable: true
+        lida:
+          type: boolean
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarMensagem:
+      type: object
+      required: [conteudo]
+      properties:
+        destinatario_id:
+          type: string
+        missao_id:
+          type: integer
+        assunto:
+          type: string
+        conteudo:
+          type: string
+          maxLength: 5000
+        nome_remetente:
+          type: string
+        email_remetente:
+          type: string
+
+    # --- Atividade ---
+    Atividade:
+      type: object
+      properties:
+        id:
+          type: integer
+        acao:
+          type: string
+        entidade:
+          type: string
+        entidade_id:
+          type: string
+          nullable: true
+        usuario_id:
+          type: string
+          nullable: true
+        conteudo:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    # --- Gestão ---
+    PublicarRequest:
+      type: object
+      required: [caminho, conteudo]
+      properties:
+        caminho:
+          type: string
+          description: "Caminho relativo no universo (ex: relatos/meu-post.md)"
+          example: relatos/nova-horta.md
+        conteudo:
+          type: string
+          description: Conteúdo completo do arquivo markdown com frontmatter YAML
+
+    PublicarResponse:
+      type: object
+      properties:
+        caminho:
+          type: string
+        tipo:
+          type: string
+        id:
+          type: string
+
+    ValidarResponse:
+      type: object
+      properties:
+        valido:
+          type: boolean
+        erros:
+          type: array
+          items:
+            type: string
+        avisos:
+          type: array
+          items:
+            type: string
+
+    CriarConteudo:
+      type: object
+      required: [id, titulo]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-zA-Z0-9._-]+$"
+          example: nova-horta
+        titulo:
+          type: string
+          example: Nova Horta Comunitária
+        descricao:
+          type: string
+        data:
+          type: string
+          format: date
+        tags:
+          type: array
+          items:
+            type: string
+        conteudo:
+          type: string
+          description: Corpo em markdown (abaixo do frontmatter)
+        hora:
+          type: string
+          description: Apenas para eventos (HH:MM)
+        local:
+          type: string
+          description: Apenas para eventos
+        nome:
+          type: string
+          description: Apenas para membros
+        papel:
+          type: string
+          description: Apenas para membros
+          enum: [admin, editor, membro]
+        status:
+          type: string
+          description: Apenas para quadro
+        prioridade:
+          type: string
+          description: Apenas para quadro
+        objetivo:
+          type: string
+          description: Apenas para quadro
+        publicado:
+          type: boolean
+          description: Apenas para relatos
+
+    AtualizarConteudo:
+      type: object
+      properties:
+        titulo:
+          type: string
+        descricao:
+          type: string
+        data:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        conteudo:
+          type: string
+        hora:
+          type: string
+        local:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+        status:
+          type: string
+        prioridade:
+          type: string
+        objetivo:
+          type: string
+        publicado:
+          type: boolean
+
+    ConteudoResumo:
+      type: object
+      properties:
+        id:
+          type: string
+        tipo:
+          type: string
+        titulo:
+          type: string
+        caminho:
+          type: string
+
+    # --- Iceberg ---
+    Manifest:
+      type: object
+      properties:
+        format_version:
+          type: integer
+        snapshot_id:
+          type: string
+          nullable: true
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestEntry"
+
+    ManifestEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        schema_id:
+          type: integer
+        partition:
+          type: object
+          additionalProperties: true
+        stats:
+          type: object
+          additionalProperties: true
+
+# ============================================================
+# PATHS — organizados por nível de acesso
+# ============================================================
+
+paths:
+
+  # ========================================
+  # PÚBLICO — Sem autenticação
+  # ========================================
+
+  /api/health:
+    get:
+      tags: ["CO: Saúde"]
+      summary: Verificar status do servidor
+      operationId: healthCheck
+      responses:
+        "200":
+          description: Servidor operacional
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/health:
+    get:
+      tags: ["CO: Saúde"]
+      summary: Verificar saúde do serviço de jogos
+      operationId: gameHealthCheck
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  # --- Conteúdo Público (Quilombo) ---
+
+  /api/v1/quilombo/publicacoes:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar relatos publicados
+      operationId: listarRelatos
+      responses:
+        "200":
+          description: Lista de relatos (posts) publicados, ordenados por data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  /api/v1/quilombo/publicacoes/{slug}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Obter relato por slug
+      operationId: obterRelato
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conteúdo completo do relato com frontmatter e corpo
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Relato não encontrado
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/v1/quilombo/paginas/{slug}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Obter página estática
+      operationId: obterPagina
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Página com frontmatter e corpo markdown
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Página não encontrada
+
+  /api/v1/quilombo/eventos:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar eventos da comunidade
+      operationId: listarEventos
+      responses:
+        "200":
+          description: Lista de eventos ordenados por data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Evento"
+
+  /api/v1/quilombo/eventos/{id}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Obter detalhes do evento
+      operationId: obterEvento
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Evento"
+        "404":
+          description: Evento não encontrado
+
+  /api/v1/quilombo/missoes:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar missões da comunidade
+      operationId: listarMissoes
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Missao"
+
+  /api/v1/quilombo/missoes/{id}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Obter missão com lista de participantes
+      operationId: obterMissao
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Missão com campo extra "participacoes"
+          content:
+            application/json:
+              schema:
+                type: object
+
+  /api/v1/quilombo/membros:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar membros da comunidade
+      operationId: listarMembros
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Membro"
+
+  /api/v1/quilombo/membros/{usuario}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Obter perfil público do membro
+      operationId: obterMembro
+      parameters:
+        - name: usuario
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Membro"
+        "404":
+          description: Membro não encontrado
+
+  /api/v1/quilombo/tags:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar todas as tags
+      operationId: listarTags
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /api/v1/quilombo/tags/{tag}:
+    get:
+      tags: ["Quilombo: Conteúdo"]
+      summary: Listar relatos com tag específica
+      operationId: relatosPorTag
+      parameters:
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+
+  # --- Comentários (público) ---
+
+  /api/v1/quilombo/comentarios:
+    get:
+      tags: ["Quilombo: Comentários"]
+      summary: Listar comentários
+      operationId: listarComentarios
+      parameters:
+        - name: relato
+          in: query
+          schema:
+            type: string
+          description: Filtrar por slug do relato
+        - name: evento
+          in: query
+          schema:
+            type: integer
+          description: Filtrar por ID do evento
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Comentario"
+    post:
+      tags: ["Quilombo: Comentários"]
+      summary: Criar comentário (anônimo permitido)
+      operationId: criarComentario
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarComentario"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Comentario"
+        "400":
+          description: Conteúdo inválido (vazio ou >2000 caracteres)
+
+  /api/v1/quilombo/contato:
+    post:
+      tags: ["Quilombo: Contato"]
+      summary: Enviar mensagem de contato (anônimo)
+      operationId: enviarContato
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarMensagem"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mensagem"
+
+  # ========================================
+  # JWT — Autenticação necessária
+  # ========================================
+
+  # --- Auth ---
+
+  /api/v1/quilombo/auth/login:
+    post:
+      tags: ["Quilombo: Auth"]
+      summary: Login com usuário e senha
+      operationId: loginQuilombo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginUsuario"
+      responses:
+        "200":
+          description: JWT token + dados do usuário
+          headers:
+            Set-Cookie:
+              description: "session={jwt}; HttpOnly; SameSite=Strict"
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Credenciais inválidas
+        "429":
+          description: Muitas tentativas (rate limited)
+
+  /api/v1/quilombo/auth/cadastro:
+    post:
+      tags: ["Quilombo: Auth"]
+      summary: Registrar novo membro
+      operationId: cadastroQuilombo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarUsuario"
+      responses:
+        "201":
+          description: Conta criada + JWT
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Dados inválidos
+        "409":
+          description: Usuário já existe
+
+  /api/v1/auth/login:
+    post:
+      tags: ["CO: Auth Email"]
+      summary: Solicitar código de verificação por email
+      operationId: loginEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        "200":
+          description: Código enviado (se email cadastrado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+
+  /api/v1/auth/verify:
+    post:
+      tags: ["CO: Auth Email"]
+      summary: Verificar código e obter JWT
+      operationId: verificarCodigo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email:
+                  type: string
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+      responses:
+        "200":
+          description: JWT emitido
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id:
+                    type: string
+                  email:
+                    type: string
+                  display_name:
+                    type: string
+                  expires_at:
+                    type: string
+                    format: date-time
+
+  # --- Perfil (JWT) ---
+
+  /api/v1/quilombo/perfil:
+    get:
+      tags: ["Quilombo: Perfil"]
+      summary: Obter meu perfil
+      operationId: obterPerfil
+      security:
+        - bearerJWT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Usuario"
+        "401":
+          description: Não autenticado
+    put:
+      tags: ["Quilombo: Perfil"]
+      summary: Atualizar meu perfil
+      operationId: atualizarPerfil
+      security:
+        - bearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarPerfil"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Usuario"
+
+  # --- Missões (JWT) ---
+
+  /api/v1/quilombo/missoes/criar:
+    post:
+      tags: ["Quilombo: Missões"]
+      summary: Criar nova missão
+      operationId: criarMissao
+      security:
+        - bearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarMissao"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Missao"
+        "403":
+          description: Sem permissão
+
+  /api/v1/quilombo/missoes/{id}/participar:
+    post:
+      tags: ["Quilombo: Missões"]
+      summary: Participar de uma missão
+      operationId: participarMissao
+      security:
+        - bearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Participacao"
+        "404":
+          description: Missão não encontrada
+        "409":
+          description: Já participa desta missão
+
+  /api/v1/quilombo/missoes/{id}/participacoes/{uid}:
+    put:
+      tags: ["Quilombo: Missões"]
+      summary: Aprovar ou rejeitar participação
+      description: Apenas o criador da missão ou admin pode alterar
+      operationId: atualizarParticipacao
+      security:
+        - bearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarParticipacao"
+      responses:
+        "200":
+          description: Status atualizado
+        "403":
+          description: Sem permissão
+
+  # --- Eventos (JWT admin) ---
+
+  /api/v1/quilombo/eventos/criar:
+    post:
+      tags: ["Quilombo: Admin"]
+      summary: Criar evento (admin)
+      operationId: criarEventoAdmin
+      security:
+        - bearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarEvento"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Evento"
+        "403":
+          description: Apenas admin
+
+  /api/v1/quilombo/eventos/{id}/editar:
+    put:
+      tags: ["Quilombo: Admin"]
+      summary: Atualizar evento (admin)
+      operationId: atualizarEventoAdmin
+      security:
+        - bearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarEvento"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Evento"
+
+  /api/v1/quilombo/eventos/{id}/excluir:
+    post:
+      tags: ["Quilombo: Admin"]
+      summary: Excluir evento (admin)
+      operationId: excluirEventoAdmin
+      security:
+        - bearerJWT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Evento excluído
+
+  # --- Mensagens (JWT) ---
+
+  /api/v1/quilombo/mensagens:
+    get:
+      tags: ["Quilombo: Mensagens"]
+      summary: Listar minhas mensagens
+      operationId: listarMensagens
+      security:
+        - bearerJWT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Mensagem"
+    post:
+      tags: ["Quilombo: Mensagens"]
+      summary: Enviar mensagem
+      operationId: enviarMensagem
+      security:
+        - bearerJWT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarMensagem"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Mensagem"
+
+  # --- Admin (JWT admin) ---
+
+  /api/v1/quilombo/admin/atividades:
+    get:
+      tags: ["Quilombo: Admin"]
+      summary: Listar log de atividades (admin)
+      operationId: listarAtividades
+      security:
+        - bearerJWT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Atividade"
+        "403":
+          description: Apenas admin
+
+  # ========================================
+  # GITHUB — Gestão administrativa
+  # ========================================
+
+  /api/v1/gestao/validar:
+    post:
+      tags: ["CO: Gestão - Publicação"]
+      summary: Validar frontmatter YAML de conteúdo markdown
+      operationId: validarConteudo
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicarRequest"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidarResponse"
+
+  /api/v1/gestao/publicar:
+    post:
+      tags: ["CO: Gestão - Publicação"]
+      summary: Publicar arquivo markdown no universo
+      operationId: publicarConteudo
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublicarRequest"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PublicarResponse"
+        "400":
+          description: Validação falhou
+
+  /api/v1/gestao/relatos:
+    get:
+      tags: ["CO: Gestão - Relatos"]
+      summary: Listar todos os relatos
+      operationId: gestaoListarRelatos
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConteudoResumo"
+    post:
+      tags: ["CO: Gestão - Relatos"]
+      summary: Criar relato
+      operationId: gestaoCriarRelato
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarConteudo"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+        "409":
+          description: Relato com este ID já existe
+
+  /api/v1/gestao/relatos/{id}:
+    put:
+      tags: ["CO: Gestão - Relatos"]
+      summary: Atualizar relato
+      operationId: gestaoAtualizarRelato
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarConteudo"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+        "404":
+          description: Relato não encontrado
+    delete:
+      tags: ["CO: Gestão - Relatos"]
+      summary: Excluir relato
+      operationId: gestaoExcluirRelato
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Relato excluído
+
+  /api/v1/gestao/eventos:
+    get:
+      tags: ["CO: Gestão - Eventos"]
+      summary: Listar todos os eventos
+      operationId: gestaoListarEventos
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConteudoResumo"
+    post:
+      tags: ["CO: Gestão - Eventos"]
+      summary: Criar evento
+      operationId: gestaoCriarEvento
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarConteudo"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+
+  /api/v1/gestao/eventos/{id}:
+    put:
+      tags: ["CO: Gestão - Eventos"]
+      summary: Atualizar evento
+      operationId: gestaoAtualizarEvento
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarConteudo"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+    delete:
+      tags: ["CO: Gestão - Eventos"]
+      summary: Excluir evento
+      operationId: gestaoExcluirEvento
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Evento excluído
+
+  /api/v1/gestao/membros:
+    get:
+      tags: ["CO: Gestão - Membros"]
+      summary: Listar todos os membros
+      operationId: gestaoListarMembros
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConteudoResumo"
+    post:
+      tags: ["CO: Gestão - Membros"]
+      summary: Criar membro
+      operationId: gestaoCriarMembro
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarConteudo"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+
+  /api/v1/gestao/membros/{id}:
+    put:
+      tags: ["CO: Gestão - Membros"]
+      summary: Atualizar membro
+      operationId: gestaoAtualizarMembro
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarConteudo"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+    delete:
+      tags: ["CO: Gestão - Membros"]
+      summary: Excluir membro
+      operationId: gestaoExcluirMembro
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Membro excluído
+
+  /api/v1/gestao/quadro:
+    get:
+      tags: ["CO: Gestão - Quadro"]
+      summary: Listar missões do quadro
+      operationId: gestaoListarQuadro
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConteudoResumo"
+    post:
+      tags: ["CO: Gestão - Quadro"]
+      summary: Criar missão no quadro
+      operationId: gestaoCriarMissao
+      security:
+        - githubPAT: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CriarConteudo"
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+
+  /api/v1/gestao/quadro/{id}:
+    put:
+      tags: ["CO: Gestão - Quadro"]
+      summary: Atualizar missão
+      operationId: gestaoAtualizarMissao
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtualizarConteudo"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConteudoResumo"
+    delete:
+      tags: ["CO: Gestão - Quadro"]
+      summary: Excluir missão
+      operationId: gestaoExcluirMissao
+      security:
+        - githubPAT: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Missão excluída
+
+  /api/v1/gestao/manifesto:
+    get:
+      tags: ["CO: Gestão - Manifesto"]
+      summary: Obter manifesto Iceberg atual
+      description: Retorna o índice de todos os arquivos do universo com partições e estatísticas
+      operationId: obterManifesto
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Manifest"
+
+  /api/v1/gestao/manifesto/reconstruir:
+    post:
+      tags: ["CO: Gestão - Manifesto"]
+      summary: Reconstruir manifesto a partir do filesystem
+      operationId: reconstruirManifesto
+      security:
+        - githubPAT: []
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Manifest"
