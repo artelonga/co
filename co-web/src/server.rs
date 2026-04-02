@@ -177,11 +177,15 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- co-web auth (email codes) ---
     let auth_api = Router::new()
         .route("/v1/auth/login", post(login_handler))
-        .route("/v1/auth/verify", post(verify_handler));
+        .route("/v1/auth/verify", post(verify_handler))
+        .route(
+            "/v1/auth/me",
+            get(me_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
+        .route("/v1/auth/logout", post(logout_handler));
 
     // --- Board public routes (GET — no auth required) ---
     let board_public = Router::new()
-        .route("/projects", get(list_projects))
         .route("/projects/{key}", get(get_project))
         .route("/projects/{key}/tasks", get(list_tasks))
         .route("/projects/{key}/tasks/{id}", get(get_task))
@@ -190,9 +194,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/projects/{key}/dashboard", get(get_dashboard))
         .route("/health", get(health_check));
 
-    // --- Board protected routes (write ops — JWT required) ---
+    // --- Board protected routes (write ops + list — JWT required) ---
     let board_protected = Router::new()
-        .route("/projects", post(create_project))
+        .route("/projects", get(list_projects).post(create_project))
         .route("/projects/{key}", delete(delete_project))
         .route("/projects/{key}/tasks", post(create_task))
         .route(
@@ -257,6 +261,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::Extension(github_token_cache))
         .layer(axum::Extension(allowed_admins));
 
+    // --- Universe multi-tenancy routes ---
+    let universe_api = crate::universe_routes::router();
+
     let mut router = Router::new()
         .nest("/api", board_public)
         .nest("/api", board_protected)
@@ -265,11 +272,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api", game_public)
         .nest("/api", game_protected)
         .nest("/api/v1/quilombo", quilombo_api)
-        .nest("/api/v1/gestao", gestao_api);
+        .nest("/api/v1/gestao", gestao_api)
+        .nest("/api/v1/universes", universe_api);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
-        router = router.nest("/api/v1/universes", plugin_router);
+        router = router.nest("/api/v1/plugins", plugin_router);
     }
 
     router
@@ -317,12 +325,40 @@ pub async fn start_server(config: WebConfig) {
         drop(storage);
     }
 
+    // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
+    let seed_path = std::path::Path::new(&config.data_dir).join("seed.sql");
+    if seed_path.exists() {
+        tracing::info!("Running one-shot seed file: {}", seed_path.display());
+        match std::fs::read_to_string(&seed_path) {
+            Ok(sql) => {
+                let seed_storage = Storage::new(&config.data_dir);
+                match seed_storage.conn().execute_batch(&sql) {
+                    Ok(()) => {
+                        tracing::info!("Seed SQL executed successfully");
+                        let _ = std::fs::remove_file(&seed_path);
+                    }
+                    Err(e) => tracing::error!("Seed SQL failed: {e}"),
+                }
+            }
+            Err(e) => tracing::error!("Could not read seed file: {e}"),
+        }
+    }
+
     let storage = Storage::new(&config.data_dir);
     let experiment = ExperimentStore::new(&config.data_dir);
     let auth_store = AuthStore::new(std::path::Path::new(&config.data_dir))
         .expect("Failed to create auth store");
 
-    let mail_provider: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+    let mail_provider: Arc<dyn co::MailProvider> = match co::ResendMailProvider::from_env() {
+        Some(p) => {
+            tracing::info!("Email: Resend provider active");
+            Arc::new(p)
+        }
+        None => {
+            tracing::warn!("Email: RESEND_API_KEY not set, using log provider (codes in logs)");
+            Arc::new(co::LogMailProvider)
+        }
+    };
 
     // Initialize game-core encrypted storage
     let game_db_path = config.game_db_path.clone().unwrap_or_else(|| {
@@ -551,9 +587,13 @@ fn cache_control_for(path: &str) -> HeaderValue {
 
 // --- Project Handlers ---
 
-async fn list_projects(State(state): State<AppState>) -> Result<Json<Vec<Project>>, AppError> {
+async fn list_projects(
+    State(state): State<AppState>,
+    user_id: crate::auth::UserId,
+) -> Result<Json<Vec<Project>>, AppError> {
     let storage = lock_storage(&state)?;
-    Ok(Json(storage.list_projects()))
+    let projects = storage.list_projects_for_user(&user_id.0);
+    Ok(Json(projects))
 }
 
 async fn get_project(
@@ -569,10 +609,15 @@ async fn get_project(
 
 async fn create_project(
     State(state): State<AppState>,
-    Json(body): Json<CreateProject>,
+    Json(mut body): Json<CreateProject>,
 ) -> Result<impl IntoResponse, AppError> {
     validate_project_name(&body.name)?;
     validate_project_key(&body.key)?;
+
+    // Server-side universe scope takes precedence over client-supplied value.
+    if state.config.universe_key.is_some() {
+        body.universe_key = state.config.universe_key.clone();
+    }
 
     let mut storage = lock_storage(&state)?;
     storage
@@ -829,13 +874,12 @@ async fn login_handler(
         auth.record_request(&email)?;
     }
 
-    // Look up user (we don't reveal whether the user exists).
-    let user = {
+    // Look up user — new emails auto-register on verify, so always send code.
+    let user_id = {
         let storage = lock_storage(&state)?;
-        storage.get_user_by_email(&email)
+        storage.get_user_by_email(&email).map(|u| u.id)
     };
 
-    let user_id = user.as_ref().map(|u| u.id.clone());
     let code = generate_code();
     let entry = new_code_entry(user_id, code.clone());
 
@@ -844,14 +888,11 @@ async fn login_handler(
         auth.store_code(&email, &entry)?;
     }
 
-    // Send email only if user exists (but we always return 200).
-    if user.is_some() {
-        let subject = "Your login code";
-        let body_text =
-            format!("Your verification code is: {code}\n\nThis code expires in 5 minutes.");
-        if let Err(e) = state.mail.send(&email, subject, &body_text) {
-            tracing::warn!("Failed to send verification email to {email}: {e}");
-        }
+    let subject = "Seu código de acesso";
+    let body_text =
+        format!("Seu código de verificação é: {code}\n\nEste código expira em 5 minutos.");
+    if let Err(e) = state.mail.send(&email, subject, &body_text) {
+        tracing::warn!("Failed to send verification email to {email}: {e}");
     }
 
     Ok(Json(LoginResponse {
@@ -907,27 +948,34 @@ async fn verify_handler(
         return Ok((StatusCode::UNAUTHORIZED, Json(body)).into_response());
     }
 
-    // Code matches — sign JWT.
-    let user_id = match entry.user_id {
-        Some(id) => id,
+    // Code matches — resolve or create user.
+    let (user_id, display_name, tier) = match entry.user_id {
+        Some(ref id) => {
+            let storage = lock_storage(&state)?;
+            let u = storage
+                .get_user_by_id(id)
+                .unwrap_or_else(|| crate::models::User {
+                    id: id.clone(),
+                    email: email.clone(),
+                    display_name: String::new(),
+                    tier: "player".to_string(),
+                    created_at: Utc::now(),
+                });
+            (id.clone(), u.display_name, u.tier)
+        }
         None => {
-            // No user found for this email; treat as wrong code.
-            let auth = lock_auth(&state)?;
-            auth.delete_code(&email)?;
-            let body = serde_json::json!({ "error": "Code expired, request a new one" });
-            return Ok((StatusCode::UNAUTHORIZED, Json(body)).into_response());
+            // First-time user — auto-register.
+            let display_name = email.split('@').next().unwrap_or("user").to_string();
+            let user = {
+                let mut storage = lock_storage(&state)?;
+                storage
+                    .create_user(&email, &display_name)
+                    .map_err(|e| AppError::Internal(e.to_string()))?
+            };
+            tracing::info!("Auto-registered new user: {} <{}>", user.id, email);
+            (user.id, user.display_name, user.tier)
         }
     };
-
-    let user = {
-        let storage = lock_storage(&state)?;
-        storage.get_user_by_email(&email)
-    };
-
-    let (display_name, tier) = user
-        .as_ref()
-        .map(|u| (u.display_name.clone(), u.tier.clone()))
-        .unwrap_or_else(|| ("".to_string(), "player".to_string()));
 
     let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret".to_string());
     let (token, expires_at) = sign_jwt(&user_id, &email, &tier, &jwt_secret)?;
@@ -954,4 +1002,48 @@ async fn verify_handler(
         Json(response_body),
     )
         .into_response())
+}
+
+// --- Auth: Me & Logout ---
+
+async fn me_handler(
+    State(state): State<AppState>,
+    user_id: crate::auth::UserId,
+) -> Result<Json<MeResponse>, AppError> {
+    let storage = lock_storage(&state)?;
+
+    // Check board users table first, then fall back to quilombo users.
+    if let Some(user) = storage.get_user_by_id(&user_id.0) {
+        return Ok(Json(MeResponse {
+            user_id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            tier: user.tier,
+        }));
+    }
+
+    if let Some(u) = crate::quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0) {
+        return Ok(Json(MeResponse {
+            user_id: u.id,
+            email: String::new(),
+            display_name: if u.nome.is_empty() {
+                u.usuario.clone()
+            } else {
+                u.nome
+            },
+            tier: u.papel.to_string(),
+        }));
+    }
+
+    Err(AppError::NotFound("User not found".into()))
+}
+
+async fn logout_handler() -> Response {
+    let clear_cookie = "session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0";
+    (
+        StatusCode::OK,
+        [(header::SET_COOKIE, clear_cookie)],
+        Json(serde_json::json!({ "message": "Logged out" })),
+    )
+        .into_response()
 }

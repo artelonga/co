@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Board</title>
+    <title>Quadro</title>
     <link rel="stylesheet" href="/style.css">
     <link rel="stylesheet" href="/shared/production.css">
     <link rel="stylesheet" href="/shared/experiment.css">
@@ -21,7 +21,7 @@
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <span class="logo-mark">B</span>
-                <span class="logo-text">Projects</span>
+                <span class="logo-text" data-i18n="projects">Projetos</span>
             </div>
             <nav class="sidebar-nav" id="project-list"></nav>
             <div class="sidebar-mini-calendar hidden" id="mini-calendar"></div>
@@ -31,55 +31,60 @@
                         <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                 </button>
+                <div class="sidebar-user hidden" id="sidebar-user">
+                    <span class="sidebar-user-name" id="user-display-name"></span>
+                    <button class="btn-text-sm" id="btn-logout" data-i18n="sign_out">Sair</button>
+                </div>
             </div>
         </aside>
         <main class="main">
             <header class="header" id="header">
                 <div class="header-left">
-                    <h1 id="project-name">Select a project</h1>
+                    <h1 id="project-name" data-i18n="select_project">Selecione um projeto</h1>
                     <span class="header-desc" id="project-desc"></span>
                 </div>
                 <div class="header-right">
                     <div class="view-tabs" id="view-tabs">
-                        <button class="view-tab active" data-view="kanban">Kanban</button>
-                        <button class="view-tab" data-view="table">Table</button>
-                        <button class="view-tab" data-view="timeline">Timeline</button>
-                        <button class="view-tab" data-view="calendar">Calendar</button>
-                        <button class="view-tab" data-view="dashboard">Dashboard</button>
+                        <button class="view-tab active" data-view="kanban" data-i18n="kanban">Kanban</button>
+                        <button class="view-tab" data-view="table" data-i18n="table">Tabela</button>
+                        <button class="view-tab" data-view="timeline" data-i18n="timeline">Linha do Tempo</button>
+                        <button class="view-tab" data-view="calendar" data-i18n="calendar">Calendário</button>
+                        <button class="view-tab" data-view="dashboard" data-i18n="dashboard">Painel</button>
+                        <button class="view-tab" data-view="conteudo">Conteúdo</button>
                     </div>
                     <div class="view-tabs hidden" id="zoom-tabs">
-                        <button class="view-tab" data-zoom="week">Week</button>
-                        <button class="view-tab active" data-zoom="month">Month</button>
-                        <button class="view-tab" data-zoom="quarter">Quarter</button>
+                        <button class="view-tab" data-zoom="week" data-i18n="week">Semana</button>
+                        <button class="view-tab active" data-zoom="month" data-i18n="month">Mês</button>
+                        <button class="view-tab" data-zoom="quarter" data-i18n="quarter">Trimestre</button>
                     </div>
                     <div class="timeline-nav-buttons hidden" id="timeline-nav">
                         <button class="timeline-nav-btn" id="btn-prev" title="Previous">&larr;</button>
-                        <button class="timeline-nav-btn" id="btn-today" title="Today">Today</button>
+                        <button class="timeline-nav-btn" id="btn-today" title="Hoje" data-i18n="today">Hoje</button>
                         <button class="timeline-nav-btn" id="btn-next" title="Next">&rarr;</button>
                     </div>
                     <label class="archive-toggle" id="archive-toggle" title="Show archived">
                         <input type="checkbox" id="show-archived">
-                        <span class="archive-toggle-label">Archived</span>
+                        <span class="archive-toggle-label" data-i18n="archived">Arquivados</span>
                     </label>
-                    <input type="search" class="search-input" id="search-input" placeholder="Filter tasks... (/)">
+                    <input type="search" class="search-input" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
                     <div id="palette-switcher" class="palette-switcher-slot"></div>
-                    <button class="btn btn-primary" id="btn-new-task">+ New Task</button>
+                    <button class="btn btn-primary" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
                 </div>
             </header>
             <div class="content" id="content">
                 <div class="loading-spinner" id="loading-spinner">
                     <div class="spinner"></div>
-                    <span>Loading...</span>
+                    <span data-i18n="loading">Carregando...</span>
                 </div>
                 <div class="empty-state">
-                    <p>Select a project from the sidebar</p>
+                    <p data-i18n="select_project_hint">Selecione um projeto na barra lateral</p>
                 </div>
             </div>
         </main>
         <!-- Activity Panel -->
         <aside class="activity-panel hidden" id="activity-panel">
             <div class="activity-panel-header">
-                <h3>Activity</h3>
+                <h3 data-i18n="activity">Atividade</h3>
                 <button class="activity-panel-close" id="activity-panel-close">&times;</button>
             </div>
             <div class="activity-panel-body" id="activity-list"></div>
@@ -93,64 +98,64 @@
     <div id="modal-overlay" class="modal-overlay hidden">
         <div class="modal" id="task-modal">
             <div class="modal-header">
-                <h2 id="modal-title">New Task</h2>
+                <h2 id="modal-title" data-i18n="new_task_title">Nova Tarefa</h2>
                 <button class="modal-close" id="modal-close">&times;</button>
             </div>
             <form id="task-form">
                 <div class="form-group">
-                    <label for="task-title">Title</label>
+                    <label for="task-title" data-i18n="title">Título</label>
                     <input type="text" id="task-title" required autocomplete="off">
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="task-status">Status</label>
+                        <label for="task-status" data-i18n="status">Status</label>
                         <select id="task-status">
-                            <option value="todo">To Do</option>
-                            <option value="in_progress">In Progress</option>
-                            <option value="in_review">In Review</option>
-                            <option value="done">Done</option>
+                            <option value="todo" data-i18n="todo">A Fazer</option>
+                            <option value="in_progress" data-i18n="in_progress">Em Andamento</option>
+                            <option value="in_review" data-i18n="in_review">Em Revisão</option>
+                            <option value="done" data-i18n="done">Concluído</option>
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="task-priority">Priority</label>
+                        <label for="task-priority" data-i18n="priority">Prioridade</label>
                         <select id="task-priority">
-                            <option value="low">Low</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="high">High</option>
-                            <option value="critical">Critical</option>
+                            <option value="low" data-i18n="low">Baixa</option>
+                            <option value="medium" selected data-i18n="medium">Média</option>
+                            <option value="high" data-i18n="high">Alta</option>
+                            <option value="critical" data-i18n="critical">Crítica</option>
                         </select>
                     </div>
                 </div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="task-due-date">Due Date</label>
+                        <label for="task-due-date" data-i18n="due_date">Data de Entrega</label>
                         <input type="date" id="task-due-date">
                     </div>
                     <div class="form-group">
-                        <label for="task-parent">Parent Task</label>
+                        <label for="task-parent" data-i18n="parent_task">Tarefa Pai</label>
                         <select id="task-parent">
-                            <option value="">None</option>
+                            <option value="" data-i18n="none">Nenhuma</option>
                         </select>
                     </div>
                 </div>
                 <div class="form-group">
-                    <label for="task-assignee">Assignee</label>
-                    <input type="text" id="task-assignee" placeholder="Name or email" autocomplete="off">
+                    <label for="task-assignee" data-i18n="assignee">Responsável</label>
+                    <input type="text" id="task-assignee" data-i18n-placeholder="name_or_email" placeholder="Nome ou email" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label for="task-labels">Labels (comma-separated)</label>
+                    <label for="task-labels" data-i18n="labels">Etiquetas (separadas por vírgula)</label>
                     <input type="text" id="task-labels" placeholder="design, web, docs" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label for="task-description">Description</label>
+                    <label for="task-description" data-i18n="description">Descrição</label>
                     <textarea id="task-description" rows="4"></textarea>
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-danger hidden" id="btn-delete">Delete</button>
-                    <button type="button" class="btn btn-warning hidden" id="btn-archive">Archive</button>
+                    <button type="button" class="btn btn-danger hidden" id="btn-delete" data-i18n="delete">Excluir</button>
+                    <button type="button" class="btn btn-warning hidden" id="btn-archive" data-i18n="archive">Arquivar</button>
                     <div class="form-actions-right">
-                        <button type="button" class="btn btn-secondary" id="btn-cancel">Cancel</button>
-                        <button type="submit" class="btn btn-primary" id="btn-save">Save</button>
+                        <button type="button" class="btn btn-secondary" id="btn-cancel" data-i18n="cancel">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="btn-save" data-i18n="save">Salvar</button>
                     </div>
                 </div>
             </form>
@@ -163,6 +168,36 @@
                     <textarea id="comment-body" rows="2" placeholder="Add a comment..."></textarea>
                     <button type="button" class="btn btn-primary btn-sm" id="btn-add-comment">Comment</button>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login Modal -->
+    <div id="login-modal-overlay" class="login-screen hidden">
+        <div class="login-card">
+            <div class="login-header">
+                <span class="login-logo">B</span>
+                <h1 class="login-title" id="login-modal-title" data-i18n="login_title">Entrar</h1>
+                <p class="login-subtitle" data-i18n="login_subtitle">Acesse seu quadro de projetos</p>
+            </div>
+
+            <div id="login-step-password">
+                <div class="form-group">
+                    <label for="login-usuario" data-i18n="username">Usuário</label>
+                    <input type="text" id="login-usuario" autocomplete="username" data-i18n-placeholder="username_placeholder" placeholder="seu.usuario">
+                </div>
+                <div class="form-group">
+                    <label for="login-senha" data-i18n="password">Senha</label>
+                    <input type="password" id="login-senha" autocomplete="current-password" placeholder="••••••••">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-full" id="btn-entrar" data-i18n="sign_in">Entrar</button>
+                </div>
+                <p id="login-error" class="form-error hidden"></p>
+            </div>
+
+            <div class="login-footer">
+                <button class="btn-text-sm lang-toggle" id="btn-lang-toggle">EN</button>
             </div>
         </div>
     </div>

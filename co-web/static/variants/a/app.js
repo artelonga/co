@@ -98,10 +98,14 @@
     }
 
     // ===== API =====
-    async function apiFetch(url, options) {
+    async function apiFetch(url, options, silent401 = false) {
         try {
             const r = await fetch(url, options);
             if (!r.ok) {
+                if (r.status === 401) {
+                    if (!silent401) showLoginModal();
+                    return null;
+                }
                 let errMsg = 'Request error';
                 try {
                     const errData = await r.json();
@@ -112,7 +116,7 @@
                 showToast(errMsg, 'error');
                 return null;
             }
-            // DELETE responses may have no body
+            // DELETE / NO_CONTENT responses may have no body
             if (r.status === 204 || r.headers.get('content-length') === '0') {
                 return {};
             }
@@ -191,6 +195,35 @@
                 body: JSON.stringify(data),
             });
             return r;
+        },
+        async me() {
+            return apiFetch('/api/v1/auth/me', {}, true);
+        },
+        async logout() {
+            await apiFetch('/api/v1/auth/logout', { method: 'POST' }, true);
+        },
+        async loginWithPassword(usuario, senha) {
+            return apiFetch('/api/v1/quilombo/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ usuario, senha }),
+            }, true);
+        },
+        async getUniverses() {
+            const r = await apiFetch('/api/v1/universes', {}, true);
+            return r || [];
+        },
+        async getPublicacoes() {
+            const r = await apiFetch('/api/v1/quilombo/publicacoes', {}, true);
+            return r || [];
+        },
+        async getEventos() {
+            const r = await apiFetch('/api/v1/quilombo/eventos', {}, true);
+            return r || [];
+        },
+        async getMissoes() {
+            const r = await apiFetch('/api/v1/quilombo/missoes', {}, true);
+            return r || [];
         },
     };
 
@@ -1900,7 +1933,76 @@
         return '#f59e0b';
     }
 
-    // ===== Render: Dashboard =====
+    // ===== Render: Conteúdo (Quilombo feed) =====
+    async function renderConteudo() {
+        const content = $('#content');
+        content.className = 'content conteudo-view';
+        content.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Carregando...</p></div>';
+
+        const [publicacoes, eventos, missoes] = await Promise.all([
+            api.getPublicacoes(),
+            api.getEventos(),
+            api.getMissoes(),
+        ]);
+
+        const today = todayDate();
+
+        // Próximos eventos (upcoming first)
+        const upcomingEventos = eventos
+            .filter(e => e.data >= today)
+            .sort((a, b) => a.data.localeCompare(b.data))
+            .slice(0, 5);
+
+        const eventosHtml = upcomingEventos.length
+            ? upcomingEventos.map(e => `
+                <div class="conteudo-card">
+                    <div class="conteudo-card-meta">${esc(e.data)}${e.hora ? ' · ' + esc(e.hora) : ''}${e.local ? ' · ' + esc(e.local) : ''}</div>
+                    <div class="conteudo-card-title">${esc(e.titulo)}</div>
+                    ${e.descricao_md ? `<div class="conteudo-card-body">${esc(e.descricao_md.slice(0, 120))}${e.descricao_md.length > 120 ? '…' : ''}</div>` : ''}
+                </div>`).join('')
+            : '<p class="conteudo-empty">Nenhum evento próximo</p>';
+
+        // Publicações recentes
+        const recentPublicacoes = publicacoes.slice(0, 6);
+        const publicacoesHtml = recentPublicacoes.length
+            ? recentPublicacoes.map(p => `
+                <div class="conteudo-card">
+                    <div class="conteudo-card-meta">${p.data ? esc(p.data) : ''}${p.autor ? ' · ' + esc(p.autor) : ''}</div>
+                    <div class="conteudo-card-title">${esc(p.titulo || p.slug || '')}</div>
+                    ${p.corpo ? `<div class="conteudo-card-body">${esc(p.corpo.slice(0, 140))}${p.corpo.length > 140 ? '…' : ''}</div>` : ''}
+                    ${(p.tags && p.tags.length) ? `<div class="conteudo-card-tags">${p.tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+                </div>`).join('')
+            : '<p class="conteudo-empty">Nenhuma publicação</p>';
+
+        // Missões ativas
+        const missaoStatusLabel = { aberta: 'Aberta', em_andamento: 'Em andamento', concluida: 'Concluída', cancelada: 'Cancelada' };
+        const missoesAtivasList = missoes.filter(m => m.status !== 'concluida' && m.status !== 'cancelada').slice(0, 6);
+        const missoesHtml = missoesAtivasList.length
+            ? missoesAtivasList.map(m => `
+                <div class="conteudo-card">
+                    <div class="conteudo-card-meta">${esc(missaoStatusLabel[m.status] || m.status || '')}</div>
+                    <div class="conteudo-card-title">${esc(m.titulo)}</div>
+                    ${m.objetivo ? `<div class="conteudo-card-body">${esc(m.objetivo.slice(0, 120))}${m.objetivo.length > 120 ? '…' : ''}</div>` : ''}
+                </div>`).join('')
+            : '<p class="conteudo-empty">Nenhuma missão ativa</p>';
+
+        content.innerHTML = `
+            <div class="conteudo-grid">
+                <section class="conteudo-section">
+                    <h2 class="conteudo-section-title">Próximos Eventos</h2>
+                    ${eventosHtml}
+                </section>
+                <section class="conteudo-section">
+                    <h2 class="conteudo-section-title">Publicações Recentes</h2>
+                    ${publicacoesHtml}
+                </section>
+                <section class="conteudo-section">
+                    <h2 class="conteudo-section-title">Missões Ativas</h2>
+                    ${missoesHtml}
+                </section>
+            </div>`;
+    }
+
     async function renderDashboard() {
         const content = $('#content');
         content.className = 'content';
@@ -2360,8 +2462,9 @@
     }
 
     function renderContent() {
-        if (!state.currentProject) return;
         if (state.loading) return;
+        if (state.view === 'conteudo') { renderConteudo(); return; }
+        if (!state.currentProject) return;
         if (state.view === 'kanban') renderKanban();
         else if (state.view === 'calendar') renderCalendar();
         else if (state.view === 'table') renderTable();
@@ -2527,14 +2630,226 @@
                 e.preventDefault();
                 switchView('dashboard');
                 break;
+            case '6':
+                e.preventDefault();
+                switchView('conteudo');
+                break;
         }
     });
 
-    // ===== Init =====
-    async function init() {
-        initTimelineStart();
-        setupHamburgerMenu();
+    // ===== i18n =====
 
+    const I18N = {
+        pt: {
+            projects: 'Projetos',
+            select_project: 'Selecione um projeto',
+            select_project_hint: 'Selecione um projeto na barra lateral',
+            sign_out: 'Sair',
+            kanban: 'Kanban',
+            table: 'Tabela',
+            timeline: 'Linha do Tempo',
+            calendar: 'Calendário',
+            dashboard: 'Painel',
+            week: 'Semana',
+            month: 'Mês',
+            quarter: 'Trimestre',
+            today: 'Hoje',
+            archived: 'Arquivados',
+            filter_tasks: 'Filtrar tarefas... (/)',
+            new_task: '+ Nova Tarefa',
+            loading: 'Carregando...',
+            activity: 'Atividade',
+            new_task_title: 'Nova Tarefa',
+            title: 'Título',
+            status: 'Status',
+            todo: 'A Fazer',
+            in_progress: 'Em Andamento',
+            in_review: 'Em Revisão',
+            done: 'Concluído',
+            priority: 'Prioridade',
+            low: 'Baixa',
+            medium: 'Média',
+            high: 'Alta',
+            critical: 'Crítica',
+            due_date: 'Data de Entrega',
+            parent_task: 'Tarefa Pai',
+            none: 'Nenhuma',
+            assignee: 'Responsável',
+            name_or_email: 'Nome ou email',
+            labels: 'Etiquetas (separadas por vírgula)',
+            description: 'Descrição',
+            delete: 'Excluir',
+            archive: 'Arquivar',
+            cancel: 'Cancelar',
+            save: 'Salvar',
+            login_title: 'Entrar',
+            login_subtitle: 'Acesse seu quadro de projetos',
+            username: 'Usuário',
+            username_placeholder: 'seu.usuario',
+            password: 'Senha',
+            sign_in: 'Entrar',
+            signing_in: 'Entrando…',
+            invalid_credentials: 'Usuário ou senha incorretos.',
+            login_error: 'Não foi possível conectar. Tente novamente.',
+        },
+        en: {
+            projects: 'Projects',
+            select_project: 'Select a project',
+            select_project_hint: 'Select a project from the sidebar',
+            sign_out: 'Sign out',
+            kanban: 'Kanban',
+            table: 'Table',
+            timeline: 'Timeline',
+            calendar: 'Calendar',
+            dashboard: 'Dashboard',
+            week: 'Week',
+            month: 'Month',
+            quarter: 'Quarter',
+            today: 'Today',
+            archived: 'Archived',
+            filter_tasks: 'Filter tasks... (/)',
+            new_task: '+ New Task',
+            loading: 'Loading...',
+            activity: 'Activity',
+            new_task_title: 'New Task',
+            title: 'Title',
+            status: 'Status',
+            todo: 'To Do',
+            in_progress: 'In Progress',
+            in_review: 'In Review',
+            done: 'Done',
+            priority: 'Priority',
+            low: 'Low',
+            medium: 'Medium',
+            high: 'High',
+            critical: 'Critical',
+            due_date: 'Due Date',
+            parent_task: 'Parent Task',
+            none: 'None',
+            assignee: 'Assignee',
+            name_or_email: 'Name or email',
+            labels: 'Labels (comma-separated)',
+            description: 'Description',
+            delete: 'Delete',
+            archive: 'Archive',
+            cancel: 'Cancel',
+            save: 'Save',
+            login_title: 'Sign In',
+            login_subtitle: 'Access your project board',
+            username: 'Username',
+            username_placeholder: 'your.username',
+            password: 'Password',
+            sign_in: 'Sign In',
+            signing_in: 'Signing in…',
+            invalid_credentials: 'Incorrect username or password.',
+            login_error: 'Could not connect. Please try again.',
+        },
+    };
+
+    let currentLang = localStorage.getItem('co_lang') || 'pt';
+
+    function t(key) {
+        return (I18N[currentLang] || I18N.pt)[key] || key;
+    }
+
+    function applyI18n() {
+        document.querySelectorAll('[data-i18n]').forEach(el => {
+            el.textContent = t(el.dataset.i18n);
+        });
+        document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+            el.placeholder = t(el.dataset.i18nPlaceholder);
+        });
+        document.documentElement.lang = currentLang === 'pt' ? 'pt-BR' : 'en';
+    }
+
+    // ===== Auth UI =====
+
+    function showLoginModal() {
+        const overlay = document.getElementById('login-modal-overlay');
+        if (overlay) {
+            overlay.classList.remove('hidden');
+            applyI18n();
+            const usuarioInput = document.getElementById('login-usuario');
+            if (usuarioInput) usuarioInput.focus();
+        }
+    }
+
+    function hideLoginModal() {
+        const overlay = document.getElementById('login-modal-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    function renderUserBadge(me) {
+        const sidebarUser = document.getElementById('sidebar-user');
+        const nameEl = document.getElementById('user-display-name');
+        if (sidebarUser) sidebarUser.classList.remove('hidden');
+        if (nameEl) nameEl.textContent = me.display_name || me.email;
+    }
+
+    function setupLoginModal() {
+        const btnEntrar = document.getElementById('btn-entrar');
+        const btnLogout = document.getElementById('btn-logout');
+        const btnLang = document.getElementById('btn-lang-toggle');
+
+        if (btnLang) {
+            btnLang.addEventListener('click', () => {
+                currentLang = currentLang === 'pt' ? 'en' : 'pt';
+                localStorage.setItem('co_lang', currentLang);
+                btnLang.textContent = currentLang === 'pt' ? 'EN' : 'PT';
+                applyI18n();
+            });
+        }
+
+        async function attemptLogin() {
+            const usuario = document.getElementById('login-usuario').value.trim();
+            const senha = document.getElementById('login-senha').value;
+            if (!usuario || !senha) return;
+
+            const errEl = document.getElementById('login-error');
+            errEl.classList.add('hidden');
+            btnEntrar.disabled = true;
+            btnEntrar.textContent = t('signing_in');
+
+            const r = await api.loginWithPassword(usuario, senha);
+
+            btnEntrar.disabled = false;
+            btnEntrar.textContent = t('sign_in');
+
+            if (r && r.usuario) {
+                hideLoginModal();
+                await bootApp();
+            } else if (r && r.error === 'unauthorized') {
+                errEl.textContent = t('invalid_credentials');
+                errEl.classList.remove('hidden');
+                document.getElementById('login-senha').value = '';
+                document.getElementById('login-senha').focus();
+            } else {
+                errEl.textContent = t('login_error');
+                errEl.classList.remove('hidden');
+            }
+        }
+
+        if (btnEntrar) btnEntrar.addEventListener('click', attemptLogin);
+
+        // Enter on either field submits
+        ['login-usuario', 'login-senha'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
+        });
+
+        if (btnLogout) {
+            btnLogout.addEventListener('click', async () => {
+                await api.logout();
+                document.getElementById('sidebar-user').classList.add('hidden');
+                document.getElementById('login-usuario').value = '';
+                document.getElementById('login-senha').value = '';
+                showLoginModal();
+            });
+        }
+    }
+
+    // ===== App boot (post-auth) =====
+    async function bootApp() {
         showLoading();
         state.projects = await api.getProjects();
         if (state.projects.length > 0) {
@@ -2542,6 +2857,25 @@
         }
         hideLoading();
         render();
+    }
+
+    // ===== Init =====
+    async function init() {
+        applyI18n();
+        initTimelineStart();
+        setupHamburgerMenu();
+        setupLoginModal();
+
+        // Show login immediately — avoids blank wait while session is checked.
+        // If already authenticated, me() will return and we hide the modal.
+        showLoginModal();
+
+        const me = await api.me();
+        if (!me) return;
+
+        hideLoginModal();
+        renderUserBadge(me);
+        await bootApp();
     }
 
     init();

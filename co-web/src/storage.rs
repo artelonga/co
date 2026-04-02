@@ -137,6 +137,123 @@ impl Storage {
                 )
                 .expect("Failed to run migration v5");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 6 {
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS universes (
+                    key TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    owner_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (owner_id) REFERENCES users(id)
+                );
+                INSERT INTO schema_version (version) VALUES (6);
+                ",
+                )
+                .expect("Failed to run migration v6");
+        }
+
+        if current_version < 7 {
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS universe_members (
+                    universe_key TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'member',
+                    joined_at TEXT NOT NULL,
+                    PRIMARY KEY (universe_key, user_id),
+                    FOREIGN KEY (universe_key) REFERENCES universes(key) ON DELETE CASCADE,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+                INSERT INTO schema_version (version) VALUES (7);
+                ",
+                )
+                .expect("Failed to run migration v7");
+        }
+
+        if current_version < 8 {
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE projects ADD COLUMN universe_key TEXT REFERENCES universes(key);
+                     INSERT INTO schema_version (version) VALUES (8);",
+                )
+                .expect("Failed to run migration v8");
+        }
+
+        if current_version < 9 {
+            // Recreate universe_members without the FK on user_id so that
+            // quilombo users (stored in quilombo_usuarios, not users) can be members.
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE universe_members_new (
+                    universe_key TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'member',
+                    joined_at TEXT NOT NULL,
+                    PRIMARY KEY (universe_key, user_id),
+                    FOREIGN KEY (universe_key) REFERENCES universes(key) ON DELETE CASCADE
+                );
+                INSERT INTO universe_members_new SELECT * FROM universe_members;
+                DROP TABLE universe_members;
+                ALTER TABLE universe_members_new RENAME TO universe_members;
+                INSERT INTO schema_version (version) VALUES (9);
+                ",
+                )
+                .expect("Failed to run migration v9");
+        }
+    }
+
+    /// List universe keys a user is a member of.
+    pub fn list_user_universes(&self, user_id: &str) -> Vec<String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT universe_key FROM universe_members WHERE user_id = ?1")
+            .expect("Failed to prepare list_user_universes");
+        stmt.query_map(rusqlite::params![user_id], |row| row.get(0))
+            .expect("Failed to query user universes")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// List projects the user can see: those in their universes.
+    pub fn list_projects_for_user(&self, user_id: &str) -> Vec<crate::models::Project> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT p.key, p.name, p.description, p.next_id, p.created_at, p.archived \
+             FROM projects p \
+             JOIN universe_members um ON um.universe_key = p.universe_key \
+             WHERE um.user_id = ?1 \
+             ORDER BY p.key",
+            )
+            .expect("Failed to prepare list_projects_for_user");
+        stmt.query_map(rusqlite::params![user_id], |row| {
+            Ok(crate::models::Project {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                next_id: row.get::<_, i64>(3)? as u64,
+                created_at: crate::storage::parse_datetime(&row.get::<_, String>(4)?),
+                archived: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .expect("Failed to list projects for user")
+        .filter_map(|r| r.ok())
+        .collect()
     }
 
     /// Access the underlying SQLite connection (for quilombo storage functions).
@@ -177,6 +294,30 @@ impl Storage {
         .collect()
     }
 
+    pub fn list_projects_for_universe(&self, universe_key: &str) -> Vec<Project> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT key, name, description, next_id, created_at, archived \
+                 FROM projects WHERE universe_key = ?1 ORDER BY key",
+            )
+            .expect("Failed to prepare list_projects_for_universe");
+
+        stmt.query_map(params![universe_key], |row| {
+            Ok(Project {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                next_id: row.get::<_, i64>(3)? as u64,
+                created_at: parse_datetime(&row.get::<_, String>(4)?),
+                archived: row.get::<_, i64>(5)? != 0,
+            })
+        })
+        .expect("Failed to list projects for universe")
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
     pub fn get_project(&self, key: &str) -> Option<Project> {
         let upper_key = key.to_uppercase();
         self.conn
@@ -207,8 +348,8 @@ impl Storage {
         let now_str = now.to_rfc3339();
 
         self.conn.execute(
-            "INSERT INTO projects (key, name, description, next_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![upper_key, create.name, create.description, 1i64, now_str],
+            "INSERT INTO projects (key, name, description, next_id, created_at, universe_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![upper_key, create.name, create.description, 1i64, now_str, create.universe_key],
         )?;
 
         self.log_activity(
@@ -955,6 +1096,27 @@ impl Storage {
 
     // --- Users ---
 
+    pub fn create_user(
+        &mut self,
+        email: &str,
+        display_name: &str,
+    ) -> anyhow::Result<crate::models::User> {
+        let id = format!("usr_{}", nanoid::nanoid!(10));
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at) VALUES (?1, ?2, ?3, 'player', ?4)",
+            params![id, email, display_name, now_str],
+        )?;
+        Ok(crate::models::User {
+            id,
+            email: email.to_string(),
+            display_name: display_name.to_string(),
+            tier: "player".to_string(),
+            created_at: now,
+        })
+    }
+
     pub fn get_user_by_email(&self, email: &str) -> Option<crate::models::User> {
         self.conn
             .query_row(
@@ -973,6 +1135,188 @@ impl Storage {
             .ok()
     }
 
+    pub fn get_user_by_id(&self, id: &str) -> Option<crate::models::User> {
+        self.conn
+            .query_row(
+                "SELECT id, email, display_name, tier, created_at FROM users WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok(crate::models::User {
+                        id: row.get(0)?,
+                        email: row.get(1)?,
+                        display_name: row.get(2)?,
+                        tier: row.get(3)?,
+                        created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    })
+                },
+            )
+            .ok()
+    }
+
+    // --- Universes ---
+
+    pub fn create_universe(
+        &mut self,
+        create: crate::models::CreateUniverse,
+        owner_id: &str,
+    ) -> anyhow::Result<crate::models::Universe> {
+        if self.get_universe(&create.key).is_some() {
+            anyhow::bail!("Universe '{}' already exists", create.key);
+        }
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO universes (key, name, description, owner_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![create.key, create.name, create.description, owner_id, now_str],
+        )?;
+        // Owner is automatically a member
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) VALUES (?1, ?2, 'owner', ?3)",
+            params![create.key, owner_id, now_str],
+        )?;
+        Ok(crate::models::Universe {
+            key: create.key,
+            name: create.name,
+            description: create.description,
+            owner_id: owner_id.to_string(),
+            created_at: now,
+        })
+    }
+
+    pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
+        self.conn
+            .query_row(
+                "SELECT key, name, description, owner_id, created_at FROM universes WHERE key = ?1",
+                params![key],
+                |row| {
+                    Ok(crate::models::Universe {
+                        key: row.get(0)?,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        owner_id: row.get(3)?,
+                        created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    })
+                },
+            )
+            .ok()
+    }
+
+    pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at \
+             FROM universes u \
+             JOIN universe_members um ON um.universe_key = u.key \
+             WHERE um.user_id = ?1 \
+             ORDER BY u.created_at ASC",
+            )
+            .expect("Failed to prepare list_universes_for_user");
+        stmt.query_map(params![user_id], |row| {
+            Ok(crate::models::Universe {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                owner_id: row.get(3)?,
+                created_at: parse_datetime(&row.get::<_, String>(4)?),
+            })
+        })
+        .expect("Failed to list universes for user")
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    // --- Universe Members ---
+
+    pub fn is_universe_member(&self, universe_key: &str, user_id: &str) -> bool {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                params![universe_key, user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    }
+
+    pub fn list_universe_members(&self, universe_key: &str) -> Vec<crate::models::UniverseMember> {
+        let mut stmt = self.conn.prepare(
+            "SELECT um.universe_key, um.user_id, um.role, um.joined_at, u.email, u.display_name \
+             FROM universe_members um \
+             LEFT JOIN users u ON um.user_id = u.id \
+             WHERE um.universe_key = ?1 \
+             ORDER BY um.joined_at ASC",
+        ).expect("Failed to prepare list_universe_members");
+        stmt.query_map(params![universe_key], |row| {
+            Ok(crate::models::UniverseMember {
+                universe_key: row.get(0)?,
+                user_id: row.get(1)?,
+                role: row.get(2)?,
+                joined_at: parse_datetime(&row.get::<_, String>(3)?),
+                email: row.get(4)?,
+                display_name: row.get(5)?,
+            })
+        })
+        .expect("Failed to list universe members")
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn add_universe_member(
+        &mut self,
+        universe_key: &str,
+        user_id: &str,
+        role: &str,
+    ) -> anyhow::Result<crate::models::UniverseMember> {
+        if self.get_universe(universe_key).is_none() {
+            anyhow::bail!("Universe '{}' not found", universe_key);
+        }
+        // Note: user_id may refer to a quilombo user (not in the users table) — no FK check.
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) VALUES (?1, ?2, ?3, ?4)",
+            params![universe_key, user_id, role, now_str],
+        )?;
+        let member = self.conn.query_row(
+            "SELECT um.universe_key, um.user_id, um.role, um.joined_at, u.email, u.display_name \
+             FROM universe_members um LEFT JOIN users u ON um.user_id = u.id \
+             WHERE um.universe_key = ?1 AND um.user_id = ?2",
+            params![universe_key, user_id],
+            |row| {
+                Ok(crate::models::UniverseMember {
+                    universe_key: row.get(0)?,
+                    user_id: row.get(1)?,
+                    role: row.get(2)?,
+                    joined_at: parse_datetime(&row.get::<_, String>(3)?),
+                    email: row.get(4)?,
+                    display_name: row.get(5)?,
+                })
+            },
+        )?;
+        Ok(member)
+    }
+
+    pub fn remove_universe_member(
+        &mut self,
+        universe_key: &str,
+        user_id: &str,
+    ) -> anyhow::Result<()> {
+        // Prevent removing the owner
+        let universe = self
+            .get_universe(universe_key)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", universe_key))?;
+        if universe.owner_id == user_id {
+            anyhow::bail!("Cannot remove the owner from a universe");
+        }
+        self.conn.execute(
+            "DELETE FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            params![universe_key, user_id],
+        )?;
+        Ok(())
+    }
+
     // --- Check if data exists ---
 
     pub fn has_data(&self) -> bool {
@@ -986,7 +1330,7 @@ impl Storage {
 
 // --- Parsing helpers ---
 
-fn parse_datetime(s: &str) -> chrono::DateTime<Utc> {
+pub fn parse_datetime(s: &str) -> chrono::DateTime<Utc> {
     chrono::DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now())
@@ -1025,6 +1369,7 @@ pub fn seed_data(storage: &mut Storage) {
         name: "Design System".into(),
         key: "DS".into(),
         description: "Shared component library and design tokens".into(),
+        ..Default::default()
     };
     storage.create_project(ds).unwrap();
 
@@ -1032,6 +1377,7 @@ pub fn seed_data(storage: &mut Storage) {
         name: "Backend API".into(),
         key: "API".into(),
         description: "Core REST API and data services".into(),
+        ..Default::default()
     };
     storage.create_project(api).unwrap();
 
@@ -1217,6 +1563,7 @@ pub fn seed_data(storage: &mut Storage) {
         name: "Platform".into(),
         key: "PLT".into(),
         description: "Unified platform for management and collaboration".into(),
+        ..Default::default()
     };
     storage.create_project(plt).unwrap();
 
