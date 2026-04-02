@@ -23,7 +23,15 @@
                 <span class="logo-mark">B</span>
                 <span class="logo-text" data-i18n="projects">Projetos</span>
             </div>
-            <nav class="sidebar-nav" id="project-list"></nav>
+            <div class="sidebar-section">
+                <button class="sidebar-section-header" id="btn-toggle-projects" aria-expanded="true">
+                    <span data-i18n="projects">Projetos</span>
+                    <svg class="section-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                        <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
+                <nav class="sidebar-nav" id="project-list"></nav>
+            </div>
             <div class="sidebar-mini-calendar hidden" id="mini-calendar"></div>
             <div class="sidebar-footer">
                 <button class="btn-icon" id="btn-new-project" title="New project">

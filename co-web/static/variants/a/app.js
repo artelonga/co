@@ -2498,6 +2498,16 @@
                 overlay.classList.remove('visible');
             });
         }
+
+        const toggleProjects = document.getElementById('btn-toggle-projects');
+        const projectList = document.getElementById('project-list');
+        if (toggleProjects && projectList) {
+            toggleProjects.addEventListener('click', () => {
+                const expanded = toggleProjects.getAttribute('aria-expanded') === 'true';
+                toggleProjects.setAttribute('aria-expanded', String(!expanded));
+                projectList.classList.toggle('collapsed', expanded);
+            });
+        }
     }
 
     // ===== Events =====
@@ -2817,6 +2827,8 @@
 
             if (r && r.usuario) {
                 hideLoginModal();
+                const me = await api.me();
+                if (me) renderUserBadge(me);
                 await bootApp();
             } else if (r && r.error === 'unauthorized') {
                 errEl.textContent = t('invalid_credentials');
