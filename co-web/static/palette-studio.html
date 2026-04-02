@@ -71,6 +71,20 @@
     }
 
     /* ─── Preset buttons ─── */
+    .preset-group {
+      display: flex;
+      border: 1.5px solid var(--md-sys-color-outline-variant);
+      border-radius: var(--co-radius);
+      overflow: hidden;
+    }
+    .preset-group .preset-btn {
+      border: none;
+      border-radius: 0;
+      border-right: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .preset-group .preset-btn:last-child {
+      border-right: none;
+    }
     .preset-btn {
       font-family: var(--co-font-label);
       font-size: 0.78rem;
@@ -656,9 +670,14 @@
     <span class="header-badge">CO Platform</span>
     <div style="flex:1"></div>
     <!-- Preset buttons -->
-    <button class="preset-btn" data-preset="co-light" onclick="applyPalette('co-light')">CO Light</button>
-    <button class="preset-btn" data-preset="co-dark"  onclick="applyPalette('co-dark')">CO Dark</button>
-    <button class="preset-btn" data-preset="quilombo" onclick="applyPalette('quilombo')">Quilombo</button>
+    <div class="preset-group">
+      <button class="preset-btn" data-preset="co-light" onclick="applyPalette('co-light')">CO Light</button>
+      <button class="preset-btn" data-preset="co-dark"  onclick="applyPalette('co-dark')">CO Dark</button>
+    </div>
+    <div class="preset-group">
+      <button class="preset-btn" data-preset="quilombo"      onclick="applyPalette('quilombo')">Quilombo</button>
+      <button class="preset-btn" data-preset="quilombo-dark" onclick="applyPalette('quilombo-dark')">Quilombo Dark</button>
+    </div>
     <button class="export-btn" onclick="openExport()">
       <span class="material-symbols-outlined" style="font-size:16px">download</span>
       Export CSS
@@ -1078,6 +1097,60 @@ const PALETTES = {
       '--md-sys-color-inverse-surface':          '#2e2820',
       '--md-sys-color-inverse-on-surface':       '#f5f0e8',
       '--md-sys-color-inverse-primary':          '#c89060',
+    },
+    fonts: {
+      '--co-font-headline': "'Newsreader', serif",
+      '--co-font-body':     "'Newsreader', serif",
+      '--co-font-label':    "'Work Sans', sans-serif",
+      '--co-radius':        '0.25rem',
+    }
+  },
+
+  'quilombo-dark': {
+    label: 'Quilombo Dark',
+    vars: {
+      '--md-sys-color-primary':                  '#c89060',
+      '--md-sys-color-primary-container':        '#3d2008',
+      '--md-sys-color-primary-fixed':            '#eed5b8',
+      '--md-sys-color-primary-fixed-dim':        '#c89060',
+      '--md-sys-color-on-primary':               '#2a1a08',
+      '--md-sys-color-on-primary-container':     '#eed5b8',
+
+      '--md-sys-color-secondary':                '#8ab886',
+      '--md-sys-color-secondary-container':      '#1e3a1a',
+      '--md-sys-color-secondary-fixed':          '#c8e4c4',
+      '--md-sys-color-secondary-fixed-dim':      '#8ab886',
+      '--md-sys-color-on-secondary':             '#0e200c',
+      '--md-sys-color-on-secondary-container':   '#c8e4c4',
+
+      '--md-sys-color-tertiary':                 '#d4a078',
+      '--md-sys-color-tertiary-container':       '#42200a',
+      '--md-sys-color-tertiary-fixed':           '#f0d4bc',
+      '--md-sys-color-tertiary-fixed-dim':       '#d4a078',
+      '--md-sys-color-on-tertiary':              '#301a08',
+      '--md-sys-color-on-tertiary-container':    '#f0d4bc',
+
+      '--md-sys-color-surface':                  '#1a1510',
+      '--md-sys-color-surface-container-lowest': '#100e0a',
+      '--md-sys-color-surface-container-low':    '#221e18',
+      '--md-sys-color-surface-container':        '#2a2520',
+      '--md-sys-color-surface-container-high':   '#353028',
+      '--md-sys-color-surface-container-highest':'#403a30',
+      '--md-sys-color-background':               '#1a1510',
+      '--md-sys-color-on-surface':               '#f0eae0',
+      '--md-sys-color-on-surface-variant':       '#c0a98a',
+
+      '--md-sys-color-outline':                  '#a0866c',
+      '--md-sys-color-outline-variant':          '#504030',
+
+      '--md-sys-color-error':                    '#ffb4ab',
+      '--md-sys-color-error-container':          '#8c1d18',
+      '--md-sys-color-on-error':                 '#690005',
+      '--md-sys-color-on-error-container':       '#ffdad6',
+
+      '--md-sys-color-inverse-surface':          '#f0eae0',
+      '--md-sys-color-inverse-on-surface':       '#2a2520',
+      '--md-sys-color-inverse-primary':          '#5c3d1e',
     },
     fonts: {
       '--co-font-headline': "'Newsreader', serif",
