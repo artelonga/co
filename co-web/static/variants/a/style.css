@@ -39,7 +39,15 @@
     --priority-critical: #ef4444;
 
     --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-label: var(--font);
     --font-mono: 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+    --modal-overlay: rgba(0,0,0,0.4);
+    --modal-surface: var(--card-bg);
+    --form-input-bg: white;
+    --form-input-border: 1px solid var(--border);
+    --form-input-border-focus: 1px solid var(--accent);
+    --form-input-radius: var(--radius-sm);
+    --form-input-padding: 8px 10px;
 
     --radius-sm: 4px;
     --radius-md: 8px;
@@ -1766,7 +1774,7 @@ body {
 .modal-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0,0,0,0.4);
+    background: var(--modal-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1777,7 +1785,7 @@ body {
 .modal-overlay.hidden { display: none; }
 
 .modal {
-    background: var(--card-bg);
+    background: var(--modal-surface);
     border-radius: var(--radius-lg);
     width: 520px;
     max-height: 90vh;
@@ -1832,20 +1840,20 @@ body {
 .form-group select,
 .form-group textarea {
     width: 100%;
-    padding: 8px 10px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    padding: var(--form-input-padding);
+    border: var(--form-input-border);
+    border-radius: var(--form-input-radius);
     font-size: 13px;
     font-family: var(--font);
     outline: none;
     transition: border-color 0.15s;
-    background: white;
+    background: var(--form-input-bg);
 }
 
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
-    border-color: var(--accent);
+    border: var(--form-input-border-focus);
 }
 
 .form-group textarea { resize: vertical; }
@@ -2390,4 +2398,267 @@ body {
     color: rgba(241, 245, 249, 0.9);
     border-color: rgba(255, 255, 255, 0.25);
     background: rgba(255, 255, 255, 0.08);
+}
+
+/* ===== Named Palettes ===== */
+
+/* Scholarly Automaton — Light */
+:root[data-palette="scholarly"] {
+    --bg: #FFF9ED;
+    --bg-hover: #F3EDE1;
+    --sidebar-bg: #F2E8D5;
+    --sidebar-hover: #EAD9BF;
+    --sidebar-active: #CD7F32;
+    --card-bg: #FFFFFF;
+    --border: rgba(134,116,102,0.15);
+    --text-primary: #1d1c15;
+    --text-secondary: #534438;
+    --text-muted: #867466;
+    --accent: #8E4E00;
+    --accent-hover: #6c3a00;
+    --accent-light: #ffdcc1;
+    --danger: #ba1a1a;
+    --danger-hover: #93000a;
+    --font: 'Newsreader', Georgia, serif;
+    --font-label: 'Work Sans', system-ui, sans-serif;
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
+    --shadow-sm: 0 1px 3px rgba(142,78,0,0.06);
+    --shadow-md: 0 4px 12px rgba(142,78,0,0.08), 0 2px 4px rgba(142,78,0,0.05);
+    --shadow-lg: 0 12px 40px rgba(142,78,0,0.12), 0 4px 8px rgba(142,78,0,0.06);
+    --modal-overlay: rgba(29,28,21,0.45);
+    --modal-surface: #FFFEF9;
+    --form-input-bg: transparent;
+    --form-input-border: none;
+    --form-input-border-focus: none;
+    --form-input-radius: 0;
+    --form-input-padding: 8px 0;
+}
+
+/* Scholarly Automaton — Dark */
+:root[data-palette="scholarly-dark"] {
+    --bg: #1c1610;
+    --bg-hover: #261d14;
+    --sidebar-bg: #120e09;
+    --sidebar-hover: #1f1710;
+    --sidebar-active: #CD7F32;
+    --card-bg: #261d14;
+    --border: rgba(205,127,50,0.15);
+    --text-primary: #f0e0c8;
+    --text-secondary: #b89070;
+    --text-muted: #7d6040;
+    --accent: #CD7F32;
+    --accent-hover: #ffb779;
+    --accent-light: #3d2000;
+    --danger: #ff6b6b;
+    --danger-hover: #ff4040;
+    --font: 'Newsreader', Georgia, serif;
+    --font-label: 'Work Sans', system-ui, sans-serif;
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+    --shadow-lg: 0 12px 40px rgba(0,0,0,0.5);
+    --modal-overlay: rgba(0,0,0,0.65);
+    --modal-surface: #2e2116;
+    --form-input-bg: transparent;
+    --form-input-border: none;
+    --form-input-border-focus: none;
+    --form-input-radius: 0;
+    --form-input-padding: 8px 0;
+    --status-todo: #7d6040;
+    --status-in_progress: #CD7F32;
+    --status-in_review: #e09020;
+    --status-done: #6a9a50;
+    --status-todo-bg: #261d14;
+    --status-in_progress-bg: #3d2000;
+    --status-in_review-bg: #3d2800;
+    --status-done-bg: #1a2e14;
+    --status-todo-text: #b89070;
+    --status-in_progress-text: #ffb779;
+    --status-in_review-text: #ffd090;
+    --status-done-text: #90c070;
+}
+
+/* Relic Archive — Dark */
+:root[data-palette="relic"] {
+    --bg: #131313;
+    --bg-hover: #1c1b1b;
+    --sidebar-bg: #1c1b1b;
+    --sidebar-hover: #252424;
+    --sidebar-active: #e0505f;
+    --card-bg: #201f1f;
+    --border: rgba(69,71,76,0.3);
+    --text-primary: #e5e2e1;
+    --text-secondary: #c5c6cc;
+    --text-muted: #8f9096;
+    --accent: #e0505f;
+    --accent-hover: #ffb3b5;
+    --accent-light: #3d000a;
+    --danger: #ff6b6b;
+    --danger-hover: #ff4040;
+    --font: 'Newsreader', Georgia, serif;
+    --font-label: 'Manrope', system-ui, sans-serif;
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.4);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
+    --shadow-lg: 0 12px 50px rgba(0,0,0,0.7);
+    --modal-overlay: rgba(0,0,0,0.75);
+    --modal-surface: #1c1b1b;
+    --form-input-bg: rgba(42,42,42,0.6);
+    --form-input-border: 1px solid rgba(69,71,76,0.5);
+    --form-input-border-focus: 1px solid #e9c349;
+    --form-input-radius: 4px;
+    --form-input-padding: 8px 10px;
+    --status-todo: #8f9096;
+    --status-in_progress: #e9c349;
+    --status-in_review: #e0505f;
+    --status-done: #6a9a50;
+    --status-todo-bg: #1c1b1b;
+    --status-in_progress-bg: #2a2500;
+    --status-in_review-bg: #2a0a0e;
+    --status-done-bg: #0e2010;
+    --status-todo-text: #8f9096;
+    --status-in_progress-text: #e9c349;
+    --status-in_review-text: #ffb3b5;
+    --status-done-text: #90c070;
+}
+
+/* Relic Archive — Light */
+:root[data-palette="relic-light"] {
+    --bg: #F5F0F0;
+    --bg-hover: #EDE5E5;
+    --sidebar-bg: #E8DEDE;
+    --sidebar-hover: #DDD0D0;
+    --sidebar-active: #af2b3e;
+    --card-bg: #FFFFFF;
+    --border: rgba(175,43,62,0.1);
+    --text-primary: #1a1010;
+    --text-secondary: #5a3a3a;
+    --text-muted: #8a6060;
+    --accent: #af2b3e;
+    --accent-hover: #8e1020;
+    --accent-light: #ffdada;
+    --danger: #ba1a1a;
+    --danger-hover: #93000a;
+    --font: 'Newsreader', Georgia, serif;
+    --font-label: 'Manrope', system-ui, sans-serif;
+    --radius-sm: 2px;
+    --radius-md: 4px;
+    --radius-lg: 8px;
+    --shadow-sm: 0 1px 3px rgba(175,43,62,0.06);
+    --shadow-md: 0 4px 12px rgba(175,43,62,0.08);
+    --shadow-lg: 0 12px 40px rgba(175,43,62,0.12);
+    --modal-overlay: rgba(26,16,16,0.45);
+    --modal-surface: #FFFFFF;
+    --form-input-bg: transparent;
+    --form-input-border: 1px solid rgba(175,43,62,0.2);
+    --form-input-border-focus: 1px solid #af2b3e;
+    --form-input-radius: 4px;
+    --form-input-padding: 8px 10px;
+}
+
+/* Palette-specific: Scholarly label font */
+:root[data-palette^="scholarly"] .form-group label,
+:root[data-palette^="scholarly"] .sidebar-section-header,
+:root[data-palette^="scholarly"] .view-tab,
+:root[data-palette^="scholarly"] .btn {
+    font-family: var(--font-label);
+    letter-spacing: 0.04em;
+}
+
+/* Scholarly: bottom-border-only inputs (ledger style) */
+:root[data-palette^="scholarly"] .form-group input,
+:root[data-palette^="scholarly"] .form-group select,
+:root[data-palette^="scholarly"] .form-group textarea {
+    border-bottom: 1px solid var(--text-muted) !important;
+    background: transparent !important;
+    border-radius: 0 !important;
+    padding: 8px 0 !important;
+}
+
+:root[data-palette^="scholarly"] .form-group input:focus,
+:root[data-palette^="scholarly"] .form-group select:focus,
+:root[data-palette^="scholarly"] .form-group textarea:focus {
+    border-bottom-color: var(--accent) !important;
+    background: transparent !important;
+}
+
+/* Scholarly: modal gets warm tonal header separator */
+:root[data-palette^="scholarly"] .modal-header {
+    border-bottom: none;
+    padding-bottom: 16px;
+    background: linear-gradient(to bottom, var(--bg-hover), var(--modal-surface));
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+:root[data-palette^="scholarly"] .modal-header h2 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+:root[data-palette^="scholarly"] .modal {
+    box-shadow: 0 20px 60px rgba(142,78,0,0.18), 0 4px 12px rgba(142,78,0,0.1);
+    border: 1px solid rgba(134,116,102,0.12);
+}
+
+/* Relic: modal gets glass treatment */
+:root[data-palette="relic"] .modal {
+    background: rgba(28,27,27,0.92);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(224,80,95,0.15);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(224,80,95,0.05);
+}
+
+:root[data-palette="relic"] .modal-header {
+    border-bottom: 1px solid rgba(69,71,76,0.4);
+}
+
+:root[data-palette="relic"] .modal-header h2 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    color: #ffb3b5;
+}
+
+/* Relic: label font */
+:root[data-palette^="relic"] .form-group label,
+:root[data-palette^="relic"] .view-tab,
+:root[data-palette^="relic"] .btn {
+    font-family: var(--font-label);
+}
+
+/* Relic light: modal with subtle card */
+:root[data-palette="relic-light"] .modal {
+    box-shadow: 0 20px 60px rgba(175,43,62,0.15), 0 4px 12px rgba(175,43,62,0.08);
+    border: 1px solid rgba(175,43,62,0.08);
+}
+
+:root[data-palette="relic-light"] .modal-header h2 {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    color: #af2b3e;
+}
+
+/* All named palettes: sidebar-user text uses text-primary */
+:root[data-palette] .sidebar-user-name {
+    color: var(--text-primary);
+}
+
+/* Tonal content/form separation: login card */
+:root[data-palette^="scholarly"] .login-card {
+    background: var(--modal-surface);
+    border: 1px solid rgba(134,116,102,0.12);
+    box-shadow: 0 20px 60px rgba(142,78,0,0.15);
+}
+
+:root[data-palette="relic"] .login-card,
+:root[data-palette="relic"] .login-screen {
+    background: rgba(19,19,19,0.95);
 }

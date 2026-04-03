@@ -31,6 +31,29 @@
         { key: '--card-bg', label: 'Cards' },
     ];
 
+    const NAMED_PALETTES = [
+        { key: '',              name: 'Modern',            bg: '#f0f2f5', accent: '#6366f1' },
+        { key: 'scholarly',     name: 'Scholarly · Light', bg: '#FFF9ED', accent: '#CD7F32' },
+        { key: 'scholarly-dark',name: 'Scholarly · Dark',  bg: '#1c1610', accent: '#CD7F32' },
+        { key: 'relic',         name: 'Relic · Dark',      bg: '#131313', accent: '#e0505f' },
+        { key: 'relic-light',   name: 'Relic · Light',     bg: '#F5F0F0', accent: '#af2b3e' },
+    ];
+
+    let currentNamedPalette = '';
+
+    function loadNamedPalette() {
+        const saved = localStorage.getItem('co_named_palette') || '';
+        currentNamedPalette = saved;
+        document.documentElement.setAttribute('data-palette', saved);
+    }
+
+    function applyNamedPalette(key) {
+        currentNamedPalette = key;
+        localStorage.setItem('co_named_palette', key);
+        document.documentElement.setAttribute('data-palette', key);
+        renderHeaderSwitcher();
+    }
+
     let currentVariant = 'a';
 
     // --- Palette ---
@@ -112,13 +135,18 @@
 
         slot.innerHTML = '';
 
+        const current = NAMED_PALETTES.find(p => p.key === currentNamedPalette) || NAMED_PALETTES[0];
+
         const btn = document.createElement('button');
         btn.className = 'palette-switcher-btn';
         btn.id = 'palette-switcher-toggle';
         btn.setAttribute('aria-haspopup', 'listbox');
         btn.innerHTML = `
-            <span class="palette-switcher-swatch">${swatchHtml(currentVariant, 'palette-switcher-swatch-dot')}</span>
-            <span class="palette-switcher-label">${esc(variantLabel(currentVariant))}</span>
+            <span class="palette-switcher-swatch">
+                <span class="palette-switcher-swatch-dot" style="background:${current.bg}"></span>
+                <span class="palette-switcher-swatch-dot" style="background:${current.accent}"></span>
+            </span>
+            <span class="palette-switcher-label">${esc(current.name)}</span>
             <svg class="palette-switcher-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
         `;
 
@@ -126,13 +154,16 @@
         dropdown.className = 'palette-switcher-dropdown hidden';
         dropdown.id = 'palette-switcher-dropdown';
         dropdown.setAttribute('role', 'listbox');
-        dropdown.innerHTML = VARIANTS.map(v => `
-            <button class="palette-switcher-item${v.key === currentVariant ? ' active' : ''}"
-                    data-variant="${v.key}"
+        dropdown.innerHTML = NAMED_PALETTES.map(p => `
+            <button class="palette-switcher-item${p.key === currentNamedPalette ? ' active' : ''}"
+                    data-palette-key="${p.key}"
                     role="option"
-                    aria-selected="${v.key === currentVariant}">
-                <span class="palette-switcher-item-swatch">${swatchHtml(v.key, 'palette-switcher-item-dot')}</span>
-                <span class="palette-switcher-item-name">${esc(v.name)}</span>
+                    aria-selected="${p.key === currentNamedPalette}">
+                <span class="palette-switcher-item-swatch">
+                    <span class="palette-switcher-item-dot" style="background:${p.bg}"></span>
+                    <span class="palette-switcher-item-dot" style="background:${p.accent}"></span>
+                </span>
+                <span class="palette-switcher-item-name">${esc(p.name)}</span>
             </button>
         `).join('');
 
@@ -148,13 +179,11 @@
         });
 
         dropdown.querySelectorAll('.palette-switcher-item').forEach(item => {
-            item.addEventListener('click', async () => {
-                const variant = item.dataset.variant;
+            item.addEventListener('click', () => {
+                const key = item.dataset.paletteKey;
                 open = false;
                 dropdown.classList.add('hidden');
-                if (variant !== currentVariant) {
-                    await applyVariantSwitch(variant);
-                }
+                applyNamedPalette(key);
             });
         });
 
@@ -178,6 +207,7 @@
             const match = document.cookie.match(/co_variant=([a-h])/);
             if (match) currentVariant = match[1];
         }
+        loadNamedPalette();
         loadPalette();
         renderWidget();
         renderHeaderSwitcher();
