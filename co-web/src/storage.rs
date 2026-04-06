@@ -365,6 +365,31 @@ impl Storage {
                 )
                 .expect("Failed migration v13");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 14 {
+            // Add form config columns to universes (presentation layer — CO-24).
+            // SQLite ALTER TABLE ADD COLUMN requires a default for NOT NULL columns.
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE universes ADD COLUMN theme_preset TEXT NOT NULL DEFAULT 'scholarly-light';
+                     ALTER TABLE universes ADD COLUMN layout TEXT NOT NULL DEFAULT 'board';
+                     ALTER TABLE universes ADD COLUMN font_headline TEXT;
+                     ALTER TABLE universes ADD COLUMN font_body TEXT;
+                     ALTER TABLE universes ADD COLUMN custom_tokens TEXT;
+                     UPDATE universes SET theme_preset = 'scholarly-light', layout = 'board' WHERE is_template = 1;
+                     INSERT INTO schema_version (version) VALUES (14);",
+                )
+                .expect("Failed to run migration v14");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -1735,6 +1760,105 @@ impl Storage {
             .ok_or_else(|| anyhow::anyhow!("Universe not found after claim"))
     }
 
+    // --- Universe form config (CO-24) ---
+
+    /// Get the presentation config for a universe (theme, layout, fonts, tokens).
+    pub fn get_universe_form_config(&self, key: &str) -> Option<crate::models::UniverseFormConfig> {
+        self.conn
+            .query_row(
+                "SELECT theme_preset, layout, font_headline, font_body, custom_tokens \
+                 FROM universes WHERE key = ?1",
+                params![key],
+                |row| {
+                    let tokens_str: Option<String> = row.get(4)?;
+                    Ok(crate::models::UniverseFormConfig {
+                        theme_preset: row.get::<_, String>(0)?,
+                        layout: row.get::<_, String>(1)?,
+                        font_headline: row.get(2)?,
+                        font_body: row.get(3)?,
+                        custom_tokens: tokens_str.and_then(|s| serde_json::from_str(&s).ok()),
+                    })
+                },
+            )
+            .ok()
+    }
+
+    /// Apply a partial update to the form config and sync `.universo.yaml`.
+    pub fn update_universe_form_config(
+        &mut self,
+        key: &str,
+        update: crate::models::UpdateUniverseFormConfig,
+    ) -> anyhow::Result<crate::models::UniverseFormConfig> {
+        let mut config = self
+            .get_universe_form_config(key)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", key))?;
+
+        if let Some(tp) = update.theme_preset {
+            config.theme_preset = tp;
+        }
+        if let Some(l) = update.layout {
+            config.layout = l;
+        }
+        // Empty string clears the font; a value sets it.
+        if let Some(fh) = update.font_headline {
+            config.font_headline = if fh.is_empty() { None } else { Some(fh) };
+        }
+        if let Some(fb) = update.font_body {
+            config.font_body = if fb.is_empty() { None } else { Some(fb) };
+        }
+        // An explicit `null` in JSON becomes None here and clears the tokens.
+        config.custom_tokens = update.custom_tokens;
+
+        let tokens_str = config.custom_tokens.as_ref().map(|v| v.to_string());
+
+        self.conn.execute(
+            "UPDATE universes SET theme_preset = ?1, layout = ?2, \
+             font_headline = ?3, font_body = ?4, custom_tokens = ?5 \
+             WHERE key = ?6",
+            params![
+                config.theme_preset,
+                config.layout,
+                config.font_headline,
+                config.font_body,
+                tokens_str,
+                key,
+            ],
+        )?;
+
+        // Sync to .universo.yaml (best-effort; never fails the request).
+        let _ = self.write_universo_yaml(key, &config);
+
+        Ok(config)
+    }
+
+    /// Write form config to `.universo.yaml` at the universe vault root.
+    fn write_universo_yaml(
+        &self,
+        universe_key: &str,
+        config: &crate::models::UniverseFormConfig,
+    ) -> anyhow::Result<()> {
+        let root = self.universe_root(universe_key);
+        std::fs::create_dir_all(&root)?;
+        let yaml_path = root.join(".universo.yaml");
+
+        let mut yaml = format!(
+            "theme_preset: {}\nlayout: {}\n",
+            config.theme_preset, config.layout
+        );
+        if let Some(fh) = &config.font_headline {
+            yaml.push_str(&format!("font_headline: {fh}\n"));
+        }
+        if let Some(fb) = &config.font_body {
+            yaml.push_str(&format!("font_body: {fb}\n"));
+        }
+        if let Some(tokens) = &config.custom_tokens {
+            yaml.push_str(&format!("custom_tokens: {tokens}\n"));
+        }
+
+        std::fs::write(yaml_path, yaml)?;
+        Ok(())
+    }
+
     // --- Check if data exists ---
 
     pub fn has_data(&self) -> bool {
@@ -1770,15 +1894,20 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        // Template universe
+        // Template universe with Scholarly Light theme + board layout.
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
-             (key, name, description, owner_id, created_at, is_template, is_public) \
+             (key, name, description, owner_id, created_at, is_template, is_public, \
+              theme_preset, layout) \
              VALUES ('template', 'CO', \
              'Universo de demonstração — todas as funcionalidades do CO', \
-             'system', ?1, 1, 1)",
+             'system', ?1, 1, 1, 'scholarly-light', 'board')",
             params![now_str],
         );
+        // Ensure form config YAML is written for the template.
+        if let Some(config) = self.get_universe_form_config("template") {
+            let _ = self.write_universo_yaml("template", &config);
+        }
 
         // Check if project entry already exists
         let proj_path = "projects/MP/_project.md";
@@ -2092,6 +2221,25 @@ impl Storage {
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",
             params![cloned_entries, new_key],
         )?;
+
+        // Inherit form config (theme, layout, fonts, tokens) from the source universe.
+        if let Some(source_config) = self.get_universe_form_config(source_key) {
+            let tokens_str = source_config.custom_tokens.as_ref().map(|v| v.to_string());
+            self.conn.execute(
+                "UPDATE universes SET theme_preset = ?1, layout = ?2, \
+                 font_headline = ?3, font_body = ?4, custom_tokens = ?5 \
+                 WHERE key = ?6",
+                params![
+                    source_config.theme_preset,
+                    source_config.layout,
+                    source_config.font_headline,
+                    source_config.font_body,
+                    tokens_str,
+                    new_key,
+                ],
+            )?;
+            let _ = self.write_universo_yaml(new_key, &source_config);
+        }
 
         Ok(crate::models::Universe {
             key: new_key.to_string(),

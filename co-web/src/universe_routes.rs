@@ -3,7 +3,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
-    routing::{delete, get, post},
+    routing::{delete, get, post, put},
 };
 use serde::Serialize;
 
@@ -294,10 +294,72 @@ fn extract_optional_user_id(headers: &HeaderMap, _state: &AppState) -> Option<St
     crate::auth::decode_user_id(token, &secret).ok()
 }
 
+// GET /api/v1/universes/:slug/config — public: returns presentation config
+pub async fn get_universe_config(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<UniverseFormConfig>, AppError> {
+    let storage = lock_storage(&state)?;
+    let config = storage
+        .get_universe_form_config(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+    Ok(Json(config))
+}
+
+// PUT /api/v1/universes/:slug/config — owner only: update presentation config
+pub async fn update_universe_config(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+    Json(body): Json<UpdateUniverseFormConfig>,
+) -> Result<Json<UniverseFormConfig>, AppError> {
+    // Verify universe exists and caller is the owner.
+    {
+        let storage = lock_storage(&state)?;
+        let universe = storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        if universe.owner_id != user_id.0 {
+            return Err(AppError::Forbidden(
+                "Only the owner can update universe config".into(),
+            ));
+        }
+    }
+
+    // Validate layout value.
+    if let Some(ref layout) = body.layout {
+        let valid = ["board", "table", "timeline", "calendar", "dashboard"];
+        if !valid.contains(&layout.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "Invalid layout '{layout}'. Must be one of: {}",
+                valid.join(", ")
+            )));
+        }
+    }
+
+    // Validate theme_preset value.
+    if let Some(ref theme) = body.theme_preset {
+        let valid = ["scholarly-light", "scholarly-dark", "relic", "relic-light"];
+        if !valid.contains(&theme.as_str()) {
+            return Err(AppError::BadRequest(format!(
+                "Invalid theme_preset '{theme}'. Must be one of: {}",
+                valid.join(", ")
+            )));
+        }
+    }
+
+    let config = lock_storage(&state)?
+        .update_universe_form_config(&slug, body)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(config))
+}
+
 pub fn router() -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
         .route("/{slug}", get(get_universe_info))
+        .route("/{slug}/config", get(get_universe_config))
         .route("/{slug}/projects", get(list_universe_projects))
         .route("/{slug}/clone", post(clone_universe));
 
@@ -307,7 +369,173 @@ pub fn router() -> Router<AppState> {
         .route("/{key}/members", get(list_members).post(add_member))
         .route("/{key}/members/{user_id}", delete(remove_member))
         .route("/{slug}/claim", post(claim_universe))
+        .route("/{slug}/config", put(update_universe_config))
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use rusqlite::params;
+    use tempfile::tempdir;
+
+    use crate::models::UpdateUniverseFormConfig;
+    use crate::storage::Storage;
+
+    fn make_storage() -> (Storage, tempfile::TempDir) {
+        // SAFETY: single-threaded test environment.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        (storage, dir)
+    }
+
+    /// After migration v14, a universe gets scholarly-light theme and board layout by default.
+    #[test]
+    fn test_universe_form_config_defaults() {
+        let (storage, _dir) = make_storage();
+        let config = storage
+            .get_universe_form_config("default")
+            .expect("default universe must exist");
+        assert_eq!(config.theme_preset, "scholarly-light");
+        assert_eq!(config.layout, "board");
+        assert!(config.font_headline.is_none());
+        assert!(config.font_body.is_none());
+        assert!(config.custom_tokens.is_none());
+    }
+
+    /// Updating theme_preset changes only that field; layout is preserved.
+    #[test]
+    fn test_update_form_config_theme() {
+        let (mut storage, _dir) = make_storage();
+        let updated = storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("relic-dark".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.theme_preset, "relic-dark");
+        assert_eq!(updated.layout, "board"); // unchanged
+
+        // Persisted correctly.
+        let persisted = storage.get_universe_form_config("default").unwrap();
+        assert_eq!(persisted.theme_preset, "relic-dark");
+    }
+
+    /// Cloning a universe copies its form config exactly.
+    #[test]
+    fn test_clone_universe_inherits_form_config() {
+        let (mut storage, _dir) = make_storage();
+
+        // Give the default universe a custom theme + layout.
+        storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("scholarly-dark".to_string()),
+                    layout: Some("calendar".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Make default public so it can be cloned.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET is_public = 1 WHERE key = 'default'",
+                params![],
+            )
+            .unwrap();
+
+        storage
+            .clone_universe("default", "clone1", "Clone 1", "", "usr_test")
+            .unwrap();
+
+        let clone_config = storage
+            .get_universe_form_config("clone1")
+            .expect("clone must have form config");
+        assert_eq!(clone_config.theme_preset, "scholarly-dark");
+        assert_eq!(clone_config.layout, "calendar");
+    }
+
+    /// Changing form config does not affect entries in the same universe.
+    #[test]
+    fn test_form_config_change_does_not_affect_entries() {
+        let (mut storage, _dir) = make_storage();
+
+        // Create a project entry so entries table is non-empty.
+        let universe_root = storage.universe_root("default");
+        let entry = crate::entry_index::make_entry(
+            "projects/TEST/_project.md",
+            serde_json::json!({
+                "type": "project",
+                "key": "TEST",
+                "title": "Test",
+                "status": "active",
+                "next_id": 1,
+                "archived": false,
+                "tags": []
+            }),
+            "Test project",
+        );
+        co::entry::write_entry(&universe_root, &entry).unwrap();
+        crate::entry_index::EntryIndex::new(storage.conn())
+            .upsert("default", &entry)
+            .unwrap();
+
+        // Change theme.
+        storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("relic".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Entry still present and unmodified.
+        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        let count = index.count("default", Some("project"));
+        assert!(
+            count > 0,
+            "project entries must still be present after config change"
+        );
+
+        // Config changed.
+        let config = storage.get_universe_form_config("default").unwrap();
+        assert_eq!(config.theme_preset, "relic");
+    }
+
+    /// `.universo.yaml` is written when form config is updated.
+    #[test]
+    fn test_universo_yaml_written_on_update() {
+        let (mut storage, _dir) = make_storage();
+
+        storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("relic-light".to_string()),
+                    layout: Some("table".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let yaml_path = storage.universe_root("default").join(".universo.yaml");
+        assert!(yaml_path.exists(), ".universo.yaml must be written");
+        let contents = std::fs::read_to_string(yaml_path).unwrap();
+        assert!(contents.contains("relic-light"));
+        assert!(contents.contains("table"));
+    }
 }

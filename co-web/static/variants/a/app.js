@@ -31,6 +31,8 @@
         currentUniverseSlug: 'template',
         isTemplate: false,
         universeInfo: null,
+        // Form config (CO-24): theme, layout, fonts from universe config endpoint
+        universeConfig: null,
     };
 
     const STATUSES = [
@@ -81,6 +83,88 @@
                 if (toast.parentNode) toast.parentNode.removeChild(toast);
             }, 300);
         }, 3000);
+    }
+
+    // ===== Universe Form Config (CO-24) =====
+
+    // Maps API theme_preset names to CSS data-palette attribute values.
+    const THEME_PALETTE_MAP = {
+        'scholarly-light': 'scholarly',
+        'scholarly-dark': 'scholarly-dark',
+        'relic': 'relic',
+        'relic-light': 'relic-light',
+    };
+
+    // Apply universe presentation config: palette, custom tokens, default layout, fonts.
+    function applyUniverseConfig(config) {
+        if (!config) return;
+        state.universeConfig = config;
+
+        // 1. Apply theme preset via data-palette attribute (uses existing CSS presets).
+        const paletteKey = THEME_PALETTE_MAP[config.theme_preset] || 'scholarly';
+        document.documentElement.setAttribute('data-palette', paletteKey);
+
+        // 2. Apply custom CSS token overrides as inline :root style.
+        let customStyle = document.getElementById('co-universe-tokens');
+        if (config.custom_tokens && typeof config.custom_tokens === 'object') {
+            const declarations = Object.entries(config.custom_tokens)
+                .map(([k, v]) => `${k}:${v}`)
+                .join(';');
+            if (!customStyle) {
+                customStyle = document.createElement('style');
+                customStyle.id = 'co-universe-tokens';
+                document.head.appendChild(customStyle);
+            }
+            customStyle.textContent = `:root{${declarations}}`;
+        } else if (customStyle) {
+            customStyle.textContent = '';
+        }
+
+        // 3. Inject Google Fonts link if custom fonts are specified.
+        const fontFamilies = [config.font_headline, config.font_body]
+            .filter(Boolean)
+            .map(f => encodeURIComponent(f))
+            .join('&family=');
+        const existingFontLink = document.getElementById('co-universe-fonts');
+        if (fontFamilies) {
+            const href = `https://fonts.googleapis.com/css2?family=${fontFamilies}&display=swap`;
+            if (existingFontLink) {
+                existingFontLink.href = href;
+            } else {
+                const link = document.createElement('link');
+                link.id = 'co-universe-fonts';
+                link.rel = 'stylesheet';
+                link.href = href;
+                document.head.appendChild(link);
+            }
+            // Apply font families as CSS variables for headings/body.
+            let fontStyle = document.getElementById('co-universe-font-vars');
+            if (!fontStyle) {
+                fontStyle = document.createElement('style');
+                fontStyle.id = 'co-universe-font-vars';
+                document.head.appendChild(fontStyle);
+            }
+            const vars = [];
+            if (config.font_headline) vars.push(`--font-headline:"${config.font_headline}"`);
+            if (config.font_body) vars.push(`--font-body:"${config.font_body}"`);
+            fontStyle.textContent = `:root{${vars.join(';')}}`;
+        } else if (existingFontLink) {
+            existingFontLink.remove();
+        }
+
+        // 4. Set default layout / view from config (board → kanban, others map directly).
+        const layoutToView = {
+            'board': 'kanban',
+            'table': 'table',
+            'timeline': 'timeline',
+            'calendar': 'calendar',
+            'dashboard': 'dashboard',
+        };
+        const defaultView = layoutToView[config.layout] || 'kanban';
+        // Only switch if no user override is active yet.
+        if (state.view === 'kanban' && defaultView !== 'kanban') {
+            switchView(defaultView);
+        }
     }
 
     // ===== Loading Helpers =====
@@ -245,6 +329,25 @@
         },
         async claimUniverse(slug) {
             return apiFetch(`/api/v1/universes/${slug}/claim`, { method: 'POST' }, true);
+        },
+        // CO-24: universe form config (theme, layout, fonts)
+        async getUniverseConfig(slug) {
+            return apiFetch(`/api/v1/universes/${slug}/config`, {}, true);
+        },
+        async updateUniverseConfig(slug, config) {
+            return apiFetch(`/api/v1/universes/${slug}/config`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(config),
+            });
+        },
+        // CO-24: fetch entries by type from the universe
+        async getUniverseEntries(slug, type) {
+            const url = type
+                ? `/api/v1/universes/${slug}/entries?type=${encodeURIComponent(type)}`
+                : `/api/v1/universes/${slug}/entries`;
+            const r = await apiFetch(url, {}, true);
+            return (r && r.entries) || [];
         },
     };
 
@@ -1975,73 +2078,111 @@
         return '#f59e0b';
     }
 
-    // ===== Render: Conteúdo (Quilombo feed) =====
+    // ===== Render: Conteúdo (entry-based — CO-24) =====
+    // Renders all universe entries grouped by type.
+    // task → kanban card, event → calendar item, page → wiki article, clip → link card.
     async function renderConteudo() {
         const content = $('#content');
         content.className = 'content conteudo-view';
         content.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Carregando...</p></div>';
 
-        const [publicacoes, eventos, missoes] = await Promise.all([
-            api.getPublicacoes(),
-            api.getEventos(),
-            api.getMissoes(),
+        const slug = state.currentUniverseSlug;
+        const [taskEntries, eventEntries, pageEntries, clipEntries] = await Promise.all([
+            api.getUniverseEntries(slug, 'task'),
+            api.getUniverseEntries(slug, 'event'),
+            api.getUniverseEntries(slug, 'page'),
+            api.getUniverseEntries(slug, 'clip'),
         ]);
 
-        const today = todayDate();
+        // Render task entries as kanban summary cards.
+        function entryFm(e) { return e.frontmatter || {}; }
+        function entryTitle(e) { return e.title || entryFm(e).title || e.path || ''; }
+        function entryTags(e) {
+            const tags = entryFm(e).tags;
+            return Array.isArray(tags) ? tags : [];
+        }
 
-        // Próximos eventos (upcoming first)
-        const upcomingEventos = eventos
-            .filter(e => e.data >= today)
-            .sort((a, b) => a.data.localeCompare(b.data))
+        const tasksHtml = taskEntries.length
+            ? taskEntries.slice(0, 8).map(e => {
+                const fm = entryFm(e);
+                const status = fm.status || 'todo';
+                const priority = fm.priority || 'medium';
+                const tags = entryTags(e);
+                return `<div class="conteudo-card">
+                    <div class="conteudo-card-meta">${esc(status)} · ${esc(priority)}</div>
+                    <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
+                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 120))}${e.body.length > 120 ? '…' : ''}</div>` : ''}
+                    ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+                </div>`;
+              }).join('')
+            : '<p class="conteudo-empty">Nenhuma tarefa</p>';
+
+        // Render event entries.
+        const today = todayDate();
+        const upcomingEvents = eventEntries
+            .filter(e => { const d = entryFm(e).date || entryFm(e).data || ''; return d >= today; })
+            .sort((a, b) => {
+                const da = entryFm(a).date || entryFm(a).data || '';
+                const db = entryFm(b).date || entryFm(b).data || '';
+                return da.localeCompare(db);
+            })
             .slice(0, 5);
 
-        const eventosHtml = upcomingEventos.length
-            ? upcomingEventos.map(e => `
-                <div class="conteudo-card">
-                    <div class="conteudo-card-meta">${esc(e.data)}${e.hora ? ' · ' + esc(e.hora) : ''}${e.local ? ' · ' + esc(e.local) : ''}</div>
-                    <div class="conteudo-card-title">${esc(e.titulo)}</div>
-                    ${e.descricao_md ? `<div class="conteudo-card-body">${esc(e.descricao_md.slice(0, 120))}${e.descricao_md.length > 120 ? '…' : ''}</div>` : ''}
-                </div>`).join('')
+        const eventsHtml = upcomingEvents.length
+            ? upcomingEvents.map(e => {
+                const fm = entryFm(e);
+                const date = fm.date || fm.data || '';
+                const local = fm.local || fm.location || '';
+                return `<div class="conteudo-card">
+                    <div class="conteudo-card-meta">${esc(date)}${local ? ' · ' + esc(local) : ''}</div>
+                    <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
+                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 120))}${e.body.length > 120 ? '…' : ''}</div>` : ''}
+                </div>`;
+              }).join('')
             : '<p class="conteudo-empty">Nenhum evento próximo</p>';
 
-        // Publicações recentes
-        const recentPublicacoes = publicacoes.slice(0, 6);
-        const publicacoesHtml = recentPublicacoes.length
-            ? recentPublicacoes.map(p => `
-                <div class="conteudo-card">
-                    <div class="conteudo-card-meta">${p.data ? esc(p.data) : ''}${p.autor ? ' · ' + esc(p.autor) : ''}</div>
-                    <div class="conteudo-card-title">${esc(p.titulo || p.slug || '')}</div>
-                    ${p.corpo ? `<div class="conteudo-card-body">${esc(p.corpo.slice(0, 140))}${p.corpo.length > 140 ? '…' : ''}</div>` : ''}
-                    ${(p.tags && p.tags.length) ? `<div class="conteudo-card-tags">${p.tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
-                </div>`).join('')
-            : '<p class="conteudo-empty">Nenhuma publicação</p>';
+        // Render page entries as wiki articles.
+        const pagesHtml = pageEntries.length
+            ? pageEntries.slice(0, 6).map(e => {
+                const tags = entryTags(e);
+                return `<div class="conteudo-card">
+                    <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
+                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 140))}${e.body.length > 140 ? '…' : ''}</div>` : ''}
+                    ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
+                </div>`;
+              }).join('')
+            : '<p class="conteudo-empty">Nenhuma página</p>';
 
-        // Missões ativas
-        const missaoStatusLabel = { aberta: 'Aberta', em_andamento: 'Em andamento', concluida: 'Concluída', cancelada: 'Cancelada' };
-        const missoesAtivasList = missoes.filter(m => m.status !== 'concluida' && m.status !== 'cancelada').slice(0, 6);
-        const missoesHtml = missoesAtivasList.length
-            ? missoesAtivasList.map(m => `
-                <div class="conteudo-card">
-                    <div class="conteudo-card-meta">${esc(missaoStatusLabel[m.status] || m.status || '')}</div>
-                    <div class="conteudo-card-title">${esc(m.titulo)}</div>
-                    ${m.objetivo ? `<div class="conteudo-card-body">${esc(m.objetivo.slice(0, 120))}${m.objetivo.length > 120 ? '…' : ''}</div>` : ''}
-                </div>`).join('')
-            : '<p class="conteudo-empty">Nenhuma missão ativa</p>';
+        // Render clip entries as link cards.
+        const clipsHtml = clipEntries.length
+            ? clipEntries.slice(0, 6).map(e => {
+                const fm = entryFm(e);
+                const url = fm.url || fm.link || '';
+                return `<div class="conteudo-card">
+                    <div class="conteudo-card-title">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(entryTitle(e))}</a>` : esc(entryTitle(e))}</div>
+                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 140))}${e.body.length > 140 ? '…' : ''}</div>` : ''}
+                </div>`;
+              }).join('')
+            : '<p class="conteudo-empty">Nenhum clipe</p>';
 
         content.innerHTML = `
             <div class="conteudo-grid">
                 <section class="conteudo-section">
+                    <h2 class="conteudo-section-title">Tarefas</h2>
+                    ${tasksHtml}
+                </section>
+                <section class="conteudo-section">
                     <h2 class="conteudo-section-title">Próximos Eventos</h2>
-                    ${eventosHtml}
+                    ${eventsHtml}
                 </section>
                 <section class="conteudo-section">
-                    <h2 class="conteudo-section-title">Publicações Recentes</h2>
-                    ${publicacoesHtml}
+                    <h2 class="conteudo-section-title">Páginas</h2>
+                    ${pagesHtml}
                 </section>
-                <section class="conteudo-section">
-                    <h2 class="conteudo-section-title">Missões Ativas</h2>
-                    ${missoesHtml}
-                </section>
+                ${clipEntries.length ? `<section class="conteudo-section">
+                    <h2 class="conteudo-section-title">Clipes</h2>
+                    ${clipsHtml}
+                </section>` : ''}
             </div>`;
     }
 
@@ -3072,11 +3213,18 @@
 
     async function bootAppForUniverse(slug) {
         showLoading();
-        // Load universe info (content_count, is_anonymous) for the header badge.
-        const info = await api.getUniverseInfo(slug);
+        // Load universe info and form config in parallel (CO-24).
+        const [info, config] = await Promise.all([
+            api.getUniverseInfo(slug),
+            api.getUniverseConfig(slug),
+        ]);
         if (info) {
             state.universeInfo = info;
             renderUsageCount();
+        }
+        if (config) {
+            applyUniverseConfig(config);
+            renderSettingsGear(info);
         }
         state.projects = await api.getUniverseProjects(slug);
         if (state.projects.length > 0) {
@@ -3084,6 +3232,105 @@
         }
         hideLoading();
         render();
+    }
+
+    // ===== Settings Panel (CO-24) =====
+
+    // Show gear icon in header if caller is the universe owner (non-template only).
+    function renderSettingsGear(universeInfo) {
+        // Remove any existing gear button to avoid duplicates.
+        const existing = document.getElementById('btn-settings-gear');
+        if (existing) existing.remove();
+
+        // Only show for non-template universes.
+        if (!universeInfo || universeInfo.is_template) return;
+
+        const headerRight = document.querySelector('.header-right');
+        if (!headerRight) return;
+
+        const gearBtn = document.createElement('button');
+        gearBtn.id = 'btn-settings-gear';
+        gearBtn.className = 'btn-icon';
+        gearBtn.title = 'Configurações do universo';
+        gearBtn.setAttribute('aria-label', 'Configurações');
+        gearBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>`;
+
+        // Insert before the new task button.
+        const btnNewTask = document.getElementById('btn-new-task');
+        if (btnNewTask) {
+            headerRight.insertBefore(gearBtn, btnNewTask);
+        } else {
+            headerRight.appendChild(gearBtn);
+        }
+
+        gearBtn.addEventListener('click', openSettingsPanel);
+    }
+
+    function openSettingsPanel() {
+        const overlay = document.getElementById('settings-modal-overlay');
+        if (!overlay) return;
+
+        const config = state.universeConfig || {};
+
+        // Pre-fill form fields.
+        const themeSelect = document.getElementById('settings-theme');
+        const layoutSelect = document.getElementById('settings-layout');
+        const fontHeadlineInput = document.getElementById('settings-font-headline');
+        const fontBodyInput = document.getElementById('settings-font-body');
+
+        if (themeSelect) themeSelect.value = config.theme_preset || 'scholarly-light';
+        if (layoutSelect) layoutSelect.value = config.layout || 'board';
+        if (fontHeadlineInput) fontHeadlineInput.value = config.font_headline || '';
+        if (fontBodyInput) fontBodyInput.value = config.font_body || '';
+
+        overlay.classList.remove('hidden');
+    }
+
+    function setupSettingsPanel() {
+        const overlay = document.getElementById('settings-modal-overlay');
+        if (!overlay) return;
+
+        const closeBtn = document.getElementById('settings-modal-close');
+        const cancelBtn = document.getElementById('settings-cancel');
+        const form = document.getElementById('settings-form');
+
+        function close() { overlay.classList.add('hidden'); }
+
+        closeBtn && closeBtn.addEventListener('click', close);
+        cancelBtn && cancelBtn.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+        form && form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const slug = state.currentUniverseSlug;
+
+            const themeSelect = document.getElementById('settings-theme');
+            const layoutSelect = document.getElementById('settings-layout');
+            const fontHeadlineInput = document.getElementById('settings-font-headline');
+            const fontBodyInput = document.getElementById('settings-font-body');
+
+            const update = {
+                theme_preset: themeSelect ? themeSelect.value : undefined,
+                layout: layoutSelect ? layoutSelect.value : undefined,
+                font_headline: fontHeadlineInput ? fontHeadlineInput.value : undefined,
+                font_body: fontBodyInput ? fontBodyInput.value : undefined,
+            };
+
+            const saveBtn = document.getElementById('settings-save');
+            if (saveBtn) saveBtn.disabled = true;
+
+            const result = await api.updateUniverseConfig(slug, update);
+            if (saveBtn) saveBtn.disabled = false;
+
+            if (result) {
+                applyUniverseConfig(result);
+                showToast('Configurações salvas', 'success');
+                close();
+            }
+        });
     }
 
     // ===== Init =====
@@ -3094,6 +3341,7 @@
         setupLoginModal();
         setupCriarModal();
         setupUsageLimitModal();
+        setupSettingsPanel();
 
         const slug = readUniverseSlugFromUrl();
         state.currentUniverseSlug = slug;

@@ -399,6 +399,58 @@ fn default_member_role() -> String {
     "member".into()
 }
 
+// --- Universe Form Config ---
+
+/// Presentation config for a universe — drives CSS, layout, and fonts.
+/// Stored in `universes.theme_preset/layout/...` and synced to `.universo.yaml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseFormConfig {
+    /// CSS preset name: scholarly-light, scholarly-dark, relic, relic-light
+    #[serde(default = "default_theme_preset")]
+    pub theme_preset: String,
+    /// Default view mode: board, table, timeline, calendar, dashboard
+    #[serde(default = "default_layout")]
+    pub layout: String,
+    /// Custom headline font (Google Fonts family name), if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_headline: Option<String>,
+    /// Custom body font (Google Fonts family name), if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_body: Option<String>,
+    /// CSS token overrides, e.g. `{"--color-accent":"#ff0000"}`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_tokens: Option<serde_json::Value>,
+}
+
+fn default_theme_preset() -> String {
+    "scholarly-light".to_string()
+}
+fn default_layout() -> String {
+    "board".to_string()
+}
+
+impl Default for UniverseFormConfig {
+    fn default() -> Self {
+        Self {
+            theme_preset: default_theme_preset(),
+            layout: default_layout(),
+            font_headline: None,
+            font_body: None,
+            custom_tokens: None,
+        }
+    }
+}
+
+/// Partial update payload for `PUT /api/v1/universes/:slug/config`.
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdateUniverseFormConfig {
+    pub theme_preset: Option<String>,
+    pub layout: Option<String>,
+    pub font_headline: Option<String>,
+    pub font_body: Option<String>,
+    pub custom_tokens: Option<serde_json::Value>,
+}
+
 // --- Auth / Users ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

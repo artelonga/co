@@ -274,6 +274,51 @@
         </div>
     </div>
 
+    <!-- Universe Settings Modal (CO-24 — owner only, shown via JS) -->
+    <div id="settings-modal-overlay" class="modal-overlay hidden">
+        <div class="modal" id="settings-modal">
+            <div class="modal-header">
+                <h2>Configurações do universo</h2>
+                <button class="modal-close" id="settings-modal-close">&times;</button>
+            </div>
+            <form id="settings-form">
+                <div class="form-group">
+                    <label for="settings-theme">Tema</label>
+                    <select id="settings-theme">
+                        <option value="scholarly-light">Scholarly Light</option>
+                        <option value="scholarly-dark">Scholarly Dark</option>
+                        <option value="relic">Relic</option>
+                        <option value="relic-light">Relic Light</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="settings-layout">Layout padrão</label>
+                    <select id="settings-layout">
+                        <option value="board">Quadro (Kanban)</option>
+                        <option value="table">Tabela</option>
+                        <option value="timeline">Linha do Tempo</option>
+                        <option value="calendar">Calendário</option>
+                        <option value="dashboard">Painel</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="settings-font-headline">Fonte de títulos (Google Fonts)</label>
+                    <input type="text" id="settings-font-headline" placeholder="Ex: Newsreader" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="settings-font-body">Fonte de texto (Google Fonts)</label>
+                    <input type="text" id="settings-font-body" placeholder="Ex: Work Sans" autocomplete="off">
+                </div>
+                <div class="form-actions">
+                    <div class="form-actions-right">
+                        <button type="button" class="btn btn-secondary" id="settings-cancel">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="settings-save">Salvar</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script src="/app.js"></script>
     <script src="/shared/experiment.js?v=3"></script>
 </body>
