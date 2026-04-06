@@ -1,12 +1,15 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, Utc};
 use rusqlite::{Connection, params};
+use serde_json::json;
 
+use crate::entry_index::{EntryRow, make_entry};
 use crate::models::*;
 
 pub struct Storage {
     conn: Connection,
+    pub data_dir: PathBuf,
 }
 
 impl Storage {
@@ -21,9 +24,22 @@ impl Storage {
         conn.execute_batch("PRAGMA foreign_keys=ON;")
             .expect("Failed to enable foreign keys");
 
-        let mut storage = Self { conn };
+        let mut storage = Self {
+            conn,
+            data_dir: data_dir.as_ref().to_path_buf(),
+        };
         storage.run_migrations();
         storage
+    }
+
+    /// Returns the root directory for a universe's .md files.
+    pub fn universe_root(&self, universe_key: &str) -> PathBuf {
+        self.data_dir.join("universes").join(universe_key)
+    }
+
+    /// Access the underlying SQLite connection (for quilombo storage functions).
+    pub fn conn(&self) -> &Connection {
+        &self.conn
     }
 
     fn run_migrations(&mut self) {
@@ -267,50 +283,265 @@ impl Storage {
                 )
                 .expect("Failed to run migration v11");
         }
-    }
 
-    /// List universe keys a user is a member of.
-    pub fn list_user_universes(&self, user_id: &str) -> Vec<String> {
-        let mut stmt = self
+        let current_version: i64 = self
             .conn
-            .prepare("SELECT universe_key FROM universe_members WHERE user_id = ?1")
-            .expect("Failed to prepare list_user_universes");
-        stmt.query_map(rusqlite::params![user_id], |row| row.get(0))
-            .expect("Failed to query user universes")
-            .filter_map(|r| r.ok())
-            .collect()
-    }
-
-    /// List projects the user can see: those in their universes.
-    pub fn list_projects_for_user(&self, user_id: &str) -> Vec<crate::models::Project> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT p.key, p.name, p.description, p.next_id, p.created_at, p.archived \
-             FROM projects p \
-             JOIN universe_members um ON um.universe_key = p.universe_key \
-             WHERE um.user_id = ?1 \
-             ORDER BY p.key",
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
             )
-            .expect("Failed to prepare list_projects_for_user");
-        stmt.query_map(rusqlite::params![user_id], |row| {
-            Ok(crate::models::Project {
-                key: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                next_id: row.get::<_, i64>(3)? as u64,
-                created_at: crate::storage::parse_datetime(&row.get::<_, String>(4)?),
-                archived: row.get::<_, i64>(5)? != 0,
-            })
-        })
-        .expect("Failed to list projects for user")
-        .filter_map(|r| r.ok())
-        .collect()
+            .unwrap_or(0);
+
+        if current_version < 12 {
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS entries (
+                    path TEXT NOT NULL,
+                    universe_key TEXT NOT NULL,
+                    entry_type TEXT NOT NULL,
+                    title TEXT,
+                    frontmatter_json TEXT NOT NULL,
+                    body TEXT NOT NULL DEFAULT '',
+                    body_hash TEXT NOT NULL,
+                    created_at TEXT,
+                    updated_at TEXT,
+                    PRIMARY KEY (universe_key, path)
+                );
+                CREATE INDEX IF NOT EXISTS idx_entries_type ON entries(universe_key, entry_type);
+                CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(universe_key, updated_at);
+                CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
+                    universe_key UNINDEXED,
+                    path UNINDEXED,
+                    title,
+                    body
+                );
+                INSERT INTO schema_version (version) VALUES (12);
+                ",
+                )
+                .expect("Failed to run migration v12");
+        }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 13 {
+            // Create default universe
+            let _ = self.conn.execute_batch(
+                "INSERT OR IGNORE INTO universes (key, name, description, owner_id, created_at, is_template, is_public, content_count) \
+                 VALUES ('default', 'Default', 'Default universe', 'system', datetime('now'), 0, 0, 0);",
+            );
+
+            // Check if projects table exists
+            let projects_exist: bool = self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='projects'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+
+            if projects_exist {
+                self.migrate_old_data_to_entries();
+            }
+
+            // Drop old tables
+            self.conn
+                .execute_batch(
+                    "DROP TABLE IF EXISTS tasks; \
+                     DROP TABLE IF EXISTS comments; \
+                     DROP TABLE IF EXISTS projects; \
+                     DROP TABLE IF EXISTS activity_log; \
+                     INSERT INTO schema_version (version) VALUES (13);",
+                )
+                .expect("Failed migration v13");
+        }
     }
 
-    /// Access the underlying SQLite connection (for quilombo storage functions).
-    pub fn conn(&self) -> &Connection {
-        &self.conn
+    /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
+    fn migrate_old_data_to_entries(&mut self) {
+        // Collect projects
+        struct OldProject {
+            key: String,
+            name: String,
+            description: String,
+            next_id: i64,
+            created_at: String,
+            archived: i64,
+            universe_key: Option<String>,
+        }
+
+        let old_projects: Vec<OldProject> = {
+            let mut stmt = match self.conn.prepare(
+                "SELECT key, name, description, next_id, created_at, archived, universe_key FROM projects",
+            ) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            match stmt.query_map([], |row| {
+                Ok(OldProject {
+                    key: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    next_id: row.get::<_, i64>(3)?,
+                    created_at: row.get::<_, String>(4)?,
+                    archived: row.get::<_, i64>(5)?,
+                    universe_key: row.get::<_, Option<String>>(6)?,
+                })
+            }) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => return,
+            }
+        };
+
+        for proj in &old_projects {
+            let universe_key = proj
+                .universe_key
+                .clone()
+                .unwrap_or_else(|| "default".to_string());
+            let universe_root = self.data_dir.join("universes").join(&universe_key);
+            let path = format!("projects/{}/_project.md", proj.key);
+            let fm = json!({
+                "type": "project",
+                "key": proj.key,
+                "title": proj.name,
+                "status": "active",
+                "next_id": proj.next_id,
+                "created": proj.created_at,
+                "modified": proj.created_at,
+                "archived": proj.archived != 0,
+                "tags": []
+            });
+            let entry = make_entry(&path, fm.clone(), &proj.description);
+            let _ = co::entry::write_entry(&universe_root, &entry);
+            let _ = upsert_entry_row(&self.conn, &universe_key, &entry);
+
+            // Collect tasks for this project
+            struct OldTask {
+                id: i64,
+                title: String,
+                description: String,
+                status: String,
+                priority: String,
+                due_date: Option<String>,
+                parent: Option<i64>,
+                labels: String,
+                created_at: String,
+                updated_at: String,
+                archived: i64,
+                assignee: Option<String>,
+            }
+
+            let old_tasks: Vec<OldTask> = {
+                let mut stmt = match self.conn.prepare(
+                    "SELECT id, title, description, status, priority, due_date, parent, labels, \
+                     created_at, updated_at, archived, assignee FROM tasks WHERE project_key = ?1",
+                ) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                match stmt.query_map(params![proj.key], |row| {
+                    Ok(OldTask {
+                        id: row.get(0)?,
+                        title: row.get(1)?,
+                        description: row.get(2)?,
+                        status: row.get(3)?,
+                        priority: row.get(4)?,
+                        due_date: row.get(5)?,
+                        parent: row.get(6)?,
+                        labels: row.get(7)?,
+                        created_at: row.get(8)?,
+                        updated_at: row.get(9)?,
+                        archived: row.get::<_, i64>(10)?,
+                        assignee: row.get(11)?,
+                    })
+                }) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => continue,
+                }
+            };
+
+            for task in &old_tasks {
+                let task_path = format!("projects/{}/{}.md", proj.key, task.id);
+                let labels: Vec<String> = serde_json::from_str(&task.labels).unwrap_or_default();
+                let task_fm = json!({
+                    "type": "task",
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "due": task.due_date,
+                    "parent": task.parent,
+                    "tags": labels,
+                    "created": task.created_at,
+                    "modified": task.updated_at,
+                    "archived": task.archived != 0,
+                    "assignee": task.assignee,
+                    "project": proj.key
+                });
+                let task_entry = make_entry(&task_path, task_fm, &task.description);
+                let _ = co::entry::write_entry(&universe_root, &task_entry);
+                let _ = upsert_entry_row(&self.conn, &universe_key, &task_entry);
+
+                // Collect comments for this task
+                struct OldComment {
+                    id: i64,
+                    author: String,
+                    body: String,
+                    created_at: String,
+                }
+
+                let old_comments: Vec<OldComment> = {
+                    let mut stmt = match self.conn.prepare(
+                        "SELECT id, author, body, created_at FROM comments \
+                         WHERE project_key = ?1 AND task_id = ?2",
+                    ) {
+                        Ok(s) => s,
+                        Err(_) => continue,
+                    };
+                    match stmt.query_map(params![proj.key, task.id], |row| {
+                        Ok(OldComment {
+                            id: row.get(0)?,
+                            author: row.get(1)?,
+                            body: row.get(2)?,
+                            created_at: row.get(3)?,
+                        })
+                    }) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(_) => continue,
+                    }
+                };
+
+                for comment in &old_comments {
+                    let comment_path = format!(
+                        "projects/{}/comments/{}-{}.md",
+                        proj.key, task.id, comment.id
+                    );
+                    let comment_fm = json!({
+                        "type": "comment",
+                        "id": comment.id,
+                        "task": task.id,
+                        "project": proj.key,
+                        "author": comment.author,
+                        "created": comment.created_at,
+                        "modified": comment.created_at,
+                        "tags": []
+                    });
+                    let comment_entry = make_entry(&comment_path, comment_fm, &comment.body);
+                    let _ = co::entry::write_entry(&universe_root, &comment_entry);
+                    let _ = upsert_entry_row(&self.conn, &universe_key, &comment_entry);
+                }
+            }
+        }
     }
 
     pub fn schema_version(&self) -> i64 {
@@ -328,66 +559,50 @@ impl Storage {
     pub fn list_projects(&self) -> Vec<Project> {
         let mut stmt = self
             .conn
-            .prepare("SELECT key, name, description, next_id, created_at, archived FROM projects ORDER BY key")
+            .prepare(
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries WHERE entry_type = 'project' ORDER BY path",
+            )
             .expect("Failed to prepare list_projects");
 
-        stmt.query_map([], |row| {
-            Ok(Project {
-                key: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                next_id: row.get::<_, i64>(3)? as u64,
-                created_at: parse_datetime(&row.get::<_, String>(4)?),
-                archived: row.get::<_, i64>(5)? != 0,
-            })
-        })
-        .expect("Failed to list projects")
-        .filter_map(|r| r.ok())
-        .collect()
+        stmt.query_map([], entry_row_from_sql)
+            .expect("Failed to list projects")
+            .filter_map(|r| r.ok())
+            .filter_map(|row| entry_row_to_project(&row))
+            .collect()
     }
 
     pub fn list_projects_for_universe(&self, universe_key: &str) -> Vec<Project> {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT key, name, description, next_id, created_at, archived \
-                 FROM projects WHERE universe_key = ?1 ORDER BY key",
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries \
+                 WHERE universe_key = ?1 AND entry_type = 'project' ORDER BY path",
             )
             .expect("Failed to prepare list_projects_for_universe");
 
-        stmt.query_map(params![universe_key], |row| {
-            Ok(Project {
-                key: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                next_id: row.get::<_, i64>(3)? as u64,
-                created_at: parse_datetime(&row.get::<_, String>(4)?),
-                archived: row.get::<_, i64>(5)? != 0,
-            })
-        })
-        .expect("Failed to list projects for universe")
-        .filter_map(|r| r.ok())
-        .collect()
+        stmt.query_map(params![universe_key], entry_row_from_sql)
+            .expect("Failed to list projects for universe")
+            .filter_map(|r| r.ok())
+            .filter_map(|row| entry_row_to_project(&row))
+            .collect()
     }
 
     pub fn get_project(&self, key: &str) -> Option<Project> {
         let upper_key = key.to_uppercase();
-        self.conn
-            .query_row(
-                "SELECT key, name, description, next_id, created_at, archived FROM projects WHERE key = ?1",
-                params![upper_key],
-                |row| {
-                    Ok(Project {
-                        key: row.get(0)?,
-                        name: row.get(1)?,
-                        description: row.get(2)?,
-                        next_id: row.get::<_, i64>(3)? as u64,
-                        created_at: parse_datetime(&row.get::<_, String>(4)?),
-                        archived: row.get::<_, i64>(5)? != 0,
-                    })
-                },
-            )
-            .ok()
+        let path = format!("projects/{}/_project.md", upper_key);
+        let result = self.conn.query_row(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries \
+             WHERE path = ?1 AND entry_type = 'project'",
+            params![path],
+            entry_row_from_sql,
+        );
+        match result {
+            Ok(row) => entry_row_to_project(&row),
+            Err(_) => None,
+        }
     }
 
     pub fn create_project(&mut self, create: CreateProject) -> anyhow::Result<Project> {
@@ -398,20 +613,28 @@ impl Storage {
 
         let now = Utc::now();
         let now_str = now.to_rfc3339();
+        let universe_key = create
+            .universe_key
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
 
-        self.conn.execute(
-            "INSERT INTO projects (key, name, description, next_id, created_at, universe_key) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![upper_key, create.name, create.description, 1i64, now_str, create.universe_key],
-        )?;
+        let path = format!("projects/{}/_project.md", upper_key);
+        let fm = json!({
+            "type": "project",
+            "key": upper_key,
+            "title": create.name,
+            "status": "active",
+            "next_id": 1,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "tags": []
+        });
 
-        self.log_activity(
-            &upper_key,
-            None,
-            "project_created",
-            None,
-            None,
-            Some(&create.name),
-        );
+        let entry = make_entry(&path, fm, &create.description);
+        let universe_root = self.universe_root(&universe_key);
+        co::entry::write_entry(&universe_root, &entry)?;
+        upsert_entry_row(&self.conn, &universe_key, &entry)?;
 
         Ok(Project {
             name: create.name,
@@ -429,16 +652,31 @@ impl Storage {
             anyhow::bail!("Project '{}' not found", upper_key);
         }
 
-        self.conn.execute(
-            "DELETE FROM activity_log WHERE project_key = ?1",
-            params![upper_key],
-        )?;
-        self.conn.execute(
-            "DELETE FROM tasks WHERE project_key = ?1",
-            params![upper_key],
-        )?;
-        self.conn
-            .execute("DELETE FROM projects WHERE key = ?1", params![upper_key])?;
+        // Find the universe_key
+        let universe_key = self
+            .get_project_universe_key(&upper_key)
+            .unwrap_or_else(|| "default".to_string());
+        let universe_root = self.universe_root(&universe_key);
+
+        // Find all entries under this project
+        let prefix = format!("projects/{}/", upper_key);
+        let entry_paths: Vec<String> = {
+            let mut stmt = self
+                .conn
+                .prepare("SELECT path FROM entries WHERE universe_key = ?1 AND path LIKE ?2")?;
+            let like_pattern = format!("{}%", prefix);
+            stmt.query_map(params![universe_key, like_pattern], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for entry_path in &entry_paths {
+            let _ = co::entry::delete_entry(&universe_root, entry_path);
+            self.conn.execute(
+                "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
+                params![universe_key, entry_path],
+            )?;
+        }
 
         Ok(())
     }
@@ -463,82 +701,76 @@ impl Storage {
         let upper_key = project_key.to_uppercase();
         let limit = limit.min(500);
 
-        let (sql, params_vec): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = match archived {
-            Some(archived_val) => (
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
-                 FROM tasks WHERE project_key = ?1 AND archived = ?2 ORDER BY id LIMIT ?3 OFFSET ?4".to_string(),
-                vec![Box::new(upper_key), Box::new(archived_val as i64), Box::new(limit as i64), Box::new(offset as i64)],
-            ),
-            None => (
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
-                 FROM tasks WHERE project_key = ?1 ORDER BY id LIMIT ?2 OFFSET ?3".to_string(),
-                vec![Box::new(upper_key), Box::new(limit as i64), Box::new(offset as i64)],
-            ),
-        };
+        let sql: String;
+        let rows: Vec<EntryRow>;
 
-        let mut stmt = self
-            .conn
-            .prepare(&sql)
-            .expect("Failed to prepare list_tasks");
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
-            params_vec.iter().map(|p| p.as_ref()).collect();
+        match archived {
+            Some(archived_val) => {
+                let archived_int = if archived_val { 1 } else { 0 };
+                sql = format!(
+                    "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                     created_at, updated_at FROM entries \
+                     WHERE entry_type = 'task' \
+                     AND json_extract(frontmatter_json, '$.project') = ?1 \
+                     AND json_extract(frontmatter_json, '$.archived') = {} \
+                     ORDER BY CAST(json_extract(frontmatter_json, '$.id') AS INTEGER) \
+                     LIMIT ?2 OFFSET ?3",
+                    archived_int
+                );
+                let mut stmt = self
+                    .conn
+                    .prepare(&sql)
+                    .expect("Failed to prepare list_tasks");
+                rows = stmt
+                    .query_map(
+                        params![upper_key, limit as i64, offset as i64],
+                        entry_row_from_sql,
+                    )
+                    .expect("Failed to list tasks")
+                    .filter_map(|r| r.ok())
+                    .collect();
+            }
+            None => {
+                sql = "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                       created_at, updated_at FROM entries \
+                       WHERE entry_type = 'task' \
+                       AND json_extract(frontmatter_json, '$.project') = ?1 \
+                       ORDER BY CAST(json_extract(frontmatter_json, '$.id') AS INTEGER) \
+                       LIMIT ?2 OFFSET ?3"
+                    .to_string();
+                let mut stmt = self
+                    .conn
+                    .prepare(&sql)
+                    .expect("Failed to prepare list_tasks");
+                rows = stmt
+                    .query_map(
+                        params![upper_key, limit as i64, offset as i64],
+                        entry_row_from_sql,
+                    )
+                    .expect("Failed to list tasks")
+                    .filter_map(|r| r.ok())
+                    .collect();
+            }
+        }
 
-        stmt.query_map(params_refs.as_slice(), |row| {
-            let project_key: String = row.get(11)?;
-            let id: i64 = row.get(0)?;
-            Ok(Task {
-                id: id as u64,
-                key: format!("{}-{}", project_key, id),
-                project_key: project_key.clone(),
-                title: row.get(1)?,
-                description: row.get(2)?,
-                status: parse_status(&row.get::<_, String>(3)?),
-                priority: parse_priority(&row.get::<_, String>(4)?),
-                due_date: row
-                    .get::<_, Option<String>>(5)?
-                    .and_then(|s| s.parse::<NaiveDate>().ok()),
-                parent: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
-                labels: parse_labels(&row.get::<_, String>(7)?),
-                created_at: parse_datetime(&row.get::<_, String>(8)?),
-                updated_at: parse_datetime(&row.get::<_, String>(9)?),
-                archived: row.get::<_, i64>(10)? != 0,
-                assignee: row.get(12)?,
-            })
-        })
-        .expect("Failed to list tasks")
-        .filter_map(|r| r.ok())
-        .collect()
+        rows.into_iter()
+            .filter_map(|row| entry_row_to_task(&row))
+            .collect()
     }
 
     pub fn get_task(&self, project_key: &str, id: u64) -> Option<Task> {
         let upper_key = project_key.to_uppercase();
-        self.conn
-            .query_row(
-                "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
-                 FROM tasks WHERE project_key = ?1 AND id = ?2",
-                params![upper_key, id as i64],
-                |row| {
-                    let project_key: String = row.get(11)?;
-                    let id: i64 = row.get(0)?;
-                    Ok(Task {
-                        id: id as u64,
-                        key: format!("{}-{}", project_key, id),
-                        project_key: project_key.clone(),
-                        title: row.get(1)?,
-                        description: row.get(2)?,
-                        status: parse_status(&row.get::<_, String>(3)?),
-                        priority: parse_priority(&row.get::<_, String>(4)?),
-                        due_date: row.get::<_, Option<String>>(5)?.and_then(|s| s.parse::<NaiveDate>().ok()),
-                        parent: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
-                        labels: parse_labels(&row.get::<_, String>(7)?),
-                        created_at: parse_datetime(&row.get::<_, String>(8)?),
-                        updated_at: parse_datetime(&row.get::<_, String>(9)?),
-                        archived: row.get::<_, i64>(10)? != 0,
-                        assignee: row.get(12)?,
-                    })
-                },
-            )
-            .ok()
+        let path = format!("projects/{}/{}.md", upper_key, id);
+        let result = self.conn.query_row(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries WHERE path = ?1 AND entry_type = 'task'",
+            params![path],
+            entry_row_from_sql,
+        );
+        match result {
+            Ok(row) => entry_row_to_task(&row),
+            Err(_) => None,
+        }
     }
 
     pub fn create_task(&mut self, project_key: &str, create: CreateTask) -> anyhow::Result<Task> {
@@ -550,41 +782,35 @@ impl Storage {
         let id = project.next_id;
         let now = Utc::now();
         let now_str = now.to_rfc3339();
-        let labels_json = serde_json::to_string(&create.labels)?;
 
-        // Increment next_id
-        self.conn.execute(
-            "UPDATE projects SET next_id = ?1 WHERE key = ?2",
-            params![(id + 1) as i64, upper_key],
-        )?;
+        let universe_key = self
+            .get_project_universe_key(&upper_key)
+            .unwrap_or_else(|| "default".to_string());
 
-        self.conn.execute(
-            "INSERT INTO tasks (project_key, id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, assignee) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                upper_key,
-                id as i64,
-                create.title,
-                create.description,
-                create.status.to_string(),
-                create.priority.to_string(),
-                create.due_date.map(|d| d.to_string()),
-                create.parent.map(|p| p as i64),
-                labels_json,
-                now_str,
-                now_str,
-                create.assignee,
-            ],
-        )?;
+        // Increment next_id in project entry
+        self.increment_project_next_id(&upper_key, &universe_key, id + 1);
 
-        self.log_activity(
-            &upper_key,
-            Some(id),
-            "task_created",
-            None,
-            None,
-            Some(&create.title),
-        );
+        let path = format!("projects/{}/{}.md", upper_key, id);
+        let fm = json!({
+            "type": "task",
+            "id": id,
+            "title": create.title,
+            "status": create.status.to_string(),
+            "priority": create.priority.to_string(),
+            "due": create.due_date.map(|d| d.to_string()),
+            "parent": create.parent,
+            "tags": create.labels,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "assignee": create.assignee,
+            "project": upper_key
+        });
+
+        let entry = make_entry(&path, fm, &create.description);
+        let universe_root = self.universe_root(&universe_key);
+        co::entry::write_entry(&universe_root, &entry)?;
+        upsert_entry_row(&self.conn, &universe_key, &entry)?;
 
         Ok(Task {
             id,
@@ -614,41 +840,17 @@ impl Storage {
             .get_task(project_key, id)
             .ok_or_else(|| anyhow::anyhow!("Task {}-{} not found", project_key, id))?;
 
-        if let Some(title) = &update.title {
-            self.log_activity(
-                &task.project_key,
-                Some(id),
-                "field_changed",
-                Some("title"),
-                Some(&task.title),
-                Some(title),
-            );
-            task.title = title.clone();
+        if let Some(title) = update.title {
+            task.title = title;
         }
-        if let Some(description) = &update.description {
-            task.description = description.clone();
+        if let Some(description) = update.description {
+            task.description = description;
         }
-        if let Some(status) = &update.status {
-            self.log_activity(
-                &task.project_key,
-                Some(id),
-                "field_changed",
-                Some("status"),
-                Some(&task.status.to_string()),
-                Some(&status.to_string()),
-            );
-            task.status = status.clone();
+        if let Some(status) = update.status {
+            task.status = status;
         }
-        if let Some(priority) = &update.priority {
-            self.log_activity(
-                &task.project_key,
-                Some(id),
-                "field_changed",
-                Some("priority"),
-                Some(&task.priority.to_string()),
-                Some(&priority.to_string()),
-            );
-            task.priority = priority.clone();
+        if let Some(priority) = update.priority {
+            task.priority = priority;
         }
         if let Some(due_date) = update.due_date {
             task.due_date = Some(due_date);
@@ -660,14 +862,6 @@ impl Storage {
             task.labels = labels;
         }
         if let Some(archived) = update.archived {
-            if archived != task.archived {
-                let action = if archived {
-                    "task_archived"
-                } else {
-                    "task_unarchived"
-                };
-                self.log_activity(&task.project_key, Some(id), action, None, None, None);
-            }
             task.archived = archived;
         }
         if update.assignee.is_some() {
@@ -675,50 +869,52 @@ impl Storage {
         }
 
         task.updated_at = Utc::now();
-        let labels_json = serde_json::to_string(&task.labels)?;
 
-        self.conn.execute(
-            "UPDATE tasks SET title = ?1, description = ?2, status = ?3, priority = ?4, \
-             due_date = ?5, parent = ?6, labels = ?7, updated_at = ?8, archived = ?9, assignee = ?10 \
-             WHERE project_key = ?11 AND id = ?12",
-            params![
-                task.title,
-                task.description,
-                task.status.to_string(),
-                task.priority.to_string(),
-                task.due_date.map(|d| d.to_string()),
-                task.parent.map(|p| p as i64),
-                labels_json,
-                task.updated_at.to_rfc3339(),
-                task.archived as i64,
-                task.assignee,
-                task.project_key,
-                id as i64,
-            ],
-        )?;
+        let universe_key = self
+            .get_project_universe_key(&task.project_key)
+            .unwrap_or_else(|| "default".to_string());
+
+        let path = format!("projects/{}/{}.md", task.project_key, id);
+        let fm = json!({
+            "type": "task",
+            "id": id,
+            "title": task.title,
+            "status": task.status.to_string(),
+            "priority": task.priority.to_string(),
+            "due": task.due_date.map(|d| d.to_string()),
+            "parent": task.parent,
+            "tags": task.labels,
+            "created": task.created_at.to_rfc3339(),
+            "modified": task.updated_at.to_rfc3339(),
+            "archived": task.archived,
+            "assignee": task.assignee,
+            "project": task.project_key
+        });
+
+        let entry = make_entry(&path, fm, &task.description);
+        let universe_root = self.universe_root(&universe_key);
+        co::entry::write_entry(&universe_root, &entry)?;
+        upsert_entry_row(&self.conn, &universe_key, &entry)?;
 
         Ok(task)
     }
 
     pub fn delete_task(&mut self, project_key: &str, id: u64) -> anyhow::Result<()> {
         let upper_key = project_key.to_uppercase();
-        let task = self
-            .get_task(&upper_key, id)
+        self.get_task(&upper_key, id)
             .ok_or_else(|| anyhow::anyhow!("Task {}-{} not found", upper_key, id))?;
 
-        self.conn.execute(
-            "DELETE FROM tasks WHERE project_key = ?1 AND id = ?2",
-            params![upper_key, id as i64],
-        )?;
+        let universe_key = self
+            .get_project_universe_key(&upper_key)
+            .unwrap_or_else(|| "default".to_string());
+        let universe_root = self.universe_root(&universe_key);
+        let path = format!("projects/{}/{}.md", upper_key, id);
 
-        self.log_activity(
-            &upper_key,
-            Some(id),
-            "task_deleted",
-            None,
-            None,
-            Some(&task.title),
-        );
+        let _ = co::entry::delete_entry(&universe_root, &path);
+        self.conn.execute(
+            "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
+            params![universe_key, path],
+        )?;
 
         Ok(())
     }
@@ -731,36 +927,19 @@ impl Storage {
         bulk: BulkUpdateTasks,
     ) -> anyhow::Result<Vec<Task>> {
         let upper_key = project_key.to_uppercase();
-        let now = Utc::now();
-        let now_str = now.to_rfc3339();
-
         for &task_id in &bulk.task_ids {
-            if let Some(status) = &bulk.status {
-                self.conn.execute(
-                    "UPDATE tasks SET status = ?1, updated_at = ?2 WHERE project_key = ?3 AND id = ?4",
-                    params![status.to_string(), now_str, upper_key, task_id as i64],
-                )?;
-                self.log_activity(
-                    &upper_key,
-                    Some(task_id),
-                    "field_changed",
-                    Some("status"),
-                    None,
-                    Some(&status.to_string()),
-                );
-            }
-            if let Some(archived) = bulk.archived {
-                self.conn.execute(
-                    "UPDATE tasks SET archived = ?1, updated_at = ?2 WHERE project_key = ?3 AND id = ?4",
-                    params![archived as i64, now_str, upper_key, task_id as i64],
-                )?;
-                let action = if archived {
-                    "task_archived"
-                } else {
-                    "task_unarchived"
-                };
-                self.log_activity(&upper_key, Some(task_id), action, None, None, None);
-            }
+            let update = UpdateTask {
+                title: None,
+                description: None,
+                status: bulk.status.clone(),
+                priority: None,
+                due_date: None,
+                parent: None,
+                labels: None,
+                archived: bulk.archived,
+                assignee: None,
+            };
+            let _ = self.update_task(&upper_key, task_id, update);
         }
 
         let mut result = Vec::new();
@@ -788,27 +967,23 @@ impl Storage {
 
     pub fn list_comments(&self, project_key: &str, task_id: u64) -> Vec<Comment> {
         let upper_key = project_key.to_uppercase();
+        let path_prefix = format!("projects/{}/comments/{}-", upper_key, task_id);
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT id, project_key, task_id, author, body, created_at \
-                 FROM comments WHERE project_key = ?1 AND task_id = ?2 ORDER BY created_at ASC",
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries \
+                 WHERE entry_type = 'comment' AND path LIKE ?1 \
+                 ORDER BY created_at ASC",
             )
             .expect("Failed to prepare list_comments");
 
-        stmt.query_map(params![upper_key, task_id as i64], |row| {
-            Ok(Comment {
-                id: row.get::<_, i64>(0)? as u64,
-                project_key: row.get(1)?,
-                task_id: row.get::<_, i64>(2)? as u64,
-                author: row.get(3)?,
-                body: row.get(4)?,
-                created_at: parse_datetime(&row.get::<_, String>(5)?),
-            })
-        })
-        .expect("Failed to list comments")
-        .filter_map(|r| r.ok())
-        .collect()
+        let like_pattern = format!("{}%", path_prefix);
+        stmt.query_map(params![like_pattern], entry_row_from_sql)
+            .expect("Failed to list comments")
+            .filter_map(|r| r.ok())
+            .filter_map(|row| entry_row_to_comment(&row, &upper_key, task_id))
+            .collect()
     }
 
     pub fn create_comment(
@@ -823,24 +998,43 @@ impl Storage {
         self.get_task(&upper_key, task_id)
             .ok_or_else(|| anyhow::anyhow!("Task {}-{} not found", upper_key, task_id))?;
 
+        let universe_key = self
+            .get_project_universe_key(&upper_key)
+            .unwrap_or_else(|| "default".to_string());
+
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        self.conn.execute(
-            "INSERT INTO comments (project_key, task_id, author, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![upper_key, task_id as i64, create.author, create.body, now_str],
-        )?;
+        // Allocate id via COUNT
+        let id: u64 = {
+            let count: i64 = self
+                .conn
+                .query_row(
+                    "SELECT COUNT(*) FROM entries WHERE entry_type = 'comment' \
+                     AND path LIKE ?1",
+                    params![format!("projects/{}/comments/{}-%%", upper_key, task_id)],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            (count + 1) as u64
+        };
 
-        let id = self.conn.last_insert_rowid() as u64;
+        let path = format!("projects/{}/comments/{}-{}.md", upper_key, task_id, id);
+        let fm = json!({
+            "type": "comment",
+            "id": id,
+            "task": task_id,
+            "project": upper_key,
+            "author": create.author,
+            "created": now_str,
+            "modified": now_str,
+            "tags": []
+        });
 
-        self.log_activity(
-            &upper_key,
-            Some(task_id),
-            "comment_added",
-            None,
-            None,
-            Some(&create.author),
-        );
+        let entry = make_entry(&path, fm, &create.body);
+        let universe_root = self.universe_root(&universe_key);
+        co::entry::write_entry(&universe_root, &entry)?;
+        upsert_entry_row(&self.conn, &universe_key, &entry)?;
 
         Ok(Comment {
             id,
@@ -852,19 +1046,19 @@ impl Storage {
         })
     }
 
-    // --- Activity Log ---
+    // --- Activity Log (graceful fallback — table may not exist) ---
 
     pub fn list_activity(&self, project_key: &str, limit: u64) -> Vec<ActivityEntry> {
         let upper_key = project_key.to_uppercase();
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT id, project_key, task_id, action, field, old_value, new_value, actor, created_at \
-                 FROM activity_log WHERE project_key = ?1 ORDER BY created_at DESC LIMIT ?2",
-            )
-            .expect("Failed to prepare list_activity");
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, project_key, task_id, action, field, old_value, new_value, actor, created_at \
+             FROM activity_log WHERE project_key = ?1 ORDER BY created_at DESC LIMIT ?2",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
 
-        stmt.query_map(params![upper_key, limit as i64], |row| {
+        match stmt.query_map(params![upper_key, limit as i64], |row| {
             Ok(ActivityEntry {
                 id: row.get::<_, i64>(0)? as u64,
                 project_key: row.get(1)?,
@@ -876,36 +1070,10 @@ impl Storage {
                 actor: row.get(7)?,
                 created_at: parse_datetime(&row.get::<_, String>(8)?),
             })
-        })
-        .expect("Failed to list activity")
-        .filter_map(|r| r.ok())
-        .collect()
-    }
-
-    fn log_activity(
-        &self,
-        project_key: &str,
-        task_id: Option<u64>,
-        action: &str,
-        field: Option<&str>,
-        old_value: Option<&str>,
-        new_value: Option<&str>,
-    ) {
-        let now_str = Utc::now().to_rfc3339();
-        let _ = self.conn.execute(
-            "INSERT INTO activity_log (project_key, task_id, action, field, old_value, new_value, actor, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            params![
-                project_key,
-                task_id.map(|v| v as i64),
-                action,
-                field,
-                old_value,
-                new_value,
-                "system",
-                now_str,
-            ],
-        );
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
     }
 
     // --- Dashboard ---
@@ -915,31 +1083,28 @@ impl Storage {
 
         let status_counts = self.get_status_counts(&upper_key);
 
+        let today_str = chrono::Utc::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
         let overdue_count: i64 = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE project_key = ?1 AND archived = 0 AND status != 'done' \
-                 AND due_date IS NOT NULL AND due_date < date('now')",
-                params![upper_key],
+                "SELECT COUNT(*) FROM entries \
+                 WHERE entry_type = 'task' \
+                 AND json_extract(frontmatter_json, '$.project') = ?1 \
+                 AND json_extract(frontmatter_json, '$.archived') = 0 \
+                 AND json_extract(frontmatter_json, '$.status') != 'done' \
+                 AND json_extract(frontmatter_json, '$.due') IS NOT NULL \
+                 AND json_extract(frontmatter_json, '$.due') < ?2",
+                params![upper_key, today_str],
                 |row| row.get(0),
             )
             .unwrap_or(0);
 
-        let upcoming_tasks = self.query_tasks(
-            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
-             FROM tasks WHERE project_key = ?1 AND archived = 0 AND status != 'done' \
-             AND due_date IS NOT NULL AND due_date BETWEEN date('now') AND date('now', '+7 days') \
-             ORDER BY due_date ASC LIMIT 10",
-            &upper_key,
-        );
-
-        let recently_updated = self.query_tasks(
-            "SELECT id, title, description, status, priority, due_date, parent, labels, created_at, updated_at, archived, project_key, assignee \
-             FROM tasks WHERE project_key = ?1 AND archived = 0 \
-             ORDER BY updated_at DESC LIMIT 10",
-            &upper_key,
-        );
-
+        let upcoming_tasks =
+            self.query_tasks_entries(&upper_key, Some(false), Some("!= 'done'"), true, Some(10));
+        let recently_updated = self.query_tasks_recent(&upper_key, 10);
         let velocity = self.get_velocity(&upper_key);
         let burndown = self.get_burndown(&upper_key);
         let label_distribution = self.get_label_distribution(&upper_key);
@@ -996,13 +1161,17 @@ impl Storage {
             let total_created: i64 = self
                 .conn
                 .query_row(
-                    "SELECT COUNT(*) FROM tasks WHERE project_key = ?1 AND archived = 0 \
+                    "SELECT COUNT(*) FROM entries \
+                     WHERE entry_type = 'task' \
+                     AND json_extract(frontmatter_json, '$.project') = ?1 \
+                     AND json_extract(frontmatter_json, '$.archived') = 0 \
                      AND date(created_at) <= ?2",
                     params![project_key, week_end_str],
                     |row| row.get(0),
                 )
                 .unwrap_or(0);
 
+            // For done count we fall back to activity_log (graceful)
             let total_done: i64 = self
                 .conn
                 .query_row(
@@ -1028,26 +1197,32 @@ impl Storage {
     }
 
     fn get_label_distribution(&self, project_key: &str) -> Vec<LabelCount> {
-        let mut stmt = match self
-            .conn
-            .prepare("SELECT labels FROM tasks WHERE project_key = ?1 AND archived = 0")
-        {
+        let mut stmt = match self.conn.prepare(
+            "SELECT frontmatter_json FROM entries \
+             WHERE entry_type = 'task' \
+             AND json_extract(frontmatter_json, '$.project') = ?1 \
+             AND json_extract(frontmatter_json, '$.archived') = 0",
+        ) {
             Ok(s) => s,
             Err(_) => return vec![],
         };
 
-        let label_strings: Vec<String> =
-            match stmt.query_map(params![project_key], |row| row.get(0)) {
-                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
-                Err(_) => return vec![],
-            };
+        let fm_strings: Vec<String> = match stmt.query_map(params![project_key], |row| row.get(0)) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => return vec![],
+        };
 
         let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
-        for s in label_strings {
-            let labels: Vec<String> = serde_json::from_str(&s).unwrap_or_default();
-            for label in labels {
-                if !label.is_empty() {
-                    *counts.entry(label).or_insert(0) += 1;
+        for fm_str in fm_strings {
+            let fm: serde_json::Value =
+                serde_json::from_str(&fm_str).unwrap_or(serde_json::Value::Null);
+            if let Some(tags) = fm.get("tags").and_then(|v| v.as_array()) {
+                for tag in tags {
+                    if let Some(t) = tag.as_str()
+                        && !t.is_empty()
+                    {
+                        *counts.entry(t.to_string()).or_insert(0) += 1;
+                    }
                 }
             }
         }
@@ -1063,27 +1238,40 @@ impl Storage {
 
     fn get_overdue_tasks_detail(&self, project_key: &str) -> Vec<OverdueTaskDetail> {
         let today = chrono::Utc::now().date_naive();
-        let tasks = self.query_tasks(
-            "SELECT id, title, description, status, priority, due_date, parent, labels, \
-             created_at, updated_at, archived, project_key, assignee \
-             FROM tasks WHERE project_key = ?1 AND archived = 0 AND status != 'done' \
-             AND due_date IS NOT NULL AND due_date < date('now') \
-             ORDER BY due_date ASC LIMIT 20",
-            project_key,
-        );
+        let today_str = today.format("%Y-%m-%d").to_string();
+        let mut stmt = match self.conn.prepare(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries \
+             WHERE entry_type = 'task' \
+             AND json_extract(frontmatter_json, '$.project') = ?1 \
+             AND json_extract(frontmatter_json, '$.archived') = 0 \
+             AND json_extract(frontmatter_json, '$.status') != 'done' \
+             AND json_extract(frontmatter_json, '$.due') IS NOT NULL \
+             AND json_extract(frontmatter_json, '$.due') < ?2 \
+             ORDER BY json_extract(frontmatter_json, '$.due') ASC LIMIT 20",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
 
-        tasks
-            .into_iter()
-            .filter_map(|t| {
-                let due = t.due_date?;
+        let rows: Vec<EntryRow> =
+            match stmt.query_map(params![project_key, today_str], entry_row_from_sql) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => return vec![],
+            };
+
+        rows.into_iter()
+            .filter_map(|row| {
+                let task = entry_row_to_task(&row)?;
+                let due = task.due_date?;
                 let days_overdue = (today - due).num_days();
                 Some(OverdueTaskDetail {
-                    id: t.id,
-                    key: t.key,
-                    title: t.title,
+                    id: task.id,
+                    key: task.key,
+                    title: task.title,
                     due_date: due.to_string(),
                     days_overdue,
-                    priority: t.priority.to_string(),
+                    priority: task.priority.to_string(),
                 })
             })
             .collect()
@@ -1093,7 +1281,11 @@ impl Storage {
         let count = |status: &str| -> u64 {
             self.conn
                 .query_row(
-                    "SELECT COUNT(*) FROM tasks WHERE project_key = ?1 AND archived = 0 AND status = ?2",
+                    "SELECT COUNT(*) FROM entries \
+                     WHERE entry_type = 'task' \
+                     AND json_extract(frontmatter_json, '$.project') = ?1 \
+                     AND json_extract(frontmatter_json, '$.archived') = 0 \
+                     AND json_extract(frontmatter_json, '$.status') = ?2",
                     params![project_key, status],
                     |row| row.get::<_, i64>(0),
                 )
@@ -1114,36 +1306,77 @@ impl Storage {
         }
     }
 
-    fn query_tasks(&self, sql: &str, project_key: &str) -> Vec<Task> {
-        let mut stmt = self
-            .conn
-            .prepare(sql)
-            .expect("Failed to prepare query_tasks");
-        stmt.query_map(params![project_key], |row| {
-            let project_key: String = row.get(11)?;
-            let id: i64 = row.get(0)?;
-            Ok(Task {
-                id: id as u64,
-                key: format!("{}-{}", project_key, id),
-                project_key: project_key.clone(),
-                title: row.get(1)?,
-                description: row.get(2)?,
-                status: parse_status(&row.get::<_, String>(3)?),
-                priority: parse_priority(&row.get::<_, String>(4)?),
-                due_date: row
-                    .get::<_, Option<String>>(5)?
-                    .and_then(|s| s.parse::<NaiveDate>().ok()),
-                parent: row.get::<_, Option<i64>>(6)?.map(|v| v as u64),
-                labels: parse_labels(&row.get::<_, String>(7)?),
-                created_at: parse_datetime(&row.get::<_, String>(8)?),
-                updated_at: parse_datetime(&row.get::<_, String>(9)?),
-                archived: row.get::<_, i64>(10)? != 0,
-                assignee: row.get(12)?,
-            })
-        })
-        .expect("Failed to query tasks")
-        .filter_map(|r| r.ok())
-        .collect()
+    /// Query tasks with due date within the next 7 days (upcoming).
+    fn query_tasks_entries(
+        &self,
+        project_key: &str,
+        archived: Option<bool>,
+        status_condition: Option<&str>,
+        upcoming_only: bool,
+        limit: Option<u64>,
+    ) -> Vec<Task> {
+        let archived_filter = match archived {
+            Some(true) => "AND json_extract(frontmatter_json, '$.archived') = 1".to_string(),
+            Some(false) => "AND json_extract(frontmatter_json, '$.archived') = 0".to_string(),
+            None => String::new(),
+        };
+        let status_filter = status_condition
+            .map(|c| format!("AND json_extract(frontmatter_json, '$.status') {}", c))
+            .unwrap_or_default();
+        let upcoming_filter = if upcoming_only {
+            "AND json_extract(frontmatter_json, '$.due') IS NOT NULL \
+             AND json_extract(frontmatter_json, '$.due') BETWEEN date('now') AND date('now', '+7 days')"
+                .to_string()
+        } else {
+            String::new()
+        };
+        let limit_clause = limit.map(|l| format!("LIMIT {}", l)).unwrap_or_default();
+
+        let sql = format!(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries \
+             WHERE entry_type = 'task' \
+             AND json_extract(frontmatter_json, '$.project') = ?1 \
+             {} {} {} \
+             ORDER BY json_extract(frontmatter_json, '$.due') ASC {}",
+            archived_filter, status_filter, upcoming_filter, limit_clause
+        );
+
+        let mut stmt = match self.conn.prepare(&sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        match stmt.query_map(params![project_key], entry_row_from_sql) {
+            Ok(rows) => rows
+                .filter_map(|r| r.ok())
+                .filter_map(|row| entry_row_to_task(&row))
+                .collect(),
+            Err(_) => vec![],
+        }
+    }
+
+    fn query_tasks_recent(&self, project_key: &str, limit: u64) -> Vec<Task> {
+        let sql = "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                   created_at, updated_at FROM entries \
+                   WHERE entry_type = 'task' \
+                   AND json_extract(frontmatter_json, '$.project') = ?1 \
+                   AND json_extract(frontmatter_json, '$.archived') = 0 \
+                   ORDER BY updated_at DESC \
+                   LIMIT ?2";
+
+        let mut stmt = match self.conn.prepare(sql) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+
+        match stmt.query_map(params![project_key, limit as i64], entry_row_from_sql) {
+            Ok(rows) => rows
+                .filter_map(|r| r.ok())
+                .filter_map(|row| entry_row_to_task(&row))
+                .collect(),
+            Err(_) => vec![],
+        }
     }
 
     // --- Users ---
@@ -1384,14 +1617,14 @@ impl Storage {
     /// Return the universe_key for a given project key, or None if not found.
     pub fn get_project_universe_key(&self, project_key: &str) -> Option<String> {
         let upper = project_key.to_uppercase();
+        let path = format!("projects/{}/_project.md", upper);
         self.conn
             .query_row(
-                "SELECT universe_key FROM projects WHERE key = ?1",
-                params![upper],
+                "SELECT universe_key FROM entries WHERE entry_type = 'project' AND path = ?1",
+                params![path],
                 |row| row.get(0),
             )
             .ok()
-            .flatten()
     }
 
     /// Increment content_count for a universe and return the new value.
@@ -1424,10 +1657,11 @@ impl Storage {
     /// Count comments for a specific task.
     pub fn count_task_comments(&self, project_key: &str, task_id: u64) -> i64 {
         let upper = project_key.to_uppercase();
+        let like_pattern = format!("projects/{}/comments/{}-%%", upper, task_id);
         self.conn
             .query_row(
-                "SELECT COUNT(*) FROM comments WHERE project_key = ?1 AND task_id = ?2",
-                params![upper, task_id as i64],
+                "SELECT COUNT(*) FROM entries WHERE entry_type = 'comment' AND path LIKE ?1",
+                params![like_pattern],
                 |row| row.get(0),
             )
             .unwrap_or(0)
@@ -1439,7 +1673,9 @@ impl Storage {
         let tasks: i64 = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE project_key = ?1",
+                "SELECT COUNT(*) FROM entries \
+                 WHERE entry_type = 'task' \
+                 AND json_extract(frontmatter_json, '$.project') = ?1",
                 params![upper],
                 |row| row.get(0),
             )
@@ -1447,7 +1683,9 @@ impl Storage {
         let comments: i64 = self
             .conn
             .query_row(
-                "SELECT COUNT(*) FROM comments WHERE project_key = ?1",
+                "SELECT COUNT(*) FROM entries \
+                 WHERE entry_type = 'comment' \
+                 AND json_extract(frontmatter_json, '$.project') = ?1",
                 params![upper],
                 |row| row.get(0),
             )
@@ -1502,7 +1740,11 @@ impl Storage {
     pub fn has_data(&self) -> bool {
         let count: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE entry_type = 'project'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap_or(0);
         count > 0
     }
@@ -1523,7 +1765,7 @@ impl Storage {
     }
 
     /// Seed the template universe with "Meu Projeto" and 8 sample tasks.
-    /// Safe to call multiple times — uses INSERT OR IGNORE.
+    /// Safe to call multiple times — checks if project entry already exists.
     pub fn seed_template_universe(&mut self) {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
@@ -1538,25 +1780,52 @@ impl Storage {
             params![now_str],
         );
 
-        // Sample project
-        let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO projects \
-             (key, name, description, next_id, created_at, universe_key) \
-             VALUES ('MP', 'Meu Projeto', \
-             'Projeto de demonstração com todas as funcionalidades do CO', \
-             9, ?1, 'template')",
-            params![now_str],
-        );
+        // Check if project entry already exists
+        let proj_path = "projects/MP/_project.md";
+        let already_seeded: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = 'template' AND path = ?1",
+                params![proj_path],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
 
-        // 8 sample tasks showcasing all features
+        if already_seeded {
+            return;
+        }
+
+        // Create sample project entry
+        let proj_fm = json!({
+            "type": "project",
+            "key": "MP",
+            "title": "Meu Projeto",
+            "status": "active",
+            "next_id": 9,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "tags": []
+        });
+        let proj_entry = make_entry(
+            proj_path,
+            proj_fm,
+            "Projeto de demonstração com todas as funcionalidades do CO",
+        );
+        let universe_root = self.universe_root("template");
+        let _ = co::entry::write_entry(&universe_root, &proj_entry);
+        let _ = upsert_entry_row(&self.conn, "template", &proj_entry);
+
+        // 8 sample tasks
         struct SeedTask {
             id: i64,
             title: &'static str,
             description: &'static str,
             status: &'static str,
             priority: &'static str,
-            labels: &'static str,
-            due_days: Option<i64>, // positive = future, negative = past
+            labels: Vec<&'static str>,
+            due_days: Option<i64>,
             parent: Option<i64>,
         }
 
@@ -1567,7 +1836,7 @@ impl Storage {
                 description: "Configurar Docker, banco de dados local e variáveis de ambiente.",
                 status: "done",
                 priority: "high",
-                labels: r#"["setup","infra"]"#,
+                labels: vec!["setup", "infra"],
                 due_days: Some(-20),
                 parent: None,
             },
@@ -1577,7 +1846,7 @@ impl Storage {
                 description: "Definir arquitetura, escolher tecnologias e documentar decisões.",
                 status: "done",
                 priority: "critical",
-                labels: r#"["architecture","docs"]"#,
+                labels: vec!["architecture", "docs"],
                 due_days: Some(-15),
                 parent: None,
             },
@@ -1587,7 +1856,7 @@ impl Storage {
                 description: "Implementar JWT, refresh tokens e logout seguro.",
                 status: "in_progress",
                 priority: "critical",
-                labels: r#"["backend","security"]"#,
+                labels: vec!["backend", "security"],
                 due_days: Some(7),
                 parent: None,
             },
@@ -1597,7 +1866,7 @@ impl Storage {
                 description: "Cobrir endpoints de autenticação com testes de integração.",
                 status: "todo",
                 priority: "medium",
-                labels: r#"["testing","backend"]"#,
+                labels: vec!["testing", "backend"],
                 due_days: Some(14),
                 parent: Some(3),
             },
@@ -1607,7 +1876,7 @@ impl Storage {
                 description: "Criar wireframes e protótipos para os principais fluxos.",
                 status: "in_review",
                 priority: "high",
-                labels: r#"["frontend","design","ux"]"#,
+                labels: vec!["frontend", "design", "ux"],
                 due_days: Some(5),
                 parent: None,
             },
@@ -1617,7 +1886,7 @@ impl Storage {
                 description: "Desenvolver componentes reutilizáveis baseados no design aprovado.",
                 status: "in_progress",
                 priority: "medium",
-                labels: r#"["frontend"]"#,
+                labels: vec!["frontend"],
                 due_days: Some(10),
                 parent: Some(5),
             },
@@ -1627,7 +1896,7 @@ impl Storage {
                 description: "Configurar CI/CD e fazer deploy no ambiente de homologação.",
                 status: "todo",
                 priority: "low",
-                labels: r#"["devops","infra"]"#,
+                labels: vec!["devops", "infra"],
                 due_days: Some(21),
                 parent: None,
             },
@@ -1637,7 +1906,7 @@ impl Storage {
                 description: "Documentar todos os endpoints com exemplos de requisição e resposta.",
                 status: "todo",
                 priority: "low",
-                labels: r#"["docs","backend"]"#,
+                labels: vec!["docs", "backend"],
                 due_days: Some(30),
                 parent: None,
             },
@@ -1651,55 +1920,45 @@ impl Storage {
                     .format("%Y-%m-%d")
                     .to_string()
             });
-            let _ = self.conn.execute(
-                "INSERT OR IGNORE INTO tasks \
-                 (project_key, id, title, description, status, priority, \
-                  due_date, parent, labels, created_at, updated_at, archived) \
-                 VALUES ('MP', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
-                params![
-                    t.id,
-                    t.title,
-                    t.description,
-                    t.status,
-                    t.priority,
-                    due_date,
-                    t.parent,
-                    t.labels,
-                    created_at,
-                    updated_at,
-                ],
-            );
+            let task_path = format!("projects/MP/{}.md", t.id);
+            let labels: Vec<serde_json::Value> = t.labels.iter().map(|l| json!(l)).collect();
+            let task_fm = json!({
+                "type": "task",
+                "id": t.id,
+                "title": t.title,
+                "status": t.status,
+                "priority": t.priority,
+                "due": due_date,
+                "parent": t.parent,
+                "tags": labels,
+                "created": created_at,
+                "modified": updated_at,
+                "archived": false,
+                "assignee": null,
+                "project": "MP"
+            });
+            let task_entry = make_entry(&task_path, task_fm, t.description);
+            let _ = co::entry::write_entry(&universe_root, &task_entry);
+            let _ = upsert_entry_row(&self.conn, "template", &task_entry);
         }
     }
 
     /// Returns true if the given project belongs to a template universe.
     pub fn is_project_in_template(&self, project_key: &str) -> bool {
-        let upper = project_key.to_uppercase();
-        // Get universe_key for the project, then check is_template
-        let universe_key: Option<String> = self
+        let universe_key = match self.get_project_universe_key(project_key) {
+            Some(k) => k,
+            None => return false,
+        };
+
+        let v: i64 = self
             .conn
             .query_row(
-                "SELECT universe_key FROM projects WHERE key = ?1",
-                params![upper],
+                "SELECT is_template FROM universes WHERE key = ?1",
+                params![universe_key],
                 |row| row.get(0),
             )
-            .ok()
-            .flatten();
-
-        match universe_key {
-            None => false,
-            Some(ukey) => {
-                let v: i64 = self
-                    .conn
-                    .query_row(
-                        "SELECT is_template FROM universes WHERE key = ?1",
-                        params![ukey],
-                        |row| row.get(0),
-                    )
-                    .unwrap_or(0);
-                v != 0
-            }
-        }
+            .unwrap_or(0);
+        v != 0
     }
 
     /// List projects for a universe that has `is_public = 1`.
@@ -1758,84 +2017,77 @@ impl Storage {
 
         let mut cloned_entries: i64 = 0;
 
-        // Collect source projects
-        let source_projects: Vec<(String, String, String, i64)> = {
+        // Collect source project entries
+        let source_project_rows: Vec<EntryRow> = {
             let mut stmt = self.conn.prepare(
-                "SELECT key, name, description, next_id \
-                 FROM projects WHERE universe_key = ?1",
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries \
+                 WHERE universe_key = ?1 AND entry_type = 'project'",
             )?;
-            stmt.query_map(params![source_key], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, i64>(3)?,
-                ))
-            })?
-            .filter_map(|r| r.ok())
-            .collect()
-        };
-
-        for (old_pkey, pname, pdesc, next_id) in &source_projects {
-            let new_pkey = self.derive_unique_project_key(new_key, old_pkey);
-
-            self.conn.execute(
-                "INSERT INTO projects \
-                 (key, name, description, next_id, created_at, universe_key) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![new_pkey, pname, pdesc, next_id, now_str, new_key],
-            )?;
-            cloned_entries += 1;
-
-            // Copy tasks (collect as raw SQL, then re-insert under new project key)
-            type TaskRow = (
-                i64,
-                String,
-                String,
-                String,
-                String,
-                Option<String>,
-                Option<i64>,
-                String,
-            );
-            let task_rows: Vec<TaskRow> = {
-                let mut stmt = self.conn.prepare(
-                    "SELECT id, title, description, status, priority, \
-                     due_date, parent, labels \
-                     FROM tasks WHERE project_key = ?1 AND archived = 0",
-                )?;
-                stmt.query_map(params![old_pkey], |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                        row.get::<_, Option<String>>(5)?,
-                        row.get::<_, Option<i64>>(6)?,
-                        row.get::<_, String>(7)?,
-                    ))
-                })?
+            stmt.query_map(params![source_key], entry_row_from_sql)?
                 .filter_map(|r| r.ok())
                 .collect()
+        };
+
+        let new_universe_root = self.data_dir.join("universes").join(new_key);
+
+        for proj_row in &source_project_rows {
+            let old_pkey = proj_row
+                .frontmatter
+                .get("key")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let new_pkey = self.derive_unique_project_key(new_key, &old_pkey);
+
+            // Build new project entry
+            let new_proj_path = format!("projects/{}/_project.md", new_pkey);
+            let mut new_proj_fm = proj_row.frontmatter.clone();
+            if let Some(obj) = new_proj_fm.as_object_mut() {
+                obj.insert("key".to_string(), json!(new_pkey));
+                obj.insert("created".to_string(), json!(now_str));
+                obj.insert("modified".to_string(), json!(now_str));
+            }
+            let new_proj_entry = make_entry(&new_proj_path, new_proj_fm, &proj_row.body);
+            co::entry::write_entry(&new_universe_root, &new_proj_entry)?;
+            upsert_entry_row(&self.conn, new_key, &new_proj_entry)?;
+            cloned_entries += 1;
+
+            // Collect source task entries
+            let source_task_rows: Vec<EntryRow> = {
+                let mut stmt = self.conn.prepare(
+                    "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                     created_at, updated_at FROM entries \
+                     WHERE universe_key = ?1 AND entry_type = 'task' \
+                     AND json_extract(frontmatter_json, '$.project') = ?2 \
+                     AND json_extract(frontmatter_json, '$.archived') = 0",
+                )?;
+                stmt.query_map(params![source_key, old_pkey], entry_row_from_sql)?
+                    .filter_map(|r| r.ok())
+                    .collect()
             };
 
-            for (id, title, desc, status, priority, due_date, parent, labels) in task_rows {
-                self.conn.execute(
-                    "INSERT INTO tasks \
-                     (project_key, id, title, description, status, priority, \
-                      due_date, parent, labels, created_at, updated_at, archived) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
-                    params![
-                        new_pkey, id, title, desc, status, priority, due_date, parent, labels,
-                        now_str, now_str,
-                    ],
-                )?;
+            for task_row in &source_task_rows {
+                let task_id = task_row
+                    .frontmatter
+                    .get("id")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                let new_task_path = format!("projects/{}/{}.md", new_pkey, task_id);
+                let mut new_task_fm = task_row.frontmatter.clone();
+                if let Some(obj) = new_task_fm.as_object_mut() {
+                    obj.insert("project".to_string(), json!(new_pkey));
+                    obj.insert("created".to_string(), json!(now_str));
+                    obj.insert("modified".to_string(), json!(now_str));
+                }
+                let new_task_entry = make_entry(&new_task_path, new_task_fm, &task_row.body);
+                co::entry::write_entry(&new_universe_root, &new_task_entry)?;
+                upsert_entry_row(&self.conn, new_key, &new_task_entry)?;
                 cloned_entries += 1;
             }
         }
 
-        // Set content_count to the number of entries cloned (projects + tasks)
+        // Set content_count
         self.conn.execute(
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",
             params![cloned_entries, new_key],
@@ -1883,9 +2135,255 @@ impl Storage {
             .take(10)
             .collect()
     }
+
+    // --- List universe keys a user is a member of ---
+
+    pub fn list_user_universes(&self, user_id: &str) -> Vec<String> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT universe_key FROM universe_members WHERE user_id = ?1")
+            .expect("Failed to prepare list_user_universes");
+        stmt.query_map(rusqlite::params![user_id], |row| row.get(0))
+            .expect("Failed to query user universes")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    /// List projects the user can see: those in their universes.
+    pub fn list_projects_for_user(&self, user_id: &str) -> Vec<crate::models::Project> {
+        let universe_keys = self.list_user_universes(user_id);
+        let mut result = Vec::new();
+        for uk in &universe_keys {
+            result.extend(self.list_projects_for_universe(uk));
+        }
+        result
+    }
+
+    // --- Increment project next_id ---
+
+    fn increment_project_next_id(
+        &mut self,
+        project_key: &str,
+        universe_key: &str,
+        new_next_id: u64,
+    ) {
+        let path = format!("projects/{}/_project.md", project_key);
+        // Read the project entry
+        let result = self.conn.query_row(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries WHERE path = ?1",
+            params![path],
+            entry_row_from_sql,
+        );
+        if let Ok(row) = result {
+            let mut fm = row.frontmatter.clone();
+            if let Some(obj) = fm.as_object_mut() {
+                obj.insert("next_id".to_string(), json!(new_next_id));
+            }
+            let entry = make_entry(&path, fm, &row.body);
+            let universe_root = self.universe_root(universe_key);
+            let _ = co::entry::write_entry(&universe_root, &entry);
+            let _ = upsert_entry_row(&self.conn, universe_key, &entry);
+        }
+    }
 }
 
-// --- Parsing helpers ---
+// ---------------------------------------------------------------------------
+// SQL helper — upsert a single entry into the entries table
+// ---------------------------------------------------------------------------
+
+fn upsert_entry_row(
+    conn: &Connection,
+    universe_key: &str,
+    entry: &co::entry::Entry,
+) -> anyhow::Result<()> {
+    let fm_json = serde_json::to_string(&entry.frontmatter)?;
+    let title: Option<&str> = entry.frontmatter.get("title").and_then(|v| v.as_str());
+    let created_at = entry
+        .frontmatter
+        .get("created")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let updated_at = entry
+        .frontmatter
+        .get("modified")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| created_at.clone());
+
+    conn.execute(
+        "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(universe_key, path) DO UPDATE SET
+           entry_type = excluded.entry_type,
+           title = excluded.title,
+           frontmatter_json = excluded.frontmatter_json,
+           body = excluded.body,
+           body_hash = excluded.body_hash,
+           created_at = excluded.created_at,
+           updated_at = excluded.updated_at",
+        params![
+            entry.path,
+            universe_key,
+            entry.entry_type,
+            title,
+            fm_json,
+            entry.body,
+            entry.body_hash,
+            created_at,
+            updated_at,
+        ],
+    )?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Conversion helpers
+// ---------------------------------------------------------------------------
+
+fn entry_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryRow> {
+    let fm_str: String = row.get(4)?;
+    let frontmatter: serde_json::Value =
+        serde_json::from_str(&fm_str).unwrap_or(serde_json::Value::Object(Default::default()));
+    Ok(EntryRow {
+        path: row.get(0)?,
+        universe_key: row.get(1)?,
+        entry_type: row.get(2)?,
+        title: row.get(3)?,
+        frontmatter,
+        body: row.get(5)?,
+        body_hash: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn entry_row_to_project(row: &EntryRow) -> Option<Project> {
+    let fm = &row.frontmatter;
+    let key = fm.get("key").and_then(|v| v.as_str())?.to_string();
+    let name = fm
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let next_id = fm.get("next_id").and_then(|v| v.as_u64()).unwrap_or(1);
+    let created_at = fm
+        .get("created")
+        .and_then(|v| v.as_str())
+        .map(parse_datetime)
+        .unwrap_or_else(Utc::now);
+    let archived = fm
+        .get("archived")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    Some(Project {
+        key,
+        name,
+        description: row.body.clone(),
+        created_at,
+        next_id,
+        archived,
+    })
+}
+
+fn entry_row_to_task(row: &EntryRow) -> Option<Task> {
+    let fm = &row.frontmatter;
+    let id = fm.get("id").and_then(|v| v.as_u64())?;
+    let project_key = fm
+        .get("project")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let title = fm
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let status = parse_status(fm.get("status").and_then(|v| v.as_str()).unwrap_or("todo"));
+    let priority = parse_priority(
+        fm.get("priority")
+            .and_then(|v| v.as_str())
+            .unwrap_or("medium"),
+    );
+    let due_date = fm
+        .get("due")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<NaiveDate>().ok());
+    let parent = fm.get("parent").and_then(|v| v.as_u64());
+    let labels: Vec<String> = fm
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    let created_at = fm
+        .get("created")
+        .and_then(|v| v.as_str())
+        .map(parse_datetime)
+        .unwrap_or_else(Utc::now);
+    let updated_at = fm
+        .get("modified")
+        .and_then(|v| v.as_str())
+        .map(parse_datetime)
+        .unwrap_or(created_at);
+    let archived = fm
+        .get("archived")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let assignee = fm
+        .get("assignee")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    Some(Task {
+        id,
+        key: format!("{}-{}", project_key, id),
+        project_key,
+        title,
+        status,
+        priority,
+        due_date,
+        parent,
+        labels,
+        created_at,
+        updated_at,
+        description: row.body.clone(),
+        archived,
+        assignee,
+    })
+}
+
+fn entry_row_to_comment(row: &EntryRow, project_key: &str, task_id: u64) -> Option<Comment> {
+    let fm = &row.frontmatter;
+    let id = fm.get("id").and_then(|v| v.as_u64())?;
+    let author = fm
+        .get("author")
+        .and_then(|v| v.as_str())
+        .unwrap_or("Anonymous")
+        .to_string();
+    let created_at = fm
+        .get("created")
+        .and_then(|v| v.as_str())
+        .map(parse_datetime)
+        .unwrap_or_else(Utc::now);
+
+    Some(Comment {
+        id,
+        project_key: project_key.to_string(),
+        task_id,
+        author,
+        body: row.body.clone(),
+        created_at,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Parsing helpers
+// ---------------------------------------------------------------------------
 
 pub fn parse_datetime(s: &str) -> chrono::DateTime<Utc> {
     chrono::DateTime::parse_from_rfc3339(s)
@@ -1911,10 +2409,6 @@ fn parse_priority(s: &str) -> Priority {
         "critical" => Priority::Critical,
         _ => Priority::Medium,
     }
-}
-
-fn parse_labels(s: &str) -> Vec<String> {
-    serde_json::from_str(s).unwrap_or_default()
 }
 
 // --- Seed Data ---

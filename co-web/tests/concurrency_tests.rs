@@ -24,6 +24,7 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         game_db_path: None,
         universo_dir: "quilomboaraucaria".to_string(),
         gestao_github_admins: vec!["artelonga".to_string()],
+        universe_key: None,
     }
 }
 
@@ -49,6 +50,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
             name: "Concurrency Test".into(),
             key: "CC".into(),
             description: "".into(),
+            universe_key: None,
         })
         .unwrap();
 

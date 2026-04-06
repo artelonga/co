@@ -359,16 +359,8 @@ pub async fn start_server(config: WebConfig) {
     let auth_store = AuthStore::new(std::path::Path::new(&config.data_dir))
         .expect("Failed to create auth store");
 
-    let mail_provider: Arc<dyn co::MailProvider> = match co::ResendMailProvider::from_env() {
-        Some(p) => {
-            tracing::info!("Email: Resend provider active");
-            Arc::new(p)
-        }
-        None => {
-            tracing::warn!("Email: RESEND_API_KEY not set, using log provider (codes in logs)");
-            Arc::new(co::LogMailProvider)
-        }
-    };
+    let mail_provider: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+    tracing::info!("Email: log provider (codes printed to stdout)");
 
     // Initialize game-core encrypted storage
     let game_db_path = config.game_db_path.clone().unwrap_or_else(|| {

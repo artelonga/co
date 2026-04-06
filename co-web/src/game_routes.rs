@@ -1,12 +1,11 @@
 use axum::{
-    extract::{Extension, Path, Query, State},
-    http::{header, StatusCode},
-    response::IntoResponse,
     Json,
+    extract::{Extension, Path, Query, State},
+    http::{StatusCode, header},
+    response::IntoResponse,
 };
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rand::Rng;
-use std::sync::Arc;
 
 use crate::auth::{Claims, UserId};
 use crate::game_models::*;
@@ -77,9 +76,7 @@ pub async fn health() -> Json<HealthResponse> {
 
 // ---- Plugins (unauthenticated) ----
 
-pub async fn list_plugins(
-    State(state): State<AppState>,
-) -> Json<Vec<PluginListEntry>> {
+pub async fn list_plugins(State(state): State<AppState>) -> Json<Vec<PluginListEntry>> {
     let entries: Vec<PluginListEntry> = state
         .plugin_registry
         .iter()
@@ -222,8 +219,7 @@ pub async fn verify(
                 let _ = storage.delete_verify_code(&email);
                 return Ok(Err(("exhausted", 0, String::new(), String::new())));
             }
-            storage
-                .save_verify_code(&email, &serde_json::to_string(&entry).unwrap_or_default())?;
+            storage.save_verify_code(&email, &serde_json::to_string(&entry).unwrap_or_default())?;
             let remaining = MAX_ATTEMPTS - entry.attempts;
             return Ok(Err(("wrong", remaining, String::new(), String::new())));
         }
@@ -313,6 +309,8 @@ pub async fn verify(
         sub: user.user_id.clone(),
         email: email.clone(),
         tier: "player".into(),
+        usuario: String::new(),
+        papel: String::new(),
         exp,
         iat: now_ts,
     };
@@ -424,8 +422,8 @@ pub async fn register(
     // Hash password with Argon2id
     let password = req.password.clone();
     let password_hash = tokio::task::spawn_blocking(move || {
-        use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
         use argon2::Argon2;
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
 
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
@@ -539,6 +537,8 @@ pub async fn legacy_login(
         sub: user.user_id.clone(),
         email: user.email.clone(),
         tier: "player".into(),
+        usuario: String::new(),
+        papel: String::new(),
         exp,
         iat: now_ts,
     };

@@ -548,37 +548,9 @@ fn test_activity_log() {
         )
         .unwrap();
 
-    // Activity from project creation + task creation
+    // activity_log was dropped in migration v13 — list_activity returns empty
     let activity = storage.list_activity("AC", 50);
-    assert!(activity.len() >= 2);
-    assert!(activity.iter().any(|a| a.action == "project_created"));
-    assert!(activity.iter().any(|a| a.action == "task_created"));
-
-    // Update task → creates field_changed entries
-    storage
-        .update_task(
-            "AC",
-            1,
-            UpdateTask {
-                status: Some(TaskStatus::Done),
-                title: None,
-                description: None,
-                priority: None,
-                due_date: None,
-                parent: None,
-                labels: None,
-                archived: None,
-                assignee: None,
-            },
-        )
-        .unwrap();
-
-    let activity = storage.list_activity("AC", 50);
-    assert!(
-        activity
-            .iter()
-            .any(|a| a.action == "field_changed" && a.field.as_deref() == Some("status"))
-    );
+    assert!(activity.is_empty());
 }
 
 #[test]
@@ -834,13 +806,9 @@ fn test_activity_log_limit_cap() {
             .unwrap();
     }
 
-    // Request with limit=5 should return only 5
+    // activity_log was dropped in migration v13 — list_activity returns empty
     let activity = storage.list_activity("LT", 5);
-    assert_eq!(activity.len(), 5);
-
-    // Even if we request 1000, storage accepts it (capping is handler-level)
-    let activity = storage.list_activity("LT", 1000);
-    assert!(activity.len() > 5);
+    assert!(activity.is_empty());
 }
 
 #[test]
@@ -905,12 +873,12 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 11);
+    assert_eq!(storage.schema_version(), 13);
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 11);
+    assert_eq!(storage2.schema_version(), 13);
 }
 
 #[test]
