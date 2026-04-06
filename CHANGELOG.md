@@ -5,6 +5,52 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.30.0] — 2026-04-06
+
+### co-obsidian (new module)
+
+#### Added — CO-34: Obsidian plugin — sync CO universe ↔ vault
+
+- `co-obsidian/` — new Obsidian community plugin (TypeScript, esbuild)
+- `manifest.json`: id `co-universe-sync`, name "CO Universe Sync", minAppVersion 1.4.0
+- `package.json` with esbuild build system + Jest test runner
+- Plugin settings: CO instance URL, API token, universe slug, sync direction, interval, conflict markers
+- Settings tab with connection test and OAuth login button
+- `src/api-client.ts` — typed CO Vault API client (listFiles, getFile, putFile, deleteFile, search, getTags)
+- `src/sync-engine.ts` — core sync engine:
+  - `pull()`: GET `/vault/` listing → mtime-based incremental check → render + write to vault
+  - `push()`: scan vault .md files → hash-based change detection → upload to CO
+  - `sync()`: bidirectional — pull then push, last-write-wins; optional conflict markers
+  - Sync triggers: on-save (debounced 5 s), startup, configurable interval
+  - Status callbacks: idle / syncing / synced / offline / conflict / error
+- `src/frontmatter.ts` — bidirectional frontmatter mapping:
+  - CO → Obsidian: `labels` → `tags`, `created_at` → `created`, `updated_at` → `modified`, `parent: N` → `parent: "[[CO-N]]"`
+  - Obsidian → CO: `tags` → `labels`, `created` → `created_at`, `modified` → `updated_at`, `parent: "[[CO-N]]"` → `parent: N`
+  - Unknown fields preserved in both directions (round-trip safe)
+  - `parseFrontmatter`, `serialiseFrontmatter`, `extractFrontmatterBlock`, `renderMarkdown`
+- `src/wikilinks.ts` — wikilink generation and resolution:
+  - `[[CO-21|Title]]` wikilinks in exported .md
+  - `parent:: [[CO-21]]` inline Dataview field for hierarchy
+  - `extractWikilinkIds`, `resolveParentRef`, `wikilinksToMdLinks`, `mdLinksToWikilinks`
+- `src/status-bar.ts` — status bar: "CO: synced ✓" / "CO: syncing…" / "CO: offline" / "CO: N conflicts"
+- `src/main.ts` — main plugin class:
+  - Ribbon icon (click to sync)
+  - 6 commands: Sync now, Pull from CO, Push to CO, Open in CO, Create task, Link to CO
+  - ObsidianProtocolHandler for OAuth callback (`obsidian://co-universe-sync/oauth`)
+  - Auto-sync interval with `registerInterval`
+  - On-save debounced push via `vault.on("modify")`
+- `.co/sync.json`: `{ lastSync, fileHashes, remoteMtimes, remoteVersion }` for incremental sync
+- Authentication: API token paste (stored in data.json) + OAuth browser flow + auto token refresh
+- `tests/frontmatter.test.ts` — 30 unit tests: round-trip mapping, parsing, serialisation
+- `tests/wikilinks.test.ts` — 22 unit tests: generation, resolution, Dataview fields
+- `tests/sync-engine.test.ts` — 11 integration tests: mock CO API, pull/push/sync verification
+- `tests/__mocks__/obsidian.ts` — Obsidian API mock for Jest (no real vault needed)
+- `README.md` with setup instructions, command table, frontmatter mapping table
+- `LICENSE`: MIT
+- All 63 tests pass
+
+---
+
 ## [0.29.0] — 2026-04-06
 
 ### co-web
