@@ -1,0 +1,10 @@
+# Fly.io inventory — wraps flyctl, no SSH needed
+# Playbooks targeting this group use local_action / delegate_to: localhost
+all:
+  children:
+    fly:
+      hosts:
+        fly_co_web:
+          ansible_connection: local
+          fly_app: "co-web"
+          fly_region: "gru"

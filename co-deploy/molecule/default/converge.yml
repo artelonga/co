@@ -1,0 +1,41 @@
+---
+# Molecule converge: run provision then a stub deploy (no real binary).
+# Tests idempotency and service/directory structure.
+
+- name: Provision (molecule)
+  ansible.builtin.import_playbook: ../../playbooks/provision.yml
+  vars:
+    # Skip rclone install in CI (no internet)
+    ansible_skip_tags: rclone
+
+- name: Deploy stub binary (molecule)
+  hosts: all
+  become: true
+
+  vars_files:
+    - ../../group_vars/all.yml
+
+  vars:
+    jwt_secret: "molecule-test-secret-32chars-minimum"
+    resend_api_key: ""
+
+  tasks:
+    - name: Create stub co-web binary for testing
+      ansible.builtin.copy:
+        dest: "{{ co_install_dir }}/co-web"
+        content: "#!/bin/sh\necho 'stub'\n"
+        owner: root
+        group: "{{ co_group }}"
+        mode: "0750"
+
+    - name: Write systemd service unit
+      ansible.builtin.template:
+        src: ../../templates/co-web.service.j2
+        dest: /etc/systemd/system/co-web.service
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true

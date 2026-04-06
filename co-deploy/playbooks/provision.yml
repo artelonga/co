@@ -1,0 +1,155 @@
+---
+# Provision a VPS for CO deployment.
+# Idempotent: safe to run multiple times.
+#
+# Usage:
+#   ansible-playbook -i inventory/vps.yml playbooks/provision.yml --ask-vault-pass
+
+- name: Provision CO server
+  hosts: production
+  become: true
+
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/production.yml
+
+  tasks:
+    # ── System packages ────────────────────────────────────────────────────────
+
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - sqlite3
+          - zstd
+          - curl
+          - ufw
+        state: present
+
+    - name: Install rclone (for optional S3/B2 backup upload)
+      ansible.builtin.shell:
+        cmd: curl -fsSL https://rclone.org/install.sh | bash
+        creates: /usr/bin/rclone
+
+    # ── Caddy reverse proxy ────────────────────────────────────────────────────
+
+    - name: Add Caddy apt repository key
+      ansible.builtin.apt_key:
+        url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+        state: present
+
+    - name: Add Caddy apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+        state: present
+        filename: caddy
+
+    - name: Install Caddy
+      ansible.builtin.apt:
+        name: caddy
+        state: present
+        update_cache: true
+
+    # ── CO user & directories ──────────────────────────────────────────────────
+
+    - name: Create co group
+      ansible.builtin.group:
+        name: "{{ co_group }}"
+        system: true
+        state: present
+
+    - name: Create co user (unprivileged)
+      ansible.builtin.user:
+        name: "{{ co_user }}"
+        group: "{{ co_group }}"
+        system: true
+        shell: /usr/sbin/nologin
+        home: "{{ co_data_dir }}"
+        create_home: false
+        state: present
+
+    - name: Create install directory
+      ansible.builtin.file:
+        path: "{{ co_install_dir }}"
+        state: directory
+        owner: root
+        group: "{{ co_group }}"
+        mode: "0755"
+
+    - name: Create data directory
+      ansible.builtin.file:
+        path: "{{ co_data_dir }}"
+        state: directory
+        owner: "{{ co_user }}"
+        group: "{{ co_group }}"
+        mode: "0750"
+
+    - name: Create backup directory
+      ansible.builtin.file:
+        path: "{{ backup_dir }}"
+        state: directory
+        owner: "{{ co_user }}"
+        group: "{{ co_group }}"
+        mode: "0750"
+
+    - name: Create Caddy log directory
+      ansible.builtin.file:
+        path: /var/log/caddy
+        state: directory
+        owner: caddy
+        group: caddy
+        mode: "0750"
+
+    # ── Firewall ───────────────────────────────────────────────────────────────
+
+    - name: Allow SSH
+      community.general.ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Allow HTTP
+      community.general.ufw:
+        rule: allow
+        port: "80"
+        proto: tcp
+
+    - name: Allow HTTPS
+      community.general.ufw:
+        rule: allow
+        port: "443"
+        proto: tcp
+
+    - name: Enable UFW (deny everything else)
+      community.general.ufw:
+        state: enabled
+        default: deny
+        direction: incoming
+
+    # ── Caddy configuration ────────────────────────────────────────────────────
+
+    - name: Write Caddy config
+      ansible.builtin.template:
+        src: ../templates/caddy.conf.j2
+        dest: /etc/caddy/Caddyfile
+        owner: root
+        group: caddy
+        mode: "0640"
+      notify: Reload Caddy
+
+    - name: Enable and start Caddy
+      ansible.builtin.systemd:
+        name: caddy
+        enabled: true
+        state: started
+
+  handlers:
+    - name: Reload Caddy
+      ansible.builtin.systemd:
+        name: caddy
+        state: reloaded

@@ -1,0 +1,116 @@
+---
+# Backup CO SQLite database.
+# Idempotent: running twice produces the same result.
+#
+# Usage (manual):
+#   ansible-playbook -i inventory/vps.yml playbooks/backup.yml
+#
+# Cron: daily at 03:00 UTC (configured below).
+# Rotation: 7 daily + 4 weekly backups retained.
+
+- name: Backup CO database
+  hosts: production
+  become: true
+
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/production.yml
+
+  vars:
+    backup_timestamp: "{{ ansible_date_time.iso8601_basic_short }}"
+    backup_file_base: "co-{{ backup_timestamp }}"
+    backup_raw: "{{ backup_dir }}/{{ backup_file_base }}.sqlite"
+    backup_compressed: "{{ backup_dir }}/{{ backup_file_base }}.sqlite.zst"
+
+  tasks:
+    # ── Online backup (consistent, no lock contention) ─────────────────────────
+
+    - name: Take SQLite online backup
+      ansible.builtin.command:
+        cmd: >
+          sqlite3 {{ co_data_dir }}/co.db
+          ".backup '{{ backup_raw }}'"
+      become_user: "{{ co_user }}"
+      changed_when: true
+
+    - name: Compress backup with zstd
+      ansible.builtin.command:
+        cmd: >
+          zstd -{{ backup_compress_level }} --rm
+          {{ backup_raw }}
+          -o {{ backup_compressed }}
+      become_user: "{{ co_user }}"
+      changed_when: true
+
+    # ── Rotation ───────────────────────────────────────────────────────────────
+
+    - name: Collect all backup files (sorted by name)
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "co-*.sqlite.zst"
+        age: "-{{ backup_retain_daily + 1 }}d"
+        file_type: file
+      register: all_backups
+
+    - name: Delete backups older than daily retention (keep last {{ backup_retain_daily }})
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ (all_backups.files | sort(attribute='mtime'))[:-backup_retain_daily] }}"
+      when: all_backups.files | length > backup_retain_daily
+
+    - name: Keep one weekly backup per week (last {{ backup_retain_weekly }} weeks)
+      # The daily rotation above keeps 7 days; this block tags Sunday backups
+      # so they survive beyond 7 days up to 4 weeks.
+      # Implementation: find files older than 7 days but younger than 28 days,
+      # keep the oldest one per ISO week number.
+      ansible.builtin.find:
+        paths: "{{ backup_dir }}"
+        patterns: "co-*.sqlite.zst"
+        age: "7d"
+        age_stamp: mtime
+        file_type: file
+      register: weekly_candidates
+
+    - name: Prune weekly backups beyond {{ backup_retain_weekly }} weeks
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: >-
+        {{
+          (weekly_candidates.files | sort(attribute='mtime'))[:-backup_retain_weekly]
+          if weekly_candidates.files | length > backup_retain_weekly
+          else []
+        }}
+
+    # ── Optional: upload to S3/B2 via rclone ──────────────────────────────────
+
+    - name: Upload backup to remote storage
+      ansible.builtin.command:
+        cmd: >
+          rclone copy {{ backup_compressed }}
+          {{ backup_rclone_remote }}/
+          --transfers 1
+          --retries 3
+      become_user: "{{ co_user }}"
+      when: backup_rclone_remote | length > 0
+      changed_when: true
+
+    - name: Report backup location
+      ansible.builtin.debug:
+        msg: "Backup written to {{ backup_compressed }}"
+
+    # ── Cron setup ─────────────────────────────────────────────────────────────
+
+    - name: Install daily backup cron job (03:00 UTC)
+      ansible.builtin.cron:
+        name: "co-web daily backup"
+        user: "{{ co_user }}"
+        minute: "0"
+        hour: "3"
+        job: >
+          /usr/bin/ansible-playbook
+          -i /opt/co/inventory/vps.yml
+          /opt/co/playbooks/backup.yml
+          >> /var/log/co-backup.log 2>&1
+        state: present

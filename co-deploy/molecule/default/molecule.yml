@@ -1,0 +1,44 @@
+---
+# Molecule test: provision + deploy on local Docker container.
+#
+# Prerequisites:
+#   pip install molecule molecule-plugins[docker]
+#   docker running locally
+#
+# Usage:
+#   cd co-deploy && molecule test
+
+dependency:
+  name: galaxy
+  options:
+    requirements-file: requirements.yml
+
+driver:
+  name: docker
+
+platforms:
+  - name: co-test-server
+    image: geerlingguy/docker-debian12-ansible:latest
+    pre_build_image: true
+    privileged: true
+    volumes:
+      - /sys/fs/cgroup:/sys/fs/cgroup:rw
+    cgroupns_mode: host
+    command: /lib/systemd/systemd
+    environment:
+      container: docker
+
+provisioner:
+  name: ansible
+  inventory:
+    hosts:
+      all:
+        hosts:
+          co-test-server:
+            ansible_connection: docker
+            ansible_user: root
+  env:
+    ANSIBLE_ROLES_PATH: ../../roles
+
+verifier:
+  name: ansible

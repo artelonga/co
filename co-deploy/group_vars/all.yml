@@ -1,0 +1,20 @@
+# Shared configuration — applies to all inventory groups
+co_version: "0.26.0"
+co_port: 3000
+co_domain: "artelonga.com.br"
+co_data_dir: "/var/lib/co/data"
+co_install_dir: "/opt/co"
+co_user: "co"
+co_group: "co"
+
+# Backup settings (overridable per environment)
+backup_dir: "/var/backups/co"
+backup_retain_daily: 7
+backup_retain_weekly: 4
+backup_compress_level: 3   # zstd compression level (1–22)
+
+# Rclone remote for off-site backup (empty = skip upload)
+backup_rclone_remote: ""   # e.g. "b2:my-bucket/co-backups"
+
+# Rust cross-compile target for x86_64 Linux (used on macOS hosts)
+co_cross_target: "x86_64-unknown-linux-musl"

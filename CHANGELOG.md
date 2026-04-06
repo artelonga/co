@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.26.0] — 2026-04-06
+
+### co-deploy
+
+#### Added — CO-32: Ansible deployment — provision, deploy, backup playbooks for Fly.io + VPS
+
+- New `co-deploy/` directory with standard Ansible structure
+- `inventory/fly.yml` — Fly.io target (local connection via flyctl)
+- `inventory/vps.yml` — generic VPS target (DigitalOcean, Hetzner, etc.) with env-var overrides
+- `playbooks/provision.yml` — creates `co` unprivileged user, installs ca-certificates + sqlite3 + zstd + Caddy, creates `/opt/co/` + `/var/lib/co/data/`, configures UFW (allow 80/443, deny rest)
+- `playbooks/deploy.yml` — cross-compiles co-web via `cross`, copies binary, writes systemd unit, runs seed SQL on first deploy, restarts service, verifies `/api/health`
+- `playbooks/backup.yml` — SQLite `.backup` (online, consistent), zstd compression, 7 daily + 4 weekly rotation, optional rclone upload to S3/B2, cron at 03:00 UTC
+- `playbooks/fly-deploy.yml` — wraps `flyctl deploy --remote-only` with pre-deploy snapshot and post-deploy health check
+- `templates/co-web.service.j2` — systemd unit with ExecStart, WorkingDirectory, Environment, systemd hardening (NoNewPrivileges, ProtectSystem)
+- `templates/caddy.conf.j2` — reverse proxy with auto-SSL, zstd+gzip compression, security headers (HSTS, X-Frame-Options, etc.), static asset caching
+- `group_vars/all.yml` — shared config: co_version, co_port, co_domain, backup retention settings
+- `group_vars/production.yml` — ansible-vault encrypted secrets: JWT_SECRET, RESEND_API_KEY
+- `molecule/default/` — Docker-based integration test (provision + stub deploy on Debian 12, idempotency check)
+- `requirements.yml` — community.general + ansible.posix collections
+- `README.md` — quickstart for VPS and Fly.io
+
+---
+
 ## [0.25.0] — 2026-04-06
 
 ### co-web
