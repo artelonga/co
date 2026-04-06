@@ -1,10 +1,10 @@
 [package]
 name = "co-cli"
-version = "0.23.0"
+version = "0.28.0"
 edition = "2024"
 description = "CLI for CO - graph-based content management"
 license = "MIT"
-repository = "https://github.com/institutional-pointset/co"
+repository = "https://github.com/artelonga/co"
 publish = false
 
 [[bin]]

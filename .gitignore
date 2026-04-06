@@ -4,9 +4,17 @@
 *.swo
 .co/
 
-# co-web runtime data (but allow embedded baseline)
+# Runtime data directories
 data/
-!co-web/data/
+
+# Database files (runtime state — never commit)
+*.db
+*.redb
+
+# Environment secrets
+.env
+.env.local
+.env.*.local
 
 # User spaces (project namespaces) - do not commit to co home
 # These are created via `co init <name>` and should live in their own repos
