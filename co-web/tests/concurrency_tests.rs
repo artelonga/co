@@ -70,6 +70,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
         mail,
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
+        doc_rooms: co_web::ws::new_room_manager(),
     });
 
     build_router(state, None)

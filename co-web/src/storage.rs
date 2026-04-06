@@ -2334,6 +2334,47 @@ impl Storage {
             let _ = upsert_entry_row(&self.conn, universe_key, &entry);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // WS / CRDT helpers
+    // -------------------------------------------------------------------------
+
+    /// Load the markdown body of an entry for CRDT initialisation.
+    /// Returns `None` if the entry does not exist yet.
+    pub fn get_entry_body(&self, universe_key: &str, path: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT body FROM entries WHERE universe_key = ?1 AND path = ?2",
+                params![universe_key, path],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+    }
+
+    /// Persist the markdown body of an entry (CRDT idle / last-disconnect save).
+    pub fn update_entry_body(
+        &self,
+        universe_key: &str,
+        path: &str,
+        body: &str,
+    ) -> anyhow::Result<()> {
+        // Simple hash: polynomial rolling hash — used only for change detection.
+        let hash = {
+            let mut h: u64 = 0xcbf29ce484222325;
+            for b in body.as_bytes() {
+                h ^= *b as u64;
+                h = h.wrapping_mul(0x100000001b3);
+            }
+            format!("{h:016x}")
+        };
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE entries SET body = ?1, body_hash = ?2, updated_at = ?3 \
+             WHERE universe_key = ?4 AND path = ?5",
+            params![body, hash, now, universe_key, path],
+        )?;
+        Ok(())
+    }
 }
 
 // ---------------------------------------------------------------------------

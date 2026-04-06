@@ -62,6 +62,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         mail,
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
+        doc_rooms: co_web::ws::new_room_manager(),
     });
 
     build_router(state, None)
@@ -1063,6 +1064,7 @@ fn build_blank_test_router(dir: &std::path::Path) -> (axum::Router, AppState) {
         mail,
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
+        doc_rooms: co_web::ws::new_room_manager(),
     });
     let router = build_router(state.clone(), None);
     (router, state)

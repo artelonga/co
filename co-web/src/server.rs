@@ -53,6 +53,8 @@ pub struct AppStateInner {
     pub mail: Arc<dyn co::MailProvider>,
     pub game_storage: Arc<game_core::storage::Storage>,
     pub plugin_registry: game_core::plugin::PluginRegistry,
+    /// CRDT document rooms — keyed by `"slug:doc_path"`.
+    pub doc_rooms: crate::ws::DocRoomManager,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -267,7 +269,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Theme tier routes ---
     let themes_api = crate::universe_routes::themes_router();
 
+    // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
+    let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
+
     let mut router = Router::new()
+        .merge(ws_route)
         .nest("/api", board_public)
         .nest("/api", board_protected)
         .nest("/api", auth_api)
@@ -400,6 +406,7 @@ pub async fn start_server(config: WebConfig) {
         mail: mail_provider,
         game_storage,
         plugin_registry,
+        doc_rooms: crate::ws::new_room_manager(),
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState

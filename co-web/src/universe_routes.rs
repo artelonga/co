@@ -251,14 +251,28 @@ pub async fn clone_universe(
 }
 
 // GET /api/v1/universes/:slug — public universe info (content_count, no owner_id)
+//
+// Sharing gate: anonymous universes are only visible to their owner
+// (identified by the `co_universe_owner` cookie). Anyone else gets a 404.
+// Logged-in universes are accessible to everyone.
 pub async fn get_universe_info(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<UniverseInfo>, AppError> {
     let storage = lock_storage(&state)?;
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+    // Sharing gate: anonymous universes are private to their owner.
+    if universe.owner_id.starts_with("anon-") {
+        let cookie_owner = extract_cookie(&headers, "co_universe_owner");
+        if cookie_owner.as_deref() != Some(universe.owner_id.as_str()) {
+            return Err(AppError::NotFound(format!("Universe '{}' not found", slug)));
+        }
+    }
+
     Ok(Json(UniverseInfo {
         key: universe.key,
         name: universe.name,
@@ -815,6 +829,7 @@ mod tests {
             mail,
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
+            doc_rooms: crate::ws::new_room_manager(),
         });
         let router = build_router(state, None);
         let tmp = tempdir().unwrap(); // keep alive
