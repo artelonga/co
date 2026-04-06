@@ -5,11 +5,23 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post},
 };
+use serde::Serialize;
 
 use crate::auth::UserId;
 use crate::error::AppError;
 use crate::models::*;
 use crate::server::AppState;
+
+/// Public universe info returned by GET /:slug — no sensitive owner_id.
+#[derive(Debug, Serialize)]
+pub struct UniverseInfo {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub content_count: i64,
+    pub is_anonymous: bool,
+    pub is_template: bool,
+}
 
 fn lock_storage(
     state: &AppState,
@@ -181,8 +193,10 @@ pub async fn clone_universe(
     }
 
     // Use authenticated user ID if Bearer token is present and valid, else anon
-    let owner_id = extract_optional_user_id(&headers, &state)
-        .unwrap_or_else(|| format!("anon-{}", nanoid::nanoid!(10)));
+    let maybe_auth_id = extract_optional_user_id(&headers, &state);
+    let is_anon = maybe_auth_id.is_none();
+    let anon_id = format!("anon-{}", nanoid::nanoid!(10));
+    let owner_id = maybe_auth_id.unwrap_or_else(|| anon_id.clone());
 
     let universe = lock_storage(&state)?.clone_universe(
         &source_slug,
@@ -192,7 +206,80 @@ pub async fn clone_universe(
         &owner_id,
     )?;
 
-    Ok((StatusCode::CREATED, Json(universe)))
+    let mut response_headers = axum::http::HeaderMap::new();
+    if is_anon {
+        // Issue an anon JWT as session cookie so the browser can make write requests.
+        let secret =
+            std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".to_string());
+        if let Ok((token, _)) = crate::auth::sign_jwt(&anon_id, "", "anon", &secret) {
+            let cookie =
+                format!("session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=2592000");
+            if let Ok(val) = axum::http::HeaderValue::from_str(&cookie) {
+                response_headers.append(header::SET_COOKIE, val);
+            }
+        }
+        // Also set co_universe_owner cookie (for the claim endpoint)
+        let owner_cookie =
+            format!("co_universe_owner={anon_id}; Path=/; SameSite=Lax; HttpOnly; Max-Age=2592000");
+        if let Ok(val) = axum::http::HeaderValue::from_str(&owner_cookie) {
+            response_headers.append(header::SET_COOKIE, val);
+        }
+    }
+
+    Ok((StatusCode::CREATED, response_headers, Json(universe)))
+}
+
+// GET /api/v1/universes/:slug — public universe info (content_count, no owner_id)
+pub async fn get_universe_info(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<UniverseInfo>, AppError> {
+    let storage = lock_storage(&state)?;
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+    Ok(Json(UniverseInfo {
+        key: universe.key,
+        name: universe.name,
+        description: universe.description,
+        content_count: universe.content_count,
+        is_anonymous: universe.owner_id.starts_with("anon-"),
+        is_template: universe.is_template,
+    }))
+}
+
+// POST /api/v1/universes/:slug/claim — authenticated user claims an anonymous universe
+pub async fn claim_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+    headers: HeaderMap,
+) -> Result<Json<Universe>, AppError> {
+    // Read co_universe_owner cookie
+    let anon_id = extract_cookie(&headers, "co_universe_owner")
+        .ok_or_else(|| AppError::BadRequest("Missing co_universe_owner cookie".into()))?;
+
+    let universe = lock_storage(&state)?
+        .claim_universe(&slug, &user_id.0, &anon_id)
+        .map_err(|e| AppError::Forbidden(e.to_string()))?;
+
+    Ok(Json(universe))
+}
+
+/// Extract a named cookie value from the Cookie header.
+fn extract_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
+    let cookie_header = headers.get("cookie")?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        let prefix = format!("{name}=");
+        if let Some(val) = part.strip_prefix(&prefix) {
+            let val = val.trim();
+            if !val.is_empty() {
+                return Some(val.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Try to extract a user ID from the Authorization header without hard-failing.
@@ -210,6 +297,7 @@ fn extract_optional_user_id(headers: &HeaderMap, _state: &AppState) -> Option<St
 pub fn router() -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
+        .route("/{slug}", get(get_universe_info))
         .route("/{slug}/projects", get(list_universe_projects))
         .route("/{slug}/clone", post(clone_universe));
 
@@ -218,6 +306,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_universes).post(create_universe))
         .route("/{key}/members", get(list_members).post(add_member))
         .route("/{key}/members/{user_id}", delete(remove_member))
+        .route("/{slug}/claim", post(claim_universe))
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)

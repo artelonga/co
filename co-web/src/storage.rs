@@ -249,6 +249,24 @@ impl Storage {
                 )
                 .expect("Failed to run migration v10");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 11 {
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE universes ADD COLUMN content_count INTEGER NOT NULL DEFAULT 0;
+                     INSERT INTO schema_version (version) VALUES (11);",
+                )
+                .expect("Failed to run migration v11");
+        }
     }
 
     /// List universe keys a user is a member of.
@@ -1216,13 +1234,14 @@ impl Storage {
             created_at: now,
             is_template: false,
             is_public: false,
+            content_count: 0,
         })
     }
 
     pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
         self.conn
             .query_row(
-                "SELECT key, name, description, owner_id, created_at, is_template, is_public \
+                "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -1234,6 +1253,7 @@ impl Storage {
                         created_at: parse_datetime(&row.get::<_, String>(4)?),
                         is_template: row.get::<_, i64>(5)? != 0,
                         is_public: row.get::<_, i64>(6)? != 0,
+                        content_count: row.get::<_, i64>(7).unwrap_or(0),
                     })
                 },
             )
@@ -1244,7 +1264,7 @@ impl Storage {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, u.is_template, u.is_public \
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, u.is_template, u.is_public, u.content_count \
                  FROM universes u \
                  JOIN universe_members um ON um.universe_key = u.key \
                  WHERE um.user_id = ?1 \
@@ -1260,6 +1280,7 @@ impl Storage {
                 created_at: parse_datetime(&row.get::<_, String>(4)?),
                 is_template: row.get::<_, i64>(5)? != 0,
                 is_public: row.get::<_, i64>(6)? != 0,
+                content_count: row.get::<_, i64>(7).unwrap_or(0),
             })
         })
         .expect("Failed to list universes for user")
@@ -1356,6 +1377,124 @@ impl Storage {
             params![universe_key, user_id],
         )?;
         Ok(())
+    }
+
+    // --- Usage gate / content count ---
+
+    /// Return the universe_key for a given project key, or None if not found.
+    pub fn get_project_universe_key(&self, project_key: &str) -> Option<String> {
+        let upper = project_key.to_uppercase();
+        self.conn
+            .query_row(
+                "SELECT universe_key FROM projects WHERE key = ?1",
+                params![upper],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    /// Increment content_count for a universe and return the new value.
+    pub fn increment_universe_content_count(&mut self, universe_key: &str) -> i64 {
+        self.conn
+            .execute(
+                "UPDATE universes SET content_count = content_count + 1 WHERE key = ?1",
+                params![universe_key],
+            )
+            .ok();
+        self.conn
+            .query_row(
+                "SELECT content_count FROM universes WHERE key = ?1",
+                params![universe_key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// Decrement content_count for a universe by `by`, flooring at 0.
+    pub fn decrement_universe_content_count(&mut self, universe_key: &str, by: i64) {
+        self.conn
+            .execute(
+                "UPDATE universes SET content_count = MAX(0, content_count - ?1) WHERE key = ?2",
+                params![by, universe_key],
+            )
+            .ok();
+    }
+
+    /// Count comments for a specific task.
+    pub fn count_task_comments(&self, project_key: &str, task_id: u64) -> i64 {
+        let upper = project_key.to_uppercase();
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM comments WHERE project_key = ?1 AND task_id = ?2",
+                params![upper, task_id as i64],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// Count all tasks and their comments for a project (used for delete_project decrement).
+    pub fn count_project_content(&self, project_key: &str) -> i64 {
+        let upper = project_key.to_uppercase();
+        let tasks: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM tasks WHERE project_key = ?1",
+                params![upper],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        let comments: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM comments WHERE project_key = ?1",
+                params![upper],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        tasks + comments
+    }
+
+    /// Claim an anonymous universe: transfer ownership to a real user.
+    /// `anon_id` must match the universe's current owner_id (must start with "anon-").
+    pub fn claim_universe(
+        &mut self,
+        slug: &str,
+        user_id: &str,
+        anon_id: &str,
+    ) -> anyhow::Result<crate::models::Universe> {
+        let universe = self
+            .get_universe(slug)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", slug))?;
+
+        if !universe.owner_id.starts_with("anon-") {
+            anyhow::bail!("Universe '{}' is not an anonymous universe", slug);
+        }
+        if universe.owner_id != anon_id {
+            anyhow::bail!("Owner cookie does not match universe owner");
+        }
+
+        let now_str = Utc::now().to_rfc3339();
+
+        // Transfer ownership
+        self.conn.execute(
+            "UPDATE universes SET owner_id = ?1 WHERE key = ?2",
+            params![user_id, slug],
+        )?;
+
+        // Replace anon member with real user
+        self.conn.execute(
+            "DELETE FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            params![slug, anon_id],
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+             VALUES (?1, ?2, 'owner', ?3)",
+            params![slug, user_id, now_str],
+        )?;
+
+        self.get_universe(slug)
+            .ok_or_else(|| anyhow::anyhow!("Universe not found after claim"))
     }
 
     // --- Check if data exists ---
@@ -1617,6 +1756,8 @@ impl Storage {
             params![new_key, owner_id, now_str],
         )?;
 
+        let mut cloned_entries: i64 = 0;
+
         // Collect source projects
         let source_projects: Vec<(String, String, String, i64)> = {
             let mut stmt = self.conn.prepare(
@@ -1644,6 +1785,7 @@ impl Storage {
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![new_pkey, pname, pdesc, next_id, now_str, new_key],
             )?;
+            cloned_entries += 1;
 
             // Copy tasks (collect as raw SQL, then re-insert under new project key)
             type TaskRow = (
@@ -1689,8 +1831,15 @@ impl Storage {
                         now_str, now_str,
                     ],
                 )?;
+                cloned_entries += 1;
             }
         }
+
+        // Set content_count to the number of entries cloned (projects + tasks)
+        self.conn.execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            params![cloned_entries, new_key],
+        )?;
 
         Ok(crate::models::Universe {
             key: new_key.to_string(),
@@ -1700,6 +1849,7 @@ impl Storage {
             created_at: now,
             is_template: false,
             is_public: false,
+            content_count: cloned_entries,
         })
     }
 

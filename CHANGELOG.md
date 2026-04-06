@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-23: Usage gate — 100 entries free, then account required
+- `universes.content_count` column (migration v11): cached counter incremented/decremented on writes and deletes
+- Middleware-style `check_usage_gate` helper: returns 402 Payment Required for anonymous universes at or above 100 entries
+- Anonymous write access: `clone_universe` issues an anon JWT session cookie + `co_universe_owner` cookie for claiming
+- `POST /api/v1/universes/:slug/claim` — authenticated user claims an anonymous universe (cookie must match)
+- `GET /api/v1/universes/:slug` — public universe info: `content_count`, `is_anonymous`, `is_template`
+- 402 response body: `{ "error": "usage_limit", "message": "Crie uma conta para continuar", "message_en": "...", "current": N, "limit": 100 }`
+- Frontend (variant a): 402 → usage limit modal with "Criar conta" / "Entrar" buttons; content count badge in header
+- After login with anonymous universe: auto-claim transfers ownership to real user
+- Unit test: 99 entries OK, 100th OK, 101st blocked (402), unblocked after claim
+
+---
+
 ## [Unreleased] — co-web E2E Testing (UX-50 Epic)
 
 ### co-web

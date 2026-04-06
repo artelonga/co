@@ -1040,3 +1040,182 @@ async fn test_list_tasks_with_pagination() {
     let tasks: Vec<Task> = serde_json::from_str(&body).unwrap();
     assert_eq!(tasks.len(), 2); // 7 total, offset 5 → 2 remaining
 }
+
+// --- Usage Gate Tests (CO-23) ---
+
+/// Build a test router with an isolated storage (no seed data).
+fn build_blank_test_router(dir: &std::path::Path) -> (axum::Router, AppState) {
+    let config = test_config(dir);
+    let storage = Storage::new(&config.data_dir);
+    let experiment = ExperimentStore::new(&config.data_dir);
+    let auth_store = co_web::auth::AuthStore::new(dir).unwrap();
+    let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
+    let game_db_path = dir.join("game_test.db");
+    let game_storage = std::sync::Arc::new(
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
+    );
+    let state: AppState = Arc::new(AppStateInner {
+        storage: Mutex::new(storage),
+        experiment: Mutex::new(experiment),
+        config,
+        auth_store: Mutex::new(auth_store),
+        mail,
+        game_storage,
+        plugin_registry: game_core::plugin::PluginRegistry::new(),
+    });
+    let router = build_router(state.clone(), None);
+    (router, state)
+}
+
+/// Generate an anon JWT (sub = "anon-test") for session cookie.
+fn anon_session_cookie() -> String {
+    let (token, _) =
+        co_web::auth::sign_jwt("anon-test", "", "anon", "dev-secret-change-me").unwrap();
+    format!("session={token}")
+}
+
+/// Generate a real user JWT.
+fn real_user_bearer() -> String {
+    let (token, _) = co_web::auth::sign_jwt(
+        "real-user",
+        "user@example.com",
+        "player",
+        "dev-secret-change-me",
+    )
+    .unwrap();
+    format!("Bearer {token}")
+}
+
+#[tokio::test]
+async fn test_usage_gate_anon_blocked_at_101() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (_app, state) = build_blank_test_router(dir.path());
+
+    // Set up: create a universe owned by "anon-test", one project
+    {
+        let mut storage = state.storage.lock().unwrap();
+        // Seed template universe so clone works
+        storage.seed_template_universe();
+    }
+
+    // Set up anonymous universe + project directly in storage
+    {
+        let mut storage = state.storage.lock().unwrap();
+        storage
+            .create_universe(
+                co_web::models::CreateUniverse {
+                    key: "test-uni".to_string(),
+                    name: "Test Universe".to_string(),
+                    description: "".to_string(),
+                },
+                "anon-test",
+            )
+            .unwrap();
+        storage
+            .create_project(co_web::models::CreateProject {
+                name: "Test Project".to_string(),
+                key: "TP".to_string(),
+                description: "".to_string(),
+                universe_key: Some("test-uni".to_string()),
+            })
+            .unwrap();
+        // Manually set content_count to 99 (simulating 99 prior entries)
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET content_count = 99 WHERE key = 'test-uni'",
+                [],
+            )
+            .unwrap();
+    }
+
+    // Build the app after state is set up
+    let app = build_router(state.clone(), None);
+
+    // The 100th entry (count goes 99→100): should succeed
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects/TP/tasks")
+                .header("cookie", anon_session_cookie())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"title":"Task 100","status":"todo","priority":"medium","labels":[]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "100th entry should succeed"
+    );
+
+    // content_count is now 100; the 101st entry should be blocked
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects/TP/tasks")
+                .header("cookie", anon_session_cookie())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"title":"Task 101","status":"todo","priority":"medium","labels":[]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::PAYMENT_REQUIRED,
+        "101st entry should be blocked with 402"
+    );
+
+    let body = body_to_string(response.into_body()).await;
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["error"], "usage_limit");
+    assert_eq!(json["current"], 100);
+    assert_eq!(json["limit"], 100);
+
+    // After claiming the universe (set owner to real user), writes should succeed
+    {
+        let storage = state.storage.lock().unwrap();
+        // Claim: set owner_id to real-user
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET owner_id = 'real-user' WHERE key = 'test-uni'",
+                [],
+            )
+            .unwrap();
+    }
+
+    let response = build_router(state.clone(), None)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects/TP/tasks")
+                .header("authorization", real_user_bearer())
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"title":"Task 101 after claim","status":"todo","priority":"medium","labels":[]}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::CREATED,
+        "After claim, writes should be unblocked"
+    );
+}

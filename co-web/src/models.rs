@@ -356,6 +356,8 @@ pub struct Universe {
     pub is_template: bool,
     #[serde(default)]
     pub is_public: bool,
+    #[serde(default)]
+    pub content_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -605,6 +605,20 @@ fn guard_template(state: &AppState, project_key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+/// Check whether a universe has hit the anonymous usage limit (100 entries).
+/// Returns Ok(()) if allowed, Err(AppError::UsageLimitExceeded) if blocked.
+fn check_usage_gate(storage: &crate::storage::Storage, universe_key: &str) -> Result<(), AppError> {
+    let Some(universe) = storage.get_universe(universe_key) else {
+        return Ok(()); // Unknown universe — let it through (other validation will catch it)
+    };
+    if universe.owner_id.starts_with("anon-") && universe.content_count >= 100 {
+        return Err(AppError::UsageLimitExceeded {
+            current: universe.content_count,
+        });
+    }
+    Ok(())
+}
+
 // --- Project Handlers ---
 
 async fn list_projects(
@@ -645,10 +659,25 @@ async fn create_project(
     }
 
     let mut storage = lock_storage(&state)?;
-    storage
+
+    // Check usage gate for universe-scoped projects.
+    if let Some(ref ukey) = body.universe_key {
+        check_usage_gate(&storage, ukey)?;
+    }
+
+    // Capture the universe_key before consuming body.
+    let universe_key = body.universe_key.clone();
+
+    let project = storage
         .create_project(body)
-        .map(|p| (StatusCode::CREATED, Json(p)))
-        .map_err(|e| AppError::Conflict(e.to_string()))
+        .map_err(|e| AppError::Conflict(e.to_string()))?;
+
+    // Increment content_count for the universe.
+    if let Some(ref ukey) = universe_key {
+        storage.increment_universe_content_count(ukey);
+    }
+
+    Ok((StatusCode::CREATED, Json(project)))
 }
 
 async fn delete_project(
@@ -657,10 +686,23 @@ async fn delete_project(
 ) -> Result<StatusCode, AppError> {
     guard_template(&state, &key)?;
     let mut storage = lock_storage(&state)?;
+
+    let universe_key = storage.get_project_universe_key(&key);
+    let project_content = universe_key
+        .as_deref()
+        .map(|_| storage.count_project_content(&key))
+        .unwrap_or(0);
+
     storage
         .delete_project(&key)
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|_| AppError::NotFound(format!("Project '{}' not found", key)))
+        .map_err(|_| AppError::NotFound(format!("Project '{}' not found", key)))?;
+
+    // Decrement: 1 for the project itself + tasks + their comments
+    if let Some(ref ukey) = universe_key {
+        storage.decrement_universe_content_count(ukey, 1 + project_content);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // --- Task Handlers ---
@@ -702,6 +744,17 @@ async fn create_task(
     validate_labels(&body.labels)?;
 
     let mut storage = lock_storage(&state)?;
+
+    // Check usage gate.
+    if let Some(ukey) = storage.get_project_universe_key(&key) {
+        check_usage_gate(&storage, &ukey)?;
+        let task = storage
+            .create_task(&key, body)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        storage.increment_universe_content_count(&ukey);
+        return Ok((StatusCode::CREATED, Json(task)));
+    }
+
     storage
         .create_task(&key, body)
         .map(|t| (StatusCode::CREATED, Json(t)))
@@ -737,10 +790,22 @@ async fn delete_task(
 ) -> Result<StatusCode, AppError> {
     guard_template(&state, &key)?;
     let mut storage = lock_storage(&state)?;
+
+    let universe_key = storage.get_project_universe_key(&key);
+    let comment_count = universe_key
+        .as_deref()
+        .map(|_| storage.count_task_comments(&key, id))
+        .unwrap_or(0);
+
     storage
         .delete_task(&key, id)
-        .map(|_| StatusCode::NO_CONTENT)
-        .map_err(|e| AppError::NotFound(e.to_string()))
+        .map_err(|e| AppError::NotFound(e.to_string()))?;
+
+    if let Some(ref ukey) = universe_key {
+        storage.decrement_universe_content_count(ukey, 1 + comment_count);
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // --- Comment Handlers ---
@@ -763,6 +828,17 @@ async fn create_comment(
     validate_comment_author(&body.author)?;
 
     let mut storage = lock_storage(&state)?;
+
+    // Check usage gate.
+    if let Some(ukey) = storage.get_project_universe_key(&key) {
+        check_usage_gate(&storage, &ukey)?;
+        let comment = storage
+            .create_comment(&key, id, body)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        storage.increment_universe_content_count(&ukey);
+        return Ok((StatusCode::CREATED, Json(comment)));
+    }
+
     storage
         .create_comment(&key, id, body)
         .map(|c| (StatusCode::CREATED, Json(c)))

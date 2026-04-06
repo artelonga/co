@@ -53,6 +53,7 @@
                 <div class="header-left">
                     <h1 id="project-name" data-i18n="select_project">Selecione um projeto</h1>
                     <span class="header-desc" id="project-desc"></span>
+                    <span class="usage-count hidden" id="usage-count"></span>
                 </div>
                 <div class="header-right">
                     <div class="view-tabs" id="view-tabs">
@@ -222,6 +223,24 @@
                     </div>
                 </div>
             </form>
+        </div>
+    </div>
+
+    <!-- Usage Limit Modal (shown when anonymous user hits 100 entries) -->
+    <div id="usage-limit-overlay" class="login-screen hidden">
+        <div class="login-card">
+            <div class="login-header">
+                <span class="login-logo">B</span>
+                <h1 class="login-title" id="usage-limit-title">Limite atingido</h1>
+                <p class="login-subtitle" id="usage-limit-msg">Você atingiu 100 entradas. Crie uma conta gratuita para continuar.</p>
+            </div>
+            <div class="form-actions" style="flex-direction:column;gap:0.5rem">
+                <a href="/api/v1/auth/register" class="btn btn-primary btn-full" id="btn-usage-register">Criar conta</a>
+                <button type="button" class="btn btn-secondary btn-full" id="btn-usage-login">Entrar</button>
+            </div>
+            <div class="login-footer">
+                <button class="btn-text-sm lang-toggle" id="btn-usage-lang">EN</button>
+            </div>
         </div>
     </div>
 

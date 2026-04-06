@@ -30,6 +30,7 @@
         // Universe routing
         currentUniverseSlug: 'template',
         isTemplate: false,
+        universeInfo: null,
     };
 
     const STATUSES = [
@@ -109,13 +110,13 @@
                     if (!silent401) showLoginModal();
                     return null;
                 }
-                let errMsg = 'Request error';
-                try {
-                    const errData = await r.json();
-                    errMsg = errData.message || errData.error || errMsg;
-                } catch (_) {
-                    // ignore parse error
+                let errData = null;
+                try { errData = await r.json(); } catch (_) {}
+                if (r.status === 402 && errData && errData.error === 'usage_limit') {
+                    showUsageLimitModal(errData);
+                    return null;
                 }
+                const errMsg = (errData && (errData.message || errData.error)) || 'Request error';
                 showToast(errMsg, 'error');
                 return null;
             }
@@ -238,6 +239,12 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
             });
+        },
+        async getUniverseInfo(slug) {
+            return apiFetch(`/api/v1/universes/${slug}`, {}, true);
+        },
+        async claimUniverse(slug) {
+            return apiFetch(`/api/v1/universes/${slug}/claim`, { method: 'POST' }, true);
         },
     };
 
@@ -500,6 +507,30 @@
         const p = state.currentProject;
         $('#project-name').textContent = p ? p.name : 'Select a project';
         $('#project-desc').textContent = p ? (p.description || '') : '';
+        renderUsageCount();
+    }
+
+    function renderUsageCount() {
+        const el = document.getElementById('usage-count');
+        if (!el) return;
+        const info = state.universeInfo;
+        if (!info || state.isTemplate) {
+            el.classList.add('hidden');
+            return;
+        }
+        el.classList.remove('hidden');
+        if (info.is_anonymous) {
+            el.textContent = `${info.content_count} / 100 entradas`;
+        } else {
+            el.textContent = `${info.content_count} entradas`;
+        }
+    }
+
+    function incrementLocalUsageCount() {
+        if (state.universeInfo) {
+            state.universeInfo.content_count += 1;
+            renderUsageCount();
+        }
     }
 
     // ===== Render: Mini Calendar (sidebar, for timeline) =====
@@ -2266,6 +2297,7 @@
                 if (result) {
                     showToast('Comment added', 'success');
                     loadComments(taskId);
+                    incrementLocalUsageCount();
                 }
             });
         }
@@ -2381,6 +2413,7 @@
 
         if (result) {
             showToast(state.editingTaskId ? 'Task updated' : 'Task created', 'success');
+            if (!state.editingTaskId) incrementLocalUsageCount();
             closeModal();
             await refreshTasks();
             render();
@@ -2783,6 +2816,46 @@
         document.documentElement.lang = currentLang === 'pt' ? 'pt-BR' : 'en';
     }
 
+    // ===== Usage Limit Modal =====
+
+    function showUsageLimitModal(data) {
+        const overlay = document.getElementById('usage-limit-overlay');
+        if (!overlay) return;
+        const titleEl = document.getElementById('usage-limit-title');
+        const msgEl = document.getElementById('usage-limit-msg');
+        const current = data && data.current != null ? data.current : 100;
+        if (currentLang === 'en') {
+            if (titleEl) titleEl.textContent = 'Limit reached';
+            if (msgEl) msgEl.textContent = `You've reached ${current} entries. Create a free account to continue.`;
+        } else {
+            if (titleEl) titleEl.textContent = 'Limite atingido';
+            if (msgEl) msgEl.textContent = `Você atingiu ${current} entradas. Crie uma conta gratuita para continuar.`;
+        }
+        overlay.classList.remove('hidden');
+    }
+
+    function hideUsageLimitModal() {
+        const overlay = document.getElementById('usage-limit-overlay');
+        if (overlay) overlay.classList.add('hidden');
+    }
+
+    function setupUsageLimitModal() {
+        const btnLogin = document.getElementById('btn-usage-login');
+        const btnLang = document.getElementById('btn-usage-lang');
+        if (btnLogin) {
+            btnLogin.addEventListener('click', () => {
+                hideUsageLimitModal();
+                showLoginModal();
+            });
+        }
+        if (btnLang) {
+            btnLang.addEventListener('click', () => {
+                currentLang = currentLang === 'pt' ? 'en' : 'pt';
+                btnLang.textContent = currentLang === 'pt' ? 'EN' : 'PT';
+            });
+        }
+    }
+
     // ===== Auth UI =====
 
     function showLoginModal() {
@@ -2838,6 +2911,12 @@
 
             if (r && r.usuario) {
                 hideLoginModal();
+                // Claim anonymous universe if we were in one
+                if (state.universeInfo && state.universeInfo.is_anonymous) {
+                    await api.claimUniverse(state.currentUniverseSlug);
+                    if (state.universeInfo) state.universeInfo.is_anonymous = false;
+                    renderUsageCount();
+                }
                 const me = await api.me();
                 if (me) renderUserBadge(me);
                 await bootApp();
@@ -2957,6 +3036,16 @@
             setUniverseSlugInUrl(result.key);
             state.currentUniverseSlug = result.key;
             state.isTemplate = false;
+            // Seed universe info from clone response (content_count already set)
+            state.universeInfo = {
+                key: result.key,
+                name: result.name,
+                description: result.description,
+                content_count: result.content_count || 0,
+                is_anonymous: result.owner_id ? result.owner_id.startsWith('anon-') : true,
+                is_template: false,
+            };
+            renderUsageCount();
             hideTemplateBanner();
             await bootAppForUniverse(result.key);
         });
@@ -2983,6 +3072,12 @@
 
     async function bootAppForUniverse(slug) {
         showLoading();
+        // Load universe info (content_count, is_anonymous) for the header badge.
+        const info = await api.getUniverseInfo(slug);
+        if (info) {
+            state.universeInfo = info;
+            renderUsageCount();
+        }
         state.projects = await api.getUniverseProjects(slug);
         if (state.projects.length > 0) {
             await selectProject(state.projects[0].key);
@@ -2998,6 +3093,7 @@
         setupHamburgerMenu();
         setupLoginModal();
         setupCriarModal();
+        setupUsageLimitModal();
 
         const slug = readUniverseSlugFromUrl();
         state.currentUniverseSlug = slug;
@@ -3017,14 +3113,32 @@
             return;
         }
 
-        // Non-template universe: require auth
-        showLoginModal();
+        // Non-template universe: try auth silently.
         const me = await api.me();
-        if (!me) return;
+        if (me) {
+            hideLoginModal();
+            renderUserBadge(me);
+            await bootAppForUniverse(slug);
+            return;
+        }
 
-        hideLoginModal();
-        renderUserBadge(me);
-        await bootAppForUniverse(slug);
+        // Not authenticated via full account — check if this is an anonymous universe.
+        // Anonymous users have a session cookie (anon JWT) set during clone.
+        const info = await api.getUniverseInfo(slug);
+        if (info && info.is_anonymous) {
+            // Anonymous universe owner: boot without requiring login
+            state.universeInfo = info;
+            renderUsageCount();
+            state.projects = await api.getUniverseProjects(slug);
+            if (state.projects.length > 0) {
+                await selectProject(state.projects[0].key);
+            }
+            render();
+            return;
+        }
+
+        // Authenticated universe with no session: show login modal
+        showLoginModal();
     }
 
     init();
