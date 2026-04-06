@@ -33,6 +33,20 @@ impl std::fmt::Display for AppError {
     }
 }
 
+fn translate_error_pt(error: &str) -> &'static str {
+    match error {
+        "not_found" => "Não encontrado",
+        "conflict" => "Conflito",
+        "bad_request" => "Requisição inválida",
+        "internal_error" => "Erro interno do servidor",
+        "unauthorized" => "Não autorizado",
+        "forbidden" => "Acesso negado",
+        "gone" => "Recurso removido",
+        "too_many_requests" => "Muitas requisições. Tente novamente em instantes.",
+        _ => "Erro",
+    }
+}
+
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         if let AppError::UsageLimitExceeded { current } = self {
@@ -60,9 +74,11 @@ impl IntoResponse for AppError {
             AppError::UsageLimitExceeded { .. } => unreachable!(),
         };
 
+        let message_pt = translate_error_pt(error);
         let body = json!({
             "error": error,
-            "message": message,
+            "message": message_pt,
+            "message_en": message,
         });
 
         (status, axum::Json(body)).into_response()

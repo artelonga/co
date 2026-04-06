@@ -62,7 +62,7 @@
                         <button class="view-tab" data-view="timeline" data-i18n="timeline">Linha do Tempo</button>
                         <button class="view-tab" data-view="calendar" data-i18n="calendar">Calendário</button>
                         <button class="view-tab" data-view="dashboard" data-i18n="dashboard">Painel</button>
-                        <button class="view-tab" data-view="conteudo">Conteúdo</button>
+                        <button class="view-tab" data-view="conteudo" data-i18n="conteudo">Conteúdo</button>
                     </div>
                     <div class="view-tabs hidden" id="zoom-tabs">
                         <button class="view-tab" data-zoom="week" data-i18n="week">Semana</button>
@@ -80,6 +80,7 @@
                     </label>
                     <input type="search" class="search-input" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
                     <div id="palette-switcher" class="palette-switcher-slot"></div>
+                    <button class="btn-text-sm lang-toggle" id="btn-header-lang" data-i18n="lang.switch">English</button>
                     <button class="btn btn-primary" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
                 </div>
             </header>
@@ -174,12 +175,12 @@
             </form>
             <!-- Comments Section -->
             <div class="comments-section" id="comments-section" style="display:none">
-                <h3 class="comments-title">Comments</h3>
+                <h3 class="comments-title" data-i18n="form.comments_title">Comentários</h3>
                 <div class="comments-list" id="comments-list"></div>
                 <div class="comment-form">
-                    <input type="text" id="comment-author" placeholder="Name (optional)" autocomplete="off">
-                    <textarea id="comment-body" rows="2" placeholder="Add a comment..."></textarea>
-                    <button type="button" class="btn btn-primary btn-sm" id="btn-add-comment">Comment</button>
+                    <input type="text" id="comment-author" data-i18n-placeholder="form.comment_name" placeholder="Nome (opcional)" autocomplete="off">
+                    <textarea id="comment-body" rows="2" data-i18n-placeholder="form.comment_placeholder" placeholder="Adicionar um comentário..."></textarea>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-add-comment" data-i18n="action.comment">Comentar</button>
                 </div>
             </div>
         </div>
@@ -189,12 +190,12 @@
     <div id="template-banner" class="template-banner hidden">
         <div class="template-banner-inner">
             <div class="template-hero">
-                <h2 class="template-hero-title" id="template-hero-title">CO — Gestão de conteúdo em grafo</h2>
-                <p class="template-hero-sub" id="template-hero-sub">Quadro demonstrativo — leitura apenas. Clone para começar o seu.</p>
+                <h2 class="template-hero-title" id="template-hero-title" data-i18n="universe.template_title">CO — Gestão de conteúdo em grafo</h2>
+                <p class="template-hero-sub" id="template-hero-sub" data-i18n="universe.template_sub">Quadro demonstrativo — leitura apenas. Clone para começar o seu.</p>
             </div>
             <div class="template-cta">
-                <button class="btn btn-primary btn-lg" id="btn-criar-universo">Criar universo</button>
-                <button class="btn btn-secondary" id="btn-banner-entrar">Entrar</button>
+                <button class="btn btn-primary btn-lg" id="btn-criar-universo" data-i18n="action.clone">Criar universo</button>
+                <button class="btn btn-secondary" id="btn-banner-entrar" data-i18n="action.login">Entrar</button>
             </div>
         </div>
     </div>
@@ -203,24 +204,24 @@
     <div id="criar-modal-overlay" class="modal-overlay hidden">
         <div class="modal" id="criar-modal">
             <div class="modal-header">
-                <h2 id="criar-modal-title">Criar universo</h2>
+                <h2 id="criar-modal-title" data-i18n="action.clone">Criar universo</h2>
                 <button class="modal-close" id="criar-modal-close">&times;</button>
             </div>
             <form id="criar-form">
                 <div class="form-group">
-                    <label for="criar-name">Nome</label>
+                    <label for="criar-name" data-i18n="form.name">Nome</label>
                     <input type="text" id="criar-name" required autocomplete="off" placeholder="Meu Projeto">
                 </div>
                 <div class="form-group">
-                    <label for="criar-slug">Slug (URL)</label>
+                    <label for="criar-slug" data-i18n="form.slug">Slug (URL)</label>
                     <input type="text" id="criar-slug" required autocomplete="off" placeholder="meu-projeto" pattern="[a-z0-9-]{2,40}">
-                    <small>Apenas letras minúsculas, números e hífens (2–40 caracteres)</small>
+                    <small data-i18n="form.slug_hint">Apenas letras minúsculas, números e hífens (2–40 caracteres)</small>
                 </div>
                 <p id="criar-error" class="form-error hidden"></p>
                 <div class="form-actions">
                     <div class="form-actions-right">
-                        <button type="button" class="btn btn-secondary" id="criar-cancel">Cancelar</button>
-                        <button type="submit" class="btn btn-primary" id="criar-submit">Criar</button>
+                        <button type="button" class="btn btn-secondary" id="criar-cancel" data-i18n="action.cancel">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="criar-submit" data-i18n="action.create">Criar</button>
                     </div>
                 </div>
             </form>
@@ -236,11 +237,11 @@
                 <p class="login-subtitle" id="usage-limit-msg">Você atingiu 100 entradas. Crie uma conta gratuita para continuar.</p>
             </div>
             <div class="form-actions" style="flex-direction:column;gap:0.5rem">
-                <a href="/api/v1/auth/register" class="btn btn-primary btn-full" id="btn-usage-register">Criar conta</a>
-                <button type="button" class="btn btn-secondary btn-full" id="btn-usage-login">Entrar</button>
+                <a href="/api/v1/auth/register" class="btn btn-primary btn-full" id="btn-usage-register" data-i18n="action.register">Criar conta</a>
+                <button type="button" class="btn btn-secondary btn-full" id="btn-usage-login" data-i18n="action.login">Entrar</button>
             </div>
             <div class="login-footer">
-                <button class="btn-text-sm lang-toggle" id="btn-usage-lang">EN</button>
+                <button class="btn-text-sm lang-toggle" id="btn-usage-lang" data-i18n="lang.switch">English</button>
             </div>
         </div>
     </div>
@@ -270,7 +271,7 @@
             </div>
 
             <div class="login-footer">
-                <button class="btn-text-sm lang-toggle" id="btn-lang-toggle">EN</button>
+                <button class="btn-text-sm lang-toggle" id="btn-lang-toggle" data-i18n="lang.switch">English</button>
             </div>
         </div>
     </div>
@@ -279,12 +280,12 @@
     <div id="settings-modal-overlay" class="modal-overlay hidden">
         <div class="modal" id="settings-modal">
             <div class="modal-header">
-                <h2>Configurações do universo</h2>
+                <h2 data-i18n="universe.settings">Configurações do universo</h2>
                 <button class="modal-close" id="settings-modal-close">&times;</button>
             </div>
             <form id="settings-form">
                 <div class="form-group">
-                    <label for="settings-theme">Tema</label>
+                    <label for="settings-theme" data-i18n="form.theme">Tema</label>
                     <select id="settings-theme">
                         <option value="scholarly-light">Scholarly Light</option>
                         <option value="scholarly-dark">Scholarly Dark</option>
@@ -293,33 +294,34 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="settings-layout">Layout padrão</label>
+                    <label for="settings-layout" data-i18n="form.layout">Layout padrão</label>
                     <select id="settings-layout">
-                        <option value="board">Quadro (Kanban)</option>
-                        <option value="table">Tabela</option>
-                        <option value="timeline">Linha do Tempo</option>
-                        <option value="calendar">Calendário</option>
-                        <option value="dashboard">Painel</option>
+                        <option value="board" data-i18n="board_layout">Quadro (Kanban)</option>
+                        <option value="table" data-i18n="table">Tabela</option>
+                        <option value="timeline" data-i18n="timeline">Linha do Tempo</option>
+                        <option value="calendar" data-i18n="calendar">Calendário</option>
+                        <option value="dashboard" data-i18n="dashboard">Painel</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="settings-font-headline">Fonte de títulos (Google Fonts)</label>
+                    <label for="settings-font-headline" data-i18n="form.font_headline">Fonte de títulos (Google Fonts)</label>
                     <input type="text" id="settings-font-headline" placeholder="Ex: Newsreader" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label for="settings-font-body">Fonte de texto (Google Fonts)</label>
+                    <label for="settings-font-body" data-i18n="form.font_body">Fonte de texto (Google Fonts)</label>
                     <input type="text" id="settings-font-body" placeholder="Ex: Work Sans" autocomplete="off">
                 </div>
                 <div class="form-actions">
                     <div class="form-actions-right">
-                        <button type="button" class="btn btn-secondary" id="settings-cancel">Cancelar</button>
-                        <button type="submit" class="btn btn-primary" id="settings-save">Salvar</button>
+                        <button type="button" class="btn btn-secondary" id="settings-cancel" data-i18n="action.cancel">Cancelar</button>
+                        <button type="submit" class="btn btn-primary" id="settings-save" data-i18n="action.save">Salvar</button>
                     </div>
                 </div>
             </form>
         </div>
     </div>
 
+    <script src="/shared/i18n.js?v=1"></script>
     <script src="/app.js"></script>
     <script src="/shared/experiment.js?v=3"></script>
 </body>

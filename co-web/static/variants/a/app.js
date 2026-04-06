@@ -73,17 +73,41 @@
         if (textarea) textarea.value = initialContent;
     }
 
-    const STATUSES = [
-        { key: 'todo', label: 'To Do', color: '#94a3b8' },
-        { key: 'in_progress', label: 'In Progress', color: '#3b82f6' },
-        { key: 'in_review', label: 'In Review', color: '#f59e0b' },
-        { key: 'done', label: 'Done', color: '#22c55e' },
-    ];
+    // i18n is provided by /shared/i18n.js (loaded before this script).
+    // window.t(), window.setLang(), window.currentLang are available.
 
-    const PRIORITY_LABELS = { low: 'Low', medium: 'Medium', high: 'High', critical: 'Critical' };
+    function buildStatuses() {
+        return [
+            { key: 'todo', label: window.t('status.todo'), color: '#94a3b8' },
+            { key: 'in_progress', label: window.t('status.in_progress'), color: '#3b82f6' },
+            { key: 'in_review', label: window.t('status.in_review'), color: '#f59e0b' },
+            { key: 'done', label: window.t('status.done'), color: '#22c55e' },
+        ];
+    }
+
+    function buildPriorityLabels() {
+        return {
+            low: window.t('priority.low'),
+            medium: window.t('priority.medium'),
+            high: window.t('priority.high'),
+            critical: window.t('priority.critical'),
+        };
+    }
+
+    function buildStatusLabels() {
+        return {
+            todo: window.t('status.todo'),
+            in_progress: window.t('status.in_progress'),
+            in_review: window.t('status.in_review'),
+            done: window.t('status.done'),
+        };
+    }
+
+    let STATUSES = buildStatuses();
+    let PRIORITY_LABELS = buildPriorityLabels();
     const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
     const STATUS_ORDER = { todo: 0, in_progress: 1, in_review: 2, done: 3 };
-    const STATUS_LABELS = { todo: 'To Do', in_progress: 'In Progress', in_review: 'In Review', done: 'Done' };
+    let STATUS_LABELS = buildStatusLabels();
 
     const ZOOM_DAYS = { week: 7, month: 30, quarter: 90 };
     const COL_WIDTHS = { week: 50, month: 40, quarter: 60 };
@@ -2876,130 +2900,15 @@
         }
     });
 
-    // ===== i18n =====
+    // ===== i18n — delegated to /shared/i18n.js =====
+    // window.t(), window.setLang(), window.currentLang are provided by i18n.js.
 
-    const I18N = {
-        pt: {
-            projects: 'Projetos',
-            select_project: 'Selecione um projeto',
-            select_project_hint: 'Selecione um projeto na barra lateral',
-            sign_out: 'Sair',
-            kanban: 'Kanban',
-            table: 'Tabela',
-            timeline: 'Linha do Tempo',
-            calendar: 'Calendário',
-            dashboard: 'Painel',
-            week: 'Semana',
-            month: 'Mês',
-            quarter: 'Trimestre',
-            today: 'Hoje',
-            archived: 'Arquivados',
-            filter_tasks: 'Filtrar tarefas... (/)',
-            new_task: '+ Nova Tarefa',
-            loading: 'Carregando...',
-            activity: 'Atividade',
-            new_task_title: 'Nova Tarefa',
-            title: 'Título',
-            status: 'Status',
-            todo: 'A Fazer',
-            in_progress: 'Em Andamento',
-            in_review: 'Em Revisão',
-            done: 'Concluído',
-            priority: 'Prioridade',
-            low: 'Baixa',
-            medium: 'Média',
-            high: 'Alta',
-            critical: 'Crítica',
-            due_date: 'Data de Entrega',
-            parent_task: 'Tarefa Pai',
-            none: 'Nenhuma',
-            assignee: 'Responsável',
-            name_or_email: 'Nome ou email',
-            labels: 'Etiquetas (separadas por vírgula)',
-            description: 'Descrição',
-            delete: 'Excluir',
-            archive: 'Arquivar',
-            cancel: 'Cancelar',
-            save: 'Salvar',
-            login_title: 'Entrar',
-            login_subtitle: 'Acesse seu quadro de projetos',
-            username: 'Usuário',
-            username_placeholder: 'seu.usuario',
-            password: 'Senha',
-            sign_in: 'Entrar',
-            signing_in: 'Entrando…',
-            invalid_credentials: 'Usuário ou senha incorretos.',
-            login_error: 'Não foi possível conectar. Tente novamente.',
-        },
-        en: {
-            projects: 'Projects',
-            select_project: 'Select a project',
-            select_project_hint: 'Select a project from the sidebar',
-            sign_out: 'Sign out',
-            kanban: 'Kanban',
-            table: 'Table',
-            timeline: 'Timeline',
-            calendar: 'Calendar',
-            dashboard: 'Dashboard',
-            week: 'Week',
-            month: 'Month',
-            quarter: 'Quarter',
-            today: 'Today',
-            archived: 'Archived',
-            filter_tasks: 'Filter tasks... (/)',
-            new_task: '+ New Task',
-            loading: 'Loading...',
-            activity: 'Activity',
-            new_task_title: 'New Task',
-            title: 'Title',
-            status: 'Status',
-            todo: 'To Do',
-            in_progress: 'In Progress',
-            in_review: 'In Review',
-            done: 'Done',
-            priority: 'Priority',
-            low: 'Low',
-            medium: 'Medium',
-            high: 'High',
-            critical: 'Critical',
-            due_date: 'Due Date',
-            parent_task: 'Parent Task',
-            none: 'None',
-            assignee: 'Assignee',
-            name_or_email: 'Name or email',
-            labels: 'Labels (comma-separated)',
-            description: 'Description',
-            delete: 'Delete',
-            archive: 'Archive',
-            cancel: 'Cancel',
-            save: 'Save',
-            login_title: 'Sign In',
-            login_subtitle: 'Access your project board',
-            username: 'Username',
-            username_placeholder: 'your.username',
-            password: 'Password',
-            sign_in: 'Sign In',
-            signing_in: 'Signing in…',
-            invalid_credentials: 'Incorrect username or password.',
-            login_error: 'Could not connect. Please try again.',
-        },
-    };
-
-    let currentLang = localStorage.getItem('co_lang') || 'pt';
-
-    function t(key) {
-        return (I18N[currentLang] || I18N.pt)[key] || key;
-    }
-
-    function applyI18n() {
-        document.querySelectorAll('[data-i18n]').forEach(el => {
-            el.textContent = t(el.dataset.i18n);
-        });
-        document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-            el.placeholder = t(el.dataset.i18nPlaceholder);
-        });
-        document.documentElement.lang = currentLang === 'pt' ? 'pt-BR' : 'en';
-    }
+    document.addEventListener('co:langchange', () => {
+        STATUSES = buildStatuses();
+        PRIORITY_LABELS = buildPriorityLabels();
+        STATUS_LABELS = buildStatusLabels();
+        render();
+    });
 
     // ===== Usage Limit Modal =====
 
@@ -3009,13 +2918,8 @@
         const titleEl = document.getElementById('usage-limit-title');
         const msgEl = document.getElementById('usage-limit-msg');
         const current = data && data.current != null ? data.current : 100;
-        if (currentLang === 'en') {
-            if (titleEl) titleEl.textContent = 'Limit reached';
-            if (msgEl) msgEl.textContent = `You've reached ${current} entries. Create a free account to continue.`;
-        } else {
-            if (titleEl) titleEl.textContent = 'Limite atingido';
-            if (msgEl) msgEl.textContent = `Você atingiu ${current} entradas. Crie uma conta gratuita para continuar.`;
-        }
+        if (titleEl) titleEl.textContent = window.t('universe.limit');
+        if (msgEl) msgEl.textContent = window.t('universe.limit_msg').replace('{n}', current);
         overlay.classList.remove('hidden');
     }
 
@@ -3035,8 +2939,8 @@
         }
         if (btnLang) {
             btnLang.addEventListener('click', () => {
-                currentLang = currentLang === 'pt' ? 'en' : 'pt';
-                btnLang.textContent = currentLang === 'pt' ? 'EN' : 'PT';
+                window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
+                render();
             });
         }
     }
@@ -3047,7 +2951,7 @@
         const overlay = document.getElementById('login-modal-overlay');
         if (overlay) {
             overlay.classList.remove('hidden');
-            applyI18n();
+            window.setLang(window.currentLang);
             const usuarioInput = document.getElementById('login-usuario');
             if (usuarioInput) usuarioInput.focus();
         }
@@ -3072,10 +2976,8 @@
 
         if (btnLang) {
             btnLang.addEventListener('click', () => {
-                currentLang = currentLang === 'pt' ? 'en' : 'pt';
-                localStorage.setItem('co_lang', currentLang);
-                btnLang.textContent = currentLang === 'pt' ? 'EN' : 'PT';
-                applyI18n();
+                window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
+                render();
             });
         }
 
@@ -3087,12 +2989,12 @@
             const errEl = document.getElementById('login-error');
             errEl.classList.add('hidden');
             btnEntrar.disabled = true;
-            btnEntrar.textContent = t('signing_in');
+            btnEntrar.textContent = window.t('signing_in');
 
             const r = await api.loginWithPassword(usuario, senha);
 
             btnEntrar.disabled = false;
-            btnEntrar.textContent = t('sign_in');
+            btnEntrar.textContent = window.t('sign_in');
 
             if (r && r.usuario) {
                 hideLoginModal();
@@ -3106,12 +3008,12 @@
                 if (me) renderUserBadge(me);
                 await bootApp();
             } else if (r && r.error === 'unauthorized') {
-                errEl.textContent = t('invalid_credentials');
+                errEl.textContent = window.t('invalid_credentials');
                 errEl.classList.remove('hidden');
                 document.getElementById('login-senha').value = '';
                 document.getElementById('login-senha').focus();
             } else {
-                errEl.textContent = t('login_error');
+                errEl.textContent = window.t('login_error');
                 errEl.classList.remove('hidden');
             }
         }
@@ -3379,7 +3281,18 @@
 
     // ===== Init =====
     async function init() {
-        applyI18n();
+        // Apply initial language (from cookie, set by i18n.js)
+        window.setLang(window.currentLang);
+
+        // Wire header language toggle
+        const btnHeaderLang = document.getElementById('btn-header-lang');
+        if (btnHeaderLang) {
+            btnHeaderLang.addEventListener('click', () => {
+                window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
+                render();
+            });
+        }
+
         initTimelineStart();
         setupHamburgerMenu();
         setupLoginModal();

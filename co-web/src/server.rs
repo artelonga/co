@@ -466,6 +466,41 @@ fn extract_variant(headers: &HeaderMap, config: &WebConfig) -> String {
     config.default_variant.clone()
 }
 
+/// Read `co_lang` cookie. Returns `None` if not set or invalid.
+fn extract_lang_cookie(headers: &HeaderMap) -> Option<String> {
+    let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
+    for part in cookie.split(';') {
+        let part = part.trim();
+        if let Some(val) = part.strip_prefix("co_lang=") {
+            let v = val.trim();
+            if v == "pt" || v == "en" {
+                return Some(v.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Detect preferred language from Accept-Language header. Defaults to "pt".
+fn detect_lang_from_accept(headers: &HeaderMap) -> &'static str {
+    if let Some(accept) = headers.get(header::ACCEPT_LANGUAGE)
+        && let Ok(s) = accept.to_str()
+    {
+        // Accept-Language: pt-BR,pt;q=0.9,en;q=0.8
+        // Take the first tag and check if it starts with "pt"
+        if let Some(first) = s.split(',').next() {
+            let tag = first.split(';').next().unwrap_or("").trim().to_lowercase();
+            if tag.starts_with("pt") {
+                return "pt";
+            }
+            if tag.starts_with("en") {
+                return "en";
+            }
+        }
+    }
+    "pt"
+}
+
 fn extract_participant(headers: &HeaderMap) -> Option<String> {
     if let Some(cookie) = headers.get(header::COOKIE)
         && let Ok(cookie_str) = cookie.to_str()
@@ -553,6 +588,20 @@ async fn serve_variant_file(
                 )
                 .parse()
                 .unwrap(),
+            );
+        }
+
+        // Set co_lang cookie for HTML responses when not already set.
+        // co_lang cookie overrides Accept-Language on subsequent loads.
+        if (path.ends_with(".html") || path == "index.html")
+            && extract_lang_cookie(&headers).is_none()
+        {
+            let lang = detect_lang_from_accept(&headers);
+            response.headers_mut().append(
+                header::SET_COOKIE,
+                format!("co_lang={}; Path=/; SameSite=Lax; Max-Age=31536000", lang)
+                    .parse()
+                    .unwrap(),
             );
         }
 
