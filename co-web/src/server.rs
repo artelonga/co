@@ -325,6 +325,16 @@ pub async fn start_server(config: WebConfig) {
         drop(storage);
     }
 
+    // Seed template universe once on first boot.
+    {
+        let mut storage = Storage::new(&config.data_dir);
+        if !storage.template_exists() {
+            tracing::info!("No template universe found — seeding template...");
+            storage.seed_template_universe();
+            tracing::info!("Template universe seeded (universe: template, project: MP)");
+        }
+    }
+
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
     let seed_path = std::path::Path::new(&config.data_dir).join("seed.sql");
     if seed_path.exists() {
@@ -585,6 +595,16 @@ fn cache_control_for(path: &str) -> HeaderValue {
     }
 }
 
+// --- Template guard ---
+
+/// Returns Forbidden if the given project belongs to a template (read-only) universe.
+fn guard_template(state: &AppState, project_key: &str) -> Result<(), AppError> {
+    if lock_storage(state)?.is_project_in_template(project_key) {
+        return Err(AppError::Forbidden("Template universe is read-only".into()));
+    }
+    Ok(())
+}
+
 // --- Project Handlers ---
 
 async fn list_projects(
@@ -614,6 +634,11 @@ async fn create_project(
     validate_project_name(&body.name)?;
     validate_project_key(&body.key)?;
 
+    // Prevent creating projects inside the template universe.
+    if body.universe_key.as_deref() == Some("template") {
+        return Err(AppError::Forbidden("Template universe is read-only".into()));
+    }
+
     // Server-side universe scope takes precedence over client-supplied value.
     if state.config.universe_key.is_some() {
         body.universe_key = state.config.universe_key.clone();
@@ -630,6 +655,7 @@ async fn delete_project(
     State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<StatusCode, AppError> {
+    guard_template(&state, &key)?;
     let mut storage = lock_storage(&state)?;
     storage
         .delete_project(&key)
@@ -670,6 +696,7 @@ async fn create_task(
     Path(key): Path<String>,
     Json(body): Json<CreateTask>,
 ) -> Result<impl IntoResponse, AppError> {
+    guard_template(&state, &key)?;
     validate_task_title(&body.title)?;
     validate_task_description(&body.description)?;
     validate_labels(&body.labels)?;
@@ -686,6 +713,7 @@ async fn update_task(
     Path((key, id)): Path<(String, u64)>,
     Json(body): Json<UpdateTask>,
 ) -> Result<Json<Task>, AppError> {
+    guard_template(&state, &key)?;
     if let Some(ref title) = body.title {
         validate_task_title(title)?;
     }
@@ -707,6 +735,7 @@ async fn delete_task(
     State(state): State<AppState>,
     Path((key, id)): Path<(String, u64)>,
 ) -> Result<StatusCode, AppError> {
+    guard_template(&state, &key)?;
     let mut storage = lock_storage(&state)?;
     storage
         .delete_task(&key, id)
@@ -729,6 +758,7 @@ async fn create_comment(
     Path((key, id)): Path<(String, u64)>,
     Json(body): Json<CreateComment>,
 ) -> Result<impl IntoResponse, AppError> {
+    guard_template(&state, &key)?;
     validate_comment_body(&body.body)?;
     validate_comment_author(&body.author)?;
 
@@ -768,6 +798,7 @@ async fn bulk_update_tasks(
     Path(key): Path<String>,
     Json(body): Json<BulkUpdateTasks>,
 ) -> Result<Json<Vec<Task>>, AppError> {
+    guard_template(&state, &key)?;
     if body.task_ids.is_empty() {
         return Err(AppError::BadRequest("task_ids cannot be empty".into()));
     }
@@ -784,6 +815,7 @@ async fn bulk_delete_tasks(
     Path(key): Path<String>,
     Json(body): Json<BulkDeleteTasks>,
 ) -> Result<StatusCode, AppError> {
+    guard_template(&state, &key)?;
     let mut storage = lock_storage(&state)?;
     storage
         .bulk_delete_tasks(&key, body)

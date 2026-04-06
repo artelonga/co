@@ -215,6 +215,40 @@ impl Storage {
                 )
                 .expect("Failed to run migration v9");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 10 {
+            // Rebuild universes without FK on owner_id (support anonymous/system owners)
+            // and add is_template + is_public columns.
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE universes_new (
+                    key TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    owner_id TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL,
+                    is_template INTEGER NOT NULL DEFAULT 0,
+                    is_public INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO universes_new (key, name, description, owner_id, created_at, is_template, is_public)
+                    SELECT key, name, description, owner_id, created_at, 0, 0 FROM universes;
+                DROP TABLE universes;
+                ALTER TABLE universes_new RENAME TO universes;
+                INSERT INTO schema_version (version) VALUES (10);
+                ",
+                )
+                .expect("Failed to run migration v10");
+        }
     }
 
     /// List universe keys a user is a member of.
@@ -1180,13 +1214,16 @@ impl Storage {
             description: create.description,
             owner_id: owner_id.to_string(),
             created_at: now,
+            is_template: false,
+            is_public: false,
         })
     }
 
     pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
         self.conn
             .query_row(
-                "SELECT key, name, description, owner_id, created_at FROM universes WHERE key = ?1",
+                "SELECT key, name, description, owner_id, created_at, is_template, is_public \
+                 FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
                     Ok(crate::models::Universe {
@@ -1195,6 +1232,8 @@ impl Storage {
                         description: row.get(2)?,
                         owner_id: row.get(3)?,
                         created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        is_template: row.get::<_, i64>(5)? != 0,
+                        is_public: row.get::<_, i64>(6)? != 0,
                     })
                 },
             )
@@ -1205,11 +1244,11 @@ impl Storage {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at \
-             FROM universes u \
-             JOIN universe_members um ON um.universe_key = u.key \
-             WHERE um.user_id = ?1 \
-             ORDER BY u.created_at ASC",
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, u.is_template, u.is_public \
+                 FROM universes u \
+                 JOIN universe_members um ON um.universe_key = u.key \
+                 WHERE um.user_id = ?1 \
+                 ORDER BY u.created_at ASC",
             )
             .expect("Failed to prepare list_universes_for_user");
         stmt.query_map(params![user_id], |row| {
@@ -1219,6 +1258,8 @@ impl Storage {
                 description: row.get(2)?,
                 owner_id: row.get(3)?,
                 created_at: parse_datetime(&row.get::<_, String>(4)?),
+                is_template: row.get::<_, i64>(5)? != 0,
+                is_public: row.get::<_, i64>(6)? != 0,
             })
         })
         .expect("Failed to list universes for user")
@@ -1325,6 +1366,372 @@ impl Storage {
             .query_row("SELECT COUNT(*) FROM projects", [], |row| row.get(0))
             .unwrap_or(0);
         count > 0
+    }
+
+    // --- Template universe ---
+
+    /// Returns true if a template universe already exists (seed already ran).
+    pub fn template_exists(&self) -> bool {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM universes WHERE is_template = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    }
+
+    /// Seed the template universe with "Meu Projeto" and 8 sample tasks.
+    /// Safe to call multiple times — uses INSERT OR IGNORE.
+    pub fn seed_template_universe(&mut self) {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Template universe
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public) \
+             VALUES ('template', 'CO', \
+             'Universo de demonstração — todas as funcionalidades do CO', \
+             'system', ?1, 1, 1)",
+            params![now_str],
+        );
+
+        // Sample project
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO projects \
+             (key, name, description, next_id, created_at, universe_key) \
+             VALUES ('MP', 'Meu Projeto', \
+             'Projeto de demonstração com todas as funcionalidades do CO', \
+             9, ?1, 'template')",
+            params![now_str],
+        );
+
+        // 8 sample tasks showcasing all features
+        struct SeedTask {
+            id: i64,
+            title: &'static str,
+            description: &'static str,
+            status: &'static str,
+            priority: &'static str,
+            labels: &'static str,
+            due_days: Option<i64>, // positive = future, negative = past
+            parent: Option<i64>,
+        }
+
+        let tasks = [
+            SeedTask {
+                id: 1,
+                title: "Configurar ambiente de desenvolvimento",
+                description: "Configurar Docker, banco de dados local e variáveis de ambiente.",
+                status: "done",
+                priority: "high",
+                labels: r#"["setup","infra"]"#,
+                due_days: Some(-20),
+                parent: None,
+            },
+            SeedTask {
+                id: 2,
+                title: "Desenho da arquitetura",
+                description: "Definir arquitetura, escolher tecnologias e documentar decisões.",
+                status: "done",
+                priority: "critical",
+                labels: r#"["architecture","docs"]"#,
+                due_days: Some(-15),
+                parent: None,
+            },
+            SeedTask {
+                id: 3,
+                title: "Implementar autenticação",
+                description: "Implementar JWT, refresh tokens e logout seguro.",
+                status: "in_progress",
+                priority: "critical",
+                labels: r#"["backend","security"]"#,
+                due_days: Some(7),
+                parent: None,
+            },
+            SeedTask {
+                id: 4,
+                title: "Escrever testes de integração",
+                description: "Cobrir endpoints de autenticação com testes de integração.",
+                status: "todo",
+                priority: "medium",
+                labels: r#"["testing","backend"]"#,
+                due_days: Some(14),
+                parent: Some(3),
+            },
+            SeedTask {
+                id: 5,
+                title: "Design da interface",
+                description: "Criar wireframes e protótipos para os principais fluxos.",
+                status: "in_review",
+                priority: "high",
+                labels: r#"["frontend","design","ux"]"#,
+                due_days: Some(5),
+                parent: None,
+            },
+            SeedTask {
+                id: 6,
+                title: "Implementar componentes de UI",
+                description: "Desenvolver componentes reutilizáveis baseados no design aprovado.",
+                status: "in_progress",
+                priority: "medium",
+                labels: r#"["frontend"]"#,
+                due_days: Some(10),
+                parent: Some(5),
+            },
+            SeedTask {
+                id: 7,
+                title: "Deploy de homologação",
+                description: "Configurar CI/CD e fazer deploy no ambiente de homologação.",
+                status: "todo",
+                priority: "low",
+                labels: r#"["devops","infra"]"#,
+                due_days: Some(21),
+                parent: None,
+            },
+            SeedTask {
+                id: 8,
+                title: "Documentação da API",
+                description: "Documentar todos os endpoints com exemplos de requisição e resposta.",
+                status: "todo",
+                priority: "low",
+                labels: r#"["docs","backend"]"#,
+                due_days: Some(30),
+                parent: None,
+            },
+        ];
+
+        for t in &tasks {
+            let created_at = (now - chrono::Duration::days(30 - t.id * 3)).to_rfc3339();
+            let updated_at = (now - chrono::Duration::days(5)).to_rfc3339();
+            let due_date: Option<String> = t.due_days.map(|d| {
+                (now + chrono::Duration::days(d))
+                    .format("%Y-%m-%d")
+                    .to_string()
+            });
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO tasks \
+                 (project_key, id, title, description, status, priority, \
+                  due_date, parent, labels, created_at, updated_at, archived) \
+                 VALUES ('MP', ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0)",
+                params![
+                    t.id,
+                    t.title,
+                    t.description,
+                    t.status,
+                    t.priority,
+                    due_date,
+                    t.parent,
+                    t.labels,
+                    created_at,
+                    updated_at,
+                ],
+            );
+        }
+    }
+
+    /// Returns true if the given project belongs to a template universe.
+    pub fn is_project_in_template(&self, project_key: &str) -> bool {
+        let upper = project_key.to_uppercase();
+        // Get universe_key for the project, then check is_template
+        let universe_key: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT universe_key FROM projects WHERE key = ?1",
+                params![upper],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten();
+
+        match universe_key {
+            None => false,
+            Some(ukey) => {
+                let v: i64 = self
+                    .conn
+                    .query_row(
+                        "SELECT is_template FROM universes WHERE key = ?1",
+                        params![ukey],
+                        |row| row.get(0),
+                    )
+                    .unwrap_or(0);
+                v != 0
+            }
+        }
+    }
+
+    /// List projects for a universe that has `is_public = 1`.
+    /// Returns Err if the universe doesn't exist or is not public.
+    pub fn list_projects_for_public_universe(
+        &self,
+        universe_key: &str,
+    ) -> anyhow::Result<Vec<crate::models::Project>> {
+        let is_public: i64 = self
+            .conn
+            .query_row(
+                "SELECT is_public FROM universes WHERE key = ?1",
+                params![universe_key],
+                |row| row.get(0),
+            )
+            .map_err(|_| anyhow::anyhow!("Universe '{}' not found", universe_key))?;
+
+        if is_public == 0 {
+            anyhow::bail!("Universe '{}' is not public", universe_key);
+        }
+
+        Ok(self.list_projects_for_universe(universe_key))
+    }
+
+    /// Clone a universe: copy all its projects and tasks into a new universe.
+    /// The new universe is NOT a template and is private by default.
+    pub fn clone_universe(
+        &mut self,
+        source_key: &str,
+        new_key: &str,
+        new_name: &str,
+        description: &str,
+        owner_id: &str,
+    ) -> anyhow::Result<crate::models::Universe> {
+        if self.get_universe(new_key).is_some() {
+            anyhow::bail!("Universe '{}' already exists", new_key);
+        }
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Create the new universe
+        self.conn.execute(
+            "INSERT INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)",
+            params![new_key, new_name, description, owner_id, now_str],
+        )?;
+
+        // Add owner as member
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members \
+             (universe_key, user_id, role, joined_at) \
+             VALUES (?1, ?2, 'owner', ?3)",
+            params![new_key, owner_id, now_str],
+        )?;
+
+        // Collect source projects
+        let source_projects: Vec<(String, String, String, i64)> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT key, name, description, next_id \
+                 FROM projects WHERE universe_key = ?1",
+            )?;
+            stmt.query_map(params![source_key], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                ))
+            })?
+            .filter_map(|r| r.ok())
+            .collect()
+        };
+
+        for (old_pkey, pname, pdesc, next_id) in &source_projects {
+            let new_pkey = self.derive_unique_project_key(new_key, old_pkey);
+
+            self.conn.execute(
+                "INSERT INTO projects \
+                 (key, name, description, next_id, created_at, universe_key) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![new_pkey, pname, pdesc, next_id, now_str, new_key],
+            )?;
+
+            // Copy tasks (collect as raw SQL, then re-insert under new project key)
+            type TaskRow = (
+                i64,
+                String,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<i64>,
+                String,
+            );
+            let task_rows: Vec<TaskRow> = {
+                let mut stmt = self.conn.prepare(
+                    "SELECT id, title, description, status, priority, \
+                     due_date, parent, labels \
+                     FROM tasks WHERE project_key = ?1 AND archived = 0",
+                )?;
+                stmt.query_map(params![old_pkey], |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
+                        row.get::<_, Option<i64>>(6)?,
+                        row.get::<_, String>(7)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            for (id, title, desc, status, priority, due_date, parent, labels) in task_rows {
+                self.conn.execute(
+                    "INSERT INTO tasks \
+                     (project_key, id, title, description, status, priority, \
+                      due_date, parent, labels, created_at, updated_at, archived) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0)",
+                    params![
+                        new_pkey, id, title, desc, status, priority, due_date, parent, labels,
+                        now_str, now_str,
+                    ],
+                )?;
+            }
+        }
+
+        Ok(crate::models::Universe {
+            key: new_key.to_string(),
+            name: new_name.to_string(),
+            description: description.to_string(),
+            owner_id: owner_id.to_string(),
+            created_at: now,
+            is_template: false,
+            is_public: false,
+        })
+    }
+
+    /// Derive a unique project key for a clone, based on the universe key + original project key.
+    fn derive_unique_project_key(&self, universe_key: &str, original_key: &str) -> String {
+        // Take up to 4 alphanumeric chars from universe key (uppercase) + original key, max 10
+        let prefix: String = universe_key
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric())
+            .take(4)
+            .collect::<String>()
+            .to_uppercase();
+        let base: String = format!("{}{}", prefix, original_key)
+            .chars()
+            .take(10)
+            .collect();
+
+        // If unique, use as-is; otherwise append a number
+        if self.get_project(&base).is_none() {
+            return base;
+        }
+        for i in 2u32..=99 {
+            let candidate: String = format!("{}{}", base, i).chars().take(10).collect();
+            if self.get_project(&candidate).is_none() {
+                return candidate;
+            }
+        }
+        // Fallback: uuid-based suffix (shouldn't happen in practice)
+        format!("{}{}", &base[..6.min(base.len())], nanoid::nanoid!(4))
+            .chars()
+            .take(10)
+            .collect()
     }
 }
 

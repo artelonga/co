@@ -1,14 +1,14 @@
 use std::path::Path;
 
 use axum::{
+    Json,
     body::Body,
     http::{Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use redb::{Database, TableDefinition};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -42,18 +42,45 @@ pub struct RateLimitEntry {
 }
 
 /// JWT claims shared across auth flows.
+///
+/// Supports both legacy (email+tier) and unified (usuario+papel) flows.
+/// All fields except `sub`, `exp`, `iat` have defaults for backwards compatibility.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Claims {
     pub sub: String,
+    #[serde(default)]
     pub email: String,
+    #[serde(default)]
     pub tier: String,
+    #[serde(default)]
+    pub usuario: String,
+    #[serde(default)]
+    pub papel: String,
     pub exp: usize,
     pub iat: usize,
 }
 
 /// User ID extracted from JWT auth middleware.
+///
+/// Can be used as an Axum extractor on routes behind `require_auth` middleware.
 #[derive(Clone, Debug)]
 pub struct UserId(pub String);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for UserId {
+    type Rejection = axum::response::Response;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let result = parts
+            .extensions
+            .get::<UserId>()
+            .cloned()
+            .ok_or_else(|| unauthorized("Not authenticated"));
+        std::future::ready(result)
+    }
+}
 
 /// JSON error body returned by the auth middleware.
 #[derive(Serialize)]
@@ -66,21 +93,39 @@ pub fn jwt_secret() -> String {
     std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
 }
 
-/// Axum middleware that validates a Bearer JWT and injects [`UserId`] into
-/// request extensions. Returns 401 with a JSON error on failure.
+/// Extracts the session token from the `Cookie` header, if present.
+pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    let cookie_header = headers.get("cookie")?.to_str().ok()?;
+    for part in cookie_header.split(';') {
+        let part = part.trim();
+        if let Some(token) = part.strip_prefix("session=") {
+            let token = token.trim();
+            if !token.is_empty() {
+                return Some(token.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Axum middleware that validates a Bearer JWT or `session` cookie and injects
+/// [`UserId`] into request extensions. Returns 401 with a JSON error on failure.
 pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response, Response> {
+    // Try Authorization: Bearer header first, then fall back to session cookie.
     let token = req
         .headers()
         .get("authorization")
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
     let secret = jwt_secret();
     let validation = Validation::new(Algorithm::HS256);
 
     let token_data = decode::<Claims>(
-        token,
+        &token,
         &DecodingKey::from_secret(secret.as_bytes()),
         &validation,
     )
@@ -239,6 +284,8 @@ pub fn sign_jwt(
         sub: user_id.to_string(),
         email: email.to_string(),
         tier: tier.to_string(),
+        usuario: String::new(),
+        papel: String::new(),
         exp,
         iat,
     };
@@ -250,6 +297,49 @@ pub fn sign_jwt(
     )?;
 
     Ok((token, expires_at))
+}
+
+/// Signs a unified JWT for quilombo community auth. Returns (token, expires_at).
+pub fn sign_jwt_quilombo(
+    user_id: &str,
+    usuario: &str,
+    papel: &str,
+    secret: &str,
+) -> anyhow::Result<(String, DateTime<Utc>)> {
+    let now = Utc::now();
+    let iat = now.timestamp() as usize;
+    let exp = (now.timestamp() + JWT_EXPIRY_SECS) as usize;
+    let expires_at = now + chrono::Duration::seconds(JWT_EXPIRY_SECS);
+
+    let claims = Claims {
+        sub: user_id.to_string(),
+        email: String::new(),
+        tier: papel.to_string(), // tier maps to papel for backwards compat
+        usuario: usuario.to_string(),
+        papel: papel.to_string(),
+        exp,
+        iat,
+    };
+
+    let token = encode(
+        &Header::new(Algorithm::HS256),
+        &claims,
+        &EncodingKey::from_secret(secret.as_bytes()),
+    )?;
+
+    Ok((token, expires_at))
+}
+
+/// Decode a JWT token and return the subject (user ID) if valid.
+pub fn decode_user_id(token: &str, secret: &str) -> anyhow::Result<String> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    let data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )?;
+    Ok(data.claims.sub)
 }
 
 /// Creates a new VerifyCodeEntry for the given user.

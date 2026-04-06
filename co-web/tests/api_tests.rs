@@ -77,6 +77,7 @@ async fn body_to_string(body: Body) -> String {
 
 #[tokio::test]
 async fn test_list_projects_api() {
+    // GET /api/projects requires auth — unauthenticated request returns 401.
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -90,14 +91,7 @@ async fn test_list_projects_api() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
-
-    let body = body_to_string(response.into_body()).await;
-    let projects: Vec<Project> = serde_json::from_str(&body).unwrap();
-    assert_eq!(projects.len(), 3);
-    assert!(projects.iter().any(|p| p.key == "DS"));
-    assert!(projects.iter().any(|p| p.key == "API"));
-    assert!(projects.iter().any(|p| p.key == "PLT"));
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

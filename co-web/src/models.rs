@@ -15,12 +15,16 @@ pub struct Project {
     pub archived: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct CreateProject {
     pub name: String,
     pub key: String,
     #[serde(default)]
     pub description: String,
+    /// Scope this project to a universe. Set server-side from UNIVERSE_KEY env
+    /// when not provided by the client.
+    #[serde(default)]
+    pub universe_key: Option<String>,
 }
 
 // --- Task ---
@@ -338,7 +342,70 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+// --- Universe / Multi-tenancy ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Universe {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub owner_id: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub is_template: bool,
+    #[serde(default)]
+    pub is_public: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseMember {
+    pub universe_key: String,
+    pub user_id: String,
+    pub role: String,
+    pub joined_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUniverse {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CloneUniverse {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddMember {
+    pub user_id: String,
+    #[serde(default = "default_member_role")]
+    pub role: String,
+}
+
+fn default_member_role() -> String {
+    "member".into()
+}
+
 // --- Auth / Users ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub user_id: String,
+    pub email: String,
+    pub display_name: String,
+    pub tier: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {

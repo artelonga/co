@@ -425,6 +425,9 @@ body {
     font-size: 18px;
     font-weight: 700;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
 }
 
 .header-desc {
@@ -683,24 +686,13 @@ body {
 }
 
 .priority-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
+    display: none;
 }
-
-.priority-dot.low { background: var(--priority-low); }
-.priority-dot.medium { background: var(--priority-medium); }
-.priority-dot.high { background: var(--priority-high); }
-.priority-dot.critical { background: var(--priority-critical); }
 
 .label-badge {
     font-size: 10px;
-    padding: 1px 6px;
-    border-radius: var(--radius-sm);
-    background: var(--accent-light);
-    color: var(--accent);
-    font-weight: 500;
+    font-family: var(--font-label);
+    color: var(--text-muted);
     white-space: nowrap;
 }
 
@@ -1162,9 +1154,18 @@ body {
 }
 
 .priority-label {
-    font-size: 12px;
-    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--font-label);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
 }
+
+.priority-label.high { color: var(--priority-high, #e07030); }
+.priority-label.critical { color: var(--priority-critical, #c0202a); }
+.priority-label.medium { color: var(--text-secondary); }
+.priority-label.low { color: var(--text-muted); }
 
 /* Due date cell */
 .cell-due-date {
@@ -2438,19 +2439,19 @@ body {
 
 /* Scholarly Automaton — Dark */
 :root[data-palette="scholarly-dark"] {
-    --bg: #1c1610;
-    --bg-hover: #261d14;
-    --sidebar-bg: #120e09;
-    --sidebar-hover: #1f1710;
-    --sidebar-active: #CD7F32;
-    --card-bg: #261d14;
-    --border: rgba(205,127,50,0.15);
+    --bg: #181208;
+    --bg-hover: #221810;
+    --sidebar-bg: #0f0b07;
+    --sidebar-hover: #1c1408;
+    --sidebar-active: #ffb779;
+    --card-bg: #271c12;
+    --border: rgba(205,127,50,0.2);
     --text-primary: #f0e0c8;
-    --text-secondary: #b89070;
-    --text-muted: #7d6040;
-    --accent: #CD7F32;
-    --accent-hover: #ffb779;
-    --accent-light: #3d2000;
+    --text-secondary: #c4986a;
+    --text-muted: #9a7a54;
+    --accent: #ffb779;
+    --accent-hover: #ffdcc1;
+    --accent-light: #4a2a00;
     --danger: #ff6b6b;
     --danger-hover: #ff4040;
     --font: 'Newsreader', Georgia, serif;
@@ -2484,13 +2485,13 @@ body {
 
 /* Relic Archive — Dark */
 :root[data-palette="relic"] {
-    --bg: #131313;
-    --bg-hover: #1c1b1b;
-    --sidebar-bg: #1c1b1b;
-    --sidebar-hover: #252424;
+    --bg: #161616;
+    --bg-hover: #222222;
+    --sidebar-bg: #0d0d0d;
+    --sidebar-hover: #1a1919;
     --sidebar-active: #e0505f;
-    --card-bg: #201f1f;
-    --border: rgba(69,71,76,0.3);
+    --card-bg: #262424;
+    --border: rgba(224,80,95,0.18);
     --text-primary: #e5e2e1;
     --text-secondary: #c5c6cc;
     --text-muted: #8f9096;
@@ -2508,9 +2509,9 @@ body {
     --shadow-md: 0 4px 16px rgba(0,0,0,0.5);
     --shadow-lg: 0 12px 50px rgba(0,0,0,0.7);
     --modal-overlay: rgba(0,0,0,0.75);
-    --modal-surface: #1c1b1b;
-    --form-input-bg: rgba(42,42,42,0.6);
-    --form-input-border: 1px solid rgba(69,71,76,0.5);
+    --modal-surface: #2e2c2c;
+    --form-input-bg: rgba(38,36,36,0.6);
+    --form-input-border: 1px solid rgba(224,80,95,0.2);
     --form-input-border-focus: 1px solid #e9c349;
     --form-input-radius: 4px;
     --form-input-padding: 8px 10px;
@@ -2609,12 +2610,12 @@ body {
     border: 1px solid rgba(134,116,102,0.12);
 }
 
-/* Relic: modal gets glass treatment */
+/* Relic: modal gets glass treatment — surface lifted for contrast */
 :root[data-palette="relic"] .modal {
-    background: rgba(28,27,27,0.92);
+    background: rgba(42,40,40,0.97);
     backdrop-filter: blur(20px);
-    border: 1px solid rgba(224,80,95,0.15);
-    box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 40px rgba(224,80,95,0.05);
+    border: 1px solid rgba(224,80,95,0.28);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.85), 0 0 40px rgba(224,80,95,0.08);
 }
 
 :root[data-palette="relic"] .modal-header {
@@ -2661,4 +2662,271 @@ body {
 :root[data-palette="relic"] .login-card,
 :root[data-palette="relic"] .login-screen {
     background: rgba(19,19,19,0.95);
+}
+
+/* ===== Palette: Login screen background adapts ===== */
+
+/* Scholarly Light — parchment vignette */
+:root[data-palette="scholarly"] .login-screen {
+    background: radial-gradient(circle, #FFF9ED 0%, #EAD9BF 100%);
+}
+
+/* Scholarly Dark — deep inkwell */
+:root[data-palette="scholarly-dark"] .login-screen {
+    background: radial-gradient(circle, #1c1610 0%, #0d0a07 100%);
+}
+
+/* Relic Light — rose dust */
+:root[data-palette="relic-light"] .login-screen {
+    background: #F5F0F0;
+}
+
+/* ===== Scholarly login card — parchment text/input overrides ===== */
+
+:root[data-palette^="scholarly"] .login-card {
+    color: var(--text-primary);
+    backdrop-filter: none;
+}
+
+:root[data-palette^="scholarly"] .login-title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    color: var(--accent);
+}
+
+:root[data-palette^="scholarly"] .login-subtitle {
+    color: var(--text-secondary);
+}
+
+:root[data-palette^="scholarly"] .login-logo {
+    background: linear-gradient(135deg, #8E4E00, #CD7F32);
+    box-shadow: 0 4px 16px rgba(142,78,0,0.3);
+}
+
+:root[data-palette^="scholarly"] .login-card .form-group label {
+    color: var(--text-muted);
+    font-family: var(--font-label);
+}
+
+:root[data-palette^="scholarly"] .login-card input[type="text"],
+:root[data-palette^="scholarly"] .login-card input[type="password"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--text-muted);
+    border-radius: 0;
+    color: var(--text-primary);
+    padding: 8px 0;
+    box-shadow: none;
+}
+
+:root[data-palette^="scholarly"] .login-card input::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
+:root[data-palette^="scholarly"] .login-card input:focus {
+    border-bottom-color: var(--accent);
+    box-shadow: none;
+    background: transparent;
+}
+
+/* ===== Relic Light login card — rose text ===== */
+
+:root[data-palette="relic-light"] .login-card {
+    background: #FFFFFF;
+    color: var(--text-primary);
+    border: 1px solid rgba(175,43,62,0.12);
+    box-shadow: 0 20px 60px rgba(175,43,62,0.15);
+    backdrop-filter: none;
+}
+
+:root[data-palette="relic-light"] .login-title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    color: var(--accent);
+}
+
+:root[data-palette="relic-light"] .login-subtitle {
+    color: var(--text-secondary);
+}
+
+:root[data-palette="relic-light"] .login-logo {
+    background: linear-gradient(135deg, #8e1020, #af2b3e);
+    box-shadow: 0 4px 16px rgba(175,43,62,0.35);
+}
+
+:root[data-palette="relic-light"] .login-card .form-group label {
+    color: var(--text-muted);
+    font-family: var(--font-label);
+}
+
+:root[data-palette="relic-light"] .login-card input[type="text"],
+:root[data-palette="relic-light"] .login-card input[type="password"] {
+    background: rgba(175,43,62,0.04);
+    border: 1px solid rgba(175,43,62,0.18);
+    color: var(--text-primary);
+    border-radius: 6px;
+}
+
+:root[data-palette="relic-light"] .login-card input::placeholder {
+    color: var(--text-muted);
+    opacity: 1;
+}
+
+/* ===== Scholarly: mock-aligned vignette on main content ===== */
+:root[data-palette="scholarly"] .main {
+    background: radial-gradient(ellipse at 50% 0%, #FFF9ED 0%, #F3EDE1 100%);
+}
+
+:root[data-palette="scholarly-dark"] .main {
+    background: radial-gradient(ellipse at 50% 0%, #221810 0%, #0f0b07 100%);
+}
+
+/* ===== Dark mode elevation & tonal layering ===== */
+
+/* Scholarly Dark: header — warm gradient + ambient brass shadow */
+:root[data-palette="scholarly-dark"] .header {
+    background: linear-gradient(to bottom, #271c12, #181208);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.55), 0 1px 0 rgba(205,127,50,0.18);
+    border-bottom: 1px solid rgba(205,127,50,0.15);
+}
+
+/* Scholarly Dark: sidebar — noticeably deeper than main content */
+:root[data-palette="scholarly-dark"] .sidebar {
+    background: #0f0b07;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.5);
+    border-right: none;
+}
+
+/* Scholarly Dark: sidebar logo area — brass accent line */
+:root[data-palette="scholarly-dark"] .sidebar-logo {
+    border-bottom: 1px solid rgba(205,127,50,0.2);
+}
+
+/* Scholarly Dark: active sidebar item — bright brass highlight */
+:root[data-palette="scholarly-dark"] .sidebar-item.active {
+    color: #ffb779;
+    background: rgba(255,183,121,0.1);
+}
+
+/* Scholarly Dark: sidebar section header text — lifted visibility */
+:root[data-palette="scholarly-dark"] .sidebar-section-header {
+    color: var(--text-secondary);
+}
+
+/* Scholarly Dark: kanban column — slightly distinct from main bg */
+:root[data-palette="scholarly-dark"] .kanban-column {
+    background: #1c1510;
+}
+
+/* Relic Dark: header — dark steel with crimson accent line */
+:root[data-palette="relic"] .header {
+    background: #1e1c1c;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.65);
+    border-bottom: 1px solid rgba(224,80,95,0.22);
+}
+
+/* Relic Dark: sidebar — near-black for strong separation */
+:root[data-palette="relic"] .sidebar {
+    background: #0d0d0d;
+    box-shadow: 4px 0 24px rgba(0,0,0,0.65);
+    border-right: none;
+}
+
+/* Relic Dark: sidebar logo — crimson accent line */
+:root[data-palette="relic"] .sidebar-logo {
+    border-bottom: 1px solid rgba(224,80,95,0.2);
+}
+
+/* Relic Dark: active sidebar item — crimson highlight */
+:root[data-palette="relic"] .sidebar-item.active {
+    color: var(--accent);
+    background: rgba(224,80,95,0.1);
+}
+
+/* Relic Dark: main — subtle dark vignette */
+:root[data-palette="relic"] .main {
+    background: radial-gradient(ellipse at 50% 0%, #1e1c1c 0%, #0d0d0d 100%);
+}
+
+/* Relic Dark: kanban column — lifted from main bg */
+:root[data-palette="relic"] .kanban-column {
+    background: #1c1a1a;
+}
+
+/* ===== Template Banner ===== */
+.template-banner {
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    background: linear-gradient(135deg, var(--accent, #4f46e5) 0%, #7c3aed 100%);
+    color: #fff;
+    padding: 1rem 1.5rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.template-banner-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.template-hero-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 0 0 0.2rem;
+    color: #fff;
+}
+
+.template-hero-sub {
+    font-size: 0.8rem;
+    margin: 0;
+    opacity: 0.85;
+}
+
+.template-cta {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.template-cta .btn-lg {
+    padding: 0.55rem 1.4rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    background: #fff;
+    color: var(--accent, #4f46e5);
+    border: none;
+}
+
+.template-cta .btn-lg:hover {
+    background: #f0f0ff;
+}
+
+.template-cta .btn-secondary {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    color: #fff;
+}
+
+.template-cta .btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+@media (max-width: 600px) {
+    .template-banner-inner {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    .template-cta {
+        width: 100%;
+    }
+    .template-cta .btn {
+        flex: 1;
+    }
 }

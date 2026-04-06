@@ -27,6 +27,9 @@
         unscheduledCollapsed: false,
         // Subtree expand/collapse (shared across views)
         collapsedSubtasks: new Set(),
+        // Universe routing
+        currentUniverseSlug: 'template',
+        isTemplate: false,
     };
 
     const STATUSES = [
@@ -224,6 +227,17 @@
         async getMissoes() {
             const r = await apiFetch('/api/v1/quilombo/missoes', {}, true);
             return r || [];
+        },
+        async getUniverseProjects(slug) {
+            const r = await apiFetch(`/api/v1/universes/${slug}/projects`, {}, true);
+            return r || [];
+        },
+        async cloneUniverse(sourceSlug, body) {
+            return apiFetch(`/api/v1/universes/${sourceSlug}/clone`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
         },
     };
 
@@ -589,7 +603,6 @@
             return `
                 <div class="kanban-column" data-status="${s.key}">
                     <div class="kanban-column-header">
-                        <span class="column-dot" style="background:${s.color}"></span>
                         ${s.label}
                         <span class="column-count">${colTasks.length}</span>
                     </div>
@@ -631,7 +644,6 @@
                 </div>
                 <div class="task-title">${esc(task.title)}</div>
                 <div class="task-meta">
-                    <span class="priority-dot ${task.priority}" title="${PRIORITY_LABELS[task.priority]}"></span>
                     ${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}
                     ${task.due_date ? `<span class="due-date-badge${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
                     ${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}
@@ -644,7 +656,6 @@
         const statusInfo = STATUSES.find(s => s.key === task.status);
         const overdue = task.status !== 'done' && isOverdue(task.due_date);
         return `<div class="subtask-item" data-task-id="${task.id}">
-            <span class="subtask-item-dot" style="background:${statusInfo ? statusInfo.color : '#94a3b8'}"></span>
             <span class="subtask-item-key">${esc(task.key)}</span>
             <span class="subtask-item-title">${esc(task.title)}</span>
             ${task.due_date ? `<span class="subtask-item-due${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
@@ -2860,10 +2871,119 @@
         }
     }
 
+    // ===== Universe routing helpers =====
+
+    function readUniverseSlugFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        return params.get('u') || 'template';
+    }
+
+    function setUniverseSlugInUrl(slug) {
+        const url = new URL(window.location.href);
+        if (slug === 'template') {
+            url.searchParams.delete('u');
+        } else {
+            url.searchParams.set('u', slug);
+        }
+        window.history.pushState({}, '', url.toString());
+    }
+
+    function showTemplateBanner() {
+        const banner = document.getElementById('template-banner');
+        if (banner) banner.classList.remove('hidden');
+    }
+
+    function hideTemplateBanner() {
+        const banner = document.getElementById('template-banner');
+        if (banner) banner.classList.add('hidden');
+    }
+
+    // ===== Criar Universo Modal =====
+
+    function setupCriarModal() {
+        const overlay = document.getElementById('criar-modal-overlay');
+        if (!overlay) return;
+
+        const closeBtn = document.getElementById('criar-modal-close');
+        const cancelBtn = document.getElementById('criar-cancel');
+        const form = document.getElementById('criar-form');
+        const nameInput = document.getElementById('criar-name');
+        const slugInput = document.getElementById('criar-slug');
+        const errorEl = document.getElementById('criar-error');
+
+        function open() {
+            overlay.classList.remove('hidden');
+            nameInput.value = '';
+            slugInput.value = '';
+            if (errorEl) errorEl.classList.add('hidden');
+            nameInput.focus();
+        }
+
+        function close() {
+            overlay.classList.add('hidden');
+        }
+
+        // Auto-generate slug from name
+        nameInput.addEventListener('input', () => {
+            const slug = nameInput.value
+                .toLowerCase()
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/^-+|-+$/g, '')
+                .slice(0, 40);
+            slugInput.value = slug;
+        });
+
+        closeBtn && closeBtn.addEventListener('click', close);
+        cancelBtn && cancelBtn.addEventListener('click', close);
+        overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            const name = nameInput.value.trim();
+            const key = slugInput.value.trim();
+            if (!name || !key) return;
+
+            const submitBtn = document.getElementById('criar-submit');
+            if (submitBtn) submitBtn.disabled = true;
+            if (errorEl) errorEl.classList.add('hidden');
+
+            const result = await api.cloneUniverse('template', { name, key, description: '' });
+            if (submitBtn) submitBtn.disabled = false;
+
+            if (!result) return; // apiFetch already showed error toast
+
+            close();
+            showToast('Universo criado! Redirecionando...', 'success');
+            setUniverseSlugInUrl(result.key);
+            state.currentUniverseSlug = result.key;
+            state.isTemplate = false;
+            hideTemplateBanner();
+            await bootAppForUniverse(result.key);
+        });
+
+        // Wire the CTA button in the banner
+        const btnCriar = document.getElementById('btn-criar-universo');
+        if (btnCriar) btnCriar.addEventListener('click', open);
+
+        // Wire "Entrar" in the banner to the login modal
+        const btnEntrar = document.getElementById('btn-banner-entrar');
+        if (btnEntrar) btnEntrar.addEventListener('click', showLoginModal);
+    }
+
     // ===== App boot (post-auth) =====
     async function bootApp() {
         showLoading();
         state.projects = await api.getProjects();
+        if (state.projects.length > 0) {
+            await selectProject(state.projects[0].key);
+        }
+        hideLoading();
+        render();
+    }
+
+    async function bootAppForUniverse(slug) {
+        showLoading();
+        state.projects = await api.getUniverseProjects(slug);
         if (state.projects.length > 0) {
             await selectProject(state.projects[0].key);
         }
@@ -2877,17 +2997,34 @@
         initTimelineStart();
         setupHamburgerMenu();
         setupLoginModal();
+        setupCriarModal();
 
-        // Show login immediately — avoids blank wait while session is checked.
-        // If already authenticated, me() will return and we hide the modal.
+        const slug = readUniverseSlugFromUrl();
+        state.currentUniverseSlug = slug;
+        state.isTemplate = slug === 'template';
+
+        if (state.isTemplate) {
+            // Load template universe publicly — no auth needed
+            showTemplateBanner();
+            await bootAppForUniverse('template');
+
+            // Check if already authenticated; if so, show user badge but keep banner
+            const me = await api.me();
+            if (me) {
+                hideLoginModal();
+                renderUserBadge(me);
+            }
+            return;
+        }
+
+        // Non-template universe: require auth
         showLoginModal();
-
         const me = await api.me();
         if (!me) return;
 
         hideLoginModal();
         renderUserBadge(me);
-        await bootApp();
+        await bootAppForUniverse(slug);
     }
 
     init();
