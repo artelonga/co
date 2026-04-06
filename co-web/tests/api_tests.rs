@@ -26,6 +26,7 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         game_db_path: None,
         universo_dir: "quilomboaraucaria".to_string(),
         gestao_github_admins: vec!["artelonga".to_string()],
+        universe_key: None,
     }
 }
 
