@@ -390,6 +390,37 @@ impl Storage {
                 )
                 .expect("Failed to run migration v14");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 15 {
+            // API tokens for vault REST API / Obsidian plugin auth (CO-35).
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS api_tokens (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    name TEXT NOT NULL DEFAULT '',
+                    token TEXT UNIQUE NOT NULL,
+                    created_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    last_used_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_api_tokens_user ON api_tokens(user_id);
+                CREATE INDEX IF NOT EXISTS idx_api_tokens_token ON api_tokens(token);
+                INSERT INTO schema_version (version) VALUES (15);
+                ",
+                )
+                .expect("Failed to run migration v15");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -2374,6 +2405,147 @@ impl Storage {
             params![body, hash, now, universe_key, path],
         )?;
         Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // API tokens (CO-35 — Vault REST API)
+    // -------------------------------------------------------------------------
+
+    /// Create a new long-lived API token (90 days) for the given user.
+    pub fn create_api_token(
+        &self,
+        user_id: &str,
+        name: &str,
+    ) -> anyhow::Result<crate::vault_routes::ApiToken> {
+        let id = nanoid::nanoid!(21);
+        let token = format!("co_{}", nanoid::nanoid!(40));
+        let now = Utc::now();
+        let expires_at = now + chrono::Duration::days(90);
+        let now_str = now.to_rfc3339();
+        let exp_str = expires_at.to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO api_tokens (id, user_id, name, token, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, user_id, name, token, now_str, exp_str],
+        )?;
+        Ok(crate::vault_routes::ApiToken {
+            id,
+            user_id: user_id.to_string(),
+            name: name.to_string(),
+            token,
+            created_at: now,
+            expires_at,
+            last_used_at: None,
+        })
+    }
+
+    /// List API tokens for a user (token value redacted).
+    pub fn list_api_tokens(
+        &self,
+        user_id: &str,
+    ) -> anyhow::Result<Vec<crate::vault_routes::ApiToken>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, user_id, name, token, created_at, expires_at, last_used_at \
+             FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let rows = stmt.query_map(params![user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+            ))
+        })?;
+        let mut tokens = vec![];
+        for row in rows.filter_map(|r| r.ok()) {
+            let (id, uid, name, token, created_str, expires_str, last_used_str) = row;
+            let created_at = created_str
+                .parse::<chrono::DateTime<Utc>>()
+                .unwrap_or_else(|_| Utc::now());
+            let expires_at = expires_str
+                .parse::<chrono::DateTime<Utc>>()
+                .unwrap_or_else(|_| Utc::now());
+            let last_used_at = last_used_str
+                .as_deref()
+                .and_then(|s| s.parse::<chrono::DateTime<Utc>>().ok());
+            tokens.push(crate::vault_routes::ApiToken {
+                id,
+                user_id: uid,
+                name,
+                token,
+                created_at,
+                expires_at,
+                last_used_at,
+            });
+        }
+        Ok(tokens)
+    }
+
+    /// Revoke an API token by id. Returns true if deleted.
+    pub fn delete_api_token(&self, id: &str, user_id: &str) -> anyhow::Result<bool> {
+        let n = self.conn.execute(
+            "DELETE FROM api_tokens WHERE id = ?1 AND user_id = ?2",
+            params![id, user_id],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Look up a token by value; check expiry. Updates `last_used_at`.
+    pub fn get_api_token_by_value(
+        &self,
+        token: &str,
+    ) -> anyhow::Result<Option<crate::vault_routes::ApiToken>> {
+        let result = self.conn.query_row(
+            "SELECT id, user_id, name, token, created_at, expires_at, last_used_at \
+             FROM api_tokens WHERE token = ?1",
+            params![token],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<String>>(6)?,
+                ))
+            },
+        );
+        match result {
+            Ok((id, uid, name, tok, created_str, expires_str, last_used_str)) => {
+                let created_at = created_str
+                    .parse::<chrono::DateTime<Utc>>()
+                    .unwrap_or_else(|_| Utc::now());
+                let expires_at = expires_str
+                    .parse::<chrono::DateTime<Utc>>()
+                    .unwrap_or_else(|_| Utc::now());
+                if expires_at < Utc::now() {
+                    return Ok(None); // expired
+                }
+                let last_used_at = last_used_str
+                    .as_deref()
+                    .and_then(|s| s.parse::<chrono::DateTime<Utc>>().ok());
+                // Update last_used_at
+                let _ = self.conn.execute(
+                    "UPDATE api_tokens SET last_used_at = ?1 WHERE id = ?2",
+                    params![Utc::now().to_rfc3339(), id],
+                );
+                Ok(Some(crate::vault_routes::ApiToken {
+                    id,
+                    user_id: uid,
+                    name,
+                    token: tok,
+                    created_at,
+                    expires_at,
+                    last_used_at,
+                }))
+            }
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 }
 

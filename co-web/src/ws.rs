@@ -762,15 +762,18 @@ mod tests {
         ws1.send(WsMsg::Binary(frame.into())).await.unwrap();
 
         // Client 2 must receive the update within 2 s.
-        let msg2 = tokio::time::timeout(Duration::from_secs(2), ws2.next())
-            .await
-            .expect("timeout waiting for sync-update")
-            .unwrap()
-            .unwrap();
-
-        let data = match msg2 {
-            WsMsg::Binary(b) => b,
-            other => panic!("expected Binary, got {other:?}"),
+        // Skip over any WebSocket control frames (Ping/Pong) — only accept Binary.
+        let data = loop {
+            let msg2 = tokio::time::timeout(Duration::from_secs(2), ws2.next())
+                .await
+                .expect("timeout waiting for sync-update")
+                .unwrap()
+                .unwrap();
+            match msg2 {
+                WsMsg::Binary(b) => break b,
+                WsMsg::Ping(_) | WsMsg::Pong(_) => continue,
+                other => panic!("expected Binary, got {other:?}"),
+            }
         };
         let mut pos = 0;
         assert_eq!(read_varuint(&data, &mut pos).unwrap(), MSG_SYNC as u64);

@@ -5,6 +5,39 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.29.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-35: Vault REST API + Obsidian Clipper support
+
+- `vault_routes.rs` — Vault REST API compatible with Obsidian Local REST API
+  - `GET /api/v1/universes/{slug}/vault/` — list all files with metadata
+  - `GET /api/v1/universes/{slug}/vault/{*path}` — get file content + stat
+  - `PUT /api/v1/universes/{slug}/vault/{*path}` — create/replace file
+  - `POST /api/v1/universes/{slug}/vault/{*path}` — append to file
+  - `PATCH /api/v1/universes/{slug}/vault/{*path}` — targeted edit (frontmatter field, heading section, block ID)
+  - `DELETE /api/v1/universes/{slug}/vault/{*path}` — soft delete (`.trash/`) or hard delete (`?permanent=true`)
+  - `POST /api/v1/universes/{slug}/vault/search` — full-text search across vault files
+  - `GET /api/v1/universes/{slug}/vault/tags` — aggregate all frontmatter tags
+  - `GET /api/v1/universes/{slug}/vault/tree` — recursive directory tree (BTreeMap, sorted)
+  - `POST /api/v1/universes/{slug}/vault/clip` — accept Obsidian Clipper payload, write clipped note
+- `storage.rs` — migration v15: `api_tokens` table with indexes; `create_api_token`, `list_api_tokens`, `delete_api_token`, `get_api_token_by_value` methods
+- Auth: Bearer JWT (same as board API) + long-lived API tokens (`co_` prefix, 90-day expiry)
+- Token management: `POST /api/v1/auth/token`, `GET /api/v1/auth/tokens`, `DELETE /api/v1/auth/tokens/{id}`
+- Rate limiting: 60 req/min per API token (in-memory sliding window, `LazyLock<Mutex<HashMap>>`)
+- `static/clipper-template.json` — Obsidian Clipper compatible template for CO frontmatter schema
+- `static/shared/clipper.js` — board UI paste handler
+  - `Ctrl/Cmd+Shift+V` keyboard shortcut for "Paste as CO content"
+  - Paste event listener on board area: detects Clipper-formatted markdown, shows choice dialog
+  - "Paste as task" vs "Paste as content" dialog with frontmatter preview
+  - `co:clipper-paste` custom event dispatched for board.js integration
+  - `co:card-context-menu` listener adds "Copy as Obsidian markdown" to task card context menus
+  - `COClipper` public API: `isClipperFormat`, `parseFrontmatter`, `toObsidianMarkdown`, `handleClipboardText`
+- All 8 variant `index.html` files updated to include `clipper.js`
+
+---
+
 ## [0.28.0] — 2026-04-06
 
 ### co (workspace)

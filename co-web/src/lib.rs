@@ -21,4 +21,5 @@ pub mod storage;
 pub mod theme_engine;
 pub mod universe_routes;
 pub mod universo;
+pub mod vault_routes;
 pub mod ws;

@@ -249,8 +249,20 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // Middleware stack
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
-        .allow_headers([header::CONTENT_TYPE]);
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::PATCH,
+            Method::DELETE,
+        ])
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            HeaderName::from_static("target-type"),
+            HeaderName::from_static("target"),
+            HeaderName::from_static("operation"),
+        ]);
 
     // --- Quilombo community routes ---
     let quilombo_api = crate::quilombo_routes::router();
@@ -268,6 +280,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     // --- Theme tier routes ---
     let themes_api = crate::universe_routes::themes_router();
+
+    // --- Vault REST API + API token management (CO-35) ---
+    let vault_api = crate::vault_routes::vault_router();
+    let token_api = crate::vault_routes::token_router();
 
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
@@ -289,6 +305,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/quilombo", quilombo_api)
         .nest("/api/v1/gestao", gestao_api)
         .nest("/api/v1/universes", universe_api)
+        .nest("/api/v1/universes", vault_api)
+        .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api);
 
     // Mount plugin routes if any plugins were loaded
