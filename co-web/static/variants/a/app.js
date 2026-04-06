@@ -35,6 +35,44 @@
         universeConfig: null,
     };
 
+    // ===== Editor lazy-load =====
+    let _editorInstance = null;
+    let _editorBundlePromise = null;
+
+    function loadEditorBundle() {
+        if (_editorBundlePromise) return _editorBundlePromise;
+        if (window.CoEditor) return (_editorBundlePromise = Promise.resolve());
+        _editorBundlePromise = new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = '/shared/editor.bundle.js';
+            s.onload = resolve;
+            s.onerror = reject;
+            document.head.appendChild(s);
+        });
+        return _editorBundlePromise;
+    }
+
+    async function initTaskEditor(initialContent) {
+        try {
+            await loadEditorBundle();
+        } catch (_) {
+            return; // fall back to hidden textarea
+        }
+        if (_editorInstance) {
+            _editorInstance.destroy();
+            _editorInstance = null;
+        }
+        const container = document.getElementById('task-description-editor');
+        const textarea = document.getElementById('task-description');
+        if (!container || !window.CoEditor) return;
+        _editorInstance = window.CoEditor.initEditor(container, {
+            content: initialContent,
+            onChange: (val) => { if (textarea) textarea.value = val; },
+            readOnly: false,
+        });
+        if (textarea) textarea.value = initialContent;
+    }
+
     const STATUSES = [
         { key: 'todo', label: 'To Do', color: '#94a3b8' },
         { key: 'in_progress', label: 'In Progress', color: '#3b82f6' },
@@ -2287,6 +2325,7 @@
             $('#task-assignee').value = task.assignee || '';
             $('#task-labels').value = task.labels.join(', ');
             $('#task-description').value = task.description || '';
+            initTaskEditor(task.description || '');
             deleteBtn.classList.remove('hidden');
 
             // Archive button logic
@@ -2356,6 +2395,7 @@
             deleteBtn.classList.add('hidden');
 
             if (archiveBtn) archiveBtn.classList.add('hidden');
+            initTaskEditor('');
 
             // Clear comments section
             const commentsSection = $('#comments-section');
@@ -2516,6 +2556,10 @@
     function closeModal() {
         $('#modal-overlay').classList.add('hidden');
         state.editingTaskId = null;
+        if (_editorInstance) {
+            _editorInstance.destroy();
+            _editorInstance = null;
+        }
     }
 
     async function handleFormSubmit(e) {

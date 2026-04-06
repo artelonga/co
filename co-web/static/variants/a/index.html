@@ -159,8 +159,9 @@
                     <input type="text" id="task-labels" placeholder="design, web, docs" autocomplete="off">
                 </div>
                 <div class="form-group">
-                    <label for="task-description" data-i18n="description">Descrição</label>
-                    <textarea id="task-description" rows="4"></textarea>
+                    <label data-i18n="description">Descrição</label>
+                    <div id="task-description-editor"></div>
+                    <textarea id="task-description" style="display:none" aria-hidden="true"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-danger hidden" id="btn-delete" data-i18n="delete">Excluir</button>

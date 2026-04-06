@@ -1,0 +1,26 @@
+{
+  "name": "co-editor",
+  "version": "1.0.0",
+  "description": "CodeMirror 6 markdown editor for CO platform",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.7.1",
+    "@codemirror/lang-markdown": "^6.3.1",
+    "@codemirror/lang-yaml": "^6.1.2",
+    "@codemirror/language": "^6.10.8",
+    "@codemirror/language-data": "^6.5.1",
+    "@codemirror/state": "^6.5.2",
+    "@codemirror/view": "^6.36.3",
+    "@lezer/highlight": "^1.2.1",
+    "dompurify": "^3.2.5",
+    "marked": "^15.0.12"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.2"
+  }
+}
