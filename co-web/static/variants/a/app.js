@@ -147,42 +147,56 @@
         }, 3000);
     }
 
-    // ===== Universe Form Config (CO-24) =====
+    // ===== Universe Form Config (CO-24 / CO-30) =====
 
-    // Maps API theme_preset names to CSS data-palette attribute values.
+    // Maps API theme_preset names to CSS data-palette attribute values (used for
+    // structural palette rules in style.css — modal styling, input styling, etc.).
     const THEME_PALETTE_MAP = {
+        'scholarly': 'scholarly',
         'scholarly-light': 'scholarly',
         'scholarly-dark': 'scholarly-dark',
         'relic': 'relic',
         'relic-light': 'relic-light',
+        'modern': '',
+        '': '',
     };
 
-    // Apply universe presentation config: palette, custom tokens, default layout, fonts.
-    function applyUniverseConfig(config) {
-        if (!config) return;
-        state.universeConfig = config;
+    // Dark/light companion pairs (CO-30).
+    const THEME_COMPANION = {
+        'scholarly': 'scholarly-dark',
+        'scholarly-light': 'scholarly-dark',
+        'scholarly-dark': 'scholarly',
+        'relic': 'relic-light',
+        'relic-light': 'relic',
+        'modern': 'modern',
+    };
 
-        // 1. Apply theme preset via data-palette attribute (uses existing CSS presets).
-        const paletteKey = THEME_PALETTE_MAP[config.theme_preset] || 'scholarly';
-        document.documentElement.setAttribute('data-palette', paletteKey);
+    const DARK_THEMES = new Set(['scholarly-dark', 'relic']);
 
-        // 2. Apply custom CSS token overrides as inline :root style.
-        let customStyle = document.getElementById('co-universe-tokens');
-        if (config.custom_tokens && typeof config.custom_tokens === 'object') {
-            const declarations = Object.entries(config.custom_tokens)
-                .map(([k, v]) => `${k}:${v}`)
-                .join(';');
-            if (!customStyle) {
-                customStyle = document.createElement('style');
-                customStyle.id = 'co-universe-tokens';
-                document.head.appendChild(customStyle);
+    // ---------------------------------------------------------------------------
+    // CO-30: Load theme.css from the server for the active universe.
+    // Hot-swaps the existing <link> element so there is no page reload.
+    // ---------------------------------------------------------------------------
+    function loadThemeCss(slug) {
+        if (!slug) return;
+        const href = `/api/v1/universes/${slug}/theme.css`;
+        let link = document.getElementById('co-theme-css');
+        if (link) {
+            // Hot-swap: update href (browser reloads only this stylesheet).
+            if (link.href !== new URL(href, document.baseURI).href) {
+                link.href = href;
             }
-            customStyle.textContent = `:root{${declarations}}`;
-        } else if (customStyle) {
-            customStyle.textContent = '';
+        } else {
+            link = document.createElement('link');
+            link.id = 'co-theme-css';
+            link.rel = 'stylesheet';
+            link.href = href;
+            document.head.appendChild(link);
         }
+    }
 
-        // 3. Inject Google Fonts link if custom fonts are specified.
+    // Inject a Google Fonts <link rel="preload"> for custom font families (CO-30).
+    function loadCustomFonts(config) {
         const fontFamilies = [config.font_headline, config.font_body]
             .filter(Boolean)
             .map(f => encodeURIComponent(f))
@@ -193,26 +207,50 @@
             if (existingFontLink) {
                 existingFontLink.href = href;
             } else {
+                // Preconnect hints (idempotent — only add if absent)
+                if (!document.querySelector('link[href="https://fonts.googleapis.com"]')) {
+                    const preconn1 = document.createElement('link');
+                    preconn1.rel = 'preconnect';
+                    preconn1.href = 'https://fonts.googleapis.com';
+                    document.head.appendChild(preconn1);
+                }
+                if (!document.querySelector('link[href="https://fonts.gstatic.com"]')) {
+                    const preconn2 = document.createElement('link');
+                    preconn2.rel = 'preconnect';
+                    preconn2.href = 'https://fonts.gstatic.com';
+                    preconn2.crossOrigin = 'anonymous';
+                    document.head.appendChild(preconn2);
+                }
                 const link = document.createElement('link');
                 link.id = 'co-universe-fonts';
                 link.rel = 'stylesheet';
                 link.href = href;
                 document.head.appendChild(link);
             }
-            // Apply font families as CSS variables for headings/body.
-            let fontStyle = document.getElementById('co-universe-font-vars');
-            if (!fontStyle) {
-                fontStyle = document.createElement('style');
-                fontStyle.id = 'co-universe-font-vars';
-                document.head.appendChild(fontStyle);
-            }
-            const vars = [];
-            if (config.font_headline) vars.push(`--font-headline:"${config.font_headline}"`);
-            if (config.font_body) vars.push(`--font-body:"${config.font_body}"`);
-            fontStyle.textContent = `:root{${vars.join(';')}}`;
         } else if (existingFontLink) {
             existingFontLink.remove();
         }
+    }
+
+    // Apply universe presentation config: theme.css link, data-palette, fonts, layout.
+    function applyUniverseConfig(config) {
+        if (!config) return;
+        state.universeConfig = config;
+        const slug = state.currentUniverseSlug;
+
+        // 1. CO-30: Load generated theme.css from the server (hot-swap on change).
+        if (slug) loadThemeCss(slug);
+
+        // 2. Set data-palette attribute for structural CSS rules (modal styling, etc.).
+        const paletteKey = THEME_PALETTE_MAP[config.theme_preset] ?? '';
+        if (paletteKey) {
+            document.documentElement.setAttribute('data-palette', paletteKey);
+        } else {
+            document.documentElement.removeAttribute('data-palette');
+        }
+
+        // 3. Inject Google Fonts for custom fonts (with <link rel="preload"> for CO-30).
+        loadCustomFonts(config);
 
         // 4. Set default layout / view from config (board → kanban, others map directly).
         const layoutToView = {
@@ -3226,13 +3264,40 @@
         const layoutSelect = document.getElementById('settings-layout');
         const fontHeadlineInput = document.getElementById('settings-font-headline');
         const fontBodyInput = document.getElementById('settings-font-body');
+        const customTokensInput = document.getElementById('settings-custom-tokens');
 
-        if (themeSelect) themeSelect.value = config.theme_preset || 'scholarly-light';
+        // Normalise scholarly-light → scholarly for the new select options.
+        const preset = config.theme_preset === 'scholarly-light' ? 'scholarly' : (config.theme_preset || 'scholarly');
+        if (themeSelect) themeSelect.value = preset;
         if (layoutSelect) layoutSelect.value = config.layout || 'board';
         if (fontHeadlineInput) fontHeadlineInput.value = config.font_headline || '';
         if (fontBodyInput) fontBodyInput.value = config.font_body || '';
+        // CO-30: pre-fill custom tokens JSON textarea.
+        if (customTokensInput) {
+            customTokensInput.value = config.custom_tokens
+                ? JSON.stringify(config.custom_tokens, null, 2)
+                : '';
+        }
+
+        // CO-30: update dark-toggle icon to reflect current theme.
+        updateDarkToggleIcon(preset);
 
         overlay.classList.remove('hidden');
+    }
+
+    // Update the dark/light toggle button icon to show current mode.
+    function updateDarkToggleIcon(preset) {
+        const btn = document.getElementById('settings-dark-toggle');
+        if (!btn) return;
+        const isDark = DARK_THEMES.has(preset);
+        // Sun icon when dark (clicking switches to light), moon icon when light.
+        if (isDark) {
+            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>`;
+            btn.title = 'Modo claro';
+        } else {
+            btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+            btn.title = 'Modo escuro';
+        }
     }
 
     function setupSettingsPanel() {
@@ -3249,6 +3314,27 @@
         cancelBtn && cancelBtn.addEventListener('click', close);
         overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
+        // CO-30: dark/light toggle — swap to companion preset.
+        const darkToggleBtn = document.getElementById('settings-dark-toggle');
+        if (darkToggleBtn) {
+            darkToggleBtn.addEventListener('click', () => {
+                const themeSelect = document.getElementById('settings-theme');
+                if (!themeSelect) return;
+                const current = themeSelect.value;
+                const companion = THEME_COMPANION[current] || 'scholarly';
+                themeSelect.value = companion;
+                updateDarkToggleIcon(companion);
+            });
+        }
+
+        // Update toggle icon when user manually changes the select.
+        const themeSelectEl = document.getElementById('settings-theme');
+        if (themeSelectEl) {
+            themeSelectEl.addEventListener('change', () => {
+                updateDarkToggleIcon(themeSelectEl.value);
+            });
+        }
+
         form && form.addEventListener('submit', async e => {
             e.preventDefault();
             const slug = state.currentUniverseSlug;
@@ -3257,12 +3343,30 @@
             const layoutSelect = document.getElementById('settings-layout');
             const fontHeadlineInput = document.getElementById('settings-font-headline');
             const fontBodyInput = document.getElementById('settings-font-body');
+            const customTokensInput = document.getElementById('settings-custom-tokens');
+
+            // CO-30: parse custom tokens JSON (null = clear).
+            let customTokens = undefined;
+            if (customTokensInput) {
+                const raw = customTokensInput.value.trim();
+                if (raw) {
+                    try {
+                        customTokens = JSON.parse(raw);
+                    } catch {
+                        showToast('JSON inválido nos tokens CSS', 'error');
+                        return;
+                    }
+                } else {
+                    customTokens = null; // explicit null clears existing overrides
+                }
+            }
 
             const update = {
                 theme_preset: themeSelect ? themeSelect.value : undefined,
                 layout: layoutSelect ? layoutSelect.value : undefined,
                 font_headline: fontHeadlineInput ? fontHeadlineInput.value : undefined,
                 font_body: fontBodyInput ? fontBodyInput.value : undefined,
+                custom_tokens: customTokens,
             };
 
             const saveBtn = document.getElementById('settings-save');
@@ -3272,6 +3376,11 @@
             if (saveBtn) saveBtn.disabled = false;
 
             if (result) {
+                // CO-30: hot-swap theme.css link by reloading with a cache-bust.
+                const themeLink = document.getElementById('co-theme-css');
+                if (themeLink && slug) {
+                    themeLink.href = `/api/v1/universes/${slug}/theme.css?_=${Date.now()}`;
+                }
                 applyUniverseConfig(result);
                 showToast('Configurações salvas', 'success');
                 close();

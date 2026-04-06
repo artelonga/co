@@ -18,5 +18,6 @@ pub mod quilombo_routes;
 pub mod quilombo_storage;
 pub mod server;
 pub mod storage;
+pub mod theme_engine;
 pub mod universe_routes;
 pub mod universo;

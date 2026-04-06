@@ -276,7 +276,7 @@
         </div>
     </div>
 
-    <!-- Universe Settings Modal (CO-24 — owner only, shown via JS) -->
+    <!-- Universe Settings Modal (CO-24/CO-30 — owner only, shown via JS) -->
     <div id="settings-modal-overlay" class="modal-overlay hidden">
         <div class="modal" id="settings-modal">
             <div class="modal-header">
@@ -286,12 +286,21 @@
             <form id="settings-form">
                 <div class="form-group">
                     <label for="settings-theme" data-i18n="form.theme">Tema</label>
-                    <select id="settings-theme">
-                        <option value="scholarly-light">Scholarly Light</option>
-                        <option value="scholarly-dark">Scholarly Dark</option>
-                        <option value="relic">Relic</option>
-                        <option value="relic-light">Relic Light</option>
-                    </select>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <select id="settings-theme" style="flex:1">
+                            <option value="scholarly">Scholarly Light</option>
+                            <option value="scholarly-dark">Scholarly Dark</option>
+                            <option value="relic-light">Relic Light</option>
+                            <option value="relic">Relic Dark</option>
+                            <option value="modern">Modern</option>
+                        </select>
+                        <!-- CO-30: dark/light toggle button -->
+                        <button type="button" id="settings-dark-toggle" class="btn btn-secondary" title="Alternar modo claro/escuro" style="white-space:nowrap;padding:6px 10px;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="settings-dark-icon">
+                                <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                            </svg>
+                        </button>
+                    </div>
                 </div>
                 <div class="form-group">
                     <label for="settings-layout" data-i18n="form.layout">Layout padrão</label>
@@ -310,6 +319,12 @@
                 <div class="form-group">
                     <label for="settings-font-body" data-i18n="form.font_body">Fonte de texto (Google Fonts)</label>
                     <input type="text" id="settings-font-body" placeholder="Ex: Work Sans" autocomplete="off">
+                </div>
+                <!-- CO-30: custom token overrides (JSON textarea) -->
+                <div class="form-group">
+                    <label for="settings-custom-tokens" data-i18n="form.custom_tokens">Tokens CSS personalizados (JSON)</label>
+                    <textarea id="settings-custom-tokens" rows="4" placeholder='{"--accent":"#ff6600","--bg":"#fafafa"}' autocomplete="off" style="font-family:var(--font-mono,monospace);font-size:12px;resize:vertical;"></textarea>
+                    <span style="font-size:11px;color:var(--text-muted);" data-i18n="form.custom_tokens_hint">Substitui qualquer token CSS do tema base.</span>
                 </div>
                 <div class="form-actions">
                     <div class="form-actions-right">

@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use axum::{
     Json, Router,
     extract::{Path, State},
@@ -420,11 +422,96 @@ pub async fn update_universe_config(
     Ok(Json(config))
 }
 
+// ---------------------------------------------------------------------------
+// Theme CSS endpoint (CO-30)
+// ---------------------------------------------------------------------------
+
+/// Compute a stable ETag from the active theme preset name + serialized custom tokens.
+fn config_etag(theme_preset: &str, custom_tokens: Option<&serde_json::Value>) -> String {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    theme_preset.hash(&mut hasher);
+    if let Some(tokens) = custom_tokens {
+        tokens.to_string().hash(&mut hasher);
+    }
+    format!("\"{}\"", hasher.finish())
+}
+
+/// GET /api/v1/universes/:slug/theme.css
+///
+/// Returns a generated CSS stylesheet with all design tokens for the universe's
+/// active theme preset, merged with any custom token overrides set by the owner.
+/// Responds with `Cache-Control: no-cache` and an ETag derived from the config.
+pub async fn get_universe_theme_css(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    let config = {
+        let Ok(storage) = lock_storage(&state) else {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                [(header::CONTENT_TYPE, "text/plain")],
+                "Storage error".to_string(),
+            )
+                .into_response();
+        };
+        match storage.get_universe_form_config(&slug) {
+            Some(c) => c,
+            None => {
+                return (
+                    StatusCode::NOT_FOUND,
+                    [(header::CONTENT_TYPE, "text/plain")],
+                    format!("Universe '{}' not found", slug),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let etag = config_etag(&config.theme_preset, config.custom_tokens.as_ref());
+
+    // Honour If-None-Match conditional request.
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        && inm == etag
+    {
+        return StatusCode::NOT_MODIFIED.into_response();
+    }
+
+    let preset = crate::theme_engine::ThemePreset::by_name(&config.theme_preset)
+        .unwrap_or_else(|| crate::theme_engine::ThemePreset::by_name("modern").unwrap());
+
+    let css = crate::theme_engine::generate_css(&preset, config.custom_tokens.as_ref());
+
+    (
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("text/css; charset=utf-8"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("no-cache"),
+            ),
+            (
+                header::ETAG,
+                axum::http::HeaderValue::from_str(&etag)
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("\"0\"")),
+            ),
+        ],
+        css,
+    )
+        .into_response()
+}
+
 pub fn router() -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
         .route("/{slug}", get(get_universe_info))
         .route("/{slug}/config", get(get_universe_config))
+        .route("/{slug}/theme.css", get(get_universe_theme_css))
         .route("/{slug}/projects", get(list_universe_projects))
         .route("/{slug}/clone", post(clone_universe));
 
@@ -688,5 +775,234 @@ mod tests {
         // must still return the premium theme — gating only applies to the switcher UI.
         let config = storage.get_universe_form_config("default").unwrap();
         assert_eq!(config.theme_preset, "relic");
+    }
+
+    // --- CO-30: theme.css endpoint ---
+
+    /// Build a minimal in-process router for the universe API (no port binding).
+    fn make_universe_router(
+        storage: Storage,
+        dir: &std::path::Path,
+    ) -> (axum::Router, tempfile::TempDir) {
+        use crate::config::WebConfig;
+        use crate::experiment::ExperimentStore;
+        use crate::server::{AppState, AppStateInner, build_router};
+        use std::sync::{Arc, Mutex};
+
+        let config = WebConfig {
+            port: 0,
+            data_dir: dir.to_str().unwrap().to_string(),
+            static_dir: "co-web/static".to_string(),
+            default_variant: "a".to_string(),
+            experiments: false,
+            plugins_dir: "plugins".to_string(),
+            game_db_path: None,
+            universo_dir: "".to_string(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+        };
+        let experiment = ExperimentStore::new(dir);
+        let auth_store = crate::auth::AuthStore::new(dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_db_path = dir.join("game_test.db");
+        let game_storage =
+            Arc::new(game_core::storage::Storage::open(&game_db_path).expect("game storage"));
+        let state: AppState = Arc::new(AppStateInner {
+            storage: Mutex::new(storage),
+            experiment: Mutex::new(experiment),
+            config,
+            auth_store: Mutex::new(auth_store),
+            mail,
+            game_storage,
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+        });
+        let router = build_router(state, None);
+        let tmp = tempdir().unwrap(); // keep alive
+        (router, tmp)
+    }
+
+    async fn body_bytes(response: axum::http::Response<axum::body::Body>) -> String {
+        use http_body_util::BodyExt;
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    /// GET /api/v1/universes/default/theme.css returns 200 with :root block.
+    #[tokio::test]
+    async fn test_theme_css_returns_ok() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (storage, dir) = make_storage();
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/default/theme.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let ct = response
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ct.contains("text/css"), "Content-Type must be text/css");
+        let body = body_bytes(response).await;
+        assert!(body.contains(":root {"), "CSS must contain :root block");
+        assert!(body.contains("--bg:"), "CSS must contain --bg token");
+        assert!(
+            body.contains("--accent:"),
+            "CSS must contain --accent token"
+        );
+    }
+
+    /// All required tokens are present in the generated CSS.
+    #[tokio::test]
+    async fn test_theme_css_all_required_tokens() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (storage, dir) = make_storage();
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/default/theme.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = body_bytes(response).await;
+
+        for token in crate::theme_engine::tests::REQUIRED_TOKENS {
+            assert!(
+                body.contains(*token),
+                "theme.css must contain token '{token}'"
+            );
+        }
+    }
+
+    /// Changing the theme changes the CSS output.
+    #[tokio::test]
+    async fn test_theme_css_changes_when_theme_changes() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (mut storage, dir) = make_storage();
+
+        // Set theme to scholarly-dark
+        storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("scholarly-dark".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/default/theme.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let body = body_bytes(response).await;
+
+        // scholarly-dark --bg is #1c1610
+        assert!(
+            body.contains("#1c1610"),
+            "scholarly-dark --bg must be #1c1610"
+        );
+        // Must NOT have scholarly-light --bg
+        assert!(
+            !body.contains("#FFF9ED"),
+            "scholarly-dark must not contain scholarly-light --bg"
+        );
+    }
+
+    /// GET /theme.css for a missing universe returns 404.
+    #[tokio::test]
+    async fn test_theme_css_404_for_missing_universe() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (storage, dir) = make_storage();
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/no-such-universe/theme.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+    }
+
+    /// ETag is present and the same ETag triggers 304 Not Modified.
+    #[tokio::test]
+    async fn test_theme_css_etag_304() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (storage, dir) = make_storage();
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        // First request: capture ETag.
+        let response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/default/theme.css")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), axum::http::StatusCode::OK);
+        let etag = response
+            .headers()
+            .get(axum::http::header::ETAG)
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
+            .to_string();
+
+        // Second request with If-None-Match: expect 304.
+        let response2 = router
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/default/theme.css")
+                    .header(axum::http::header::IF_NONE_MATCH, &etag)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response2.status(), axum::http::StatusCode::NOT_MODIFIED);
     }
 }
