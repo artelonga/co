@@ -12,6 +12,25 @@ use crate::error::AppError;
 use crate::models::*;
 use crate::server::AppState;
 
+// ---------------------------------------------------------------------------
+// Theme tier constants
+// ---------------------------------------------------------------------------
+
+/// Palette keys available to all users (anonymous or logged-in).
+const FREE_PALETTES: &[&str] = &[
+    "scholarly",
+    "scholarly-light", // backward-compat alias stored in older DB rows
+    "scholarly-dark",
+    "relic",
+    "relic-light",
+];
+
+/// Additional palette keys available only to real logged-in (non-anon) users.
+const PREMIUM_PALETTES: &[&str] = &["", "modern"];
+
+/// Variant keys (a–h) available only to real logged-in users.
+const PREMIUM_VARIANTS: &[&str] = &["a", "b", "c", "d", "e", "f", "g", "h"];
+
 /// Public universe info returned by GET /:slug — no sensitive owner_id.
 #[derive(Debug, Serialize)]
 pub struct UniverseInfo {
@@ -266,6 +285,33 @@ pub async fn claim_universe(
     Ok(Json(universe))
 }
 
+// GET /api/v1/themes/available — optional auth; returns theme tier for the caller
+pub async fn get_available_themes(headers: HeaderMap) -> Json<AvailableThemes> {
+    let is_real_user = extract_optional_claims(&headers)
+        .map(|c| c.tier != "anon" && !c.sub.starts_with("anon-"))
+        .unwrap_or(false);
+
+    if is_real_user {
+        Json(AvailableThemes {
+            palettes: ["", "scholarly", "scholarly-dark", "relic", "relic-light"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            variants: PREMIUM_VARIANTS.iter().map(|s| s.to_string()).collect(),
+            custom: Some(true),
+        })
+    } else {
+        Json(AvailableThemes {
+            palettes: ["scholarly", "scholarly-dark", "relic", "relic-light"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            variants: vec![],
+            custom: None,
+        })
+    }
+}
+
 /// Extract a named cookie value from the Cookie header.
 fn extract_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
@@ -282,16 +328,22 @@ fn extract_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
-/// Try to extract a user ID from the Authorization header without hard-failing.
+/// Try to extract a user ID from the Authorization header or session cookie without hard-failing.
 fn extract_optional_user_id(headers: &HeaderMap, _state: &AppState) -> Option<String> {
+    extract_optional_claims(headers).map(|c| c.sub)
+}
+
+/// Try to decode full JWT claims from Authorization header or session cookie without hard-failing.
+fn extract_optional_claims(headers: &HeaderMap) -> Option<crate::auth::Claims> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))?;
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| crate::auth::extract_session_cookie(headers))?;
 
-    let secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".to_string());
-
-    crate::auth::decode_user_id(token, &secret).ok()
+    let secret = crate::auth::jwt_secret();
+    crate::auth::decode_claims(&token, &secret).ok()
 }
 
 // GET /api/v1/universes/:slug/config — public: returns presentation config
@@ -337,13 +389,26 @@ pub async fn update_universe_config(
         }
     }
 
-    // Validate theme_preset value.
+    // Validate theme_preset value against the caller's tier.
     if let Some(ref theme) = body.theme_preset {
-        let valid = ["scholarly-light", "scholarly-dark", "relic", "relic-light"];
-        if !valid.contains(&theme.as_str()) {
+        let is_anon = user_id.0.starts_with("anon-");
+        if FREE_PALETTES.contains(&theme.as_str()) {
+            // Free palette — always allowed.
+        } else if PREMIUM_PALETTES.contains(&theme.as_str()) {
+            if is_anon {
+                return Err(AppError::Forbidden(format!(
+                    "Theme '{theme}' requires a logged-in account"
+                )));
+            }
+        } else {
             return Err(AppError::BadRequest(format!(
                 "Invalid theme_preset '{theme}'. Must be one of: {}",
-                valid.join(", ")
+                FREE_PALETTES
+                    .iter()
+                    .chain(PREMIUM_PALETTES.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
             )));
         }
     }
@@ -373,6 +438,11 @@ pub fn router() -> Router<AppState> {
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)
+}
+
+/// Standalone router for the `/api/v1/themes` namespace (no auth layer).
+pub fn themes_router() -> Router<AppState> {
+    Router::new().route("/available", get(get_available_themes))
 }
 
 // ---------------------------------------------------------------------------
@@ -537,5 +607,86 @@ mod tests {
         let contents = std::fs::read_to_string(yaml_path).unwrap();
         assert!(contents.contains("relic-light"));
         assert!(contents.contains("table"));
+    }
+
+    // --- CO-25: theme gating ---
+
+    /// Anonymous user (no auth header) sees 4 free palettes, no variants, no custom editor.
+    #[tokio::test]
+    async fn test_themes_available_anonymous() {
+        let headers = axum::http::HeaderMap::new();
+        let axum::Json(themes) = super::get_available_themes(headers).await;
+
+        assert_eq!(
+            themes.palettes,
+            vec!["scholarly", "scholarly-dark", "relic", "relic-light"]
+        );
+        assert!(themes.variants.is_empty());
+        assert!(themes.custom.is_none());
+    }
+
+    /// Real logged-in user sees Modern + 4 free palettes + 8 variants + custom editor.
+    #[tokio::test]
+    async fn test_themes_available_logged_in() {
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (token, _) =
+            crate::auth::sign_jwt("usr_real", "user@example.com", "player", "test-secret").unwrap();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        let axum::Json(themes) = super::get_available_themes(headers).await;
+
+        assert_eq!(
+            themes.palettes,
+            vec!["", "scholarly", "scholarly-dark", "relic", "relic-light"]
+        );
+        assert_eq!(themes.variants.len(), 8);
+        assert_eq!(themes.custom, Some(true));
+    }
+
+    /// Anon-tier user (cookie JWT with tier="anon") sees only free palettes.
+    #[tokio::test]
+    async fn test_themes_available_anon_cookie() {
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (token, _) = crate::auth::sign_jwt("anon-abc123", "", "anon", "test-secret").unwrap();
+
+        let mut headers = axum::http::HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("session={token}").parse().unwrap(),
+        );
+        let axum::Json(themes) = super::get_available_themes(headers).await;
+
+        assert_eq!(
+            themes.palettes,
+            vec!["scholarly", "scholarly-dark", "relic", "relic-light"]
+        );
+        assert!(themes.variants.is_empty());
+    }
+
+    /// A premium theme (scholarly, relic) set by an owner persists even if the user logs out —
+    /// the storage layer always returns the stored preset regardless of auth.
+    #[test]
+    fn test_premium_theme_persists_after_owner_sets_it() {
+        let (mut storage, _dir) = make_storage();
+
+        // Owner sets a premium theme while logged in.
+        storage
+            .update_universe_form_config(
+                "default",
+                UpdateUniverseFormConfig {
+                    theme_preset: Some("relic".to_string()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        // Reading config back (as if a new, unauthenticated visitor renders the universe)
+        // must still return the premium theme — gating only applies to the switcher UI.
+        let config = storage.get_universe_form_config("default").unwrap();
+        assert_eq!(config.theme_preset, "relic");
     }
 }

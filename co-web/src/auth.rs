@@ -342,6 +342,18 @@ pub fn decode_user_id(token: &str, secret: &str) -> anyhow::Result<String> {
     Ok(data.claims.sub)
 }
 
+/// Decode a JWT token and return the full claims if valid.
+pub fn decode_claims(token: &str, secret: &str) -> anyhow::Result<Claims> {
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    let data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    )?;
+    Ok(data.claims)
+}
+
 /// Creates a new VerifyCodeEntry for the given user.
 pub fn new_code_entry(user_id: Option<String>, code: String) -> VerifyCodeEntry {
     VerifyCodeEntry {

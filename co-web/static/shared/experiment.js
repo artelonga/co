@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    // Theme tier data fetched from /api/v1/themes/available at init.
+    // Defaults to the free tier so UI is correct before the fetch completes.
+    let availableThemes = {
+        palettes: ['scholarly', 'scholarly-dark', 'relic', 'relic-light'],
+        variants: [],
+        custom: null,
+    };
+
     const VARIANTS = [
         { key: 'a', name: 'Modern' },
         { key: 'b', name: 'Medieval' },
@@ -135,7 +143,18 @@
 
         slot.innerHTML = '';
 
-        const current = NAMED_PALETTES.find(p => p.key === currentNamedPalette) || NAMED_PALETTES[0];
+        // Filter palettes to only those available to this user's tier.
+        const allowedPalettes = NAMED_PALETTES.filter(p =>
+            availableThemes.palettes.includes(p.key)
+        );
+
+        // If the currently selected palette is not in the allowed list, fall back to the
+        // first allowed one (this happens when a premium theme is displayed to a visitor —
+        // the switcher just won't pre-select it, the CSS token on the page still applies).
+        const current =
+            allowedPalettes.find(p => p.key === currentNamedPalette) ||
+            allowedPalettes[0] ||
+            NAMED_PALETTES[0];
 
         const btn = document.createElement('button');
         btn.className = 'palette-switcher-btn';
@@ -154,7 +173,7 @@
         dropdown.className = 'palette-switcher-dropdown hidden';
         dropdown.id = 'palette-switcher-dropdown';
         dropdown.setAttribute('role', 'listbox');
-        dropdown.innerHTML = NAMED_PALETTES.map(p => `
+        dropdown.innerHTML = allowedPalettes.map(p => `
             <button class="palette-switcher-item${p.key === currentNamedPalette ? ' active' : ''}"
                     data-palette-key="${p.key}"
                     role="option"
@@ -199,6 +218,7 @@
 
     // --- Init ---
     async function init() {
+        // Fetch variant assignment
         try {
             const res = await fetch('/api/experiment/variant');
             const data = await res.json();
@@ -207,6 +227,15 @@
             const match = document.cookie.match(/co_variant=([a-h])/);
             if (match) currentVariant = match[1];
         }
+
+        // Fetch theme tier — determines which palettes, variants, and editors are shown
+        try {
+            const res = await fetch('/api/v1/themes/available');
+            if (res.ok) {
+                availableThemes = await res.json();
+            }
+        } catch (_) { /* keep free-tier defaults */ }
+
         loadNamedPalette();
         loadPalette();
         renderWidget();
@@ -215,51 +244,62 @@
 
     // --- Render ---
     function renderWidget() {
-        // Pill
+        const hasVariants = availableThemes.variants.length > 0;
+        const hasCustomPalette = !!availableThemes.custom;
+
+        // Pill — hide variant switch and palette editor for anonymous users
         const pill = document.createElement('div');
         pill.className = 'experiment-pill';
         pill.innerHTML = `
             <span class="experiment-pill-variant">Variant ${currentVariant.toUpperCase()}</span>
+            ${hasVariants ? `
             <span class="experiment-pill-sep">|</span>
             <button class="experiment-pill-btn" id="exp-switch">Switch</button>
+            ` : ''}
+            ${hasCustomPalette ? `
             <span class="experiment-pill-sep">|</span>
             <button class="experiment-pill-btn" id="exp-palette">Palette</button>
+            ` : ''}
             <span class="experiment-pill-sep">|</span>
             <button class="experiment-pill-btn" id="exp-feedback">Feedback</button>
         `;
         document.body.appendChild(pill);
 
-        // Dropdown
-        const dropdown = document.createElement('div');
-        dropdown.className = 'experiment-dropdown hidden';
-        dropdown.id = 'exp-dropdown';
-        dropdown.innerHTML = VARIANTS.map(v => `
-            <button class="experiment-dropdown-item${v.key === currentVariant ? ' active' : ''}" data-variant="${v.key}">
-                <span class="experiment-dropdown-item-letter">${v.key.toUpperCase()}</span>
-                ${esc(v.name)}
-            </button>
-        `).join('');
-        document.body.appendChild(dropdown);
+        // Variant dropdown — only rendered for logged-in users
+        if (hasVariants) {
+            const dropdown = document.createElement('div');
+            dropdown.className = 'experiment-dropdown hidden';
+            dropdown.id = 'exp-dropdown';
+            dropdown.innerHTML = VARIANTS.map(v => `
+                <button class="experiment-dropdown-item${v.key === currentVariant ? ' active' : ''}" data-variant="${v.key}">
+                    <span class="experiment-dropdown-item-letter">${v.key.toUpperCase()}</span>
+                    ${esc(v.name)}
+                </button>
+            `).join('');
+            document.body.appendChild(dropdown);
+        }
 
-        // Palette panel
-        const palettePanel = document.createElement('div');
-        palettePanel.className = 'experiment-palette hidden';
-        palettePanel.id = 'exp-palette-panel';
-        palettePanel.innerHTML = `
-            <div class="experiment-palette-header">
-                <span class="experiment-palette-title">Customize Palette</span>
-                <button class="experiment-palette-reset" id="exp-palette-reset">Reset</button>
-            </div>
-            <div class="experiment-palette-colors">
-                ${PALETTE_KEYS.map(p => `
-                    <div class="experiment-palette-row">
-                        <label>${esc(p.label)}</label>
-                        <input type="color" data-var="${p.key}" class="experiment-palette-input">
-                    </div>
-                `).join('')}
-            </div>
-        `;
-        document.body.appendChild(palettePanel);
+        // Custom palette panel — only rendered for logged-in users
+        if (hasCustomPalette) {
+            const palettePanel = document.createElement('div');
+            palettePanel.className = 'experiment-palette hidden';
+            palettePanel.id = 'exp-palette-panel';
+            palettePanel.innerHTML = `
+                <div class="experiment-palette-header">
+                    <span class="experiment-palette-title">Customize Palette</span>
+                    <button class="experiment-palette-reset" id="exp-palette-reset">Reset</button>
+                </div>
+                <div class="experiment-palette-colors">
+                    ${PALETTE_KEYS.map(p => `
+                        <div class="experiment-palette-row">
+                            <label>${esc(p.label)}</label>
+                            <input type="color" data-var="${p.key}" class="experiment-palette-input">
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            document.body.appendChild(palettePanel);
+        }
 
         // Feedback overlay
         const overlay = document.createElement('div');
@@ -341,63 +381,74 @@
 
     // --- Events ---
     function setupEvents() {
+        const hasVariants = availableThemes.variants.length > 0;
+        const hasCustomPalette = !!availableThemes.custom;
+
         let dropdownOpen = false;
         let paletteOpen = false;
 
-        document.getElementById('exp-switch').addEventListener('click', (e) => {
-            e.stopPropagation();
-            dropdownOpen = !dropdownOpen;
-            paletteOpen = false;
-            document.getElementById('exp-dropdown').classList.toggle('hidden', !dropdownOpen);
-            document.getElementById('exp-palette-panel').classList.add('hidden');
-        });
-
-        document.getElementById('exp-palette').addEventListener('click', (e) => {
-            e.stopPropagation();
-            paletteOpen = !paletteOpen;
-            dropdownOpen = false;
-            document.getElementById('exp-palette-panel').classList.toggle('hidden', !paletteOpen);
-            document.getElementById('exp-dropdown').classList.add('hidden');
-            if (paletteOpen) syncPaletteInputs();
-        });
-
-        document.getElementById('exp-dropdown').querySelectorAll('.experiment-dropdown-item').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const variant = btn.dataset.variant;
-                dropdownOpen = false;
-                document.getElementById('exp-dropdown').classList.add('hidden');
-                if (variant !== currentVariant) {
-                    await applyVariantSwitch(variant);
+        if (hasVariants) {
+            document.getElementById('exp-switch').addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdownOpen = !dropdownOpen;
+                paletteOpen = false;
+                document.getElementById('exp-dropdown').classList.toggle('hidden', !dropdownOpen);
+                if (hasCustomPalette) {
+                    document.getElementById('exp-palette-panel').classList.add('hidden');
                 }
             });
-        });
+
+            document.getElementById('exp-dropdown').querySelectorAll('.experiment-dropdown-item').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const variant = btn.dataset.variant;
+                    dropdownOpen = false;
+                    document.getElementById('exp-dropdown').classList.add('hidden');
+                    if (variant !== currentVariant) {
+                        await applyVariantSwitch(variant);
+                    }
+                });
+            });
+        }
+
+        if (hasCustomPalette) {
+            document.getElementById('exp-palette').addEventListener('click', (e) => {
+                e.stopPropagation();
+                paletteOpen = !paletteOpen;
+                dropdownOpen = false;
+                document.getElementById('exp-palette-panel').classList.toggle('hidden', !paletteOpen);
+                if (hasVariants) {
+                    document.getElementById('exp-dropdown').classList.add('hidden');
+                }
+                if (paletteOpen) syncPaletteInputs();
+            });
+
+            // Palette color inputs
+            document.getElementById('exp-palette-panel').addEventListener('click', e => e.stopPropagation());
+            document.querySelectorAll('.experiment-palette-input').forEach(input => {
+                input.addEventListener('input', () => {
+                    const varName = input.dataset.var;
+                    document.documentElement.style.setProperty(varName, input.value);
+                    const palette = getCurrentPalette();
+                    palette[varName] = input.value;
+                    savePalette(palette);
+                });
+            });
+
+            document.getElementById('exp-palette-reset').addEventListener('click', () => {
+                resetPalette();
+                window.location.reload();
+            });
+        }
 
         document.addEventListener('click', () => {
             if (dropdownOpen) {
                 dropdownOpen = false;
-                document.getElementById('exp-dropdown').classList.add('hidden');
+                if (hasVariants) document.getElementById('exp-dropdown').classList.add('hidden');
             }
             if (paletteOpen) {
                 paletteOpen = false;
-                document.getElementById('exp-palette-panel').classList.add('hidden');
+                if (hasCustomPalette) document.getElementById('exp-palette-panel').classList.add('hidden');
             }
-        });
-
-        // Palette color inputs
-        document.getElementById('exp-palette-panel').addEventListener('click', e => e.stopPropagation());
-        document.querySelectorAll('.experiment-palette-input').forEach(input => {
-            input.addEventListener('input', () => {
-                const varName = input.dataset.var;
-                document.documentElement.style.setProperty(varName, input.value);
-                const palette = getCurrentPalette();
-                palette[varName] = input.value;
-                savePalette(palette);
-            });
-        });
-
-        document.getElementById('exp-palette-reset').addEventListener('click', () => {
-            resetPalette();
-            window.location.reload();
         });
 
         document.getElementById('exp-feedback').addEventListener('click', (e) => {

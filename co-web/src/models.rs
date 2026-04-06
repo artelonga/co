@@ -451,6 +451,21 @@ pub struct UpdateUniverseFormConfig {
     pub custom_tokens: Option<serde_json::Value>,
 }
 
+// --- Theme Tiers ---
+
+/// Available themes returned by `GET /api/v1/themes/available`.
+/// Content depends on whether the caller is a real logged-in user or anonymous.
+#[derive(Debug, Serialize)]
+pub struct AvailableThemes {
+    /// Named palette keys available to this user.
+    pub palettes: Vec<String>,
+    /// Variant keys (a–h) available to this user. Empty for anonymous.
+    pub variants: Vec<String>,
+    /// Whether the custom palette editor is available. Absent for anonymous.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<bool>,
+}
+
 // --- Auth / Users ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

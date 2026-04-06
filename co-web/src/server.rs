@@ -264,6 +264,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Universe multi-tenancy routes ---
     let universe_api = crate::universe_routes::router();
 
+    // --- Theme tier routes ---
+    let themes_api = crate::universe_routes::themes_router();
+
     let mut router = Router::new()
         .nest("/api", board_public)
         .nest("/api", board_protected)
@@ -273,7 +276,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api", game_protected)
         .nest("/api/v1/quilombo", quilombo_api)
         .nest("/api/v1/gestao", gestao_api)
-        .nest("/api/v1/universes", universe_api);
+        .nest("/api/v1/universes", universe_api)
+        .nest("/api/v1/themes", themes_api);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
