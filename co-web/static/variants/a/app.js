@@ -870,8 +870,11 @@
                 ${subtasks.map(sub => renderSubtaskKanbanItem(sub)).join('')}
             </div>` : '';
 
+        const readonlyTip = state.isTemplate
+            ? ` data-readonly-tip="${esc(window.t ? window.t('universe.readonly_tooltip') : 'Crie seu universo para editar')}"`
+            : '';
         return `
-            <div class="task-card" draggable="true" data-task-id="${task.id}">
+            <div class="task-card" draggable="${!state.isTemplate}" data-task-id="${task.id}"${readonlyTip}>
                 <div class="task-card-header">
                     <span class="task-key">${esc(task.key)}</span>
                     ${parentKey ? `<span class="task-parent-key">${esc(parentKey)}</span>` : ''}
@@ -1991,6 +1994,7 @@
 
         cards.forEach(card => {
             card.addEventListener('dragstart', (e) => {
+                if (state.isTemplate) { e.preventDefault(); return; }
                 card.classList.add('dragging');
                 e.dataTransfer.setData('text/plain', card.dataset.taskId);
                 e.dataTransfer.effectAllowed = 'move';
@@ -2366,6 +2370,9 @@
 
     // ===== Modal =====
     function openTaskModal(taskId) {
+        // Template universe is read-only — block task editing
+        if (state.isTemplate) return;
+
         const overlay = $('#modal-overlay');
         const form = $('#task-form');
         const deleteBtn = $('#btn-delete');
@@ -2832,6 +2839,7 @@
 
     // New task
     $('#btn-new-task').addEventListener('click', () => {
+        if (state.isTemplate) return; // read-only in template
         if (state.currentProject) openTaskModal(null);
     });
 
@@ -3005,6 +3013,7 @@
         const nameEl = document.getElementById('user-display-name');
         if (sidebarUser) sidebarUser.classList.remove('hidden');
         if (nameEl) nameEl.textContent = me.display_name || me.email;
+        renderHeaderUserArea(me);
     }
 
     function setupLoginModal() {
@@ -3044,6 +3053,18 @@
                 }
                 const me = await api.me();
                 if (me) renderUserBadge(me);
+                // If on template (/co), redirect to first owned universe after login
+                if (state.isTemplate) {
+                    const universes = await api.getUniverses();
+                    const owned = universes.filter(u => !u.is_template);
+                    if (owned.length > 0) {
+                        const slug = owned[0].key;
+                        window.location.href = window.location.pathname.startsWith('/co')
+                            ? `/co/${slug}`
+                            : `/?u=${slug}`;
+                        return;
+                    }
+                }
                 await bootApp();
             } else if (r && r.error === 'unauthorized') {
                 errEl.textContent = window.t('invalid_credentials');
@@ -3078,11 +3099,23 @@
     // ===== Universe routing helpers =====
 
     function readUniverseSlugFromUrl() {
+        // Path-based routing: /co → template, /co/{slug} → slug
+        const pathMatch = window.location.pathname.match(/^\/co\/([a-z0-9-]+)$/);
+        if (pathMatch) return pathMatch[1];
+        if (window.location.pathname === '/co') return 'template';
+        // Fallback: query param (legacy / root path)
         const params = new URLSearchParams(window.location.search);
         return params.get('u') || 'template';
     }
 
     function setUniverseSlugInUrl(slug) {
+        // Use path-based routing when on /co
+        if (window.location.pathname.startsWith('/co')) {
+            const newPath = slug === 'template' ? '/co' : `/co/${slug}`;
+            window.history.pushState({}, '', newPath);
+            return;
+        }
+        // Legacy query param routing (root path)
         const url = new URL(window.location.href);
         if (slug === 'template') {
             url.searchParams.delete('u');
@@ -3095,11 +3128,27 @@
     function showTemplateBanner() {
         const banner = document.getElementById('template-banner');
         if (banner) banner.classList.remove('hidden');
+        // Mark app as template read-only (disables interactions via CSS)
+        const app = document.getElementById('app');
+        if (app) {
+            app.classList.add('is-template');
+            // Set tooltip text on all task cards (rendered later via MutationObserver)
+            applyTemplateReadonlyTooltips();
+        }
     }
 
     function hideTemplateBanner() {
         const banner = document.getElementById('template-banner');
         if (banner) banner.classList.add('hidden');
+        const app = document.getElementById('app');
+        if (app) app.classList.remove('is-template');
+    }
+
+    function applyTemplateReadonlyTooltips() {
+        const tip = window.t ? window.t('universe.readonly_tooltip') : 'Crie seu universo para editar';
+        document.querySelectorAll('.task-card').forEach(card => {
+            card.setAttribute('data-readonly-tip', tip);
+        });
     }
 
     // ===== Criar Universo Modal =====
@@ -3127,6 +3176,21 @@
             overlay.classList.add('hidden');
         }
 
+        const slugPreview = document.getElementById('criar-slug-preview');
+        const slugValEl = document.getElementById('criar-slug-val');
+
+        function updateSlugPreview() {
+            const slug = slugInput.value.trim();
+            if (slugValEl) slugValEl.textContent = slug || '…';
+            if (slugPreview) {
+                if (slug) {
+                    slugPreview.setAttribute('data-active', '');
+                } else {
+                    slugPreview.removeAttribute('data-active');
+                }
+            }
+        }
+
         // Auto-generate slug from name
         nameInput.addEventListener('input', () => {
             const slug = nameInput.value
@@ -3135,7 +3199,11 @@
                 .replace(/^-+|-+$/g, '')
                 .slice(0, 40);
             slugInput.value = slug;
+            updateSlugPreview();
         });
+
+        // Manual slug edit also updates preview
+        slugInput.addEventListener('input', updateSlugPreview);
 
         closeBtn && closeBtn.addEventListener('click', close);
         cancelBtn && cancelBtn.addEventListener('click', close);
@@ -3182,6 +3250,15 @@
         // Wire "Entrar" in the banner to the login modal
         const btnEntrar = document.getElementById('btn-banner-entrar');
         if (btnEntrar) btnEntrar.addEventListener('click', showLoginModal);
+
+        // Wire language toggle in banner
+        const btnBannerLang = document.getElementById('btn-banner-lang');
+        if (btnBannerLang) {
+            btnBannerLang.addEventListener('click', () => {
+                window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
+                render();
+            });
+        }
     }
 
     // ===== App boot (post-auth) =====
@@ -3388,6 +3465,36 @@
         });
     }
 
+    // ===== Header user area =====
+
+    function renderHeaderUserArea(me) {
+        const area = document.getElementById('header-user-area');
+        if (!area) return;
+        if (me) {
+            const name = me.display_name || me.usuario || me.email || '';
+            area.innerHTML = `<span class="header-user-badge" title="${esc(name)}">${esc(name)}</span>`;
+        } else {
+            area.innerHTML = `<button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">${window.t ? window.t('action.login') : 'Entrar'}</button>`;
+            const btn = document.getElementById('btn-header-entrar');
+            if (btn) btn.addEventListener('click', showLoginModal);
+        }
+    }
+
+    // ===== Footer version =====
+
+    async function initFooter() {
+        const versionEl = document.getElementById('footer-version');
+        if (!versionEl) return;
+        try {
+            const r = await fetch('/api/health');
+            if (r.ok) {
+                const data = await r.json();
+                const tagline = window.t ? window.t('footer.tagline') : 'CO — código aberto';
+                versionEl.textContent = `CO v${data.version} — ${tagline.replace('CO — ', '')}`;
+            }
+        } catch {}
+    }
+
     // ===== Init =====
     async function init() {
         // Apply initial language (from cookie, set by i18n.js)
@@ -3402,12 +3509,16 @@
             });
         }
 
+        // Wire initial header "Entrar" button (before auth check)
+        renderHeaderUserArea(null);
+
         initTimelineStart();
         setupHamburgerMenu();
         setupLoginModal();
         setupCriarModal();
         setupUsageLimitModal();
         setupSettingsPanel();
+        initFooter();
 
         const slug = readUniverseSlugFromUrl();
         state.currentUniverseSlug = slug;

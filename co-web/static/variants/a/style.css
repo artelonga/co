@@ -2875,10 +2875,40 @@ body {
     flex-wrap: wrap;
 }
 
+.template-hero {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.template-hero-logo {
+    flex-shrink: 0;
+}
+
+.template-logo-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #fff;
+}
+
+.template-hero-text {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
 .template-hero-title {
     font-size: 1.1rem;
     font-weight: 600;
-    margin: 0 0 0.2rem;
+    margin: 0;
     color: #fff;
 }
 
@@ -2893,6 +2923,7 @@ body {
     gap: 0.75rem;
     align-items: center;
     flex-shrink: 0;
+    flex-wrap: wrap;
 }
 
 .template-cta .btn-lg {
@@ -2918,10 +2949,41 @@ body {
     background: rgba(255, 255, 255, 0.15);
 }
 
+.template-github-link {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    color: #fff;
+    text-decoration: none;
+    padding: 0.4rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: background 0.15s;
+}
+
+.template-github-link:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.template-lang-toggle {
+    color: rgba(255, 255, 255, 0.8);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+}
+
+.template-lang-toggle:hover {
+    color: #fff;
+}
+
 @media (max-width: 600px) {
     .template-banner-inner {
         flex-direction: column;
         align-items: flex-start;
+    }
+    .template-hero {
+        gap: 0.75rem;
     }
     .template-cta {
         width: 100%;
@@ -2929,4 +2991,110 @@ body {
     .template-cta .btn {
         flex: 1;
     }
+}
+
+/* ===== Template read-only board overlay ===== */
+.app.is-template .task-card {
+    cursor: default;
+    position: relative;
+}
+
+.app.is-template .task-card::after {
+    content: attr(data-readonly-tip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0, 0, 0, 0.78);
+    color: #fff;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 200;
+}
+
+.app.is-template .task-card:hover::after {
+    opacity: 1;
+}
+
+.app.is-template #btn-new-task {
+    opacity: 0.45;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* ===== Slug preview in criar modal ===== */
+.slug-preview {
+    display: block;
+    margin-top: 0.3rem;
+    font-size: 0.78rem;
+    color: var(--text-muted, #888);
+    font-family: var(--font-mono, monospace);
+    word-break: break-all;
+}
+
+.slug-preview:empty,
+#criar-slug-preview:not([data-active]) {
+    display: none;
+}
+
+/* ===== Header user area ===== */
+.header-user-area {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.header-entrar {
+    font-size: 0.85rem;
+    padding: 0.35rem 0.75rem;
+    background: transparent;
+    border: 1px solid var(--border, rgba(0,0,0,0.15));
+    border-radius: 6px;
+    color: var(--text-primary, #111);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+}
+
+.header-entrar:hover {
+    background: var(--bg-elevated, #f0f0f0);
+}
+
+.header-user-badge {
+    font-size: 0.82rem;
+    color: var(--text-muted, #666);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
+}
+
+/* ===== App Footer ===== */
+.app-footer {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    padding: 0.6rem 1.5rem;
+    font-size: 0.78rem;
+    color: var(--text-muted, #999);
+    border-top: 1px solid var(--border, rgba(0,0,0,0.08));
+    background: var(--bg, #fff);
+    flex-shrink: 0;
+}
+
+.footer-github-link {
+    color: var(--text-muted, #999);
+    text-decoration: none;
+    font-size: 0.78rem;
+    transition: color 0.15s;
+}
+
+.footer-github-link:hover {
+    color: var(--text-primary, #333);
 }

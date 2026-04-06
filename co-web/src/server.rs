@@ -272,8 +272,14 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
 
+    // --- /co landing + universe routes (serve index.html for SPA routing) ---
+    let co_routes = Router::new()
+        .route("/co", get(serve_co_index))
+        .route("/co/{slug}", get(serve_co_index));
+
     let mut router = Router::new()
         .merge(ws_route)
+        .merge(co_routes)
         .nest("/api", board_public)
         .nest("/api", board_protected)
         .nest("/api", auth_api)
@@ -524,6 +530,41 @@ fn extract_participant(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
+}
+
+/// Serve `index.html` for `/co` and `/co/{slug}` — SPA landing routes.
+async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    let variant = extract_variant(&headers, &state.config);
+    let embed_path = format!("variants/{}/index.html", variant);
+    let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
+
+    if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
+        let mut response = (
+            StatusCode::OK,
+            [
+                (
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                ),
+                (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            ],
+            contents,
+        )
+            .into_response();
+
+        if extract_lang_cookie(&headers).is_none() {
+            let lang = detect_lang_from_accept(&headers);
+            if let Ok(v) =
+                format!("co_lang={}; Path=/; SameSite=Lax; Max-Age=31536000", lang).parse()
+            {
+                response.headers_mut().append(header::SET_COOKIE, v);
+            }
+        }
+
+        return response;
+    }
+
+    (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
 async fn serve_variant_file(
