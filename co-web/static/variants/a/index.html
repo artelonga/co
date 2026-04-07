@@ -18,6 +18,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&family=Work+Sans:wght@300;400;500;600&family=Manrope:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
     <link rel="manifest" href="/shared/manifest.json">
     <meta name="theme-color" content="#1a1a2e">
 </head>
@@ -36,6 +37,7 @@
             </div>
             <div class="sidebar-section">
                 <button class="sidebar-section-header" id="btn-toggle-projects" aria-expanded="true">
+                    <span class="sidebar-section-icon material-symbols-outlined">architecture</span>
                     <span data-i18n="projects">Projetos</span>
                     <svg class="section-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none">
                         <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -65,12 +67,10 @@
                 </div>
                 <div class="header-right">
                     <div class="view-tabs" id="view-tabs">
-                        <button class="view-tab active" data-view="kanban" data-i18n="kanban">Kanban</button>
-                        <button class="view-tab" data-view="table" data-i18n="table">Tabela</button>
-                        <button class="view-tab" data-view="timeline" data-i18n="timeline">Linha do Tempo</button>
-                        <button class="view-tab" data-view="calendar" data-i18n="calendar">Calendário</button>
-                        <button class="view-tab" data-view="dashboard" data-i18n="dashboard">Painel</button>
-                        <button class="view-tab" data-view="conteudo" data-i18n="conteudo">Conteúdo</button>
+                        <button class="view-tab active" data-view="kanban" data-i18n="kanban"><span class="view-tab-icon material-symbols-outlined">view_kanban</span><span class="view-tab-label">Kanban</span></button>
+                        <button class="view-tab" data-view="table" data-i18n="table"><span class="view-tab-icon material-symbols-outlined">table_rows</span><span class="view-tab-label">Tabela</span></button>
+                        <button class="view-tab" data-view="dashboard" data-i18n="dashboard"><span class="view-tab-icon material-symbols-outlined">dashboard</span><span class="view-tab-label">Painel</span></button>
+                        <button class="view-tab" data-view="conteudo" data-i18n="conteudo"><span class="view-tab-icon material-symbols-outlined">auto_stories</span><span class="view-tab-label">Conteúdo</span></button>
                     </div>
                     <div class="view-tabs hidden" id="zoom-tabs">
                         <button class="view-tab" data-zoom="week" data-i18n="week">Semana</button>
@@ -86,13 +86,13 @@
                         <input type="checkbox" id="show-archived">
                         <span class="archive-toggle-label" data-i18n="archived">Arquivados</span>
                     </label>
-                    <input type="search" class="search-input" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
+                    <input type="search" class="search-input hide-mobile" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
                     <div id="palette-switcher" class="palette-switcher-slot"></div>
                     <button class="btn-text-sm lang-toggle" id="btn-header-lang" data-i18n="lang.switch">English</button>
                     <div id="header-user-area" class="header-user-area">
                         <button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">Entrar</button>
                     </div>
-                    <button class="btn btn-primary" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
+                    <button class="btn btn-primary btn-new-task" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
                 </div>
             </header>
             <div class="content" id="content">

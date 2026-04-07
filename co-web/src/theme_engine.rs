@@ -168,6 +168,7 @@ fn scholarly_preset() -> ThemePreset {
     t.insert("--form-input-padding".into(), "8px 0".into());
     insert_default_status_tokens(t);
     insert_default_priority_tokens(t);
+    insert_scholarly_md3_tokens(t);
     p
 }
 
@@ -227,6 +228,7 @@ fn scholarly_dark_preset() -> ThemePreset {
     t.insert("--status-in_review-text".into(), "#ffd090".into());
     t.insert("--status-done-text".into(), "#90c070".into());
     insert_default_priority_tokens(t);
+    insert_scholarly_dark_md3_tokens(t);
     p
 }
 
@@ -292,6 +294,7 @@ fn relic_preset() -> ThemePreset {
     t.insert("--status-in_review-text".into(), "#ffb3b5".into());
     t.insert("--status-done-text".into(), "#90c070".into());
     insert_default_priority_tokens(t);
+    insert_relic_dark_md3_tokens(t);
     p
 }
 
@@ -355,6 +358,7 @@ fn relic_light_preset() -> ThemePreset {
     t.insert("--form-input-padding".into(), "8px 10px".into());
     insert_default_status_tokens(t);
     insert_default_priority_tokens(t);
+    insert_relic_light_md3_tokens(t);
     p
 }
 
@@ -414,6 +418,193 @@ fn modern_preset() -> ThemePreset {
     insert_default_status_tokens(t);
     insert_default_priority_tokens(t);
     p
+}
+
+// ---------------------------------------------------------------------------
+// MD3 token helpers
+// ---------------------------------------------------------------------------
+
+/// Insert the full Material Design 3 color token set for the Scholarly Automaton
+/// (light) theme.  Tokens are prefixed `--md-` to avoid clashing with the
+/// existing short-form tokens (`--bg`, `--accent`, …).
+fn insert_scholarly_md3_tokens(t: &mut HashMap<String, String>) {
+    t.insert("--md-primary".into(), "#8e4e00".into());
+    t.insert("--md-primary-container".into(), "#cd7f32".into());
+    t.insert("--md-on-primary".into(), "#ffffff".into());
+    t.insert("--md-on-primary-container".into(), "#432200".into());
+    t.insert("--md-primary-fixed".into(), "#ffdcc1".into());
+    t.insert("--md-primary-fixed-dim".into(), "#ffb779".into());
+    t.insert("--md-on-primary-fixed".into(), "#2e1500".into());
+    t.insert("--md-on-primary-fixed-variant".into(), "#6c3a00".into());
+    t.insert("--md-secondary".into(), "#8c4f10".into());
+    t.insert("--md-secondary-container".into(), "#fdad67".into());
+    t.insert("--md-on-secondary".into(), "#ffffff".into());
+    t.insert("--md-on-secondary-container".into(), "#763f00".into());
+    t.insert("--md-secondary-fixed".into(), "#ffdcc2".into());
+    t.insert("--md-secondary-fixed-dim".into(), "#ffb77b".into());
+    t.insert("--md-on-secondary-fixed".into(), "#2e1500".into());
+    t.insert("--md-on-secondary-fixed-variant".into(), "#6d3a00".into());
+    t.insert("--md-tertiary".into(), "#805533".into());
+    t.insert("--md-tertiary-container".into(), "#b98661".into());
+    t.insert("--md-on-tertiary".into(), "#ffffff".into());
+    t.insert("--md-on-tertiary-container".into(), "#432105".into());
+    t.insert("--md-tertiary-fixed".into(), "#ffdcc5".into());
+    t.insert("--md-tertiary-fixed-dim".into(), "#f4bb92".into());
+    t.insert("--md-on-tertiary-fixed".into(), "#301400".into());
+    t.insert("--md-on-tertiary-fixed-variant".into(), "#653d1e".into());
+    t.insert("--md-surface".into(), "#fff9ed".into());
+    t.insert("--md-surface-dim".into(), "#dfd9ce".into());
+    t.insert("--md-surface-bright".into(), "#fff9ed".into());
+    t.insert("--md-surface-container-lowest".into(), "#ffffff".into());
+    t.insert("--md-surface-container-low".into(), "#f9f3e7".into());
+    t.insert("--md-surface-container".into(), "#f3ede1".into());
+    t.insert("--md-surface-container-high".into(), "#ede8dc".into());
+    t.insert("--md-surface-container-highest".into(), "#e8e2d6".into());
+    t.insert("--md-surface-variant".into(), "#e8e2d6".into());
+    t.insert("--md-surface-tint".into(), "#8e4e00".into());
+    t.insert("--md-on-surface".into(), "#1d1c15".into());
+    t.insert("--md-on-surface-variant".into(), "#534438".into());
+    t.insert("--md-outline".into(), "#867466".into());
+    t.insert("--md-outline-variant".into(), "#d8c2b2".into());
+    t.insert("--md-error".into(), "#ba1a1a".into());
+    t.insert("--md-error-container".into(), "#ffdad6".into());
+    t.insert("--md-on-error".into(), "#ffffff".into());
+    t.insert("--md-on-error-container".into(), "#93000a".into());
+    t.insert("--md-background".into(), "#fff9ed".into());
+    t.insert("--md-on-background".into(), "#1d1c15".into());
+    t.insert("--md-inverse-surface".into(), "#333029".into());
+    t.insert("--md-inverse-on-surface".into(), "#f6f0e4".into());
+    t.insert("--md-inverse-primary".into(), "#ffb779".into());
+}
+
+/// Insert the full MD3 token set for Scholarly Dark (inverted surface tiers,
+/// warm brass tones preserved).
+fn insert_scholarly_dark_md3_tokens(t: &mut HashMap<String, String>) {
+    t.insert("--md-primary".into(), "#ffb779".into());
+    t.insert("--md-primary-container".into(), "#6c3a00".into());
+    t.insert("--md-on-primary".into(), "#4a2000".into());
+    t.insert("--md-on-primary-container".into(), "#ffdcc1".into());
+    t.insert("--md-secondary".into(), "#ffb77b".into());
+    t.insert("--md-secondary-container".into(), "#6d3a00".into());
+    t.insert("--md-on-secondary".into(), "#4a2400".into());
+    t.insert("--md-on-secondary-container".into(), "#ffdcc2".into());
+    t.insert("--md-tertiary".into(), "#f4bb92".into());
+    t.insert("--md-tertiary-container".into(), "#653d1e".into());
+    t.insert("--md-on-tertiary".into(), "#432105".into());
+    t.insert("--md-on-tertiary-container".into(), "#ffdcc5".into());
+    t.insert("--md-surface".into(), "#1c1610".into());
+    t.insert("--md-surface-dim".into(), "#14100c".into());
+    t.insert("--md-surface-bright".into(), "#271c12".into());
+    t.insert("--md-surface-container-lowest".into(), "#0f0b07".into());
+    t.insert("--md-surface-container-low".into(), "#1c1408".into());
+    t.insert("--md-surface-container".into(), "#221810".into());
+    t.insert("--md-surface-container-high".into(), "#2e2116".into());
+    t.insert("--md-surface-container-highest".into(), "#3a2b1e".into());
+    t.insert("--md-surface-variant".into(), "#534438".into());
+    t.insert("--md-surface-tint".into(), "#ffb779".into());
+    t.insert("--md-on-surface".into(), "#f0e0c8".into());
+    t.insert("--md-on-surface-variant".into(), "#c4986a".into());
+    t.insert("--md-outline".into(), "#9a7a54".into());
+    t.insert("--md-outline-variant".into(), "#534438".into());
+    t.insert("--md-error".into(), "#ffb4ab".into());
+    t.insert("--md-error-container".into(), "#93000a".into());
+    t.insert("--md-on-error".into(), "#690005".into());
+    t.insert("--md-on-error-container".into(), "#ffdad6".into());
+    t.insert("--md-background".into(), "#1c1610".into());
+    t.insert("--md-on-background".into(), "#f0e0c8".into());
+    t.insert("--md-inverse-surface".into(), "#f0e0c8".into());
+    t.insert("--md-inverse-on-surface".into(), "#3a2b1e".into());
+    t.insert("--md-inverse-primary".into(), "#8e4e00".into());
+}
+
+/// Insert the full MD3 token set for the Relic Archive (dark) theme.
+fn insert_relic_dark_md3_tokens(t: &mut HashMap<String, String>) {
+    t.insert("--md-primary".into(), "#ffb3b5".into());
+    t.insert("--md-primary-container".into(), "#3d000a".into());
+    t.insert("--md-on-primary".into(), "#680018".into());
+    t.insert("--md-on-primary-container".into(), "#e0505f".into());
+    t.insert("--md-primary-fixed".into(), "#ffdada".into());
+    t.insert("--md-primary-fixed-dim".into(), "#ffb3b5".into());
+    t.insert("--md-on-primary-fixed".into(), "#40000b".into());
+    t.insert("--md-on-primary-fixed-variant".into(), "#8e0f28".into());
+    t.insert("--md-secondary".into(), "#e9c349".into());
+    t.insert("--md-secondary-container".into(), "#af8d11".into());
+    t.insert("--md-on-secondary".into(), "#3c2f00".into());
+    t.insert("--md-on-secondary-container".into(), "#342800".into());
+    t.insert("--md-secondary-fixed".into(), "#ffe088".into());
+    t.insert("--md-secondary-fixed-dim".into(), "#e9c349".into());
+    t.insert("--md-on-secondary-fixed".into(), "#241a00".into());
+    t.insert("--md-on-secondary-fixed-variant".into(), "#574500".into());
+    t.insert("--md-tertiary".into(), "#c5c6cd".into());
+    t.insert("--md-tertiary-container".into(), "#181a1f".into());
+    t.insert("--md-on-tertiary".into(), "#2e3036".into());
+    t.insert("--md-on-tertiary-container".into(), "#818289".into());
+    t.insert("--md-tertiary-fixed".into(), "#e2e2e9".into());
+    t.insert("--md-tertiary-fixed-dim".into(), "#c5c6cd".into());
+    t.insert("--md-on-tertiary-fixed".into(), "#191c20".into());
+    t.insert("--md-on-tertiary-fixed-variant".into(), "#45474c".into());
+    t.insert("--md-surface".into(), "#131313".into());
+    t.insert("--md-surface-dim".into(), "#131313".into());
+    t.insert("--md-surface-bright".into(), "#393939".into());
+    t.insert("--md-surface-container-lowest".into(), "#0e0e0e".into());
+    t.insert("--md-surface-container-low".into(), "#1c1b1b".into());
+    t.insert("--md-surface-container".into(), "#201f1f".into());
+    t.insert("--md-surface-container-high".into(), "#2a2a2a".into());
+    t.insert("--md-surface-container-highest".into(), "#353534".into());
+    t.insert("--md-surface-variant".into(), "#353534".into());
+    t.insert("--md-surface-tint".into(), "#ffb3b5".into());
+    t.insert("--md-on-surface".into(), "#e5e2e1".into());
+    t.insert("--md-on-surface-variant".into(), "#c5c6cc".into());
+    t.insert("--md-outline".into(), "#8f9096".into());
+    t.insert("--md-outline-variant".into(), "#45474c".into());
+    t.insert("--md-error".into(), "#ffb4ab".into());
+    t.insert("--md-error-container".into(), "#93000a".into());
+    t.insert("--md-on-error".into(), "#690005".into());
+    t.insert("--md-on-error-container".into(), "#ffdad6".into());
+    t.insert("--md-background".into(), "#131313".into());
+    t.insert("--md-on-background".into(), "#e5e2e1".into());
+    t.insert("--md-inverse-surface".into(), "#e5e2e1".into());
+    t.insert("--md-inverse-on-surface".into(), "#313030".into());
+    t.insert("--md-inverse-primary".into(), "#af2b3e".into());
+}
+
+/// Insert the full MD3 token set for the Relic Archive (light) companion.
+fn insert_relic_light_md3_tokens(t: &mut HashMap<String, String>) {
+    t.insert("--md-primary".into(), "#af2b3e".into());
+    t.insert("--md-primary-container".into(), "#ffdada".into());
+    t.insert("--md-on-primary".into(), "#ffffff".into());
+    t.insert("--md-on-primary-container".into(), "#40000b".into());
+    t.insert("--md-secondary".into(), "#7a5900".into());
+    t.insert("--md-secondary-container".into(), "#ffe08a".into());
+    t.insert("--md-on-secondary".into(), "#ffffff".into());
+    t.insert("--md-on-secondary-container".into(), "#241a00".into());
+    t.insert("--md-tertiary".into(), "#5a5e6b".into());
+    t.insert("--md-tertiary-container".into(), "#dfe1f0".into());
+    t.insert("--md-on-tertiary".into(), "#ffffff".into());
+    t.insert("--md-on-tertiary-container".into(), "#181c26".into());
+    t.insert("--md-surface".into(), "#F5F0F0".into());
+    t.insert("--md-surface-dim".into(), "#DDD5D5".into());
+    t.insert("--md-surface-bright".into(), "#F5F0F0".into());
+    t.insert("--md-surface-container-lowest".into(), "#ffffff".into());
+    t.insert("--md-surface-container-low".into(), "#EDE5E5".into());
+    t.insert("--md-surface-container".into(), "#E8DEDE".into());
+    t.insert("--md-surface-container-high".into(), "#E0D6D6".into());
+    t.insert("--md-surface-container-highest".into(), "#D6CBCB".into());
+    t.insert("--md-surface-variant".into(), "#F0E5E5".into());
+    t.insert("--md-surface-tint".into(), "#af2b3e".into());
+    t.insert("--md-on-surface".into(), "#1a1010".into());
+    t.insert("--md-on-surface-variant".into(), "#5a3a3a".into());
+    t.insert("--md-outline".into(), "#8a6060".into());
+    t.insert("--md-outline-variant".into(), "#C9B0B0".into());
+    t.insert("--md-error".into(), "#ba1a1a".into());
+    t.insert("--md-error-container".into(), "#ffdad6".into());
+    t.insert("--md-on-error".into(), "#ffffff".into());
+    t.insert("--md-on-error-container".into(), "#93000a".into());
+    t.insert("--md-background".into(), "#F5F0F0".into());
+    t.insert("--md-on-background".into(), "#1a1010".into());
+    t.insert("--md-inverse-surface".into(), "#1a1010".into());
+    t.insert("--md-inverse-on-surface".into(), "#F5F0F0".into());
+    t.insert("--md-inverse-primary".into(), "#ffb3b5".into());
 }
 
 // ---------------------------------------------------------------------------
@@ -599,6 +790,39 @@ pub mod tests {
         assert!(!ThemePreset::is_dark("scholarly"));
         assert!(!ThemePreset::is_dark("relic-light"));
         assert!(!ThemePreset::is_dark("modern"));
+    }
+
+    /// CO-37: Scholarly and Relic presets include the full MD3 token set.
+    #[test]
+    fn md3_tokens_present_in_scholarly_and_relic() {
+        const MD3_TOKENS: &[&str] = &[
+            "--md-primary",
+            "--md-surface",
+            "--md-on-surface",
+            "--md-surface-container",
+            "--md-surface-container-low",
+            "--md-surface-container-high",
+            "--md-outline",
+            "--md-outline-variant",
+            "--md-primary-container",
+            "--md-on-primary",
+            "--md-on-primary-container",
+            "--md-secondary",
+            "--md-tertiary",
+            "--md-background",
+            "--md-on-background",
+        ];
+        for name in &["scholarly", "scholarly-dark", "relic", "relic-light"] {
+            let preset = ThemePreset::by_name(name).unwrap();
+            for token in MD3_TOKENS {
+                assert!(
+                    preset.tokens.contains_key(*token),
+                    "Preset '{}' missing MD3 token '{}'",
+                    preset.name,
+                    token
+                );
+            }
+        }
     }
 
     /// Changing the theme produces different CSS output.

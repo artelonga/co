@@ -11,6 +11,7 @@ pub mod gestao_routes;
 pub mod github_auth;
 pub mod iceberg;
 pub mod models;
+pub mod obsidian_tasks;
 pub mod plugin_loader;
 pub mod quilombo_models;
 pub mod quilombo_permissoes;

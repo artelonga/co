@@ -35,6 +35,81 @@
         universeConfig: null,
     };
 
+    // ===== Obsidian Tasks compatibility (CO-37) =====
+    // Maps CO status values ↔ Obsidian Tasks checkbox characters.
+    // Checkbox line format: `- [c] Task title`
+    //
+    // | CO status   | checkbox |
+    // |-------------|----------|
+    // | todo        | ' '      |
+    // | in_progress | '/'      |
+    // | in_review   | '~'      |
+    // | done        | 'x'      |
+
+    const OBSIDIAN_CHECKBOX = {
+        todo:        ' ',
+        in_progress: '/',
+        in_review:   '~',
+        done:        'x',
+    };
+
+    const CHECKBOX_TO_STATUS = {
+        ' ': 'todo',
+        '/': 'in_progress',
+        '~': 'in_review',
+        'x': 'done',
+        'X': 'done',
+    };
+
+    /** Convert a CO status string to an Obsidian Tasks checkbox character. */
+    function statusToCheckbox(status) {
+        return OBSIDIAN_CHECKBOX[status] ?? ' ';
+    }
+
+    /** Convert an Obsidian Tasks checkbox character to a CO status string. */
+    function checkboxToStatus(c) {
+        return CHECKBOX_TO_STATUS[c] ?? 'todo';
+    }
+
+    /**
+     * Serialize a task object to an Obsidian Tasks markdown line.
+     * Format: `- [c] Task title`
+     *
+     * @param {object} task - CO task with `status` and `title` fields
+     * @returns {string} Obsidian Tasks markdown line
+     */
+    function taskToObsidianLine(task) {
+        const c = statusToCheckbox(task.status ?? 'todo');
+        return `- [${c}] ${task.title ?? 'Untitled'}`;
+    }
+
+    /**
+     * Parse an Obsidian Tasks checkbox line and return the corresponding
+     * CO status string.  Returns `null` if the line does not match.
+     *
+     * @param {string} line - A single line of markdown text
+     * @returns {string|null} CO status string or null
+     */
+    function parseObsidianCheckboxLine(line) {
+        const m = line.match(/^- \[(.)\] /);
+        if (!m) return null;
+        return checkboxToStatus(m[1]);
+    }
+
+    /**
+     * Extract the CO status from the first line of a markdown body, if it
+     * contains an Obsidian Tasks checkbox.  Frontmatter `status` should be
+     * treated as canonical; this is only used when frontmatter is absent.
+     *
+     * @param {string} body - Markdown body text
+     * @returns {string|null} CO status or null if no checkbox found
+     */
+    function extractStatusFromBody(body) {
+        if (!body) return null;
+        const firstLine = body.split('\n')[0];
+        return parseObsidianCheckboxLine(firstLine);
+    }
+
     // ===== Editor lazy-load =====
     let _editorInstance = null;
     let _editorBundlePromise = null;
@@ -80,7 +155,6 @@
         return [
             { key: 'todo', label: window.t('status.todo'), color: '#94a3b8' },
             { key: 'in_progress', label: window.t('status.in_progress'), color: '#3b82f6' },
-            { key: 'in_review', label: window.t('status.in_review'), color: '#f59e0b' },
             { key: 'done', label: window.t('status.done'), color: '#22c55e' },
         ];
     }
@@ -106,7 +180,7 @@
     let STATUSES = buildStatuses();
     let PRIORITY_LABELS = buildPriorityLabels();
     const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
-    const STATUS_ORDER = { todo: 0, in_progress: 1, in_review: 2, done: 3 };
+    const STATUS_ORDER = { todo: 0, in_progress: 1, done: 2, in_review: 3 };
     let STATUS_LABELS = buildStatusLabels();
 
     const ZOOM_DAYS = { week: 7, month: 30, quarter: 90 };
@@ -316,8 +390,14 @@
     }
 
     const api = {
+        // Append ?u=<slug> to board API URLs for universe scoping
+        _u(url) {
+            const slug = state.currentUniverseSlug;
+            if (!slug) return url;
+            return url + (url.includes('?') ? '&' : '?') + `u=${slug}`;
+        },
         async getProjects() {
-            const r = await apiFetch('/api/projects');
+            const r = await apiFetch(this._u('/api/projects'), {}, true);
             return r || [];
         },
         async getTasks(key, opts) {
@@ -325,11 +405,11 @@
             if (opts && typeof opts.archived === 'boolean') {
                 url += '?archived=' + (opts.archived ? 'true' : 'false');
             }
-            const r = await apiFetch(url);
+            const r = await apiFetch(this._u(url), {}, true);
             return r || [];
         },
         async createTask(key, data) {
-            const r = await apiFetch(`/api/projects/${key}/tasks`, {
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -337,7 +417,7 @@
             return r;
         },
         async updateTask(key, id, data) {
-            const r = await apiFetch(`/api/projects/${key}/tasks/${id}`, {
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks/${id}`), {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -345,14 +425,14 @@
             return r;
         },
         async deleteTask(key, id) {
-            await apiFetch(`/api/projects/${key}/tasks/${id}`, { method: 'DELETE' });
+            await apiFetch(this._u(`/api/projects/${key}/tasks/${id}`), { method: 'DELETE' });
         },
         async getComments(key, id) {
-            const r = await apiFetch(`/api/projects/${key}/tasks/${id}/comments`);
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks/${id}/comments`), {}, true);
             return r || [];
         },
         async createComment(key, id, data) {
-            const r = await apiFetch(`/api/projects/${key}/tasks/${id}/comments`, {
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks/${id}/comments`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -361,15 +441,15 @@
         },
         async getActivity(key, limit) {
             const l = limit || 50;
-            const r = await apiFetch(`/api/projects/${key}/activity?limit=${l}`);
+            const r = await apiFetch(this._u(`/api/projects/${key}/activity?limit=${l}`), {}, true);
             return r || [];
         },
         async getDashboard(key) {
-            const r = await apiFetch(`/api/projects/${key}/dashboard`);
+            const r = await apiFetch(this._u(`/api/projects/${key}/dashboard`), {}, true);
             return r;
         },
         async bulkUpdateTasks(key, data) {
-            const r = await apiFetch(`/api/projects/${key}/tasks/bulk-update`, {
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks/bulk-update`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -377,7 +457,7 @@
             return r;
         },
         async bulkDeleteTasks(key, data) {
-            const r = await apiFetch(`/api/projects/${key}/tasks/bulk-delete`, {
+            const r = await apiFetch(this._u(`/api/projects/${key}/tasks/bulk-delete`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(data),
@@ -708,7 +788,7 @@
     // ===== Render: Header =====
     function renderHeader() {
         const p = state.currentProject;
-        $('#project-name').textContent = p ? p.name : 'Select a project';
+        $('#project-name').textContent = p ? p.name : (window.t ? window.t('select_project') : 'Selecione um projeto');
         $('#project-desc').textContent = p ? (p.description || '') : '';
         renderUsageCount();
     }

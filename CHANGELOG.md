@@ -5,6 +5,66 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] — 2026-04-07
+
+### co-web
+
+#### Added — CO-37: Design alignment — Scholarly Automaton + Relic Archive aesthetic
+
+**Typography**
+- Load Newsreader (serif) + Work Sans (sans) for Scholarly theme via Google Fonts CDN
+- Load Newsreader (serif) + Manrope (sans) for Relic theme
+- Load Material Symbols Outlined via Google Fonts CDN
+- Font hierarchy: project name = Newsreader italic, task titles = Newsreader 600, labels = Work Sans/Manrope uppercase
+
+**Surface & Depth (No-Line Rule)**
+- Removed all `1px solid` header/sidebar borders for Scholarly and Relic palettes
+- Sidebar: `surface-container-low` background via tonal shift — no right border
+- Cards: asymmetric padding (16px left vs 10px right) for editorial feel
+- Kanban columns: tonal background shift per palette (no column borders)
+- Ghost borders via CSS custom properties at 15% opacity where accessibility requires
+- Modals: ambient `box-shadow: 0 20px 50px` warm-tinted shadows
+- Glassmorphism: Relic dark modal + header use `backdrop-filter: blur(20px)` with 80% opacity surface
+
+**Color Tokens (theme_engine.rs)**
+- Full Material Design 3 token set added to Scholarly (light + dark) presets: `--md-primary`, `--md-surface`, `--md-surface-container-*`, `--md-on-surface`, `--md-outline`, `--md-outline-variant`, and 30+ additional tokens
+- Full MD3 token set added to Relic (dark + light) presets
+- All MD3 tokens exposed as CSS custom properties `--md-*` in named palette blocks
+- Scholarly dark companion: inverted surface tiers, warm brass tones preserved
+- Relic light companion: warm rose-tinted light version
+
+**Components**
+- Buttons: Primary (Scholarly = brass + inner glow, Relic = blood-silk gradient), Secondary (ghost border 15% opacity, 40% on hover)
+- Task cards: thin left border with priority color (critical/high/medium/low) instead of pill
+- Task cards: no dividers between cards — whitespace separation
+- Kanban card hover: background tonal shift to surface-container, no hard border
+- View tabs: pill group style with `border-radius: 99px`, active tab gets accent bg
+- Sidebar items: `translateX(4px)` on hover instead of background change
+- Search input: bottom-border only (ledger style) for Scholarly palette
+- Status badges: pill-shaped with `primary-container` bg for Relic
+
+**Material Icons**
+- View tabs: Material Symbols Outlined icons (view_kanban, table_rows, dashboard, auto_stories) + text
+- Sidebar nav section: architecture icon
+- Icon-only on mobile (label hidden below 640px)
+- On desktop: icon + text
+
+**Responsive**
+- Login button, language toggle, palette switcher: always visible on all breakpoints
+- Mobile ≤640px: single-column kanban, horizontal-scroll view tabs
+- Tablet 641–1024px: 2-column kanban grid
+
+**Obsidian Tasks Compatibility**
+- New `co-web/src/obsidian_tasks.rs` module: bidirectional status ↔ checkbox mapping
+  - `status_to_checkbox`: `todo→' '`, `in_progress→'/'`, `in_review→'~'`, `done→'x'`
+  - `checkbox_to_status`: reverse mapping with uppercase-X support
+  - `inject_task_checkbox`: prepends `- [c] Title` to task body on vault export
+  - `apply_obsidian_tasks`: parses checkbox from body on vault import, updates frontmatter status; frontmatter is canonical (not overwritten if already set)
+- `vault_routes.rs` GET: injects checkbox line into task entry bodies on export
+- `vault_routes.rs` PUT: parses checkbox from incoming body, updates frontmatter status on import; strips checkbox line from stored body
+- `app.js`: `taskToObsidianLine`, `parseObsidianCheckboxLine`, `extractStatusFromBody` utilities
+- 14 unit tests in `obsidian_tasks.rs` covering all status/checkbox combinations and edge cases
+
 ## [0.30.0] — 2026-04-06
 
 ### co-obsidian (new module)

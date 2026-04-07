@@ -400,7 +400,10 @@ pub async fn get_vault_file(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("File '{path}' not found")))?;
 
-    let content = entry_to_content(&row.frontmatter, &row.body);
+    // CO-37: inject Obsidian Tasks checkbox into body for task entries.
+    let export_body =
+        crate::obsidian_tasks::inject_task_checkbox(&row.entry_type, &row.frontmatter, &row.body);
+    let content = entry_to_content(&row.frontmatter, &export_body);
     let stat = make_stat(
         row.created_at.as_deref(),
         row.updated_at.as_deref(),
@@ -428,6 +431,10 @@ pub async fn put_vault_file(
     vault_auth(&state, &headers)?;
 
     let (frontmatter, body_text) = parse_markdown_content(&body);
+    // CO-37: parse Obsidian Tasks checkbox from body and set frontmatter status
+    // (frontmatter status is canonical and is not overwritten if already present).
+    let (frontmatter, body_text) =
+        crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
     let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
 
     // Update content count
