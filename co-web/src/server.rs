@@ -285,6 +285,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let vault_api = crate::vault_routes::vault_router();
     let token_api = crate::vault_routes::token_router();
 
+    // --- Entry abstraction API (CO-36) ---
+    let entry_api = crate::entry_routes::router();
+
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
 
@@ -303,9 +306,20 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api", game_public)
         .nest("/api", game_protected)
         .nest("/api/v1/quilombo", quilombo_api)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::quilombo_telemetria::telemetry_middleware,
+        ))
+        .layer(axum::middleware::from_fn(
+            crate::quilombo_telemetria::csrf_middleware,
+        ))
+        .layer(axum::middleware::from_fn(
+            crate::quilombo_telemetria::canonical_host_middleware,
+        ))
         .nest("/api/v1/gestao", gestao_api)
         .nest("/api/v1/universes", universe_api)
         .nest("/api/v1/universes", vault_api)
+        .nest("/api/v1/universes", entry_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api);
 

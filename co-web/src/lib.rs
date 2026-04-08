@@ -17,6 +17,7 @@ pub mod quilombo_models;
 pub mod quilombo_permissoes;
 pub mod quilombo_routes;
 pub mod quilombo_storage;
+pub mod quilombo_telemetria;
 pub mod server;
 pub mod storage;
 pub mod theme_engine;

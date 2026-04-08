@@ -47,6 +47,7 @@ pub fn router() -> Router<AppState> {
         // Events (public read)
         .route("/eventos", get(listar_eventos_handler))
         .route("/eventos/{id}", get(obter_evento_handler))
+        .route("/eventos/slug/{slug}", get(obter_evento_por_slug_handler))
         // Missions (public read)
         .route("/missoes", get(listar_missoes_handler))
         .route("/missoes/{id}", get(obter_missao_handler))
@@ -62,7 +63,10 @@ pub fn router() -> Router<AppState> {
         .route("/contato", post(contato_handler))
         // Tags
         .route("/tags", get(listar_tags_handler))
-        .route("/tags/{tag}", get(publicacoes_por_tag_handler));
+        .route("/tags/{tag}", get(publicacoes_por_tag_handler))
+        // File serving
+        .route("/upload/{filename}", get(serve_upload_handler))
+        .route("/fotos/{filename}", get(serve_foto_handler));
 
     let authenticated = Router::new()
         // Profile
@@ -81,6 +85,11 @@ pub fn router() -> Router<AppState> {
         .route("/eventos/criar", post(criar_evento_handler))
         .route("/eventos/{id}/editar", put(atualizar_evento_handler))
         .route("/eventos/{id}/excluir", post(excluir_evento_handler))
+        // Admin endpoints
+        .route("/admin/telemetria", get(admin_telemetria_handler))
+        .route("/admin/resumo", get(admin_resumo_handler))
+        .route("/admin/usuarios", get(admin_listar_usuarios_handler))
+        .route("/admin/usuarios/{id}", put(admin_atualizar_usuario_handler))
         // Messages
         .route(
             "/mensagens",
@@ -777,4 +786,195 @@ async fn listar_atividades_handler(
         storage.conn(),
         200,
     )))
+}
+
+// --- Event slug lookup ---
+
+async fn obter_evento_por_slug_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Evento>, AppError> {
+    let storage = lock_storage(&state)?;
+    quilombo_storage::obter_evento_por_slug(storage.conn(), &slug)
+        .map(Json)
+        .ok_or_else(|| AppError::NotFound("Event not found".into()))
+}
+
+// --- Admin Handlers ---
+
+#[derive(serde::Deserialize)]
+struct TelemetriaQuery {
+    #[serde(default = "default_days")]
+    days: i64,
+}
+
+fn default_days() -> i64 {
+    30
+}
+
+async fn admin_telemetria_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Query(query): Query<TelemetriaQuery>,
+) -> Result<Json<Vec<Telemetria>>, AppError> {
+    let storage = lock_storage(&state)?;
+    let user = lookup_quilombo_user(&storage, &user_id.0)?;
+
+    if !tem_permissao(&user.papel, "admin:painel") {
+        return Err(AppError::Forbidden("Admin access required".into()));
+    }
+
+    Ok(Json(quilombo_storage::listar_telemetria_admin(
+        storage.conn(),
+        query.days,
+    )))
+}
+
+async fn admin_resumo_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Query(query): Query<TelemetriaQuery>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let storage = lock_storage(&state)?;
+    let user = lookup_quilombo_user(&storage, &user_id.0)?;
+
+    if !tem_permissao(&user.papel, "admin:painel") {
+        return Err(AppError::Forbidden("Admin access required".into()));
+    }
+
+    Ok(Json(quilombo_storage::resumo_admin(
+        storage.conn(),
+        query.days,
+    )))
+}
+
+async fn admin_listar_usuarios_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<Vec<Usuario>>, AppError> {
+    let storage = lock_storage(&state)?;
+    let user = lookup_quilombo_user(&storage, &user_id.0)?;
+
+    if !tem_permissao(&user.papel, "admin:usuarios") {
+        return Err(AppError::Forbidden("Admin access required".into()));
+    }
+
+    Ok(Json(quilombo_storage::listar_usuarios(storage.conn())))
+}
+
+#[derive(serde::Deserialize)]
+struct AtualizarPapelBody {
+    papel: String,
+}
+
+// --- File Serving Handlers ---
+
+fn uploads_dir() -> std::path::PathBuf {
+    let data_dir = std::env::var("CO_WEB_DATA").unwrap_or_else(|_| "data".to_string());
+    std::path::Path::new(&data_dir).join("uploads")
+}
+
+fn validate_filename(filename: &str) -> Result<(), AppError> {
+    // Only allow safe filenames: alphanumeric, dash, underscore, dot
+    if filename.len() > 100
+        || filename.contains('/')
+        || filename.contains('\\')
+        || filename.contains("..")
+        || !filename
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(AppError::BadRequest("Invalid filename".into()));
+    }
+    Ok(())
+}
+
+fn mime_for_extension(ext: &str) -> &'static str {
+    match ext {
+        "jpg" | "jpeg" => "image/jpeg",
+        "png" => "image/png",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+async fn serve_upload_handler(Path(filename): Path<String>) -> Result<Response, AppError> {
+    validate_filename(&filename)?;
+
+    let filepath = uploads_dir().join(&filename);
+    let data = tokio::fs::read(&filepath)
+        .await
+        .map_err(|_| AppError::NotFound(format!("File not found: {filename}")))?;
+
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    let mime = mime_for_extension(&ext);
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime.to_string()),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable".to_string(),
+            ),
+        ],
+        data,
+    )
+        .into_response())
+}
+
+async fn serve_foto_handler(Path(filename): Path<String>) -> Result<Response, AppError> {
+    validate_filename(&filename)?;
+
+    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let filepath = std::path::Path::new(&quilombo_dir)
+        .join("fotos")
+        .join(&filename);
+
+    let data = tokio::fs::read(&filepath)
+        .await
+        .map_err(|_| AppError::NotFound(format!("Photo not found: {filename}")))?;
+
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+    let mime = mime_for_extension(&ext);
+
+    Ok((
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, mime.to_string()),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=31536000, immutable".to_string(),
+            ),
+        ],
+        data,
+    )
+        .into_response())
+}
+
+async fn admin_atualizar_usuario_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Path(target_id): Path<String>,
+    Json(body): Json<AtualizarPapelBody>,
+) -> Result<Json<Usuario>, AppError> {
+    let storage = lock_storage(&state)?;
+    let user = lookup_quilombo_user(&storage, &user_id.0)?;
+
+    if !tem_permissao(&user.papel, "admin:usuarios") {
+        return Err(AppError::Forbidden("Admin access required".into()));
+    }
+
+    let papel: Papel = body
+        .papel
+        .parse()
+        .map_err(|_| AppError::BadRequest("Invalid role. Use: admin, editor, membro".into()))?;
+
+    Ok(Json(
+        quilombo_storage::atualizar_papel(storage.conn(), &target_id, &papel)
+            .map_err(AppError::NotFound)?,
+    ))
 }

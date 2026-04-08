@@ -164,19 +164,30 @@ pub async fn remove_member(
 pub async fn list_universe_projects(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<Project>>, AppError> {
     let storage = lock_storage(&state)?;
-    let projects = storage
-        .list_projects_for_public_universe(&slug)
-        .map_err(|e| {
+
+    // First try public access (template or public universes)
+    match storage.list_projects_for_public_universe(&slug) {
+        Ok(projects) => Ok(Json(projects)),
+        Err(e) => {
             let msg = e.to_string();
             if msg.contains("not found") {
-                AppError::NotFound(msg)
-            } else {
-                AppError::Forbidden(msg)
+                return Err(AppError::NotFound(msg));
             }
-        })?;
-    Ok(Json(projects))
+            // Not public — check if caller is the owner
+            let caller_id = extract_optional_user_id(&headers, &state);
+            if let Some(uid) = caller_id
+                && let Some(universe) = storage.get_universe(&slug)
+                && (universe.owner_id == uid || storage.is_universe_member(&slug, &uid))
+            {
+                let projects = storage.list_projects_for_universe(&slug);
+                return Ok(Json(projects));
+            }
+            Err(AppError::Forbidden(msg))
+        }
+    }
 }
 
 // POST /api/v1/universes/:slug/clone — clone a universe (no auth required)
