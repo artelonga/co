@@ -34,6 +34,10 @@ dirs = "5"
 prost = "0.13"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
 
+[[bin]]
+name = "migrate_quilombo"
+path = "src/bin/migrate_quilombo.rs"
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
