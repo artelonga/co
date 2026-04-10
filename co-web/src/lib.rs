@@ -20,6 +20,7 @@ pub mod quilombo_storage;
 pub mod quilombo_telemetria;
 pub mod server;
 pub mod storage;
+pub mod telemetry;
 pub mod theme_engine;
 pub mod universe_routes;
 pub mod universo;

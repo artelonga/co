@@ -32,7 +32,7 @@
         <div class="sidebar-overlay" id="sidebar-overlay"></div>
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <span class="logo-mark">B</span>
+                <span class="logo-mark">Co</span>
                 <span class="logo-text" data-i18n="projects">Projetos</span>
             </div>
             <div class="sidebar-section">
@@ -170,10 +170,13 @@
                     <label for="task-labels" data-i18n="labels">Etiquetas (separadas por vírgula)</label>
                     <input type="text" id="task-labels" placeholder="design, web, docs" autocomplete="off">
                 </div>
+                <div class="form-group hidden" id="subtask-btn-group">
+                    <button type="button" class="btn btn-secondary" id="btn-add-subtask" data-i18n="add_subtask">+ Subtarefa</button>
+                </div>
                 <div class="form-group">
                     <label data-i18n="description">Descrição</label>
                     <div id="task-description-editor"></div>
-                    <textarea id="task-description" style="display:none" aria-hidden="true"></textarea>
+                    <textarea id="task-description" rows="6" aria-hidden="true"></textarea>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-danger hidden" id="btn-delete" data-i18n="delete">Excluir</button>
@@ -202,18 +205,17 @@
         <div class="template-banner-inner">
             <div class="template-hero">
                 <div class="template-hero-logo">
-                    <span class="template-logo-mark">CO</span>
+                    <span class="template-logo-mark">Co</span>
                 </div>
                 <div class="template-hero-text">
-                    <h2 class="template-hero-title" id="template-hero-title" data-i18n="universe.template_title">CO — Gestão de conteúdo em grafo</h2>
-                    <p class="template-hero-sub" id="template-hero-sub" data-i18n="universe.template_tagline">Gestão de conteúdo em grafo — livre e aberto</p>
+                    <h2 class="template-hero-title" id="template-hero-title" data-i18n="universe.template_title">Co — Cocriar, Colaborar, Conectar</h2>
+                    <p class="template-hero-sub" id="template-hero-sub" data-i18n="universe.local_hint">Experimente abaixo — crie uma conta para salvar e colaborar</p>
                 </div>
             </div>
             <div class="template-cta">
-                <button class="btn btn-primary btn-lg" id="btn-criar-universo" data-i18n="action.clone">Criar universo</button>
-                <button class="btn btn-secondary" id="btn-banner-entrar" data-i18n="action.login">Entrar</button>
+                <button class="btn btn-primary btn-lg" id="btn-banner-entrar" data-i18n="action.register">Criar conta</button>
+                <button class="btn btn-secondary" id="btn-banner-login" data-i18n="action.login">Entrar</button>
                 <a class="btn btn-ghost template-github-link" id="btn-banner-github" href="https://github.com/artelonga/co" target="_blank" rel="noopener" data-i18n="action.github">GitHub</a>
-                <button class="btn-text-sm lang-toggle template-lang-toggle" id="btn-banner-lang" data-i18n="lang.switch">English</button>
             </div>
         </div>
     </div>
@@ -297,55 +299,38 @@
 
     <!-- Universe Settings Modal (CO-24/CO-30 — owner only, shown via JS) -->
     <div id="settings-modal-overlay" class="modal-overlay hidden">
-        <div class="modal" id="settings-modal">
+        <div class="modal" id="settings-modal" style="max-width:480px">
             <div class="modal-header">
-                <h2 data-i18n="universe.settings">Configurações do universo</h2>
+                <h2 data-i18n="universe.settings">Configurações</h2>
                 <button class="modal-close" id="settings-modal-close">&times;</button>
             </div>
             <form id="settings-form">
                 <div class="form-group">
                     <label for="settings-theme" data-i18n="form.theme">Tema</label>
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <select id="settings-theme" style="flex:1">
-                            <option value="scholarly">Scholarly Light</option>
-                            <option value="scholarly-dark">Scholarly Dark</option>
-                            <option value="relic-light">Relic Light</option>
-                            <option value="relic">Relic Dark</option>
-                            <option value="modern">Modern</option>
-                        </select>
-                        <!-- CO-30: dark/light toggle button -->
-                        <button type="button" id="settings-dark-toggle" class="btn btn-secondary" title="Alternar modo claro/escuro" style="white-space:nowrap;padding:6px 10px;">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" id="settings-dark-icon">
-                                <circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
-                            </svg>
-                        </button>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label for="settings-layout" data-i18n="form.layout">Layout padrão</label>
-                    <select id="settings-layout">
-                        <option value="board" data-i18n="board_layout">Quadro (Kanban)</option>
-                        <option value="table" data-i18n="table">Tabela</option>
-                        <option value="timeline" data-i18n="timeline">Linha do Tempo</option>
-                        <option value="calendar" data-i18n="calendar">Calendário</option>
-                        <option value="dashboard" data-i18n="dashboard">Painel</option>
+                    <select id="settings-theme">
+                        <option value="modern">Modern</option>
+                        <option value="scholarly">Scholarly Light</option>
+                        <option value="scholarly-dark">Scholarly Dark</option>
+                        <option value="relic-light">Relic Light</option>
+                        <option value="relic">Relic Dark</option>
+                        <option value="medieval">Medieval</option>
+                        <option value="steampunk">Steampunk</option>
+                        <option value="cyberpunk">Cyberpunk</option>
+                        <option value="matrix">Matrix</option>
+                        <option value="garden">Garden</option>
+                        <option value="terminal">Terminal</option>
+                        <option value="retro">Retro Arcade</option>
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="settings-font-headline" data-i18n="form.font_headline">Fonte de títulos (Google Fonts)</label>
-                    <input type="text" id="settings-font-headline" placeholder="Ex: Newsreader" autocomplete="off">
+                    <label for="settings-layout" data-i18n="form.layout">Visualização padrão</label>
+                    <select id="settings-layout">
+                        <option value="board">Kanban</option>
+                        <option value="table" data-i18n="table">Tabela</option>
+                        <option value="dashboard" data-i18n="dashboard">Painel</option>
+                    </select>
                 </div>
-                <div class="form-group">
-                    <label for="settings-font-body" data-i18n="form.font_body">Fonte de texto (Google Fonts)</label>
-                    <input type="text" id="settings-font-body" placeholder="Ex: Work Sans" autocomplete="off">
-                </div>
-                <!-- CO-30: custom token overrides (JSON textarea) -->
-                <div class="form-group">
-                    <label for="settings-custom-tokens" data-i18n="form.custom_tokens">Tokens CSS personalizados (JSON)</label>
-                    <textarea id="settings-custom-tokens" rows="4" placeholder='{"--accent":"#ff6600","--bg":"#fafafa"}' autocomplete="off" style="font-family:var(--font-mono,monospace);font-size:12px;resize:vertical;"></textarea>
-                    <span style="font-size:11px;color:var(--text-muted);" data-i18n="form.custom_tokens_hint">Substitui qualquer token CSS do tema base.</span>
-                </div>
-                <div class="form-actions">
+                <div class="form-actions" style="margin-top:24px">
                     <div class="form-actions-right">
                         <button type="button" class="btn btn-secondary" id="settings-cancel" data-i18n="action.cancel">Cancelar</button>
                         <button type="submit" class="btn btn-primary" id="settings-save" data-i18n="action.save">Salvar</button>
@@ -361,9 +346,42 @@
         <a class="footer-github-link" href="https://github.com/artelonga/co" target="_blank" rel="noopener" data-i18n="action.github">GitHub</a>
     </footer>
 
+    <!-- Cookie Banner -->
+    <div id="cookie-banner" class="cookie-banner hidden">
+        <div class="cookie-banner-inner">
+            <p class="cookie-banner-text">
+                Este site usa cookies essenciais para autenticação e preferências.
+                Não usamos cookies de rastreamento.
+                <a href="#" id="cookie-privacy-link" style="text-decoration:underline">Política de Privacidade</a>
+            </p>
+            <button class="btn btn-primary btn-sm" id="cookie-accept">Aceitar</button>
+        </div>
+    </div>
+
     <script src="/shared/i18n.js?v=1"></script>
     <script src="/app.js"></script>
     <script src="/shared/clipper.js"></script>
     <script src="/shared/experiment.js?v=3"></script>
+    <script src="/shared/telemetry.js?v=1" defer></script>
+    <script>
+    // Cookie consent banner
+    (function() {
+        if (localStorage.getItem('co_cookie_consent')) return;
+        var banner = document.getElementById('cookie-banner');
+        if (banner) banner.classList.remove('hidden');
+        var btn = document.getElementById('cookie-accept');
+        if (btn) btn.addEventListener('click', function() {
+            localStorage.setItem('co_cookie_consent', '1');
+            banner.classList.add('hidden');
+        });
+        var link = document.getElementById('cookie-privacy-link');
+        if (link) link.addEventListener('click', function(e) {
+            e.preventDefault();
+            // Open privacy page in content view if available
+            var tab = document.querySelector('[data-view="conteudo"]');
+            if (tab) tab.click();
+        });
+    })();
+    </script>
 </body>
 </html>

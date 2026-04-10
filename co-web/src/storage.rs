@@ -247,6 +247,8 @@ impl Storage {
             self.conn
                 .execute_batch(
                     "
+                PRAGMA foreign_keys = OFF;
+                DROP TABLE IF EXISTS universes_new;
                 CREATE TABLE universes_new (
                     key TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -260,6 +262,7 @@ impl Storage {
                     SELECT key, name, description, owner_id, created_at, 0, 0 FROM universes;
                 DROP TABLE universes;
                 ALTER TABLE universes_new RENAME TO universes;
+                PRAGMA foreign_keys = ON;
                 INSERT INTO schema_version (version) VALUES (10);
                 ",
                 )
@@ -354,13 +357,15 @@ impl Storage {
                 self.migrate_old_data_to_entries();
             }
 
-            // Drop old tables
+            // Drop old tables (disable FK checks to avoid constraint errors on drop order)
             self.conn
                 .execute_batch(
-                    "DROP TABLE IF EXISTS tasks; \
+                    "PRAGMA foreign_keys = OFF; \
                      DROP TABLE IF EXISTS comments; \
-                     DROP TABLE IF EXISTS projects; \
                      DROP TABLE IF EXISTS activity_log; \
+                     DROP TABLE IF EXISTS tasks; \
+                     DROP TABLE IF EXISTS projects; \
+                     PRAGMA foreign_keys = ON; \
                      INSERT INTO schema_version (version) VALUES (13);",
                 )
                 .expect("Failed migration v13");
@@ -420,6 +425,46 @@ impl Storage {
                 ",
                 )
                 .expect("Failed to run migration v15");
+        }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 16 {
+            // CO-46: telemetry_events table — privacy-respecting event tracking.
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS telemetry_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    visitor_token TEXT,
+                    user_id TEXT,
+                    session_id TEXT,
+                    event_type TEXT NOT NULL,
+                    event_name TEXT NOT NULL,
+                    universe_key TEXT,
+                    path TEXT,
+                    properties TEXT,
+                    duration_ms INTEGER,
+                    ip_hash TEXT,
+                    ua_device TEXT,
+                    ua_browser TEXT,
+                    ua_os TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_telemetry_time ON telemetry_events(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_telemetry_event ON telemetry_events(event_type, event_name);
+                CREATE INDEX IF NOT EXISTS idx_telemetry_user ON telemetry_events(user_id);
+                INSERT INTO schema_version (version) VALUES (16);
+                ",
+                )
+                .expect("Failed to run migration v16");
         }
     }
 
@@ -1919,7 +1964,7 @@ impl Storage {
         count > 0
     }
 
-    /// Seed the template universe with "Meu Projeto" and 8 sample tasks.
+    /// Seed the template universe with interactive tutorial tasks.
     /// Safe to call multiple times — checks if project entry already exists.
     pub fn seed_template_universe(&mut self) {
         let now = Utc::now();
@@ -1930,9 +1975,9 @@ impl Storage {
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
               theme_preset, layout) \
-             VALUES ('template', 'CO', \
-             'Universo de demonstração — todas as funcionalidades do CO', \
-             'system', ?1, 1, 1, 'scholarly-light', 'board')",
+             VALUES ('template', 'Co', \
+             'Aprenda a usar o CO — arraste, crie e explore', \
+             'system', ?1, 1, 1, 'scholarly', 'board')",
             params![now_str],
         );
         // Ensure form config YAML is written for the template.
@@ -1941,7 +1986,7 @@ impl Storage {
         }
 
         // Check if project entry already exists
-        let proj_path = "projects/MP/_project.md";
+        let proj_path = "projects/CO/_project.md";
         let already_seeded: bool = self
             .conn
             .query_row(
@@ -1956,28 +2001,29 @@ impl Storage {
             return;
         }
 
-        // Create sample project entry
+        // Create project entry
         let proj_fm = json!({
             "type": "project",
-            "key": "MP",
-            "title": "Meu Projeto",
+            "key": "CO",
+            "title": "Bem-vindo ao Co",
             "status": "active",
-            "next_id": 9,
+            "next_id": 10,
             "created": now_str,
             "modified": now_str,
             "archived": false,
-            "tags": []
+            "tags": ["onboarding"]
         });
         let proj_entry = make_entry(
             proj_path,
             proj_fm,
-            "Projeto de demonstração com todas as funcionalidades do CO",
+            "Cada cartão é uma ideia. Arraste, crie, explore.",
         );
         let universe_root = self.universe_root("template");
         let _ = co::entry::write_entry(&universe_root, &proj_entry);
         let _ = upsert_entry_row(&self.conn, "template", &proj_entry);
 
-        // 8 sample tasks
+        // Onboarding tasks — game tutorial tone, curiosity-driven
+        // Content always in Portuguese. UI labels translate via i18n.
         struct SeedTask {
             id: i64,
             title: &'static str,
@@ -1990,84 +2036,100 @@ impl Storage {
         }
 
         let tasks = [
+            // --- Act 1: First contact ---
             SeedTask {
                 id: 1,
-                title: "Configurar ambiente de desenvolvimento",
-                description: "Configurar Docker, banco de dados local e variáveis de ambiente.",
-                status: "done",
+                title: "Mova este cartão para Concluído",
+                description: "Você acabou de chegar. Que tal começar com algo simples?\n\nArraste este cartão direto para a coluna **Concluído**.\n\nPronto — você já terminou sua primeira tarefa no Co. Cada coluna representa um estado. Mova os cartões conforme avança.",
+                status: "todo",
                 priority: "high",
-                labels: vec!["setup", "infra"],
-                due_days: Some(-20),
+                labels: vec!["inicio"],
+                due_days: None,
                 parent: None,
             },
+            // --- Act 2: Make it yours ---
             SeedTask {
                 id: 2,
-                title: "Desenho da arquitetura",
-                description: "Definir arquitetura, escolher tecnologias e documentar decisões.",
-                status: "done",
-                priority: "critical",
-                labels: vec!["architecture", "docs"],
-                due_days: Some(-15),
+                title: "Crie algo seu",
+                description: "Clique em **+ Nova Tarefa** e escreva o que vier à mente.\n\nPode ser uma ideia, um lembrete, um projeto. A descrição aceita **Markdown** — negrito, listas, links, código.\n\nCada tarefa vira um arquivo `.md` que você pode abrir no Obsidian, editar no VS Code, ou versionar no Git.",
+                status: "todo",
+                priority: "high",
+                labels: vec!["inicio"],
+                due_days: None,
                 parent: None,
             },
             SeedTask {
                 id: 3,
-                title: "Implementar autenticação",
-                description: "Implementar JWT, refresh tokens e logout seguro.",
-                status: "in_progress",
-                priority: "critical",
-                labels: vec!["backend", "security"],
-                due_days: Some(7),
-                parent: None,
-            },
-            SeedTask {
-                id: 4,
-                title: "Escrever testes de integração",
-                description: "Cobrir endpoints de autenticação com testes de integração.",
+                title: "Quebre em partes menores",
+                description: "Toda grande ideia começa com um passo pequeno.\n\nAbra uma tarefa e escolha um **pai** no campo \"Tarefa Pai\". A subtarefa aparece aninhada no Kanban — clique no triângulo para expandir.\n\nVocê pode criar quantos níveis quiser.",
                 status: "todo",
                 priority: "medium",
-                labels: vec!["testing", "backend"],
-                due_days: Some(14),
-                parent: Some(3),
+                labels: vec!["inicio"],
+                due_days: None,
+                parent: Some(2),
+            },
+            // --- Act 3: Discover ---
+            SeedTask {
+                id: 4,
+                title: "Escolha um visual",
+                description: "Cada universo tem sua identidade. Use o seletor de tema no cabeçalho para experimentar:\n\n- **Scholarly** — editorial acadêmico, tons de cobre\n- **Relic** — cinema escuro, rosa e ouro\n- **Cyberpunk** — neon sobre noite\n- **Garden** — verde orgânico\n- **Matrix** — fósforo sobre preto\n- **Terminal** — minimalismo absoluto\n\nSão 12 temas. Cada um transforma completamente a interface.",
+                status: "todo",
+                priority: "medium",
+                labels: vec!["explorar"],
+                due_days: None,
+                parent: None,
             },
             SeedTask {
                 id: 5,
-                title: "Design da interface",
-                description: "Criar wireframes e protótipos para os principais fluxos.",
-                status: "in_review",
-                priority: "high",
-                labels: vec!["frontend", "design", "ux"],
-                due_days: Some(5),
+                title: "Veja de outro ângulo",
+                description: "Os mesmos dados, apresentados de formas diferentes. Alterne entre as abas:\n\n- **Kanban** — visão espacial, arraste entre colunas\n- **Tabela** — lista ordenável, filtros rápidos\n- **Painel** — visão geral, métricas\n- **Conteúdo** — seus textos como artigos\n\nO Conteúdo é especial: cada descrição de tarefa é um texto Markdown completo. Escreva documentação, notas, artigos — tudo organizado no mesmo lugar.",
+                status: "todo",
+                priority: "medium",
+                labels: vec!["explorar"],
+                due_days: None,
                 parent: None,
             },
+            // --- Act 4: Understand the system ---
             SeedTask {
                 id: 6,
-                title: "Implementar componentes de UI",
-                description: "Desenvolver componentes reutilizáveis baseados no design aprovado.",
-                status: "in_progress",
-                priority: "medium",
-                labels: vec!["frontend"],
-                due_days: Some(10),
-                parent: Some(5),
+                title: "Entenda o que é Conteúdo",
+                description: "No CO, **tudo é conteúdo**. Uma tarefa é um arquivo Markdown com metadados (título, status, prioridade) no cabeçalho.\n\n```yaml\n---\ntype: task\ntitle: Minha tarefa\nstatus: todo\ntags: [projeto, ideia]\n---\n```\n\nIsso significa que seu quadro de tarefas é também um banco de dados de textos. Abra a aba **Conteúdo** para ver seus cartões como artigos.\n\nVocê pode sincronizar com o **Obsidian**, editar no seu editor favorito, ou acessar via API. O conteúdo é seu — em Markdown, sempre portátil.",
+                status: "todo",
+                priority: "low",
+                labels: vec!["explorar", "conteudo"],
+                due_days: None,
+                parent: None,
             },
             SeedTask {
                 id: 7,
-                title: "Deploy de homologação",
-                description: "Configurar CI/CD e fazer deploy no ambiente de homologação.",
+                title: "Troque o idioma da interface",
+                description: "A interface do CO funciona em **Português** e **English**.\n\nClique no botão de idioma no cabeçalho. Os rótulos da interface mudam, mas o conteúdo (seus textos, descrições, títulos) permanece como você escreveu.\n\nIsso porque conteúdo é seu — a interface é só a moldura.",
                 status: "todo",
                 priority: "low",
-                labels: vec!["devops", "infra"],
-                due_days: Some(21),
+                labels: vec!["explorar"],
+                due_days: None,
                 parent: None,
             },
+            // --- Act 5: Join ---
             SeedTask {
                 id: 8,
-                title: "Documentação da API",
-                description: "Documentar todos os endpoints com exemplos de requisição e resposta.",
+                title: "Faça parte",
+                description: "Tudo o que você fez até agora está salvo neste navegador.\n\nQuando criar uma conta, seu universo ganha um endereço permanente que você pode compartilhar. Outras pessoas podem colaborar em tempo real — com cursores visíveis e edição simultânea.\n\nSeu conteúdo continua sendo Markdown. Seu universo continua sendo seu.\n\n**Crie uma conta gratuita** para salvar, compartilhar e colaborar.",
+                status: "todo",
+                priority: "critical",
+                labels: vec!["acao"],
+                due_days: None,
+                parent: None,
+            },
+            // --- Bonus: hidden depth ---
+            SeedTask {
+                id: 9,
+                title: "Conecte com o Obsidian",
+                description: "Se você usa Obsidian, pode sincronizar este universo como um vault.\n\nCada tarefa vira uma nota `.md` com frontmatter YAML. Subtarefas viram `[[wikilinks]]`. Tags viram #tags.\n\nInstale o plugin **CO Universe Sync** no Obsidian e conecte com sua conta. Seus dados fluem entre o CO e o Obsidian sem atrito.\n\nDataview queries funcionam nativamente:\n\n```dataview\nTABLE status, priority\nFROM \"projects\"\nWHERE type = \"task\" AND status != \"done\"\nSORT priority DESC\n```",
                 status: "todo",
                 priority: "low",
-                labels: vec!["docs", "backend"],
-                due_days: Some(30),
+                labels: vec!["avancado", "obsidian"],
+                due_days: None,
                 parent: None,
             },
         ];
@@ -2080,7 +2142,7 @@ impl Storage {
                     .format("%Y-%m-%d")
                     .to_string()
             });
-            let task_path = format!("projects/MP/{}.md", t.id);
+            let task_path = format!("projects/CO/{}.md", t.id);
             let labels: Vec<serde_json::Value> = t.labels.iter().map(|l| json!(l)).collect();
             let task_fm = json!({
                 "type": "task",
@@ -2095,11 +2157,176 @@ impl Storage {
                 "modified": updated_at,
                 "archived": false,
                 "assignee": null,
-                "project": "MP"
+                "project": "CO"
             });
             let task_entry = make_entry(&task_path, task_fm, t.description);
             let _ = co::entry::write_entry(&universe_root, &task_entry);
             let _ = upsert_entry_row(&self.conn, "template", &task_entry);
+        }
+
+        // --- Content pages: intro article, terms, privacy ---
+
+        let intro_page = make_entry(
+            "content/sobre.md",
+            json!({
+                "type": "page",
+                "slug": "sobre",
+                "title": "Co — Consciência Coletiva",
+                "order": 1,
+                "tags": ["sobre", "manifesto"],
+                "created": now_str,
+                "modified": now_str
+            }),
+            "# **Co**nsciência **Co**letiva\n\n\
+             Co é uma plataforma para organizar ideias, projetos e pessoas.\n\n\
+             Três verbos definem o que fazemos:\n\n\
+             - **Co**criar — cada cartão é uma ideia. Escreva, arraste, conecte.\n\
+             - **Co**laborar — convide pessoas para seu universo. Editem juntos, em tempo real.\n\
+             - **Co**nectar os pontos — seus universos formam uma rede. Cada perfil é uma presença online.\n\n\
+             ## O que é um universo?\n\n\
+             Um universo é seu espaço. Pode ser um projeto pessoal, um portfólio, \
+             um blog, ou o painel de uma equipe. Você decide o que entra e como aparece.\n\n\
+             Universos privados são como perfis — sua identidade digital. \
+             Universos públicos são vitrines para o mundo.\n\n\
+             ## Tudo é Markdown\n\n\
+             Cada tarefa, cada página, cada nota é um arquivo `.md` com metadados YAML. \
+             Isso significa que seu conteúdo é portátil: sincronize com o Obsidian, \
+             edite no VS Code, versione no Git.\n\n\
+             Você nunca fica preso. O conteúdo é seu.\n\n\
+             ## Código aberto\n\n\
+             Co é software livre, licenciado sob MIT. \
+             O código está no [GitHub](https://github.com/artelonga/co). \
+             Contribuições são bem-vindas.\n\n\
+             ---\n\n\
+             *Co — conectando os pontos.*",
+        );
+        if let Err(e) = co::entry::write_entry(&universe_root, &intro_page) {
+            tracing::warn!("Failed to write intro page file: {e}");
+        }
+        if let Err(e) = upsert_entry_row(&self.conn, "template", &intro_page) {
+            tracing::warn!("Failed to upsert intro page: {e}");
+        }
+
+        let termos_page = make_entry(
+            "content/termos.md",
+            json!({
+                "type": "page",
+                "slug": "termos",
+                "title": "Termos de Uso",
+                "order": 10,
+                "tags": ["legal"],
+                "created": now_str,
+                "modified": now_str
+            }),
+            "# Termos de Uso\n\n\
+             Última atualização: abril de 2026\n\n\
+             ## 1. Aceitação dos termos\n\n\
+             Ao acessar e usar o Co (\"Plataforma\"), você concorda com estes Termos de Uso. \
+             Se não concordar, não utilize a Plataforma.\n\n\
+             ## 2. Descrição do serviço\n\n\
+             O Co é uma plataforma de gestão de conteúdo em grafo, oferecida como software \
+             livre (licença MIT). A Plataforma permite criar, organizar e compartilhar conteúdo \
+             em formato Markdown através de \"universos\" — espaços de trabalho pessoais ou colaborativos.\n\n\
+             ## 3. Contas e universos\n\n\
+             - Visitantes podem usar a Plataforma sem conta, com limite de 100 entradas por universo anônimo.\n\
+             - Ao criar uma conta, você é responsável por manter a segurança de suas credenciais.\n\
+             - Universos privados são visíveis apenas para o proprietário e membros convidados.\n\
+             - Universos públicos são acessíveis a qualquer pessoa com o link.\n\n\
+             ## 4. Conteúdo do usuário\n\n\
+             - Você mantém todos os direitos sobre o conteúdo que cria.\n\
+             - O conteúdo é armazenado como arquivos Markdown e pode ser exportado a qualquer momento.\n\
+             - Não nos responsabilizamos por conteúdo criado por usuários.\n\
+             - Conteúdo que viole leis brasileiras poderá ser removido sem aviso prévio.\n\n\
+             ## 5. Uso aceitável\n\n\
+             Você concorda em não usar a Plataforma para:\n\
+             - Distribuir conteúdo ilegal, difamatório ou que viole direitos de terceiros\n\
+             - Tentar acessar contas ou universos de outros usuários sem autorização\n\
+             - Sobrecarregar intencionalmente a infraestrutura da Plataforma\n\n\
+             ## 6. Disponibilidade\n\n\
+             A Plataforma é oferecida \"como está\", sem garantias de disponibilidade contínua. \
+             Faremos esforços razoáveis para manter o serviço operacional.\n\n\
+             ## 7. Privacidade\n\n\
+             O tratamento de dados pessoais é descrito na nossa Política de Privacidade.\n\n\
+             ## 8. Modificações\n\n\
+             Estes termos podem ser atualizados. Alterações significativas serão comunicadas \
+             através da Plataforma.\n\n\
+             ## 9. Contato\n\n\
+             Dúvidas: yuri@artelonga.com.br\n\n\
+             ---\n\n\
+             *Arte Longa — Curitiba, PR, Brasil*",
+        );
+        if let Err(e) = co::entry::write_entry(&universe_root, &termos_page) {
+            tracing::warn!("Failed to write termos page file: {e}");
+        }
+        if let Err(e) = upsert_entry_row(&self.conn, "template", &termos_page) {
+            tracing::warn!("Failed to upsert termos page: {e}");
+        }
+
+        let privacidade_page = make_entry(
+            "content/privacidade.md",
+            json!({
+                "type": "page",
+                "slug": "privacidade",
+                "title": "Política de Privacidade",
+                "order": 11,
+                "tags": ["legal"],
+                "created": now_str,
+                "modified": now_str
+            }),
+            "# Política de Privacidade\n\n\
+             Última atualização: abril de 2026\n\n\
+             ## 1. Dados coletados\n\n\
+             O Co coleta o mínimo necessário para o funcionamento da Plataforma:\n\n\
+             - **Conta:** e-mail (para autenticação), nome de exibição (opcional)\n\
+             - **Conteúdo:** textos, tarefas e arquivos que você cria nos seus universos\n\
+             - **Cookies:** sessão de autenticação, preferência de idioma, tema visual\n\
+             - **Logs:** endereço IP (anonimizado), páginas acessadas, para fins de segurança\n\n\
+             ## 2. Uso dos dados\n\n\
+             Seus dados são usados exclusivamente para:\n\
+             - Autenticar sua conta e manter sua sessão\n\
+             - Armazenar e exibir seu conteúdo\n\
+             - Melhorar a Plataforma (estatísticas agregadas e anônimas)\n\n\
+             **Não vendemos, compartilhamos ou cedemos seus dados a terceiros.**\n\n\
+             ## 3. Armazenamento\n\n\
+             - Dados são armazenados em servidores na região de São Paulo (GRU) via Fly.io\n\
+             - Conteúdo é armazenado como arquivos Markdown + banco de dados SQLite\n\
+             - Backups automáticos são realizados diariamente\n\n\
+             ## 4. Cookies\n\n\
+             Utilizamos cookies estritamente necessários:\n\n\
+             | Cookie | Finalidade | Duração |\n\
+             |--------|-----------|--------|\n\
+             | `session` | Autenticação (JWT) | 30 dias |\n\
+             | `co_lang` | Idioma da interface | 1 ano |\n\
+             | `co_named_palette` | Tema visual | 1 ano |\n\
+             | `co_local_universe` | Universo anônimo local | Sessão |\n\n\
+             Não utilizamos cookies de rastreamento, analytics de terceiros ou publicidade.\n\n\
+             ## 5. Seus direitos (LGPD)\n\n\
+             Conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018), você tem direito a:\n\
+             - Acessar seus dados pessoais\n\
+             - Corrigir dados incompletos ou inexatos\n\
+             - Solicitar a exclusão dos seus dados\n\
+             - Exportar seu conteúdo (Markdown nativo, exportável a qualquer momento)\n\
+             - Revogar consentimento\n\n\
+             Para exercer esses direitos, entre em contato: yuri@artelonga.com.br\n\n\
+             ## 6. Retenção\n\n\
+             - Dados de conta são mantidos enquanto a conta estiver ativa\n\
+             - Universos anônimos (sem conta) podem ser removidos após 90 dias de inatividade\n\
+             - Após exclusão de conta, dados são removidos em até 30 dias\n\n\
+             ## 7. Segurança\n\n\
+             - Senhas são armazenadas com hash Argon2\n\
+             - Comunicação via HTTPS (TLS)\n\
+             - Tokens JWT com expiração\n\
+             - Banco de dados criptografado em repouso\n\n\
+             ## 8. Contato\n\n\
+             Controlador: Yuri — yuri@artelonga.com.br\n\n\
+             ---\n\n\
+             *Arte Longa — Curitiba, PR, Brasil*",
+        );
+        if let Err(e) = co::entry::write_entry(&universe_root, &privacidade_page) {
+            tracing::warn!("Failed to write privacidade page file: {e}");
+        }
+        if let Err(e) = upsert_entry_row(&self.conn, "template", &privacidade_page) {
+            tracing::warn!("Failed to upsert privacidade page: {e}");
         }
     }
 
@@ -2243,6 +2470,31 @@ impl Storage {
                 let new_task_entry = make_entry(&new_task_path, new_task_fm, &task_row.body);
                 co::entry::write_entry(&new_universe_root, &new_task_entry)?;
                 upsert_entry_row(&self.conn, new_key, &new_task_entry)?;
+                cloned_entries += 1;
+            }
+        }
+
+        // Clone page entries (content/about, terms, privacy, etc.)
+        {
+            let source_pages: Vec<EntryRow> = {
+                let mut stmt = self.conn.prepare(
+                    "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                     created_at, updated_at FROM entries \
+                     WHERE universe_key = ?1 AND entry_type = 'page'",
+                )?;
+                stmt.query_map(params![source_key], entry_row_from_sql)?
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
+            for page_row in &source_pages {
+                let mut new_fm = page_row.frontmatter.clone();
+                if let Some(obj) = new_fm.as_object_mut() {
+                    obj.insert("created".to_string(), json!(now_str));
+                    obj.insert("modified".to_string(), json!(now_str));
+                }
+                let new_page = make_entry(&page_row.path, new_fm, &page_row.body);
+                let _ = co::entry::write_entry(&new_universe_root, &new_page);
+                let _ = upsert_entry_row(&self.conn, new_key, &new_page);
                 cloned_entries += 1;
             }
         }

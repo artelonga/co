@@ -272,8 +272,16 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let allowed_admins =
         crate::github_auth::AllowedAdmins(state.config.gestao_github_admins.clone());
     let gestao_api = crate::gestao_routes::router()
+        .layer(axum::Extension(github_token_cache.clone()))
+        .layer(axum::Extension(allowed_admins.clone()));
+
+    // --- Telemetry admin routes (CO-46) ---
+    let telemetry_admin = crate::telemetry::admin_router()
         .layer(axum::Extension(github_token_cache))
         .layer(axum::Extension(allowed_admins));
+
+    // --- Telemetry public route (CO-46) ---
+    let telemetry_public = crate::telemetry::router();
 
     // --- Universe multi-tenancy routes ---
     let universe_api = crate::universe_routes::router();
@@ -294,6 +302,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- /co landing + universe routes (serve index.html for SPA routing) ---
     let co_routes = Router::new()
         .route("/co", get(serve_co_index))
+        // CO-46: admin telemetry dashboard (specific route takes priority over /{slug})
+        .route(
+            "/co/co-dev/telemetria",
+            get(crate::telemetry::serve_admin_dashboard),
+        )
         .route("/co/{slug}", get(serve_co_index));
 
     let mut router = Router::new()
@@ -306,6 +319,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api", game_public)
         .nest("/api", game_protected)
         .nest("/api/v1/quilombo", quilombo_api)
+        // CO-46: telemetry middleware — records pageviews in telemetry_events
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::telemetry::telemetry_middleware,
+        ))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::quilombo_telemetria::telemetry_middleware,
@@ -321,7 +339,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", vault_api)
         .nest("/api/v1/universes", entry_api)
         .nest("/api/v1/auth", token_api)
-        .nest("/api/v1/themes", themes_api);
+        .nest("/api/v1/themes", themes_api)
+        // CO-46: public event ingestion + admin summary/export
+        .nest("/api/v1/telemetry", telemetry_public)
+        .nest("/api/v1/admin", telemetry_admin);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -712,8 +733,8 @@ fn guess_content_type(path: &str) -> &'static str {
 fn cache_control_for(path: &str) -> HeaderValue {
     match path.rsplit('.').next() {
         Some("html") => HeaderValue::from_static("no-cache"),
-        Some("css") | Some("js") => HeaderValue::from_static("public, max-age=31536000, immutable"),
-        Some("png") | Some("svg") | Some("ico") => {
+        Some("css") | Some("js") => HeaderValue::from_static("public, max-age=60, must-revalidate"),
+        Some("png") | Some("svg") | Some("ico") | Some("woff2") => {
             HeaderValue::from_static("public, max-age=31536000, immutable")
         }
         _ => HeaderValue::from_static("no-cache"),

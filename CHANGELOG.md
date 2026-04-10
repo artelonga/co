@@ -5,6 +5,34 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-04-10
+
+### co-web
+
+#### Added — CO-46: Full user telemetry — privacy-respecting tracking
+
+- **`telemetry_events` table** (migration v16): stores page views, interactions, errors, and performance events without PII — no raw IPs, no email addresses, no entry content
+- **`co-web/src/telemetry.rs`**: new telemetry module with server-side middleware, storage helpers, and aggregation queries
+  - `telemetry_middleware`: tracks all GET page views; filters bots; stores daily-salted IP hash, device/browser/OS from UA
+  - `hash_ip_daily()`: xxhash + daily date salt — same IP gets a different hash each day, preventing cross-day re-identification
+  - `cleanup_old_events()`: 90-day retention policy (removes raw rows older than 90 days)
+  - `telemetry_summary()`: aggregates total events, unique visitors, top pages, error count, p95 latency, events by type and day
+- **`POST /api/v1/telemetry/event`**: client-side event ingestion endpoint (returns 202 Accepted); accepts `event_name`, `event_type`, `path`, `universe_key`, `properties`, `duration_ms`, `session_id`
+- **`GET /api/v1/admin/telemetry/summary`**: aggregated analytics for the last 30 days (GitHub admin auth required)
+- **`GET /api/v1/admin/telemetry/export`**: last 10 000 events as CSV download (GitHub admin auth required)
+- **`GET /co/co-dev/telemetria`**: admin dashboard page with cards (total visitors, unique visitors, error count, p95 latency), traffic chart, top pages, events by type, and CSV export
+- **`co-web/static/shared/telemetry.js`**: client-side module
+  - Respects `navigator.doNotTrack === '1'` — tracking silently disabled
+  - Gated on `co_cookie_consent` in localStorage — no events sent before consent
+  - Auto-tracks page views (with load time + TTI) on `DOMContentLoaded`
+  - Auto-tracks JavaScript errors via `window.onerror`
+  - Auto-tracks LCP and FID via `PerformanceObserver`
+  - Exposes `window.coTrack(eventName, properties)` for manual interaction tracking
+  - Uses `navigator.sendBeacon` for non-blocking delivery
+  - Session ID: random nanoid stored in `sessionStorage` (expires on tab close)
+- **Integration tests** in `co-web/tests/telemetry_tests.rs`: simulate user flow → verify events recorded, retention cleanup, HTTP endpoint status codes, admin auth guard, admin dashboard page
+- **Unit tests** in `co-web/src/telemetry.rs`: UA parsing, bot detection, IP hash privacy
+
 ## [1.0.0] — 2026-04-07
 
 ### co-web
