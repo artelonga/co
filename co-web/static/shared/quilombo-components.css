@@ -1,0 +1,200 @@
+/**
+ * Quilombo Araucária — component styles (CO-41)
+ *
+ * Loaded only when the active universe theme is `quilombo`.
+ * Tokens follow the quilombo-blog design system:
+ *   Primary: #2d4a22 (folha — forest green)
+ *   Secondary: #8b6914 (terra — bronze)
+ *   Background: #f5f0e8 (areia — sand)
+ *   Card: #faf6ef
+ *   Border: #c8b48e
+ *   Headline: Playfair Display / Body: Inter
+ */
+
+/* ── Root token overrides ─────────────────────────────────────────────────── */
+.quilombo-theme {
+  --q-primary:    #2d4a22;
+  --q-secondary:  #8b6914;
+  --q-bg:         #f5f0e8;
+  --q-card:       #faf6ef;
+  --q-border:     #c8b48e;
+  --q-text:       #1a2614;
+  --q-text-muted: #6b4e14;
+}
+
+/* ── Hero banner ──────────────────────────────────────────────────────────── */
+.quilombo-hero {
+  background: linear-gradient(135deg, var(--q-primary) 0%, #4a7a38 100%);
+  color: #fff;
+  padding: 3rem 2rem;
+  border-radius: var(--radius-lg);
+  margin-bottom: 2rem;
+  font-family: 'Playfair Display', Georgia, serif;
+}
+
+.quilombo-hero__title {
+  font-size: 2.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  line-height: 1.2;
+}
+
+.quilombo-hero__subtitle {
+  font-size: 1.125rem;
+  opacity: 0.85;
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────────── */
+.quilombo-card {
+  background: var(--q-card);
+  border: 1px solid var(--q-border);
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.quilombo-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+
+.quilombo-card__type {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--q-secondary);
+  font-family: 'Inter', system-ui, sans-serif;
+  margin-bottom: 0.5rem;
+}
+
+.quilombo-card__title {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--q-text);
+  font-family: 'Playfair Display', Georgia, serif;
+  margin: 0 0 0.75rem;
+  line-height: 1.35;
+}
+
+.quilombo-card__body {
+  font-size: 0.875rem;
+  color: var(--q-text-muted);
+  line-height: 1.6;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.quilombo-card__meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  color: var(--q-text-muted);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* ── Tag pills ────────────────────────────────────────────────────────────── */
+.quilombo-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2em 0.65em;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #e0ecda;
+  color: var(--q-primary);
+  border: 1px solid #b8d4b0;
+  white-space: nowrap;
+}
+
+.quilombo-tag--secondary {
+  background: #f0e8cc;
+  color: #5a4010;
+  border-color: var(--q-border);
+}
+
+/* ── Stats grid ───────────────────────────────────────────────────────────── */
+.quilombo-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0;
+}
+
+.quilombo-stat {
+  background: var(--q-card);
+  border: 1px solid var(--q-border);
+  border-radius: var(--radius-md);
+  padding: 1rem 1.25rem;
+  text-align: center;
+}
+
+.quilombo-stat__value {
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--q-primary);
+  font-family: 'Playfair Display', Georgia, serif;
+  line-height: 1;
+}
+
+.quilombo-stat__label {
+  font-size: 0.75rem;
+  color: var(--q-text-muted);
+  font-family: 'Inter', system-ui, sans-serif;
+  margin-top: 0.25rem;
+}
+
+/* ── Divider with leaf motif ──────────────────────────────────────────────── */
+.quilombo-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--q-border);
+  margin: 2rem 0;
+}
+
+.quilombo-divider::before,
+.quilombo-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--q-border);
+}
+
+/* ── Mission status badge ─────────────────────────────────────────────────── */
+.quilombo-mission-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.25em 0.75em;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.quilombo-mission-badge--aberta {
+  background: #e0ecda;
+  color: var(--q-primary);
+}
+
+.quilombo-mission-badge--em-andamento {
+  background: #f5f0cc;
+  color: #5a4800;
+}
+
+.quilombo-mission-badge--concluida {
+  background: #c8e8c0;
+  color: #154015;
+}
+
+.quilombo-mission-badge--cancelada {
+  background: #f5d8d8;
+  color: #6e0000;
+}

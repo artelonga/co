@@ -453,6 +453,22 @@ pub struct UpdateUniverseFormConfig {
 
 // --- Theme Tiers ---
 
+/// Stats for the `quilomboaraucaria` public universe.
+///
+/// Counts are derived from the SQLite entry index; totalUsuarios, versaoApp,
+/// and ultimaSync come from the `meta/stats.md` metadata entry written by the
+/// importer on each run.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuilomboStats {
+    pub total_usuarios: i64,
+    pub total_publicacoes: i64,
+    pub total_eventos: i64,
+    pub total_missoes: i64,
+    pub versao_app: String,
+    pub ultima_sync: Option<String>,
+}
+
 /// Available themes returned by `GET /api/v1/themes/available`.
 /// Content depends on whether the caller is a real logged-in user or anonymous.
 #[derive(Debug, Serialize)]

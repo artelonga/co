@@ -373,6 +373,15 @@ fn extract_optional_claims(headers: &HeaderMap) -> Option<crate::auth::Claims> {
     crate::auth::decode_claims(&token, &secret).ok()
 }
 
+// GET /api/v1/universes/quilomboaraucaria/stats — public stats endpoint (CO-41)
+pub async fn quilombo_stats(
+    State(state): State<AppState>,
+) -> Result<Json<crate::models::QuilomboStats>, AppError> {
+    let storage = lock_storage(&state)?;
+    let stats = storage.quilombo_stats();
+    Ok(Json(stats))
+}
+
 // GET /api/v1/universes/:slug/config — public: returns presentation config
 pub async fn get_universe_config(
     State(state): State<AppState>,
@@ -534,6 +543,8 @@ pub async fn get_universe_theme_css(
 pub fn router() -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
+        // CO-41: specific literal route must come before /{slug} wildcard
+        .route("/quilomboaraucaria/stats", get(quilombo_stats))
         .route("/{slug}", get(get_universe_info))
         .route("/{slug}/config", get(get_universe_config))
         .route("/{slug}/theme.css", get(get_universe_theme_css))

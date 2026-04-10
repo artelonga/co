@@ -537,6 +537,12 @@ pub async fn start_server(config: WebConfig) {
             storage.seed_template_universe();
             tracing::info!("Template universe seeded (universe: template, project: MP)");
         }
+        // CO-41: seed quilomboaraucaria public universe once on first boot.
+        if !storage.quilombo_universe_exists() {
+            tracing::info!("Seeding quilomboaraucaria universe...");
+            storage.seed_quilombo_universe();
+            tracing::info!("quilomboaraucaria universe seeded (public, quilombo theme)");
+        }
     }
 
     // CO-44: UAT-specific startup — runs only when CO_ENV=uat.

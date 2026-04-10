@@ -2625,6 +2625,104 @@ impl Storage {
         }
     }
 
+    // --- Quilombo Araucária universe ---
+
+    /// Returns true if the quilomboaraucaria universe already exists.
+    pub fn quilombo_universe_exists(&self) -> bool {
+        self.get_universe("quilomboaraucaria").is_some()
+    }
+
+    /// Seed the `quilomboaraucaria` public universe (CO-41).
+    ///
+    /// Creates the universe with is_public=1, owner_id='system', and the
+    /// quilombo theme preset. Safe to call multiple times — idempotent via
+    /// INSERT OR IGNORE.
+    pub fn seed_quilombo_universe(&mut self) {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Custom tokens for the quilombo-blog design system
+        let custom_tokens = serde_json::json!({
+            "--bg": "#f5f0e8",
+            "--card-bg": "#faf6ef",
+            "--border": "#c8b48e",
+            "--accent": "#2d4a22",
+            "--text-muted": "#8b6914"
+        });
+        let tokens_str = custom_tokens.to_string();
+
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public, \
+              theme_preset, layout, font_headline, font_body, custom_tokens, content_count) \
+             VALUES ('quilomboaraucaria', 'Quilombo Araucária', \
+             'Comunidade quilombola do Paraná — publicações, eventos e missões', \
+             'system', ?1, 0, 1, 'quilombo', 'board', \
+             'Playfair Display', 'Inter', ?2, 0)",
+            params![now_str, tokens_str],
+        );
+
+        // Sync .universo.yaml
+        if let Some(config) = self.get_universe_form_config("quilomboaraucaria") {
+            let _ = self.write_universo_yaml("quilomboaraucaria", &config);
+        }
+    }
+
+    /// Stats for the quilomboaraucaria universe.
+    ///
+    /// Entry counts come from the SQLite index; totalUsuarios, versaoApp and
+    /// ultimaSync are read from the `meta/stats.md` metadata entry written by
+    /// the importer on each run. Returns a zeroed struct if the universe has no
+    /// content yet.
+    pub fn quilombo_stats(&self) -> crate::models::QuilomboStats {
+        let count_by_type = |entry_type: &str| -> i64 {
+            self.conn
+                .query_row(
+                    "SELECT COUNT(*) FROM entries \
+                     WHERE universe_key = 'quilomboaraucaria' AND entry_type = ?1",
+                    params![entry_type],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0)
+        };
+
+        let total_publicacoes = count_by_type("post");
+        let total_eventos = count_by_type("event");
+        let total_missoes = count_by_type("mission");
+
+        // Read metadata from meta/stats.md entry
+        let meta: Option<(i64, String, String)> = self
+            .conn
+            .query_row(
+                "SELECT frontmatter_json FROM entries \
+                 WHERE universe_key = 'quilomboaraucaria' AND path = 'meta/stats.md'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .ok()
+            .and_then(|json_str| serde_json::from_str::<serde_json::Value>(&json_str).ok())
+            .and_then(|fm| {
+                let usuarios = fm.get("total_usuarios")?.as_i64()?;
+                let versao = fm.get("versao_app")?.as_str()?.to_string();
+                let sync = fm.get("ultima_sync")?.as_str()?.to_string();
+                Some((usuarios, versao, sync))
+            });
+
+        let (total_usuarios, versao_app, ultima_sync) = match meta {
+            Some((u, v, s)) => (u, v, Some(s)),
+            None => (0, "—".to_string(), None),
+        };
+
+        crate::models::QuilomboStats {
+            total_usuarios,
+            total_publicacoes,
+            total_eventos,
+            total_missoes,
+            versao_app,
+            ultima_sync,
+        }
+    }
+
     /// Returns true if the given project belongs to a template universe.
     pub fn is_project_in_template(&self, project_key: &str) -> bool {
         let universe_key = match self.get_project_universe_key(project_key) {

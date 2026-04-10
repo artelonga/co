@@ -33,10 +33,15 @@ toml = { workspace = true }
 dirs = "5"
 prost = "0.13"
 reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+flate2 = "1.0"
 
 [[bin]]
 name = "migrate_quilombo"
 path = "src/bin/migrate_quilombo.rs"
+
+[[bin]]
+name = "import_quilombo"
+path = "src/bin/import_quilombo.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
