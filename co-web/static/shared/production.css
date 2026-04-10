@@ -601,3 +601,624 @@
     color: var(--text-muted);
     font-size: 13px;
 }
+
+/* ===== CO-40: Game Universe Components ===== */
+/* Base styles use CSS custom properties so they adapt to any active theme.
+   Palette-specific overrides live in style.css under the relevant [data-palette] selectors. */
+
+/* --- Engine Log & Chronology (Image 1) ---
+   Notification feed with timestamped entries. Warm in Scholarly, dark in Relic. */
+
+.co-engine-log {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 20px 24px;
+    box-shadow: var(--shadow-sm);
+}
+
+.co-engine-log__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 18px;
+    gap: 12px;
+}
+
+.co-engine-log__title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 18px;
+    font-weight: 700;
+    font-style: italic;
+    color: var(--accent);
+}
+
+.co-engine-log__updated {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.co-engine-log__entries {
+    display: flex;
+    flex-direction: column;
+}
+
+.co-engine-log__entry {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    padding: 11px 0;
+}
+
+.co-engine-log__entry + .co-engine-log__entry {
+    border-top: 1px solid var(--border);
+}
+
+.co-engine-log__timestamp {
+    flex-shrink: 0;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--accent-light);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    letter-spacing: 0.02em;
+    margin-top: 3px;
+}
+
+.co-engine-log__entry-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.co-engine-log__entry-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    margin-bottom: 3px;
+    line-height: 1.3;
+}
+
+.co-engine-log__entry-body {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* --- Active Chronicles / Quest Log (Image 2) ---
+   Multi-category quest tracker with progress badges. */
+
+.co-chronicles {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 20px;
+    box-shadow: var(--shadow-md);
+}
+
+.co-chronicles__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.co-chronicles__title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 18px;
+    font-weight: 700;
+    font-style: italic;
+    color: var(--text-primary);
+}
+
+.co-chronicles__sync {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    padding: 4px;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: var(--radius-sm);
+}
+
+.co-chronicles__sync:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+}
+
+.co-chronicles__section {
+    margin-bottom: 18px;
+}
+
+.co-chronicles__section:last-child {
+    margin-bottom: 0;
+}
+
+.co-chronicles__category-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    margin-bottom: 10px;
+}
+
+.co-chronicles__quest {
+    padding: 10px 0;
+    border-bottom: 1px solid rgba(128,128,128,0.08);
+}
+
+.co-chronicles__quest:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.co-chronicles__quest-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 5px;
+}
+
+.co-chronicles__quest-title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.3;
+}
+
+.co-chronicles__badge {
+    font-size: 10px;
+    font-weight: 600;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    letter-spacing: 0.04em;
+    padding: 2px 8px;
+    border-radius: 99px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.co-chronicles__badge--progress {
+    background: rgba(142,78,0,0.12);
+    color: var(--accent);
+}
+
+.co-chronicles__badge--tracked {
+    background: rgba(142,78,0,0.08);
+    color: var(--text-secondary);
+}
+
+.co-chronicles__badge--new {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.co-chronicles__quest-body {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+}
+
+/* --- Campaign Arc / Timeline (Image 3) ---
+   Horizontal chapter timeline. Active chapter highlighted, locked chapters dimmed. */
+
+.co-campaign-arc {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 24px 28px 20px;
+    overflow: hidden;
+}
+
+.co-campaign-arc__header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    margin-bottom: 28px;
+    gap: 24px;
+}
+
+.co-campaign-arc__left {}
+
+.co-campaign-arc__title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 21px;
+    font-style: italic;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    line-height: 1.2;
+}
+
+.co-campaign-arc__desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+    max-width: 360px;
+}
+
+.co-campaign-arc__right {
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.co-campaign-arc__era-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    margin-bottom: 4px;
+}
+
+.co-campaign-arc__era-name {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.co-campaign-arc__timeline {
+    display: flex;
+    align-items: flex-start;
+    gap: 28px;
+    position: relative;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+}
+
+.co-campaign-arc__timeline::-webkit-scrollbar { display: none; }
+
+.co-campaign-arc__timeline::before {
+    content: '';
+    position: absolute;
+    top: 28px;
+    left: 28px;
+    right: 28px;
+    height: 1px;
+    background: var(--border);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.co-campaign-arc__chapter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    min-width: 88px;
+    cursor: pointer;
+    position: relative;
+    z-index: 1;
+}
+
+.co-campaign-arc__chapter-node {
+    width: 56px;
+    height: 56px;
+    border-radius: var(--radius-md);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.co-campaign-arc__chapter--active .co-campaign-arc__chapter-node {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+}
+
+.co-campaign-arc__chapter--locked {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+.co-campaign-arc__chapter-label {
+    text-align: center;
+}
+
+.co-campaign-arc__chapter-name {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 13px;
+    font-style: italic;
+    color: var(--text-secondary);
+    line-height: 1.3;
+}
+
+.co-campaign-arc__chapter--active .co-campaign-arc__chapter-name {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.co-campaign-arc__chapter-num {
+    font-size: 9px;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.co-campaign-arc__chapter--active .co-campaign-arc__chapter-num {
+    color: var(--accent);
+    font-weight: 700;
+}
+
+/* --- Valuables / Inventory (Image 4) ---
+   Item grid with wealth display and expand action. */
+
+.co-inventory {
+    background: var(--card-bg);
+    border-radius: var(--radius-lg);
+    padding: 16px;
+    box-shadow: var(--shadow-sm);
+}
+
+.co-inventory__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.co-inventory__title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 17px;
+    font-style: italic;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.co-inventory__filter-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--accent);
+    padding: 4px;
+    font-size: 16px;
+    line-height: 1;
+    border-radius: var(--radius-sm);
+    opacity: 0.7;
+}
+
+.co-inventory__filter-btn:hover { opacity: 1; }
+
+.co-inventory__grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.co-inventory__slot {
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    font-size: 22px;
+    line-height: 1;
+}
+
+.co-inventory__slot--filled {
+    border-color: rgba(128,128,128,0.15);
+}
+
+.co-inventory__slot--filled:hover {
+    border-color: var(--accent);
+}
+
+.co-inventory__slot--active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm);
+}
+
+.co-inventory__slot--empty {
+    font-size: 16px;
+    color: var(--text-muted);
+    opacity: 0.4;
+    cursor: default;
+}
+
+.co-inventory__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.co-inventory__wealth {}
+
+.co-inventory__wealth-label {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.co-inventory__wealth-value {
+    font-family: 'Newsreader', Georgia, serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.co-inventory__expand-btn {
+    font-size: 11px;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 7px 14px;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.co-inventory__expand-btn:hover {
+    border-color: var(--accent);
+    color: var(--text-primary);
+}
+
+/* --- Character Card (Image 5) ---
+   Portrait card with overlaid name, level, and status badges. */
+
+.co-character-card {
+    position: relative;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    aspect-ratio: 3 / 4;
+    max-width: 300px;
+    box-shadow: var(--shadow-lg);
+}
+
+.co-character-card__portrait {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.co-character-card__overlay {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        to top,
+        rgba(0,0,0,0.92) 0%,
+        rgba(0,0,0,0.35) 55%,
+        rgba(0,0,0,0.0) 100%
+    );
+    pointer-events: none;
+}
+
+.co-character-card__badges {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.co-character-card__badge {
+    width: 30px;
+    height: 30px;
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+}
+
+.co-character-card__badge--shield {
+    background: rgba(233,195,73,0.2);
+    border: 1px solid rgba(233,195,73,0.45);
+    color: #e9c349;
+}
+
+.co-character-card__badge--danger {
+    background: rgba(224,80,95,0.2);
+    border: 1px solid rgba(224,80,95,0.45);
+    color: #e0505f;
+}
+
+.co-character-card__info {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 14px 18px 20px;
+}
+
+.co-character-card__level {
+    font-size: 11px;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.6);
+    margin-bottom: 4px;
+}
+
+.co-character-card__name {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    font-size: 26px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.15;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.5);
+}
+
+/* --- Saga Sidebar Elements (Image 6) ---
+   Title block and primary CTA for game universe sidebars. */
+
+.co-sidebar-saga-header {
+    padding: 18px 16px 14px;
+    border-bottom: 1px solid var(--border);
+}
+
+.co-sidebar-saga-title {
+    font-family: 'Newsreader', Georgia, serif;
+    font-style: italic;
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1.2;
+}
+
+.co-sidebar-saga-subtitle {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    color: var(--text-muted);
+    margin-top: 3px;
+}
+
+.btn-saga-new {
+    display: block;
+    width: calc(100% - 24px);
+    margin: 0 12px 12px;
+    padding: 12px;
+    text-align: center;
+    font-family: var(--font-label, 'Work Sans', sans-serif);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    background: var(--accent);
+    color: #fff;
+    transition: filter 0.15s;
+}
+
+.btn-saga-new:hover {
+    filter: brightness(1.1);
+}

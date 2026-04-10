@@ -145,13 +145,24 @@ token overrides, not selector overrides.
 
 ---
 
-## 5. Spec-readiness checklist (for when spec arrives)
+## 5. CO-40 Implemented Components (spec received 2026-04-10)
 
-When the UI spec is received:
-- [ ] Parse spec element-by-element against the mapping table above
-- [ ] Identify which component rows need new overrides vs. token adjustments
-- [ ] Check if spec introduces new component classes not in the table
-- [ ] Confirm: all Scholarly/Relic additions follow tonal-shift rule (see DESIGN.md)
-- [ ] Implement changes under existing `data-palette` selector blocks
-- [ ] Screenshot-diff all 12 themes before/after (Playwright)
+Six game-universe UI components implemented in `production.css` (base) and `style.css` (overrides).
+
+| Component | Class prefix | Scholarly override | Relic override |
+|-----------|-------------|--------------------|----------------|
+| Engine Log & Chronology | `.co-engine-log` | Warm parchment bg, amber badge, no border separators | Glass surface, crimson badge |
+| Active Chronicles / Quest Log | `.co-chronicles` | Warm badge tints, tonal separators | Crimson/gold badges, dark glass |
+| Campaign Arc / Timeline | `.co-campaign-arc` | Warm bg, accent era name | #0d0d0d bg, gold (#e9c349) active chapter |
+| Valuables / Inventory | `.co-inventory` | Warm bg, accent wealth | Dark glass, gold (#e9c349) wealth + active slot |
+| Character Card | `.co-character-card` | Brass shield badge, warm danger badge | Crimson/gold badge default |
+| Saga Sidebar | `.co-sidebar-saga-*` / `.btn-saga-new` | Brass CTA, tonal header separator | Gradient silk CTA (relic) / solid crimson (relic-light) |
+
+## 6. Spec-readiness checklist (completed 2026-04-10)
+
+- [x] Parse spec element-by-element (6 components from images 1–6)
+- [x] Identify new component classes (all 6 are new — no collisions with existing classes)
+- [x] Confirm tonal-shift rule: no structural borders — used box-shadow / rgba separators throughout
+- [x] Implement under `[data-palette]` selectors in `style.css`
+- [ ] Screenshot-diff all 12 themes before/after (Playwright — pending deploy)
 - [ ] Verify no regressions in non-named palettes
