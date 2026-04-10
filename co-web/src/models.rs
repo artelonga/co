@@ -318,6 +318,23 @@ pub struct VariantSummary {
     pub comments: Vec<String>,
 }
 
+// --- CO-45: UAT mutation tracking ---
+
+/// A single write operation recorded in the `uat_mutations` table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UatMutation {
+    pub id: i64,
+    pub timestamp: String,
+    pub user_id: Option<String>,
+    /// e.g. "entry.create", "entry.update", "entry.delete"
+    pub action: String,
+    /// "{universe_key}:{entry_path}" for entry mutations
+    pub target: String,
+    pub before_value: Option<String>,
+    pub after_value: Option<String>,
+    pub metadata: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ExperimentSummary {
     pub total_feedback: u64,

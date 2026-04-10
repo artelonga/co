@@ -250,6 +250,24 @@ pub async fn create_entry(
     let mut storage = lock_storage(&state)?;
     storage.increment_universe_content_count(&slug);
 
+    // CO-45: log mutation on UAT before body values are moved into the response
+    if state.config.is_uat() {
+        let after_val = serde_json::json!({
+            "path": body.path,
+            "frontmatter": body.frontmatter,
+            "body": body.body,
+        });
+        let target = format!("{}:{}", slug, body.path);
+        let _ = storage.log_uat_mutation(
+            "entry.create",
+            &target,
+            None,
+            Some(&after_val.to_string()),
+            None,
+            None,
+        );
+    }
+
     Ok((
         StatusCode::CREATED,
         Json(EntryRow {
@@ -307,6 +325,21 @@ pub async fn update_entry(
         .upsert(&slug, &entry)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    // CO-45: log mutation on UAT
+    if state.config.is_uat() {
+        let before_val = serde_json::to_string(&existing).unwrap_or_default();
+        let after_val = serde_json::json!({ "frontmatter": new_fm, "body": new_body }).to_string();
+        let target = format!("{}:{}", slug, path);
+        let _ = storage.log_uat_mutation(
+            "entry.update",
+            &target,
+            Some(&before_val),
+            Some(&after_val),
+            None,
+            None,
+        );
+    }
+
     Ok(Json(EntryRow {
         path,
         universe_key: slug,
@@ -336,6 +369,19 @@ pub async fn delete_entry(
         storage.universe_root(&slug)
     };
 
+    // CO-45: capture before_value on UAT before deletion
+    let before_val = if state.config.is_uat() {
+        let storage = lock_storage(&state)?;
+        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        index
+            .get(&slug, &path)
+            .ok()
+            .flatten()
+            .and_then(|e| serde_json::to_string(&e).ok())
+    } else {
+        None
+    };
+
     co::delete_entry(&universe_root, &path).map_err(|e| AppError::Internal(e.to_string()))?;
 
     {
@@ -348,6 +394,19 @@ pub async fn delete_entry(
     let mut storage = lock_storage(&state)?;
     storage.decrement_universe_content_count(&slug, 1);
 
+    // CO-45: log mutation on UAT
+    if state.config.is_uat() {
+        let target = format!("{}:{}", slug, path);
+        let _ = storage.log_uat_mutation(
+            "entry.delete",
+            &target,
+            before_val.as_deref(),
+            None,
+            None,
+            None,
+        );
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -358,11 +417,11 @@ pub async fn delete_entry(
 pub fn router() -> Router<AppState> {
     Router::new()
         // Specific paths must come before wildcard
-        .route("/entries/tags", get(list_entry_tags))
-        .route("/entries/tree", get(entry_tree))
-        .route("/entries", get(list_entries).post(create_entry))
+        .route("/{slug}/entries/tags", get(list_entry_tags))
+        .route("/{slug}/entries/tree", get(entry_tree))
+        .route("/{slug}/entries", get(list_entries).post(create_entry))
         .route(
-            "/entries/{*path}",
+            "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),
         )
 }

@@ -303,6 +303,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Entry abstraction API (CO-36) ---
     let entry_api = crate::entry_routes::router();
 
+    // --- CO-45: UAT change promotion endpoints ---
+    let uat_api = crate::uat_routes::router();
+
     // --- CO-43: Hidden dev board (admin only) ---
     let dev_board_api = crate::dev_board::router();
 
@@ -354,6 +357,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", entry_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)
+        // CO-45: UAT change promotion
+        .nest("/api/v1/uat", uat_api)
         // CO-46: public event ingestion + admin summary/export
         .nest("/api/v1/telemetry", telemetry_public)
         .nest("/api/v1/admin", telemetry_admin);
@@ -496,6 +501,12 @@ fn uat_startup(config: &WebConfig) {
         let cleaned = storage.cleanup_anon_universes();
         if cleaned > 0 {
             tracing::info!("UAT: removed {cleaned} anonymous universe(s) from previous session");
+        }
+
+        // CO-45: snapshot current UAT state so mutations can be diffed later.
+        match crate::uat_routes::create_snapshot(&config.data_dir, &storage) {
+            Ok(snap) => tracing::info!("UAT: snapshot {} created", snap.version),
+            Err(e) => tracing::warn!("UAT: could not create snapshot: {e}"),
         }
     }
 

@@ -1,11 +1,19 @@
-//! CO-44: UAT environment tests
+//! CO-44 + CO-45: UAT environment tests
 //!
-//! Covers:
+//! CO-44:
 //! - Migration v17 adds password_hash column
 //! - `seed_uat_user` is idempotent
 //! - `cleanup_anon_universes` removes anon-* universes
 //! - `uat_login` handler returns 404 in prod mode
 //! - `uat_login` handler works in UAT mode
+//!
+//! CO-45:
+//! - Migration v19 adds uat_mutations table
+//! - `log_uat_mutation` / `get_uat_mutations_since` roundtrip
+//! - `create_snapshot` writes a JSON file with watermark
+//! - GET /api/v1/uat/changes returns 404 in prod mode
+//! - GET /api/v1/uat/changes returns mutations since last snapshot in UAT mode
+//! - POST /api/v1/uat/export-patch generates a valid tar.gz tarball
 
 use std::sync::{Arc, Mutex};
 
@@ -330,4 +338,328 @@ fn test_is_uat_config() {
         ..prod_config
     };
     assert!(!default_config.is_uat());
+}
+
+// ---------------------------------------------------------------------------
+// CO-45: UAT mutation tracking unit tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_migration_v19_adds_uat_mutations_table() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let table_exists: bool = storage
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='uat_mutations'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
+        .unwrap_or(0)
+        > 0;
+    assert!(
+        table_exists,
+        "uat_mutations table should exist after migration v19"
+    );
+}
+
+#[test]
+fn test_log_and_retrieve_uat_mutations() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+
+    // No mutations yet — watermark should be 0.
+    assert_eq!(storage.get_uat_mutations_watermark(), 0);
+
+    storage
+        .log_uat_mutation(
+            "entry.create",
+            "template:projects/CO/1.md",
+            None,
+            Some("{\"title\":\"Task 1\"}"),
+            None,
+            None,
+        )
+        .unwrap();
+    storage
+        .log_uat_mutation(
+            "entry.update",
+            "template:projects/CO/1.md",
+            Some("{\"title\":\"Task 1\"}"),
+            Some("{\"title\":\"Task 1 Updated\"}"),
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Watermark should now be 2.
+    assert_eq!(storage.get_uat_mutations_watermark(), 2);
+
+    // All mutations since id 0.
+    let all = storage.get_uat_mutations_since(0);
+    assert_eq!(all.len(), 2);
+    assert_eq!(all[0].action, "entry.create");
+    assert_eq!(all[1].action, "entry.update");
+
+    // Mutations since id 1 — only the update.
+    let since_first = storage.get_uat_mutations_since(1);
+    assert_eq!(since_first.len(), 1);
+    assert_eq!(since_first[0].action, "entry.update");
+
+    // Mutations since id 2 — none.
+    let since_last = storage.get_uat_mutations_since(2);
+    assert!(since_last.is_empty());
+}
+
+#[test]
+fn test_create_snapshot_writes_json_file() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+
+    // Log a mutation before snapshot so watermark > 0.
+    storage
+        .log_uat_mutation(
+            "entry.create",
+            "template:test.md",
+            None,
+            Some("{}"),
+            None,
+            None,
+        )
+        .unwrap();
+
+    let data_dir = dir.path().to_str().unwrap();
+    let snap = co_web::uat_routes::create_snapshot(data_dir, &storage).unwrap();
+
+    assert_eq!(snap.version, "v1");
+    assert_eq!(snap.mutation_watermark, 1);
+    assert!(snap.schema_version >= 19);
+
+    // File must exist on disk.
+    let snap_path = dir.path().join("uat-snapshots").join("v1.json");
+    assert!(
+        snap_path.exists(),
+        "snapshot file should be written to disk"
+    );
+
+    // Second snapshot increments version.
+    storage
+        .log_uat_mutation(
+            "entry.update",
+            "template:test.md",
+            Some("{}"),
+            Some("{\"v\":2}"),
+            None,
+            None,
+        )
+        .unwrap();
+    let snap2 = co_web::uat_routes::create_snapshot(data_dir, &storage).unwrap();
+    assert_eq!(snap2.version, "v2");
+    assert_eq!(snap2.mutation_watermark, 2);
+}
+
+// ---------------------------------------------------------------------------
+// CO-45: HTTP integration tests
+// ---------------------------------------------------------------------------
+
+/// Helper: sign a JWT for test use and return the Authorization header value.
+fn test_auth_header() -> String {
+    // SAFETY: single-threaded test context; no concurrent env reads.
+    unsafe {
+        std::env::set_var("JWT_SECRET", "test-secret");
+    }
+    let (token, _) =
+        co_web::auth::sign_jwt("user-test", "test@test.com", "admin", "test-secret").unwrap();
+    format!("Bearer {token}")
+}
+
+#[tokio::test]
+async fn test_uat_changes_returns_404_in_prod() {
+    let dir = tempdir().unwrap();
+    let app = build_app(dir.path(), false); // prod mode
+
+    let auth = test_auth_header();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/uat/changes")
+        .header("authorization", auth)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_uat_changes_requires_auth() {
+    let dir = tempdir().unwrap();
+    let app = build_app(dir.path(), true); // UAT mode
+
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/uat/changes")
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_uat_changes_returns_mutations_since_snapshot() {
+    let dir = tempdir().unwrap();
+
+    // Log a mutation and create a snapshot before building the app.
+    {
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        storage
+            .log_uat_mutation(
+                "entry.create",
+                "template:projects/CO/1.md",
+                None,
+                Some("{\"title\":\"Task 1\"}"),
+                None,
+                None,
+            )
+            .unwrap();
+        co_web::uat_routes::create_snapshot(dir.path().to_str().unwrap(), &storage).unwrap();
+
+        // Log a second mutation after the snapshot (this is what we expect back).
+        storage
+            .log_uat_mutation(
+                "entry.update",
+                "template:projects/CO/1.md",
+                Some("{\"title\":\"Task 1\"}"),
+                Some("{\"title\":\"Task 1 Updated\"}"),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    let app = build_app(dir.path(), true);
+    let auth = test_auth_header();
+
+    // Changes since snapshot v1 — should return only the second mutation.
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/v1/uat/changes?since=v1")
+        .header("authorization", &auth)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(body["snapshot"], "v1");
+    let mutations = body["mutations"].as_array().unwrap();
+    assert_eq!(mutations.len(), 1);
+    assert_eq!(mutations[0]["action"], "entry.update");
+
+    let content_diff = &body["content_diff"];
+    assert_eq!(content_diff["modified"].as_array().unwrap().len(), 1);
+    assert!(content_diff["added"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_uat_export_patch_returns_404_in_prod() {
+    let dir = tempdir().unwrap();
+    let app = build_app(dir.path(), false); // prod mode
+
+    let auth = test_auth_header();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/uat/export-patch")
+        .header("authorization", auth)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_uat_export_patch_generates_tarball() {
+    use flate2::read::GzDecoder;
+
+    let dir = tempdir().unwrap();
+
+    // Create a universe and entry file so the tarball can include it.
+    {
+        let universe_dir = dir.path().join("universes").join("template");
+        std::fs::create_dir_all(universe_dir.join("projects/CO")).unwrap();
+        std::fs::write(
+            universe_dir.join("projects/CO/test.md"),
+            "---\ntitle: Test Task\n---\nBody content\n",
+        )
+        .unwrap();
+
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        // Snapshot first (watermark = 0).
+        co_web::uat_routes::create_snapshot(dir.path().to_str().unwrap(), &storage).unwrap();
+        // Then log the create mutation.
+        storage
+            .log_uat_mutation(
+                "entry.create",
+                "template:projects/CO/test.md",
+                None,
+                Some("{\"title\":\"Test Task\"}"),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    let app = build_app(dir.path(), true);
+    let auth = test_auth_header();
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/uat/export-patch")
+        .header("authorization", &auth)
+        .body(Body::empty())
+        .unwrap();
+
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let content_type = resp
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert!(
+        content_type.contains("gzip") || content_type.contains("octet-stream"),
+        "expected gzip content type, got: {content_type}"
+    );
+
+    // Decompress and inspect the tarball.
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let gz = GzDecoder::new(bytes.as_ref());
+    let mut archive = tar::Archive::new(gz);
+
+    let mut found_mutations = false;
+    let mut found_entry = false;
+    let mut found_readme = false;
+
+    for file in archive.entries().unwrap() {
+        let file = file.unwrap();
+        let path = file.path().unwrap().to_string_lossy().to_string();
+        if path == "mutations.json" {
+            found_mutations = true;
+        }
+        if path.contains("projects/CO/test.md") {
+            found_entry = true;
+        }
+        if path == "README.md" {
+            found_readme = true;
+        }
+    }
+
+    assert!(found_mutations, "tarball must contain mutations.json");
+    assert!(found_entry, "tarball must contain the promoted entry file");
+    assert!(found_readme, "tarball must contain README.md");
 }

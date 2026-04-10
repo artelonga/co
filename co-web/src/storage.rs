@@ -505,6 +505,38 @@ impl Storage {
                 )
                 .expect("Failed to run migration v18");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 19 {
+            // CO-45: uat_mutations table — records every write op on UAT for change promotion.
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS uat_mutations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT NOT NULL,
+                    user_id TEXT,
+                    action TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    before_value TEXT,
+                    after_value TEXT,
+                    metadata TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_uat_mutations_ts ON uat_mutations(timestamp);
+                CREATE INDEX IF NOT EXISTS idx_uat_mutations_action ON uat_mutations(action);
+                INSERT INTO schema_version (version) VALUES (19);
+                ",
+                )
+                .expect("Failed to run migration v19");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -688,6 +720,74 @@ impl Storage {
         self.conn
             .query_row(
                 "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    // --- CO-45: UAT mutation log ---
+
+    /// Record a write operation in the uat_mutations table.
+    /// Only call this when `CO_ENV=uat`.
+    pub fn log_uat_mutation(
+        &self,
+        action: &str,
+        target: &str,
+        before_value: Option<&str>,
+        after_value: Option<&str>,
+        user_id: Option<&str>,
+        metadata: Option<&str>,
+    ) -> rusqlite::Result<()> {
+        let ts = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO uat_mutations \
+             (timestamp, user_id, action, target, before_value, after_value, metadata) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                ts,
+                user_id,
+                action,
+                target,
+                before_value,
+                after_value,
+                metadata
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Return all mutations with id > since_id, ordered ascending.
+    pub fn get_uat_mutations_since(&self, since_id: i64) -> Vec<crate::models::UatMutation> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, timestamp, user_id, action, target, before_value, after_value, metadata \
+             FROM uat_mutations WHERE id > ?1 ORDER BY id ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![since_id], |row| {
+            Ok(crate::models::UatMutation {
+                id: row.get(0)?,
+                timestamp: row.get(1)?,
+                user_id: row.get(2)?,
+                action: row.get(3)?,
+                target: row.get(4)?,
+                before_value: row.get(5)?,
+                after_value: row.get(6)?,
+                metadata: row.get(7)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Return the maximum mutation id (watermark for snapshot creation).
+    /// Returns 0 if no mutations exist.
+    pub fn get_uat_mutations_watermark(&self) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(MAX(id), 0) FROM uat_mutations",
                 [],
                 |row| row.get(0),
             )
