@@ -38,7 +38,7 @@ import * as decoding from 'lib0/decoding';
 
 const markedInstance = new Marked({ gfm: true, breaks: false });
 
-function renderMarkdown(src) {
+export function renderMarkdown(src) {
   const html = markedInstance.parse(src || '');
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
@@ -47,8 +47,70 @@ function renderMarkdown(src) {
       'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
       'a', 'img', 'hr', 'input', 'span', 'div',
     ],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'type', 'checked', 'disabled', 'class', 'id'],
+    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'type', 'checked', 'disabled', 'class', 'id', 'loading', 'data-zoom'],
   });
+}
+
+// ===== Markdown utilities (exposed via window.CoEditor) =====
+
+export function extractFrontmatter(text) {
+  if (!text || !text.startsWith('---')) return { frontmatter: {}, body: text || '' };
+  const nl = text.indexOf('\n');
+  if (nl === -1) return { frontmatter: {}, body: text };
+  const rest = text.slice(nl + 1);
+  const end = rest.search(/^---/m);
+  if (end === -1) return { frontmatter: {}, body: text };
+  const yamlStr = rest.slice(0, end);
+  const body = rest.slice(end).replace(/^---\n?/, '');
+  const frontmatter = {};
+  for (const line of yamlStr.split('\n')) {
+    const m = line.match(/^([\w-]+)\s*:\s*(.*)$/);
+    if (m) {
+      let val = m[2].trim();
+      val = val.replace(/^["']|["']$/g, '');
+      frontmatter[m[1]] = val;
+    }
+  }
+  return { frontmatter, body };
+}
+
+export function extractFirstParagraph(text) {
+  if (!text) return '';
+  const { body } = extractFrontmatter(text);
+  for (const line of body.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    if (/^#{1,6}\s/.test(t)) continue;
+    if (t.startsWith('```')) continue;
+    if (/^[-*_]{3,}$/.test(t)) continue;
+    return t
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .replace(/\*\*(.*?)\*\*/g, '$1')
+      .replace(/\*(.*?)\*/g, '$1')
+      .replace(/~~(.*?)~~/g, '$1')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/\[\[([^\]|]+)(?:\|[^\]]+)?\]\]/g, '$1')
+      .trim();
+  }
+  return '';
+}
+
+export function wordCount(text) {
+  if (!text) return 0;
+  const { body } = extractFrontmatter(text);
+  const clean = body.replace(/```[\s\S]*?```/g, '').replace(/`[^`]+`/g, '');
+  return clean.trim().split(/\s+/).filter(Boolean).length;
+}
+
+export function readingTime(text) {
+  return Math.max(1, Math.ceil(wordCount(text) / 200));
+}
+
+export function headingCount(text) {
+  if (!text) return 0;
+  const { body } = extractFrontmatter(text);
+  return (body.match(/^#{1,6}\s/gm) || []).length;
 }
 
 // ===== CodeMirror theme =====

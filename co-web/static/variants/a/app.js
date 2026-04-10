@@ -113,6 +113,7 @@
     // ===== Editor lazy-load =====
     let _editorInstance = null;
     let _editorBundlePromise = null;
+    let _taskDraftInterval = null;
 
     function loadEditorBundle() {
         if (_editorBundlePromise) return _editorBundlePromise;
@@ -127,25 +128,49 @@
         return _editorBundlePromise;
     }
 
-    async function initTaskEditor(initialContent) {
-        try {
-            await loadEditorBundle();
-        } catch (_) {
-            return; // fall back to hidden textarea
-        }
+    async function initTaskEditor(initialContent, taskId) {
+        const container = document.getElementById('task-description-editor');
+        const textarea = document.getElementById('task-description');
+
+        if (_taskDraftInterval) { clearInterval(_taskDraftInterval); _taskDraftInterval = null; }
         if (_editorInstance) {
             _editorInstance.destroy();
             _editorInstance = null;
         }
-        const container = document.getElementById('task-description-editor');
-        const textarea = document.getElementById('task-description');
-        if (!container || !window.CoEditor) return;
-        _editorInstance = window.CoEditor.initEditor(container, {
-            content: initialContent,
-            onChange: (val) => { if (textarea) textarea.value = val; },
-            readOnly: false,
-        });
-        if (textarea) textarea.value = initialContent;
+
+        const draftKey = taskId ? `co_draft_task_${taskId}` : 'co_draft_new_task';
+
+        // Try CodeMirror editor
+        try {
+            await loadEditorBundle();
+            if (container && window.CoEditor) {
+                container.style.display = '';
+                if (textarea) textarea.style.display = 'none';
+                _editorInstance = window.CoEditor.initEditor(container, {
+                    content: initialContent,
+                    onChange: (val) => { if (textarea) textarea.value = val; },
+                    readOnly: false,
+                });
+                if (textarea) textarea.value = initialContent;
+
+                // Auto-save draft to localStorage every 5s
+                _taskDraftInterval = setInterval(() => {
+                    try {
+                        const val = _editorInstance ? _editorInstance.getValue() : '';
+                        localStorage.setItem(draftKey, val);
+                    } catch (_) {}
+                }, 5000);
+                return;
+            }
+        } catch (_) { /* CodeMirror not available */ }
+
+        // Fallback: show plain textarea
+        if (container) container.style.display = 'none';
+        if (textarea) {
+            textarea.style.display = '';
+            textarea.value = initialContent;
+            textarea.rows = 6;
+        }
     }
 
     // i18n is provided by /shared/i18n.js (loaded before this script).
@@ -507,6 +532,10 @@
         async getUniverseInfo(slug) {
             return apiFetch(`/api/v1/universes/${slug}`, {}, true);
         },
+        async listUniverses() {
+            const r = await apiFetch('/api/v1/universes', {}, true);
+            return r || [];
+        },
         async claimUniverse(slug) {
             return apiFetch(`/api/v1/universes/${slug}/claim`, { method: 'POST' }, true);
         },
@@ -530,6 +559,55 @@
             return (r && r.entries) || [];
         },
     };
+
+    // ===== Auto-clone on first interaction =====
+    // When a visitor interacts with the template (drag, edit, create),
+    // silently clone into an anonymous universe so writes persist server-side.
+    // The clone slug is cached in localStorage for subsequent visits.
+
+    let _cloning = false;
+    async function ensureOwnUniverse() {
+        if (!state.isTemplate) return true; // already on own universe
+        if (_cloning) return false; // prevent double-clone
+
+        // Check if we already have a cached clone
+        const cached = localStorage.getItem('co_local_universe');
+        if (cached) {
+            // Verify it still exists
+            const info = await api.getUniverseInfo(cached);
+            if (info) {
+                state.currentUniverseSlug = cached;
+                state.isTemplate = false;
+                setUniverseSlugInUrl(cached);
+                hideTemplateBanner();
+                await bootAppForUniverse(cached);
+                return true;
+            }
+            localStorage.removeItem('co_local_universe');
+        }
+
+        // Clone template silently
+        _cloning = true;
+        const rnd = Math.random().toString(36).slice(2, 8);
+        const slug = `u-${rnd}`;
+        const result = await api.cloneUniverse('template', { name: 'Meu CO', key: slug, description: '' });
+        _cloning = false;
+
+        if (result) {
+            localStorage.setItem('co_local_universe', result.key);
+            state.currentUniverseSlug = result.key;
+            state.isTemplate = false;
+            setUniverseSlugInUrl(result.key);
+            hideTemplateBanner();
+            await bootAppForUniverse(result.key);
+            return true;
+        }
+        return false;
+    }
+
+    // Stub for backward compat (drag handler references these)
+    function saveLocalTaskOverrides() {}
+    function applyLocalTaskOverrides() {}
 
     // ===== Helpers =====
     function esc(s) {
@@ -950,16 +1028,20 @@
                 ${subtasks.map(sub => renderSubtaskKanbanItem(sub)).join('')}
             </div>` : '';
 
-        const readonlyTip = state.isTemplate
-            ? ` data-readonly-tip="${esc(window.t ? window.t('universe.readonly_tooltip') : 'Crie seu universo para editar')}"`
-            : '';
+        // Description preview: first paragraph as plain text (no raw markdown escapes)
+        const rawPreview = window.CoMarkdown
+            ? window.CoMarkdown.extractFirstParagraph(task.description || '')
+            : (task.description || '').split('\n').find(l => l.trim() && !l.startsWith('#') && !l.startsWith('```')) || '';
+        const descSnippet = rawPreview.length > 100 ? rawPreview.slice(0, 100) + '…' : rawPreview;
+
         return `
-            <div class="task-card" draggable="${!state.isTemplate}" data-task-id="${task.id}"${readonlyTip}>
+            <div class="task-card" draggable="true" data-task-id="${task.id}">
                 <div class="task-card-header">
                     <span class="task-key">${esc(task.key)}</span>
                     ${parentKey ? `<span class="task-parent-key">${esc(parentKey)}</span>` : ''}
                 </div>
                 <div class="task-title">${esc(task.title)}</div>
+                ${descSnippet ? `<div class="task-desc-preview">${esc(descSnippet)}</div>` : ''}
                 <div class="task-meta">
                     ${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}
                     ${task.due_date ? `<span class="due-date-badge${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span>` : ''}
@@ -2074,7 +2156,6 @@
 
         cards.forEach(card => {
             card.addEventListener('dragstart', (e) => {
-                if (state.isTemplate) { e.preventDefault(); return; }
                 card.classList.add('dragging');
                 e.dataTransfer.setData('text/plain', card.dataset.taskId);
                 e.dataTransfer.effectAllowed = 'move';
@@ -2101,15 +2182,16 @@
                 const newStatus = zone.dataset.status;
                 const task = state.tasks.find(t => t.id === taskId);
                 if (task && task.status !== newStatus) {
-                    // Optimistic update: save old status, render immediately
+                    if (state.isTemplate) {
+                        // First interaction: clone template into own universe
+                        await ensureOwnUniverse();
+                        return; // board will re-render from the cloned universe
+                    }
                     const oldStatus = task.status;
                     task.status = newStatus;
                     renderKanban();
-
-                    // Call API
                     const result = await api.updateTask(state.currentProject.key, taskId, { status: newStatus });
                     if (!result) {
-                        // Revert on failure
                         task.status = oldStatus;
                         renderKanban();
                         showToast('Failed to move task. Reverted.', 'error');
@@ -2271,6 +2353,10 @@
         content.innerHTML = '<div class="loading-spinner"><div class="spinner"></div><p>Carregando...</p></div>';
 
         const slug = state.currentUniverseSlug;
+
+        // Pre-load editor bundle so renderMarkdown is available for card bodies
+        try { await loadEditorBundle(); } catch (_) { /* fallback renderer ok */ }
+
         const [taskEntries, eventEntries, pageEntries, clipEntries] = await Promise.all([
             api.getUniverseEntries(slug, 'task'),
             api.getUniverseEntries(slug, 'event'),
@@ -2278,24 +2364,37 @@
             api.getUniverseEntries(slug, 'clip'),
         ]);
 
-        // Render task entries as kanban summary cards.
+        // Shared helpers
         function entryFm(e) { return e.frontmatter || {}; }
         function entryTitle(e) { return e.title || entryFm(e).title || e.path || ''; }
         function entryTags(e) {
             const tags = entryFm(e).tags;
             return Array.isArray(tags) ? tags : [];
         }
+        // Render entry body as markdown with DOMPurify sanitization.
+        // Code blocks are monospace/scrollable; no syntax highlighting in cards.
+        function cardBodyHtml(body) {
+            if (!body) return '';
+            const md = window.CoMarkdown;
+            if (md) {
+                const html = md.renderMarkdown(body);
+                return `<div class="conteudo-card-body md-body md-fade">${html}</div>`;
+            }
+            const snippet = body.slice(0, 200);
+            return `<div class="conteudo-card-body">${esc(snippet)}${body.length > 200 ? '…' : ''}</div>`;
+        }
 
         const tasksHtml = taskEntries.length
-            ? taskEntries.slice(0, 8).map(e => {
+            ? taskEntries.map(e => {
                 const fm = entryFm(e);
+                const taskId = fm.id || '';
                 const status = fm.status || 'todo';
                 const priority = fm.priority || 'medium';
                 const tags = entryTags(e);
-                return `<div class="conteudo-card">
+                return `<div class="conteudo-card conteudo-card-clickable" data-task-id="${taskId}">
                     <div class="conteudo-card-meta">${esc(status)} · ${esc(priority)}</div>
                     <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 120))}${e.body.length > 120 ? '…' : ''}</div>` : ''}
+                    ${cardBodyHtml(e.body)}
                     ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
                 </div>`;
               }).join('')
@@ -2320,18 +2419,18 @@
                 return `<div class="conteudo-card">
                     <div class="conteudo-card-meta">${esc(date)}${local ? ' · ' + esc(local) : ''}</div>
                     <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 120))}${e.body.length > 120 ? '…' : ''}</div>` : ''}
+                    ${cardBodyHtml(e.body)}
                 </div>`;
               }).join('')
             : '<p class="conteudo-empty">Nenhum evento próximo</p>';
 
-        // Render page entries as wiki articles.
+        // Render page entries as wiki articles (clickable → viewer → editor).
         const pagesHtml = pageEntries.length
-            ? pageEntries.slice(0, 6).map(e => {
+            ? pageEntries.map(e => {
                 const tags = entryTags(e);
-                return `<div class="conteudo-card">
+                return `<div class="conteudo-card conteudo-card-clickable" data-entry-path="${esc(e.path)}" data-entry-title="${esc(entryTitle(e))}" data-view-mode="page">
                     <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 140))}${e.body.length > 140 ? '…' : ''}</div>` : ''}
+                    ${cardBodyHtml(e.body)}
                     ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
                 </div>`;
               }).join('')
@@ -2344,7 +2443,7 @@
                 const url = fm.url || fm.link || '';
                 return `<div class="conteudo-card">
                     <div class="conteudo-card-title">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(entryTitle(e))}</a>` : esc(entryTitle(e))}</div>
-                    ${e.body ? `<div class="conteudo-card-body">${esc(e.body.slice(0, 140))}${e.body.length > 140 ? '…' : ''}</div>` : ''}
+                    ${cardBodyHtml(e.body)}
                 </div>`;
               }).join('')
             : '<p class="conteudo-empty">Nenhum clipe</p>';
@@ -2368,6 +2467,285 @@
                     ${clipsHtml}
                 </section>` : ''}
             </div>`;
+
+        // Make content cards clickable — viewer for pages, editor for tasks
+        content.querySelectorAll('.conteudo-card-clickable').forEach(card => {
+            card.addEventListener('click', () => {
+                const taskId = card.dataset.taskId ? parseInt(card.dataset.taskId) : null;
+                const entryPath = card.dataset.entryPath;
+                const viewMode = card.dataset.viewMode;
+                if (taskId) {
+                    openContentEditor(taskId);
+                } else if (entryPath && viewMode === 'page') {
+                    // Fetch entry body from server for viewer
+                    const title = card.dataset.entryTitle || entryPath;
+                    api.getUniverseEntries(state.currentUniverseSlug, 'page').then(entries => {
+                        const entry = entries.find(e => e.path === entryPath);
+                        openContentViewer({
+                            path: entryPath,
+                            title,
+                            body: entry ? entry.body || '' : '',
+                        });
+                    }).catch(() => openPageEditor(entryPath, title, ''));
+                } else if (entryPath) {
+                    openPageEditor(entryPath, card.dataset.entryTitle || '', '');
+                }
+            });
+        });
+    }
+
+    // ===== Content Viewer (full markdown rendering) =====
+
+    /**
+     * Show a read-only rendered view of a content entry.
+     * Features: GFM rendering, prismjs code highlighting (CDN, lazy-loaded),
+     * responsive tables, lazy-loaded images with click-to-zoom, wikilink resolution.
+     *
+     * @param {{ path: string, title: string, body: string }} entry
+     */
+    async function openContentViewer(entry) {
+        const content = $('#content');
+        content.className = 'content content-editor-view content-viewer-view';
+        content.innerHTML = `
+            <div class="content-editor-header">
+                <button class="btn btn-secondary content-editor-back" id="content-viewer-back">
+                    <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle">arrow_back</span>
+                    ${window.t ? window.t('back') : 'Voltar'}
+                </button>
+                <div class="content-editor-title-area">
+                    <h2 class="content-editor-title">${esc(entry.title)}</h2>
+                </div>
+                <button class="btn btn-secondary" id="content-viewer-edit">${window.t ? window.t('edit') : 'Editar'}</button>
+            </div>
+            <div class="content-viewer-body" id="content-viewer-body"></div>
+        `;
+
+        document.getElementById('content-viewer-back').addEventListener('click', () => {
+            renderConteudo();
+        });
+        document.getElementById('content-viewer-edit').addEventListener('click', () => {
+            openPageEditor(entry.path, entry.title, entry.body);
+        });
+
+        const viewerBody = document.getElementById('content-viewer-body');
+
+        // Pre-load editor bundle for full GFM rendering
+        try { await loadEditorBundle(); } catch (_) { /* fallback ok */ }
+
+        const md = window.CoMarkdown;
+        let html = md ? md.renderMarkdown(entry.body) : esc(entry.body);
+
+        // Resolve [[wikilinks]] to universe entries
+        if (md && md.resolveWikilinks) {
+            html = md.resolveWikilinks(html, state.currentUniverseSlug);
+        }
+
+        viewerBody.innerHTML = html;
+
+        // Make tables responsive (horizontal scroll on mobile)
+        viewerBody.querySelectorAll('table').forEach(tbl => {
+            const wrap = document.createElement('div');
+            wrap.className = 'co-table-wrap';
+            tbl.parentNode.insertBefore(wrap, tbl);
+            wrap.appendChild(tbl);
+        });
+
+        // Lazy-load images + click-to-zoom
+        if (md && md.enableImageZoom) {
+            md.enableImageZoom(viewerBody);
+        }
+
+        // Syntax highlighting (prismjs, CDN, lazy)
+        if (md && md.highlightCode) {
+            md.highlightCode(viewerBody);
+        }
+    }
+
+    // ===== Content Editor (CodeMirror) =====
+    let _contentEditorInstance = null;
+    let _draftSaveInterval = null;
+
+    async function openContentEditor(taskId) {
+        const task = state.tasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const content = $('#content');
+        content.className = 'content content-editor-view';
+        content.innerHTML = `
+            <div class="content-editor-header">
+                <button class="btn btn-secondary content-editor-back" id="content-editor-back">
+                    <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle">arrow_back</span>
+                    ${window.t ? window.t('back') : 'Voltar'}
+                </button>
+                <div class="content-editor-title-area">
+                    <span class="task-key" style="margin-right:8px">${esc(task.key)}</span>
+                    <h2 class="content-editor-title">${esc(task.title)}</h2>
+                </div>
+                <button class="btn btn-primary" id="content-editor-save">${window.t ? window.t('save') : 'Salvar'}</button>
+            </div>
+            <div class="content-editor-body" id="content-editor-body"></div>
+        `;
+
+        const draftKey = `co_draft_task_${taskId}`;
+
+        // Back button → return to content view
+        document.getElementById('content-editor-back').addEventListener('click', () => {
+            if (_draftSaveInterval) { clearInterval(_draftSaveInterval); _draftSaveInterval = null; }
+            if (_contentEditorInstance) {
+                _contentEditorInstance.destroy();
+                _contentEditorInstance = null;
+            }
+            renderConteudo();
+        });
+
+        // Always show textarea first, then upgrade to CodeMirror if available
+        const editorContainer = document.getElementById('content-editor-body');
+        editorContainer.innerHTML = `<textarea class="content-editor-textarea" id="content-editor-textarea">${esc(task.description || '')}</textarea>`;
+
+        try {
+            await loadEditorBundle();
+            if (window.CoEditor) {
+                // Hide textarea, show CodeMirror
+                const ta = document.getElementById('content-editor-textarea');
+                if (ta) ta.style.display = 'none';
+                const cmDiv = document.createElement('div');
+                cmDiv.className = 'content-editor-cm';
+                editorContainer.appendChild(cmDiv);
+                _contentEditorInstance = window.CoEditor.initEditor(cmDiv, {
+                    content: task.description || '',
+                    onChange: (val) => { if (ta) ta.value = val; },
+                    readOnly: false,
+                });
+
+                // Auto-save draft to localStorage every 5s
+                if (_draftSaveInterval) clearInterval(_draftSaveInterval);
+                _draftSaveInterval = setInterval(() => {
+                    try {
+                        const val = _contentEditorInstance ? _contentEditorInstance.getValue() : '';
+                        localStorage.setItem(draftKey, val);
+                    } catch (_) {}
+                }, 5000);
+            }
+        } catch (_) { /* keep textarea */ }
+
+        // Save button
+        document.getElementById('content-editor-save').addEventListener('click', async () => {
+            const saveBtn = document.getElementById('content-editor-save');
+            const ta = document.getElementById('content-editor-textarea');
+            let newDesc;
+            if (_contentEditorInstance && _contentEditorInstance.getContent) {
+                newDesc = _contentEditorInstance.getContent();
+            } else {
+                newDesc = ta ? ta.value : task.description;
+            }
+
+            if (state.isTemplate) {
+                const ok = await ensureOwnUniverse();
+                if (!ok) { showToast('Crie uma conta para salvar', 'error'); return; }
+                // After clone, task references changed — just show success
+                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+                return;
+            }
+
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
+            const result = await api.updateTask(state.currentProject.key, taskId, { description: newDesc });
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = window.t ? window.t('save') : 'Salvar'; }
+            if (result) {
+                task.description = newDesc;
+                try { localStorage.removeItem(draftKey); } catch (_) {}
+                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+            } else {
+                showToast('Erro ao salvar', 'error');
+            }
+        });
+    }
+
+    // Page editor — same as content editor but saves via vault/entries API
+    async function openPageEditor(entryPath, title, body) {
+        const content = $('#content');
+        content.className = 'content content-editor-view';
+        content.innerHTML = `
+            <div class="content-editor-header">
+                <button class="btn btn-secondary content-editor-back" id="content-editor-back">
+                    <span class="material-symbols-outlined" style="font-size:18px;vertical-align:middle">arrow_back</span>
+                    ${window.t ? window.t('back') : 'Voltar'}
+                </button>
+                <div class="content-editor-title-area">
+                    <h2 class="content-editor-title">${esc(title)}</h2>
+                </div>
+                <button class="btn btn-primary" id="content-editor-save">${window.t ? window.t('save') : 'Salvar'}</button>
+            </div>
+            <div class="content-editor-body" id="content-editor-body"></div>
+        `;
+
+        const pageDraftKey = `co_draft_page_${encodeURIComponent(entryPath)}`;
+
+        document.getElementById('content-editor-back').addEventListener('click', () => {
+            if (_draftSaveInterval) { clearInterval(_draftSaveInterval); _draftSaveInterval = null; }
+            if (_contentEditorInstance) { _contentEditorInstance.destroy(); _contentEditorInstance = null; }
+            renderConteudo();
+        });
+
+        const editorContainer = document.getElementById('content-editor-body');
+        editorContainer.innerHTML = `<textarea class="content-editor-textarea" id="content-editor-textarea">${esc(body)}</textarea>`;
+
+        try {
+            await loadEditorBundle();
+            if (window.CoEditor) {
+                const ta = document.getElementById('content-editor-textarea');
+                if (ta) ta.style.display = 'none';
+                const cmDiv = document.createElement('div');
+                cmDiv.className = 'content-editor-cm';
+                editorContainer.appendChild(cmDiv);
+                _contentEditorInstance = window.CoEditor.initEditor(cmDiv, {
+                    content: body,
+                    onChange: (val) => { if (ta) ta.value = val; },
+                    readOnly: false,
+                });
+
+                // Auto-save draft to localStorage every 5s
+                if (_draftSaveInterval) clearInterval(_draftSaveInterval);
+                _draftSaveInterval = setInterval(() => {
+                    try {
+                        const val = _contentEditorInstance ? _contentEditorInstance.getValue() : '';
+                        localStorage.setItem(pageDraftKey, val);
+                    } catch (_) {}
+                }, 5000);
+            }
+        } catch (_) { /* keep textarea */ }
+
+        document.getElementById('content-editor-save').addEventListener('click', async () => {
+            const saveBtn = document.getElementById('content-editor-save');
+            const ta = document.getElementById('content-editor-textarea');
+            let newBody;
+            if (_contentEditorInstance && _contentEditorInstance.getContent) {
+                newBody = _contentEditorInstance.getContent();
+            } else {
+                newBody = ta ? ta.value : body;
+            }
+
+            if (state.isTemplate) {
+                const ok = await ensureOwnUniverse();
+                if (!ok) { showToast('Crie uma conta para salvar', 'error'); return; }
+                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+                return;
+            }
+
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
+            const slug = state.currentUniverseSlug;
+            const result = await apiFetch(`/api/v1/universes/${slug}/entries/${encodeURIComponent(entryPath)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ body: newBody }),
+            });
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = window.t ? window.t('save') : 'Salvar'; }
+            if (result) {
+                try { localStorage.removeItem(pageDraftKey); } catch (_) {}
+                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+            } else {
+                showToast('Erro ao salvar', 'error');
+            }
+        });
     }
 
     async function renderDashboard() {
@@ -2450,9 +2828,6 @@
 
     // ===== Modal =====
     function openTaskModal(taskId) {
-        // Template universe is read-only — block task editing
-        if (state.isTemplate) return;
-
         const overlay = $('#modal-overlay');
         const form = $('#task-form');
         const deleteBtn = $('#btn-delete');
@@ -2474,16 +2849,31 @@
             $('#task-assignee').value = task.assignee || '';
             $('#task-labels').value = task.labels.join(', ');
             $('#task-description').value = task.description || '';
-            initTaskEditor(task.description || '');
+            initTaskEditor(task.description || '', taskId);
             deleteBtn.classList.remove('hidden');
 
             // Archive button logic
             if (archiveBtn) {
                 archiveBtn.classList.remove('hidden');
-                if (task.archived) {
-                    archiveBtn.textContent = 'Desarquivar';
-                } else {
-                    archiveBtn.textContent = 'Archive';
+                archiveBtn.textContent = task.archived
+                    ? (window.t ? window.t('unarchive') : 'Desarquivar')
+                    : (window.t ? window.t('archive') : 'Arquivar');
+            }
+
+            // Subtask creation button (above description)
+            const subtaskGroup = $('#subtask-btn-group');
+            if (subtaskGroup) {
+                subtaskGroup.classList.remove('hidden');
+                const subtaskBtn = $('#btn-add-subtask');
+                if (subtaskBtn) {
+                    subtaskBtn.onclick = () => {
+                        closeModal();
+                        openTaskModal(null);
+                        setTimeout(() => {
+                            const parentSel = $('#task-parent');
+                            if (parentSel) parentSel.value = String(taskId);
+                        }, 50);
+                    };
                 }
             }
 
@@ -2544,6 +2934,8 @@
             deleteBtn.classList.add('hidden');
 
             if (archiveBtn) archiveBtn.classList.add('hidden');
+            const subtaskGroup2 = $('#subtask-btn-group');
+            if (subtaskGroup2) subtaskGroup2.classList.add('hidden');
             initTaskEditor('');
 
             // Clear comments section
@@ -2705,6 +3097,7 @@
     function closeModal() {
         $('#modal-overlay').classList.add('hidden');
         state.editingTaskId = null;
+        if (_taskDraftInterval) { clearInterval(_taskDraftInterval); _taskDraftInterval = null; }
         if (_editorInstance) {
             _editorInstance.destroy();
             _editorInstance = null;
@@ -2734,6 +3127,12 @@
         const parentVal = $('#task-parent').value;
         if (parentVal) data.parent = parseInt(parentVal);
 
+        // If on template, auto-clone first so writes go to own universe
+        if (state.isTemplate) {
+            const ok = await ensureOwnUniverse();
+            if (!ok) { setSubmitDisabled(false); return; }
+        }
+
         const key = state.currentProject.key;
 
         let result;
@@ -2746,6 +3145,12 @@
         setSubmitDisabled(false);
 
         if (result) {
+            // Clear draft on successful save
+            try {
+                const savedId = state.editingTaskId || (result.id);
+                if (savedId) localStorage.removeItem(`co_draft_task_${savedId}`);
+                else localStorage.removeItem('co_draft_new_task');
+            } catch (_) {}
             showToast(state.editingTaskId ? 'Task updated' : 'Task created', 'success');
             if (!state.editingTaskId) incrementLocalUsageCount();
             closeModal();
@@ -2801,6 +3206,7 @@
                 opts.archived = false;
             }
             state.tasks = await api.getTasks(state.currentProject.key, opts);
+            applyLocalTaskOverrides();
         }
     }
 
@@ -2918,8 +3324,8 @@
     });
 
     // New task
-    $('#btn-new-task').addEventListener('click', () => {
-        if (state.isTemplate) return; // read-only in template
+    $('#btn-new-task').addEventListener('click', async () => {
+        if (state.isTemplate) { await ensureOwnUniverse(); return; }
         if (state.currentProject) openTaskModal(null);
     });
 
@@ -3133,15 +3539,34 @@
                 }
                 const me = await api.me();
                 if (me) renderUserBadge(me);
-                // If on template (/co), redirect to first owned universe after login
+                // After login: redirect to own universe (create one if needed)
                 if (state.isTemplate) {
-                    const universes = await api.getUniverses();
-                    const owned = universes.filter(u => !u.is_template);
-                    if (owned.length > 0) {
-                        const slug = owned[0].key;
-                        window.location.href = window.location.pathname.startsWith('/co')
-                            ? `/co/${slug}`
-                            : `/?u=${slug}`;
+                    const owned = await api.listUniverses();
+                    const mine = owned.filter(u => !u.is_template);
+                    if (mine.length > 0) {
+                        // Has existing universe — go there
+                        const slug = mine[0].key;
+                        setUniverseSlugInUrl(slug);
+                        state.currentUniverseSlug = slug;
+                        state.isTemplate = false;
+                        hideTemplateBanner();
+                        await bootAppForUniverse(slug);
+                        return;
+                    }
+                    // No universe yet — clone template into personal universe
+                    const username = r.usuario || r.display_name || 'meu-co';
+                    const slug = username.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
+                    const result = await api.cloneUniverse('template', {
+                        name: username,
+                        key: slug,
+                        description: '',
+                    });
+                    if (result) {
+                        setUniverseSlugInUrl(result.key);
+                        state.currentUniverseSlug = result.key;
+                        state.isTemplate = false;
+                        hideTemplateBanner();
+                        await bootAppForUniverse(result.key);
                         return;
                     }
                 }
@@ -3208,13 +3633,6 @@
     function showTemplateBanner() {
         const banner = document.getElementById('template-banner');
         if (banner) banner.classList.remove('hidden');
-        // Mark app as template read-only (disables interactions via CSS)
-        const app = document.getElementById('app');
-        if (app) {
-            app.classList.add('is-template');
-            // Set tooltip text on all task cards (rendered later via MutationObserver)
-            applyTemplateReadonlyTooltips();
-        }
     }
 
     function hideTemplateBanner() {
@@ -3225,10 +3643,7 @@
     }
 
     function applyTemplateReadonlyTooltips() {
-        const tip = window.t ? window.t('universe.readonly_tooltip') : 'Crie seu universo para editar';
-        document.querySelectorAll('.task-card').forEach(card => {
-            card.setAttribute('data-readonly-tip', tip);
-        });
+        // No-op: users always work on their own clone, never on read-only template
     }
 
     // ===== Criar Universo Modal =====
@@ -3605,15 +4020,56 @@
         state.isTemplate = slug === 'template';
 
         if (state.isTemplate) {
-            // Load template universe publicly — no auth needed
+            // Every visitor gets their own clone. Check for cached clone first.
+            const cached = localStorage.getItem('co_local_universe');
+            if (cached) {
+                const info = await api.getUniverseInfo(cached);
+                if (info) {
+                    state.currentUniverseSlug = cached;
+                    state.isTemplate = false;
+                    showTemplateBanner();
+                    await bootAppForUniverse(cached);
+                    const me = await api.me();
+                    if (me) { hideLoginModal(); renderUserBadge(me); }
+                    return;
+                }
+                localStorage.removeItem('co_local_universe');
+            }
+
+            // No cached clone — create one silently
+            const rnd = Math.random().toString(36).slice(2, 8);
+            const slug = `u-${rnd}`;
+            const result = await api.cloneUniverse('template', { name: 'Meu CO', key: slug, description: '' });
+            if (result) {
+                localStorage.setItem('co_local_universe', result.key);
+                state.currentUniverseSlug = result.key;
+                state.isTemplate = false;
+                showTemplateBanner();
+                await bootAppForUniverse(result.key);
+                const me = await api.me();
+                if (me) { hideLoginModal(); renderUserBadge(me); }
+                return;
+            }
+
+            // Clone failed — show template read-only as fallback
             showTemplateBanner();
             await bootAppForUniverse('template');
 
-            // Check if already authenticated; if so, show user badge but keep banner
             const me = await api.me();
             if (me) {
                 hideLoginModal();
                 renderUserBadge(me);
+                // Logged-in user on template — check if they have a universe
+                const owned = await api.listUniverses();
+                if (owned && owned.length > 0) {
+                    // Redirect to their universe
+                    const mySlug = owned[0].key;
+                    setUniverseSlugInUrl(mySlug);
+                    state.currentUniverseSlug = mySlug;
+                    state.isTemplate = false;
+                    hideTemplateBanner();
+                    await bootAppForUniverse(mySlug);
+                }
             }
             return;
         }
@@ -3642,8 +4098,12 @@
             return;
         }
 
-        // Authenticated universe with no session: show login modal
-        showLoginModal();
+        // Universe not accessible or doesn't exist — fall back to template
+        state.currentUniverseSlug = 'template';
+        state.isTemplate = true;
+        setUniverseSlugInUrl('template');
+        showTemplateBanner();
+        await bootAppForUniverse('template');
     }
 
     init();
