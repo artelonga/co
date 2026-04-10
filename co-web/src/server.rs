@@ -176,7 +176,7 @@ fn validate_labels(labels: &[String]) -> Result<(), AppError> {
 // --- Router ---
 
 pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) -> Router {
-    // --- co-web auth (email codes) ---
+    // --- co-web auth (email codes + UAT password login) ---
     let auth_api = Router::new()
         .route("/v1/auth/login", post(login_handler))
         .route("/v1/auth/verify", post(verify_handler))
@@ -184,7 +184,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/v1/auth/me",
             get(me_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
-        .route("/v1/auth/logout", post(logout_handler));
+        .route("/v1/auth/logout", post(logout_handler))
+        // CO-44: password-based login for UAT (returns 404 in prod)
+        .route("/v1/auth/uat-login", post(uat_login_handler));
 
     // --- Board public routes (GET — no auth required) ---
     let board_public = Router::new()
@@ -377,6 +379,134 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
 }
 
+// ---------------------------------------------------------------------------
+// UAT startup helpers (CO-44)
+// ---------------------------------------------------------------------------
+
+/// Recursively copy all files from `src` into `dst`, creating directories as needed.
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &dst.join(entry.file_name()))?;
+        } else {
+            std::fs::copy(entry.path(), dst.join(entry.file_name()))?;
+        }
+    }
+    Ok(())
+}
+
+/// Runs all UAT-specific startup tasks when `CO_ENV=uat`.
+///
+/// # Reset flag
+/// If `{data_dir}/uat-reset.flag` exists:
+/// 1. Back up all users (with password hashes) from SQLite.
+/// 2. Delete the SQLite database files.
+/// 3. Remove anonymous universe directories.
+/// 4. Re-open the database (runs all migrations from scratch).
+/// 5. Restore the backed-up users.
+/// 6. Re-seed the template universe.
+/// 7. Delete the flag file.
+///
+/// # Always (after optional reset)
+/// - Seed or update `yuri@uat.local` (tier=admin, password=`uat`).
+/// - Clean up anonymous universes from the previous session.
+/// - Seed `{data_dir}/co/` from `/app/seed-co/` if the directory is missing
+///   (so the CO dev board has content on first boot).
+fn uat_startup(config: &WebConfig) {
+    let data_dir = std::path::Path::new(&config.data_dir);
+    let reset_flag = data_dir.join("uat-reset.flag");
+
+    // --- Reset flag handling ---
+    if reset_flag.exists() {
+        tracing::info!("UAT: reset flag detected — resetting database...");
+
+        // 1. Back up users.
+        let backup = {
+            let storage = Storage::new(&config.data_dir);
+            storage.get_all_users_with_hashes()
+        };
+        tracing::info!("UAT: backed up {} user(s)", backup.len());
+
+        // 2. Delete SQLite database files.
+        for suffix in &["co.db", "co.db-shm", "co.db-wal"] {
+            let _ = std::fs::remove_file(data_dir.join(suffix));
+        }
+
+        // 3. Remove anonymous universe directories.
+        let universes_dir = data_dir.join("universes");
+        if universes_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&universes_dir)
+        {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().starts_with("anon-") {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+
+        // 4. Re-open DB (runs all migrations from scratch).
+        let mut storage = Storage::new(&config.data_dir);
+
+        // 5. Restore users.
+        storage.restore_users_with_hashes(&backup);
+
+        // 6. Re-seed template universe.
+        if !storage.template_exists() {
+            storage.seed_template_universe();
+        }
+
+        drop(storage);
+
+        // 7. Delete flag.
+        let _ = std::fs::remove_file(&reset_flag);
+        tracing::info!("UAT: reset complete");
+    }
+
+    // --- Seed yuri@uat.local (idempotent) ---
+    {
+        use argon2::Argon2;
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(b"uat", &salt)
+            .expect("Argon2 hash failed")
+            .to_string();
+
+        let mut storage = Storage::new(&config.data_dir);
+        if let Err(e) = storage.seed_uat_user(&hash) {
+            tracing::error!("UAT: failed to seed yuri user: {e}");
+        }
+
+        // --- Clean up anonymous universes from previous session ---
+        let cleaned = storage.cleanup_anon_universes();
+        if cleaned > 0 {
+            tracing::info!("UAT: removed {cleaned} anonymous universe(s) from previous session");
+        }
+    }
+
+    // --- Seed co-dev tasks from bundled data ---
+    let co_dir = data_dir.join("co");
+    if !co_dir.exists() {
+        let seed_src = std::path::Path::new("/app/seed-co");
+        if seed_src.exists() {
+            match copy_dir_all(seed_src, &co_dir) {
+                Ok(()) => tracing::info!("UAT: seeded co-dev tasks from /app/seed-co"),
+                Err(e) => tracing::warn!("UAT: could not seed co-dev tasks: {e}"),
+            }
+        } else {
+            tracing::warn!(
+                "UAT: /app/seed-co not found — co-dev board will be empty. \
+                 Add co task files manually at {}/co/",
+                config.data_dir
+            );
+        }
+    }
+}
+
 /// Start the web server with the given config.
 /// This is the main entry point used by both `co-web` binary and `co board` subcommand.
 pub async fn start_server(config: WebConfig) {
@@ -407,6 +537,12 @@ pub async fn start_server(config: WebConfig) {
             storage.seed_template_universe();
             tracing::info!("Template universe seeded (universe: template, project: MP)");
         }
+    }
+
+    // CO-44: UAT-specific startup — runs only when CO_ENV=uat.
+    if config.is_uat() {
+        tracing::info!("UAT mode enabled (CO_ENV=uat)");
+        uat_startup(&config);
     }
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
@@ -1305,4 +1441,71 @@ async fn logout_handler() -> Response {
         Json(serde_json::json!({ "message": "Logged out" })),
     )
         .into_response()
+}
+
+// --- UAT: password-based login (CO-44) ---
+
+/// Request body for the UAT password login endpoint.
+#[derive(serde::Deserialize)]
+struct UatLoginRequest {
+    email: String,
+    password: String,
+}
+
+/// POST /api/v1/auth/uat-login — email + password login for UAT testing.
+///
+/// Only available when `CO_ENV=uat`. Returns 404 in production so the endpoint
+/// existence is not revealed to non-UAT deployments.
+async fn uat_login_handler(
+    State(state): State<AppState>,
+    Json(req): Json<UatLoginRequest>,
+) -> Result<Response, AppError> {
+    if !state.config.is_uat() {
+        return Err(AppError::NotFound("Not found".into()));
+    }
+
+    let email = req.email.trim().to_lowercase();
+
+    let (user, hash_opt) = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_user_by_email_with_hash(&email)
+            .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?
+    };
+
+    let hash = hash_opt.ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?;
+
+    // Verify password with Argon2id (blocking — CPU-intensive).
+    let password = req.password.clone();
+    let hash_clone = hash.clone();
+    tokio::task::spawn_blocking(move || {
+        use argon2::Argon2;
+        use argon2::password_hash::{PasswordHash, PasswordVerifier};
+        let parsed =
+            PasswordHash::new(&hash_clone).map_err(|_| AppError::Internal("Bad hash".into()))?;
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .map_err(|_| AppError::Unauthorized("Invalid credentials".into()))
+    })
+    .await
+    .map_err(|_| AppError::Internal("Task join error".into()))??;
+
+    let jwt_secret = crate::auth::jwt_secret();
+    let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let cookie =
+        format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
+
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(VerifyResponse {
+            user_id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            expires_at,
+        }),
+    )
+        .into_response())
 }

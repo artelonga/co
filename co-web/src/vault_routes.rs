@@ -1195,6 +1195,7 @@ mod tests {
             universo_dir: "quilomboaraucaria".to_string(),
             gestao_github_admins: vec![],
             universe_key: None,
+            co_env: "prod".into(),
         }
     }
 

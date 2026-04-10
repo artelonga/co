@@ -466,6 +466,25 @@ impl Storage {
                 )
                 .expect("Failed to run migration v16");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 17 {
+            // CO-44: password_hash column for UAT user (password-based login).
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE users ADD COLUMN password_hash TEXT;
+                     INSERT INTO schema_version (version) VALUES (17);",
+                )
+                .expect("Failed to run migration v17");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -1537,6 +1556,160 @@ impl Storage {
                 },
             )
             .ok()
+    }
+
+    // --- UAT-specific methods (CO-44) ---
+
+    /// Get user by email along with their stored Argon2 password hash.
+    /// Returns `None` if the user does not exist or has no password set.
+    pub fn get_user_by_email_with_hash(
+        &self,
+        email: &str,
+    ) -> Option<(crate::models::User, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT id, email, display_name, tier, created_at, password_hash \
+                 FROM users WHERE email = ?1",
+                params![email],
+                |row| {
+                    Ok((
+                        crate::models::User {
+                            id: row.get(0)?,
+                            email: row.get(1)?,
+                            display_name: row.get(2)?,
+                            tier: row.get(3)?,
+                            created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        },
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
+            )
+            .ok()
+    }
+
+    /// Seed the UAT `yuri@uat.local` user with an Argon2-hashed password.
+    ///
+    /// Idempotent: if the user already exists their password hash is updated
+    /// to the supplied value (so a fresh hash is applied on each UAT startup).
+    pub fn seed_uat_user(&mut self, password_hash: &str) -> anyhow::Result<()> {
+        let exists: bool = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE email = 'yuri@uat.local'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+
+        if exists {
+            self.conn.execute(
+                "UPDATE users SET password_hash = ?1, tier = 'admin' WHERE email = 'yuri@uat.local'",
+                params![password_hash],
+            )?;
+            tracing::info!("UAT: updated yuri@uat.local password hash");
+        } else {
+            let now = Utc::now().to_rfc3339();
+            self.conn.execute(
+                "INSERT INTO users (id, email, display_name, tier, created_at, password_hash) \
+                 VALUES ('usr_yuri_uat', 'yuri@uat.local', 'yuri', 'admin', ?1, ?2)",
+                params![now, password_hash],
+            )?;
+            tracing::info!("UAT: seeded user yuri@uat.local (tier=admin)");
+        }
+        Ok(())
+    }
+
+    /// Remove all anonymous universes (keys starting with `anon-`) from the
+    /// database and from the filesystem. Called on UAT startup so each session
+    /// starts from a clean slate.
+    ///
+    /// Returns the number of universes removed.
+    pub fn cleanup_anon_universes(&mut self) -> usize {
+        let anon_keys: Vec<String> = {
+            let mut stmt = match self
+                .conn
+                .prepare("SELECT key FROM universes WHERE key LIKE 'anon-%'")
+            {
+                Ok(s) => s,
+                Err(_) => return 0,
+            };
+            stmt.query_map([], |row| row.get(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        let count = anon_keys.len();
+        for key in &anon_keys {
+            let _ = self
+                .conn
+                .execute("DELETE FROM entries WHERE universe_key = ?1", params![key]);
+            let _ = self.conn.execute(
+                "DELETE FROM universe_members WHERE universe_key = ?1",
+                params![key],
+            );
+            let _ = self
+                .conn
+                .execute("DELETE FROM universes WHERE key = ?1", params![key]);
+            let universe_dir = self.data_dir.join("universes").join(key);
+            if universe_dir.exists() {
+                let _ = std::fs::remove_dir_all(&universe_dir);
+            }
+        }
+
+        if count > 0 {
+            tracing::info!("UAT: cleaned up {} anonymous universe(s)", count);
+        }
+        count
+    }
+
+    /// Collect all users (with password hashes) for backup before a DB reset.
+    pub fn get_all_users_with_hashes(&self) -> Vec<(crate::models::User, Option<String>)> {
+        let mut stmt = match self
+            .conn
+            .prepare("SELECT id, email, display_name, tier, created_at, password_hash FROM users")
+        {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map([], |row| {
+            Ok((
+                crate::models::User {
+                    id: row.get(0)?,
+                    email: row.get(1)?,
+                    display_name: row.get(2)?,
+                    tier: row.get(3)?,
+                    created_at: parse_datetime(&row.get::<_, String>(4)?),
+                },
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// Re-insert users (with hashes) after a DB reset. Uses INSERT OR IGNORE to
+    /// avoid duplicates if migrations re-ran and the yuri seed already ran.
+    pub fn restore_users_with_hashes(&mut self, users: &[(crate::models::User, Option<String>)]) {
+        for (user, hash) in users {
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO users \
+                 (id, email, display_name, tier, created_at, password_hash) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    user.id,
+                    user.email,
+                    user.display_name,
+                    user.tier,
+                    user.created_at.to_rfc3339(),
+                    hash.as_deref(),
+                ],
+            );
+        }
     }
 
     // --- Universes ---

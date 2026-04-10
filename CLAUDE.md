@@ -288,6 +288,292 @@ Remaining v1.0 work:
 - #53 - Versioning Policy (implemented, close when satisfied)
 - #70 - Forbidden character validation (new)
 
+## Deployment
+
+### Environments
+
+| Env | App | URL | Purpose |
+|-----|-----|-----|---------|
+| **UAT** | `co-artelonga-uat` | `co-artelonga-uat.fly.dev` | Verify before prod. Fresh data per deploy. |
+| **Production** | `co-artelonga` | `co-artelonga.fly.dev` | Public-facing. Never deploy untested changes. |
+
+### Deploy Order: ALWAYS UAT First
+
+```bash
+# 1. Run tests locally
+cargo test -p co-web
+cargo clippy -p co-web -- -D warnings
+
+# 2. Deploy to UAT
+flyctl deploy --config fly.uat.toml
+
+# 3. Verify UAT (see UAT Verification below)
+curl -s https://co-artelonga-uat.fly.dev/api/health
+
+# 4. Only after UAT passes — deploy to production
+flyctl deploy
+```
+
+**Never** run `flyctl deploy` (prod) without first verifying on UAT.
+
+### Fly.io Configuration Files
+
+| File | Target | Notes |
+|------|--------|-------|
+| `fly.toml` | Production (`co-artelonga`) | Default deploy target |
+| `fly.uat.toml` | UAT (`co-artelonga-uat`) | `--config fly.uat.toml` |
+
+### Secrets (per environment)
+
+```bash
+# Set JWT_SECRET (required, one-time per env)
+flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a co-artelonga
+flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a co-artelonga-uat
+
+# Verify
+flyctl secrets list -a co-artelonga
+flyctl secrets list -a co-artelonga-uat
+```
+
+### Dockerfile Notes
+
+- Image: `rust:1.88-slim` (requires protobuf-compiler)
+- Dependency cache layer: `Cargo.toml`/`Cargo.lock` → dummy build → real source build
+- First deploy: ~5 min (no cache). Subsequent: ~1-2 min (deps cached).
+- Runtime: `debian:bookworm-slim` with `ca-certificates` + `curl` (healthcheck)
+- Non-root user `co`, data volume at `/data`
+
+### Logs & Debugging
+
+```bash
+flyctl logs -a co-artelonga-uat --no-tail   # Recent logs
+flyctl logs -a co-artelonga-uat              # Stream live
+flyctl ssh console -a co-artelonga-uat       # Shell into machine
+flyctl status -a co-artelonga-uat            # Machine state
+```
+
+### UAT Credentials (CO-44)
+
+**Login: `yuri` / `uat`** — UAT only. Never use these credentials in production.
+
+| Field | Value |
+|-------|-------|
+| Email | `yuri@uat.local` |
+| Password | `uat` |
+| Tier | `admin` |
+| Endpoint | `POST /api/v1/auth/uat-login` |
+
+```bash
+# Login as yuri on UAT
+curl -s -X POST https://co-artelonga-uat.fly.dev/api/v1/auth/uat-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"yuri@uat.local","password":"uat"}'
+# → { user_id, email, display_name, expires_at }
+```
+
+The `uat-login` endpoint returns **404 in production** (`CO_ENV` unset). Only available on UAT.
+
+### UAT Database Reset
+
+Touch the reset flag and restart the machine to wipe all non-user data:
+
+```bash
+# 1. Create reset flag (survives until machine restarts)
+flyctl ssh console -a co-artelonga-uat -C "touch /data/uat-reset.flag"
+
+# 2. Restart the machine to trigger the reset on startup
+flyctl machine restart -a co-artelonga-uat
+
+# 3. Verify reset completed (check logs)
+flyctl logs -a co-artelonga-uat --no-tail | grep "UAT: reset"
+```
+
+On startup with the flag present, the server will:
+1. Back up all user accounts (so yuri persists across resets)
+2. Delete the SQLite database
+3. Clean up anonymous universe directories
+4. Run all migrations fresh
+5. Restore users + re-seed template universe
+6. Delete the flag file
+
+### UAT Yuri Login Health Check
+
+Include this in post-deploy verification:
+
+```bash
+# Verify yuri login works
+RESP=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X POST https://co-artelonga-uat.fly.dev/api/v1/auth/uat-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"yuri@uat.local","password":"uat"}')
+[ "$RESP" = "200" ] && echo "UAT login OK" || echo "UAT login FAILED ($RESP)"
+
+# Verify co-dev board accessible (requires token from login)
+TOKEN=$(curl -sc /tmp/uat-cookies.txt -X POST \
+  https://co-artelonga-uat.fly.dev/api/v1/auth/uat-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"yuri@uat.local","password":"uat"}' | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('user_id',''))")
+echo "Logged in as: $TOKEN"
+```
+
+## UAT Verification Spec
+
+After every deploy to UAT, verify the following:
+
+### 1. Health & Data Seeding
+
+```bash
+# Health check
+curl -s https://co-artelonga-uat.fly.dev/api/health
+# → {"status":"ok","version":"1.0.0"}
+
+# Template universe exists
+curl -s https://co-artelonga-uat.fly.dev/api/v1/universes/template | python3 -m json.tool
+# → key: "template", is_template: true, name: "CO"
+
+# Tutorial project exists
+curl -s https://co-artelonga-uat.fly.dev/api/v1/universes/template/projects
+# → [{ key: "CO", name: "Aprenda CO" }]
+
+# 7 tutorial tasks
+curl -s "https://co-artelonga-uat.fly.dev/api/projects/CO/tasks?u=template" | python3 -c "import sys,json; print(len(json.load(sys.stdin)), 'tasks')"
+# → 7 tasks
+```
+
+### 2. Anonymous User Flow (no login)
+
+1. Open `https://co-artelonga-uat.fly.dev` in incognito
+2. Board loads in Portuguese with 7 tutorial tasks in "A fazer" column
+3. Banner visible: "CO — Gestão de conteúdo em grafo"
+4. Drag task → board updates (auto-clone happens silently on first load)
+5. Create task via "+ Nova Tarefa" → works
+6. Refresh page → board persists (same clone loaded from localStorage)
+7. Create up to 100 entries → all succeed
+8. Entry 101 → "Crie uma conta para continuar" modal
+
+### 3. Theme Switching
+
+1. Click theme dropdown in header
+2. All 12 themes visible: Modern, Scholarly Light/Dark, Relic Light/Dark, Medieval, Steampunk, Cyberpunk, Matrix, Garden, Terminal, Retro
+3. Switch to each theme → colors change instantly, no reload
+4. Refresh → theme persists (localStorage)
+
+### 4. Language Toggle
+
+1. Default: Portuguese ("Projetos", "A fazer", "Concluído")
+2. Click language toggle → English ("Projects", "To do", "Done")
+3. Refresh → language persists (cookie)
+
+### 5. Login Flow
+
+```bash
+# Request login code (dev: code printed to server logs)
+curl -X POST https://co-artelonga-uat.fly.dev/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@example.com"}'
+
+# Check server logs for verification code
+flyctl logs -a co-artelonga-uat --no-tail | grep "Verification code"
+
+# Verify code → get JWT
+curl -X POST https://co-artelonga-uat.fly.dev/api/auth/verify \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@example.com","code":"XXXXXX"}'
+# → { user_id, email, display_name, expires_at }
+```
+
+In the browser:
+1. Click "Criar conta" or "Entrar"
+2. Enter email → check server logs for code → enter code
+3. After login: anonymous clone is claimed, user has full access
+4. User badge appears in header with display name
+
+### 6. Access Levels
+
+| Level | Can do | How to test |
+|-------|--------|-------------|
+| **Anonymous (no login)** | View template, auto-clone on load, CRUD up to 100 entries, switch themes/language | Incognito window |
+| **Anonymous (clone owner)** | Full CRUD on own clone, up to 100 entries | Same browser, refresh |
+| **Logged-in (own universe)** | Unlimited entries, CRDT collaboration, all themes, shareable URL | Login via email code |
+| **Logged-in (other's universe)** | View only (if public) | Visit another user's `/co/{slug}` |
+| **Admin** | Gestão API access | `GESTAO_GITHUB_ADMINS` env var |
+
+### 7. Database State (SQLite)
+
+```bash
+# SSH into UAT machine
+flyctl ssh console -a co-artelonga-uat
+
+# Check database
+sqlite3 /data/co.db
+
+# Tables
+.tables
+# → entries, projects, schema_version, tasks, universe_members, universes, users, ...
+
+# Schema version
+SELECT MAX(version) FROM schema_version;
+# → 13
+
+# Universes
+SELECT key, name, is_template, is_public, content_count FROM universes;
+# → template | CO | 1 | 1 | 0
+# → u-xxxxx | Meu CO | 0 | 0 | N  (anonymous clones)
+
+# Entries (template)
+SELECT path, entry_type, title FROM entries WHERE universe_key = 'template' LIMIT 5;
+# → projects/CO/_project.md | project | Aprenda CO
+# → projects/CO/1.md | task | Arraste esta tarefa...
+
+# Users (after login test)
+SELECT id, email, display_name, tier FROM users;
+```
+
+### 8. Entry Abstraction
+
+```bash
+# Entries API
+curl -s "https://co-artelonga-uat.fly.dev/api/v1/universes/template/entries?type=task" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['total'], 'entries')"
+# → 7 entries
+
+# Tags
+curl -s "https://co-artelonga-uat.fly.dev/api/v1/universes/template/entries/tags"
+# → [{"tag":"tutorial","count":7}, ...]
+
+# Tree
+curl -s "https://co-artelonga-uat.fly.dev/api/v1/universes/template/entries/tree?type=task"
+# → Hierarchical JSON with parent/child nesting
+```
+
+### 9. Vault API (Obsidian Compat)
+
+```bash
+# Requires API token (login first, then generate)
+TOKEN="..." # from POST /api/v1/auth/token
+
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://co-artelonga-uat.fly.dev/api/v1/universes/template/vault/notes"
+# → File listing
+
+curl -H "Authorization: Bearer $TOKEN" \
+  "https://co-artelonga-uat.fly.dev/api/v1/universes/template/vault/tags"
+# → Tag counts
+```
+
+### 10. E2E Tests (Playwright)
+
+```bash
+cd co-web
+
+# Run against UAT
+BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test
+
+# Run specific suite
+BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/smoke.spec.ts
+BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/universe.spec.ts
+```
+
 ## Getting Help
 
 - Review existing code patterns before implementing new features

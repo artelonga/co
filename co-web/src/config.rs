@@ -47,6 +47,16 @@ pub struct WebConfig {
     pub gestao_github_admins: Vec<String>,
     /// Optional universe key to scope this server instance to a single universe.
     pub universe_key: Option<String>,
+    /// Deployment environment: "prod" (default) or "uat".
+    /// Set via the `CO_ENV` environment variable.
+    pub co_env: String,
+}
+
+impl WebConfig {
+    /// Returns true when running in UAT mode (`CO_ENV=uat`).
+    pub fn is_uat(&self) -> bool {
+        self.co_env == "uat"
+    }
 }
 
 impl From<Args> for WebConfig {
@@ -68,6 +78,7 @@ impl From<Args> for WebConfig {
                 .map(|s| s.trim().to_string())
                 .collect(),
             universe_key: std::env::var("UNIVERSE_KEY").ok(),
+            co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
         }
     }
 }

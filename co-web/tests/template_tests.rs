@@ -26,6 +26,7 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         universo_dir: "quilomboaraucaria".to_string(),
         gestao_github_admins: vec!["artelonga".to_string()],
         universe_key: None,
+        co_env: "prod".into(),
     }
 }
 
@@ -43,7 +44,6 @@ fn test_bearer() -> String {
 fn build_template_app(dir: &std::path::Path) -> axum::Router {
     let config = test_config(dir);
     let mut storage = Storage::new(&config.data_dir);
-    // Seed the template universe (what start_server does on first boot)
     storage.seed_template_universe();
     let experiment = ExperimentStore::new(&config.data_dir);
     let auth_store = co_web::auth::AuthStore::new(dir).unwrap();
@@ -88,36 +88,33 @@ async fn test_seed_idempotent() {
     assert_eq!(projects.len(), 1, "exactly one project expected");
 }
 
-// --- Test 3: template universe has 8 sample tasks ---
+// --- Test 3: template universe has 7 tutorial tasks ---
 
 #[tokio::test]
 async fn test_template_has_sample_tasks() {
     let dir = tempdir().unwrap();
     let mut storage = Storage::new(dir.path().to_str().unwrap());
     storage.seed_template_universe();
-    let tasks = storage.list_tasks("MP");
+    let tasks = storage.list_tasks("CO");
     assert_eq!(
         tasks.len(),
-        8,
-        "expected 8 sample tasks, got {}",
+        9,
+        "expected 9 onboarding tasks, got {}",
         tasks.len()
     );
 
-    // All statuses present
+    // All tasks should be todo (interactive tutorial)
     let statuses: std::collections::HashSet<_> =
         tasks.iter().map(|t| t.status.to_string()).collect();
     assert!(statuses.contains("todo"), "missing todo");
-    assert!(statuses.contains("in_progress"), "missing in_progress");
-    assert!(statuses.contains("in_review"), "missing in_review");
-    assert!(statuses.contains("done"), "missing done");
 
-    // Subtask relationships present (tasks with parent)
+    // Subtask relationships present (at least one task with parent)
     let with_parent = tasks.iter().filter(|t| t.parent.is_some()).count();
-    assert!(with_parent >= 2, "expected at least 2 subtasks");
+    assert!(with_parent >= 1, "expected at least 1 subtask");
 
-    // Labels present
+    // Labels present — all should have tutorial label
     let with_labels = tasks.iter().filter(|t| !t.labels.is_empty()).count();
-    assert_eq!(with_labels, 8, "all tasks should have labels");
+    assert_eq!(with_labels, 9, "all tasks should have labels");
 }
 
 // --- Test 4: template projects visible without auth ---
@@ -141,7 +138,7 @@ async fn test_template_projects_public() {
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
     let projects: Vec<Project> = serde_json::from_slice(&bytes).unwrap();
     assert_eq!(projects.len(), 1);
-    assert_eq!(projects[0].key, "MP");
+    assert_eq!(projects[0].key, "CO");
 }
 
 // --- Test 5: write to template project returns 403 ---
@@ -155,7 +152,7 @@ async fn test_write_to_template_forbidden() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/projects/MP/tasks")
+                .uri("/api/projects/CO/tasks")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
@@ -187,7 +184,7 @@ async fn test_update_template_task_forbidden() {
         .oneshot(
             Request::builder()
                 .method("PUT")
-                .uri("/api/projects/MP/tasks/1")
+                .uri("/api/projects/CO/tasks/1")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::from(
@@ -261,26 +258,22 @@ async fn test_cloned_project_writable() {
     let dir = tempdir().unwrap();
     let mut storage = Storage::new(dir.path().to_str().unwrap());
     storage.seed_template_universe();
-    // Clone manually to get the new project key
     let universe = storage
         .clone_universe("template", "bob", "Bob Universe", "", "bob-owner")
         .unwrap();
     assert_eq!(universe.key, "bob");
 
-    // Find the cloned project key
     let projects = storage.list_projects_for_universe("bob");
     assert_eq!(projects.len(), 1);
     let proj_key = &projects[0].key;
 
-    // Verify it is NOT in a template universe
     assert!(
         !storage.is_project_in_template(proj_key),
         "cloned project should not be in template universe"
     );
 
-    // Verify tasks were copied
     let tasks = storage.list_tasks(proj_key);
-    assert_eq!(tasks.len(), 8, "cloned project should have 8 tasks");
+    assert_eq!(tasks.len(), 9, "cloned project should have 9 tasks");
 }
 
 // --- Test 9: seed_template does not run twice (template_exists check) ---
@@ -292,7 +285,6 @@ async fn test_template_exists_prevents_double_seed() {
     assert!(!storage.template_exists());
     storage.seed_template_universe();
     assert!(storage.template_exists());
-    // Simulate what start_server does: only seed if not exists
     if !storage.template_exists() {
         storage.seed_template_universe();
     }

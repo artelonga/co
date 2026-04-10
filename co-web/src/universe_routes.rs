@@ -825,6 +825,7 @@ mod tests {
             universo_dir: "".to_string(),
             gestao_github_admins: vec![],
             universe_key: None,
+            co_env: "prod".into(),
         };
         let experiment = ExperimentStore::new(dir);
         let auth_store = crate::auth::AuthStore::new(dir).unwrap();
