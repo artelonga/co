@@ -1,0 +1,223 @@
+# co-web content type frontmatter schemas
+# These schemas define the YAML frontmatter expected in each entry type.
+# Source: co-web/src/entry_routes.rs, work/schema.yaml, CO board entries.
+#
+# All types store frontmatter as JSON in entries.frontmatter_json.
+# The "type" field in frontmatter must match entries.entry_type.
+
+content_types:
+
+  - type: task
+    description: A unit of work within a project (Kanban card)
+    entry_type: task
+    required: [type, id, title, status, project]
+    fields:
+      type:
+        value: task
+        description: Discriminator — must be "task"
+      id:
+        type: integer
+        description: Sequential ID within the project (project-scoped)
+      title:
+        type: string
+        max: 200
+      status:
+        type: enum
+        values: [todo, in_progress, in_review, done]
+        default: todo
+      priority:
+        type: enum
+        values: [low, medium, high, critical]
+        default: medium
+      project:
+        type: string
+        description: Project key this task belongs to
+        references: project.key
+      parent:
+        type: integer
+        nullable: true
+        references: task.id
+        description: Parent task ID for subtask hierarchy
+      labels:
+        type: array
+        items: string
+        default: []
+        description: Free-form tags / labels
+      assignee:
+        type: string
+        nullable: true
+        description: Username or display name of the assignee
+      due:
+        type: date
+        nullable: true
+        format: YYYY-MM-DD
+      description:
+        type: string
+        nullable: true
+        description: Markdown body (stored separately in entries.body)
+      created:
+        type: datetime
+        format: rfc3339
+      modified:
+        type: datetime
+        format: rfc3339
+
+  - type: project
+    description: Container for tasks — top-level Kanban board
+    entry_type: project
+    required: [type, key, title]
+    fields:
+      type:
+        value: project
+        description: Discriminator — must be "project"
+      key:
+        type: string
+        pattern: '[A-Z0-9]+'
+        description: Short uppercase project key, e.g. "CO", "FEAT"
+      title:
+        type: string
+        description: Human-readable project name
+      description:
+        type: string
+        nullable: true
+      status:
+        type: enum
+        values: [active, archived]
+        default: active
+      next_id:
+        type: integer
+        default: 1
+        description: Next task ID to assign (auto-incremented on task create)
+      created:
+        type: datetime
+        format: rfc3339
+
+  - type: page
+    description: Free-form markdown content — wiki / garden notes
+    entry_type: page
+    required: [type, title]
+    fields:
+      type:
+        value: page
+        description: Discriminator — must be "page"
+      slug:
+        type: string
+        description: URL-safe slug (derived from path if absent)
+      title:
+        type: string
+      order:
+        type: integer
+        default: 0
+        description: Sort order within a parent folder
+      parent:
+        type: string
+        nullable: true
+        description: Parent page slug for hierarchy
+      tags:
+        type: array
+        items: string
+        default: []
+      created:
+        type: datetime
+        format: rfc3339
+      modified:
+        type: datetime
+        format: rfc3339
+
+  - type: event
+    description: Scheduled community event
+    entry_type: event
+    required: [type, title, date]
+    fields:
+      type:
+        value: event
+      title:
+        type: string
+      date:
+        type: date
+        format: YYYY-MM-DD
+      time:
+        type: string
+        nullable: true
+        format: HH:MM
+      location:
+        type: string
+        nullable: true
+      tags:
+        type: array
+        items: string
+        default: []
+      created:
+        type: datetime
+        format: rfc3339
+
+  - type: message
+    description: A message entry (direct message or mission thread)
+    entry_type: message
+    required: [type, author, body]
+    fields:
+      type:
+        value: message
+      author:
+        type: string
+        description: Author user ID or display name
+      subject:
+        type: string
+        nullable: true
+      thread:
+        type: string
+        nullable: true
+        description: Thread ID for grouping replies
+      read:
+        type: boolean
+        default: false
+      created:
+        type: datetime
+        format: rfc3339
+
+  - type: comment
+    description: A comment attached to another entry
+    entry_type: comment
+    required: [type, body]
+    fields:
+      type:
+        value: comment
+      author:
+        type: string
+        nullable: true
+        description: Author user ID (null for anonymous)
+      author_display:
+        type: string
+        nullable: true
+        description: Display name for anonymous authors
+      anonymous:
+        type: boolean
+        default: true
+      parent_path:
+        type: string
+        nullable: true
+        description: Path of the parent entry this comment is attached to
+      created:
+        type: datetime
+        format: rfc3339
+
+  - type: clip
+    description: A web clip saved to the vault
+    entry_type: clip
+    required: [type, url, title]
+    fields:
+      type:
+        value: clip
+      url:
+        type: string
+        format: url
+        description: Source URL of the clipped content
+      title:
+        type: string
+      tags:
+        type: array
+        items: string
+        default: []
+      clipped_at:
+        type: datetime
+        format: rfc3339

@@ -1,0 +1,181 @@
+# co-web schema relations
+# Foreign keys (database-level) and content references (frontmatter-level).
+# Source: co-web/src/storage.rs, frontmatter.yaml
+#
+# Mermaid ERD rendering of these relations is deferred to CO-49.
+
+relations:
+
+  # --- Database-level foreign keys ---
+
+  - from: universes.owner_id
+    to: users.id
+    kind: many_to_one
+    description: >
+      Each universe has one optional owner (NULL / empty string for
+      system-owned universes like "template").
+    nullable: true
+
+  - from: universe_members.universe_key
+    to: universes.key
+    kind: many_to_one
+    on_delete: CASCADE
+    description: Membership rows are deleted when the universe is deleted
+
+  - from: universe_members.user_id
+    to: users.id
+    kind: many_to_one
+    description: Members belong to authenticated users
+
+  - from: entries.universe_key
+    to: universes.key
+    kind: many_to_one
+    description: Every entry belongs to exactly one universe
+
+  - from: api_tokens.user_id
+    to: users.id
+    kind: many_to_one
+    description: Each API token is owned by one user
+
+  - from: telemetry_events.user_id
+    to: users.id
+    kind: many_to_one
+    nullable: true
+    description: NULL for anonymous events
+
+  # --- Legacy foreign keys (deprecated tables) ---
+
+  - from: projects.universe_key
+    to: universes.key
+    kind: many_to_one
+    nullable: true
+    deprecated: true
+    description: Legacy — migrated to entries in v13
+
+  - from: tasks.project_key
+    to: projects.key
+    kind: many_to_one
+    deprecated: true
+    description: Legacy — migrated to entries in v13
+
+  - from: tasks.parent
+    to: tasks.id
+    kind: self_referential
+    nullable: true
+    deprecated: true
+    description: Legacy subtask hierarchy — now in frontmatter.parent
+
+  - from: comments.project_key+task_id
+    to: tasks.project_key+id
+    kind: many_to_one
+    on_delete: CASCADE
+    deprecated: true
+    description: Legacy — migrated to entries in v13
+
+  - from: activity_log.project_key
+    to: projects.key
+    kind: many_to_one
+    deprecated: true
+    description: Legacy — migrated to entries in v13
+
+  # --- Quilombo foreign keys ---
+
+  - from: quilombo_eventos.criado_por
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_missoes.criado_por
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_participacoes.missao_id
+    to: quilombo_missoes.id
+    kind: many_to_one
+    module: quilombo
+
+  - from: quilombo_participacoes.usuario_id
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    module: quilombo
+
+  - from: quilombo_comentarios.evento_id
+    to: quilombo_eventos.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_comentarios.autor_id
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_mensagens.remetente_id
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_mensagens.destinatario_id
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_mensagens.missao_id
+    to: quilombo_missoes.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_atividades.usuario_id
+    to: quilombo_usuarios.id
+    kind: many_to_one
+    nullable: true
+    module: quilombo
+
+  - from: quilombo_perfis.usuario_id
+    to: quilombo_usuarios.id
+    kind: one_to_one
+    on_delete: CASCADE
+    module: quilombo
+    description: One profile row per user (extended profile data)
+
+  # --- Content-level references (frontmatter fields) ---
+
+  - from: entries[task].frontmatter.project
+    to: entries[project].frontmatter.key
+    kind: many_to_one
+    level: content
+    description: Every task references its parent project by key
+
+  - from: entries[task].frontmatter.parent
+    to: entries[task].frontmatter.id
+    kind: self_referential
+    level: content
+    nullable: true
+    description: Task subtask hierarchy — parent field holds the parent task ID
+
+  - from: entries[comment].frontmatter.parent_path
+    to: entries.path
+    kind: many_to_one
+    level: content
+    nullable: true
+    description: Comment is attached to another entry by its path
+
+  # --- Cross-module boundary ---
+
+  - from: universe.owner_id
+    to: quilombo_usuarios.id
+    kind: conceptual
+    level: application
+    description: >
+      When a quilombo user creates a CO universe, the owner_id in universes
+      corresponds to the user in the quilombo_usuarios table. Not enforced
+      as a SQLite foreign key because the tables live in the same database
+      but are managed by separate modules.
+    enforced: false

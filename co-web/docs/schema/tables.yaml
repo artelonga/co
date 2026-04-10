@@ -1,0 +1,777 @@
+# co-web database schema — SQLite
+# Source: co-web/src/storage.rs migrations v1–v17
+# and co-web/src/quilombo_storage.rs migrations v1–v6
+#
+# Mermaid ERD rendering is deferred (CO-49).
+
+tables:
+
+  # --- Core app tables ---
+
+  - name: schema_version
+    description: Migration tracking — one row per applied migration
+    columns:
+      - name: version
+        type: INTEGER
+        nullable: false
+        description: Migration version number
+
+  - name: users
+    description: Authenticated user accounts
+    columns:
+      - name: id
+        type: TEXT
+        primary_key: true
+        description: nanoid user ID, format usr_xxxxx
+      - name: email
+        type: TEXT
+        unique: true
+        nullable: false
+      - name: display_name
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: tier
+        type: TEXT
+        nullable: false
+        default: player
+        enum: [player, admin]
+      - name: created_at
+        type: TEXT
+        nullable: false
+        format: rfc3339
+      - name: password_hash
+        type: TEXT
+        nullable: true
+        description: Argon2 hash — v17+, replaces email verification codes in UAT
+
+  - name: universes
+    description: Multi-tenant content workspaces
+    columns:
+      - name: key
+        type: TEXT
+        primary_key: true
+        description: URL-safe slug, e.g. "template", "u-abc123"
+      - name: name
+        type: TEXT
+        nullable: false
+      - name: description
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: owner_id
+        type: TEXT
+        nullable: false
+        default: "''"
+        references: users.id
+        description: Empty string for system-owned (template)
+      - name: created_at
+        type: TEXT
+        nullable: false
+        format: rfc3339
+      - name: is_template
+        type: INTEGER
+        nullable: false
+        default: 0
+        description: 1 for the seeded template universe — v10+
+      - name: is_public
+        type: INTEGER
+        nullable: false
+        default: 0
+        description: 1 = visible to anonymous users — v10+
+      - name: content_count
+        type: INTEGER
+        nullable: false
+        default: 0
+        description: Cached count of entries — v11+
+      - name: theme_preset
+        type: TEXT
+        nullable: false
+        default: scholarly-light
+        description: Active theme key — v14+
+      - name: layout
+        type: TEXT
+        nullable: false
+        default: board
+        description: Default view layout — v14+
+      - name: font_headline
+        type: TEXT
+        nullable: true
+        description: Custom headline font override — v14+
+      - name: font_body
+        type: TEXT
+        nullable: true
+        description: Custom body font override — v14+
+      - name: custom_tokens
+        type: TEXT
+        nullable: true
+        description: JSON object of CSS token overrides — v14+
+    indexes:
+      - columns: [owner_id]
+
+  - name: universe_members
+    description: Universe membership and roles
+    columns:
+      - name: universe_key
+        type: TEXT
+        nullable: false
+        references: universes.key
+        on_delete: CASCADE
+      - name: user_id
+        type: TEXT
+        nullable: false
+        references: users.id
+      - name: role
+        type: TEXT
+        nullable: false
+        default: member
+        enum: [owner, admin, member, viewer]
+      - name: joined_at
+        type: TEXT
+        nullable: false
+        format: rfc3339
+    primary_key: [universe_key, user_id]
+
+  - name: entries
+    description: >
+      Universal content storage — tasks, projects, pages, events, messages,
+      comments, clips. Replaced the legacy projects/tasks/comments tables
+      in migration v13.
+    columns:
+      - name: path
+        type: TEXT
+        nullable: false
+        description: Relative path within the universe, e.g. "projects/CO/1.md"
+      - name: universe_key
+        type: TEXT
+        nullable: false
+        references: universes.key
+      - name: entry_type
+        type: TEXT
+        nullable: false
+        enum: [project, task, page, event, message, comment, clip]
+      - name: title
+        type: TEXT
+        nullable: true
+      - name: frontmatter_json
+        type: TEXT
+        nullable: false
+        description: JSON-serialised frontmatter fields
+      - name: body
+        type: TEXT
+        nullable: false
+        default: "''"
+        description: Markdown body (without frontmatter)
+      - name: body_hash
+        type: TEXT
+        nullable: false
+        description: xxhash3 of body — used for change detection
+      - name: created_at
+        type: TEXT
+        nullable: true
+        format: rfc3339
+      - name: updated_at
+        type: TEXT
+        nullable: true
+        format: rfc3339
+    primary_key: [universe_key, path]
+    indexes:
+      - name: idx_entries_type
+        columns: [universe_key, entry_type]
+      - name: idx_entries_updated
+        columns: [universe_key, updated_at]
+    virtual_tables:
+      - name: entries_fts
+        type: fts5
+        columns: [universe_key, path, title, body]
+        description: Full-text search index over entry titles and bodies
+
+  - name: api_tokens
+    description: Long-lived API tokens for Vault/Obsidian access
+    columns:
+      - name: id
+        type: TEXT
+        primary_key: true
+        description: nanoid token ID
+      - name: user_id
+        type: TEXT
+        nullable: false
+        references: users.id
+      - name: name
+        type: TEXT
+        nullable: false
+        default: "''"
+        description: Human-readable label
+      - name: token
+        type: TEXT
+        unique: true
+        nullable: false
+        description: Bearer token value (nanoid, 48 chars)
+      - name: created_at
+        type: TEXT
+        nullable: false
+        format: rfc3339
+      - name: expires_at
+        type: TEXT
+        nullable: false
+        format: rfc3339
+      - name: last_used_at
+        type: TEXT
+        nullable: true
+        format: rfc3339
+    indexes:
+      - name: idx_api_tokens_user
+        columns: [user_id]
+      - name: idx_api_tokens_token
+        columns: [token]
+        unique: true
+
+  - name: telemetry_events
+    description: Privacy-respecting usage events (CO-46)
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: timestamp
+        type: TEXT
+        nullable: false
+        format: rfc3339
+      - name: visitor_token
+        type: TEXT
+        nullable: true
+        description: Anonymous visitor identifier (24-char nanoid from cookie)
+      - name: user_id
+        type: TEXT
+        nullable: true
+        description: Authenticated user ID — NULL for anonymous
+      - name: session_id
+        type: TEXT
+        nullable: true
+        description: Client-side session ID (random, expires on tab close)
+      - name: event_type
+        type: TEXT
+        nullable: false
+        enum: [pageview, interaction, error, performance]
+      - name: event_name
+        type: TEXT
+        nullable: false
+        description: Dot-separated event name, e.g. "task.create", "page.view"
+      - name: universe_key
+        type: TEXT
+        nullable: true
+        description: Universe context, if available
+      - name: path
+        type: TEXT
+        nullable: true
+        description: URL path at time of event
+      - name: properties
+        type: TEXT
+        nullable: true
+        description: JSON object with event-specific properties (no PII)
+      - name: duration_ms
+        type: INTEGER
+        nullable: true
+        description: Server-side response duration or client-side timing
+      - name: ip_hash
+        type: TEXT
+        nullable: true
+        description: xxhash3 of client IP — daily-rotated, non-reversible
+      - name: ua_device
+        type: TEXT
+        nullable: true
+        enum: [mobile, tablet, desktop, unknown]
+      - name: ua_browser
+        type: TEXT
+        nullable: true
+        description: Browser name extracted from User-Agent
+      - name: ua_os
+        type: TEXT
+        nullable: true
+        description: OS name extracted from User-Agent
+    indexes:
+      - name: idx_telemetry_time
+        columns: [timestamp]
+      - name: idx_telemetry_event
+        columns: [event_type, event_name]
+      - name: idx_telemetry_user
+        columns: [user_id]
+
+  # --- Legacy tables (deprecated in v13, kept for migration) ---
+
+  - name: projects
+    description: Legacy project table — migrated to entries in v13. Do not use.
+    deprecated: true
+    replaced_by: entries
+    columns:
+      - name: key
+        type: TEXT
+        primary_key: true
+      - name: name
+        type: TEXT
+        nullable: false
+      - name: description
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: next_id
+        type: INTEGER
+        nullable: false
+        default: 1
+      - name: created_at
+        type: TEXT
+        nullable: false
+      - name: archived
+        type: INTEGER
+        nullable: false
+        default: 0
+      - name: universe_key
+        type: TEXT
+        nullable: true
+        references: universes.key
+        description: Added v8
+
+  - name: tasks
+    description: Legacy task table — migrated to entries in v13. Do not use.
+    deprecated: true
+    replaced_by: entries
+    columns:
+      - name: project_key
+        type: TEXT
+        nullable: false
+        references: projects.key
+      - name: id
+        type: INTEGER
+        nullable: false
+      - name: title
+        type: TEXT
+        nullable: false
+      - name: description
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: status
+        type: TEXT
+        nullable: false
+        default: todo
+        enum: [todo, in_progress, in_review, done]
+      - name: priority
+        type: TEXT
+        nullable: false
+        default: medium
+        enum: [low, medium, high, critical]
+      - name: due_date
+        type: TEXT
+        nullable: true
+      - name: parent
+        type: INTEGER
+        nullable: true
+        references: tasks.id
+        description: Self-referential parent task
+      - name: labels
+        type: TEXT
+        nullable: false
+        default: "'[]'"
+        description: JSON array of label strings
+      - name: created_at
+        type: TEXT
+        nullable: false
+      - name: updated_at
+        type: TEXT
+        nullable: false
+      - name: archived
+        type: INTEGER
+        nullable: false
+        default: 0
+      - name: assignee
+        type: TEXT
+        nullable: true
+        description: Added v5
+    primary_key: [project_key, id]
+
+  - name: comments
+    description: Legacy comment table — migrated to entries in v13. Do not use.
+    deprecated: true
+    replaced_by: entries
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: project_key
+        type: TEXT
+        nullable: false
+      - name: task_id
+        type: INTEGER
+        nullable: false
+      - name: author
+        type: TEXT
+        nullable: false
+        default: Anonymous
+      - name: body
+        type: TEXT
+        nullable: false
+      - name: created_at
+        type: TEXT
+        nullable: false
+
+  - name: activity_log
+    description: Legacy activity log — migrated to entries in v13. Do not use.
+    deprecated: true
+    replaced_by: entries
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: project_key
+        type: TEXT
+        nullable: false
+      - name: task_id
+        type: INTEGER
+        nullable: true
+      - name: action
+        type: TEXT
+        nullable: false
+      - name: field
+        type: TEXT
+        nullable: true
+      - name: old_value
+        type: TEXT
+        nullable: true
+      - name: new_value
+        type: TEXT
+        nullable: true
+      - name: actor
+        type: TEXT
+        nullable: false
+        default: system
+      - name: created_at
+        type: TEXT
+        nullable: false
+
+  # --- Quilombo community tables (quilombo_storage.rs) ---
+
+  - name: quilombo_usuarios
+    description: Quilombo community user accounts
+    module: quilombo
+    columns:
+      - name: id
+        type: TEXT
+        primary_key: true
+      - name: usuario
+        type: TEXT
+        unique: true
+        nullable: false
+        description: Username / login handle
+      - name: nome
+        type: TEXT
+        nullable: false
+        description: Display name
+      - name: senha_hash
+        type: TEXT
+        nullable: false
+        description: Argon2 hash
+      - name: papel
+        type: TEXT
+        nullable: false
+        default: membro
+        enum: [membro, moderador, admin]
+      - name: bio
+        type: TEXT
+        nullable: true
+      - name: foto_url
+        type: TEXT
+        nullable: true
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+      - name: atualizado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_eventos
+    description: Community events
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: titulo
+        type: TEXT
+        nullable: false
+      - name: data
+        type: TEXT
+        nullable: false
+        description: Event date (YYYY-MM-DD)
+      - name: hora
+        type: TEXT
+        nullable: false
+        description: Event time (HH:MM)
+      - name: local
+        type: TEXT
+        nullable: false
+      - name: descricao_md
+        type: TEXT
+        nullable: false
+        default: "''"
+        description: Markdown description body
+      - name: criado_por
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+      - name: slug
+        type: TEXT
+        nullable: true
+        description: URL slug — v5+
+      - name: tags
+        type: TEXT
+        nullable: true
+        default: "'[]'"
+        description: JSON array of tags — v5+
+
+  - name: quilombo_missoes
+    description: Community missions / calls to action
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: titulo
+        type: TEXT
+        nullable: false
+      - name: descricao
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: objetivo
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: status
+        type: TEXT
+        nullable: false
+        default: aberta
+        enum: [aberta, em_andamento, concluida, cancelada]
+      - name: criado_por
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+      - name: atualizado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_participacoes
+    description: User participation in missions
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: missao_id
+        type: INTEGER
+        nullable: false
+        references: quilombo_missoes.id
+      - name: usuario_id
+        type: TEXT
+        nullable: false
+        references: quilombo_usuarios.id
+      - name: status
+        type: TEXT
+        nullable: false
+        default: pendente
+        enum: [pendente, confirmada, cancelada]
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+    unique: [missao_id, usuario_id]
+
+  - name: quilombo_comentarios
+    description: Comments on publications, relatos, and events
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: publicacao_slug
+        type: TEXT
+        nullable: true
+        description: Legacy publication reference
+      - name: relato_slug
+        type: TEXT
+        nullable: true
+        description: Relato reference — v4+
+      - name: evento_id
+        type: INTEGER
+        nullable: true
+        references: quilombo_eventos.id
+      - name: autor_id
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: nome_exibicao
+        type: TEXT
+        nullable: true
+        description: Anonymous commenter display name
+      - name: conteudo
+        type: TEXT
+        nullable: false
+      - name: anonimo
+        type: INTEGER
+        nullable: false
+        default: 1
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_mensagens
+    description: Direct and mission messages between users
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: remetente_id
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: destinatario_id
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: missao_id
+        type: INTEGER
+        nullable: true
+        references: quilombo_missoes.id
+      - name: assunto
+        type: TEXT
+        nullable: false
+        default: "''"
+      - name: conteudo
+        type: TEXT
+        nullable: false
+      - name: nome_remetente
+        type: TEXT
+        nullable: true
+        description: Display name for anonymous senders
+      - name: email_remetente
+        type: TEXT
+        nullable: true
+      - name: lida
+        type: INTEGER
+        nullable: false
+        default: 0
+        description: 1 = read
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_atividades
+    description: Audit log of community actions
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: acao
+        type: TEXT
+        nullable: false
+        description: Action name, e.g. "publicou_relato"
+      - name: entidade
+        type: TEXT
+        nullable: false
+        description: Entity type, e.g. "relato", "evento"
+      - name: entidade_id
+        type: TEXT
+        nullable: true
+      - name: usuario_id
+        type: TEXT
+        nullable: true
+        references: quilombo_usuarios.id
+      - name: conteudo
+        type: TEXT
+        nullable: true
+        description: Optional JSON payload
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_perfis
+    description: Extended user profile data — v4+
+    module: quilombo
+    columns:
+      - name: usuario_id
+        type: TEXT
+        primary_key: true
+        references: quilombo_usuarios.id
+      - name: nome_exibicao
+        type: TEXT
+        nullable: true
+      - name: bio
+        type: TEXT
+        nullable: true
+      - name: foto_url
+        type: TEXT
+        nullable: true
+      - name: atualizado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')
+
+  - name: quilombo_telemetria
+    description: Page-view telemetry for the quilombo platform — v4+
+    module: quilombo
+    columns:
+      - name: id
+        type: INTEGER
+        primary_key: true
+        autoincrement: true
+      - name: visitante_token
+        type: TEXT
+        nullable: true
+        description: Anonymous visitor token from cookie
+      - name: usuario_id
+        type: TEXT
+        nullable: true
+      - name: path
+        type: TEXT
+        nullable: false
+      - name: referrer
+        type: TEXT
+        nullable: true
+        description: External referrer (internal referrers filtered out)
+      - name: user_agent
+        type: TEXT
+        nullable: true
+      - name: ip_hash
+        type: TEXT
+        nullable: true
+        description: xxhash3 of client IP
+      - name: duracao_ms
+        type: INTEGER
+        nullable: true
+      - name: criado_em
+        type: TEXT
+        nullable: false
+        default: datetime('now')

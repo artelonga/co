@@ -1,0 +1,215 @@
+# co-web telemetry events (CO-46)
+# Source: co-web/static/shared/telemetry.js, co-web/src/telemetry.rs
+#
+# All events are stored in the telemetry_events table.
+# Privacy rules:
+#   - Respects navigator.doNotTrack === '1'
+#   - Requires co_cookie_consent in localStorage
+#   - No PII: no email, no passwords, no entry body content
+#   - IP is hashed (xxhash3, non-reversible) — not stored raw
+#
+# Common fields on every event (set by server):
+#   timestamp    — RFC3339
+#   visitor_token — 24-char nanoid from visitante_id cookie
+#   user_id       — authenticated user ID (NULL for anonymous)
+#   session_id    — client session ID (random, expires on tab close)
+#   event_type    — see "type" field on each event below
+#   event_name    — see "name" field on each event below
+#   universe_key  — universe context from /co/{slug} path (optional)
+#   path          — URL path
+#   ip_hash       — xxhash3(ip), daily-rotated
+#   ua_device     — mobile | tablet | desktop | unknown
+#   ua_browser    — browser name
+#   ua_os         — OS name
+
+events:
+
+  # --- Page views (server-side, automatic) ---
+
+  - name: page.view
+    type: pageview
+    triggered_by: server — telemetry middleware on every GET request
+    description: >
+      Recorded for every human GET request that is not an API call, static
+      asset, or bot. Fires server-side before the response is sent.
+    properties:
+      referrer:
+        type: string
+        nullable: true
+        description: External referrer URL (internal referrers filtered)
+      theme:
+        type: string
+        nullable: true
+        description: Active theme from localStorage (co_theme)
+      lang:
+        type: string
+        nullable: true
+        description: Active language from localStorage or <html lang>
+      screen:
+        type: enum
+        values: [small, medium, large]
+        description: Screen size bucket (<768px, <1280px, >=1280px)
+      load_ms:
+        type: integer
+        nullable: true
+        description: Full page load time (loadEventEnd - navigationStart)
+      tti_ms:
+        type: integer
+        nullable: true
+        description: Time to interactive (domInteractive - navigationStart)
+    pii: false
+    filters:
+      - Skips paths starting with /api/, /_app/, /static/
+      - Skips paths containing a dot (static files)
+      - Skips all bot user-agents (see bot_patterns in quilombo_telemetria.rs)
+      - Skips scanner probe paths (wp-admin, .env, .git, etc.)
+
+  # --- JavaScript errors (client-side, automatic) ---
+
+  - name: js.error
+    type: error
+    triggered_by: client — window.addEventListener('error')
+    description: Unhandled JavaScript error on the page
+    properties:
+      message:
+        type: string
+        nullable: true
+        description: Error message, truncated to 120 chars
+      source:
+        type: string
+        nullable: true
+        description: Script filename (origin stripped)
+      line:
+        type: integer
+        nullable: true
+        description: Line number of the error
+    pii: false
+
+  # --- Performance metrics (client-side, automatic, Web Vitals) ---
+
+  - name: perf.lcp
+    type: performance
+    triggered_by: client — PerformanceObserver (largest-contentful-paint)
+    description: Largest Contentful Paint timing
+    properties:
+      lcp_ms:
+        type: integer
+        description: LCP start time in milliseconds (rounded)
+    pii: false
+
+  - name: perf.fid
+    type: performance
+    triggered_by: client — PerformanceObserver (first-input)
+    description: First Input Delay timing
+    properties:
+      fid_ms:
+        type: integer
+        description: FID (processingStart - startTime) in milliseconds (rounded)
+    pii: false
+
+  # --- Interaction events (client-side, manual — to be wired up) ---
+  # These event names follow the dot.separated convention.
+  # They are sent via window.coTrack(name, props) from app code.
+  # The list below documents the intended events; actual firing depends on
+  # app.js integration (pending CO-49+).
+
+  - name: task.create
+    type: interaction
+    triggered_by: client — POST /api/projects/{key}/tasks (success)
+    description: User creates a new task on the board
+    properties:
+      project:
+        type: string
+        description: Project key
+      status:
+        type: string
+        description: Initial status of the created task
+      priority:
+        type: string
+        description: Initial priority
+    pii: false
+
+  - name: task.status_change
+    type: interaction
+    triggered_by: client — drag-and-drop or status dropdown
+    description: Task status changed (including drag between columns)
+    properties:
+      project:
+        type: string
+      from_status:
+        type: string
+      to_status:
+        type: string
+    pii: false
+
+  - name: task.delete
+    type: interaction
+    triggered_by: client — DELETE /api/projects/{key}/tasks/{id} (success)
+    description: User deletes a task
+    properties:
+      project:
+        type: string
+    pii: false
+
+  - name: theme.change
+    type: interaction
+    triggered_by: client — theme dropdown selection
+    description: User switches the active theme
+    properties:
+      from_theme:
+        type: string
+        nullable: true
+      to_theme:
+        type: string
+    pii: false
+
+  - name: lang.change
+    type: interaction
+    triggered_by: client — language toggle
+    description: User switches the interface language
+    properties:
+      from_lang:
+        type: string
+        nullable: true
+      to_lang:
+        type: string
+    pii: false
+
+  - name: universe.clone
+    type: interaction
+    triggered_by: client — POST /api/v1/universes/{slug}/clone (success)
+    description: Anonymous user auto-clones the template universe on first load
+    properties:
+      source_slug:
+        type: string
+        description: Template universe key that was cloned
+    pii: false
+
+  - name: universe.claim
+    type: interaction
+    triggered_by: client — POST /api/v1/universes/{slug}/claim (success)
+    description: Authenticated user claims their anonymous universe clone
+    pii: false
+
+  - name: auth.login_start
+    type: interaction
+    triggered_by: client — email login form submit
+    description: User initiates email login (code request sent)
+    pii: false
+
+  - name: auth.login_success
+    type: interaction
+    triggered_by: client — POST /api/v1/auth/verify (success)
+    description: User successfully logs in
+    pii: false
+
+  - name: entry.limit_reached
+    type: interaction
+    triggered_by: client — 403 response on entry create for anonymous user
+    description: Anonymous user hits the 100-entry limit and sees the upgrade modal
+    properties:
+      count:
+        type: integer
+        nullable: true
+        description: Current entry count at time of limit
+    pii: false
