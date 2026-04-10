@@ -358,6 +358,9 @@ pub struct Universe {
     pub is_public: bool,
     #[serde(default)]
     pub content_count: i64,
+    /// CO-38: if true, anonymous visitors cannot access this universe.
+    #[serde(default)]
+    pub requires_login: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -42,6 +42,8 @@ pub struct UniverseInfo {
     pub content_count: i64,
     pub is_anonymous: bool,
     pub is_template: bool,
+    /// CO-38: signals to the frontend that login is required to use this universe.
+    pub requires_login: bool,
 }
 
 fn lock_storage(
@@ -284,6 +286,16 @@ pub async fn get_universe_info(
         }
     }
 
+    // CO-38: login gate — universes with requires_login=true block anonymous access.
+    if universe.requires_login {
+        let caller_id = extract_optional_user_id(&headers, &state);
+        if caller_id.is_none() {
+            return Err(AppError::Unauthorized(
+                "Login required to access this universe".into(),
+            ));
+        }
+    }
+
     Ok(Json(UniverseInfo {
         key: universe.key,
         name: universe.name,
@@ -291,6 +303,7 @@ pub async fn get_universe_info(
         content_count: universe.content_count,
         is_anonymous: universe.owner_id.starts_with("anon-"),
         is_template: universe.is_template,
+        requires_login: universe.requires_login,
     }))
 }
 

@@ -162,6 +162,28 @@ pub struct FieldError {
     pub message: String,
 }
 
+/// Entry in the global leaderboard (sum of high scores across all games).
+#[derive(Serialize, Deserialize)]
+pub struct GlobalLeaderboardEntry {
+    pub rank: u32,
+    pub user_id: String,
+    pub display_name: String,
+    pub username: String,
+    pub total_score: i64,
+    pub games_played: u64,
+}
+
+/// A single recent-activity event in the Yggdrasil feed.
+#[derive(Serialize, Deserialize)]
+pub struct RecentActivityEntry {
+    pub user_id: String,
+    pub display_name: String,
+    pub username: String,
+    pub game_name: String,
+    pub score: i64,
+    pub played_at: i64,
+}
+
 // ---- Internal structures stored as JSON in redb ----
 
 #[derive(Serialize, Deserialize)]

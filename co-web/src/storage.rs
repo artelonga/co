@@ -485,6 +485,26 @@ impl Storage {
                 )
                 .expect("Failed to run migration v17");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 18 {
+            // CO-38: requires_login flag on universes — gates Yggdrasil and future
+            // login-only universes from anonymous access.
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE universes ADD COLUMN requires_login INTEGER NOT NULL DEFAULT 0;
+                     INSERT INTO schema_version (version) VALUES (18);",
+                )
+                .expect("Failed to run migration v18");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -1742,13 +1762,15 @@ impl Storage {
             is_template: false,
             is_public: false,
             content_count: 0,
+            requires_login: false,
         })
     }
 
     pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
         self.conn
             .query_row(
-                "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count \
+                "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
+                 COALESCE(requires_login, 0) \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -1761,6 +1783,7 @@ impl Storage {
                         is_template: row.get::<_, i64>(5)? != 0,
                         is_public: row.get::<_, i64>(6)? != 0,
                         content_count: row.get::<_, i64>(7).unwrap_or(0),
+                        requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                     })
                 },
             )
@@ -1788,6 +1811,7 @@ impl Storage {
                 is_template: row.get::<_, i64>(5)? != 0,
                 is_public: row.get::<_, i64>(6)? != 0,
                 content_count: row.get::<_, i64>(7).unwrap_or(0),
+                requires_login: false,
             })
         })
         .expect("Failed to list universes for user")
@@ -2723,6 +2747,34 @@ impl Storage {
         }
     }
 
+    // --- Yggdrasil universe (CO-38) ---
+
+    /// Returns true if the yggdrasil universe already exists.
+    pub fn yggdrasil_universe_exists(&self) -> bool {
+        self.get_universe("yggdrasil").is_some()
+    }
+
+    /// Seed the `yggdrasil` special universe — the minigames hub (CO-38).
+    ///
+    /// `is_public=1`, `requires_login=1`, `owner='system'`, Relic Dark theme,
+    /// layout='gaming'. Safe to call multiple times — idempotent via INSERT OR IGNORE.
+    pub fn seed_yggdrasil_universe(&mut self) {
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public, \
+              requires_login, theme_preset, layout, font_headline, font_body, content_count) \
+             VALUES ('yggdrasil', 'Yggdrasil', \
+             'Hub de minijogos — perfis de jogadores e rankings globais', \
+             'system', ?1, 0, 1, 1, 'relic', 'gaming', \
+             'Newsreader', 'Manrope', 0)",
+            params![now_str],
+        );
+        tracing::info!("Yggdrasil universe seeded (key=yggdrasil, requires_login=true)");
+    }
+
     /// Returns true if the given project belongs to a template universe.
     pub fn is_project_in_template(&self, project_key: &str) -> bool {
         let universe_key = match self.get_project_universe_key(project_key) {
@@ -2926,6 +2978,7 @@ impl Storage {
             is_template: false,
             is_public: false,
             content_count: cloned_entries,
+            requires_login: false,
         })
     }
 

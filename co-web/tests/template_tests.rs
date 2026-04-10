@@ -291,3 +291,98 @@ async fn test_template_exists_prevents_double_seed() {
     let projects = storage.list_projects_for_universe("template");
     assert_eq!(projects.len(), 1);
 }
+
+// --- CO-38: Yggdrasil universe ---
+
+#[tokio::test]
+async fn test_yggdrasil_seed_and_requires_login() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+    assert!(
+        !storage.yggdrasil_universe_exists(),
+        "yggdrasil should not exist before seed"
+    );
+    storage.seed_yggdrasil_universe();
+    assert!(
+        storage.yggdrasil_universe_exists(),
+        "yggdrasil should exist after seed"
+    );
+
+    let u = storage.get_universe("yggdrasil").expect("yggdrasil not found");
+    assert!(u.requires_login, "yggdrasil must require login");
+    assert!(u.is_public, "yggdrasil must be public");
+    assert!(!u.is_template, "yggdrasil must not be a template");
+    assert_eq!(u.owner_id, "system");
+
+    // Seed is idempotent
+    storage.seed_yggdrasil_universe();
+    assert!(storage.yggdrasil_universe_exists());
+}
+
+/// CO-38: anonymous access to a requires_login universe returns 401.
+#[tokio::test]
+async fn test_yggdrasil_requires_login_returns_401() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+    storage.seed_yggdrasil_universe();
+    let app = build_template_app(dir.path());
+
+    // Anonymous request (no auth header) — should get 401
+    let req = Request::builder()
+        .uri("/api/v1/universes/yggdrasil")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "anonymous access to yggdrasil must return 401"
+    );
+}
+
+/// CO-38: authenticated access to yggdrasil succeeds.
+#[tokio::test]
+async fn test_yggdrasil_authenticated_access_ok() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+    storage.seed_yggdrasil_universe();
+    let app = build_template_app(dir.path());
+
+    let req = Request::builder()
+        .uri("/api/v1/universes/yggdrasil")
+        .header(header::AUTHORIZATION, test_bearer())
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "authenticated access to yggdrasil should succeed"
+    );
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(info["key"], "yggdrasil");
+    assert_eq!(info["requires_login"], true);
+}
+
+/// CO-38: non-yggdrasil public universes (template) remain accessible without login.
+#[tokio::test]
+async fn test_template_still_accessible_without_login() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+    storage.seed_template_universe();
+    storage.seed_yggdrasil_universe();
+    let app = build_template_app(dir.path());
+
+    let req = Request::builder()
+        .uri("/api/v1/universes/template")
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "template universe must still be accessible anonymously"
+    );
+}

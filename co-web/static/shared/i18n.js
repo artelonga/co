@@ -32,7 +32,7 @@
             'universe.limit': 'Limite atingido',
             'universe.limit_msg': 'Você atingiu {n} entradas. Crie uma conta gratuita para continuar.',
             'universe.settings': 'Configurações do universo',
-            'universe.template_title': 'CO — Gestão de conteúdo em grafo',
+            'universe.template_title': 'Co — Cocriar, Colaborar, Conectar',
             'universe.template_sub': 'Quadro demonstrativo — leitura apenas. Clone para começar o seu.',
             'universe.template_tagline': 'Gestão de conteúdo em grafo — livre e aberto',
             'universe.readonly_tooltip': 'Crie seu universo para editar',
@@ -53,6 +53,8 @@
             projects: 'Projetos',
             select_project: 'Selecione um projeto',
             select_project_hint: 'Selecione um projeto na barra lateral',
+            'universe.local_hint': 'Experimente abaixo — crie uma conta para salvar e colaborar',
+            'action.register': 'Criar conta',
             sign_out: 'Sair',
             kanban: 'Kanban',
             table: 'Tabela',
@@ -67,6 +69,10 @@
             archived: 'Arquivados',
             filter_tasks: 'Filtrar tarefas... (/)',
             new_task: '+ Nova Tarefa',
+            add_subtask: '+ Subtarefa',
+            unarchive: 'Desarquivar',
+            back: 'Voltar',
+            saved: 'Salvo',
             loading: 'Carregando...',
             activity: 'Atividade',
             new_task_title: 'Nova Tarefa',
@@ -105,6 +111,17 @@
             login_error: 'Não foi possível conectar. Tente novamente.',
             settings: 'Configurações do universo',
             board_layout: 'Quadro (Kanban)',
+            // CO-38: Yggdrasil
+            'ygg.title': 'Yggdrasil',
+            'ygg.subtitle': 'Hub de minijogos — perfis e rankings',
+            'ygg.login_required': 'Faça login para jogar',
+            'ygg.login_cta': 'Crie uma conta gratuita para acessar o hub de minijogos, perfis de jogadores e rankings globais.',
+            'ygg.play': 'JOGAR',
+            'ygg.best': 'Melhor',
+            'ygg.global_rank': 'Ranking Global',
+            'ygg.recent': 'Atividade Recente',
+            'ygg.games': 'Jogos',
+            'ygg.back': 'Yggdrasil',
         },
         en: {
             // Spec-defined dot-notation keys
@@ -133,7 +150,7 @@
             'universe.limit': 'Limit reached',
             'universe.limit_msg': 'You\'ve reached {n} entries. Create a free account to continue.',
             'universe.settings': 'Universe settings',
-            'universe.template_title': 'CO — Graph-based content management',
+            'universe.template_title': 'Co — Cocreate, Collaborate, Connect',
             'universe.template_sub': 'Demo board — read only. Clone to start your own.',
             'universe.template_tagline': 'Graph-based content management — free and open',
             'universe.readonly_tooltip': 'Create your universe to edit',
@@ -154,6 +171,8 @@
             projects: 'Projects',
             select_project: 'Select a project',
             select_project_hint: 'Select a project from the sidebar',
+            'universe.local_hint': 'Try it below — create an account to save and collaborate',
+            'action.register': 'Create account',
             sign_out: 'Sign out',
             kanban: 'Kanban',
             table: 'Table',
@@ -168,6 +187,10 @@
             archived: 'Archived',
             filter_tasks: 'Filter tasks... (/)',
             new_task: '+ New Task',
+            add_subtask: '+ Subtask',
+            unarchive: 'Unarchive',
+            back: 'Back',
+            saved: 'Saved',
             loading: 'Loading...',
             activity: 'Activity',
             new_task_title: 'New Task',
@@ -251,8 +274,7 @@
     if (cookieLang === 'pt' || cookieLang === 'en') {
         _lang = cookieLang;
     } else {
-        var navLang = (navigator.language || 'pt');
-        _lang = navLang.toLowerCase().indexOf('pt') === 0 ? 'pt' : 'en';
+        _lang = 'pt'; // default to Portuguese
         setCookie('co_lang', _lang);
     }
     document.documentElement.lang = _lang === 'pt' ? 'pt-BR' : 'en';

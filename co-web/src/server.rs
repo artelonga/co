@@ -231,6 +231,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(game_routes::get_leaderboard),
         )
         .route(
+            "/v1/games/leaderboard/global",
+            get(game_routes::get_global_leaderboard),
+        )
+        .route("/v1/games/recent", get(game_routes::get_recent_activity))
+        .route(
             "/v1/players/{username}",
             get(game_routes::get_player_profile),
         );
@@ -312,7 +317,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/co/co-dev/telemetria",
             get(crate::telemetry::serve_admin_dashboard),
         )
-        .route("/co/{slug}", get(serve_co_index));
+        .route("/co/{slug}", get(serve_co_index))
+        // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
+        .route("/co/yggdrasil/{game}", get(serve_co_index));
 
     let mut router = Router::new()
         .merge(ws_route)
@@ -457,6 +464,10 @@ fn uat_startup(config: &WebConfig) {
         if !storage.template_exists() {
             storage.seed_template_universe();
         }
+        // Re-seed Yggdrasil.
+        if !storage.yggdrasil_universe_exists() {
+            storage.seed_yggdrasil_universe();
+        }
 
         drop(storage);
 
@@ -542,6 +553,11 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("Seeding quilomboaraucaria universe...");
             storage.seed_quilombo_universe();
             tracing::info!("quilomboaraucaria universe seeded (public, quilombo theme)");
+        }
+        // CO-38: seed Yggdrasil minigames hub once on first boot.
+        if !storage.yggdrasil_universe_exists() {
+            tracing::info!("Seeding Yggdrasil universe...");
+            storage.seed_yggdrasil_universe();
         }
     }
 
