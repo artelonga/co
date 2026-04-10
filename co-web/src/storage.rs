@@ -2473,7 +2473,26 @@ impl Storage {
              | `co_named_palette` | Tema visual | 1 ano |\n\
              | `co_local_universe` | Universo anônimo local | Sessão |\n\n\
              Não utilizamos cookies de rastreamento, analytics de terceiros ou publicidade.\n\n\
-             ## 5. Seus direitos (LGPD)\n\n\
+             ## 5. Telemetria e Análise\n\n\
+             Para melhorar a Plataforma e identificar problemas, coletamos dados de uso \
+             agregados e anonimizados. **Nenhum dado pessoal é coletado sem seu consentimento.**\n\n\
+             ### Dados coletados (anônimos)\n\
+             - Páginas visitadas e tempo de permanência\n\
+             - Cliques em botões e ações principais (criar tarefa, mudar tema, etc.)\n\
+             - Erros encontrados (para debug)\n\
+             - Performance da aplicação\n\
+             - Tipo de dispositivo (desktop/mobile/tablet) e navegador\n\n\
+             ### Dados anonimizados\n\
+             - Endereço IP é convertido em hash diário (impossível reverter)\n\
+             - Identificador de visitante é aleatório, sem ligação com identidade real\n\n\
+             ### Lista completa\n\
+             Para transparência total, mantemos uma lista exaustiva de tudo que rastreamos:\n\n\
+             → [Lista completa de dados rastreados](/co/template?path=content/dados-rastreados.md)\n\n\
+             ### Como desativar\n\
+             - Habilite \"Do Not Track\" no seu navegador (respeitamos automaticamente)\n\
+             - Recuse cookies no banner (telemetria não é ativada)\n\
+             - Logged-in users: opt-out em Configurações → Privacidade\n\n\
+             ## 6. Seus direitos (LGPD)\n\n\
              Conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018), você tem direito a:\n\
              - Acessar seus dados pessoais\n\
              - Corrigir dados incompletos ou inexatos\n\
@@ -2481,16 +2500,16 @@ impl Storage {
              - Exportar seu conteúdo (Markdown nativo, exportável a qualquer momento)\n\
              - Revogar consentimento\n\n\
              Para exercer esses direitos, entre em contato: yuri@artelonga.com.br\n\n\
-             ## 6. Retenção\n\n\
+             ## 7. Retenção\n\n\
              - Dados de conta são mantidos enquanto a conta estiver ativa\n\
              - Universos anônimos (sem conta) podem ser removidos após 90 dias de inatividade\n\
              - Após exclusão de conta, dados são removidos em até 30 dias\n\n\
-             ## 7. Segurança\n\n\
+             ## 8. Segurança\n\n\
              - Senhas são armazenadas com hash Argon2\n\
              - Comunicação via HTTPS (TLS)\n\
              - Tokens JWT com expiração\n\
              - Banco de dados criptografado em repouso\n\n\
-             ## 8. Contato\n\n\
+             ## 9. Contato\n\n\
              Controlador: Yuri — yuri@artelonga.com.br\n\n\
              ---\n\n\
              *Arte Longa — Curitiba, PR, Brasil*",
@@ -2500,6 +2519,109 @@ impl Storage {
         }
         if let Err(e) = upsert_entry_row(&self.conn, "template", &privacidade_page) {
             tracing::warn!("Failed to upsert privacidade page: {e}");
+        }
+
+        let dados_rastreados_page = make_entry(
+            "content/dados-rastreados.md",
+            json!({
+                "type": "page",
+                "slug": "dados-rastreados",
+                "title": "Lista completa de dados rastreados",
+                "order": 12,
+                "tags": ["legal"],
+                "created": now_str,
+                "modified": now_str
+            }),
+            "# Lista completa de dados rastreados\n\n\
+             Última atualização: abril de 2026\n\n\
+             Esta página lista TODOS os dados que o Co coleta. Nada além disso é armazenado.\n\n\
+             ## 1. Navegação\n\n\
+             | Campo | Descrição | Anônimo? |\n\
+             |-------|-----------|----------|\n\
+             | `path` | URL visitada | Sim |\n\
+             | `referrer` | Página de origem | Sim |\n\
+             | `universe_key` | Slug do universo | Sim |\n\
+             | `view_mode` | Kanban, tabela, etc. | Sim |\n\
+             | `theme` | Tema ativo | Sim |\n\
+             | `language` | Idioma da interface | Sim |\n\
+             | `duration_ms` | Tempo na página | Sim |\n\n\
+             ## 2. Interações\n\n\
+             | Evento | Quando | Dados |\n\
+             |--------|--------|-------|\n\
+             | `task.create` | Criar tarefa | universe, project, status |\n\
+             | `task.update` | Editar tarefa | universe, project, campo alterado |\n\
+             | `task.delete` | Deletar tarefa | universe, project |\n\
+             | `task.drag` | Mover entre colunas | de_status, para_status |\n\
+             | `theme.change` | Mudar tema | de_tema, para_tema |\n\
+             | `lang.switch` | Mudar idioma | de_lang, para_lang |\n\
+             | `universe.create` | Criar universo | universe (slug) |\n\
+             | `universe.clone` | Clonar template | source, new |\n\
+             | `auth.login` | Login (sucesso/falha) | timestamp, sucesso |\n\
+             | `auth.logout` | Logout | timestamp |\n\
+             | `modal.open` | Abrir modal | nome do modal |\n\
+             | `search.query` | Buscar | hash do termo (não o termo) |\n\n\
+             ## 3. Performance\n\n\
+             | Métrica | Descrição |\n\
+             |---------|----------|\n\
+             | `page_load_ms` | Tempo de carregamento |\n\
+             | `time_to_interactive_ms` | Tempo até interativo |\n\
+             | `api_call_duration_ms` | Latência de cada API |\n\
+             | `ws_connect` | Conexão WebSocket |\n\
+             | `cache_hit` | Cache HIT/MISS |\n\n\
+             ## 4. Erros\n\n\
+             | Campo | Descrição |\n\
+             |-------|----------|\n\
+             | `error_type` | Tipo (4xx, 5xx, JS exception) |\n\
+             | `error_path` | URL onde aconteceu |\n\
+             | `error_message` | Mensagem (sem dados pessoais) |\n\
+             | `stack_trace` | Stack trace (anonimizado) |\n\n\
+             ## 5. Identificação anônima\n\n\
+             | Campo | Descrição | Como é gerado |\n\
+             |-------|-----------|---------------|\n\
+             | `visitor_token` | Identificador único do visitante | nanoid aleatório, salvo em cookie |\n\
+             | `session_id` | ID da sessão atual | Aleatório, expira em 30min |\n\
+             | `ip_hash` | Hash do IP | SHA256(IP + sal_diário) |\n\
+             | `ua_device` | Categoria de dispositivo | desktop/mobile/tablet |\n\
+             | `ua_browser` | Navegador | chrome/firefox/safari/etc |\n\
+             | `ua_os` | Sistema operacional | windows/macos/linux/ios/android |\n\n\
+             ## 6. Dados de conta (apenas para usuários logados)\n\n\
+             | Campo | Quando |\n\
+             |-------|--------|\n\
+             | `user_id` | Sempre que logado |\n\
+             | `email` | Apenas no login (autenticação) |\n\
+             | `display_name` | No registro |\n\
+             | `created_at` | Data de criação da conta |\n\
+             | `last_login_at` | Última sessão |\n\n\
+             ## 7. O que NÃO rastreamos\n\n\
+             - ❌ Endereço IP bruto (apenas hash diário)\n\
+             - ❌ Senhas (apenas hash Argon2)\n\
+             - ❌ Conteúdo de tarefas/notas (apenas metadados de criação)\n\
+             - ❌ Cookies de terceiros\n\
+             - ❌ Pixels de publicidade\n\
+             - ❌ Fingerprinting de navegador\n\
+             - ❌ Dados biométricos\n\
+             - ❌ Localização precisa\n\
+             - ❌ Histórico fora do Co\n\
+             - ❌ Identificadores de outras plataformas\n\n\
+             ## Retenção\n\n\
+             - Eventos detalhados: **90 dias**\n\
+             - Agregados anônimos: **mantidos indefinidamente**\n\
+             - Dados de conta: enquanto a conta estiver ativa\n\
+             - Após exclusão: 30 dias para remoção completa\n\n\
+             ## Seus direitos (LGPD)\n\n\
+             Você pode a qualquer momento:\n\
+             - Solicitar uma cópia dos seus dados: yuri@artelonga.com.br\n\
+             - Pedir exclusão completa\n\
+             - Desativar telemetria (cookie consent)\n\
+             - Exportar todo seu conteúdo (Markdown nativo)\n\n\
+             ---\n\n\
+             *Este documento é exaustivo. Se encontrarmos algo não listado, atualizamos imediatamente.*",
+        );
+        if let Err(e) = co::entry::write_entry(&universe_root, &dados_rastreados_page) {
+            tracing::warn!("Failed to write dados-rastreados page file: {e}");
+        }
+        if let Err(e) = upsert_entry_row(&self.conn, "template", &dados_rastreados_page) {
+            tracing::warn!("Failed to upsert dados-rastreados page: {e}");
         }
     }
 
