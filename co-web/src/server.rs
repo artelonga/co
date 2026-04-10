@@ -296,6 +296,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Entry abstraction API (CO-36) ---
     let entry_api = crate::entry_routes::router();
 
+    // --- CO-43: Hidden dev board (admin only) ---
+    let dev_board_api = crate::dev_board::router();
+
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
 
@@ -335,6 +338,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::quilombo_telemetria::canonical_host_middleware,
         ))
         .nest("/api/v1/gestao", gestao_api)
+        // CO-43: dev board routes use literal /co-dev prefix — take priority over /{slug} routes
+        .nest("/api/v1/universes", dev_board_api)
         .nest("/api/v1/universes", universe_api)
         .nest("/api/v1/universes", vault_api)
         .nest("/api/v1/universes", entry_api)

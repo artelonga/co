@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod baseline;
 pub mod config;
+pub mod dev_board;
 pub mod entry_index;
 pub mod entry_routes;
 pub mod error;
