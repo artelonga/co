@@ -28,3 +28,9 @@ playwright/.cache/
 
 # Parallel execution worktrees
 .worktrees/
+
+# Runtime content (cloned at boot, NOT committed)
+co-web/seed-co/
+co-web/data/
+quilombo/
+data/

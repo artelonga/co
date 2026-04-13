@@ -55,9 +55,8 @@ WORKDIR /app
 
 COPY --from=builder /usr/src/co/target/release/co-web /app/co-web
 
-# CO-44: UAT seed data — CO task files for the co-dev board.
-# Only exists if co-web/seed-co/ is present in the build context (optional).
-COPY co-web/seed-co/ /app/seed-co/
+# Content repos are cloned at runtime (CO-50), NOT bundled in image.
+# The server clones from GitHub on first boot into /data/repos/.
 
 VOLUME /data
 
