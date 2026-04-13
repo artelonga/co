@@ -1,10 +1,10 @@
 (function () {
     'use strict';
 
-    // Theme tier data fetched from /api/v1/themes/available at init.
-    // Defaults to the free tier so UI is correct before the fetch completes.
+    // All themes available to everyone — no tier gating.
     let availableThemes = {
-        palettes: ['scholarly', 'scholarly-dark', 'relic', 'relic-light'],
+        palettes: ['', 'scholarly', 'scholarly-dark', 'relic', 'relic-light',
+                   'medieval', 'steampunk', 'cyberpunk', 'matrix', 'garden', 'terminal', 'retro'],
         variants: [],
         custom: null,
     };
@@ -45,6 +45,13 @@
         { key: 'scholarly-dark',name: 'Scholarly · Dark',  bg: '#1c1610', accent: '#CD7F32' },
         { key: 'relic',         name: 'Relic · Dark',      bg: '#131313', accent: '#e0505f' },
         { key: 'relic-light',   name: 'Relic · Light',     bg: '#F5F0F0', accent: '#af2b3e' },
+        { key: 'medieval',      name: 'Medieval',          bg: '#F5E6D3', accent: '#8B4513' },
+        { key: 'steampunk',     name: 'Steampunk',         bg: '#18191b', accent: '#7b8fa0' },
+        { key: 'cyberpunk',     name: 'Cyberpunk',         bg: '#0d0221', accent: '#ff2a6d' },
+        { key: 'matrix',        name: 'Matrix',            bg: '#000000', accent: '#00ff41' },
+        { key: 'garden',        name: 'Garden',            bg: '#f0f5e8', accent: '#4caf50' },
+        { key: 'terminal',      name: 'Terminal',          bg: '#000000', accent: '#ffffff' },
+        { key: 'retro',         name: 'Retro Arcade',      bg: '#1c1c1c', accent: '#d4a24c' },
     ];
 
     let currentNamedPalette = '';
@@ -53,12 +60,20 @@
         const saved = localStorage.getItem('co_named_palette') || '';
         currentNamedPalette = saved;
         document.documentElement.setAttribute('data-palette', saved);
+        // If user chose a palette, remove server theme CSS so their choice wins
+        if (saved) {
+            const themeLink = document.getElementById('co-theme-css');
+            if (themeLink) themeLink.remove();
+        }
     }
 
     function applyNamedPalette(key) {
         currentNamedPalette = key;
         localStorage.setItem('co_named_palette', key);
         document.documentElement.setAttribute('data-palette', key);
+        // Remove server theme CSS so the user's palette choice takes full effect
+        const themeLink = document.getElementById('co-theme-css');
+        if (themeLink) themeLink.remove();
         renderHeaderSwitcher();
     }
 
@@ -214,6 +229,7 @@
         });
 
         dropdown.addEventListener('click', (e) => e.stopPropagation());
+
     }
 
     // --- Init ---
@@ -228,13 +244,7 @@
             if (match) currentVariant = match[1];
         }
 
-        // Fetch theme tier — determines which palettes, variants, and editors are shown
-        try {
-            const res = await fetch('/api/v1/themes/available');
-            if (res.ok) {
-                availableThemes = await res.json();
-            }
-        } catch (_) { /* keep free-tier defaults */ }
+        // All themes available to everyone — no tier fetch needed
 
         loadNamedPalette();
         loadPalette();
@@ -244,26 +254,9 @@
 
     // --- Render ---
     function renderWidget() {
-        const hasVariants = availableThemes.variants.length > 0;
-        const hasCustomPalette = !!availableThemes.custom;
-
-        // Pill — hide variant switch and palette editor for anonymous users
-        const pill = document.createElement('div');
-        pill.className = 'experiment-pill';
-        pill.innerHTML = `
-            <span class="experiment-pill-variant">Variant ${currentVariant.toUpperCase()}</span>
-            ${hasVariants ? `
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-switch">Switch</button>
-            ` : ''}
-            ${hasCustomPalette ? `
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-palette">Palette</button>
-            ` : ''}
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-feedback">Feedback</button>
-        `;
-        document.body.appendChild(pill);
+        // No bottom pill — the header palette switcher handles theme selection.
+        // Variant switch and feedback are removed from the public MVP.
+        return;
 
         // Variant dropdown — only rendered for logged-in users
         if (hasVariants) {

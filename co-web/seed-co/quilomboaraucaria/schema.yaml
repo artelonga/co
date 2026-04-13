@@ -1,0 +1,59 @@
+name: quilombo
+version: 1
+content_types:
+  - relato
+  - evento
+  - missao
+  - membro
+  - pagina
+properties:
+  titulo:
+    kind: text
+    required: true
+  descricao:
+    kind: text
+  slug:
+    kind: text
+  tags:
+    kind: list
+  autor:
+    kind: text
+  publicado:
+    kind: checkbox
+  data:
+    kind: date
+  hora:
+    kind: text
+  local:
+    kind: text
+  objetivo:
+    kind: text
+  status:
+    kind: text
+  prioridade:
+    kind: text
+  prazo:
+    kind: date
+  nome:
+    kind: text
+  papel:
+    kind: text
+  bio:
+    kind: text
+  foto_url:
+    kind: link
+  fotos:
+    kind: list
+  arquivo:
+    kind: text
+    required: true
+  legenda:
+    kind: text
+  credito:
+    kind: text
+  destaque:
+    kind: checkbox
+  etiquetas:
+    kind: list
+  criado:
+    kind: date

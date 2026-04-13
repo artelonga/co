@@ -11,6 +11,7 @@
         searchQuery: '',
         loading: false,
         showArchived: false,
+        userUniverses: [],
         // Calendar
         calendarDate: new Date(),
         // Table
@@ -340,6 +341,11 @@
         state.universeConfig = config;
         const slug = state.currentUniverseSlug;
 
+        // Clear any user palette override so universe theme takes effect.
+        // User can manually switch via the palette dropdown afterward.
+        localStorage.removeItem('co_named_palette');
+        document.documentElement.removeAttribute('data-palette');
+
         // 1. CO-30: Load generated theme.css from the server (hot-swap on change).
         if (slug) loadThemeCss(slug);
 
@@ -499,6 +505,19 @@
             await apiFetch('/api/v1/auth/logout', { method: 'POST' }, true);
         },
         async loginWithPassword(usuario, senha) {
+            // If it looks like an email, try UAT login first (CO-44)
+            if (usuario.includes('@')) {
+                const uatResp = await apiFetch('/api/v1/auth/uat-login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: usuario, password: senha }),
+                }, true);
+                if (uatResp && uatResp.user_id) {
+                    // Normalize response shape to match quilombo login
+                    return { usuario: uatResp.display_name || uatResp.email, ...uatResp };
+                }
+            }
+            // Fallback: quilombo legacy username/password login
             return apiFetch('/api/v1/quilombo/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -571,40 +590,8 @@
     let _cloning = false;
     async function ensureOwnUniverse() {
         if (!state.isTemplate) return true; // already on own universe
-        if (_cloning) return false; // prevent double-clone
-
-        // Check if we already have a cached clone
-        const cached = localStorage.getItem('co_local_universe');
-        if (cached) {
-            // Verify it still exists
-            const info = await api.getUniverseInfo(cached);
-            if (info) {
-                state.currentUniverseSlug = cached;
-                state.isTemplate = false;
-                setUniverseSlugInUrl(cached);
-                hideTemplateBanner();
-                await bootAppForUniverse(cached);
-                return true;
-            }
-            localStorage.removeItem('co_local_universe');
-        }
-
-        // Clone template silently
-        _cloning = true;
-        const rnd = Math.random().toString(36).slice(2, 8);
-        const slug = `u-${rnd}`;
-        const result = await api.cloneUniverse('template', { name: 'Meu CO', key: slug, description: '' });
-        _cloning = false;
-
-        if (result) {
-            localStorage.setItem('co_local_universe', result.key);
-            state.currentUniverseSlug = result.key;
-            state.isTemplate = false;
-            setUniverseSlugInUrl(result.key);
-            hideTemplateBanner();
-            await bootAppForUniverse(result.key);
-            return true;
-        }
+        // Template is read-only — prompt login to create own community
+        showLoginModal();
         return false;
     }
 
@@ -852,7 +839,23 @@
     // ===== Render: Sidebar =====
     function renderSidebar() {
         const list = $('#project-list');
-        list.innerHTML = state.projects.map(p => {
+
+        // Universe switcher (visible when logged in with multiple universes)
+        let universeHtml = '';
+        if (state.userUniverses && state.userUniverses.length > 1) {
+            universeHtml = `<div class="sidebar-universes">
+                <div class="sidebar-universe-label">${window.t ? window.t('universes') : 'Universos'}</div>
+                ${state.userUniverses.map(u => {
+                    const active = u.key === state.currentUniverseSlug ? ' active' : '';
+                    return `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${u.key}">
+                        <span class="sidebar-item-name">${esc(u.name || u.key)}</span>
+                    </div>`;
+                }).join('')}
+                <hr class="sidebar-divider">
+            </div>`;
+        }
+
+        list.innerHTML = universeHtml + state.projects.map(p => {
             const active = state.currentProject?.key === p.key ? ' active' : '';
             return `
                 <div class="sidebar-item${active}" data-key="${p.key}">
@@ -861,8 +864,56 @@
                 </div>`;
         }).join('');
 
-        list.querySelectorAll('.sidebar-item').forEach(el => {
-            el.addEventListener('click', () => selectProject(el.dataset.key));
+        // Universe switching (click) + rename (double-click)
+        list.querySelectorAll('.sidebar-universe-item').forEach(el => {
+            el.addEventListener('click', async () => {
+                const slug = el.dataset.universe;
+                if (slug === state.currentUniverseSlug) return;
+                setUniverseSlugInUrl(slug);
+                state.currentUniverseSlug = slug;
+                state.isTemplate = false;
+                hideTemplateBanner();
+                await bootAppForUniverse(slug);
+            });
+            el.addEventListener('dblclick', (e) => {
+                e.stopPropagation();
+                const slug = el.dataset.universe;
+                const nameSpan = el.querySelector('.sidebar-item-name');
+                const oldName = nameSpan.textContent;
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.value = oldName;
+                input.className = 'sidebar-rename-input';
+                nameSpan.replaceWith(input);
+                input.focus();
+                input.select();
+                const save = async () => {
+                    const newName = input.value.trim() || oldName;
+                    const span = document.createElement('span');
+                    span.className = 'sidebar-item-name';
+                    span.textContent = newName;
+                    input.replaceWith(span);
+                    if (newName !== oldName) {
+                        await apiFetch(`/api/v1/universes/${slug}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ name: newName }),
+                        }, true);
+                        const u = state.userUniverses.find(u => u.key === slug);
+                        if (u) u.name = newName;
+                    }
+                };
+                input.addEventListener('blur', save);
+                input.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter') input.blur();
+                    if (e.key === 'Escape') { input.value = oldName; input.blur(); }
+                });
+            });
+        });
+
+        // Project selection
+        list.querySelectorAll('.sidebar-item:not(.sidebar-universe-item)').forEach(el => {
+            if (el.dataset.key) el.addEventListener('click', () => selectProject(el.dataset.key));
         });
     }
 
@@ -2441,14 +2492,16 @@
             } catch (_) { return defaultOpen; }
         }
 
-        function sectionHtml(key, label, count, bodyHtml, defaultOpen, tooltip) {
+        function sectionHtml(key, label, count, bodyHtml, defaultOpen, tooltip, actionBtn) {
             const open = sectionOpen(key, defaultOpen);
             const tooltipAttr = tooltip ? ` title="${esc(tooltip)}"` : '';
+            const actionHtml = actionBtn || '';
             return `<div class="co-section" data-section="${esc(key)}">
                 <div class="co-section-header" data-section-toggle${tooltipAttr}>
                     <span class="co-section-chevron ${open ? 'open' : 'closed'}">▼</span>
                     <span class="co-section-title">${esc(label)}</span>
                     <span class="co-section-count">${count}</span>
+                    ${actionHtml}
                 </div>
                 <div class="co-section-body${open ? '' : ' collapsed'}">${bodyHtml}</div>
             </div>`;
@@ -2554,8 +2607,12 @@
               }).join('')
             : '<p class="conteudo-empty">Nenhum clipe</p>';
 
+        const addContentBtn = state.isTemplate
+            ? ''
+            : `<button class="btn btn-secondary btn-sm co-add-content" id="btn-add-content" style="margin-left:auto;font-size:12px">+ ${window.t ? window.t('add_content') : 'Adicionar conteúdo'}</button>`;
+
         const sectionsHtml = [
-            sectionHtml('paginas', 'Páginas', pageEntries.length, pagesBodyHtml, true, null),
+            sectionHtml('paginas', 'Páginas', pageEntries.length, pagesBodyHtml, true, null, addContentBtn),
             sectionHtml('tarefas', 'Tarefas', taskEntries.length, tasksBodyHtml, false, 'Redundante ao Kanban'),
             sectionHtml('eventos', 'Próximos Eventos', upcomingEvents.length, eventsBodyHtml, false, null),
             clipEntries.length ? sectionHtml('clipes', 'Clipes', clipEntries.length, clipsBodyHtml, false, null) : '',
@@ -2626,6 +2683,40 @@
 
         // Store page entries for click handlers
         content._pageEntries = pageEntries;
+
+        // "Add Content" button → create new page and open editor
+        const addBtn = document.getElementById('btn-add-content');
+        if (addBtn) {
+            addBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                if (state.isTemplate) { showLoginModal(); return; }
+
+                const title = prompt(window.t ? window.t('new_page_title') : 'Título da nova página:');
+                if (!title || !title.trim()) return;
+
+                const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 60);
+                const path = `content/${slug}.md`;
+                const slug2 = state.currentUniverseSlug;
+
+                const result = await apiFetch(`/api/v1/universes/${slug2}/entries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        path: path,
+                        type: 'page',
+                        frontmatter: { type: 'page', title: title.trim(), slug: slug, tags: [], created: new Date().toISOString(), modified: new Date().toISOString() },
+                        body: `# ${title.trim()}\n\n`,
+                    }),
+                }, true);
+
+                if (result) {
+                    // Open the new page in edit mode
+                    openZoomModal({ path, title: title.trim(), body: `# ${title.trim()}\n\n` }, true);
+                } else {
+                    showToast('Erro ao criar página', 'error');
+                }
+            });
+        }
     }
 
     // ===== Zoom Viewer Modal (CO-42) =====
@@ -3603,10 +3694,8 @@
 
     async function refreshTasks() {
         if (state.currentProject) {
-            const opts = {};
-            if (!state.showArchived) {
-                opts.archived = false;
-            }
+            // showArchived checkbox: unchecked → only current, checked → only archived
+            const opts = { archived: state.showArchived };
             state.tasks = await api.getTasks(state.currentProject.key, opts);
             applyLocalTaskOverrides();
         }
@@ -3933,44 +4022,61 @@
 
             if (r && r.usuario) {
                 hideLoginModal();
-                // Claim anonymous universe if we were in one
-                if (state.universeInfo && state.universeInfo.is_anonymous) {
-                    await api.claimUniverse(state.currentUniverseSlug);
-                    if (state.universeInfo) state.universeInfo.is_anonymous = false;
-                    renderUsageCount();
-                }
+                // Clear anonymous local clone reference (disposable)
+                localStorage.removeItem('co_local_universe');
+
                 const me = await api.me();
                 if (me) renderUserBadge(me);
-                // After login: redirect to own universe (create one if needed)
-                if (state.isTemplate) {
-                    const owned = await api.listUniverses();
-                    const mine = owned.filter(u => !u.is_template);
-                    if (mine.length > 0) {
-                        // Has existing universe — go there
-                        const slug = mine[0].key;
-                        setUniverseSlugInUrl(slug);
-                        state.currentUniverseSlug = slug;
-                        state.isTemplate = false;
-                        hideTemplateBanner();
-                        await bootAppForUniverse(slug);
-                        return;
+
+                // Get user's communities — only keep unique ones
+                const owned = await api.listUniverses();
+                const mine = (owned || []).filter(u => !u.is_template);
+                state.userUniverses = mine;
+
+                let targetSlug;
+                // Prefer personal community (owned by this user) over shared ones
+                const userId = me?.user_id || '';
+                const personal = mine.find(u => u.owner_id === userId);
+                if (personal) {
+                    targetSlug = personal.key;
+                } else {
+                    // No personal community yet — create one (even if shared communities exist)
+                    const displayName = r.display_name || r.usuario || me?.display_name || 'Minha comunidade';
+                    const slug = displayName.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'minha-comunidade';
+
+                    // Try creating empty universe
+                    let result = await apiFetch('/api/v1/universes', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: slug, name: displayName, description: '' }),
+                    }, true);
+
+                    // If create failed (auth issue, duplicate slug), try clone as fallback
+                    if (!result) {
+                        const fallbackSlug = slug + '-' + Math.random().toString(36).slice(2, 6);
+                        result = await api.cloneUniverse('template', {
+                            name: displayName,
+                            key: fallbackSlug,
+                            description: '',
+                        });
                     }
-                    // No universe yet — clone template into personal universe
-                    const username = r.usuario || r.display_name || 'meu-co';
-                    const slug = username.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40);
-                    const result = await api.cloneUniverse('template', {
-                        name: username,
-                        key: slug,
-                        description: '',
-                    });
+
                     if (result) {
-                        setUniverseSlugInUrl(result.key);
-                        state.currentUniverseSlug = result.key;
-                        state.isTemplate = false;
-                        hideTemplateBanner();
-                        await bootAppForUniverse(result.key);
-                        return;
+                        targetSlug = result.key;
+                        state.userUniverses.push(result);
                     }
+                }
+
+                if (targetSlug) {
+                    setUniverseSlugInUrl(targetSlug);
+                    state.currentUniverseSlug = targetSlug;
+                    state.isTemplate = false;
+                    hideTemplateBanner();
+                    // Re-fetch full universe list (includes quilombo membership)
+                    const refreshed = await api.listUniverses();
+                    state.userUniverses = (refreshed || []).filter(u => !u.is_template);
+                    await bootAppForUniverse(targetSlug);
+                    return;
                 }
                 await bootApp();
             } else if (r && r.error === 'unauthorized') {
@@ -4734,7 +4840,21 @@
         if (!area) return;
         if (me) {
             const name = me.display_name || me.usuario || me.email || '';
-            area.innerHTML = `<span class="header-user-badge" title="${esc(name)}">${esc(name)}</span>`;
+            area.innerHTML = `
+                <span class="header-user-badge" title="${esc(name)}">${esc(name)}</span>
+                <button class="btn btn-ghost btn-signout" id="btn-signout" title="${window.t ? window.t('sign_out') : 'Sair'}">
+                    <span class="material-symbols-outlined" style="font-size:18px">logout</span>
+                </button>`;
+            document.getElementById('btn-signout').addEventListener('click', async () => {
+                await api.logout();
+                // Clear state
+                state.userUniverses = [];
+                state.currentUniverseSlug = 'template';
+                state.isTemplate = true;
+                localStorage.removeItem('co_local_universe');
+                // Reload to template
+                window.location.href = '/';
+            });
         } else {
             area.innerHTML = `<button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">${window.t ? window.t('action.login') : 'Entrar'}</button>`;
             const btn = document.getElementById('btn-header-entrar');
@@ -4796,57 +4916,27 @@
         }
 
         if (state.isTemplate) {
-            // Every visitor gets their own clone. Check for cached clone first.
-            const cached = localStorage.getItem('co_local_universe');
-            if (cached) {
-                const info = await api.getUniverseInfo(cached);
-                if (info) {
-                    state.currentUniverseSlug = cached;
-                    state.isTemplate = false;
-                    showTemplateBanner();
-                    await bootAppForUniverse(cached);
-                    const me = await api.me();
-                    if (me) { hideLoginModal(); renderUserBadge(me); }
-                    return;
-                }
-                localStorage.removeItem('co_local_universe');
-            }
-
-            // No cached clone — create one silently
-            const rnd = Math.random().toString(36).slice(2, 8);
-            const slug = `u-${rnd}`;
-            const result = await api.cloneUniverse('template', { name: 'Meu CO', key: slug, description: '' });
-            if (result) {
-                localStorage.setItem('co_local_universe', result.key);
-                state.currentUniverseSlug = result.key;
-                state.isTemplate = false;
-                showTemplateBanner();
-                await bootAppForUniverse(result.key);
-                const me = await api.me();
-                if (me) { hideLoginModal(); renderUserBadge(me); }
-                return;
-            }
-
-            // Clone failed — show template read-only as fallback
-            showTemplateBanner();
-            await bootAppForUniverse('template');
-
+            // Anonymous: show template board directly (static, read-only).
+            // No cloning. Logged-in users get redirected to their community.
             const me = await api.me();
             if (me) {
                 hideLoginModal();
                 renderUserBadge(me);
-                // Logged-in user on template — check if they have a universe
+                // Logged-in → go to their community
                 const owned = await api.listUniverses();
-                if (owned && owned.length > 0) {
-                    // Redirect to their universe
-                    const mySlug = owned[0].key;
-                    setUniverseSlugInUrl(mySlug);
-                    state.currentUniverseSlug = mySlug;
+                const mine = (owned || []).filter(u => !u.is_template);
+                state.userUniverses = mine;
+                if (mine.length > 0) {
+                    state.currentUniverseSlug = mine[0].key;
                     state.isTemplate = false;
                     hideTemplateBanner();
-                    await bootAppForUniverse(mySlug);
+                    await bootAppForUniverse(mine[0].key);
+                    return;
                 }
             }
+            // Anonymous or logged-in with no community → show template
+            showTemplateBanner();
+            await bootAppForUniverse('template');
             return;
         }
 

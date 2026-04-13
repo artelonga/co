@@ -126,19 +126,65 @@
    * Lightweight fallback: renders paragraphs and code blocks with basic HTML
    * escaping. No inline formatting. Used before the editor bundle loads.
    */
+  function _inlineMd(s) {
+    // Apply inline markdown to already-escaped HTML.
+    // Order matters: images before links (![]() vs []()).
+    return s
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" class="md-img">')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+      .replace(/`([^`]+?)`/g, '<code>$1</code>');
+  }
+
   function _fallbackRender(text) {
     if (!text) return '';
     const { body } = extractFrontmatter(text);
-    const paragraphs = body.split(/\n\n+/).map(p => {
+    const blocks = body.split(/\n\n+/).map(p => {
       const t = p.trim();
       if (!t) return '';
+
+      // Code block
       if (t.startsWith('```')) {
         const inner = t.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
         return `<pre><code>${_escHtml(inner)}</code></pre>`;
       }
-      return `<p>${_escHtml(t).replace(/\n/g, '<br>')}</p>`;
+
+      // Heading
+      const h = t.match(/^(#{1,6})\s+(.+)$/);
+      if (h) {
+        const level = h[1].length;
+        return `<h${level}>${_inlineMd(_escHtml(h[2]))}</h${level}>`;
+      }
+
+      // Blockquote
+      if (t.startsWith('> ')) {
+        const lines = t.split('\n').map(l => l.replace(/^>\s?/, '')).join(' ');
+        return `<blockquote><p>${_inlineMd(_escHtml(lines))}</p></blockquote>`;
+      }
+
+      // List (unordered or ordered)
+      if (/^[-*]\s/.test(t) || /^\d+\.\s/.test(t)) {
+        const items = t.split('\n').filter(l => l.trim()).map(l => {
+          const itemText = l.replace(/^[-*]\s+/, '').replace(/^\d+\.\s+/, '');
+          return `<li>${_inlineMd(_escHtml(itemText))}</li>`;
+        });
+        const ordered = /^\d+\.\s/.test(t);
+        return ordered ? `<ol>${items.join('')}</ol>` : `<ul>${items.join('')}</ul>`;
+      }
+
+      // Image-only block (no <p> wrapper for valid HTML)
+      if (/^!\[[^\]]*\]\([^)]+\)$/.test(t)) {
+        return `<figure class="md-figure">${_inlineMd(t)}</figure>`;
+      }
+
+      // Horizontal rule
+      if (/^[-*_]{3,}$/.test(t)) return '<hr>';
+
+      // Paragraph (with inline formatting)
+      return `<p>${_inlineMd(_escHtml(t).replace(/\n/g, '<br>'))}</p>`;
     });
-    return paragraphs.filter(Boolean).join('');
+    return blocks.filter(Boolean).join('\n');
   }
 
   // ===== Wikilink resolution =====

@@ -1,4 +1,4 @@
-use axum::{routing::get, Json, Router};
+use axum::{Json, Router, routing::get};
 use game_core::plugin::{Plugin, PluginManifest, PluginRegistry};
 use game_core::storage::Storage;
 use std::path::{Path, PathBuf};

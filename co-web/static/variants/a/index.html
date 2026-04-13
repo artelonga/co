@@ -253,7 +253,7 @@
     <div id="usage-limit-overlay" class="login-screen hidden">
         <div class="login-card">
             <div class="login-header">
-                <span class="login-logo">B</span>
+                <span class="login-logo">Co</span>
                 <h1 class="login-title" id="usage-limit-title">Limite atingido</h1>
                 <p class="login-subtitle" id="usage-limit-msg">Você atingiu 100 entradas. Crie uma conta gratuita para continuar.</p>
             </div>
@@ -271,15 +271,15 @@
     <div id="login-modal-overlay" class="login-screen hidden">
         <div class="login-card">
             <div class="login-header">
-                <span class="login-logo">B</span>
+                <span class="login-logo">Co</span>
                 <h1 class="login-title" id="login-modal-title" data-i18n="login_title">Entrar</h1>
                 <p class="login-subtitle" data-i18n="login_subtitle">Acesse seu quadro de projetos</p>
             </div>
 
             <div id="login-step-password">
                 <div class="form-group">
-                    <label for="login-usuario" data-i18n="username">Usuário</label>
-                    <input type="text" id="login-usuario" autocomplete="username" data-i18n-placeholder="username_placeholder" placeholder="seu.usuario">
+                    <label for="login-usuario" data-i18n="email_or_user">Email ou usuário</label>
+                    <input type="text" id="login-usuario" autocomplete="username" data-i18n-placeholder="username_placeholder" placeholder="email@exemplo.com">
                 </div>
                 <div class="form-group">
                     <label for="login-senha" data-i18n="password">Senha</label>
@@ -352,14 +352,14 @@
             <p class="cookie-banner-text">
                 Este site usa cookies essenciais para autenticação e preferências.
                 Ao aceitar, você também consente com a coleta de dados de uso anonimizados para melhoria da plataforma.
-                <a href="#" id="cookie-privacy-link" style="text-decoration:underline">Política de Privacidade</a>
+                <a href="/co/template?page=privacidade" id="cookie-privacy-link" target="_blank" rel="noopener" style="text-decoration:underline">Política de Privacidade</a>
             </p>
             <button class="btn btn-primary btn-sm" id="cookie-accept">Aceitar</button>
         </div>
     </div>
 
     <script src="/shared/i18n.js?v=1"></script>
-    <script src="/shared/markdown.js?v=1"></script>
+    <script src="/shared/markdown.js?v=2"></script>
     <script src="/app.js"></script>
     <script src="/shared/clipper.js"></script>
     <script src="/shared/experiment.js?v=3"></script>
@@ -375,13 +375,12 @@
             localStorage.setItem('co_cookie_consent', '1');
             banner.classList.add('hidden');
         });
-        var link = document.getElementById('cookie-privacy-link');
-        if (link) link.addEventListener('click', function(e) {
-            e.preventDefault();
-            // Open privacy page in content view if available
-            var tab = document.querySelector('[data-view="conteudo"]');
-            if (tab) tab.click();
-        });
+        // cookie-privacy-link opens privacy page in new tab (no JS handler needed)
+
+        // Register PWA service worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(function() {});
+        }
     })();
     </script>
 </body>

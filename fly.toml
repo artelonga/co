@@ -1,0 +1,40 @@
+# Fly.io deployment configuration
+app = "co-artelonga"
+primary_region = "gru"
+
+[build]
+  dockerfile = "co-web/Dockerfile"
+
+[mounts]
+  source = "co_data"
+  destination = "/data"
+
+[env]
+  CO_WEB_DATA = "/data"
+  CO_WEB_PORT = "3000"
+  RUST_LOG = "co_web=info,tower_http=info"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 100
+    soft_limit = 80
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 3000
+    path = "/api/health"
+    interval = "30s"
+    timeout = "5s"

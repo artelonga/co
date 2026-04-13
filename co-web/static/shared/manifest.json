@@ -1,11 +1,14 @@
 {
-    "name": "Board",
-    "short_name": "Board",
-    "description": "Graph-based project management tool",
+    "name": "Co — Consciência Coletiva",
+    "short_name": "Co",
+    "description": "Cocriar, Colaborar, Conectar os pontos",
     "start_url": "/",
     "display": "standalone",
-    "background_color": "#1a1a2e",
+    "background_color": "#f0f2f5",
     "theme_color": "#6366f1",
+    "orientation": "any",
+    "categories": ["productivity", "social"],
+    "lang": "pt-BR",
     "icons": [
         {
             "src": "/shared/icon-192.png",

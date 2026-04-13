@@ -316,10 +316,17 @@ pub async fn csrf_middleware(req: Request<Body>, next: Next) -> Response<Body> {
         return next.run(req).await;
     }
 
-    // Check if origin matches allowed list
-    let is_allowed = allowed_origins
-        .iter()
-        .any(|o| !o.is_empty() && origin.contains(o))
+    // Same-origin check: if origin matches the request Host, always allow
+    let request_host = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let is_allowed = origin.contains(request_host) && !request_host.is_empty()
+        || allowed_origins
+            .iter()
+            .any(|o| !o.is_empty() && origin.contains(o))
         || (!canonical.is_empty() && origin.contains(&canonical))
         || origin.contains("localhost")
         || origin.contains("127.0.0.1");

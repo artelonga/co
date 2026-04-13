@@ -308,7 +308,9 @@ async fn test_yggdrasil_seed_and_requires_login() {
         "yggdrasil should exist after seed"
     );
 
-    let u = storage.get_universe("yggdrasil").expect("yggdrasil not found");
+    let u = storage
+        .get_universe("yggdrasil")
+        .expect("yggdrasil not found");
     assert!(u.requires_login, "yggdrasil must require login");
     assert!(u.is_public, "yggdrasil must be public");
     assert!(!u.is_template, "yggdrasil must not be a template");

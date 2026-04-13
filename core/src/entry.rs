@@ -56,6 +56,21 @@ pub struct Entry {
 }
 
 impl Entry {
+    /// Parse YAML frontmatter from a markdown string.
+    /// Returns `Some((frontmatter_json, body_string))` or `None` if no frontmatter.
+    pub fn parse_frontmatter(content: &str) -> Option<(serde_json::Value, String)> {
+        let trimmed = content.trim_start();
+        if !trimmed.starts_with("---") {
+            return None;
+        }
+        let after_first = &trimmed[3..];
+        let end = after_first.find("\n---")?;
+        let yaml_str = &after_first[..end];
+        let body = after_first[end + 4..].trim_start_matches('\n').to_string();
+        let fm: serde_json::Value = serde_yaml::from_str(yaml_str).ok()?;
+        Some((fm, body))
+    }
+
     /// Compute the SHA-256 hash of a body string.
     pub fn hash_body(body: &str) -> String {
         let mut hasher = Sha256::new();

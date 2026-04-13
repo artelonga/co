@@ -184,6 +184,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/v1/auth/me",
             get(me_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
+        .route(
+            "/v1/auth/stats",
+            get(user_stats_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
         .route("/v1/auth/logout", post(logout_handler))
         // CO-44: password-based login for UAT (returns 404 in prod)
         .route("/v1/auth/uat-login", post(uat_login_handler));
@@ -435,6 +439,9 @@ fn uat_startup(config: &WebConfig) {
     if reset_flag.exists() {
         tracing::info!("UAT: reset flag detected — resetting database...");
 
+        // 0. Delete flag FIRST so a crash/restart doesn't re-trigger reset.
+        let _ = std::fs::remove_file(&reset_flag);
+
         // 1. Back up users.
         let backup = {
             let storage = Storage::new(&config.data_dir);
@@ -465,19 +472,19 @@ fn uat_startup(config: &WebConfig) {
         // 5. Restore users.
         storage.restore_users_with_hashes(&backup);
 
-        // 6. Re-seed template universe.
+        // 6. Re-seed all universes.
         if !storage.template_exists() {
             storage.seed_template_universe();
         }
-        // Re-seed Yggdrasil.
+        if !storage.quilombo_universe_exists() {
+            storage.seed_quilombo_universe();
+        }
         if !storage.yggdrasil_universe_exists() {
             storage.seed_yggdrasil_universe();
         }
 
         drop(storage);
 
-        // 7. Delete flag.
-        let _ = std::fs::remove_file(&reset_flag);
         tracing::info!("UAT: reset complete");
     }
 
@@ -496,6 +503,13 @@ fn uat_startup(config: &WebConfig) {
         if let Err(e) = storage.seed_uat_user(&hash) {
             tracing::error!("UAT: failed to seed yuri user: {e}");
         }
+
+        // Add yuri as member of quilomboaraucaria so it appears in their sidebar
+        let _ = storage.conn().execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+             VALUES ('quilomboaraucaria', 'usr_yuri_uat', 'admin', datetime('now'))",
+            rusqlite::params![],
+        );
 
         // --- Clean up anonymous universes from previous session ---
         let cleaned = storage.cleanup_anon_universes();
@@ -1414,8 +1428,7 @@ async fn verify_handler(
         auth.delete_code(&email)?;
     }
 
-    let cookie =
-        format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
+    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
 
     let response_body = VerifyResponse {
         user_id,
@@ -1464,6 +1477,62 @@ async fn me_handler(
     }
 
     Err(AppError::NotFound("User not found".into()))
+}
+
+/// GET /api/v1/auth/stats — user statistics (universes count, sizes, articles, etc.)
+async fn user_stats_handler(
+    State(state): State<AppState>,
+    user_id: crate::auth::UserId,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let storage = lock_storage(&state)?;
+    let universes = storage.list_universes_for_user(&user_id.0);
+
+    let mut stats = Vec::new();
+    for u in &universes {
+        let entry_count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1",
+                rusqlite::params![u.key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let page_count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1 AND entry_type = 'page'",
+                rusqlite::params![u.key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        let task_count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1 AND entry_type = 'task'",
+                rusqlite::params![u.key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        stats.push(serde_json::json!({
+            "key": u.key,
+            "name": u.name,
+            "entries": entry_count,
+            "pages": page_count,
+            "tasks": task_count,
+            "content_count": u.content_count,
+            "is_public": u.is_public,
+        }));
+    }
+
+    Ok(Json(serde_json::json!({
+        "user_id": user_id.0,
+        "universes": stats,
+        "total_universes": universes.len(),
+        "total_entries": stats.iter().map(|s| s["entries"].as_i64().unwrap_or(0)).sum::<i64>(),
+    })))
 }
 
 async fn logout_handler() -> Response {
@@ -1527,8 +1596,7 @@ async fn uat_login_handler(
     let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie =
-        format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
+    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
 
     Ok((
         StatusCode::OK,

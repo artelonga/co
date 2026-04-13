@@ -7,7 +7,7 @@
     var I18N = {
         pt: {
             // Spec-defined dot-notation keys
-            'nav.projects': 'Projetos',
+            'nav.projects': 'Comunidades',
             'nav.dashboard': 'Painel',
             'action.create': 'Criar',
             'action.edit': 'Editar',
@@ -50,7 +50,7 @@
             'form.comment_placeholder': 'Adicionar um comentário...',
             'form.move_to': 'Mover para...',
             // Flat keys (backward-compat with existing data-i18n attributes)
-            projects: 'Projetos',
+            projects: 'Comunidades',
             select_project: 'Selecione um projeto',
             select_project_hint: 'Selecione um projeto na barra lateral',
             'universe.local_hint': 'Experimente abaixo — crie uma conta para salvar e colaborar',
@@ -73,6 +73,8 @@
             unarchive: 'Desarquivar',
             back: 'Voltar',
             saved: 'Salvo',
+            add_content: 'Adicionar conteúdo',
+            new_page_title: 'Título da nova página:',
             loading: 'Carregando...',
             activity: 'Atividade',
             new_task_title: 'Nova Tarefa',
@@ -103,6 +105,8 @@
             login_title: 'Entrar',
             login_subtitle: 'Acesse seu quadro de projetos',
             username: 'Usuário',
+            email_or_user: 'Email ou usuário',
+            universes: 'Comunidades',
             username_placeholder: 'seu.usuario',
             password: 'Senha',
             sign_in: 'Entrar',
@@ -125,7 +129,7 @@
         },
         en: {
             // Spec-defined dot-notation keys
-            'nav.projects': 'Projects',
+            'nav.projects': 'Communities',
             'nav.dashboard': 'Dashboard',
             'action.create': 'Create',
             'action.edit': 'Edit',
@@ -168,7 +172,7 @@
             'form.comment_placeholder': 'Add a comment...',
             'form.move_to': 'Move to...',
             // Flat keys
-            projects: 'Projects',
+            projects: 'Communities',
             select_project: 'Select a project',
             select_project_hint: 'Select a project from the sidebar',
             'universe.local_hint': 'Try it below — create an account to save and collaborate',
@@ -191,6 +195,8 @@
             unarchive: 'Unarchive',
             back: 'Back',
             saved: 'Saved',
+            add_content: 'Add content',
+            new_page_title: 'New page title:',
             loading: 'Loading...',
             activity: 'Activity',
             new_task_title: 'New Task',
@@ -221,6 +227,8 @@
             login_title: 'Sign In',
             login_subtitle: 'Access your project board',
             username: 'Username',
+            email_or_user: 'Email or username',
+            universes: 'Communities',
             username_placeholder: 'your.username',
             password: 'Password',
             sign_in: 'Sign In',
@@ -258,7 +266,7 @@
     function setLang(lang) {
         if (lang !== 'pt' && lang !== 'en') return;
         _lang = lang;
-        setCookie('co_lang', lang);
+        setCookie('co_lang2', lang);
         document.querySelectorAll('[data-i18n]').forEach(function (el) {
             el.textContent = t(el.dataset.i18n);
         });
@@ -269,13 +277,14 @@
         document.dispatchEvent(new CustomEvent('co:langchange', { detail: { lang: lang } }));
     }
 
-    // Initialize: cookie overrides navigator.language
-    var cookieLang = getCookie('co_lang');
+    // Initialize: only respect cookie if it was set by an explicit user action.
+    // Bumped cookie name to co_lang2 to invalidate stale en cookies from prior sessions.
+    var cookieLang = getCookie('co_lang2');
     if (cookieLang === 'pt' || cookieLang === 'en') {
         _lang = cookieLang;
     } else {
         _lang = 'pt'; // default to Portuguese
-        setCookie('co_lang', _lang);
+        setCookie('co_lang2', _lang);
     }
     document.documentElement.lang = _lang === 'pt' ? 'pt-BR' : 'en';
 
