@@ -15,12 +15,16 @@ pub struct Project {
     pub archived: bool,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Default, Deserialize)]
 pub struct CreateProject {
     pub name: String,
     pub key: String,
     #[serde(default)]
     pub description: String,
+    /// Scope this project to a universe. Set server-side from UNIVERSE_KEY env
+    /// when not provided by the client.
+    #[serde(default)]
+    pub universe_key: Option<String>,
 }
 
 // --- Task ---
@@ -44,6 +48,8 @@ pub struct Task {
     pub description: String,
     #[serde(default)]
     pub archived: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -59,6 +65,7 @@ pub struct CreateTask {
     pub parent: Option<u64>,
     #[serde(default)]
     pub labels: Vec<String>,
+    pub assignee: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -71,6 +78,7 @@ pub struct UpdateTask {
     pub parent: Option<u64>,
     pub labels: Option<Vec<String>>,
     pub archived: Option<bool>,
+    pub assignee: Option<String>,
 }
 
 fn default_status() -> TaskStatus {
@@ -212,6 +220,10 @@ pub struct DashboardData {
     pub overdue_count: u64,
     pub upcoming_tasks: Vec<Task>,
     pub recently_updated: Vec<Task>,
+    pub velocity: Vec<WeeklyVelocity>,
+    pub burndown: Vec<BurndownPoint>,
+    pub label_distribution: Vec<LabelCount>,
+    pub overdue_tasks_detail: Vec<OverdueTaskDetail>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -221,6 +233,35 @@ pub struct StatusCounts {
     pub in_review: u64,
     pub done: u64,
     pub total: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct WeeklyVelocity {
+    pub week: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct BurndownPoint {
+    pub date: String,
+    pub remaining: i64,
+    pub completed: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LabelCount {
+    pub label: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct OverdueTaskDetail {
+    pub id: u64,
+    pub key: String,
+    pub title: String,
+    pub due_date: String,
+    pub days_overdue: i64,
+    pub priority: String,
 }
 
 // --- Experiment ---
@@ -277,6 +318,23 @@ pub struct VariantSummary {
     pub comments: Vec<String>,
 }
 
+// --- CO-45: UAT mutation tracking ---
+
+/// A single write operation recorded in the `uat_mutations` table.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UatMutation {
+    pub id: i64,
+    pub timestamp: String,
+    pub user_id: Option<String>,
+    /// e.g. "entry.create", "entry.update", "entry.delete"
+    pub action: String,
+    /// "{universe_key}:{entry_path}" for entry mutations
+    pub target: String,
+    pub before_value: Option<String>,
+    pub after_value: Option<String>,
+    pub metadata: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ExperimentSummary {
     pub total_feedback: u64,
@@ -301,7 +359,189 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+// --- Universe / Multi-tenancy ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Universe {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub owner_id: String,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub is_template: bool,
+    #[serde(default)]
+    pub is_public: bool,
+    #[serde(default)]
+    pub content_count: i64,
+    /// CO-38: if true, anonymous visitors cannot access this universe.
+    #[serde(default)]
+    pub requires_login: bool,
+    /// CO-49: single visibility enum replacing is_public + is_template + requires_login.
+    /// Values: "template", "private", "public-subscribable", "requires_login"
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+}
+
+fn default_visibility() -> String {
+    "private".into()
+}
+
+/// CO-49: Deterministic access level for a universe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniverseAccess {
+    /// Full read + write access (owner or member with write role).
+    ReadWrite,
+    /// Read-only access (member with read role, subscriber, or any logged-in user for requires_login universes).
+    ReadOnly,
+    /// Only public metadata visible (title, description, subscriber count).
+    MetadataOnly,
+    /// Login required; return 401 (universe exists but is not accessible anonymously).
+    LoginRequired,
+    /// Universe not accessible; return 404.
+    Denied,
+}
+
+/// CO-49: A user's subscription to a public-subscribable universe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Subscription {
+    pub user_id: String,
+    pub universe_key: String,
+    pub subscribed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseMember {
+    pub universe_key: String,
+    pub user_id: String,
+    pub role: String,
+    pub joined_at: DateTime<Utc>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateUniverse {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CloneUniverse {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddMember {
+    pub user_id: String,
+    #[serde(default = "default_member_role")]
+    pub role: String,
+}
+
+fn default_member_role() -> String {
+    "member".into()
+}
+
+// --- Universe Form Config ---
+
+/// Presentation config for a universe — drives CSS, layout, and fonts.
+/// Stored in `universes.theme_preset/layout/...` and synced to `.universo.yaml`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseFormConfig {
+    /// CSS preset name: scholarly-light, scholarly-dark, relic, relic-light
+    #[serde(default = "default_theme_preset")]
+    pub theme_preset: String,
+    /// Default view mode: board, table, timeline, calendar, dashboard
+    #[serde(default = "default_layout")]
+    pub layout: String,
+    /// Custom headline font (Google Fonts family name), if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_headline: Option<String>,
+    /// Custom body font (Google Fonts family name), if any
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_body: Option<String>,
+    /// CSS token overrides, e.g. `{"--color-accent":"#ff0000"}`
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom_tokens: Option<serde_json::Value>,
+}
+
+fn default_theme_preset() -> String {
+    "scholarly-light".to_string()
+}
+fn default_layout() -> String {
+    "board".to_string()
+}
+
+impl Default for UniverseFormConfig {
+    fn default() -> Self {
+        Self {
+            theme_preset: default_theme_preset(),
+            layout: default_layout(),
+            font_headline: None,
+            font_body: None,
+            custom_tokens: None,
+        }
+    }
+}
+
+/// Partial update payload for `PUT /api/v1/universes/:slug/config`.
+#[derive(Debug, Default, Deserialize)]
+pub struct UpdateUniverseFormConfig {
+    pub theme_preset: Option<String>,
+    pub layout: Option<String>,
+    pub font_headline: Option<String>,
+    pub font_body: Option<String>,
+    pub custom_tokens: Option<serde_json::Value>,
+}
+
+// --- Theme Tiers ---
+
+/// Stats for the `quilomboaraucaria` public universe.
+///
+/// Counts are derived from the SQLite entry index; totalUsuarios, versaoApp,
+/// and ultimaSync come from the `meta/stats.md` metadata entry written by the
+/// importer on each run.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuilomboStats {
+    pub total_usuarios: i64,
+    pub total_publicacoes: i64,
+    pub total_eventos: i64,
+    pub total_missoes: i64,
+    pub versao_app: String,
+    pub ultima_sync: Option<String>,
+}
+
+/// Available themes returned by `GET /api/v1/themes/available`.
+/// Content depends on whether the caller is a real logged-in user or anonymous.
+#[derive(Debug, Serialize)]
+pub struct AvailableThemes {
+    /// Named palette keys available to this user.
+    pub palettes: Vec<String>,
+    /// Variant keys (a–h) available to this user. Empty for anonymous.
+    pub variants: Vec<String>,
+    /// Whether the custom palette editor is available. Absent for anonymous.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<bool>,
+}
+
 // --- Auth / Users ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MeResponse {
+    pub user_id: String,
+    pub email: String,
+    pub display_name: String,
+    pub tier: String,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {

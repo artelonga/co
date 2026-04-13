@@ -1,0 +1,63 @@
+---
+# Molecule verify: assert expected state after converge.
+
+- name: Verify CO provisioning
+  hosts: all
+  become: true
+
+  vars_files:
+    - ../../group_vars/all.yml
+
+  tasks:
+    - name: Check co user exists
+      ansible.builtin.command: id co
+      changed_when: false
+
+    - name: Check install directory exists with correct permissions
+      ansible.builtin.stat:
+        path: "{{ co_install_dir }}"
+      register: install_dir
+      failed_when: not install_dir.stat.exists
+
+    - name: Check data directory exists
+      ansible.builtin.stat:
+        path: "{{ co_data_dir }}"
+      register: data_dir
+      failed_when: not data_dir.stat.exists
+
+    - name: Check backup directory exists
+      ansible.builtin.stat:
+        path: "{{ backup_dir }}"
+      register: bkp_dir
+      failed_when: not bkp_dir.stat.exists
+
+    - name: Check co-web binary is present
+      ansible.builtin.stat:
+        path: "{{ co_install_dir }}/co-web"
+      register: binary
+      failed_when: not binary.stat.exists
+
+    - name: Check systemd unit file is present
+      ansible.builtin.stat:
+        path: /etc/systemd/system/co-web.service
+      register: unit_file
+      failed_when: not unit_file.stat.exists
+
+    - name: Check Caddyfile is present
+      ansible.builtin.stat:
+        path: /etc/caddy/Caddyfile
+      register: caddy_conf
+      failed_when: not caddy_conf.stat.exists
+
+    - name: Check UFW is active
+      ansible.builtin.command: ufw status
+      register: ufw_status
+      changed_when: false
+      failed_when: "'active' not in ufw_status.stdout"
+
+    # ── Idempotency: run provision again, expect no changes ───────────────────
+
+    - name: Re-run provision to verify idempotency
+      ansible.builtin.import_playbook: ../../playbooks/provision.yml
+      vars:
+        ansible_skip_tags: rclone

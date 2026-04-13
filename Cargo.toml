@@ -9,11 +9,13 @@ members = [
 ]
 
 [workspace.package]
-version = "0.22.1"
+version = "1.1.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/institutional-pointset/co"
-description = "Exegetic graph database for project development"
+repository = "https://github.com/artelonga/co"
+description = "Graph-based content management platform — CLI, web server, kanban board"
+keywords = ["content-management", "kanban", "markdown", "graph", "cli"]
+categories = ["command-line-utilities", "web-programming"]
 publish = false
 
 [workspace.dependencies]

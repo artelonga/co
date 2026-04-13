@@ -39,6 +39,7 @@ pub struct Task {
     pub priority: String,
     pub parent: Option<u64>,
     pub labels: Vec<String>,
+    #[allow(dead_code)]
     pub module: Option<String>,
     pub body: String,
     pub file_path: PathBuf,
@@ -179,8 +180,7 @@ pub fn run(config: AutoConfig) -> Result<()> {
             neutralize_git_crypt(&base_workdir)
         } else {
             // Check if git-crypt exists but don't neutralize yet
-            base_workdir.join(".git-crypt").exists()
-                || base_workdir.join(".git/git-crypt").exists()
+            base_workdir.join(".git-crypt").exists() || base_workdir.join(".git/git-crypt").exists()
         };
 
         let (branch_name, workdir) = create_task_branch(&task, &base_workdir, use_worktree)?;
@@ -200,12 +200,18 @@ pub fn run(config: AutoConfig) -> Result<()> {
                 if let Ok(content) = fs::read_to_string(&settings_file) {
                     if serde_json::from_str::<serde_json::Value>(&content).is_err() {
                         let _ = fs::remove_file(&settings_file);
-                        println!("  {} Removed corrupted settings.local.json from worktree", "◆".dimmed());
+                        println!(
+                            "  {} Removed corrupted settings.local.json from worktree",
+                            "◆".dimmed()
+                        );
                     }
                 } else {
                     // Binary/unreadable — remove it
                     let _ = fs::remove_file(&settings_file);
-                    println!("  {} Removed corrupted settings.local.json from worktree", "◆".dimmed());
+                    println!(
+                        "  {} Removed corrupted settings.local.json from worktree",
+                        "◆".dimmed()
+                    );
                 }
             }
         }
@@ -310,7 +316,7 @@ fn load_tasks(data_dir: &Path, project_key: &str) -> Result<Vec<Task>> {
     for entry in fs::read_dir(data_dir)? {
         let entry = entry?;
         let path = entry.path();
-        if !path.extension().is_some_and(|e| e == "md") {
+        if path.extension().is_none_or(|e| e != "md") {
             continue;
         }
         let filename = path.file_stem().unwrap_or_default().to_string_lossy();
@@ -339,26 +345,26 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
     let yaml: serde_yaml::Value = serde_yaml::from_str(yaml_str).ok()?;
     let map = yaml.as_mapping()?;
 
-    let id = map.get(&serde_yaml::Value::String("id".into()))?.as_u64()?;
+    let id = map.get(serde_yaml::Value::String("id".into()))?.as_u64()?;
     let title = map
-        .get(&serde_yaml::Value::String("title".into()))?
+        .get(serde_yaml::Value::String("title".into()))?
         .as_str()?
         .to_string();
     let status = map
-        .get(&serde_yaml::Value::String("status".into()))
+        .get(serde_yaml::Value::String("status".into()))
         .and_then(|v| v.as_str())
         .unwrap_or("todo")
         .to_string();
     let priority = map
-        .get(&serde_yaml::Value::String("priority".into()))
+        .get(serde_yaml::Value::String("priority".into()))
         .and_then(|v| v.as_str())
         .unwrap_or("medium")
         .to_string();
     let parent = map
-        .get(&serde_yaml::Value::String("parent".into()))
+        .get(serde_yaml::Value::String("parent".into()))
         .and_then(|v| v.as_u64());
     let labels = map
-        .get(&serde_yaml::Value::String("labels".into()))
+        .get(serde_yaml::Value::String("labels".into()))
         .and_then(|v| v.as_sequence())
         .map(|seq| {
             seq.iter()
@@ -367,7 +373,7 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
         })
         .unwrap_or_default();
     let module = map
-        .get(&serde_yaml::Value::String("module".into()))
+        .get(serde_yaml::Value::String("module".into()))
         .and_then(|v| v.as_str())
         .map(String::from);
 
@@ -462,14 +468,14 @@ fn build_context(
     ));
 
     // Layer 3: Epic/parent context
-    if let Some(parent_id) = task.parent {
-        if let Some(parent) = all_tasks.iter().find(|t| t.id == parent_id) {
-            let parent_content = fs::read_to_string(&parent.file_path).unwrap_or_default();
-            layers.push(format!(
-                "## Parent Epic: {} — {}\n\n{}",
-                parent.key, parent.title, parent_content
-            ));
-        }
+    if let Some(parent_id) = task.parent
+        && let Some(parent) = all_tasks.iter().find(|t| t.id == parent_id)
+    {
+        let parent_content = fs::read_to_string(&parent.file_path).unwrap_or_default();
+        layers.push(format!(
+            "## Parent Epic: {} — {}\n\n{}",
+            parent.key, parent.title, parent_content
+        ));
     }
 
     // Layer 4: Project context
@@ -532,6 +538,7 @@ fn build_context(
 
 // ==================== CLAUDE CODE LAUNCHER ====================
 
+#[allow(clippy::too_many_arguments)]
 fn launch_claude(
     context: &str,
     workdir: &Path,
@@ -774,6 +781,7 @@ fn restore_git_crypt(workdir: &Path) {
 
 /// Unlock git-crypt in a worktree using the key from the base repo.
 /// Worktrees share .git/ but git-crypt unlock state is per-checkout.
+#[allow(dead_code)]
 fn unlock_git_crypt_worktree(worktree: &Path, base_repo: &Path) {
     // Check if base repo has git-crypt keys
     let key_path = base_repo.join(".git/git-crypt/keys/default/0");
@@ -808,7 +816,10 @@ fn unlock_git_crypt_worktree(worktree: &Path, base_repo: &Path) {
                     .current_dir(worktree)
                     .output();
                 let _ = fs::remove_file(&key_path); // destroy temp key
-                println!("  {} git-crypt: worktree unlocked (from keychain)", "◆".dimmed());
+                println!(
+                    "  {} git-crypt: worktree unlocked (from keychain)",
+                    "◆".dimmed()
+                );
             } else {
                 eprintln!(
                     "  {} git-crypt unlock failed in worktree: {}",
@@ -822,26 +833,34 @@ fn unlock_git_crypt_worktree(worktree: &Path, base_repo: &Path) {
 }
 
 /// Find git-crypt key file in the base repo's .git directory
+#[allow(dead_code)]
 fn find_git_crypt_key(base_repo: &Path) -> Option<PathBuf> {
     let keys_dir = base_repo.join(".git/git-crypt/keys/default/0");
-    if keys_dir.is_dir() {
-        if let Ok(mut entries) = fs::read_dir(&keys_dir) {
-            if let Some(Ok(entry)) = entries.next() {
-                return Some(entry.path());
-            }
-        }
+    if keys_dir.is_dir()
+        && let Ok(mut entries) = fs::read_dir(&keys_dir)
+        && let Some(Ok(entry)) = entries.next()
+    {
+        return Some(entry.path());
     }
     None
 }
 
 /// Retrieve git-crypt key from macOS Keychain, write to temp file
+#[allow(dead_code)]
 fn retrieve_key_from_keychain(base_repo: &Path) -> Option<PathBuf> {
     // Derive keychain service name from repo name
     let repo_name = base_repo.file_name()?.to_str()?;
     let service = format!("{}-git-crypt", repo_name);
 
     let output = Command::new("security")
-        .args(["find-generic-password", "-a", &whoami::username(), "-s", &service, "-w"])
+        .args([
+            "find-generic-password",
+            "-a",
+            &whoami::username(),
+            "-s",
+            &service,
+            "-w",
+        ])
         .output()
         .ok()?;
 
@@ -853,15 +872,16 @@ fn retrieve_key_from_keychain(base_repo: &Path) -> Option<PathBuf> {
 
     // Decode base64 and write to temp file
     let tmp_key = std::env::temp_dir().join(format!(".co-git-crypt-{}", std::process::id()));
-    if let Ok(decoded) = base64_decode(&b64_key) {
-        if fs::write(&tmp_key, decoded).is_ok() {
-            return Some(tmp_key);
-        }
+    if let Ok(decoded) = base64_decode(&b64_key)
+        && fs::write(&tmp_key, decoded).is_ok()
+    {
+        return Some(tmp_key);
     }
     None
 }
 
 /// Simple base64 decode (standard alphabet)
+#[allow(dead_code)]
 fn base64_decode(input: &str) -> Result<Vec<u8>> {
     // Use command-line base64 for portability
     let output = Command::new("base64")
@@ -952,9 +972,21 @@ fn create_task_branch(
         }
 
         if !existing.is_empty() {
-            wt_cmd.args(["worktree", "add", worktree_dir.to_str().unwrap(), &branch_name]);
+            wt_cmd.args([
+                "worktree",
+                "add",
+                worktree_dir.to_str().unwrap(),
+                &branch_name,
+            ]);
         } else {
-            wt_cmd.args(["worktree", "add", "-b", &branch_name, worktree_dir.to_str().unwrap(), "main"]);
+            wt_cmd.args([
+                "worktree",
+                "add",
+                "-b",
+                &branch_name,
+                worktree_dir.to_str().unwrap(),
+                "main",
+            ]);
         }
 
         let output = wt_cmd.output().context("Failed to create worktree")?;
@@ -972,14 +1004,18 @@ fn create_task_branch(
                 let wt_crypt_dir = wt_git_dir.join("git-crypt");
                 if !wt_crypt_dir.exists() {
                     let _ = Command::new("cp")
-                        .args(["-r",
+                        .args([
+                            "-r",
                             base_key_dir.to_str().unwrap(),
-                            wt_crypt_dir.to_str().unwrap()])
+                            wt_crypt_dir.to_str().unwrap(),
+                        ])
                         .output();
                 }
 
                 // Now unlock the worktree — this decrypts files in place
-                let key_file = base_key_dir.join("keys/default/0").read_dir()
+                let key_file = base_key_dir
+                    .join("keys/default/0")
+                    .read_dir()
                     .ok()
                     .and_then(|mut d| d.next())
                     .and_then(|e| e.ok())
@@ -1000,9 +1036,16 @@ fn create_task_branch(
                             let err = String::from_utf8_lossy(&o.stderr);
                             // "already decrypted" or warnings are OK
                             if err.contains("Warning") || err.contains("not encrypted") {
-                                println!("  {} git-crypt: worktree unlocked (with warnings)", "◆".dimmed());
+                                println!(
+                                    "  {} git-crypt: worktree unlocked (with warnings)",
+                                    "◆".dimmed()
+                                );
                             } else {
-                                eprintln!("  {} git-crypt unlock warning: {}", "!".yellow(), err.trim());
+                                eprintln!(
+                                    "  {} git-crypt unlock warning: {}",
+                                    "!".yellow(),
+                                    err.trim()
+                                );
                             }
                         }
                         Err(e) => {
@@ -1020,10 +1063,10 @@ fn create_task_branch(
         let wt_settings = worktree_dir.join(".claude/settings.local.json");
         if wt_settings.exists() {
             // Validate JSON — if corrupted (encrypted blob), delete it
-            if let Ok(content) = fs::read_to_string(&wt_settings) {
-                if serde_json::from_str::<serde_json::Value>(&content).is_err() {
-                    let _ = fs::remove_file(&wt_settings);
-                }
+            if let Ok(content) = fs::read_to_string(&wt_settings)
+                && serde_json::from_str::<serde_json::Value>(&content).is_err()
+            {
+                let _ = fs::remove_file(&wt_settings);
             }
         }
 
@@ -1092,20 +1135,20 @@ fn resolve_workdir(workdir: Option<&str>) -> Result<PathBuf> {
 /// Detect changes using jj (if available) or git as fallback
 fn detect_changes() -> bool {
     // Try jj first
-    if let Ok(output) = Command::new("jj").args(["diff", "--stat"]).output() {
-        if output.status.success() {
-            let diff = String::from_utf8_lossy(&output.stdout);
-            if !diff.trim().is_empty() {
-                return true;
-            }
-            // Also check jj log for new commits
-            if let Ok(log) = Command::new("jj")
-                .args(["log", "-r", "@", "--no-graph", "-T", "description"])
-                .output()
-            {
-                let desc = String::from_utf8_lossy(&log.stdout);
-                return !desc.trim().is_empty();
-            }
+    if let Ok(output) = Command::new("jj").args(["diff", "--stat"]).output()
+        && output.status.success()
+    {
+        let diff = String::from_utf8_lossy(&output.stdout);
+        if !diff.trim().is_empty() {
+            return true;
+        }
+        // Also check jj log for new commits
+        if let Ok(log) = Command::new("jj")
+            .args(["log", "-r", "@", "--no-graph", "-T", "description"])
+            .output()
+        {
+            let desc = String::from_utf8_lossy(&log.stdout);
+            return !desc.trim().is_empty();
         }
     }
 
@@ -1162,7 +1205,7 @@ fn load_project_key(data_dir: &Path) -> Result<String> {
         fs::read_to_string(&project_yaml).context("No project.yaml found in space directory")?;
     let yaml: serde_yaml::Value = serde_yaml::from_str(&content)?;
     yaml.as_mapping()
-        .and_then(|m| m.get(&serde_yaml::Value::String("key".into())))
+        .and_then(|m| m.get(serde_yaml::Value::String("key".into())))
         .and_then(|v| v.as_str())
         .map(String::from)
         .context("project.yaml missing 'key' field")

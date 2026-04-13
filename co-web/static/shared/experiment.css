@@ -413,6 +413,113 @@
     border-radius: 2px;
 }
 
+/* ===== Header Palette Switcher ===== */
+.palette-switcher-slot {
+    position: relative;
+}
+
+.palette-switcher-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: transparent;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: var(--radius-md, 8px);
+    color: var(--text-secondary, #6b7280);
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s;
+    white-space: nowrap;
+}
+
+.palette-switcher-btn:hover {
+    background: var(--bg-hover, #e8eaed);
+    border-color: var(--accent, #6366f1);
+    color: var(--text-primary, #111827);
+}
+
+.palette-switcher-swatch {
+    display: flex;
+    gap: 2px;
+}
+
+.palette-switcher-swatch-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 1px solid rgba(0,0,0,0.15);
+    display: block;
+}
+
+.palette-switcher-chevron {
+    opacity: 0.6;
+    flex-shrink: 0;
+}
+
+.palette-switcher-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 1001;
+    background: var(--card-bg, #ffffff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: var(--radius-lg, 12px);
+    padding: 6px;
+    box-shadow: var(--shadow-lg, 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.05));
+    min-width: 190px;
+}
+
+.palette-switcher-dropdown.hidden {
+    display: none;
+}
+
+.palette-switcher-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border: none;
+    background: none;
+    color: var(--text-primary, #111827);
+    font-size: 13px;
+    font-family: inherit;
+    width: 100%;
+    text-align: left;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.palette-switcher-item:hover {
+    background: var(--bg-hover, #e8eaed);
+}
+
+.palette-switcher-item.active {
+    background: var(--accent-light, #e0e7ff);
+    color: var(--accent, #6366f1);
+    font-weight: 500;
+}
+
+.palette-switcher-item-swatch {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}
+
+.palette-switcher-item-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 3px;
+    border: 1px solid rgba(0,0,0,0.1);
+    display: block;
+}
+
+.palette-switcher-item-name {
+    flex: 1;
+}
+
 /* Checkbox styling in feedback form */
 .experiment-feedback-group input[type="checkbox"] {
     margin-right: 6px;

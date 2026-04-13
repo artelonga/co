@@ -1,6 +1,14 @@
 (function () {
     'use strict';
 
+    // All themes available to everyone — no tier gating.
+    let availableThemes = {
+        palettes: ['', 'scholarly', 'scholarly-dark', 'relic', 'relic-light',
+                   'medieval', 'steampunk', 'cyberpunk', 'matrix', 'garden', 'terminal', 'retro'],
+        variants: [],
+        custom: null,
+    };
+
     const VARIANTS = [
         { key: 'a', name: 'Modern' },
         { key: 'b', name: 'Medieval' },
@@ -12,6 +20,17 @@
         { key: 'h', name: 'Terminal' },
     ];
 
+    const VARIANT_COLORS = {
+        a: { bg: '#f0f2f5', accent: '#6366f1' },
+        b: { bg: '#F5E6D3', accent: '#8B4513' },
+        c: { bg: '#1c1c1c', accent: '#d4a24c' },
+        d: { bg: '#18191b', accent: '#7b8fa0' },
+        e: { bg: '#000000', accent: '#00ff41' },
+        f: { bg: '#0d0221', accent: '#ff2a6d' },
+        g: { bg: '#f0f5e8', accent: '#4caf50' },
+        h: { bg: '#000000', accent: '#ffffff' },
+    };
+
     const PALETTE_KEYS = [
         { key: '--bg', label: 'Background' },
         { key: '--sidebar-bg', label: 'Sidebar' },
@@ -19,6 +38,44 @@
         { key: '--text-primary', label: 'Text' },
         { key: '--card-bg', label: 'Cards' },
     ];
+
+    const NAMED_PALETTES = [
+        { key: '',              name: 'Modern',            bg: '#f0f2f5', accent: '#6366f1' },
+        { key: 'scholarly',     name: 'Scholarly · Light', bg: '#FFF9ED', accent: '#CD7F32' },
+        { key: 'scholarly-dark',name: 'Scholarly · Dark',  bg: '#1c1610', accent: '#CD7F32' },
+        { key: 'relic',         name: 'Relic · Dark',      bg: '#131313', accent: '#e0505f' },
+        { key: 'relic-light',   name: 'Relic · Light',     bg: '#F5F0F0', accent: '#af2b3e' },
+        { key: 'medieval',      name: 'Medieval',          bg: '#F5E6D3', accent: '#8B4513' },
+        { key: 'steampunk',     name: 'Steampunk',         bg: '#18191b', accent: '#7b8fa0' },
+        { key: 'cyberpunk',     name: 'Cyberpunk',         bg: '#0d0221', accent: '#ff2a6d' },
+        { key: 'matrix',        name: 'Matrix',            bg: '#000000', accent: '#00ff41' },
+        { key: 'garden',        name: 'Garden',            bg: '#f0f5e8', accent: '#4caf50' },
+        { key: 'terminal',      name: 'Terminal',          bg: '#000000', accent: '#ffffff' },
+        { key: 'retro',         name: 'Retro Arcade',      bg: '#1c1c1c', accent: '#d4a24c' },
+    ];
+
+    let currentNamedPalette = '';
+
+    function loadNamedPalette() {
+        const saved = localStorage.getItem('co_named_palette') || '';
+        currentNamedPalette = saved;
+        document.documentElement.setAttribute('data-palette', saved);
+        // If user chose a palette, remove server theme CSS so their choice wins
+        if (saved) {
+            const themeLink = document.getElementById('co-theme-css');
+            if (themeLink) themeLink.remove();
+        }
+    }
+
+    function applyNamedPalette(key) {
+        currentNamedPalette = key;
+        localStorage.setItem('co_named_palette', key);
+        document.documentElement.setAttribute('data-palette', key);
+        // Remove server theme CSS so the user's palette choice takes full effect
+        const themeLink = document.getElementById('co-theme-css');
+        if (themeLink) themeLink.remove();
+        renderHeaderSwitcher();
+    }
 
     let currentVariant = 'a';
 
@@ -61,8 +118,123 @@
         });
     }
 
+    // --- Variant switch (swap CSS, no full reload) ---
+    async function applyVariantSwitch(variant) {
+        try {
+            await fetch('/api/experiment/variant', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ variant }),
+            });
+            resetPalette();
+            currentVariant = variant;
+            // Swap the stylesheet immediately so the new theme is applied without a page reload
+            const styleLink = document.querySelector('link[href="/style.css"], link[href^="/style.css?"]');
+            if (styleLink) {
+                styleLink.href = '/style.css?' + Date.now();
+            }
+            // Update header switcher UI to reflect new selection
+            renderHeaderSwitcher();
+        } catch (_err) {
+            showToast('Failed to switch variant');
+        }
+    }
+
+    // --- Header Palette Switcher ---
+    function swatchHtml(variantKey, dotClass) {
+        const colors = VARIANT_COLORS[variantKey];
+        if (!colors) return '';
+        return `<span class="${dotClass}" style="background:${colors.bg}"></span><span class="${dotClass}" style="background:${colors.accent}"></span>`;
+    }
+
+    function variantLabel(key) {
+        const v = VARIANTS.find(v => v.key === key);
+        return v ? v.name : key.toUpperCase();
+    }
+
+    function renderHeaderSwitcher() {
+        const slot = document.getElementById('palette-switcher');
+        if (!slot) return;
+
+        slot.innerHTML = '';
+
+        // Filter palettes to only those available to this user's tier.
+        const allowedPalettes = NAMED_PALETTES.filter(p =>
+            availableThemes.palettes.includes(p.key)
+        );
+
+        // If the currently selected palette is not in the allowed list, fall back to the
+        // first allowed one (this happens when a premium theme is displayed to a visitor —
+        // the switcher just won't pre-select it, the CSS token on the page still applies).
+        const current =
+            allowedPalettes.find(p => p.key === currentNamedPalette) ||
+            allowedPalettes[0] ||
+            NAMED_PALETTES[0];
+
+        const btn = document.createElement('button');
+        btn.className = 'palette-switcher-btn';
+        btn.id = 'palette-switcher-toggle';
+        btn.setAttribute('aria-haspopup', 'listbox');
+        btn.innerHTML = `
+            <span class="palette-switcher-swatch">
+                <span class="palette-switcher-swatch-dot" style="background:${current.bg}"></span>
+                <span class="palette-switcher-swatch-dot" style="background:${current.accent}"></span>
+            </span>
+            <span class="palette-switcher-label">${esc(current.name)}</span>
+            <svg class="palette-switcher-chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        `;
+
+        const dropdown = document.createElement('div');
+        dropdown.className = 'palette-switcher-dropdown hidden';
+        dropdown.id = 'palette-switcher-dropdown';
+        dropdown.setAttribute('role', 'listbox');
+        dropdown.innerHTML = allowedPalettes.map(p => `
+            <button class="palette-switcher-item${p.key === currentNamedPalette ? ' active' : ''}"
+                    data-palette-key="${p.key}"
+                    role="option"
+                    aria-selected="${p.key === currentNamedPalette}">
+                <span class="palette-switcher-item-swatch">
+                    <span class="palette-switcher-item-dot" style="background:${p.bg}"></span>
+                    <span class="palette-switcher-item-dot" style="background:${p.accent}"></span>
+                </span>
+                <span class="palette-switcher-item-name">${esc(p.name)}</span>
+            </button>
+        `).join('');
+
+        slot.appendChild(btn);
+        slot.appendChild(dropdown);
+
+        let open = false;
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            open = !open;
+            dropdown.classList.toggle('hidden', !open);
+        });
+
+        dropdown.querySelectorAll('.palette-switcher-item').forEach(item => {
+            item.addEventListener('click', () => {
+                const key = item.dataset.paletteKey;
+                open = false;
+                dropdown.classList.add('hidden');
+                applyNamedPalette(key);
+            });
+        });
+
+        document.addEventListener('click', () => {
+            if (open) {
+                open = false;
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        dropdown.addEventListener('click', (e) => e.stopPropagation());
+
+    }
+
     // --- Init ---
     async function init() {
+        // Fetch variant assignment
         try {
             const res = await fetch('/api/experiment/variant');
             const data = await res.json();
@@ -71,57 +243,56 @@
             const match = document.cookie.match(/co_variant=([a-h])/);
             if (match) currentVariant = match[1];
         }
+
+        // All themes available to everyone — no tier fetch needed
+
+        loadNamedPalette();
         loadPalette();
         renderWidget();
+        renderHeaderSwitcher();
     }
 
     // --- Render ---
     function renderWidget() {
-        // Pill
-        const pill = document.createElement('div');
-        pill.className = 'experiment-pill';
-        pill.innerHTML = `
-            <span class="experiment-pill-variant">Variant ${currentVariant.toUpperCase()}</span>
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-switch">Switch</button>
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-palette">Palette</button>
-            <span class="experiment-pill-sep">|</span>
-            <button class="experiment-pill-btn" id="exp-feedback">Feedback</button>
-        `;
-        document.body.appendChild(pill);
+        // No bottom pill — the header palette switcher handles theme selection.
+        // Variant switch and feedback are removed from the public MVP.
+        return;
 
-        // Dropdown
-        const dropdown = document.createElement('div');
-        dropdown.className = 'experiment-dropdown hidden';
-        dropdown.id = 'exp-dropdown';
-        dropdown.innerHTML = VARIANTS.map(v => `
-            <button class="experiment-dropdown-item${v.key === currentVariant ? ' active' : ''}" data-variant="${v.key}">
-                <span class="experiment-dropdown-item-letter">${v.key.toUpperCase()}</span>
-                ${esc(v.name)}
-            </button>
-        `).join('');
-        document.body.appendChild(dropdown);
+        // Variant dropdown — only rendered for logged-in users
+        if (hasVariants) {
+            const dropdown = document.createElement('div');
+            dropdown.className = 'experiment-dropdown hidden';
+            dropdown.id = 'exp-dropdown';
+            dropdown.innerHTML = VARIANTS.map(v => `
+                <button class="experiment-dropdown-item${v.key === currentVariant ? ' active' : ''}" data-variant="${v.key}">
+                    <span class="experiment-dropdown-item-letter">${v.key.toUpperCase()}</span>
+                    ${esc(v.name)}
+                </button>
+            `).join('');
+            document.body.appendChild(dropdown);
+        }
 
-        // Palette panel
-        const palettePanel = document.createElement('div');
-        palettePanel.className = 'experiment-palette hidden';
-        palettePanel.id = 'exp-palette-panel';
-        palettePanel.innerHTML = `
-            <div class="experiment-palette-header">
-                <span class="experiment-palette-title">Customize Palette</span>
-                <button class="experiment-palette-reset" id="exp-palette-reset">Reset</button>
-            </div>
-            <div class="experiment-palette-colors">
-                ${PALETTE_KEYS.map(p => `
-                    <div class="experiment-palette-row">
-                        <label>${esc(p.label)}</label>
-                        <input type="color" data-var="${p.key}" class="experiment-palette-input">
-                    </div>
-                `).join('')}
-            </div>
-        `;
-        document.body.appendChild(palettePanel);
+        // Custom palette panel — only rendered for logged-in users
+        if (hasCustomPalette) {
+            const palettePanel = document.createElement('div');
+            palettePanel.className = 'experiment-palette hidden';
+            palettePanel.id = 'exp-palette-panel';
+            palettePanel.innerHTML = `
+                <div class="experiment-palette-header">
+                    <span class="experiment-palette-title">Customize Palette</span>
+                    <button class="experiment-palette-reset" id="exp-palette-reset">Reset</button>
+                </div>
+                <div class="experiment-palette-colors">
+                    ${PALETTE_KEYS.map(p => `
+                        <div class="experiment-palette-row">
+                            <label>${esc(p.label)}</label>
+                            <input type="color" data-var="${p.key}" class="experiment-palette-input">
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+            document.body.appendChild(palettePanel);
+        }
 
         // Feedback overlay
         const overlay = document.createElement('div');
@@ -203,74 +374,74 @@
 
     // --- Events ---
     function setupEvents() {
+        const hasVariants = availableThemes.variants.length > 0;
+        const hasCustomPalette = !!availableThemes.custom;
+
         let dropdownOpen = false;
         let paletteOpen = false;
 
-        document.getElementById('exp-switch').addEventListener('click', (e) => {
-            e.stopPropagation();
-            dropdownOpen = !dropdownOpen;
-            paletteOpen = false;
-            document.getElementById('exp-dropdown').classList.toggle('hidden', !dropdownOpen);
-            document.getElementById('exp-palette-panel').classList.add('hidden');
-        });
-
-        document.getElementById('exp-palette').addEventListener('click', (e) => {
-            e.stopPropagation();
-            paletteOpen = !paletteOpen;
-            dropdownOpen = false;
-            document.getElementById('exp-palette-panel').classList.toggle('hidden', !paletteOpen);
-            document.getElementById('exp-dropdown').classList.add('hidden');
-            if (paletteOpen) syncPaletteInputs();
-        });
-
-        document.getElementById('exp-dropdown').querySelectorAll('.experiment-dropdown-item').forEach(btn => {
-            btn.addEventListener('click', async () => {
-                const variant = btn.dataset.variant;
-                if (variant === currentVariant) {
-                    dropdownOpen = false;
-                    document.getElementById('exp-dropdown').classList.add('hidden');
-                    return;
-                }
-                try {
-                    await fetch('/api/experiment/variant', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ variant }),
-                    });
-                    resetPalette();
-                    window.location.reload();
-                } catch (err) {
-                    showToast('Failed to switch variant');
+        if (hasVariants) {
+            document.getElementById('exp-switch').addEventListener('click', (e) => {
+                e.stopPropagation();
+                dropdownOpen = !dropdownOpen;
+                paletteOpen = false;
+                document.getElementById('exp-dropdown').classList.toggle('hidden', !dropdownOpen);
+                if (hasCustomPalette) {
+                    document.getElementById('exp-palette-panel').classList.add('hidden');
                 }
             });
-        });
+
+            document.getElementById('exp-dropdown').querySelectorAll('.experiment-dropdown-item').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const variant = btn.dataset.variant;
+                    dropdownOpen = false;
+                    document.getElementById('exp-dropdown').classList.add('hidden');
+                    if (variant !== currentVariant) {
+                        await applyVariantSwitch(variant);
+                    }
+                });
+            });
+        }
+
+        if (hasCustomPalette) {
+            document.getElementById('exp-palette').addEventListener('click', (e) => {
+                e.stopPropagation();
+                paletteOpen = !paletteOpen;
+                dropdownOpen = false;
+                document.getElementById('exp-palette-panel').classList.toggle('hidden', !paletteOpen);
+                if (hasVariants) {
+                    document.getElementById('exp-dropdown').classList.add('hidden');
+                }
+                if (paletteOpen) syncPaletteInputs();
+            });
+
+            // Palette color inputs
+            document.getElementById('exp-palette-panel').addEventListener('click', e => e.stopPropagation());
+            document.querySelectorAll('.experiment-palette-input').forEach(input => {
+                input.addEventListener('input', () => {
+                    const varName = input.dataset.var;
+                    document.documentElement.style.setProperty(varName, input.value);
+                    const palette = getCurrentPalette();
+                    palette[varName] = input.value;
+                    savePalette(palette);
+                });
+            });
+
+            document.getElementById('exp-palette-reset').addEventListener('click', () => {
+                resetPalette();
+                window.location.reload();
+            });
+        }
 
         document.addEventListener('click', () => {
             if (dropdownOpen) {
                 dropdownOpen = false;
-                document.getElementById('exp-dropdown').classList.add('hidden');
+                if (hasVariants) document.getElementById('exp-dropdown').classList.add('hidden');
             }
             if (paletteOpen) {
                 paletteOpen = false;
-                document.getElementById('exp-palette-panel').classList.add('hidden');
+                if (hasCustomPalette) document.getElementById('exp-palette-panel').classList.add('hidden');
             }
-        });
-
-        // Palette color inputs
-        document.getElementById('exp-palette-panel').addEventListener('click', e => e.stopPropagation());
-        document.querySelectorAll('.experiment-palette-input').forEach(input => {
-            input.addEventListener('input', () => {
-                const varName = input.dataset.var;
-                document.documentElement.style.setProperty(varName, input.value);
-                const palette = getCurrentPalette();
-                palette[varName] = input.value;
-                savePalette(palette);
-            });
-        });
-
-        document.getElementById('exp-palette-reset').addEventListener('click', () => {
-            resetPalette();
-            window.location.reload();
         });
 
         document.getElementById('exp-feedback').addEventListener('click', (e) => {

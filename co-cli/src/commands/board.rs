@@ -3,12 +3,19 @@ use co_web::config::WebConfig;
 use co_web::server::start_server;
 
 pub fn run(port: u16, data: String, static_dir: String, default_variant: String) {
+    let universo_dir = format!("{}/universes", data);
     let config = WebConfig {
         port,
         data_dir: data,
         static_dir,
         default_variant,
         experiments: true,
+        plugins_dir: "plugins".to_string(),
+        game_db_path: None,
+        universo_dir,
+        gestao_github_admins: vec![],
+        universe_key: None,
+        co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
     };
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");

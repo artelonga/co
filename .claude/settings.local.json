@@ -12,7 +12,11 @@
       "Read(//opt/homebrew/bin/**)",
       "Read(//Users/artelonga/.npm-global/bin/**)",
       "Read(//Users/artelonga/**)",
-      "Bash(PATH=\"/Users/artelonga/Library/Application Support/Claude/claude-code/2.1.78/claude.app/Contents/MacOS:$PATH\" co auto --space gp --workdir /Users/artelonga/projects/game --model opus)"
+      "Bash(PATH=\"/Users/artelonga/Library/Application Support/Claude/claude-code/2.1.78/claude.app/Contents/MacOS:$PATH\" co auto --space gp --workdir /Users/artelonga/projects/game --model opus)",
+      "Bash(pkill -f \"target/debug/co-web\")",
+      "Bash(JWT_SECRET=dev-test-secret cargo run -p co-web)",
+      "Bash(curl -s http://localhost:8742/api/health)",
+      "Bash(grep -r \"deploy\\\\|url\\\\|origin\\\\|host\" package.json svelte.config.js vite.config.*)"
     ]
   }
 }

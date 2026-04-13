@@ -1,0 +1,65 @@
+---
+# Fly.io deployment wrapper.
+# Runs backup → flyctl deploy → health check.
+# Idempotent: safe to run multiple times.
+#
+# Prerequisites:
+#   flyctl installed and authenticated (fly auth login)
+#
+# Usage:
+#   ansible-playbook -i inventory/fly.yml playbooks/fly-deploy.yml
+
+- name: Deploy to Fly.io
+  hosts: fly
+  gather_facts: false
+
+  vars_files:
+    - ../group_vars/all.yml
+
+  vars:
+    fly_app: "co-web"
+    fly_health_url: "https://{{ fly_app }}.fly.dev/api/health"
+    co_workspace_root: "{{ playbook_dir }}/../../"
+
+  tasks:
+    # ── Pre-deploy: backup existing data ──────────────────────────────────────
+
+    - name: Create pre-deploy snapshot via flyctl (SSH into machine)
+      ansible.builtin.command:
+        cmd: >
+          flyctl ssh console
+          --app {{ fly_app }}
+          --command
+          "sqlite3 /data/co.db \".backup /data/co-pre-deploy.sqlite\""
+      delegate_to: localhost
+      changed_when: true
+      failed_when: false  # non-fatal: first deploy has no data
+
+    # ── Deploy ─────────────────────────────────────────────────────────────────
+
+    - name: Run flyctl deploy
+      ansible.builtin.command:
+        cmd: flyctl deploy --app {{ fly_app }} --remote-only
+        chdir: "{{ co_workspace_root }}/co-web"
+      delegate_to: localhost
+      changed_when: true
+      environment:
+        FLY_API_TOKEN: "{{ lookup('env', 'FLY_API_TOKEN') }}"
+
+    # ── Post-deploy: health check ──────────────────────────────────────────────
+
+    - name: Wait for Fly.io deployment to become healthy
+      ansible.builtin.uri:
+        url: "{{ fly_health_url }}"
+        method: GET
+        status_code: 200
+        timeout: 15
+      delegate_to: localhost
+      register: fly_health
+      retries: 12
+      delay: 10
+      until: fly_health.status == 200
+
+    - name: Report Fly.io health
+      ansible.builtin.debug:
+        msg: "Fly.io deployment healthy — {{ fly_health.json | default(fly_health.content) }}"

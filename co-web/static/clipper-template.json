@@ -1,0 +1,22 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "CO — Gestão de conteúdo",
+  "behavior": "create",
+  "noteContentFormat": "---\ntitle: {{title}}\nsource: {{url}}\nauthor: {{author}}\npublished: {{date:YYYY-MM-DD}}\ncreated: {{date:YYYY-MM-DDTHH:mm:ssZ}}\ntags: {{tags|default:[web-clip]}}\ntype: clip\n---\n\n{{content}}",
+  "properties": [
+    { "name": "title", "value": "{{title}}", "type": "text" },
+    { "name": "source", "value": "{{url}}", "type": "text" },
+    { "name": "author", "value": "{{author}}", "type": "text" },
+    { "name": "published", "value": "{{date:YYYY-MM-DD}}", "type": "date" },
+    { "name": "created", "value": "{{date:YYYY-MM-DDTHH:mm:ssZ}}", "type": "date" },
+    { "name": "tags", "value": "{{tags}}", "type": "multitext" },
+    { "name": "type", "value": "clip", "type": "text" }
+  ],
+  "triggers": [
+    { "name": "Clip to CO", "hotkey": "" }
+  ],
+  "destination": "vault",
+  "path": "content/clips/{{date:YYYYMMDD}}-{{slugify title}}.md",
+  "apiEndpoint": "/api/v1/universes/{{universe}}/vault/clip",
+  "description": "Clip web content to your CO universe. Configure the universe slug in the endpoint URL."
+}

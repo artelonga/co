@@ -1,88 +1,139 @@
 # CO
 
-Graph-based content management in Rust. Markdown files with YAML frontmatter, version controlled, human readable.
+**CO** is an open-source, graph-based content management platform. You write Markdown files with YAML frontmatter; CO indexes them into a graph, serves a kanban board and wiki, and syncs edits in real time. Run it locally with the CLI, self-host the web server, or use the hosted version at [artelonga.com.br/co](https://artelonga.com.br/co).
 
-## Prerequisites
+---
 
-CO requires Rust and Cargo. Install using [rustup](https://doc.rust-lang.org/cargo/getting-started/installation.html):
+<!-- Screenshot: template board at artelonga.com.br/co -->
+> **Hosted demo:** [artelonga.com.br/co](https://artelonga.com.br/co) — create a free universe, no login required (up to 100 entries).
 
-```bash
-curl https://sh.rustup.rs -sSf | sh
-```
-
-After installation, reload your terminal or run:
-```bash
-source ~/.cargo/env
-```
+---
 
 ## Quick Start
 
+### Option A — CLI (Rust)
+
 ```bash
-git clone git@github.com:institutional-pointset/co.git
+cargo install co-cli
+co init meu-projeto
+cd meu-projeto
+co new task "primeira tarefa"
+co show board
+```
+
+### Option B — Docker
+
+```bash
+docker run -d \
+  -p 3000:3000 \
+  -v co-data:/data \
+  -e JWT_SECRET=change-me \
+  ghcr.io/artelonga/co:latest
+```
+
+Open [http://localhost:3000/co](http://localhost:3000/co).
+
+---
+
+## Self-Hosting
+
+### Docker Compose (recommended)
+
+```yaml
+services:
+  co:
+    image: ghcr.io/artelonga/co:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - co-data:/data
+    environment:
+      JWT_SECRET: ${JWT_SECRET}
+      CO_WEB_DATA: /data
+      CO_WEB_PORT: 3000
+    restart: unless-stopped
+
+volumes:
+  co-data:
+```
+
+```bash
+JWT_SECRET=$(openssl rand -hex 32) docker compose up -d
+```
+
+### Fly.io
+
+```bash
+git clone https://github.com/artelonga/co
 cd co
-cargo build --workspace
-cargo install --path co-cli
-co --help
+fly launch --no-deploy
+fly secrets set JWT_SECRET=$(openssl rand -hex 32)
+fly deploy
 ```
 
-## Using as a Dependency
-
-```toml
-[dependencies]
-co = { git = "https://github.com/institutional-pointset/co", branch = "main" }
-```
-
-### Example
-
-```rust
-use co::{Graph, LANGUAGES};
-use co::language::Language;
-
-fn main() {
-    let graph = Graph::new();
-    println!("Root: {:?}", graph.root());
-
-    for lang in Language::initial_languages() {
-        println!("{}: {}", lang.id, lang.name);
-    }
-}
-```
-
-## Structure
-
-```
-co/
-├── core/             # Library crate
-│   └── src/
-│       ├── graph.rs      # Graph operations
-│       ├── node.rs       # Node types
-│       ├── edge.rs       # Edge types
-│       ├── language.rs   # Language system
-│       ├── index.rs      # Binary index
-│       ├── query.rs      # Query DSL
-│       ├── storage.rs    # File I/O
-│       ├── frontmatter.rs
-│       └── archive.rs
-├── co-cli/           # CLI binary
-│   └── src/
-│       ├── main.rs
-│       └── commands/
-└── graph/            # Content
-    ├── languages/
-    └── definitions/
-```
-
-## Commands
+### Build from source
 
 ```bash
-co status              # Graph status
-co languages           # List languages
-co query "status:todo" # Query content
-co define <id>         # Create definition
-co index build         # Rebuild index
-co repl                # Interactive mode
+git clone https://github.com/artelonga/co
+cd co
+cargo build --release -p co-web
+./target/release/co-web
 ```
+
+---
+
+## Architecture
+
+```
+┌─────────────┐     REST / WebSocket     ┌─────────────────┐
+│   co-cli    │ ◄──────────────────────► │    co-web       │
+│  (Rust CLI) │                          │  (Axum server)  │
+└──────┬──────┘                          └────────┬────────┘
+       │                                          │
+       └──────────────────┬───────────────────────┘
+                          │
+                   ┌──────▼──────┐
+                   │    core     │
+                   │ (Rust lib)  │
+                   │             │
+                   │  graph DB   │
+                   │  Markdown   │
+                   │  SQLite     │
+                   └─────────────┘
+```
+
+| Component | Description |
+|-----------|-------------|
+| `core`    | Graph database, Markdown parser, content types, validation |
+| `co-cli`  | Command-line interface — init, new, show, validate |
+| `co-web`  | Axum HTTP server — board UI, REST API, WebSocket CRDT sync |
+
+---
+
+## CLI Reference
+
+```bash
+co init <name>          # Create a new universe
+co new task "title"     # Create a task
+co new note "title"     # Create a note
+co show board           # Open board in browser
+co locate               # Search content
+co locate --type task   # Filter by type
+co validate all         # Validate workspace
+co schema list          # List content types
+co config show          # Show configuration
+```
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, branch conventions, and the PR process.
+
+All contributions are welcome — bug reports, feature requests, documentation, and code.
+
+---
 
 ## License
 
-MIT
+[MIT](LICENSE) — Copyright (c) 2025 Institutional PointSet

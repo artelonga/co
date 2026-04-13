@@ -1,12 +1,11 @@
 use axum::{
-    extract::{Extension, Path, Query, State},
-    http::{header, StatusCode},
-    response::IntoResponse,
     Json,
+    extract::{Extension, Path, Query, State},
+    http::{StatusCode, header},
+    response::IntoResponse,
 };
-use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
 use rand::Rng;
-use std::sync::Arc;
 
 use crate::auth::{Claims, UserId};
 use crate::game_models::*;
@@ -77,9 +76,7 @@ pub async fn health() -> Json<HealthResponse> {
 
 // ---- Plugins (unauthenticated) ----
 
-pub async fn list_plugins(
-    State(state): State<AppState>,
-) -> Json<Vec<PluginListEntry>> {
+pub async fn list_plugins(State(state): State<AppState>) -> Json<Vec<PluginListEntry>> {
     let entries: Vec<PluginListEntry> = state
         .plugin_registry
         .iter()
@@ -222,8 +219,7 @@ pub async fn verify(
                 let _ = storage.delete_verify_code(&email);
                 return Ok(Err(("exhausted", 0, String::new(), String::new())));
             }
-            storage
-                .save_verify_code(&email, &serde_json::to_string(&entry).unwrap_or_default())?;
+            storage.save_verify_code(&email, &serde_json::to_string(&entry).unwrap_or_default())?;
             let remaining = MAX_ATTEMPTS - entry.attempts;
             return Ok(Err(("wrong", remaining, String::new(), String::new())));
         }
@@ -313,6 +309,8 @@ pub async fn verify(
         sub: user.user_id.clone(),
         email: email.clone(),
         tier: "player".into(),
+        usuario: String::new(),
+        papel: String::new(),
         exp,
         iat: now_ts,
     };
@@ -424,8 +422,8 @@ pub async fn register(
     // Hash password with Argon2id
     let password = req.password.clone();
     let password_hash = tokio::task::spawn_blocking(move || {
-        use argon2::password_hash::{rand_core::OsRng, PasswordHasher, SaltString};
         use argon2::Argon2;
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
 
         let salt = SaltString::generate(&mut OsRng);
         let argon2 = Argon2::default();
@@ -539,6 +537,8 @@ pub async fn legacy_login(
         sub: user.user_id.clone(),
         email: user.email.clone(),
         tier: "player".into(),
+        usuario: String::new(),
+        papel: String::new(),
         exp,
         iat: now_ts,
     };
@@ -727,6 +727,147 @@ pub async fn get_leaderboard(
     .await
     .map_err(|e| server_error(format!("Task error: {}", e)))?
     .map_err(|e| server_error(format!("Storage error: {}", e)))?;
+
+    Ok(Json(entries))
+}
+
+// ---- Global Leaderboard (unauthenticated) ----
+
+pub async fn get_global_leaderboard(
+    State(state): State<AppState>,
+    Query(params): Query<LeaderboardQuery>,
+) -> Result<Json<Vec<GlobalLeaderboardEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let limit = params.limit.unwrap_or(10).min(100) as usize;
+    let storage = state.game_storage.clone();
+
+    let entries = tokio::task::spawn_blocking(move || {
+        // Stat keys have the format "{game_name}:{user_id}".
+        // Collect unique user IDs from the keys, then aggregate their scores.
+        let keys = storage
+            .list_game_stat_keys()
+            .map_err(|e| format!("Storage error: {e}"))?;
+
+        let mut user_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for key in &keys {
+            if let Some(pos) = key.find(':') {
+                user_ids.insert(key[pos + 1..].to_string());
+            }
+        }
+
+        let mut aggregated: Vec<(String, String, String, i64, u64)> = Vec::new();
+
+        for uid in user_ids {
+            let stats_list = storage.list_game_stats_by_user(&uid).unwrap_or_default();
+            if stats_list.is_empty() {
+                continue;
+            }
+            let total_score: i64 = stats_list.iter().map(|s| s.high_score).sum();
+            let total_played: u64 = stats_list.iter().map(|s| s.games_played).sum();
+            if total_score == 0 && total_played == 0 {
+                continue;
+            }
+
+            let user = storage.get_user_by_id(&uid).ok().flatten();
+            let display_name = user
+                .as_ref()
+                .map(|u| u.display_name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let username = user
+                .as_ref()
+                .map(|u| u.username.clone())
+                .unwrap_or_default();
+
+            aggregated.push((uid, display_name, username, total_score, total_played));
+        }
+
+        aggregated.sort_by_key(|e| std::cmp::Reverse(e.3));
+        aggregated.truncate(limit);
+
+        let results = aggregated
+            .into_iter()
+            .enumerate()
+            .map(
+                |(i, (user_id, display_name, username, total_score, games_played))| {
+                    GlobalLeaderboardEntry {
+                        rank: (i + 1) as u32,
+                        user_id,
+                        display_name,
+                        username,
+                        total_score,
+                        games_played,
+                    }
+                },
+            )
+            .collect();
+
+        Ok::<_, String>(results)
+    })
+    .await
+    .map_err(|e| server_error(format!("Task error: {e}")))?
+    .map_err(server_error)?;
+
+    Ok(Json(entries))
+}
+
+// ---- Recent Activity Feed (unauthenticated) ----
+
+pub async fn get_recent_activity(
+    State(state): State<AppState>,
+    Query(params): Query<LeaderboardQuery>,
+) -> Result<Json<Vec<RecentActivityEntry>>, (StatusCode, Json<ErrorResponse>)> {
+    let limit = params.limit.unwrap_or(20).min(100) as usize;
+    let storage = state.game_storage.clone();
+
+    let entries = tokio::task::spawn_blocking(move || {
+        let keys = storage
+            .list_game_stat_keys()
+            .map_err(|e| format!("Storage error: {e}"))?;
+
+        let mut user_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for key in &keys {
+            if let Some(pos) = key.find(':') {
+                user_ids.insert(key[pos + 1..].to_string());
+            }
+        }
+
+        let mut activity: Vec<RecentActivityEntry> = Vec::new();
+
+        for uid in user_ids {
+            let stats_list = storage.list_game_stats_by_user(&uid).unwrap_or_default();
+
+            let user = storage.get_user_by_id(&uid).ok().flatten();
+            let display_name = user
+                .as_ref()
+                .map(|u| u.display_name.clone())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let username = user
+                .as_ref()
+                .map(|u| u.username.clone())
+                .unwrap_or_default();
+
+            for stat in stats_list {
+                if stat.games_played == 0 {
+                    continue;
+                }
+                activity.push(RecentActivityEntry {
+                    user_id: uid.clone(),
+                    display_name: display_name.clone(),
+                    username: username.clone(),
+                    game_name: stat.game_name.clone(),
+                    score: stat.high_score,
+                    played_at: stat.last_played_at,
+                });
+            }
+        }
+
+        activity.sort_by_key(|e| std::cmp::Reverse(e.played_at));
+        activity.truncate(limit);
+
+        Ok::<_, String>(activity)
+    })
+    .await
+    .map_err(|e| server_error(format!("Task error: {e}")))?
+    .map_err(server_error)?;
 
     Ok(Json(entries))
 }

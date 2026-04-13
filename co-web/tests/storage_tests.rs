@@ -12,6 +12,7 @@ fn test_create_and_list_projects() {
             name: "Test Project".into(),
             key: "TP".into(),
             description: "A test project".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -35,6 +36,7 @@ fn test_duplicate_project_rejected() {
             name: "First".into(),
             key: "DUP".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -42,6 +44,7 @@ fn test_duplicate_project_rejected() {
         name: "Second".into(),
         key: "DUP".into(),
         description: "".into(),
+        ..Default::default()
     });
 
     assert!(result.is_err());
@@ -57,6 +60,7 @@ fn test_get_project() {
             name: "Findable".into(),
             key: "FND".into(),
             description: "desc".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -78,6 +82,7 @@ fn test_project_key_case_insensitive() {
             name: "Case Test".into(),
             key: "ct".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -99,6 +104,7 @@ fn test_create_and_list_tasks() {
             name: "Task Test".into(),
             key: "TT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -113,6 +119,7 @@ fn test_create_and_list_tasks() {
                 due_date: None,
                 parent: None,
                 labels: vec!["test".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -141,6 +148,7 @@ fn test_task_ids_monotonically_increase() {
             name: "ID Test".into(),
             key: "ID".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -155,6 +163,7 @@ fn test_task_ids_monotonically_increase() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -170,6 +179,7 @@ fn test_task_ids_monotonically_increase() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -189,6 +199,7 @@ fn test_get_task() {
             name: "Get Test".into(),
             key: "GT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -203,6 +214,7 @@ fn test_get_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -228,6 +240,7 @@ fn test_update_task() {
             name: "Update Test".into(),
             key: "UT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -242,6 +255,7 @@ fn test_update_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -259,6 +273,7 @@ fn test_update_task() {
                 parent: None,
                 labels: Some(vec!["done".into()]),
                 archived: None,
+                assignee: None,
             },
         )
         .unwrap();
@@ -285,6 +300,7 @@ fn test_delete_task() {
             name: "Delete Test".into(),
             key: "DT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -299,6 +315,7 @@ fn test_delete_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -321,6 +338,7 @@ fn test_delete_nonexistent_task_errors() {
             name: "Test".into(),
             key: "DNE".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -374,6 +392,7 @@ fn test_task_with_parent() {
             name: "Parent Test".into(),
             key: "PT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -388,6 +407,7 @@ fn test_task_with_parent() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -403,6 +423,7 @@ fn test_task_with_parent() {
                 due_date: None,
                 parent: Some(parent.id),
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -439,6 +460,7 @@ fn test_comments() {
             name: "Comment Test".into(),
             key: "CM".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -453,6 +475,7 @@ fn test_comments() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -505,6 +528,7 @@ fn test_activity_log() {
             name: "Activity Test".into(),
             key: "AC".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -519,40 +543,14 @@ fn test_activity_log() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
 
-    // Activity from project creation + task creation
+    // activity_log was dropped in migration v13 — list_activity returns empty
     let activity = storage.list_activity("AC", 50);
-    assert!(activity.len() >= 2);
-    assert!(activity.iter().any(|a| a.action == "project_created"));
-    assert!(activity.iter().any(|a| a.action == "task_created"));
-
-    // Update task → creates field_changed entries
-    storage
-        .update_task(
-            "AC",
-            1,
-            UpdateTask {
-                status: Some(TaskStatus::Done),
-                title: None,
-                description: None,
-                priority: None,
-                due_date: None,
-                parent: None,
-                labels: None,
-                archived: None,
-            },
-        )
-        .unwrap();
-
-    let activity = storage.list_activity("AC", 50);
-    assert!(
-        activity
-            .iter()
-            .any(|a| a.action == "field_changed" && a.field.as_deref() == Some("status"))
-    );
+    assert!(activity.is_empty());
 }
 
 #[test]
@@ -565,6 +563,7 @@ fn test_archive_task() {
             name: "Archive Test".into(),
             key: "AR".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -579,6 +578,7 @@ fn test_archive_task() {
                 due_date: None,
                 parent: None,
                 labels: vec![],
+                assignee: None,
             },
         )
         .unwrap();
@@ -597,6 +597,7 @@ fn test_archive_task() {
                 due_date: None,
                 parent: None,
                 labels: None,
+                assignee: None,
             },
         )
         .unwrap();
@@ -621,6 +622,7 @@ fn test_bulk_operations() {
             name: "Bulk Test".into(),
             key: "BK".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -636,6 +638,7 @@ fn test_bulk_operations() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
@@ -705,6 +708,7 @@ fn test_create_task_unicode_title() {
             name: "Unicode Test".into(),
             key: "UC".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -719,6 +723,7 @@ fn test_create_task_unicode_title() {
                 due_date: None,
                 parent: None,
                 labels: vec!["日本語".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -741,6 +746,7 @@ fn test_create_task_special_chars() {
             name: "Special".into(),
             key: "SP".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -755,6 +761,7 @@ fn test_create_task_special_chars() {
                 due_date: None,
                 parent: None,
                 labels: vec!["a&b".into(), "c<d".into()],
+                assignee: None,
             },
         )
         .unwrap();
@@ -776,6 +783,7 @@ fn test_activity_log_limit_cap() {
             name: "Limit Test".into(),
             key: "LT".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -792,18 +800,15 @@ fn test_activity_log_limit_cap() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
     }
 
-    // Request with limit=5 should return only 5
+    // activity_log was dropped in migration v13 — list_activity returns empty
     let activity = storage.list_activity("LT", 5);
-    assert_eq!(activity.len(), 5);
-
-    // Even if we request 1000, storage accepts it (capping is handler-level)
-    let activity = storage.list_activity("LT", 1000);
-    assert!(activity.len() > 5);
+    assert!(activity.is_empty());
 }
 
 #[test]
@@ -816,6 +821,7 @@ fn test_list_tasks_with_pagination() {
             name: "Pagination Test".into(),
             key: "PG".into(),
             description: "".into(),
+            ..Default::default()
         })
         .unwrap();
 
@@ -831,6 +837,7 @@ fn test_list_tasks_with_pagination() {
                     due_date: None,
                     parent: None,
                     labels: vec![],
+                    assignee: None,
                 },
             )
             .unwrap();
@@ -866,10 +873,71 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 2);
+    assert_eq!(storage.schema_version(), 20); // CO-49 added v20
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 2);
+    assert_eq!(storage2.schema_version(), 20); // CO-49 added v20
+}
+
+#[test]
+fn test_delete_project_cascade() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path());
+
+    storage
+        .create_project(CreateProject {
+            name: "To Delete".into(),
+            key: "DEL".into(),
+            description: "".into(),
+            ..Default::default()
+        })
+        .unwrap();
+
+    storage
+        .create_task(
+            "DEL",
+            CreateTask {
+                title: "Task to cascade".into(),
+                description: "".into(),
+                status: TaskStatus::Todo,
+                priority: Priority::Medium,
+                due_date: None,
+                parent: None,
+                labels: vec![],
+                assignee: None,
+            },
+        )
+        .unwrap();
+
+    storage
+        .create_comment(
+            "DEL",
+            1,
+            CreateComment {
+                body: "Comment to cascade".into(),
+                author: "tester".into(),
+            },
+        )
+        .unwrap();
+
+    assert!(storage.get_project("DEL").is_some());
+    assert_eq!(storage.list_tasks("DEL").len(), 1);
+    assert_eq!(storage.list_comments("DEL", 1).len(), 1);
+
+    storage.delete_project("DEL").unwrap();
+
+    assert!(storage.get_project("DEL").is_none());
+    assert_eq!(storage.list_tasks("DEL").len(), 0);
+    assert_eq!(storage.list_comments("DEL", 1).len(), 0);
+}
+
+#[test]
+fn test_delete_project_not_found() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path());
+
+    let result = storage.delete_project("NOPE");
+    assert!(result.is_err());
 }

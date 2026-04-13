@@ -40,6 +40,7 @@ pub mod archive;
 pub mod config;
 pub mod content;
 pub mod edge;
+pub mod entry;
 pub mod feature;
 pub mod frontmatter;
 pub mod github;
@@ -55,6 +56,13 @@ pub mod storage;
 pub mod types;
 pub mod validate;
 
+/// Generated protobuf types for Entry wire format.
+pub mod proto {
+    pub mod entry {
+        include!(concat!(env!("OUT_DIR"), "/co.entry.rs"));
+    }
+}
+
 // Re-export main types
 pub use content::{ParsedContent, SectionSpec, specs_for_type};
 pub use edge::{Edge, EdgeType};
@@ -68,6 +76,10 @@ pub use query::Query;
 pub use schema::{Definition, Domain, Project, Task};
 pub use space::{Space, SpaceKind, SpaceLocation};
 // Deprecated aliases for backwards compatibility
+pub use entry::{
+    Entry, FileStat, delete_entry, entry_to_markdown, move_entry, parse_entry_content, read_entry,
+    scan_entries, split_frontmatter, write_entry, yaml_to_json,
+};
 #[allow(deprecated)]
 pub use space::{Context, ContextKind, Scope, ScopeKind};
 pub use storage::ContentStore;

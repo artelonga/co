@@ -1,0 +1,11 @@
+{
+  "id": "co-universe-sync",
+  "name": "CO Universe Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.4.0",
+  "description": "Sync a CO universe ↔ Obsidian vault — pull, push, or bidirectional with wikilink support.",
+  "author": "ArteLonga",
+  "authorUrl": "https://artelonga.com.br",
+  "fundingUrl": "https://artelonga.com.br/co",
+  "isDesktopOnly": false
+}

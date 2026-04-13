@@ -34,8 +34,17 @@ uuid = { workspace = true }
 xxhash-rust = { workspace = true }
 dirs = "5"
 
+# Hashing (for body_hash in Entry)
+sha2 = "0.10"
+
+# Protobuf (wire format for Entry)
+prost = "0.13"
+
 # Graph
 petgraph = { workspace = true }
+
+[build-dependencies]
+prost-build = "0.13"
 
 [dev-dependencies]
 tempfile = { workspace = true }

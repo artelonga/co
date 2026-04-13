@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "inlineSourceMap": true,
+    "inlineSources": true,
+    "module": "ESNext",
+    "target": "ES2018",
+    "allowImportingTsExtensions": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "bundler",
+    "importHelpers": true,
+    "isolatedModules": true,
+    "lib": ["ES6", "DOM"],
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "strictNullChecks": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "tests"]
+}

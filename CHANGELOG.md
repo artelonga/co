@@ -5,6 +5,308 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-04-10
+
+### co-web
+
+#### Added — CO-38: Yggdrasil — universe of universes: minigames hub
+
+- **Migration v18**: `requires_login INTEGER NOT NULL DEFAULT 0` column on `universes` table — gates login-only universes from anonymous access
+- **Yggdrasil universe**: seeded on first boot (`key=yggdrasil`, `requires_login=1`, `is_public=1`, `theme_preset=relic`, `layout=gaming`, `owner=system`)
+- **Login gate** (`universe_routes.rs`): `GET /api/v1/universes/:slug` returns 401 for universes with `requires_login=true` when no valid JWT is present; other universes unaffected
+- **`UniverseInfo`** response now includes `requires_login: bool` field
+- **Global leaderboard endpoint** `GET /api/v1/games/leaderboard/global`: aggregates high scores across all games per user, returns top N sorted by total score
+- **Recent activity endpoint** `GET /api/v1/games/recent`: returns recent game plays across all users sorted by `last_played_at` desc
+- **Browser games** (`co-web/static/games/`): 5 pure HTML5 canvas + JS games — Tetris, Snake, Space Invaders, PointSet (memory pairs), Video Poker — each posts score to `/api/v1/games/{name}/result` on game over
+- **Yggdrasil hub** (`app.js` variant a): gaming layout at `/co/yggdrasil` — player profile card (level, total score, games played), game grid (5 cards with personal best + JOGAR), global leaderboard panel, recent activity feed; detects `/co/yggdrasil/{game}` to launch individual games with per-game leaderboard
+- **Login wall**: anonymous visitors to `/co/yggdrasil` see a "Login to play" CTA screen instead of the hub
+- **SPA route** `/co/yggdrasil/{game}` added to the Axum router (served by the same SPA)
+- **i18n strings** added for Yggdrasil UI elements (pt-BR)
+- **4 new tests** in `template_tests.rs`: seed/existence, requires_login flag, 401 for anonymous, 200 for authenticated; template universe still accessible anonymously
+
+---
+
+## [1.1.0] — 2026-04-10
+
+### co-web
+
+#### Added — CO-46: Full user telemetry — privacy-respecting tracking
+
+- **`telemetry_events` table** (migration v16): stores page views, interactions, errors, and performance events without PII — no raw IPs, no email addresses, no entry content
+- **`co-web/src/telemetry.rs`**: new telemetry module with server-side middleware, storage helpers, and aggregation queries
+  - `telemetry_middleware`: tracks all GET page views; filters bots; stores daily-salted IP hash, device/browser/OS from UA
+  - `hash_ip_daily()`: xxhash + daily date salt — same IP gets a different hash each day, preventing cross-day re-identification
+  - `cleanup_old_events()`: 90-day retention policy (removes raw rows older than 90 days)
+  - `telemetry_summary()`: aggregates total events, unique visitors, top pages, error count, p95 latency, events by type and day
+- **`POST /api/v1/telemetry/event`**: client-side event ingestion endpoint (returns 202 Accepted); accepts `event_name`, `event_type`, `path`, `universe_key`, `properties`, `duration_ms`, `session_id`
+- **`GET /api/v1/admin/telemetry/summary`**: aggregated analytics for the last 30 days (GitHub admin auth required)
+- **`GET /api/v1/admin/telemetry/export`**: last 10 000 events as CSV download (GitHub admin auth required)
+- **`GET /co/co-dev/telemetria`**: admin dashboard page with cards (total visitors, unique visitors, error count, p95 latency), traffic chart, top pages, events by type, and CSV export
+- **`co-web/static/shared/telemetry.js`**: client-side module
+  - Respects `navigator.doNotTrack === '1'` — tracking silently disabled
+  - Gated on `co_cookie_consent` in localStorage — no events sent before consent
+  - Auto-tracks page views (with load time + TTI) on `DOMContentLoaded`
+  - Auto-tracks JavaScript errors via `window.onerror`
+  - Auto-tracks LCP and FID via `PerformanceObserver`
+  - Exposes `window.coTrack(eventName, properties)` for manual interaction tracking
+  - Uses `navigator.sendBeacon` for non-blocking delivery
+  - Session ID: random nanoid stored in `sessionStorage` (expires on tab close)
+- **Integration tests** in `co-web/tests/telemetry_tests.rs`: simulate user flow → verify events recorded, retention cleanup, HTTP endpoint status codes, admin auth guard, admin dashboard page
+- **Unit tests** in `co-web/src/telemetry.rs`: UA parsing, bot detection, IP hash privacy
+
+## [1.0.0] — 2026-04-07
+
+### co-web
+
+#### Added — CO-37: Design alignment — Scholarly Automaton + Relic Archive aesthetic
+
+**Typography**
+- Load Newsreader (serif) + Work Sans (sans) for Scholarly theme via Google Fonts CDN
+- Load Newsreader (serif) + Manrope (sans) for Relic theme
+- Load Material Symbols Outlined via Google Fonts CDN
+- Font hierarchy: project name = Newsreader italic, task titles = Newsreader 600, labels = Work Sans/Manrope uppercase
+
+**Surface & Depth (No-Line Rule)**
+- Removed all `1px solid` header/sidebar borders for Scholarly and Relic palettes
+- Sidebar: `surface-container-low` background via tonal shift — no right border
+- Cards: asymmetric padding (16px left vs 10px right) for editorial feel
+- Kanban columns: tonal background shift per palette (no column borders)
+- Ghost borders via CSS custom properties at 15% opacity where accessibility requires
+- Modals: ambient `box-shadow: 0 20px 50px` warm-tinted shadows
+- Glassmorphism: Relic dark modal + header use `backdrop-filter: blur(20px)` with 80% opacity surface
+
+**Color Tokens (theme_engine.rs)**
+- Full Material Design 3 token set added to Scholarly (light + dark) presets: `--md-primary`, `--md-surface`, `--md-surface-container-*`, `--md-on-surface`, `--md-outline`, `--md-outline-variant`, and 30+ additional tokens
+- Full MD3 token set added to Relic (dark + light) presets
+- All MD3 tokens exposed as CSS custom properties `--md-*` in named palette blocks
+- Scholarly dark companion: inverted surface tiers, warm brass tones preserved
+- Relic light companion: warm rose-tinted light version
+
+**Components**
+- Buttons: Primary (Scholarly = brass + inner glow, Relic = blood-silk gradient), Secondary (ghost border 15% opacity, 40% on hover)
+- Task cards: thin left border with priority color (critical/high/medium/low) instead of pill
+- Task cards: no dividers between cards — whitespace separation
+- Kanban card hover: background tonal shift to surface-container, no hard border
+- View tabs: pill group style with `border-radius: 99px`, active tab gets accent bg
+- Sidebar items: `translateX(4px)` on hover instead of background change
+- Search input: bottom-border only (ledger style) for Scholarly palette
+- Status badges: pill-shaped with `primary-container` bg for Relic
+
+**Material Icons**
+- View tabs: Material Symbols Outlined icons (view_kanban, table_rows, dashboard, auto_stories) + text
+- Sidebar nav section: architecture icon
+- Icon-only on mobile (label hidden below 640px)
+- On desktop: icon + text
+
+**Responsive**
+- Login button, language toggle, palette switcher: always visible on all breakpoints
+- Mobile ≤640px: single-column kanban, horizontal-scroll view tabs
+- Tablet 641–1024px: 2-column kanban grid
+
+**Obsidian Tasks Compatibility**
+- New `co-web/src/obsidian_tasks.rs` module: bidirectional status ↔ checkbox mapping
+  - `status_to_checkbox`: `todo→' '`, `in_progress→'/'`, `in_review→'~'`, `done→'x'`
+  - `checkbox_to_status`: reverse mapping with uppercase-X support
+  - `inject_task_checkbox`: prepends `- [c] Title` to task body on vault export
+  - `apply_obsidian_tasks`: parses checkbox from body on vault import, updates frontmatter status; frontmatter is canonical (not overwritten if already set)
+- `vault_routes.rs` GET: injects checkbox line into task entry bodies on export
+- `vault_routes.rs` PUT: parses checkbox from incoming body, updates frontmatter status on import; strips checkbox line from stored body
+- `app.js`: `taskToObsidianLine`, `parseObsidianCheckboxLine`, `extractStatusFromBody` utilities
+- 14 unit tests in `obsidian_tasks.rs` covering all status/checkbox combinations and edge cases
+
+## [0.30.0] — 2026-04-06
+
+### co-obsidian (new module)
+
+#### Added — CO-34: Obsidian plugin — sync CO universe ↔ vault
+
+- `co-obsidian/` — new Obsidian community plugin (TypeScript, esbuild)
+- `manifest.json`: id `co-universe-sync`, name "CO Universe Sync", minAppVersion 1.4.0
+- `package.json` with esbuild build system + Jest test runner
+- Plugin settings: CO instance URL, API token, universe slug, sync direction, interval, conflict markers
+- Settings tab with connection test and OAuth login button
+- `src/api-client.ts` — typed CO Vault API client (listFiles, getFile, putFile, deleteFile, search, getTags)
+- `src/sync-engine.ts` — core sync engine:
+  - `pull()`: GET `/vault/` listing → mtime-based incremental check → render + write to vault
+  - `push()`: scan vault .md files → hash-based change detection → upload to CO
+  - `sync()`: bidirectional — pull then push, last-write-wins; optional conflict markers
+  - Sync triggers: on-save (debounced 5 s), startup, configurable interval
+  - Status callbacks: idle / syncing / synced / offline / conflict / error
+- `src/frontmatter.ts` — bidirectional frontmatter mapping:
+  - CO → Obsidian: `labels` → `tags`, `created_at` → `created`, `updated_at` → `modified`, `parent: N` → `parent: "[[CO-N]]"`
+  - Obsidian → CO: `tags` → `labels`, `created` → `created_at`, `modified` → `updated_at`, `parent: "[[CO-N]]"` → `parent: N`
+  - Unknown fields preserved in both directions (round-trip safe)
+  - `parseFrontmatter`, `serialiseFrontmatter`, `extractFrontmatterBlock`, `renderMarkdown`
+- `src/wikilinks.ts` — wikilink generation and resolution:
+  - `[[CO-21|Title]]` wikilinks in exported .md
+  - `parent:: [[CO-21]]` inline Dataview field for hierarchy
+  - `extractWikilinkIds`, `resolveParentRef`, `wikilinksToMdLinks`, `mdLinksToWikilinks`
+- `src/status-bar.ts` — status bar: "CO: synced ✓" / "CO: syncing…" / "CO: offline" / "CO: N conflicts"
+- `src/main.ts` — main plugin class:
+  - Ribbon icon (click to sync)
+  - 6 commands: Sync now, Pull from CO, Push to CO, Open in CO, Create task, Link to CO
+  - ObsidianProtocolHandler for OAuth callback (`obsidian://co-universe-sync/oauth`)
+  - Auto-sync interval with `registerInterval`
+  - On-save debounced push via `vault.on("modify")`
+- `.co/sync.json`: `{ lastSync, fileHashes, remoteMtimes, remoteVersion }` for incremental sync
+- Authentication: API token paste (stored in data.json) + OAuth browser flow + auto token refresh
+- `tests/frontmatter.test.ts` — 30 unit tests: round-trip mapping, parsing, serialisation
+- `tests/wikilinks.test.ts` — 22 unit tests: generation, resolution, Dataview fields
+- `tests/sync-engine.test.ts` — 11 integration tests: mock CO API, pull/push/sync verification
+- `tests/__mocks__/obsidian.ts` — Obsidian API mock for Jest (no real vault needed)
+- `README.md` with setup instructions, command table, frontmatter mapping table
+- `LICENSE`: MIT
+- All 63 tests pass
+
+---
+
+## [0.29.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-35: Vault REST API + Obsidian Clipper support
+
+- `vault_routes.rs` — Vault REST API compatible with Obsidian Local REST API
+  - `GET /api/v1/universes/{slug}/vault/` — list all files with metadata
+  - `GET /api/v1/universes/{slug}/vault/{*path}` — get file content + stat
+  - `PUT /api/v1/universes/{slug}/vault/{*path}` — create/replace file
+  - `POST /api/v1/universes/{slug}/vault/{*path}` — append to file
+  - `PATCH /api/v1/universes/{slug}/vault/{*path}` — targeted edit (frontmatter field, heading section, block ID)
+  - `DELETE /api/v1/universes/{slug}/vault/{*path}` — soft delete (`.trash/`) or hard delete (`?permanent=true`)
+  - `POST /api/v1/universes/{slug}/vault/search` — full-text search across vault files
+  - `GET /api/v1/universes/{slug}/vault/tags` — aggregate all frontmatter tags
+  - `GET /api/v1/universes/{slug}/vault/tree` — recursive directory tree (BTreeMap, sorted)
+  - `POST /api/v1/universes/{slug}/vault/clip` — accept Obsidian Clipper payload, write clipped note
+- `storage.rs` — migration v15: `api_tokens` table with indexes; `create_api_token`, `list_api_tokens`, `delete_api_token`, `get_api_token_by_value` methods
+- Auth: Bearer JWT (same as board API) + long-lived API tokens (`co_` prefix, 90-day expiry)
+- Token management: `POST /api/v1/auth/token`, `GET /api/v1/auth/tokens`, `DELETE /api/v1/auth/tokens/{id}`
+- Rate limiting: 60 req/min per API token (in-memory sliding window, `LazyLock<Mutex<HashMap>>`)
+- `static/clipper-template.json` — Obsidian Clipper compatible template for CO frontmatter schema
+- `static/shared/clipper.js` — board UI paste handler
+  - `Ctrl/Cmd+Shift+V` keyboard shortcut for "Paste as CO content"
+  - Paste event listener on board area: detects Clipper-formatted markdown, shows choice dialog
+  - "Paste as task" vs "Paste as content" dialog with frontmatter preview
+  - `co:clipper-paste` custom event dispatched for board.js integration
+  - `co:card-context-menu` listener adds "Copy as Obsidian markdown" to task card context menus
+  - `COClipper` public API: `isClipperFormat`, `parseFrontmatter`, `toObsidianMarkdown`, `handleClipboardText`
+- All 8 variant `index.html` files updated to include `clipper.js`
+
+---
+
+## [0.28.0] — 2026-04-06
+
+### co (workspace)
+
+#### Added — CO-28: Open source repo setup
+
+- `README.md` — rewritten for public audience: what CO is, quick start (cargo install + Docker), self-hosting (Docker Compose + Fly.io), architecture diagram, CLI reference, contributing link
+- `CONTRIBUTING.md` — development setup, TDD workflow, branch/label conventions, commit format, test rules, PR process
+- `.github/ISSUE_TEMPLATE/bug_report.md` — structured bug report template
+- `.github/ISSUE_TEMPLATE/feature_request.md` — feature request template with acceptance criteria
+- `.gitignore` — added `*.db`, `*.redb`, `.env`, `.env.local` patterns; removed `!co-web/data/` exception that could allow committing runtime databases
+- `Cargo.toml` — added `keywords` and `categories` to workspace package; updated repository URL to `artelonga/co`
+
+---
+
+## [0.27.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-33: E2E test suite — Playwright for full MVP flow
+
+- `e2e/universe.spec.ts` — Universe creation: criar form submit → redirect to /co/:slug → editable board
+- `e2e/board-drag.spec.ts` — Board drag-and-drop between kanban columns + full CRUD sequence
+- `e2e/codemirror.spec.ts` — CodeMirror 6 editor: init, toolbar (Bold/Italic/Heading), live preview, save+persist
+- `e2e/usage-gate.spec.ts` — Usage gate: API 402 structure, overlay DOM, "Entrar" opens login modal
+- `e2e/theme.spec.ts` — Palette switcher: anonymous sees 4, switch updates CSS vars without reload
+- `e2e/i18n.spec.ts` — i18n toggle pt↔en, co_lang cookie set, persists across page reload
+- `e2e/auth-crdt.spec.ts` — Auth flow, sharing gate, anonymous editor has no WebSocket, CRDT two-context sync
+- `e2e/responsive.spec.ts` — Board renders at mobile (375px), tablet (768px), desktop (1280px) viewports
+- `.github/workflows/ci.yml` — Added `e2e` job: build co-web → install Playwright → run Chromium suite → upload HTML report
+
+---
+
+## [0.26.0] — 2026-04-06
+
+### co-deploy
+
+#### Added — CO-32: Ansible deployment — provision, deploy, backup playbooks for Fly.io + VPS
+
+- New `co-deploy/` directory with standard Ansible structure
+- `inventory/fly.yml` — Fly.io target (local connection via flyctl)
+- `inventory/vps.yml` — generic VPS target (DigitalOcean, Hetzner, etc.) with env-var overrides
+- `playbooks/provision.yml` — creates `co` unprivileged user, installs ca-certificates + sqlite3 + zstd + Caddy, creates `/opt/co/` + `/var/lib/co/data/`, configures UFW (allow 80/443, deny rest)
+- `playbooks/deploy.yml` — cross-compiles co-web via `cross`, copies binary, writes systemd unit, runs seed SQL on first deploy, restarts service, verifies `/api/health`
+- `playbooks/backup.yml` — SQLite `.backup` (online, consistent), zstd compression, 7 daily + 4 weekly rotation, optional rclone upload to S3/B2, cron at 03:00 UTC
+- `playbooks/fly-deploy.yml` — wraps `flyctl deploy --remote-only` with pre-deploy snapshot and post-deploy health check
+- `templates/co-web.service.j2` — systemd unit with ExecStart, WorkingDirectory, Environment, systemd hardening (NoNewPrivileges, ProtectSystem)
+- `templates/caddy.conf.j2` — reverse proxy with auto-SSL, zstd+gzip compression, security headers (HSTS, X-Frame-Options, etc.), static asset caching
+- `group_vars/all.yml` — shared config: co_version, co_port, co_domain, backup retention settings
+- `group_vars/production.yml` — ansible-vault encrypted secrets: JWT_SECRET, RESEND_API_KEY
+- `molecule/default/` — Docker-based integration test (provision + stub deploy on Debian 12, idempotency check)
+- `requirements.yml` — community.general + ansible.posix collections
+- `README.md` — quickstart for VPS and Fly.io
+
+---
+
+## [0.25.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-31: CRDT sync — Yjs + WebSocket, login required
+
+- New module `co-web/src/ws.rs`: `DocRoom` struct (yrs `Doc`, broadcast tx, client count, dirty notify), `DocRoomManager = Arc<RwLock<HashMap>>`, `ws_handler`, `handle_socket`
+- `GET /ws/doc/:universe_slug/:doc_id` — JWT-gated endpoint; returns 401 for anonymous requests (token via `?token=` query param or `co_auth` cookie)
+- Yjs sync protocol v1 (binary lib0 encoding): MSG_SYNC (0) with SYNC_STEP1/STEP2/UPDATE; MSG_AWARENESS (1) for cursor positions
+- Room lifecycle: load content from SQLite on first connect (initializes Y.Doc), broadcast updates to all connected clients, debounced persist (5s idle), cleanup on last disconnect
+- Heartbeat: ping every 30s, disconnect after 60s silence; rate limit: 100 messages/sec per client (token bucket)
+- `AppStateInner.doc_rooms` field added; WS route mounted at `/ws/doc/{slug}/{doc_id}`
+- `Storage::get_entry_body()` and `Storage::update_entry_body()` methods for CRDT persistence
+- Sharing gate in `get_universe_info`: anonymous universes return 404 for non-owners (checked via `co_universe_owner` cookie)
+- Frontend: added `yjs`, `y-codemirror.next`, `lib0` to editor bundle
+- `createAwareness()` shim implementing y-codemirror.next's awareness interface (no y-protocols dep)
+- `CoYjsProvider` class: WebSocket provider with reconnect, sync-step-1 on open, apply sync-step-2/update, forward awareness
+- `initEditor` accepts `wsUrl` and `user` params; CRDT mode for logged-in users; anonymous mode shows "Crie uma conta pra colaborar" toast
+- Collab badge ("N users editing"), connection status dot (green/yellow/red), remote cursor CSS
+- 7 unit tests: varuint roundtrip, varbytes roundtrip, sync frame structure, rate limiter burst/block, DocRoom init, anonymous 401, two-user sync
+
+---
+
+## [0.24.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-30: Dynamic CSS engine — token generation from universe config at runtime
+- New module `co-web/src/theme_engine.rs`: `ThemePreset` struct (name, tokens HashMap, font fields) + `generate_css()` function
+- Five built-in presets with all required CSS tokens: `scholarly` (warm cream/bronze), `scholarly-dark` (dark chocolate/bronze), `relic` (near-black/rose), `relic-light` (off-white/burgundy), `modern` (default indigo)
+- All presets define: `--bg`, `--sidebar-bg`, `--card-bg`, `--text-primary`, `--text-secondary`, `--accent`, `--border`, `--status-*`, `--priority-*`, `--font`, `--font-mono`, `--radius-*`, `--shadow-*`
+- `generate_css(preset, overrides)` merges custom token overrides on top of preset, outputs deterministic `:root { … }` block
+- `GET /api/v1/universes/:slug/theme.css` — returns generated CSS, `Cache-Control: no-cache`, ETag based on config hash, supports `If-None-Match` (304)
+- Dark/light companion mapping: `scholarly` ↔ `scholarly-dark`, `relic-light` ↔ `relic`
+- Frontend (variant a): `loadThemeCss(slug)` hot-swaps `<link id="co-theme-css">` href — no page reload when theme changes
+- Frontend: custom fonts inject `<link rel="stylesheet" href="https://fonts.googleapis.com/…">` with preconnect hints
+- Settings panel (owner only): added dark/light toggle button, `modern` theme option, custom token overrides JSON textarea
+- Unit tests: 13 theme engine tests + 4 HTTP endpoint integration tests (200 OK, all tokens present, CSS changes on theme change, 404 for missing universe, ETag 304)
+
+---
+
+## [0.23.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-23: Usage gate — 100 entries free, then account required
+- `universes.content_count` column (migration v11): cached counter incremented/decremented on writes and deletes
+- Middleware-style `check_usage_gate` helper: returns 402 Payment Required for anonymous universes at or above 100 entries
+- Anonymous write access: `clone_universe` issues an anon JWT session cookie + `co_universe_owner` cookie for claiming
+- `POST /api/v1/universes/:slug/claim` — authenticated user claims an anonymous universe (cookie must match)
+- `GET /api/v1/universes/:slug` — public universe info: `content_count`, `is_anonymous`, `is_template`
+- 402 response body: `{ "error": "usage_limit", "message": "Crie uma conta para continuar", "message_en": "...", "current": N, "limit": 100 }`
+- Frontend (variant a): 402 → usage limit modal with "Criar conta" / "Entrar" buttons; content count badge in header
+- After login with anonymous universe: auto-claim transfers ownership to real user
+- Unit test: 99 entries OK, 100th OK, 101st blocked (402), unblocked after claim
+
+---
+
 ## [Unreleased] — co-web E2E Testing (UX-50 Epic)
 
 ### co-web

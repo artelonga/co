@@ -1,0 +1,732 @@
+# co-web REST API endpoints
+# Source: co-web/src/server.rs, entry_routes.rs, gestao_routes.rs, telemetry.rs
+#
+# Auth levels:
+#   none     — public, no token required
+#   optional — JWT accepted but not required (affects response scope)
+#   required — JWT cookie or Bearer token required
+#   api_token — Bearer API token required (Vault)
+#   admin    — GitHub OAuth admin (GESTAO_GITHUB_ADMINS env var)
+#   uat      — UAT environment only (CO_ENV=uat), returns 404 in production
+
+endpoints:
+
+  # --- Health ---
+
+  - method: GET
+    path: /api/health
+    auth: none
+    description: Application health check
+    response:
+      status: string
+      version: string
+
+  # --- Authentication ---
+
+  - method: POST
+    path: /api/v1/auth/login
+    auth: none
+    description: Request email verification code
+    request:
+      email: string
+    response:
+      message: string
+
+  - method: POST
+    path: /api/v1/auth/verify
+    auth: none
+    description: Verify email code and create session
+    request:
+      email: string
+      code: string
+    response:
+      user_id: string
+      email: string
+      display_name: string
+      expires_at: string
+
+  - method: POST
+    path: /api/v1/auth/uat-login
+    auth: uat
+    description: Password-based login for UAT environment only — 404 in production
+    request:
+      email: string
+      password: string
+    response:
+      user_id: string
+      email: string
+      display_name: string
+      expires_at: string
+
+  - method: GET
+    path: /api/v1/auth/me
+    auth: required
+    description: Get current authenticated user
+    response:
+      user_id: string
+      email: string
+      display_name: string
+      tier: string
+
+  - method: POST
+    path: /api/v1/auth/logout
+    auth: required
+    description: Clear session cookie
+
+  - method: POST
+    path: /api/v1/auth/token
+    auth: required
+    description: Create an API token for Vault access
+    request:
+      name: string
+      expires_in_days: integer
+    response:
+      id: string
+      token: string
+      expires_at: string
+
+  - method: GET
+    path: /api/v1/auth/tokens
+    auth: required
+    description: List API tokens for current user
+    response: array of ApiToken
+
+  - method: DELETE
+    path: /api/v1/auth/tokens/{id}
+    auth: required
+    description: Revoke an API token
+
+  # --- Universes ---
+
+  - method: GET
+    path: /api/v1/universes
+    auth: required
+    description: List universes owned by the current user
+    response: array of Universe
+
+  - method: POST
+    path: /api/v1/universes
+    auth: required
+    description: Create a new universe
+    request:
+      name: string
+      description: string
+    response: Universe
+
+  - method: GET
+    path: /api/v1/universes/{slug}
+    auth: none
+    description: Get universe metadata
+    response: Universe
+
+  - method: GET
+    path: /api/v1/universes/{slug}/config
+    auth: none
+    description: Get universe display config (theme, layout, fonts)
+    response: UniverseConfig
+
+  - method: PUT
+    path: /api/v1/universes/{slug}/config
+    auth: required
+    description: Update universe display config
+
+  - method: GET
+    path: /api/v1/universes/{slug}/theme.css
+    auth: none
+    description: Generate and serve dynamic theme CSS for this universe
+
+  - method: POST
+    path: /api/v1/universes/{slug}/clone
+    auth: none
+    description: Clone a public/template universe to an anonymous session
+    response:
+      universe_key: string
+
+  - method: POST
+    path: /api/v1/universes/{slug}/claim
+    auth: required
+    description: Claim an anonymous universe clone for the authenticated user
+
+  - method: GET
+    path: /api/v1/universes/{slug}/projects
+    auth: none
+    description: List projects in a universe
+    response: array of Project
+
+  - method: GET
+    path: /api/v1/universes/{key}/members
+    auth: required
+    description: List members of a universe
+    response: array of Member
+
+  - method: POST
+    path: /api/v1/universes/{key}/members
+    auth: required
+    description: Add a member to a universe
+    request:
+      user_id: string
+      role: string
+
+  - method: DELETE
+    path: /api/v1/universes/{key}/members/{user_id}
+    auth: required
+    description: Remove a member from a universe
+
+  # --- Entries ---
+
+  - method: GET
+    path: /api/v1/universes/{slug}/entries
+    auth: optional
+    description: List entries in a universe
+    query_params:
+      type: string
+      q: string
+      limit: integer
+      offset: integer
+    response:
+      total: integer
+      items: array of Entry
+
+  - method: POST
+    path: /api/v1/universes/{slug}/entries
+    auth: required
+    description: Create a new entry
+    request:
+      path: string
+      entry_type: string
+      title: string
+      frontmatter: object
+      body: string
+    response: Entry
+
+  - method: GET
+    path: /api/v1/universes/{slug}/entries/tags
+    auth: optional
+    description: List all tags used in entries
+    response: array of { tag, count }
+
+  - method: GET
+    path: /api/v1/universes/{slug}/entries/tree
+    auth: optional
+    description: Get entries as a hierarchical tree
+    query_params:
+      type: string
+    response: array of EntryNode (recursive)
+
+  - method: GET
+    path: /api/v1/universes/{slug}/entries/{*path}
+    auth: optional
+    description: Get a single entry by path
+    response: Entry
+
+  - method: PUT
+    path: /api/v1/universes/{slug}/entries/{*path}
+    auth: required
+    description: Update an entry
+    request:
+      title: string
+      frontmatter: object
+      body: string
+    response: Entry
+
+  - method: DELETE
+    path: /api/v1/universes/{slug}/entries/{*path}
+    auth: required
+    description: Delete an entry
+
+  # --- Vault (Obsidian-compatible) ---
+
+  - method: GET
+    path: /api/v1/universes/{slug}/vault/
+    auth: api_token
+    description: List all vault files
+    response: array of VaultFile
+
+  - method: GET
+    path: /api/v1/universes/{slug}/vault/tags
+    auth: api_token
+    description: List all tags in vault
+    response: array of { tag, count }
+
+  - method: GET
+    path: /api/v1/universes/{slug}/vault/tree
+    auth: api_token
+    description: Get vault files as a directory tree
+
+  - method: POST
+    path: /api/v1/universes/{slug}/vault/search
+    auth: api_token
+    description: Full-text search over vault
+    request:
+      q: string
+    response: array of VaultFile
+
+  - method: POST
+    path: /api/v1/universes/{slug}/vault/clip
+    auth: api_token
+    description: Save a web clip to vault
+    request:
+      url: string
+      title: string
+      body: string
+
+  - method: GET
+    path: /api/v1/universes/{slug}/vault/{*path}
+    auth: api_token
+    description: Get a vault file as raw markdown
+    response: string (raw markdown)
+
+  - method: PUT
+    path: /api/v1/universes/{slug}/vault/{*path}
+    auth: api_token
+    description: Create or update a vault file
+    request: string (raw markdown body with optional frontmatter)
+
+  - method: DELETE
+    path: /api/v1/universes/{slug}/vault/{*path}
+    auth: api_token
+    description: Delete a vault file
+
+  # --- Co-dev board (admin only) ---
+
+  - method: GET
+    path: /api/v1/universes/co-dev
+    auth: admin
+    description: Get co-dev universe metadata
+    response: Universe
+
+  - method: GET
+    path: /api/v1/universes/co-dev/entries
+    auth: admin
+    description: List co-dev board entries
+    response: array of Entry
+
+  - method: GET
+    path: /api/v1/universes/co-dev/entries/tags
+    auth: admin
+    description: List co-dev entry tags
+    response: array of { tag, count }
+
+  - method: GET
+    path: /api/v1/universes/co-dev/entries/{*path}
+    auth: admin
+    description: Get a co-dev entry
+    response: Entry
+
+  - method: PUT
+    path: /api/v1/universes/co-dev/entries/{*path}
+    auth: admin
+    description: Update a co-dev entry
+    response: Entry
+
+  # --- Themes ---
+
+  - method: GET
+    path: /api/v1/themes/available
+    auth: none
+    description: List all available theme presets
+    response: array of ThemePreset
+
+  # --- Telemetry ---
+
+  - method: POST
+    path: /api/v1/telemetry/event
+    auth: none
+    description: Record a client-side event (CO-46)
+    request:
+      event_name: string
+      event_type: string
+      path: string
+      session_id: string
+      universe_key: string
+      properties: object
+    response: 204 No Content
+
+  - method: GET
+    path: /api/v1/admin/telemetry/summary
+    auth: admin
+    description: Aggregated telemetry dashboard data
+    response: TelemetrySummary
+
+  - method: GET
+    path: /api/v1/admin/telemetry/export
+    auth: admin
+    description: Export raw telemetry as CSV
+
+  # --- Legacy board API (projects/tasks) ---
+  # These routes use the entries table under the hood since v13.
+
+  - method: GET
+    path: /api/projects
+    auth: required
+    description: List projects (legacy board API)
+    response: array of Project
+
+  - method: POST
+    path: /api/projects
+    auth: required
+    description: Create a project (legacy board API)
+    request:
+      key: string
+      name: string
+      description: string
+    response: Project
+
+  - method: GET
+    path: /api/projects/{key}
+    auth: none
+    description: Get a project (legacy board API)
+    response: Project
+
+  - method: DELETE
+    path: /api/projects/{key}
+    auth: required
+    description: Delete a project (legacy board API)
+
+  - method: GET
+    path: /api/projects/{key}/tasks
+    auth: none
+    description: List tasks in a project (legacy board API)
+    query_params:
+      u: string
+      status: string
+    response: array of Task
+
+  - method: POST
+    path: /api/projects/{key}/tasks
+    auth: required
+    description: Create a task (legacy board API)
+    request:
+      title: string
+      status: string
+      priority: string
+      description: string
+      labels: array
+      due_date: string
+      parent: integer
+      assignee: string
+    response: Task
+
+  - method: GET
+    path: /api/projects/{key}/tasks/{id}
+    auth: none
+    description: Get a single task
+    response: Task
+
+  - method: PUT
+    path: /api/projects/{key}/tasks/{id}
+    auth: required
+    description: Update a task
+    request: Task (partial)
+    response: Task
+
+  - method: DELETE
+    path: /api/projects/{key}/tasks/{id}
+    auth: required
+    description: Delete a task
+
+  - method: GET
+    path: /api/projects/{key}/tasks/{id}/comments
+    auth: none
+    description: List comments on a task
+    response: array of Comment
+
+  - method: POST
+    path: /api/projects/{key}/tasks/{id}/comments
+    auth: required
+    description: Add a comment to a task
+    request:
+      body: string
+    response: Comment
+
+  - method: POST
+    path: /api/projects/{key}/tasks/bulk-update
+    auth: required
+    description: Bulk update task fields
+    request: array of { id, ...fields }
+
+  - method: POST
+    path: /api/projects/{key}/tasks/bulk-delete
+    auth: required
+    description: Bulk delete tasks
+    request: array of task IDs
+
+  - method: GET
+    path: /api/projects/{key}/activity
+    auth: none
+    description: Get project activity log
+    response: array of ActivityEntry
+
+  - method: GET
+    path: /api/projects/{key}/dashboard
+    auth: none
+    description: Get project dashboard stats
+    response: DashboardStats
+
+  # --- Experiment (A/B) ---
+
+  - method: GET
+    path: /api/experiment/variant
+    auth: none
+    description: Get the current UI experiment variant
+    response:
+      variant: string
+
+  - method: POST
+    path: /api/experiment/variant
+    auth: none
+    description: Switch the UI experiment variant
+    request:
+      variant: string
+
+  - method: POST
+    path: /api/experiment/feedback
+    auth: none
+    description: Submit experiment feedback
+    request:
+      variant: string
+      rating: integer
+      comment: string
+
+  - method: GET
+    path: /api/experiment/summary
+    auth: admin
+    description: Get experiment results summary
+    response: ExperimentSummary
+
+  # --- Gestão (admin — GitHub OAuth) ---
+
+  - method: POST
+    path: /api/v1/gestao/validar
+    auth: admin
+    description: Validate content structure
+
+  - method: POST
+    path: /api/v1/gestao/publicar
+    auth: admin
+    description: Publish content to the quilombo platform
+
+  - method: GET
+    path: /api/v1/gestao/relatos
+    auth: admin
+    description: List relatos (published narratives)
+    response: array of Relato
+
+  - method: POST
+    path: /api/v1/gestao/relatos
+    auth: admin
+    description: Create a relato
+    request:
+      slug: string
+      titulo: string
+      corpo_md: string
+      tags: array
+
+  - method: PUT
+    path: /api/v1/gestao/relatos/{id}
+    auth: admin
+    description: Update a relato
+
+  - method: DELETE
+    path: /api/v1/gestao/relatos/{id}
+    auth: admin
+    description: Delete a relato
+
+  - method: GET
+    path: /api/v1/gestao/eventos
+    auth: admin
+    description: List events (gestão)
+    response: array of Evento
+
+  - method: POST
+    path: /api/v1/gestao/eventos
+    auth: admin
+    description: Create an event (gestão)
+
+  - method: PUT
+    path: /api/v1/gestao/eventos/{id}
+    auth: admin
+    description: Update an event (gestão)
+
+  - method: DELETE
+    path: /api/v1/gestao/eventos/{id}
+    auth: admin
+    description: Delete an event (gestão)
+
+  - method: GET
+    path: /api/v1/gestao/membros
+    auth: admin
+    description: List members (gestão)
+    response: array of Membro
+
+  - method: POST
+    path: /api/v1/gestao/membros
+    auth: admin
+    description: Create a member (gestão)
+
+  - method: PUT
+    path: /api/v1/gestao/membros/{id}
+    auth: admin
+    description: Update a member (gestão)
+
+  - method: DELETE
+    path: /api/v1/gestao/membros/{id}
+    auth: admin
+    description: Delete a member (gestão)
+
+  - method: GET
+    path: /api/v1/gestao/quadro
+    auth: admin
+    description: List dev board items (gestão)
+    response: array of QuadroItem
+
+  - method: POST
+    path: /api/v1/gestao/quadro
+    auth: admin
+    description: Create a dev board item
+
+  - method: PUT
+    path: /api/v1/gestao/quadro/{id}
+    auth: admin
+    description: Update a dev board item
+
+  - method: DELETE
+    path: /api/v1/gestao/quadro/{id}
+    auth: admin
+    description: Delete a dev board item
+
+  - method: GET
+    path: /api/v1/gestao/manifesto
+    auth: admin
+    description: Get the quilombo manifest
+
+  - method: POST
+    path: /api/v1/gestao/manifesto/reconstruir
+    auth: admin
+    description: Rebuild the quilombo manifest from scratch
+
+  # --- Quilombo community (public) ---
+
+  - method: POST
+    path: /api/v1/quilombo/auth/cadastro
+    auth: none
+    description: Register a new quilombo user
+    request:
+      usuario: string
+      nome: string
+      senha: string
+
+  - method: GET
+    path: /api/v1/quilombo/publicacoes
+    auth: none
+    description: List published articles
+    response: array of Publicacao
+
+  - method: GET
+    path: /api/v1/quilombo/publicacoes/{slug}
+    auth: none
+    description: Get a published article
+    response: Publicacao
+
+  - method: GET
+    path: /api/v1/quilombo/paginas/{slug}
+    auth: none
+    description: Get a static page
+    response: Pagina
+
+  - method: GET
+    path: /api/v1/quilombo/eventos
+    auth: none
+    description: List quilombo events
+    response: array of Evento
+
+  - method: GET
+    path: /api/v1/quilombo/eventos/{id}
+    auth: none
+    description: Get a quilombo event by ID
+    response: Evento
+
+  - method: GET
+    path: /api/v1/quilombo/eventos/slug/{slug}
+    auth: none
+    description: Get a quilombo event by slug
+    response: Evento
+
+  - method: GET
+    path: /api/v1/quilombo/missoes
+    auth: none
+    description: List missions
+    response: array of Missao
+
+  - method: GET
+    path: /api/v1/quilombo/missoes/{id}
+    auth: none
+    description: Get a mission
+    response: Missao
+
+  - method: GET
+    path: /api/v1/quilombo/membros
+    auth: none
+    description: List community members
+    response: array of Membro
+
+  - method: GET
+    path: /api/v1/quilombo/membros/{usuario}
+    auth: none
+    description: Get a member profile by username
+    response: Membro
+
+  - method: POST
+    path: /api/v1/quilombo/comentarios
+    auth: none
+    description: Post a comment (anonymous or authenticated)
+    request:
+      publicacao_slug: string
+      relato_slug: string
+      evento_id: integer
+      nome_exibicao: string
+      conteudo: string
+      anonimo: boolean
+
+  - method: POST
+    path: /api/v1/quilombo/contato
+    auth: none
+    description: Submit a contact message
+    request:
+      nome: string
+      email: string
+      mensagem: string
+
+  - method: GET
+    path: /api/v1/quilombo/tags
+    auth: none
+    description: List all content tags with counts
+    response: array of { tag, count }
+
+  - method: GET
+    path: /api/v1/quilombo/tags/{tag}
+    auth: none
+    description: List publications with a specific tag
+    response: array of Publicacao
+
+  # --- WebSocket ---
+
+  - method: GET
+    path: /ws/doc/{slug}/{doc_id}
+    auth: optional
+    protocol: WebSocket
+    description: >
+      CRDT document collaboration — Yjs protocol over WebSocket.
+      One connection per document; changes broadcast to all connected peers.
+
+  # --- Frontend SPA ---
+
+  - method: GET
+    path: /co
+    auth: none
+    description: Serve the CO SPA (template universe board)
+
+  - method: GET
+    path: /co/{slug}
+    auth: none
+    description: Serve the CO SPA for a specific universe

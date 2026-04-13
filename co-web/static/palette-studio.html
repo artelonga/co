@@ -1,0 +1,1487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Palette Studio — CO Platform</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..800;1,6..72,300..800&family=Work+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" rel="stylesheet" />
+  <style>
+    /* ─── Reset & base ─── */
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: var(--md-sys-typescale-body-font, 'Work Sans', sans-serif);
+      background: var(--md-sys-color-surface-container-low);
+      color: var(--md-sys-color-on-surface);
+      min-height: 100vh;
+    }
+
+    /* ─── Typography helpers ─── */
+    .font-headline { font-family: var(--co-font-headline); }
+    .font-body     { font-family: var(--co-font-body); }
+    .font-label    { font-family: var(--co-font-label); }
+
+    /* ─── App layout ─── */
+    .app-layout {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+    .main-content {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 0;
+      height: calc(100vh - 56px);
+      overflow: hidden;
+    }
+
+    /* ─── Header ─── */
+    .app-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 20px;
+      height: 56px;
+      background: var(--md-sys-color-surface-container);
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .app-header h1 {
+      font-family: var(--co-font-headline);
+      font-size: 1.1rem;
+      font-weight: 500;
+      color: var(--md-sys-color-on-surface);
+      margin: 0;
+      flex: 1;
+    }
+    .header-badge {
+      font-size: 0.7rem;
+      font-family: var(--co-font-label);
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+
+    /* ─── Preset buttons ─── */
+    .preset-group {
+      display: flex;
+      border: 1.5px solid var(--md-sys-color-outline-variant);
+      border-radius: var(--co-radius);
+      overflow: hidden;
+    }
+    .preset-group .preset-btn {
+      border: none;
+      border-radius: 0;
+      border-right: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .preset-group .preset-btn:last-child {
+      border-right: none;
+    }
+    .preset-btn {
+      font-family: var(--co-font-label);
+      font-size: 0.78rem;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: var(--co-radius);
+      border: 1.5px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-container-low);
+      color: var(--md-sys-color-on-surface-variant);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s, border-color 0.15s;
+    }
+    .preset-btn:hover {
+      background: var(--md-sys-color-surface-container-high);
+      border-color: var(--md-sys-color-outline);
+    }
+    .preset-btn.active {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      border-color: var(--md-sys-color-primary-container);
+    }
+    .export-btn {
+      font-family: var(--co-font-label);
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 6px 16px;
+      border-radius: var(--co-radius);
+      border: none;
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.15s;
+    }
+    .export-btn:hover { opacity: 0.9; }
+
+    /* ─── Left panel ─── */
+    .left-panel {
+      background: var(--md-sys-color-surface-container);
+      border-right: 1px solid var(--md-sys-color-outline-variant);
+      overflow-y: auto;
+      padding: 16px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .panel-section-title {
+      font-family: var(--co-font-label);
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--md-sys-color-outline);
+      padding: 0 4px;
+    }
+
+    /* ─── Swatch group ─── */
+    .swatch-group {
+      border-radius: calc(var(--co-radius) * 2);
+      overflow: hidden;
+      border: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .swatch-group-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      font-family: var(--co-font-label);
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .swatch-group-header .group-name {
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+    }
+    .swatch-group-header .group-hex {
+      font-size: 0.65rem;
+      font-weight: 400;
+      opacity: 0.8;
+      font-family: monospace;
+    }
+    .swatch-row {
+      display: flex;
+      height: 40px;
+    }
+    .swatch {
+      flex: 1;
+      position: relative;
+      cursor: pointer;
+      transition: flex 0.15s;
+    }
+    .swatch:hover { flex: 1.6; }
+    .swatch input[type="color"] {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+      border: none;
+      padding: 0;
+    }
+    .swatch-label {
+      position: absolute;
+      bottom: 3px;
+      left: 4px;
+      font-size: 0.5rem;
+      font-family: monospace;
+      pointer-events: none;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 90%;
+    }
+
+    /* ─── Right panel ─── */
+    .right-panel {
+      overflow-y: auto;
+      padding: 16px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .section-label {
+      font-family: var(--co-font-label);
+      font-size: 0.65rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--md-sys-color-outline);
+      margin-bottom: 8px;
+    }
+
+    /* ─── 3×3 Preview grid ─── */
+    .preview-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      grid-template-rows: repeat(3, 160px);
+      gap: 12px;
+    }
+    .preview-card {
+      background: var(--md-sys-color-surface-container-lowest);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: calc(var(--co-radius) * 3);
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .card-label {
+      font-family: var(--co-font-label);
+      font-size: 0.6rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--md-sys-color-outline);
+      align-self: flex-start;
+      margin-bottom: 4px;
+    }
+    .big-aa {
+      font-size: 56px;
+      line-height: 1;
+      color: var(--md-sys-color-on-surface);
+      font-weight: 400;
+    }
+
+    /* ─── Button variants ─── */
+    .btn-primary {
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      border: none;
+      border-radius: var(--co-radius);
+      padding: 6px 14px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-secondary {
+      background: var(--md-sys-color-secondary-container);
+      color: var(--md-sys-color-on-secondary-container);
+      border: none;
+      border-radius: var(--co-radius);
+      padding: 6px 14px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-inverted {
+      background: var(--md-sys-color-inverse-surface);
+      color: var(--md-sys-color-inverse-on-surface);
+      border: none;
+      border-radius: var(--co-radius);
+      padding: 6px 14px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-outlined {
+      background: transparent;
+      color: var(--md-sys-color-primary);
+      border: 1.5px solid var(--md-sys-color-outline);
+      border-radius: var(--co-radius);
+      padding: 5px 13px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ─── Search bar ─── */
+    .search-bar {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--md-sys-color-surface-container-high);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: 99px;
+      padding: 6px 14px;
+      width: 100%;
+    }
+    .search-bar input {
+      border: none;
+      background: transparent;
+      outline: none;
+      font-family: var(--co-font-label);
+      font-size: 0.78rem;
+      color: var(--md-sys-color-on-surface);
+      width: 100%;
+    }
+    .search-bar input::placeholder { color: var(--md-sys-color-outline); }
+    .search-icon { color: var(--md-sys-color-outline); font-size: 18px; }
+
+    /* ─── Text lines preview ─── */
+    .text-line {
+      height: 6px;
+      border-radius: 3px;
+      width: 100%;
+    }
+
+    /* ─── Icon buttons ─── */
+    .icon-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: transparent;
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .icon-btn.active {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+    }
+    .icon-btn.outlined-btn {
+      background: transparent;
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .icon-btn.error-btn {
+      background: var(--md-sys-color-error-container);
+      color: var(--md-sys-color-error);
+    }
+
+    /* ─── Label button ─── */
+    .label-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--md-sys-color-secondary-container);
+      color: var(--md-sys-color-on-secondary-container);
+      border: none;
+      border-radius: var(--co-radius);
+      padding: 6px 14px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    /* ─── Dashboard Shell ─── */
+    .dashboard-shell {
+      background: var(--md-sys-color-surface-container-lowest);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: calc(var(--co-radius) * 3);
+      overflow: hidden;
+      height: 360px;
+      display: flex;
+      flex-direction: row;
+    }
+
+    /* sidebar */
+    .dash-sidebar {
+      width: 160px;
+      background: var(--md-sys-color-surface-container);
+      border-right: 1px solid var(--md-sys-color-outline-variant);
+      display: flex;
+      flex-direction: column;
+      padding: 12px 0;
+      flex-shrink: 0;
+    }
+    .dash-sidebar-brand {
+      font-family: var(--co-font-headline);
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--md-sys-color-primary);
+      padding: 4px 16px 12px;
+      letter-spacing: -0.01em;
+    }
+    .dash-nav-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 16px;
+      font-family: var(--co-font-label);
+      font-size: 0.72rem;
+      font-weight: 500;
+      color: var(--md-sys-color-on-surface-variant);
+      cursor: pointer;
+      border-radius: 0;
+      transition: background 0.1s;
+    }
+    .dash-nav-item .material-symbols-outlined { font-size: 16px; }
+    .dash-nav-item.active {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      font-weight: 600;
+    }
+    .dash-nav-spacer { flex: 1; }
+    .dash-nav-settings {
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+      padding-top: 8px;
+    }
+
+    /* main area */
+    .dash-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .dash-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: var(--md-sys-color-surface-container-low);
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      flex-shrink: 0;
+    }
+    .dash-header-title {
+      font-family: var(--co-font-headline);
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--md-sys-color-on-surface);
+      flex: 1;
+    }
+    .dash-version-badge {
+      font-family: var(--co-font-label);
+      font-size: 0.6rem;
+      font-weight: 700;
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      padding: 1px 7px;
+      border-radius: 99px;
+    }
+    .dash-header-icons {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .dash-header-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      color: var(--md-sys-color-on-surface-variant);
+      cursor: pointer;
+    }
+    .dash-header-icon .material-symbols-outlined { font-size: 18px; }
+    .dash-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--md-sys-color-secondary-container);
+      color: var(--md-sys-color-on-secondary-container);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--co-font-label);
+      font-size: 0.65rem;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    /* kanban board */
+    .dash-board {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      padding: 12px 14px;
+      overflow: hidden;
+    }
+    .kanban-col {
+      background: var(--md-sys-color-surface-container);
+      border-radius: calc(var(--co-radius) * 2);
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow: hidden;
+    }
+    .kanban-col-title {
+      font-family: var(--co-font-label);
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--md-sys-color-outline);
+      padding: 0 2px 4px;
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .kanban-card {
+      background: var(--md-sys-color-surface-container-lowest);
+      border-radius: var(--co-radius);
+      padding: 7px 8px;
+      border-left: 3px solid;
+    }
+    .kanban-card-id {
+      font-family: var(--co-font-label);
+      font-size: 0.55rem;
+      font-weight: 700;
+      color: var(--md-sys-color-outline);
+      margin-bottom: 2px;
+    }
+    .kanban-card-title {
+      font-family: var(--co-font-label);
+      font-size: 0.62rem;
+      font-weight: 500;
+      color: var(--md-sys-color-on-surface);
+      line-height: 1.3;
+    }
+
+    /* ─── Export modal ─── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 24px;
+    }
+    .modal-overlay.hidden { display: none; }
+    .modal-box {
+      background: var(--md-sys-color-surface-container-lowest);
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: calc(var(--co-radius) * 4);
+      width: 100%;
+      max-width: 680px;
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+      gap: 10px;
+    }
+    .modal-title {
+      font-family: var(--co-font-headline);
+      font-size: 1rem;
+      font-weight: 500;
+      color: var(--md-sys-color-on-surface);
+      flex: 1;
+    }
+    .modal-close {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      border: none;
+      background: transparent;
+      color: var(--md-sys-color-on-surface-variant);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 20px;
+    }
+    .modal-code {
+      background: var(--md-sys-color-surface-container-high);
+      border-radius: calc(var(--co-radius) * 2);
+      padding: 14px 16px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.72rem;
+      line-height: 1.7;
+      color: var(--md-sys-color-on-surface);
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 12px 20px;
+      border-top: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .copy-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      border: none;
+      border-radius: var(--co-radius);
+      padding: 8px 18px;
+      font-family: var(--co-font-label);
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .close-modal-btn {
+      background: transparent;
+      color: var(--md-sys-color-on-surface-variant);
+      border: 1.5px solid var(--md-sys-color-outline-variant);
+      border-radius: var(--co-radius);
+      padding: 7px 16px;
+      font-family: var(--co-font-label);
+      font-size: 0.78rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    /* ─── Scrollbar ─── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb {
+      background: var(--md-sys-color-outline-variant);
+      border-radius: 3px;
+    }
+
+    /* ─── Material Symbols ─── */
+    .material-symbols-outlined {
+      font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+      user-select: none;
+    }
+    .material-symbols-outlined.filled {
+      font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     APP LAYOUT
+═══════════════════════════════════════════ -->
+<div class="app-layout">
+
+  <!-- ── Header ── -->
+  <header class="app-header">
+    <h1>Palette Studio</h1>
+    <span class="header-badge">CO Platform</span>
+    <div style="flex:1"></div>
+    <!-- Preset buttons -->
+    <div class="preset-group">
+      <button class="preset-btn" data-preset="co-light" onclick="applyPalette('co-light')">CO Light</button>
+      <button class="preset-btn" data-preset="co-dark"  onclick="applyPalette('co-dark')">CO Dark</button>
+    </div>
+    <div class="preset-group">
+      <button class="preset-btn" data-preset="quilombo"      onclick="applyPalette('quilombo')">Quilombo</button>
+      <button class="preset-btn" data-preset="quilombo-dark" onclick="applyPalette('quilombo-dark')">Quilombo Dark</button>
+    </div>
+    <button class="export-btn" onclick="openExport()">
+      <span class="material-symbols-outlined" style="font-size:16px">download</span>
+      Export CSS
+    </button>
+  </header>
+
+  <!-- ── Main two-column layout ── -->
+  <div class="main-content">
+
+    <!-- ══ Left Panel: Swatch editor ══ -->
+    <aside class="left-panel" id="leftPanel">
+      <div class="panel-section-title">Color tokens</div>
+      <!-- Swatch groups injected by JS -->
+    </aside>
+
+    <!-- ══ Right Panel: Previews ══ -->
+    <main class="right-panel">
+
+      <!-- 3×3 Preview grid -->
+      <div>
+        <div class="section-label">Component preview</div>
+        <div class="preview-grid">
+
+          <!-- R1C1 — Headline typography -->
+          <div class="preview-card">
+            <span class="card-label">Headline</span>
+            <div class="big-aa font-headline">Aa</div>
+            <div style="font-family:var(--co-font-headline);font-size:0.65rem;color:var(--md-sys-color-outline);margin-top:4px;">Newsreader</div>
+          </div>
+
+          <!-- R1C2 — Button grid -->
+          <div class="preview-card">
+            <span class="card-label">Buttons</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;width:100%;margin-top:4px;">
+              <button class="btn-primary">Primary</button>
+              <button class="btn-secondary">Secondary</button>
+              <button class="btn-inverted">Inverted</button>
+              <button class="btn-outlined">Outlined</button>
+            </div>
+          </div>
+
+          <!-- R1C3 — Search -->
+          <div class="preview-card">
+            <span class="card-label">Search</span>
+            <div class="search-bar" style="margin-top:4px;">
+              <span class="material-symbols-outlined search-icon">search</span>
+              <input type="text" placeholder="Search…" readonly />
+            </div>
+          </div>
+
+          <!-- R2C1 — Body typography -->
+          <div class="preview-card">
+            <span class="card-label">Body</span>
+            <div class="big-aa font-body">Aa</div>
+            <div style="font-family:var(--co-font-body);font-size:0.65rem;color:var(--md-sys-color-outline);margin-top:4px;">Newsreader</div>
+          </div>
+
+          <!-- R2C2 — Text lines -->
+          <div class="preview-card">
+            <span class="card-label">Text list</span>
+            <div style="display:flex;flex-direction:column;gap:8px;width:100%;margin-top:8px;">
+              <div class="text-line" style="background:var(--md-sys-color-primary);width:85%;"></div>
+              <div class="text-line" style="background:var(--md-sys-color-primary-fixed-dim);width:65%;"></div>
+              <div class="text-line" style="background:var(--md-sys-color-outline-variant);width:75%;"></div>
+            </div>
+          </div>
+
+          <!-- R2C3 — Nav icon buttons -->
+          <div class="preview-card">
+            <span class="card-label">Nav icons</span>
+            <div style="display:flex;align-items:center;gap:6px;margin-top:4px;">
+              <button class="icon-btn active">
+                <span class="material-symbols-outlined filled" style="font-size:20px;">home</span>
+              </button>
+              <button class="icon-btn outlined-btn">
+                <span class="material-symbols-outlined" style="font-size:20px;">search</span>
+              </button>
+              <button class="icon-btn outlined-btn">
+                <span class="material-symbols-outlined" style="font-size:20px;">person</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- R3C1 — Label typography -->
+          <div class="preview-card">
+            <span class="card-label">Label</span>
+            <div class="big-aa font-label">Aa</div>
+            <div style="font-family:var(--co-font-label);font-size:0.65rem;color:var(--md-sys-color-outline);margin-top:4px;">Work Sans</div>
+          </div>
+
+          <!-- R3C2 — Label button (edit) -->
+          <div class="preview-card">
+            <span class="card-label">Icon-button</span>
+            <div style="display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:4px;">
+              <button class="icon-btn active" style="border-radius:var(--co-radius);width:auto;height:auto;padding:8px;">
+                <span class="material-symbols-outlined" style="font-size:20px;">edit</span>
+              </button>
+              <button class="label-btn">
+                <span class="material-symbols-outlined" style="font-size:15px;">edit</span>
+                Edit
+              </button>
+            </div>
+          </div>
+
+          <!-- R3C3 — Action icon buttons -->
+          <div class="preview-card">
+            <span class="card-label">Actions</span>
+            <div style="display:flex;align-items:center;gap:4px;margin-top:4px;">
+              <button class="icon-btn outlined-btn" title="Auto fix">
+                <span class="material-symbols-outlined" style="font-size:18px;">auto_fix_high</span>
+              </button>
+              <button class="icon-btn outlined-btn" title="Share">
+                <span class="material-symbols-outlined" style="font-size:18px;">share</span>
+              </button>
+              <button class="icon-btn outlined-btn" title="Label">
+                <span class="material-symbols-outlined" style="font-size:18px;">label</span>
+              </button>
+              <button class="icon-btn error-btn" title="Delete">
+                <span class="material-symbols-outlined" style="font-size:18px;">delete</span>
+              </button>
+            </div>
+          </div>
+
+        </div><!-- /preview-grid -->
+      </div>
+
+      <!-- ── Dashboard Shell ── -->
+      <div>
+        <div class="section-label">Dashboard shell</div>
+        <div class="dashboard-shell">
+
+          <!-- Sidebar -->
+          <nav class="dash-sidebar">
+            <div class="dash-sidebar-brand">CO Platform</div>
+            <div class="dash-nav-item active">
+              <span class="material-symbols-outlined filled">view_kanban</span>
+              Board
+            </div>
+            <div class="dash-nav-item">
+              <span class="material-symbols-outlined">timeline</span>
+              Timeline
+            </div>
+            <div class="dash-nav-item">
+              <span class="material-symbols-outlined">dashboard</span>
+              Dashboard
+            </div>
+            <div class="dash-nav-item">
+              <span class="material-symbols-outlined">calendar_month</span>
+              Calendar
+            </div>
+            <div class="dash-nav-spacer"></div>
+            <div class="dash-nav-settings">
+              <div class="dash-nav-item">
+                <span class="material-symbols-outlined">settings</span>
+                Settings
+              </div>
+            </div>
+          </nav>
+
+          <!-- Main -->
+          <div class="dash-main">
+            <!-- Header -->
+            <div class="dash-header">
+              <span class="dash-header-title">CO Platform</span>
+              <span class="dash-version-badge">v0.23</span>
+              <div class="dash-header-icons">
+                <div class="dash-header-icon">
+                  <span class="material-symbols-outlined">search</span>
+                </div>
+                <div class="dash-header-icon">
+                  <span class="material-symbols-outlined">notifications</span>
+                </div>
+                <div class="dash-avatar">YU</div>
+              </div>
+            </div>
+
+            <!-- Kanban board -->
+            <div class="dash-board">
+              <!-- To Do -->
+              <div class="kanban-col">
+                <div class="kanban-col-title">To Do</div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-outline-variant);">
+                  <div class="kanban-card-id">CO-14</div>
+                  <div class="kanban-card-title">Auth flow refactor</div>
+                </div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-outline-variant);">
+                  <div class="kanban-card-id">CO-15</div>
+                  <div class="kanban-card-title">Plugin loader tests</div>
+                </div>
+              </div>
+              <!-- In Progress -->
+              <div class="kanban-col">
+                <div class="kanban-col-title">In Progress</div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-primary);">
+                  <div class="kanban-card-id">CO-11</div>
+                  <div class="kanban-card-title">Timeline stable header</div>
+                </div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-primary);">
+                  <div class="kanban-card-id">CO-12</div>
+                  <div class="kanban-card-title">Subtask tree expand</div>
+                </div>
+              </div>
+              <!-- In Review -->
+              <div class="kanban-col">
+                <div class="kanban-col-title">In Review</div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-tertiary);">
+                  <div class="kanban-card-id">CO-9</div>
+                  <div class="kanban-card-title">Email auth codes</div>
+                </div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-tertiary);">
+                  <div class="kanban-card-id">CO-10</div>
+                  <div class="kanban-card-title">Unified server arch</div>
+                </div>
+              </div>
+              <!-- Done -->
+              <div class="kanban-col">
+                <div class="kanban-col-title">Done</div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-secondary);">
+                  <div class="kanban-card-id">CO-7</div>
+                  <div class="kanban-card-title">External folder support</div>
+                </div>
+                <div class="kanban-card" style="border-left-color:var(--md-sys-color-secondary);">
+                  <div class="kanban-card-id">CO-8</div>
+                  <div class="kanban-card-title">Board command</div>
+                </div>
+              </div>
+            </div><!-- /dash-board -->
+          </div><!-- /dash-main -->
+
+        </div><!-- /dashboard-shell -->
+      </div>
+
+    </main><!-- /right-panel -->
+  </div><!-- /main-content -->
+</div><!-- /app-layout -->
+
+<!-- ══ Export Modal ══ -->
+<div class="modal-overlay hidden" id="exportModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <span class="modal-title">Export CSS Variables</span>
+      <button class="modal-close" onclick="closeExport()">
+        <span class="material-symbols-outlined">close</span>
+      </button>
+    </div>
+    <div class="modal-body">
+      <pre class="modal-code" id="exportCode"></pre>
+    </div>
+    <div class="modal-footer">
+      <button class="close-modal-btn" onclick="closeExport()">Close</button>
+      <button class="copy-btn" onclick="copyCSS()">
+        <span class="material-symbols-outlined" style="font-size:15px;">content_copy</span>
+        Copy
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════
+     JAVASCRIPT
+══════════════════════════════════════════════════════ -->
+<script>
+// ─────────────────────────────────────────────────────────
+// Palette definitions
+// ─────────────────────────────────────────────────────────
+const PALETTES = {
+  'co-light': {
+    label: 'CO Light',
+    vars: {
+      '--md-sys-color-primary':                  '#8e4e00',
+      '--md-sys-color-primary-container':        '#cd7f32',
+      '--md-sys-color-primary-fixed':            '#ffdcc1',
+      '--md-sys-color-primary-fixed-dim':        '#ffb779',
+      '--md-sys-color-on-primary':               '#ffffff',
+      '--md-sys-color-on-primary-container':     '#432200',
+
+      '--md-sys-color-secondary':                '#8c4f10',
+      '--md-sys-color-secondary-container':      '#fdad67',
+      '--md-sys-color-secondary-fixed':          '#ffdcc2',
+      '--md-sys-color-secondary-fixed-dim':      '#ffb77b',
+      '--md-sys-color-on-secondary':             '#ffffff',
+      '--md-sys-color-on-secondary-container':   '#763f00',
+
+      '--md-sys-color-tertiary':                 '#805533',
+      '--md-sys-color-tertiary-container':       '#b98661',
+      '--md-sys-color-tertiary-fixed':           '#ffdcc5',
+      '--md-sys-color-tertiary-fixed-dim':       '#f4bb92',
+      '--md-sys-color-on-tertiary':              '#ffffff',
+      '--md-sys-color-on-tertiary-container':    '#432105',
+
+      '--md-sys-color-surface':                  '#fff9ed',
+      '--md-sys-color-surface-container-lowest': '#ffffff',
+      '--md-sys-color-surface-container-low':    '#f9f3e7',
+      '--md-sys-color-surface-container':        '#f3ede1',
+      '--md-sys-color-surface-container-high':   '#ede8dc',
+      '--md-sys-color-surface-container-highest':'#e8e2d6',
+      '--md-sys-color-background':               '#fff9ed',
+      '--md-sys-color-on-surface':               '#1d1c15',
+      '--md-sys-color-on-surface-variant':       '#534438',
+
+      '--md-sys-color-outline':                  '#867466',
+      '--md-sys-color-outline-variant':          '#d8c2b2',
+
+      '--md-sys-color-error':                    '#ba1a1a',
+      '--md-sys-color-error-container':          '#ffdad6',
+      '--md-sys-color-on-error':                 '#ffffff',
+      '--md-sys-color-on-error-container':       '#93000a',
+
+      '--md-sys-color-inverse-surface':          '#333029',
+      '--md-sys-color-inverse-on-surface':       '#f6f0e4',
+      '--md-sys-color-inverse-primary':          '#ffb779',
+    },
+    fonts: {
+      '--co-font-headline': "'Newsreader', serif",
+      '--co-font-body':     "'Newsreader', serif",
+      '--co-font-label':    "'Work Sans', sans-serif",
+      '--co-radius':        '0.125rem',
+    }
+  },
+
+  'co-dark': {
+    label: 'CO Dark',
+    vars: {
+      '--md-sys-color-primary':                  '#ffb779',
+      '--md-sys-color-primary-container':        '#6c3a00',
+      '--md-sys-color-primary-fixed':            '#ffdcc1',
+      '--md-sys-color-primary-fixed-dim':        '#ffb779',
+      '--md-sys-color-on-primary':               '#4e2800',
+      '--md-sys-color-on-primary-container':     '#ffdcc1',
+
+      '--md-sys-color-secondary':                '#ffb77b',
+      '--md-sys-color-secondary-container':      '#6d3a00',
+      '--md-sys-color-secondary-fixed':          '#ffdcc2',
+      '--md-sys-color-secondary-fixed-dim':      '#ffb77b',
+      '--md-sys-color-on-secondary':             '#4e2500',
+      '--md-sys-color-on-secondary-container':   '#ffdcc2',
+
+      '--md-sys-color-tertiary':                 '#f4bb92',
+      '--md-sys-color-tertiary-container':       '#653d1e',
+      '--md-sys-color-tertiary-fixed':           '#ffdcc5',
+      '--md-sys-color-tertiary-fixed-dim':       '#f4bb92',
+      '--md-sys-color-on-tertiary':              '#452010',
+      '--md-sys-color-on-tertiary-container':    '#ffdcc5',
+
+      '--md-sys-color-surface':                  '#1d1c15',
+      '--md-sys-color-surface-container-lowest': '#0e0d08',
+      '--md-sys-color-surface-container-low':    '#252319',
+      '--md-sys-color-surface-container':        '#2a2720',
+      '--md-sys-color-surface-container-high':   '#333029',
+      '--md-sys-color-surface-container-highest':'#3e3b2f',
+      '--md-sys-color-background':               '#1d1c15',
+      '--md-sys-color-on-surface':               '#f6f0e4',
+      '--md-sys-color-on-surface-variant':       '#d8c2b2',
+
+      '--md-sys-color-outline':                  '#a08877',
+      '--md-sys-color-outline-variant':          '#534438',
+
+      '--md-sys-color-error':                    '#ffb4ab',
+      '--md-sys-color-error-container':          '#93000a',
+      '--md-sys-color-on-error':                 '#690005',
+      '--md-sys-color-on-error-container':       '#ffdad6',
+
+      '--md-sys-color-inverse-surface':          '#f6f0e4',
+      '--md-sys-color-inverse-on-surface':       '#333029',
+      '--md-sys-color-inverse-primary':          '#8e4e00',
+    },
+    fonts: {
+      '--co-font-headline': "'Newsreader', serif",
+      '--co-font-body':     "'Newsreader', serif",
+      '--co-font-label':    "'Work Sans', sans-serif",
+      '--co-radius':        '0.125rem',
+    }
+  },
+
+  'quilombo': {
+    label: 'Quilombo Araucária',
+    vars: {
+      '--md-sys-color-primary':                  '#5c3d1e',
+      '--md-sys-color-primary-container':        '#a0622a',
+      '--md-sys-color-primary-fixed':            '#eed5b8',
+      '--md-sys-color-primary-fixed-dim':        '#c89060',
+      '--md-sys-color-on-primary':               '#ffffff',
+      '--md-sys-color-on-primary-container':     '#ffffff',
+
+      '--md-sys-color-secondary':                '#3e5e38',
+      '--md-sys-color-secondary-container':      '#6a9464',
+      '--md-sys-color-secondary-fixed':          '#c8e4c4',
+      '--md-sys-color-secondary-fixed-dim':      '#8ab886',
+      '--md-sys-color-on-secondary':             '#ffffff',
+      '--md-sys-color-on-secondary-container':   '#ffffff',
+
+      '--md-sys-color-tertiary':                 '#7a4f2b',
+      '--md-sys-color-tertiary-container':       '#c4855a',
+      '--md-sys-color-tertiary-fixed':           '#f0d4bc',
+      '--md-sys-color-tertiary-fixed-dim':       '#d4a078',
+      '--md-sys-color-on-tertiary':              '#ffffff',
+      '--md-sys-color-on-tertiary-container':    '#ffffff',
+
+      '--md-sys-color-surface':                  '#faf7f2',
+      '--md-sys-color-surface-container-lowest': '#ffffff',
+      '--md-sys-color-surface-container-low':    '#f5f0e8',
+      '--md-sys-color-surface-container':        '#ede6da',
+      '--md-sys-color-surface-container-high':   '#e4dbd0',
+      '--md-sys-color-surface-container-highest':'#d8d0c4',
+      '--md-sys-color-background':               '#faf7f2',
+      '--md-sys-color-on-surface':               '#1a1510',
+      '--md-sys-color-on-surface-variant':       '#504030',
+
+      '--md-sys-color-outline':                  '#8a6e54',
+      '--md-sys-color-outline-variant':          '#c0a98a',
+
+      '--md-sys-color-error':                    '#b3261e',
+      '--md-sys-color-error-container':          '#f9dedc',
+      '--md-sys-color-on-error':                 '#ffffff',
+      '--md-sys-color-on-error-container':       '#8c1d18',
+
+      '--md-sys-color-inverse-surface':          '#2e2820',
+      '--md-sys-color-inverse-on-surface':       '#f5f0e8',
+      '--md-sys-color-inverse-primary':          '#c89060',
+    },
+    fonts: {
+      '--co-font-headline': "'Newsreader', serif",
+      '--co-font-body':     "'Newsreader', serif",
+      '--co-font-label':    "'Work Sans', sans-serif",
+      '--co-radius':        '0.25rem',
+    }
+  },
+
+  'quilombo-dark': {
+    label: 'Quilombo Dark',
+    vars: {
+      '--md-sys-color-primary':                  '#c89060',
+      '--md-sys-color-primary-container':        '#3d2008',
+      '--md-sys-color-primary-fixed':            '#eed5b8',
+      '--md-sys-color-primary-fixed-dim':        '#c89060',
+      '--md-sys-color-on-primary':               '#2a1a08',
+      '--md-sys-color-on-primary-container':     '#eed5b8',
+
+      '--md-sys-color-secondary':                '#8ab886',
+      '--md-sys-color-secondary-container':      '#1e3a1a',
+      '--md-sys-color-secondary-fixed':          '#c8e4c4',
+      '--md-sys-color-secondary-fixed-dim':      '#8ab886',
+      '--md-sys-color-on-secondary':             '#0e200c',
+      '--md-sys-color-on-secondary-container':   '#c8e4c4',
+
+      '--md-sys-color-tertiary':                 '#d4a078',
+      '--md-sys-color-tertiary-container':       '#42200a',
+      '--md-sys-color-tertiary-fixed':           '#f0d4bc',
+      '--md-sys-color-tertiary-fixed-dim':       '#d4a078',
+      '--md-sys-color-on-tertiary':              '#301a08',
+      '--md-sys-color-on-tertiary-container':    '#f0d4bc',
+
+      '--md-sys-color-surface':                  '#1a1510',
+      '--md-sys-color-surface-container-lowest': '#100e0a',
+      '--md-sys-color-surface-container-low':    '#221e18',
+      '--md-sys-color-surface-container':        '#2a2520',
+      '--md-sys-color-surface-container-high':   '#353028',
+      '--md-sys-color-surface-container-highest':'#403a30',
+      '--md-sys-color-background':               '#1a1510',
+      '--md-sys-color-on-surface':               '#f0eae0',
+      '--md-sys-color-on-surface-variant':       '#c0a98a',
+
+      '--md-sys-color-outline':                  '#a0866c',
+      '--md-sys-color-outline-variant':          '#504030',
+
+      '--md-sys-color-error':                    '#ffb4ab',
+      '--md-sys-color-error-container':          '#8c1d18',
+      '--md-sys-color-on-error':                 '#690005',
+      '--md-sys-color-on-error-container':       '#ffdad6',
+
+      '--md-sys-color-inverse-surface':          '#f0eae0',
+      '--md-sys-color-inverse-on-surface':       '#2a2520',
+      '--md-sys-color-inverse-primary':          '#5c3d1e',
+    },
+    fonts: {
+      '--co-font-headline': "'Newsreader', serif",
+      '--co-font-body':     "'Newsreader', serif",
+      '--co-font-label':    "'Work Sans', sans-serif",
+      '--co-radius':        '0.25rem',
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────
+// Swatch group definitions
+// Each group: { name, keyVar, swatches: [{label, var}] }
+// "keyVar" = the var shown in the group header hex
+// ─────────────────────────────────────────────────────────
+const SWATCH_GROUPS = [
+  {
+    name: 'Primary',
+    keyVar: '--md-sys-color-primary',
+    swatches: [
+      { label: 'primary',           var: '--md-sys-color-primary' },
+      { label: 'on-primary',        var: '--md-sys-color-on-primary' },
+      { label: 'p-container',       var: '--md-sys-color-primary-container' },
+      { label: 'on-p-container',    var: '--md-sys-color-on-primary-container' },
+      { label: 'p-fixed-dim',       var: '--md-sys-color-primary-fixed-dim' },
+    ]
+  },
+  {
+    name: 'Secondary',
+    keyVar: '--md-sys-color-secondary',
+    swatches: [
+      { label: 'secondary',         var: '--md-sys-color-secondary' },
+      { label: 'on-secondary',      var: '--md-sys-color-on-secondary' },
+      { label: 's-container',       var: '--md-sys-color-secondary-container' },
+      { label: 'on-s-container',    var: '--md-sys-color-on-secondary-container' },
+      { label: 's-fixed-dim',       var: '--md-sys-color-secondary-fixed-dim' },
+    ]
+  },
+  {
+    name: 'Tertiary',
+    keyVar: '--md-sys-color-tertiary',
+    swatches: [
+      { label: 'tertiary',          var: '--md-sys-color-tertiary' },
+      { label: 'on-tertiary',       var: '--md-sys-color-on-tertiary' },
+      { label: 't-container',       var: '--md-sys-color-tertiary-container' },
+      { label: 'on-t-container',    var: '--md-sys-color-on-tertiary-container' },
+      { label: 't-fixed-dim',       var: '--md-sys-color-tertiary-fixed-dim' },
+    ]
+  },
+  {
+    name: 'Neutral',
+    keyVar: '--md-sys-color-surface',
+    swatches: [
+      { label: 'surface',           var: '--md-sys-color-surface' },
+      { label: 'surf-low',          var: '--md-sys-color-surface-container-low' },
+      { label: 'surf-container',    var: '--md-sys-color-surface-container' },
+      { label: 'surf-high',         var: '--md-sys-color-surface-container-high' },
+      { label: 'surf-highest',      var: '--md-sys-color-surface-container-highest' },
+    ]
+  },
+  {
+    name: 'On-surface & Outline',
+    keyVar: '--md-sys-color-on-surface',
+    swatches: [
+      { label: 'on-surface',        var: '--md-sys-color-on-surface' },
+      { label: 'on-surf-var',       var: '--md-sys-color-on-surface-variant' },
+      { label: 'outline',           var: '--md-sys-color-outline' },
+      { label: 'outline-var',       var: '--md-sys-color-outline-variant' },
+      { label: 'inverse-surf',      var: '--md-sys-color-inverse-surface' },
+    ]
+  },
+  {
+    name: 'Error',
+    keyVar: '--md-sys-color-error',
+    swatches: [
+      { label: 'error',             var: '--md-sys-color-error' },
+      { label: 'on-error',          var: '--md-sys-color-on-error' },
+      { label: 'error-container',   var: '--md-sys-color-error-container' },
+      { label: 'on-err-container',  var: '--md-sys-color-on-error-container' },
+      { label: 'inverse-primary',   var: '--md-sys-color-inverse-primary' },
+    ]
+  }
+];
+
+// ─────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────
+let currentVars = {};
+let currentFonts = {};
+let activePalette = 'co-light';
+
+// ─────────────────────────────────────────────────────────
+// Apply palette
+// ─────────────────────────────────────────────────────────
+function applyPalette(name) {
+  const palette = PALETTES[name];
+  if (!palette) return;
+
+  activePalette = name;
+  currentVars = { ...palette.vars };
+  currentFonts = { ...palette.fonts };
+
+  // Set all CSS vars on :root
+  const root = document.documentElement;
+  for (const [k, v] of Object.entries(currentVars)) {
+    root.style.setProperty(k, v);
+  }
+  for (const [k, v] of Object.entries(currentFonts)) {
+    root.style.setProperty(k, v);
+  }
+
+  // Update preset button active state
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.preset === name);
+  });
+
+  // Re-render swatches to reflect new values
+  renderSwatches();
+}
+
+// ─────────────────────────────────────────────────────────
+// Render swatch groups
+// ─────────────────────────────────────────────────────────
+function renderSwatches() {
+  const panel = document.getElementById('leftPanel');
+  // Clear existing swatch groups (but keep the section title)
+  const title = panel.querySelector('.panel-section-title');
+  panel.innerHTML = '';
+  panel.appendChild(title);
+
+  SWATCH_GROUPS.forEach(group => {
+    const keyColor = getVar(group.keyVar);
+
+    // Build group element
+    const groupEl = document.createElement('div');
+    groupEl.className = 'swatch-group';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'swatch-group-header';
+    header.id = `group-header-${group.name.replace(/\s+/g,'-')}`;
+
+    // Determine contrasting text for header
+    const headerBg = keyColor;
+    const textColor = getContrastColor(headerBg);
+
+    header.style.background = headerBg;
+    header.style.color = textColor;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'group-name';
+    nameSpan.textContent = group.name;
+
+    const hexSpan = document.createElement('span');
+    hexSpan.className = 'group-hex';
+    hexSpan.textContent = keyColor;
+
+    header.appendChild(nameSpan);
+    header.appendChild(hexSpan);
+    groupEl.appendChild(header);
+
+    // Swatch row
+    const row = document.createElement('div');
+    row.className = 'swatch-row';
+
+    group.swatches.forEach(sw => {
+      const color = getVar(sw.var);
+      const swatch = document.createElement('div');
+      swatch.className = 'swatch';
+      swatch.style.background = color;
+      swatch.title = `${sw.var}\n${color}`;
+
+      // Label
+      const lbl = document.createElement('span');
+      lbl.className = 'swatch-label';
+      lbl.textContent = color;
+      lbl.style.color = getContrastColor(color);
+      swatch.appendChild(lbl);
+
+      // Color input overlay
+      const input = document.createElement('input');
+      input.type = 'color';
+      input.value = hexToInputValue(color);
+      input.title = sw.var;
+      input.addEventListener('input', (e) => {
+        const newColor = e.target.value;
+        updateVar(sw.var, newColor, swatch, lbl, group, header, hexSpan);
+      });
+
+      swatch.appendChild(input);
+      row.appendChild(swatch);
+    });
+
+    groupEl.appendChild(row);
+    panel.appendChild(groupEl);
+  });
+}
+
+// ─────────────────────────────────────────────────────────
+// Update a single var (from swatch picker)
+// ─────────────────────────────────────────────────────────
+function updateVar(varName, newColor, swatchEl, lblEl, group, headerEl, hexSpanEl) {
+  // Update CSS var
+  document.documentElement.style.setProperty(varName, newColor);
+  currentVars[varName] = newColor;
+
+  // Update swatch background
+  swatchEl.style.background = newColor;
+  lblEl.textContent = newColor;
+  lblEl.style.color = getContrastColor(newColor);
+
+  // If this is the key var for the group, update the header too
+  if (varName === group.keyVar) {
+    headerEl.style.background = newColor;
+    headerEl.style.color = getContrastColor(newColor);
+    hexSpanEl.textContent = newColor;
+  }
+}
+
+// ─────────────────────────────────────────────────────────
+// Get current CSS var value (falls back to currentVars map)
+// ─────────────────────────────────────────────────────────
+function getVar(varName) {
+  const fromStyle = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+  if (fromStyle) return fromStyle;
+  return currentVars[varName] || '#000000';
+}
+
+// ─────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────
+
+// Simple luminance-based contrast: returns black or white
+function getContrastColor(hex) {
+  const c = hex.replace('#', '');
+  if (c.length < 6) return '#000000';
+  const r = parseInt(c.substring(0,2), 16);
+  const g = parseInt(c.substring(2,4), 16);
+  const b = parseInt(c.substring(4,6), 16);
+  // Relative luminance
+  const L = 0.299 * r + 0.587 * g + 0.114 * b;
+  return L > 140 ? '#1d1c15' : '#f6f0e4';
+}
+
+// Convert potentially 8-char hex to 6-char for <input type="color">
+function hexToInputValue(hex) {
+  const h = hex.trim().replace('#', '');
+  if (h.length === 6) return '#' + h;
+  if (h.length === 8) return '#' + h.substring(0, 6);
+  return '#000000';
+}
+
+// ─────────────────────────────────────────────────────────
+// Export modal
+// ─────────────────────────────────────────────────────────
+function buildCSSExport() {
+  const lines = [':root {'];
+
+  // Color vars
+  lines.push('  /* — Primary — */');
+  const primaryKeys = Object.keys(currentVars).filter(k => k.includes('primary'));
+  primaryKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  lines.push('  /* — Secondary — */');
+  const secondaryKeys = Object.keys(currentVars).filter(k => k.includes('secondary'));
+  secondaryKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  lines.push('  /* — Tertiary — */');
+  const tertiaryKeys = Object.keys(currentVars).filter(k => k.includes('tertiary'));
+  tertiaryKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  lines.push('  /* — Surface — */');
+  const surfaceKeys = Object.keys(currentVars).filter(k => k.includes('surface') || k.includes('background'));
+  surfaceKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  lines.push('  /* — On-surface & Outline — */');
+  const onSurfaceKeys = Object.keys(currentVars).filter(k =>
+    (k.includes('on-surface') || k.includes('outline') || k.includes('inverse')) && !surfaceKeys.includes(k) && !primaryKeys.includes(k) && !secondaryKeys.includes(k) && !tertiaryKeys.includes(k)
+  );
+  onSurfaceKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  lines.push('  /* — Error — */');
+  const errorKeys = Object.keys(currentVars).filter(k => k.includes('error'));
+  errorKeys.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+
+  // Catch any remaining
+  const handled = new Set([...primaryKeys, ...secondaryKeys, ...tertiaryKeys, ...surfaceKeys, ...onSurfaceKeys, ...errorKeys]);
+  const remaining = Object.keys(currentVars).filter(k => !handled.has(k));
+  if (remaining.length) {
+    lines.push('  /* — Other — */');
+    remaining.forEach(k => lines.push(`  ${k}: ${currentVars[k]};`));
+  }
+
+  lines.push('');
+  lines.push('  /* — Typography — */');
+  for (const [k, v] of Object.entries(currentFonts)) {
+    lines.push(`  ${k}: ${v};`);
+  }
+
+  lines.push('}');
+  return lines.join('\n');
+}
+
+function openExport() {
+  document.getElementById('exportCode').textContent = buildCSSExport();
+  document.getElementById('exportModal').classList.remove('hidden');
+}
+
+function closeExport() {
+  document.getElementById('exportModal').classList.add('hidden');
+}
+
+function copyCSS() {
+  const text = document.getElementById('exportCode').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.copy-btn');
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<span class="material-symbols-outlined" style="font-size:15px;">check</span> Copied!';
+    setTimeout(() => { btn.innerHTML = orig; }, 2000);
+  });
+}
+
+// Close modal on overlay click
+document.getElementById('exportModal').addEventListener('click', function(e) {
+  if (e.target === this) closeExport();
+});
+
+// ─────────────────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────────────────
+applyPalette('co-light');
+</script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+[Unit]
+Description=CO Web Server
+Documentation=https://github.com/institutional-pointset/co
+After=network.target
+
+[Service]
+Type=simple
+User={{ co_user }}
+Group={{ co_group }}
+WorkingDirectory={{ co_data_dir }}
+ExecStart={{ co_install_dir }}/co-web
+Restart=on-failure
+RestartSec=5s
+
+# Environment
+Environment="CO_WEB_PORT={{ co_port }}"
+Environment="CO_WEB_DATA={{ co_data_dir }}"
+Environment="RUST_LOG=co_web=info,tower_http=info"
+Environment="JWT_SECRET={{ jwt_secret }}"
+{% if resend_api_key is defined and resend_api_key %}
+Environment="RESEND_API_KEY={{ resend_api_key }}"
+{% endif %}
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths={{ co_data_dir }}
+PrivateTmp=true
+ProtectHome=true
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

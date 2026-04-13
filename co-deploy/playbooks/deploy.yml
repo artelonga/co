@@ -1,0 +1,124 @@
+---
+# Deploy co-web binary to a VPS.
+# Idempotent: running twice produces the same result.
+#
+# Usage (from workspace root):
+#   ansible-playbook -i co-deploy/inventory/vps.yml co-deploy/playbooks/deploy.yml --ask-vault-pass
+#
+# Variables:
+#   co_build_host: where to build — "local" (cross-compile) or "remote" (build on server)
+#                  Defaults to "local".
+
+- name: Deploy CO web server
+  hosts: production
+  become: true
+
+  vars_files:
+    - ../group_vars/all.yml
+    - ../group_vars/production.yml
+
+  vars:
+    co_build_host: "local"
+    co_workspace_root: "{{ playbook_dir }}/../../"
+    co_binary_local: "{{ co_workspace_root }}/target/{{ co_cross_target }}/release/co-web"
+    co_is_first_deploy: false
+
+  tasks:
+    # ── Build ──────────────────────────────────────────────────────────────────
+
+    - name: Cross-compile co-web for Linux x86_64 (local build)
+      ansible.builtin.command:
+        cmd: cross build --release -p co-web --target {{ co_cross_target }}
+        chdir: "{{ co_workspace_root }}"
+      delegate_to: localhost
+      become: false
+      when: co_build_host == "local"
+      changed_when: true
+
+    # ── Stop service before replacing binary ───────────────────────────────────
+
+    - name: Stop co-web service (if running)
+      ansible.builtin.systemd:
+        name: co-web
+        state: stopped
+      failed_when: false
+
+    # ── Binary ────────────────────────────────────────────────────────────────
+
+    - name: Copy co-web binary
+      ansible.builtin.copy:
+        src: "{{ co_binary_local }}"
+        dest: "{{ co_install_dir }}/co-web"
+        owner: root
+        group: "{{ co_group }}"
+        mode: "0750"
+      notify: Restart co-web
+
+    # ── Systemd unit ──────────────────────────────────────────────────────────
+
+    - name: Write systemd service unit
+      ansible.builtin.template:
+        src: ../templates/co-web.service.j2
+        dest: /etc/systemd/system/co-web.service
+        owner: root
+        group: root
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart co-web
+
+    - name: Enable co-web service
+      ansible.builtin.systemd:
+        name: co-web
+        enabled: true
+        daemon_reload: true
+
+    # ── First-deploy seed SQL ──────────────────────────────────────────────────
+
+    - name: Check if database already exists
+      ansible.builtin.stat:
+        path: "{{ co_data_dir }}/co.db"
+      register: co_db_stat
+
+    - name: Run seed SQL (first deploy only)
+      ansible.builtin.command:
+        cmd: >
+          sqlite3 {{ co_data_dir }}/co.db
+          ".read {{ co_install_dir }}/seed.sql"
+      become_user: "{{ co_user }}"
+      when:
+        - co_is_first_deploy or not co_db_stat.stat.exists
+        - co_seed_sql is defined
+      changed_when: true
+
+    # ── Start & verify ────────────────────────────────────────────────────────
+
+    - name: Start co-web service
+      ansible.builtin.systemd:
+        name: co-web
+        state: started
+
+    - name: Wait for co-web to be healthy
+      ansible.builtin.uri:
+        url: "http://localhost:{{ co_port }}/api/health"
+        method: GET
+        status_code: 200
+        timeout: 10
+      register: health_check
+      retries: 12
+      delay: 5
+      until: health_check.status == 200
+
+    - name: Report health check result
+      ansible.builtin.debug:
+        msg: "co-web is healthy — {{ health_check.json | default(health_check.content) }}"
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart co-web
+      ansible.builtin.systemd:
+        name: co-web
+        state: restarted

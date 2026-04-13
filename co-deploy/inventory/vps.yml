@@ -1,0 +1,11 @@
+# Generic VPS inventory — DigitalOcean, Hetzner, etc.
+# Override host/user via -i or environment variables before running playbooks.
+all:
+  children:
+    production:
+      hosts:
+        co_vps:
+          ansible_host: "{{ lookup('env', 'CO_VPS_HOST') | default('YOUR_VPS_IP') }}"
+          ansible_user: "{{ lookup('env', 'CO_VPS_USER') | default('root') }}"
+          ansible_ssh_private_key_file: "{{ lookup('env', 'CO_SSH_KEY') | default('~/.ssh/id_ed25519') }}"
+          ansible_python_interpreter: /usr/bin/python3

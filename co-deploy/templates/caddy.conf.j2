@@ -1,0 +1,37 @@
+{{ co_domain }} {
+    # Reverse proxy to co-web
+    reverse_proxy localhost:{{ co_port }}
+
+    # Auto-SSL via Let's Encrypt (Caddy handles this automatically)
+
+    # Compression
+    encode zstd gzip
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "geolocation=(), microphone=(), camera=()"
+        -Server
+    }
+
+    # Cache static assets (rust-embed serves them via co-web)
+    @static path /assets/* /static/*
+    header @static Cache-Control "public, max-age=31536000, immutable"
+
+    # Health check (no auth required)
+    handle /api/health {
+        reverse_proxy localhost:{{ co_port }}
+    }
+
+    # Logs
+    log {
+        output file /var/log/caddy/co.log {
+            roll_size 10mb
+            roll_keep 5
+        }
+        format json
+    }
+}

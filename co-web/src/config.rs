@@ -41,10 +41,27 @@ pub struct WebConfig {
     pub experiments: bool,
     pub plugins_dir: String,
     pub game_db_path: Option<String>,
+    /// Directory for the universo (quilombo) vault files.
+    pub universo_dir: String,
+    /// GitHub usernames allowed as gestão admins.
+    pub gestao_github_admins: Vec<String>,
+    /// Optional universe key to scope this server instance to a single universe.
+    pub universe_key: Option<String>,
+    /// Deployment environment: "prod" (default) or "uat".
+    /// Set via the `CO_ENV` environment variable.
+    pub co_env: String,
+}
+
+impl WebConfig {
+    /// Returns true when running in UAT mode (`CO_ENV=uat`).
+    pub fn is_uat(&self) -> bool {
+        self.co_env == "uat"
+    }
 }
 
 impl From<Args> for WebConfig {
     fn from(args: Args) -> Self {
+        let universo_dir = format!("{}/universes", args.data);
         Self {
             port: args.port,
             data_dir: args.data,
@@ -53,6 +70,15 @@ impl From<Args> for WebConfig {
             experiments: args.experiments,
             plugins_dir: args.plugins_dir,
             game_db_path: args.game_db_path,
+            universo_dir,
+            gestao_github_admins: std::env::var("GESTAO_GITHUB_ADMINS")
+                .unwrap_or_default()
+                .split(',')
+                .filter(|s| !s.is_empty())
+                .map(|s| s.trim().to_string())
+                .collect(),
+            universe_key: std::env::var("UNIVERSE_KEY").ok(),
+            co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
         }
     }
 }

@@ -4,7 +4,9 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["ws"] }
+futures-util = "0.3"
+yrs = "0.22"
 tower-http = { version = "0.6", features = ["fs", "cors", "compression-gzip", "trace", "set-header", "request-id"] }
 tower = { version = "0.5", features = ["util"] }
 tokio = { workspace = true }
@@ -26,10 +28,24 @@ game-core = { path = "../game-core" }
 argon2 = { workspace = true }
 rand = { workspace = true }
 nanoid = { workspace = true }
+xxhash-rust = { workspace = true }
 toml = { workspace = true }
 dirs = "5"
+prost = "0.13"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+flate2 = "1.0"
+tar = "0.4"
+
+[[bin]]
+name = "migrate_quilombo"
+path = "src/bin/migrate_quilombo.rs"
+
+[[bin]]
+name = "import_quilombo"
+path = "src/bin/import_quilombo.rs"
 
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

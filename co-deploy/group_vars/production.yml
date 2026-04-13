@@ -1,0 +1,14 @@
+# Production secrets — encrypt this file with ansible-vault before committing.
+#
+# Usage:
+#   ansible-vault encrypt group_vars/production.yml
+#   ansible-vault edit   group_vars/production.yml
+#   ansible-playbook ... --ask-vault-pass
+#
+# Required secrets (replace placeholder values):
+jwt_secret: "CHANGE_ME_strong_random_secret_min_32_chars"
+resend_api_key: "re_CHANGE_ME"
+
+# Optional: S3/B2 credentials for off-site backup via rclone
+# rclone_config_b2_account: "CHANGE_ME"
+# rclone_config_b2_key: "CHANGE_ME"

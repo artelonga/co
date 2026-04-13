@@ -1,0 +1,65 @@
+syntax = "proto3";
+package co.entry;
+
+/// A single content entity — the wire representation of an Entry.
+message Entry {
+  string path = 1;            // vault-relative path (e.g., "projects/MP/1.md")
+  string entry_type = 2;      // "task", "event", "message", "comment", "page", "clip", "project"
+  string title = 3;
+  map<string, Value> frontmatter = 4;
+  string body = 5;
+  string body_hash = 6;       // SHA-256 hex for change detection
+  FileStat stat = 7;
+}
+
+/// File system metadata.
+message FileStat {
+  int64 created_ms = 1;       // Unix timestamp in milliseconds
+  int64 modified_ms = 2;
+  uint64 size = 3;
+}
+
+/// Flexible scalar value for frontmatter fields.
+message Value {
+  oneof kind {
+    string string_value = 1;
+    int64 int_value = 2;
+    bool bool_value = 3;
+    double float_value = 4;
+    ListValue list_value = 5;
+  }
+}
+
+/// A list of Values (used for arrays like `tags`).
+message ListValue {
+  repeated Value values = 1;
+}
+
+/// A paginated list of entries.
+message EntryList {
+  repeated Entry entries = 1;
+  uint64 total = 2;
+}
+
+/// Query parameters for listing entries.
+message EntryQuery {
+  string universe = 1;
+  string entry_type = 2;
+  map<string, string> filters = 3;
+  string sort_by = 4;
+  bool sort_desc = 5;
+  uint32 limit = 6;
+  uint32 offset = 7;
+}
+
+/// A tag with its occurrence count.
+message TagCount {
+  string tag = 1;
+  uint64 count = 2;
+}
+
+/// A tree node — an entry with optional children (built from `parent` field).
+message TreeNode {
+  Entry entry = 1;
+  repeated TreeNode children = 2;
+}
