@@ -378,6 +378,37 @@ pub struct Universe {
     /// CO-38: if true, anonymous visitors cannot access this universe.
     #[serde(default)]
     pub requires_login: bool,
+    /// CO-49: single visibility enum replacing is_public + is_template + requires_login.
+    /// Values: "template", "private", "public-subscribable", "requires_login"
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+}
+
+fn default_visibility() -> String {
+    "private".into()
+}
+
+/// CO-49: Deterministic access level for a universe.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniverseAccess {
+    /// Full read + write access (owner or member with write role).
+    ReadWrite,
+    /// Read-only access (member with read role, subscriber, or any logged-in user for requires_login universes).
+    ReadOnly,
+    /// Only public metadata visible (title, description, subscriber count).
+    MetadataOnly,
+    /// Login required; return 401 (universe exists but is not accessible anonymously).
+    LoginRequired,
+    /// Universe not accessible; return 404.
+    Denied,
+}
+
+/// CO-49: A user's subscription to a public-subscribable universe.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Subscription {
+    pub user_id: String,
+    pub universe_key: String,
+    pub subscribed_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

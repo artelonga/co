@@ -2,7 +2,7 @@ use std::hash::{Hash, Hasher};
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
     routing::{delete, get, post, put},
@@ -44,6 +44,15 @@ pub struct UniverseInfo {
     pub is_template: bool,
     /// CO-38: signals to the frontend that login is required to use this universe.
     pub requires_login: bool,
+    /// CO-49: single visibility field replacing the boolean flags.
+    pub visibility: String,
+}
+
+/// Query params for universe search.
+#[derive(Debug, serde::Deserialize)]
+pub struct SearchQuery {
+    #[serde(default)]
+    pub q: String,
 }
 
 fn lock_storage(
@@ -128,7 +137,14 @@ pub async fn add_member(
     user_id: UserId,
     Json(body): Json<AddMember>,
 ) -> Result<impl IntoResponse, AppError> {
-    let valid_roles = ["owner", "admin", "member", "coordenacao"];
+    let valid_roles = [
+        "owner",
+        "admin",
+        "editor",
+        "viewer",
+        "member",
+        "coordenacao",
+    ];
     if !valid_roles.contains(&body.role.as_str()) {
         return Err(AppError::BadRequest(format!(
             "Invalid role '{}'. Must be one of: {}",
@@ -190,6 +206,67 @@ pub async fn list_universe_projects(
             Err(AppError::Forbidden(msg))
         }
     }
+}
+
+// PUT /api/v1/universes/:slug — update universe name/description (owner only)
+pub async fn update_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let caller_id = extract_optional_user_id(&headers, &state)
+        .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
+
+    let storage = lock_storage(&state)?;
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+    if universe.owner_id != caller_id {
+        return Err(AppError::Forbidden(
+            "Only the owner can update this universe".into(),
+        ));
+    }
+
+    drop(storage);
+
+    if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
+        let name = name.trim();
+        if name.is_empty() || name.len() > 100 {
+            return Err(AppError::BadRequest("Name must be 1-100 characters".into()));
+        }
+        let storage = lock_storage(&state)?;
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET name = ?1 WHERE key = ?2",
+                rusqlite::params![name, slug],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
+    if let Some(desc) = body.get("description").and_then(|v| v.as_str()) {
+        let storage = lock_storage(&state)?;
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET description = ?1 WHERE key = ?2",
+                rusqlite::params![desc, slug],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
+    let storage = lock_storage(&state)?;
+    let updated = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::Internal("Universe disappeared".into()))?;
+
+    Ok(Json(serde_json::json!({
+        "key": updated.key,
+        "name": updated.name,
+        "description": updated.description,
+    })))
 }
 
 // POST /api/v1/universes/:slug/clone — clone a universe (no auth required)
@@ -263,22 +340,75 @@ pub async fn clone_universe(
     Ok((StatusCode::CREATED, response_headers, Json(universe)))
 }
 
+// GET /api/v1/universes/search?q=... — search public-subscribable universes
+pub async fn search_universes(
+    State(state): State<AppState>,
+    Query(params): Query<SearchQuery>,
+) -> Result<Json<Vec<Universe>>, AppError> {
+    let storage = lock_storage(&state)?;
+    Ok(Json(storage.search_public_universes(&params.q)))
+}
+
+// POST /api/v1/universes/:slug/subscribe — subscribe to a public universe (auth required)
+pub async fn subscribe_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<StatusCode, AppError> {
+    lock_storage(&state)?
+        .subscribe_universe(&user_id.0, &slug)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// DELETE /api/v1/universes/:slug/subscribe — unsubscribe (auth required)
+pub async fn unsubscribe_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<StatusCode, AppError> {
+    lock_storage(&state)?
+        .unsubscribe_universe(&user_id.0, &slug)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// GET /api/v1/universes/:slug/subscribers — list subscribers (owner only)
+pub async fn list_subscribers(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<Json<Vec<Subscription>>, AppError> {
+    let storage = lock_storage(&state)?;
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+    if universe.owner_id != user_id.0 {
+        return Err(AppError::Forbidden(
+            "Only the owner can list subscribers".into(),
+        ));
+    }
+    Ok(Json(storage.list_universe_subscribers(&slug)))
+}
+
 // GET /api/v1/universes/:slug — public universe info (content_count, no owner_id)
 //
-// Sharing gate: anonymous universes are only visible to their owner
-// (identified by the `co_universe_owner` cookie). Anyone else gets a 404.
-// Logged-in universes are accessible to everyone.
+// CO-49: uses deterministic 7-step access check.
+// Anonymous universes remain visible only to their cookie-identified owner.
 pub async fn get_universe_info(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<UniverseInfo>, AppError> {
+    let caller_id = extract_optional_user_id(&headers, &state);
+
+    // For anonymous universes (owned by anon-*), we still use the cookie gate
+    // because those don't have a visibility flag yet — they're always private.
     let storage = lock_storage(&state)?;
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
 
-    // Sharing gate: anonymous universes are private to their owner.
     if universe.owner_id.starts_with("anon-") {
         let cookie_owner = extract_cookie(&headers, "co_universe_owner");
         if cookie_owner.as_deref() != Some(universe.owner_id.as_str()) {
@@ -286,13 +416,22 @@ pub async fn get_universe_info(
         }
     }
 
-    // CO-38: login gate — universes with requires_login=true block anonymous access.
-    if universe.requires_login {
-        let caller_id = extract_optional_user_id(&headers, &state);
-        if caller_id.is_none() {
+    // CO-49: deterministic access check.
+    let access = storage.check_universe_access(caller_id.as_deref(), &slug);
+    match access {
+        crate::models::UniverseAccess::Denied => {
+            return Err(AppError::NotFound(format!("Universe '{}' not found", slug)));
+        }
+        crate::models::UniverseAccess::LoginRequired => {
             return Err(AppError::Unauthorized(
                 "Login required to access this universe".into(),
             ));
+        }
+        crate::models::UniverseAccess::MetadataOnly => {
+            // Public-subscribable: return metadata only (no content access).
+        }
+        _ => {
+            // ReadOnly or ReadWrite: full info.
         }
     }
 
@@ -304,6 +443,7 @@ pub async fn get_universe_info(
         is_anonymous: universe.owner_id.starts_with("anon-"),
         is_template: universe.is_template,
         requires_login: universe.requires_login,
+        visibility: universe.visibility,
     }))
 }
 
@@ -558,6 +698,8 @@ pub fn router() -> Router<AppState> {
     let public_routes = Router::new()
         // CO-41: specific literal route must come before /{slug} wildcard
         .route("/quilomboaraucaria/stats", get(quilombo_stats))
+        // CO-49: universe search (no auth required)
+        .route("/search", get(search_universes))
         .route("/{slug}", get(get_universe_info))
         .route("/{slug}/config", get(get_universe_config))
         .route("/{slug}/theme.css", get(get_universe_theme_css))
@@ -569,8 +711,15 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_universes).post(create_universe))
         .route("/{key}/members", get(list_members).post(add_member))
         .route("/{key}/members/{user_id}", delete(remove_member))
+        .route("/{slug}", put(update_universe))
         .route("/{slug}/claim", post(claim_universe))
         .route("/{slug}/config", put(update_universe_config))
+        // CO-49: subscription routes
+        .route(
+            "/{slug}/subscribe",
+            post(subscribe_universe).delete(unsubscribe_universe),
+        )
+        .route("/{slug}/subscribers", get(list_subscribers))
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)
@@ -1055,5 +1204,305 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response2.status(), axum::http::StatusCode::NOT_MODIFIED);
+    }
+
+    // --- CO-49: deterministic access check ---
+
+    /// Helper: set visibility on a universe.
+    fn set_visibility(storage: &Storage, key: &str, visibility: &str) {
+        storage.conn()
+            .execute(
+                "UPDATE universes SET visibility = ?1, is_public = ?2, is_template = ?3 WHERE key = ?4",
+                rusqlite::params![
+                    visibility,
+                    if visibility == "public-subscribable" || visibility == "public" { 1i64 } else { 0i64 },
+                    if visibility == "template" { 1i64 } else { 0i64 },
+                    key
+                ],
+            )
+            .unwrap();
+    }
+
+    /// 1. Template universe → READ for everyone (anonymous).
+    #[test]
+    fn test_access_template_anonymous() {
+        let (mut storage, _dir) = make_storage();
+        set_visibility(&storage, "default", "template");
+        let access = storage.check_universe_access(None, "default");
+        assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
+    }
+
+    /// 1. Template universe → READ for logged-in user too.
+    #[test]
+    fn test_access_template_logged_in() {
+        let (mut storage, _dir) = make_storage();
+        set_visibility(&storage, "default", "template");
+        let access = storage.check_universe_access(Some("some-user"), "default");
+        assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
+    }
+
+    /// 2. Owner → READ+WRITE regardless of visibility.
+    #[test]
+    fn test_access_owner_readwrite() {
+        let (mut storage, _dir) = make_storage();
+        // "default" universe is owned by "system"; create one owned by test-owner.
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "my-uni".into(),
+                    name: "My Universe".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        let access = storage.check_universe_access(Some("owner-1"), "my-uni");
+        assert_eq!(access, crate::models::UniverseAccess::ReadWrite);
+    }
+
+    /// 3. Member with editor role → READ+WRITE.
+    #[test]
+    fn test_access_editor_member_readwrite() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "collab".into(),
+                    name: "Collab".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        storage
+            .add_universe_member("collab", "editor-1", "editor")
+            .unwrap();
+        let access = storage.check_universe_access(Some("editor-1"), "collab");
+        assert_eq!(access, crate::models::UniverseAccess::ReadWrite);
+    }
+
+    /// 4. Member with viewer role → READ only.
+    #[test]
+    fn test_access_viewer_member_readonly() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "readonly-uni".into(),
+                    name: "Read Only".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        storage
+            .add_universe_member("readonly-uni", "viewer-1", "viewer")
+            .unwrap();
+        let access = storage.check_universe_access(Some("viewer-1"), "readonly-uni");
+        assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
+    }
+
+    /// 5. Subscribed user → READ only.
+    #[test]
+    fn test_access_subscribed_readonly() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "pub-uni".into(),
+                    name: "Public".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        set_visibility(&storage, "pub-uni", "public-subscribable");
+        storage.subscribe_universe("sub-user", "pub-uni").unwrap();
+        let access = storage.check_universe_access(Some("sub-user"), "pub-uni");
+        assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
+    }
+
+    /// 6. Public-subscribable universe → MetadataOnly for non-subscribed anonymous.
+    #[test]
+    fn test_access_public_subscribable_anonymous_metadata_only() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "disco".into(),
+                    name: "Discoverable".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        set_visibility(&storage, "disco", "public-subscribable");
+        // Anonymous (no user_id)
+        let access = storage.check_universe_access(None, "disco");
+        assert_eq!(access, crate::models::UniverseAccess::MetadataOnly);
+    }
+
+    /// 6. Public-subscribable → MetadataOnly for non-subscribed logged-in user.
+    #[test]
+    fn test_access_public_subscribable_logged_in_not_subscribed() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "disco2".into(),
+                    name: "Discoverable2".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        set_visibility(&storage, "disco2", "public-subscribable");
+        let access = storage.check_universe_access(Some("other-user"), "disco2");
+        assert_eq!(access, crate::models::UniverseAccess::MetadataOnly);
+    }
+
+    /// 7. Private universe → Denied for non-owner.
+    #[test]
+    fn test_access_private_denied_to_non_owner() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "secret".into(),
+                    name: "Secret".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        let access = storage.check_universe_access(Some("attacker"), "secret");
+        assert_eq!(access, crate::models::UniverseAccess::Denied);
+    }
+
+    /// 7. Private universe → Denied for anonymous user.
+    #[test]
+    fn test_access_private_denied_anonymous() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "secret2".into(),
+                    name: "Secret2".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        let access = storage.check_universe_access(None, "secret2");
+        assert_eq!(access, crate::models::UniverseAccess::Denied);
+    }
+
+    /// Non-existent universe → Denied.
+    #[test]
+    fn test_access_nonexistent_denied() {
+        let (storage, _dir) = make_storage();
+        let access = storage.check_universe_access(None, "does-not-exist");
+        assert_eq!(access, crate::models::UniverseAccess::Denied);
+    }
+
+    /// Subscribe/unsubscribe flow: subscriptions table is correctly updated.
+    #[test]
+    fn test_subscribe_unsubscribe_flow() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "pub3".into(),
+                    name: "Public3".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        set_visibility(&storage, "pub3", "public-subscribable");
+
+        // Not subscribed yet.
+        assert!(!storage.is_subscribed("user-a", "pub3"));
+
+        // Subscribe.
+        storage.subscribe_universe("user-a", "pub3").unwrap();
+        assert!(storage.is_subscribed("user-a", "pub3"));
+
+        // Appears in user's universe list.
+        let universes = storage.list_universes_for_user("user-a");
+        assert!(
+            universes.iter().any(|u| u.key == "pub3"),
+            "subscribed universe must appear in user list"
+        );
+
+        // Unsubscribe.
+        storage.unsubscribe_universe("user-a", "pub3").unwrap();
+        assert!(!storage.is_subscribed("user-a", "pub3"));
+
+        // No longer in user's universe list.
+        let universes_after = storage.list_universes_for_user("user-a");
+        assert!(
+            !universes_after.iter().any(|u| u.key == "pub3"),
+            "unsubscribed universe must not appear in user list"
+        );
+    }
+
+    /// Cannot subscribe to a private universe.
+    #[test]
+    fn test_cannot_subscribe_to_private_universe() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "private-u".into(),
+                    name: "Private".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        let result = storage.subscribe_universe("user-b", "private-u");
+        assert!(
+            result.is_err(),
+            "subscribing to a private universe must fail"
+        );
+    }
+
+    /// Search returns only public-subscribable universes matching the query.
+    #[test]
+    fn test_search_public_universes() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "co-dev".into(),
+                    name: "CO Development".into(),
+                    description: "The main dev board".into(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+        set_visibility(&storage, "co-dev", "public-subscribable");
+
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "private-proj".into(),
+                    name: "Private Project".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+
+        let results = storage.search_public_universes("dev");
+        assert!(
+            results.iter().any(|u| u.key == "co-dev"),
+            "co-dev must appear in search results"
+        );
+        assert!(
+            !results.iter().any(|u| u.key == "private-proj"),
+            "private universe must not appear in search results"
+        );
     }
 }

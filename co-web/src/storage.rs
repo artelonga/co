@@ -537,6 +537,45 @@ impl Storage {
                 )
                 .expect("Failed to run migration v19");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 20 {
+            // CO-49: deterministic access model.
+            // Add visibility column + populate from existing flags.
+            // Add subscriptions table for public-subscribable universes.
+            self.conn
+                .execute_batch(
+                    "
+                ALTER TABLE universes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private';
+                UPDATE universes SET visibility = 'template' WHERE is_template = 1;
+                UPDATE universes SET visibility = 'requires_login'
+                    WHERE is_template = 0 AND requires_login = 1;
+                UPDATE universes SET visibility = 'public-subscribable'
+                    WHERE is_template = 0 AND requires_login = 0 AND is_public = 1;
+
+                CREATE TABLE IF NOT EXISTS subscriptions (
+                    user_id TEXT NOT NULL,
+                    universe_key TEXT NOT NULL,
+                    subscribed_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, universe_key),
+                    FOREIGN KEY (universe_key) REFERENCES universes(key) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+                CREATE INDEX IF NOT EXISTS idx_subscriptions_universe ON subscriptions(universe_key);
+
+                INSERT INTO schema_version (version) VALUES (20);
+                ",
+                )
+                .expect("Failed to run migration v20");
+        }
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -1845,14 +1884,55 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
         self.conn.execute(
-            "INSERT INTO universes (key, name, description, owner_id, created_at) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![create.key, create.name, create.description, owner_id, now_str],
+            "INSERT INTO universes (key, name, description, owner_id, created_at, visibility) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'private')",
+            params![
+                create.key,
+                create.name,
+                create.description,
+                owner_id,
+                now_str
+            ],
         )?;
         // Owner is automatically a member
         self.conn.execute(
             "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) VALUES (?1, ?2, 'owner', ?3)",
             params![create.key, owner_id, now_str],
         )?;
+
+        // Create ONE empty project named "Co" — private boards start empty.
+        // Project key is unique per universe to avoid cross-universe task leaks.
+        let proj_key = format!(
+            "{}P",
+            create
+                .key
+                .to_uppercase()
+                .chars()
+                .take(4)
+                .collect::<String>()
+        );
+        let proj_path = format!("projects/{}/_project.md", proj_key);
+        let proj_fm = json!({
+            "type": "project",
+            "key": proj_key,
+            "title": "Bem-vindo ao Co",
+            "status": "active",
+            "next_id": 1,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "tags": []
+        });
+        let proj_entry = make_entry(&proj_path, proj_fm, "");
+        let universe_root = self.universe_root(&create.key);
+        let _ = co::entry::write_entry(&universe_root, &proj_entry);
+        let _ = upsert_entry_row(&self.conn, &create.key, &proj_entry);
+
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = 1 WHERE key = ?1",
+            params![create.key],
+        );
+
         Ok(crate::models::Universe {
             key: create.key,
             name: create.name,
@@ -1861,8 +1941,9 @@ impl Storage {
             created_at: now,
             is_template: false,
             is_public: false,
-            content_count: 0,
+            content_count: 1,
             requires_login: false,
+            visibility: "private".into(),
         })
     }
 
@@ -1870,7 +1951,7 @@ impl Storage {
         self.conn
             .query_row(
                 "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-                 COALESCE(requires_login, 0) \
+                 COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -1884,6 +1965,7 @@ impl Storage {
                         is_public: row.get::<_, i64>(6)? != 0,
                         content_count: row.get::<_, i64>(7).unwrap_or(0),
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                        visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                     })
                 },
             )
@@ -1891,13 +1973,19 @@ impl Storage {
     }
 
     pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
+        // Owned/member universes + subscribed universes, deduplicated.
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, u.is_template, u.is_public, u.content_count \
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+                 u.is_template, u.is_public, u.content_count, \
+                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
                  FROM universes u \
-                 JOIN universe_members um ON um.universe_key = u.key \
-                 WHERE um.user_id = ?1 \
+                 WHERE u.key IN ( \
+                   SELECT universe_key FROM universe_members WHERE user_id = ?1 \
+                   UNION \
+                   SELECT universe_key FROM subscriptions WHERE user_id = ?1 \
+                 ) \
                  ORDER BY u.created_at ASC",
             )
             .expect("Failed to prepare list_universes_for_user");
@@ -1911,7 +1999,8 @@ impl Storage {
                 is_template: row.get::<_, i64>(5)? != 0,
                 is_public: row.get::<_, i64>(6)? != 0,
                 content_count: row.get::<_, i64>(7).unwrap_or(0),
-                requires_login: false,
+                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
             })
         })
         .expect("Failed to list universes for user")
@@ -2008,6 +2097,190 @@ impl Storage {
             params![universe_key, user_id],
         )?;
         Ok(())
+    }
+
+    // --- Universe member role helper ---
+
+    /// Return the role of a user in a universe, or None if not a member.
+    pub fn universe_member_role(&self, universe_key: &str, user_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT role FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                params![universe_key, user_id],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    // --- CO-49: Subscriptions ---
+
+    /// Subscribe a user to a public-subscribable universe.
+    pub fn subscribe_universe(&mut self, user_id: &str, universe_key: &str) -> anyhow::Result<()> {
+        let universe = self
+            .get_universe(universe_key)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", universe_key))?;
+        if universe.visibility != "public-subscribable" {
+            anyhow::bail!("Universe '{}' is not public-subscribable", universe_key);
+        }
+        let now_str = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO subscriptions (user_id, universe_key, subscribed_at) \
+             VALUES (?1, ?2, ?3)",
+            params![user_id, universe_key, now_str],
+        )?;
+        Ok(())
+    }
+
+    /// Unsubscribe a user from a universe.
+    pub fn unsubscribe_universe(
+        &mut self,
+        user_id: &str,
+        universe_key: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "DELETE FROM subscriptions WHERE user_id = ?1 AND universe_key = ?2",
+            params![user_id, universe_key],
+        )?;
+        Ok(())
+    }
+
+    /// Check whether a user is subscribed to a universe.
+    pub fn is_subscribed(&self, user_id: &str, universe_key: &str) -> bool {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM subscriptions WHERE user_id = ?1 AND universe_key = ?2",
+                params![user_id, universe_key],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    }
+
+    /// List subscribers for a universe.
+    pub fn list_universe_subscribers(
+        &self,
+        universe_key: &str,
+    ) -> Vec<crate::models::Subscription> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT user_id, universe_key, subscribed_at FROM subscriptions \
+             WHERE universe_key = ?1 ORDER BY subscribed_at ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![universe_key], |row| {
+            Ok(crate::models::Subscription {
+                user_id: row.get(0)?,
+                universe_key: row.get(1)?,
+                subscribed_at: parse_datetime(&row.get::<_, String>(2)?),
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Search public-subscribable universes by name/description.
+    pub fn search_public_universes(&self, query: &str) -> Vec<crate::models::Universe> {
+        let pattern = format!("%{}%", query.to_lowercase());
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
+             COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
+             FROM universes \
+             WHERE visibility = 'public-subscribable' \
+             AND (LOWER(name) LIKE ?1 OR LOWER(description) LIKE ?1 OR LOWER(key) LIKE ?1) \
+             ORDER BY content_count DESC LIMIT 50",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![pattern], |row| {
+            Ok(crate::models::Universe {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                owner_id: row.get(3)?,
+                created_at: parse_datetime(&row.get::<_, String>(4)?),
+                is_template: row.get::<_, i64>(5)? != 0,
+                is_public: row.get::<_, i64>(6)? != 0,
+                content_count: row.get::<_, i64>(7).unwrap_or(0),
+                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                visibility: row
+                    .get::<_, String>(9)
+                    .unwrap_or_else(|_| "public-subscribable".into()),
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    // --- CO-49: Deterministic access check ---
+
+    /// Check the access level for a user (or anonymous) on a given universe.
+    ///
+    /// Implements the 7-step deterministic check from the CO-49 spec:
+    /// 1. template → READ for everyone
+    /// 2. owner → READ+WRITE
+    /// 3. member with write role (owner/admin/editor) → READ+WRITE
+    /// 4. member with read role (viewer/member) → READ
+    /// 5. subscribed → READ
+    /// 6. public-subscribable → metadata only
+    /// 7. otherwise → Denied (404)
+    pub fn check_universe_access(
+        &self,
+        user_id: Option<&str>,
+        universe_key: &str,
+    ) -> crate::models::UniverseAccess {
+        use crate::models::UniverseAccess;
+
+        let universe = match self.get_universe(universe_key) {
+            Some(u) => u,
+            None => return UniverseAccess::Denied,
+        };
+
+        // 1. Template universes are readable by everyone.
+        if universe.visibility == "template" {
+            return UniverseAccess::ReadOnly;
+        }
+
+        // 2–5 require a known user_id.
+        if let Some(uid) = user_id {
+            // 2. Owner gets full access.
+            if universe.owner_id == uid {
+                return UniverseAccess::ReadWrite;
+            }
+
+            // 3–4. Members: check role.
+            if let Some(role) = self.universe_member_role(universe_key, uid) {
+                let write_roles = ["owner", "admin", "editor"];
+                if write_roles.contains(&role.as_str()) {
+                    return UniverseAccess::ReadWrite;
+                }
+                return UniverseAccess::ReadOnly;
+            }
+
+            // 5. Subscribed users get read access.
+            if self.is_subscribed(uid, universe_key) {
+                return UniverseAccess::ReadOnly;
+            }
+        }
+
+        // 6. Public-subscribable: show metadata to anyone (for discovery).
+        if universe.visibility == "public-subscribable" {
+            return UniverseAccess::MetadataOnly;
+        }
+
+        // requires_login: any logged-in user gets read access;
+        // anonymous users get LoginRequired (401).
+        if universe.visibility == "requires_login" || universe.requires_login {
+            if user_id.is_some() {
+                return UniverseAccess::ReadOnly;
+            }
+            return UniverseAccess::LoginRequired;
+        }
+
+        // 7. Everything else is denied.
+        UniverseAccess::Denied
     }
 
     // --- Usage gate / content count ---
@@ -2267,14 +2540,14 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        // Template universe with Scholarly Light theme + board layout.
+        // Template universe with Modern theme (default) + board layout.
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              theme_preset, layout) \
+              visibility, theme_preset, layout) \
              VALUES ('template', 'Co', \
-             'Aprenda a usar o CO — arraste, crie e explore', \
-             'system', ?1, 1, 1, 'scholarly', 'board')",
+             'Aprenda a usar o Co — arraste, crie e explore', \
+             'system', ?1, 1, 1, 'template', 'modern', 'board')",
             params![now_str],
         );
         // Ensure form config YAML is written for the template.
@@ -2758,9 +3031,9 @@ impl Storage {
 
     /// Seed the `quilomboaraucaria` public universe (CO-41).
     ///
-    /// Creates the universe with is_public=1, owner_id='system', and the
-    /// quilombo theme preset. Safe to call multiple times — idempotent via
-    /// INSERT OR IGNORE.
+    /// Creates the universe with is_public=1, visibility='public-subscribable',
+    /// owner_id='system', and the quilombo theme preset.
+    /// Safe to call multiple times — idempotent via INSERT OR IGNORE.
     pub fn seed_quilombo_universe(&mut self) {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
@@ -2778,10 +3051,10 @@ impl Storage {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              theme_preset, layout, font_headline, font_body, custom_tokens, content_count) \
+              visibility, theme_preset, layout, font_headline, font_body, custom_tokens, content_count) \
              VALUES ('quilomboaraucaria', 'Quilombo Araucária', \
              'Comunidade quilombola do Paraná — publicações, eventos e missões', \
-             'system', ?1, 0, 1, 'quilombo', 'board', \
+             'system', ?1, 0, 1, 'public-subscribable', 'quilombo', 'board', \
              'Playfair Display', 'Inter', ?2, 0)",
             params![now_str, tokens_str],
         );
@@ -2790,6 +3063,123 @@ impl Storage {
         if let Some(config) = self.get_universe_form_config("quilomboaraucaria") {
             let _ = self.write_universo_yaml("quilomboaraucaria", &config);
         }
+    }
+
+    /// Import markdown files from the quilomboaraucaria content repo into the universe.
+    #[allow(dead_code)]
+    fn import_quilombo_content(&mut self) {
+        // Look for the repo in common locations
+        let candidates = [
+            std::path::PathBuf::from("/app/seed-co/quilomboaraucaria"),
+            std::path::PathBuf::from("quilomboaraucaria"),
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join("projects/quilomboaraucaria"),
+        ];
+        let repo = candidates.iter().find(|p| p.join("schema.yaml").exists());
+        let repo = match repo {
+            Some(r) => r.clone(),
+            None => {
+                tracing::info!("quilomboaraucaria content repo not found, skipping import");
+                return;
+            }
+        };
+        tracing::info!(
+            "Importing quilomboaraucaria content from {}",
+            repo.display()
+        );
+
+        let now = Utc::now().to_rfc3339();
+        let universe_root = self.universe_root("quilomboaraucaria");
+
+        // Map folder → entry type
+        let folder_types = [
+            ("eventos", "event"),
+            ("relatos", "post"),
+            ("jardim", "page"),
+            ("membros", "member"),
+            ("quadro", "task"),
+        ];
+
+        let mut count: i64 = 0;
+        for (folder, entry_type) in &folder_types {
+            let dir = repo.join(folder);
+            if !dir.is_dir() {
+                continue;
+            }
+            let entries = std::fs::read_dir(&dir);
+            if entries.is_err() {
+                continue;
+            }
+
+            for entry in entries.unwrap().flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+
+                let content = match std::fs::read_to_string(&path) {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+
+                // Parse frontmatter
+                let parsed = co::entry::Entry::parse_frontmatter(&content);
+                let (mut fm, body) = match parsed {
+                    Some((f, b)) => (f, b),
+                    None => {
+                        // No frontmatter — treat entire content as body
+                        let fm = json!({"type": entry_type});
+                        (fm, content.clone())
+                    }
+                };
+
+                // Ensure type field
+                if let Some(obj) = fm.as_object_mut() {
+                    if !obj.contains_key("type") {
+                        obj.insert("type".to_string(), json!(entry_type));
+                    }
+                    // Map Portuguese fields to standard
+                    if let Some(titulo) = obj.remove("titulo") {
+                        obj.entry("title".to_string()).or_insert(titulo);
+                    }
+                    if !obj.contains_key("created") {
+                        obj.insert("created".to_string(), json!(now));
+                    }
+                    if !obj.contains_key("modified") {
+                        obj.insert("modified".to_string(), json!(now));
+                    }
+                }
+
+                let title = fm
+                    .get("title")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let filename = path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("unknown");
+                let entry_path = format!("content/{}/{}.md", folder, filename);
+
+                let entry = make_entry(&entry_path, fm, &body);
+                let _ = co::entry::write_entry(&universe_root, &entry);
+                let _ = upsert_entry_row(&self.conn, "quilomboaraucaria", &entry);
+                count += 1;
+
+                if !title.is_empty() {
+                    tracing::debug!("  imported: {}/{} — {}", folder, filename, title);
+                }
+            }
+        }
+
+        // Update content count
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = 'quilomboaraucaria'",
+            params![count],
+        );
+
+        tracing::info!("quilomboaraucaria: imported {} entries", count);
     }
 
     /// Stats for the quilomboaraucaria universe.
@@ -2865,10 +3255,10 @@ impl Storage {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              requires_login, theme_preset, layout, font_headline, font_body, content_count) \
+              requires_login, visibility, theme_preset, layout, font_headline, font_body, content_count) \
              VALUES ('yggdrasil', 'Yggdrasil', \
              'Hub de minijogos — perfis de jogadores e rankings globais', \
-             'system', ?1, 0, 1, 1, 'relic', 'gaming', \
+             'system', ?1, 0, 1, 1, 'requires_login', 'relic', 'gaming', \
              'Newsreader', 'Manrope', 0)",
             params![now_str],
         );
@@ -2913,6 +3303,115 @@ impl Storage {
         }
 
         Ok(self.list_projects_for_universe(universe_key))
+    }
+
+    /// Copy entries (projects, tasks, pages) from source into an already-existing target universe.
+    /// Returns the number of entries cloned.
+    #[allow(dead_code)]
+    fn clone_universe_internal(
+        &mut self,
+        source_key: &str,
+        target_key: &str,
+        now_str: &str,
+    ) -> anyhow::Result<i64> {
+        let mut count: i64 = 0;
+        let target_root = self.universe_root(target_key);
+
+        // Collect ALL entries from source
+        let rows: Vec<EntryRow> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries WHERE universe_key = ?1",
+            )?;
+            stmt.query_map(params![source_key], entry_row_from_sql)?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for row in &rows {
+            // Derive new project key for project entries
+            let mut new_fm = row.frontmatter.clone();
+            let mut new_path = row.path.clone();
+
+            if row.entry_type == "project" {
+                let old_key = row
+                    .frontmatter
+                    .get("key")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let new_key = self.derive_unique_project_key(target_key, &old_key);
+                new_path = format!("projects/{}/_project.md", new_key);
+                if let Some(obj) = new_fm.as_object_mut() {
+                    obj.insert("key".to_string(), json!(new_key));
+                    obj.insert("created".to_string(), json!(now_str));
+                    obj.insert("modified".to_string(), json!(now_str));
+                }
+                let entry = make_entry(&new_path, new_fm, &row.body);
+                let _ = co::entry::write_entry(&target_root, &entry);
+                let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                count += 1;
+
+                // Clone tasks for this project
+                let old_key2 = old_key.clone();
+                let task_rows: Vec<EntryRow> = {
+                    let mut stmt2 = self.conn.prepare(
+                        "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                         created_at, updated_at FROM entries \
+                         WHERE universe_key = ?1 AND entry_type = 'task' \
+                         AND json_extract(frontmatter_json, '$.project') = ?2",
+                    )?;
+                    stmt2
+                        .query_map(params![source_key, old_key2], entry_row_from_sql)?
+                        .filter_map(|r| r.ok())
+                        .collect()
+                };
+                for task_row in &task_rows {
+                    let task_id = task_row
+                        .frontmatter
+                        .get("id")
+                        .and_then(|v| v.as_i64())
+                        .unwrap_or(0);
+                    let task_path = format!("projects/{}/{}.md", new_key, task_id);
+                    let mut task_fm = task_row.frontmatter.clone();
+                    if let Some(obj) = task_fm.as_object_mut() {
+                        obj.insert("project".to_string(), json!(new_key));
+                        obj.insert("created".to_string(), json!(now_str));
+                        obj.insert("modified".to_string(), json!(now_str));
+                    }
+                    let entry = make_entry(&task_path, task_fm, &task_row.body);
+                    let _ = co::entry::write_entry(&target_root, &entry);
+                    let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                    count += 1;
+                }
+            } else if row.entry_type == "page" {
+                if let Some(obj) = new_fm.as_object_mut() {
+                    obj.insert("created".to_string(), json!(now_str));
+                    obj.insert("modified".to_string(), json!(now_str));
+                }
+                let entry = make_entry(&new_path, new_fm, &row.body);
+                let _ = co::entry::write_entry(&target_root, &entry);
+                let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                count += 1;
+            }
+        }
+
+        // Inherit form config
+        if let Some(config) = self.get_universe_form_config(source_key) {
+            let tokens_str = config.custom_tokens.as_ref().map(|v| v.to_string());
+            let _ = self.conn.execute(
+                "UPDATE universes SET theme_preset = ?1, layout = ?2 WHERE key = ?3",
+                params![config.theme_preset, config.layout, target_key],
+            );
+            if tokens_str.is_some() {
+                let _ = self.conn.execute(
+                    "UPDATE universes SET custom_tokens = ?1 WHERE key = ?2",
+                    params![tokens_str, target_key],
+                );
+            }
+        }
+
+        Ok(count)
     }
 
     /// Clone a universe: copy all its projects and tasks into a new universe.
@@ -3079,6 +3578,7 @@ impl Storage {
             is_public: false,
             content_count: cloned_entries,
             requires_login: false,
+            visibility: "private".into(),
         })
     }
 
