@@ -724,7 +724,15 @@ pub async fn set_universe_git(
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-        if universe.owner_id != user_id.0 {
+        // Allow owner OR admin users to configure git repos
+        let is_owner = universe.owner_id == user_id.0;
+        let is_admin = storage.is_universe_member(&slug, &user_id.0)
+            && storage.universe_member_role(&slug, &user_id.0).as_deref() == Some("admin");
+        let is_global_admin = {
+            let user = storage.get_user_by_id(&user_id.0);
+            user.map(|u| u.tier == "admin").unwrap_or(false)
+        };
+        if !is_owner && !is_admin && !is_global_admin {
             return Err(AppError::Forbidden(
                 "Only the owner can configure the git repo".into(),
             ));
