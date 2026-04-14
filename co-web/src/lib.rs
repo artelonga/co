@@ -9,6 +9,7 @@ pub mod experiment;
 pub mod game_models;
 pub mod game_routes;
 pub mod gestao_routes;
+pub mod git_sync;
 pub mod github_auth;
 pub mod iceberg;
 pub mod models;

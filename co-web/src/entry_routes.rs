@@ -90,12 +90,67 @@ pub async fn list_entries(
     Query(q): Query<EntryListQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    // CO-50: Lazy git sync — check if this universe needs a repo sync before
+    // serving entries. Extract git config without holding the lock into the
+    // async gap (std::sync::Mutex must not be held across .await).
+    let lazy_sync_args: Option<(crate::models::UniverseGitConfig, std::path::PathBuf)> = {
+        let storage = lock_storage(&state)?;
+        // Ensure universe exists (will 404 here if missing)
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        let git = storage.get_universe_git_config(&slug);
+        let data_dir = storage.data_dir.clone();
+        git.and_then(|g| {
+            let synced_at = g.synced_at.map(|dt| dt.to_rfc3339());
+            if crate::git_sync::needs_lazy_sync(synced_at.as_deref()) {
+                Some((g, data_dir))
+            } else {
+                None
+            }
+        })
+    }; // storage lock released here
 
-    // Ensure universe exists
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+    // Perform the lazy sync outside the mutex (git clone/pull are blocking).
+    if let Some((git_config, data_dir)) = lazy_sync_args {
+        let repo = git_config.repo.clone();
+        let subpath = git_config.path.clone();
+        let branch = git_config.branch.clone();
+        let known_hash = git_config.commit_hash.clone();
+        let slug_owned = slug.clone();
+
+        let sync_result = tokio::task::spawn_blocking(move || {
+            crate::git_sync::sync(
+                &data_dir,
+                &slug_owned,
+                &repo,
+                subpath.as_deref(),
+                &branch,
+                known_hash.as_deref(),
+            )
+        })
+        .await
+        .ok()
+        .and_then(|r| r.ok())
+        .flatten();
+
+        // Update DB with sync results (re-acquire lock).
+        if let Ok(mut storage) = state.storage.lock() {
+            match sync_result {
+                Some((new_hash, entries)) => {
+                    let _ = storage.upsert_entries_from_sync(&slug, &entries);
+                    let _ = storage.update_universe_git_sync(&slug, &new_hash);
+                }
+                None => {
+                    // Up to date — refresh synced_at so we don't check again for 5 min.
+                    let hash = git_config.commit_hash.clone().unwrap_or_default();
+                    let _ = storage.update_universe_git_sync(&slug, &hash);
+                }
+            }
+        }
+    }
+
+    let storage = lock_storage(&state)?;
 
     let index = crate::entry_index::EntryIndex::new(storage.conn());
 

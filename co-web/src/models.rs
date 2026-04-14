@@ -502,6 +502,52 @@ pub struct UpdateUniverseFormConfig {
     pub custom_tokens: Option<serde_json::Value>,
 }
 
+// --- Universe Git config (CO-50) ---
+
+/// CO-50: Git repository config for a universe (as stored in the DB).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseGitConfig {
+    pub universe_key: String,
+    /// GitHub repo slug: `"owner/repo"`
+    pub repo: String,
+    /// Optional subdirectory within the repo, e.g. `"data/co"`
+    pub path: Option<String>,
+    /// Branch to track (default: `"main"`)
+    pub branch: String,
+    /// Last successfully synced commit hash
+    pub commit_hash: Option<String>,
+    /// When the last sync completed
+    pub synced_at: Option<DateTime<Utc>>,
+    /// Last sync error message, if any
+    pub sync_error: Option<String>,
+}
+
+/// CO-50: Request body to configure a git-backed universe.
+#[derive(Debug, Deserialize)]
+pub struct SetGitConfig {
+    /// GitHub repo slug: `"owner/repo"`
+    pub repo: String,
+    /// Optional subdirectory within the repo
+    pub path: Option<String>,
+    /// Branch to track (default: `"main"`)
+    #[serde(default = "default_git_branch")]
+    pub branch: String,
+}
+
+fn default_git_branch() -> String {
+    "main".into()
+}
+
+/// CO-50: GitHub webhook push payload (subset we care about).
+#[derive(Debug, Deserialize)]
+pub struct GithubWebhookPush {
+    /// The ref that was pushed to, e.g. `"refs/heads/main"`
+    #[serde(rename = "ref")]
+    pub git_ref: String,
+    /// The new HEAD commit hash after the push
+    pub after: Option<String>,
+}
+
 // --- Theme Tiers ---
 
 /// Stats for the `quilomboaraucaria` public universe.
