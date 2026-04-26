@@ -1223,3 +1223,65 @@ async fn test_usage_gate_anon_blocked_at_101() {
         "After claim, writes should be unblocked"
     );
 }
+
+// --- CO-65: visibility on PUT /api/v1/universes/:slug ---
+
+#[tokio::test]
+async fn test_update_universe_visibility_flip() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // Create as test-user (default visibility = private)
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(
+                    r#"{"key":"flip-test","name":"Flip Test","description":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create.status(), StatusCode::CREATED);
+
+    // Flip to public-subscribable
+    let put = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/flip-test")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(
+                    r#"{"visibility":"public-subscribable"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put.status(), StatusCode::OK);
+    let body = body_to_string(put.into_body()).await;
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(json["visibility"], "public-subscribable");
+
+    // Reject invalid value
+    let bad = app
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/flip-test")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(r#"{"visibility":"template"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+}

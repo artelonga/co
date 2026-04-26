@@ -257,6 +257,30 @@ pub async fn update_universe(
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
+    if let Some(vis) = body.get("visibility").and_then(|v| v.as_str()) {
+        // Owners may flip between these three; "template" is system-only.
+        let (is_public, requires_login) = match vis {
+            "private" => (0, 0),
+            "public-subscribable" => (1, 0),
+            "requires_login" => (0, 1),
+            _ => {
+                return Err(AppError::BadRequest(format!(
+                    "Invalid visibility '{}'. Must be: private, public-subscribable, requires_login",
+                    vis
+                )));
+            }
+        };
+        let storage = lock_storage(&state)?;
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET visibility = ?1, is_public = ?2, requires_login = ?3 \
+                 WHERE key = ?4",
+                rusqlite::params![vis, is_public, requires_login, slug],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
     let storage = lock_storage(&state)?;
     let updated = storage
         .get_universe(&slug)
@@ -266,6 +290,7 @@ pub async fn update_universe(
         "key": updated.key,
         "name": updated.name,
         "description": updated.description,
+        "visibility": updated.visibility,
     })))
 }
 

@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] — 2026-04-26
+
+### Added — CO-65: visibility on `PUT /api/v1/universes/:slug`
+
+- `co-web/src/universe_routes.rs`: extended `update_universe` handler to accept `visibility` field in addition to `name` and `description`
+- Accepted values: `private`, `public-subscribable`, `requires_login`. `template` is system-only and rejected with 400
+- Atomic update of legacy `is_public` and `requires_login` columns alongside `visibility`, keeping CO-49 access checks coherent
+- New unit test `test_update_universe_visibility_flip` in `co-web/tests/api_tests.rs`: covers happy-path flip + invalid-value rejection
+
+### Note
+
+Versioned to 1.15.0 to reconcile the source `Cargo.toml` (was 1.1.0) with the
+deployed binary (was reporting 1.14.0 from an image built 2026-04-07 that had
+since drifted from local source). All work since CO-37 (Cargo.toml never
+re-bumped after CO-37 deploy) is implicitly bundled into this release.
+
 ## [1.2.0] — 2026-04-10
 
 ### co-web
