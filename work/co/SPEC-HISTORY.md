@@ -1,0 +1,794 @@
+# Changelog
+
+All notable changes to CO are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.4.0] — 2026-04-26
+
+### Added — CO-63: Universe manifest + content-type plugin epic
+
+- `CO-63.md` (epic): per-universe manifest declaring content types, doc generators, relationships, presentation hints
+- `CO-70.md`: manifest format spec (`_universe.yaml`)
+- `CO-71.md`: per-universe schema validator + generic JSON entry storage with expression indexes
+- `CO-72.md`: doc-generator hooks (scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc)
+- `CO-73.md`: temporal model (event_at, due_at, scheduled_at, published_at, expires_at, effective_at)
+- `CO-74.md`: relationship graph + query DSL + typed wikilink promotion
+- `CO-75.md`: version reconstruction (replay op log to any timestamp, auto-changelog)
+
+### Added — CO-76: Scalability infrastructure epic
+
+- `CO-76.md` (epic): designed for thousands of universes/user and thousands of concurrent requests
+- `CO-77.md`: per-universe SQLite + global metadata DB + LiteFS read replicas
+- `CO-78.md`: job queue + worker pool (doc gen, sync, indexing, changelog)
+- `CO-79.md`: caching layer (in-process LRU + Redis + CDN)
+- `CO-80.md`: per-tier rate limiting + quota
+- `CO-81.md`: object storage for blobs + filesystem sharding
+
+### Added — Pre-63 prerequisites
+
+- `CO-64.md`: post-GitHub cleanup — remove dead `git_sync.rs`, write `ARCHITECTURE.md`
+- `CO-65.md`: visibility-on-PUT API (code already implemented in `co-web/src/universe_routes.rs`)
+- `CO-66.md`: API hygiene — 500→409 on duplicate key, seed override fix, no-auto-stop UAT
+- `CO-67.md`: prod universe seed — artelonga / quilomboaraucaria / rfq with bulk content
+- `CO-68.md`: Obsidian plugin deep-sync (INFRA-3)
+- `CO-69.md`: PWA offline cache (INFRA-4)
+
+### Changed
+
+- `ROADMAP-SYNC.md`: header declares this as the canonical post-GitHub spec, supersedes CO-50/CO-55, maps phases to INFRA-1..6
+- `project.yaml`: `next_id` 63 → 82
+
+## [1.3.0] — 2026-04-14
+
+### Added — CO-61: Sync Protocol v1 spec
+
+- `CO-61.md`: canonical protocol spec — op log, Hybrid Logical Clock, content-addressed blobs, 3-way merge, recursive conflict resolution
+- Formal model: `Operacao`, `Hlc`, `Ator`, `Alvo`, `Manifesto`, `Proposta`, `RelatorioMesclagem`, `Conflito`
+- Op catalog v1 (photos subset): `foto.adicionar`, `foto.remover`, `foto.vincular`, `foto.desvincular`, `conflito.detectado`, `conflito.resolver`, `schema.estender`
+- Merge algorithm: prod-wins default, conflict detection via concurrent-on-same-alvo predicate, recursive resolution via `conflito.resolver` ops with `ops_efetivas` / `ops_superadas`
+- Termination proof: HLC strict monotonicity + finite op set → bounded resolution DAG depth
+- Compatibility section: CO-51 file-based sync becomes projection of op log; CO-54 `entry_versions` becomes materialized view; CO-58 desktop tray + PWA reuse same HTTP endpoints; CO-55 orthogonal
+- Next_id bumped to 63
+
+### Added — CO-62: quilombo-blog sync adapter (photos subset)
+
+- `CO-62.md`: task spec for implementing CO-61 v1 subset in the interim SvelteKit app
+- Migration v006 schema (operacoes/atores/sync_base/propostas/conflitos/foto_refs)
+- 10 acceptance scenarios covering clean add, prod advance, prod-wins default, UAT override, copia, idempotent retry, atomicity, recursive resolution, fresh UAT fork, reversibility
+- Prerequisite: UAT refork runbook codified in scripts/uat-refork.sh (deferred)
+
+## [1.2.1] — 2026-04-14
+
+### co-web
+
+#### Added — CO-57: Adaptation audit — reconcile CO-1–CO-48 with new architecture
+
+- **`co-web/tests/audit_tests.rs`**: 4 new integration tests covering the structural acceptance criteria:
+  - `test_visibility_migration_v20_backfill` — verifies that the migration v20 backfill SQL correctly maps legacy boolean flags (`is_template`, `is_public`, `requires_login`) to the new `visibility` enum
+  - `test_legacy_and_entries_api_data_parity` — documents and guards that the legacy `/api/projects/:key/tasks` path and the new `/api/v1/universes/:slug/entries` path read the same `entries` table (single source of truth, no divergence)
+  - `test_cleanup_leaves_no_anon_universes` — verifies `cleanup_anon_universes()` removes all `anon-*` universes without affecting regular user universes
+  - `test_new_universe_has_private_visibility_by_default` — verifies new universes get `visibility = 'private'` at the DB level, not just in the model layer
+- **`BREAKING-CHANGES.md`**: new document — "Breaking changes from v1.0 → v1.2" covering:
+  - Universe visibility model migration (CO-49)
+  - Deterministic access model (401/404 semantics per visibility value)
+  - Subscriptions API additions
+  - Anonymous auto-clone removal and `anon-*` cleanup
+  - Project key namespace change (`{SLUG}P` for user universes)
+  - Legacy task API deprecation (phase-out in v1.3)
+  - Theme engine server-side CSS and known palette switcher conflict
+  - CRDT + CLI sync coexistence rules
+
+---
+
+## [1.2.0] — 2026-04-10
+
+### co-web
+
+#### Added — CO-52: Universe search + subscription — discover and subscribe to public universes
+
+- **`GET /api/v1/universes/search?q=&limit=20`**: search public-subscribable universes
+  - Returns `[{ key, name, description, subscriber_count, entry_count, owner_display_name }]`
+  - Authenticated callers: excludes already-subscribed universes from results
+  - Anonymous callers: returns all matching public-subscribable universes
+- **`POST /api/v1/universes/:slug/subscribe`**: 201 Created (new subscription) / 200 OK (idempotent)
+- **`DELETE /api/v1/universes/:slug/subscribe`**: 204 No Content
+- **`GET /api/v1/universes/:slug/subscribers`**: owner-only subscriber list
+- **`Storage::subscribe_universe()`**: returns `bool` — `true` if newly subscribed, `false` if already subscribed
+- **`Storage::set_universe_visibility()`**: new public method to set a universe's visibility
+- **`UniverseSearchResult`** model: richer search result with `subscriber_count` and `owner_display_name`
+- **Frontend (variant a)**: discover button in sidebar → inline search panel with debounced input
+  - Subscribe button per result → universe appears in sidebar immediately
+  - Subscribed universes in sidebar: owned = bold, subscribed = normal weight
+  - Right-click subscribed universe → "Cancelar inscrição" / "Unsubscribe" context menu
+- **i18n**: `action.subscribe`, `action.subscribed`, `action.unsubscribe`, `universe.search_placeholder`, `universe.subscribers`, `universe.no_results`, `universe.discover` (pt + en)
+- **5 new storage tests**: subscribe (new/idempotent), subscribe private universe fails, unsubscribe, search with subscriber_count, search exclusion, list_universes_includes_subscribed
+
+## [1.2.0] — 2026-04-13
+
+### co-web
+
+#### Added — CO-50: Universe-as-repo — each universe backed by a Git repo
+
+- **Migration v21**: six new columns on `universes` — `git_repo TEXT`, `git_path TEXT`, `git_branch TEXT DEFAULT 'main'`, `git_commit_hash TEXT`, `git_synced_at TEXT`, `git_sync_error TEXT`
+- **`co-web/src/git_sync.rs`**: new module encapsulating all git operations
+  - `clone_repo()` — shallow `git clone --depth 1` for first access
+  - `pull_repo()` — `git pull --ff-only --depth 1` for updates
+  - `remote_head()` — `git ls-remote origin` to check remote HEAD without fetching
+  - `local_commit_hash()` — reads local HEAD hash
+  - `needs_lazy_sync()` — returns true if `synced_at` is older than 5 minutes or absent
+  - `sync()` — full sync: clone if needed, check remote HEAD, pull if behind, scan .md entries
+  - Private repo support via `GIT_DEPLOY_KEY_PATH` env var (`GIT_SSH_COMMAND` injection)
+  - 9 unit tests using `tempfile` + local git repos (no network required)
+- **`co-web/src/models.rs`**: new types
+  - `UniverseGitConfig` — DB row for git config + sync state
+  - `SetGitConfig` — request body for `PUT /git`
+  - `GithubWebhookPush` — subset of GitHub push webhook payload
+- **`co-web/src/storage.rs`**: new methods
+  - `get_universe_git_config()` — fetch git config for a universe
+  - `set_universe_git_config()` — configure repo/path/branch (clears previous sync state)
+  - `update_universe_git_sync()` — store new commit hash + synced_at after sync
+  - `set_universe_git_error()` — record last sync error
+  - `upsert_entries_from_sync()` — bulk-upsert scanned entries + update content_count
+- **`co-web/src/universe_routes.rs`**: new endpoints
+  - `GET /api/v1/universes/:slug/git` — return current git config (public)
+  - `PUT /api/v1/universes/:slug/git` — configure git repo (owner only)
+  - `POST /api/v1/universes/:slug/sync` — manual sync, blocks until done (owner only)
+  - `POST /api/v1/universes/:slug/webhook` — GitHub push webhook, filters to tracked branch
+  - Shared `do_git_sync()` helper: spawns `tokio::task::spawn_blocking` for git I/O, releases lock across await, updates DB after sync
+- **`co-web/src/entry_routes.rs`**: lazy sync on `GET /api/v1/universes/:slug/entries`
+  - On first request: clones repo and indexes entries into `entries` table
+  - On subsequent requests: if last sync > 5 min, checks remote HEAD — pulls + re-indexes only if changed
+  - Storage lock is released before git operations; re-acquired only for DB writes
+- **`co-web/src/universo.rs`**: extended `UniversoConfig` with `repo`, `path`, `branch`, `co_auto` fields (all optional, parsed from `.universo.yaml`)
+- **co-auto compatibility**: tasks stored in `*-N.md` files with `type: task`, `status`, `id`, `title`, `priority`, `parent`, `labels` frontmatter are indexed into the `entries` table — accessible via `GET /api/v1/universes/:slug/entries?type=task`
+
+#### Added — CO-38: Yggdrasil — universe of universes: minigames hub
+
+- **Migration v18**: `requires_login INTEGER NOT NULL DEFAULT 0` column on `universes` table — gates login-only universes from anonymous access
+- **Yggdrasil universe**: seeded on first boot (`key=yggdrasil`, `requires_login=1`, `is_public=1`, `theme_preset=relic`, `layout=gaming`, `owner=system`)
+- **Login gate** (`universe_routes.rs`): `GET /api/v1/universes/:slug` returns 401 for universes with `requires_login=true` when no valid JWT is present; other universes unaffected
+- **`UniverseInfo`** response now includes `requires_login: bool` field
+- **Global leaderboard endpoint** `GET /api/v1/games/leaderboard/global`: aggregates high scores across all games per user, returns top N sorted by total score
+- **Recent activity endpoint** `GET /api/v1/games/recent`: returns recent game plays across all users sorted by `last_played_at` desc
+- **Browser games** (`co-web/static/games/`): 5 pure HTML5 canvas + JS games — Tetris, Snake, Space Invaders, PointSet (memory pairs), Video Poker — each posts score to `/api/v1/games/{name}/result` on game over
+- **Yggdrasil hub** (`app.js` variant a): gaming layout at `/co/yggdrasil` — player profile card (level, total score, games played), game grid (5 cards with personal best + JOGAR), global leaderboard panel, recent activity feed; detects `/co/yggdrasil/{game}` to launch individual games with per-game leaderboard
+- **Login wall**: anonymous visitors to `/co/yggdrasil` see a "Login to play" CTA screen instead of the hub
+- **SPA route** `/co/yggdrasil/{game}` added to the Axum router (served by the same SPA)
+- **i18n strings** added for Yggdrasil UI elements (pt-BR)
+- **4 new tests** in `template_tests.rs`: seed/existence, requires_login flag, 401 for anonymous, 200 for authenticated; template universe still accessible anonymously
+
+---
+
+## [1.1.0] — 2026-04-10
+
+### co-web
+
+#### Added — CO-46: Full user telemetry — privacy-respecting tracking
+
+- **`telemetry_events` table** (migration v16): stores page views, interactions, errors, and performance events without PII — no raw IPs, no email addresses, no entry content
+- **`co-web/src/telemetry.rs`**: new telemetry module with server-side middleware, storage helpers, and aggregation queries
+  - `telemetry_middleware`: tracks all GET page views; filters bots; stores daily-salted IP hash, device/browser/OS from UA
+  - `hash_ip_daily()`: xxhash + daily date salt — same IP gets a different hash each day, preventing cross-day re-identification
+  - `cleanup_old_events()`: 90-day retention policy (removes raw rows older than 90 days)
+  - `telemetry_summary()`: aggregates total events, unique visitors, top pages, error count, p95 latency, events by type and day
+- **`POST /api/v1/telemetry/event`**: client-side event ingestion endpoint (returns 202 Accepted); accepts `event_name`, `event_type`, `path`, `universe_key`, `properties`, `duration_ms`, `session_id`
+- **`GET /api/v1/admin/telemetry/summary`**: aggregated analytics for the last 30 days (GitHub admin auth required)
+- **`GET /api/v1/admin/telemetry/export`**: last 10 000 events as CSV download (GitHub admin auth required)
+- **`GET /co/co-dev/telemetria`**: admin dashboard page with cards (total visitors, unique visitors, error count, p95 latency), traffic chart, top pages, events by type, and CSV export
+- **`co-web/static/shared/telemetry.js`**: client-side module
+  - Respects `navigator.doNotTrack === '1'` — tracking silently disabled
+  - Gated on `co_cookie_consent` in localStorage — no events sent before consent
+  - Auto-tracks page views (with load time + TTI) on `DOMContentLoaded`
+  - Auto-tracks JavaScript errors via `window.onerror`
+  - Auto-tracks LCP and FID via `PerformanceObserver`
+  - Exposes `window.coTrack(eventName, properties)` for manual interaction tracking
+  - Uses `navigator.sendBeacon` for non-blocking delivery
+  - Session ID: random nanoid stored in `sessionStorage` (expires on tab close)
+- **Integration tests** in `co-web/tests/telemetry_tests.rs`: simulate user flow → verify events recorded, retention cleanup, HTTP endpoint status codes, admin auth guard, admin dashboard page
+- **Unit tests** in `co-web/src/telemetry.rs`: UA parsing, bot detection, IP hash privacy
+
+## [1.0.0] — 2026-04-07
+
+### co-web
+
+#### Added — CO-37: Design alignment — Scholarly Automaton + Relic Archive aesthetic
+
+**Typography**
+- Load Newsreader (serif) + Work Sans (sans) for Scholarly theme via Google Fonts CDN
+- Load Newsreader (serif) + Manrope (sans) for Relic theme
+- Load Material Symbols Outlined via Google Fonts CDN
+- Font hierarchy: project name = Newsreader italic, task titles = Newsreader 600, labels = Work Sans/Manrope uppercase
+
+**Surface & Depth (No-Line Rule)**
+- Removed all `1px solid` header/sidebar borders for Scholarly and Relic palettes
+- Sidebar: `surface-container-low` background via tonal shift — no right border
+- Cards: asymmetric padding (16px left vs 10px right) for editorial feel
+- Kanban columns: tonal background shift per palette (no column borders)
+- Ghost borders via CSS custom properties at 15% opacity where accessibility requires
+- Modals: ambient `box-shadow: 0 20px 50px` warm-tinted shadows
+- Glassmorphism: Relic dark modal + header use `backdrop-filter: blur(20px)` with 80% opacity surface
+
+**Color Tokens (theme_engine.rs)**
+- Full Material Design 3 token set added to Scholarly (light + dark) presets: `--md-primary`, `--md-surface`, `--md-surface-container-*`, `--md-on-surface`, `--md-outline`, `--md-outline-variant`, and 30+ additional tokens
+- Full MD3 token set added to Relic (dark + light) presets
+- All MD3 tokens exposed as CSS custom properties `--md-*` in named palette blocks
+- Scholarly dark companion: inverted surface tiers, warm brass tones preserved
+- Relic light companion: warm rose-tinted light version
+
+**Components**
+- Buttons: Primary (Scholarly = brass + inner glow, Relic = blood-silk gradient), Secondary (ghost border 15% opacity, 40% on hover)
+- Task cards: thin left border with priority color (critical/high/medium/low) instead of pill
+- Task cards: no dividers between cards — whitespace separation
+- Kanban card hover: background tonal shift to surface-container, no hard border
+- View tabs: pill group style with `border-radius: 99px`, active tab gets accent bg
+- Sidebar items: `translateX(4px)` on hover instead of background change
+- Search input: bottom-border only (ledger style) for Scholarly palette
+- Status badges: pill-shaped with `primary-container` bg for Relic
+
+**Material Icons**
+- View tabs: Material Symbols Outlined icons (view_kanban, table_rows, dashboard, auto_stories) + text
+- Sidebar nav section: architecture icon
+- Icon-only on mobile (label hidden below 640px)
+- On desktop: icon + text
+
+**Responsive**
+- Login button, language toggle, palette switcher: always visible on all breakpoints
+- Mobile ≤640px: single-column kanban, horizontal-scroll view tabs
+- Tablet 641–1024px: 2-column kanban grid
+
+**Obsidian Tasks Compatibility**
+- New `co-web/src/obsidian_tasks.rs` module: bidirectional status ↔ checkbox mapping
+  - `status_to_checkbox`: `todo→' '`, `in_progress→'/'`, `in_review→'~'`, `done→'x'`
+  - `checkbox_to_status`: reverse mapping with uppercase-X support
+  - `inject_task_checkbox`: prepends `- [c] Title` to task body on vault export
+  - `apply_obsidian_tasks`: parses checkbox from body on vault import, updates frontmatter status; frontmatter is canonical (not overwritten if already set)
+- `vault_routes.rs` GET: injects checkbox line into task entry bodies on export
+- `vault_routes.rs` PUT: parses checkbox from incoming body, updates frontmatter status on import; strips checkbox line from stored body
+- `app.js`: `taskToObsidianLine`, `parseObsidianCheckboxLine`, `extractStatusFromBody` utilities
+- 14 unit tests in `obsidian_tasks.rs` covering all status/checkbox combinations and edge cases
+
+## [0.30.0] — 2026-04-06
+
+### co-obsidian (new module)
+
+#### Added — CO-34: Obsidian plugin — sync CO universe ↔ vault
+
+- `co-obsidian/` — new Obsidian community plugin (TypeScript, esbuild)
+- `manifest.json`: id `co-universe-sync`, name "CO Universe Sync", minAppVersion 1.4.0
+- `package.json` with esbuild build system + Jest test runner
+- Plugin settings: CO instance URL, API token, universe slug, sync direction, interval, conflict markers
+- Settings tab with connection test and OAuth login button
+- `src/api-client.ts` — typed CO Vault API client (listFiles, getFile, putFile, deleteFile, search, getTags)
+- `src/sync-engine.ts` — core sync engine:
+  - `pull()`: GET `/vault/` listing → mtime-based incremental check → render + write to vault
+  - `push()`: scan vault .md files → hash-based change detection → upload to CO
+  - `sync()`: bidirectional — pull then push, last-write-wins; optional conflict markers
+  - Sync triggers: on-save (debounced 5 s), startup, configurable interval
+  - Status callbacks: idle / syncing / synced / offline / conflict / error
+- `src/frontmatter.ts` — bidirectional frontmatter mapping:
+  - CO → Obsidian: `labels` → `tags`, `created_at` → `created`, `updated_at` → `modified`, `parent: N` → `parent: "[[CO-N]]"`
+  - Obsidian → CO: `tags` → `labels`, `created` → `created_at`, `modified` → `updated_at`, `parent: "[[CO-N]]"` → `parent: N`
+  - Unknown fields preserved in both directions (round-trip safe)
+  - `parseFrontmatter`, `serialiseFrontmatter`, `extractFrontmatterBlock`, `renderMarkdown`
+- `src/wikilinks.ts` — wikilink generation and resolution:
+  - `[[CO-21|Title]]` wikilinks in exported .md
+  - `parent:: [[CO-21]]` inline Dataview field for hierarchy
+  - `extractWikilinkIds`, `resolveParentRef`, `wikilinksToMdLinks`, `mdLinksToWikilinks`
+- `src/status-bar.ts` — status bar: "CO: synced ✓" / "CO: syncing…" / "CO: offline" / "CO: N conflicts"
+- `src/main.ts` — main plugin class:
+  - Ribbon icon (click to sync)
+  - 6 commands: Sync now, Pull from CO, Push to CO, Open in CO, Create task, Link to CO
+  - ObsidianProtocolHandler for OAuth callback (`obsidian://co-universe-sync/oauth`)
+  - Auto-sync interval with `registerInterval`
+  - On-save debounced push via `vault.on("modify")`
+- `.co/sync.json`: `{ lastSync, fileHashes, remoteMtimes, remoteVersion }` for incremental sync
+- Authentication: API token paste (stored in data.json) + OAuth browser flow + auto token refresh
+- `tests/frontmatter.test.ts` — 30 unit tests: round-trip mapping, parsing, serialisation
+- `tests/wikilinks.test.ts` — 22 unit tests: generation, resolution, Dataview fields
+- `tests/sync-engine.test.ts` — 11 integration tests: mock CO API, pull/push/sync verification
+- `tests/__mocks__/obsidian.ts` — Obsidian API mock for Jest (no real vault needed)
+- `README.md` with setup instructions, command table, frontmatter mapping table
+- `LICENSE`: MIT
+- All 63 tests pass
+
+---
+
+## [0.29.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-35: Vault REST API + Obsidian Clipper support
+
+- `vault_routes.rs` — Vault REST API compatible with Obsidian Local REST API
+  - `GET /api/v1/universes/{slug}/vault/` — list all files with metadata
+  - `GET /api/v1/universes/{slug}/vault/{*path}` — get file content + stat
+  - `PUT /api/v1/universes/{slug}/vault/{*path}` — create/replace file
+  - `POST /api/v1/universes/{slug}/vault/{*path}` — append to file
+  - `PATCH /api/v1/universes/{slug}/vault/{*path}` — targeted edit (frontmatter field, heading section, block ID)
+  - `DELETE /api/v1/universes/{slug}/vault/{*path}` — soft delete (`.trash/`) or hard delete (`?permanent=true`)
+  - `POST /api/v1/universes/{slug}/vault/search` — full-text search across vault files
+  - `GET /api/v1/universes/{slug}/vault/tags` — aggregate all frontmatter tags
+  - `GET /api/v1/universes/{slug}/vault/tree` — recursive directory tree (BTreeMap, sorted)
+  - `POST /api/v1/universes/{slug}/vault/clip` — accept Obsidian Clipper payload, write clipped note
+- `storage.rs` — migration v15: `api_tokens` table with indexes; `create_api_token`, `list_api_tokens`, `delete_api_token`, `get_api_token_by_value` methods
+- Auth: Bearer JWT (same as board API) + long-lived API tokens (`co_` prefix, 90-day expiry)
+- Token management: `POST /api/v1/auth/token`, `GET /api/v1/auth/tokens`, `DELETE /api/v1/auth/tokens/{id}`
+- Rate limiting: 60 req/min per API token (in-memory sliding window, `LazyLock<Mutex<HashMap>>`)
+- `static/clipper-template.json` — Obsidian Clipper compatible template for CO frontmatter schema
+- `static/shared/clipper.js` — board UI paste handler
+  - `Ctrl/Cmd+Shift+V` keyboard shortcut for "Paste as CO content"
+  - Paste event listener on board area: detects Clipper-formatted markdown, shows choice dialog
+  - "Paste as task" vs "Paste as content" dialog with frontmatter preview
+  - `co:clipper-paste` custom event dispatched for board.js integration
+  - `co:card-context-menu` listener adds "Copy as Obsidian markdown" to task card context menus
+  - `COClipper` public API: `isClipperFormat`, `parseFrontmatter`, `toObsidianMarkdown`, `handleClipboardText`
+- All 8 variant `index.html` files updated to include `clipper.js`
+
+---
+
+## [0.28.0] — 2026-04-06
+
+### co (workspace)
+
+#### Added — CO-28: Open source repo setup
+
+- `README.md` — rewritten for public audience: what CO is, quick start (cargo install + Docker), self-hosting (Docker Compose + Fly.io), architecture diagram, CLI reference, contributing link
+- `CONTRIBUTING.md` — development setup, TDD workflow, branch/label conventions, commit format, test rules, PR process
+- `.github/ISSUE_TEMPLATE/bug_report.md` — structured bug report template
+- `.github/ISSUE_TEMPLATE/feature_request.md` — feature request template with acceptance criteria
+- `.gitignore` — added `*.db`, `*.redb`, `.env`, `.env.local` patterns; removed `!co-web/data/` exception that could allow committing runtime databases
+- `Cargo.toml` — added `keywords` and `categories` to workspace package; updated repository URL to `artelonga/co`
+
+---
+
+## [0.27.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-33: E2E test suite — Playwright for full MVP flow
+
+- `e2e/universe.spec.ts` — Universe creation: criar form submit → redirect to /co/:slug → editable board
+- `e2e/board-drag.spec.ts` — Board drag-and-drop between kanban columns + full CRUD sequence
+- `e2e/codemirror.spec.ts` — CodeMirror 6 editor: init, toolbar (Bold/Italic/Heading), live preview, save+persist
+- `e2e/usage-gate.spec.ts` — Usage gate: API 402 structure, overlay DOM, "Entrar" opens login modal
+- `e2e/theme.spec.ts` — Palette switcher: anonymous sees 4, switch updates CSS vars without reload
+- `e2e/i18n.spec.ts` — i18n toggle pt↔en, co_lang cookie set, persists across page reload
+- `e2e/auth-crdt.spec.ts` — Auth flow, sharing gate, anonymous editor has no WebSocket, CRDT two-context sync
+- `e2e/responsive.spec.ts` — Board renders at mobile (375px), tablet (768px), desktop (1280px) viewports
+- `.github/workflows/ci.yml` — Added `e2e` job: build co-web → install Playwright → run Chromium suite → upload HTML report
+
+---
+
+## [0.26.0] — 2026-04-06
+
+### co-deploy
+
+#### Added — CO-32: Ansible deployment — provision, deploy, backup playbooks for Fly.io + VPS
+
+- New `co-deploy/` directory with standard Ansible structure
+- `inventory/fly.yml` — Fly.io target (local connection via flyctl)
+- `inventory/vps.yml` — generic VPS target (DigitalOcean, Hetzner, etc.) with env-var overrides
+- `playbooks/provision.yml` — creates `co` unprivileged user, installs ca-certificates + sqlite3 + zstd + Caddy, creates `/opt/co/` + `/var/lib/co/data/`, configures UFW (allow 80/443, deny rest)
+- `playbooks/deploy.yml` — cross-compiles co-web via `cross`, copies binary, writes systemd unit, runs seed SQL on first deploy, restarts service, verifies `/api/health`
+- `playbooks/backup.yml` — SQLite `.backup` (online, consistent), zstd compression, 7 daily + 4 weekly rotation, optional rclone upload to S3/B2, cron at 03:00 UTC
+- `playbooks/fly-deploy.yml` — wraps `flyctl deploy --remote-only` with pre-deploy snapshot and post-deploy health check
+- `templates/co-web.service.j2` — systemd unit with ExecStart, WorkingDirectory, Environment, systemd hardening (NoNewPrivileges, ProtectSystem)
+- `templates/caddy.conf.j2` — reverse proxy with auto-SSL, zstd+gzip compression, security headers (HSTS, X-Frame-Options, etc.), static asset caching
+- `group_vars/all.yml` — shared config: co_version, co_port, co_domain, backup retention settings
+- `group_vars/production.yml` — ansible-vault encrypted secrets: JWT_SECRET, RESEND_API_KEY
+- `molecule/default/` — Docker-based integration test (provision + stub deploy on Debian 12, idempotency check)
+- `requirements.yml` — community.general + ansible.posix collections
+- `README.md` — quickstart for VPS and Fly.io
+
+---
+
+## [0.25.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-31: CRDT sync — Yjs + WebSocket, login required
+
+- New module `co-web/src/ws.rs`: `DocRoom` struct (yrs `Doc`, broadcast tx, client count, dirty notify), `DocRoomManager = Arc<RwLock<HashMap>>`, `ws_handler`, `handle_socket`
+- `GET /ws/doc/:universe_slug/:doc_id` — JWT-gated endpoint; returns 401 for anonymous requests (token via `?token=` query param or `co_auth` cookie)
+- Yjs sync protocol v1 (binary lib0 encoding): MSG_SYNC (0) with SYNC_STEP1/STEP2/UPDATE; MSG_AWARENESS (1) for cursor positions
+- Room lifecycle: load content from SQLite on first connect (initializes Y.Doc), broadcast updates to all connected clients, debounced persist (5s idle), cleanup on last disconnect
+- Heartbeat: ping every 30s, disconnect after 60s silence; rate limit: 100 messages/sec per client (token bucket)
+- `AppStateInner.doc_rooms` field added; WS route mounted at `/ws/doc/{slug}/{doc_id}`
+- `Storage::get_entry_body()` and `Storage::update_entry_body()` methods for CRDT persistence
+- Sharing gate in `get_universe_info`: anonymous universes return 404 for non-owners (checked via `co_universe_owner` cookie)
+- Frontend: added `yjs`, `y-codemirror.next`, `lib0` to editor bundle
+- `createAwareness()` shim implementing y-codemirror.next's awareness interface (no y-protocols dep)
+- `CoYjsProvider` class: WebSocket provider with reconnect, sync-step-1 on open, apply sync-step-2/update, forward awareness
+- `initEditor` accepts `wsUrl` and `user` params; CRDT mode for logged-in users; anonymous mode shows "Crie uma conta pra colaborar" toast
+- Collab badge ("N users editing"), connection status dot (green/yellow/red), remote cursor CSS
+- 7 unit tests: varuint roundtrip, varbytes roundtrip, sync frame structure, rate limiter burst/block, DocRoom init, anonymous 401, two-user sync
+
+---
+
+## [0.24.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-30: Dynamic CSS engine — token generation from universe config at runtime
+- New module `co-web/src/theme_engine.rs`: `ThemePreset` struct (name, tokens HashMap, font fields) + `generate_css()` function
+- Five built-in presets with all required CSS tokens: `scholarly` (warm cream/bronze), `scholarly-dark` (dark chocolate/bronze), `relic` (near-black/rose), `relic-light` (off-white/burgundy), `modern` (default indigo)
+- All presets define: `--bg`, `--sidebar-bg`, `--card-bg`, `--text-primary`, `--text-secondary`, `--accent`, `--border`, `--status-*`, `--priority-*`, `--font`, `--font-mono`, `--radius-*`, `--shadow-*`
+- `generate_css(preset, overrides)` merges custom token overrides on top of preset, outputs deterministic `:root { … }` block
+- `GET /api/v1/universes/:slug/theme.css` — returns generated CSS, `Cache-Control: no-cache`, ETag based on config hash, supports `If-None-Match` (304)
+- Dark/light companion mapping: `scholarly` ↔ `scholarly-dark`, `relic-light` ↔ `relic`
+- Frontend (variant a): `loadThemeCss(slug)` hot-swaps `<link id="co-theme-css">` href — no page reload when theme changes
+- Frontend: custom fonts inject `<link rel="stylesheet" href="https://fonts.googleapis.com/…">` with preconnect hints
+- Settings panel (owner only): added dark/light toggle button, `modern` theme option, custom token overrides JSON textarea
+- Unit tests: 13 theme engine tests + 4 HTTP endpoint integration tests (200 OK, all tokens present, CSS changes on theme change, 404 for missing universe, ETag 304)
+
+---
+
+## [0.23.0] — 2026-04-06
+
+### co-web
+
+#### Added — CO-23: Usage gate — 100 entries free, then account required
+- `universes.content_count` column (migration v11): cached counter incremented/decremented on writes and deletes
+- Middleware-style `check_usage_gate` helper: returns 402 Payment Required for anonymous universes at or above 100 entries
+- Anonymous write access: `clone_universe` issues an anon JWT session cookie + `co_universe_owner` cookie for claiming
+- `POST /api/v1/universes/:slug/claim` — authenticated user claims an anonymous universe (cookie must match)
+- `GET /api/v1/universes/:slug` — public universe info: `content_count`, `is_anonymous`, `is_template`
+- 402 response body: `{ "error": "usage_limit", "message": "Crie uma conta para continuar", "message_en": "...", "current": N, "limit": 100 }`
+- Frontend (variant a): 402 → usage limit modal with "Criar conta" / "Entrar" buttons; content count badge in header
+- After login with anonymous universe: auto-claim transfers ownership to real user
+- Unit test: 99 entries OK, 100th OK, 101st blocked (402), unblocked after claim
+
+---
+
+## [Unreleased] — co-web E2E Testing (UX-50 Epic)
+
+### co-web
+
+#### Added — UX-51: Initialize Playwright project
+- Playwright + @axe-core/playwright devDependencies in `co-web/package.json`
+- `playwright.config.ts` — baseURL localhost:3000, 9 projects (chromium/firefox/webkit × desktop/tablet/mobile)
+- Custom viewports: desktop (1280×720), tablet (768×1024), mobile (375×812)
+- `e2e/global-setup.ts` — builds binary, starts co-web, polls `/api/health`
+- `e2e/global-teardown.ts` — SIGTERM cleanup, skips if external server
+- `.gitignore` updated for node_modules, test-results, playwright-report
+- `npx playwright test --pass-with-no-tests` exits cleanly (code 0)
+
+---
+
+## [0.22.1] - 2026-01-04
+
+### Fixed
+- **External Folder Support** (#77)
+  - Bundle language configs in binary using `include_str!()`
+  - CO now works properly in any registered workspace without source files
+  - `co init` simplified to just create directory (no README.md)
+  - `co new` defaults to current directory instead of 'en' space
+  - Namespaces are now simple directories users organize however they want
+
+## [0.22.0] - 2026-01-04
+
+### Added
+- **System-wide Installation & Namespace Detection** (#75)
+  - `.co/` directory now recognized as CO workspace root marker
+  - `co repo switch <alias>` to switch active workspace context
+  - Git submodule detection for nested repositories
+  - `is_submodule` field in `SpaceLocation::InSpace` variant
+  - `is_git_submodule()` and `is_submodule()` helper methods
+  - Enhanced `co space current` with helpful guidance when not in workspace
+  - `effective_space()` method combining detected and active workspaces
+  - `active_repo` field in `GlobalConfig` for workspace context persistence
+
+### Changed
+- `co space current` now shows "(switched)" indicator when using active workspace
+- Status command shows "(submodule)" indicator when in a git submodule
+- Improved error messages with actionable suggestions (Navigate, Register, Switch)
+
+## [0.21.2] - 2026-01-04
+
+### Changed
+- **Rename ui/ to i18n/** (#72)
+  - Renamed `ui/` folder to `i18n/` for clarity
+  - Updated all path references in core and CLI
+  - Folder now clearly indicates internationalization purpose
+
+## [0.21.1] - 2026-01-04
+
+### Added
+- **Explicit Forbidden Character List** (#70)
+  - `FORBIDDEN_ID_CHARS` constant documenting all forbidden ID characters
+  - `is_valid_id_char()` function for character validation
+  - `validate_id()` function to check ID strings for invalid characters
+  - User-facing error messages in `co create` showing forbidden characters
+  - Comprehensive tests validating all forbidden characters are handled
+
+### Documentation
+- Added doc comments explaining forbidden character categories:
+  - Filesystem-unsafe: `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`
+  - Shell/special: `'`, `!`, `@`, `#`, `$`, `%`, `^`, `&`
+  - Whitespace: space, tab, newline, carriage return
+- Clarified allowed characters: alphanumeric, hyphen, dot, underscore
+
+## [0.21.0] - 2026-01-04
+
+### Added
+- **Documentation System** (#42)
+  - `co help` - Topic-based embedded documentation
+  - `co help getting-started` - Quick start guide
+  - `co help spaces` - Understanding spaces
+  - `co help workflows` - Plan & Execute, Write workflows
+  - `co help work-items` - User-stories, tasks, epics
+  - Alias: `co h` for quick access
+  - Added `clap_mangen` for future man page generation
+
+### Changed
+- Updated CLAUDE.md with work item types and git label mapping
+- Clarified work item hierarchy (epic → user-story → task)
+- Removed deprecated "scope" terminology from documentation
+
+### Fixed
+- Removed personal name references, using PRIVATE/PUBLIC/USER namespaces
+
+## [0.20.0] - 2026-01-04
+
+### Added
+- **Archive & Storage** (#43)
+  - `co archive <item>` - Move content to archive with deindexing
+  - `co archive restore <item>` - Restore content from archive
+  - `co archive list` - List all archived items
+  - Directory structure mirrors original: `work/tasks/` → `work/archive/tasks/`
+  - Adds `archived_at` timestamp to frontmatter
+  - Adds `indexed: false` to exclude from co operations (locate, validate)
+  - `--force` flag to replace existing archived items
+  - Alias: `co ar` for quick access
+
+## [0.19.0] - 2026-01-04
+
+### Added
+- **Analyze Command** (#41)
+  - `co analyze <item>` - Evaluate content quality and generate suggestions
+  - Checks for clear title, status field, and required sections
+  - Type-aware validation: user-story (As/I Need/To), task (Given/When/Then)
+  - Detects broken internal [[links]]
+  - Generates actionable improvement suggestions
+  - Generates interview questions for missing information
+  - Colored output with ✓/⚠/✗ indicators
+  - `--verbose` flag for detailed analysis
+
+## [0.18.0] - 2026-01-04
+
+### Added
+- **Tools & Extensions** (#40)
+  - `co tools run <name> [args...]` - Execute a tool with arguments
+  - Tool types: `deterministic` (shell commands) and `predictive` (ML models, stub)
+  - User tools in `user/tools/` take precedence over system tools
+  - Tool schema extended with `tool_type` field
+  - Default behavior: deterministic when `tool_type` not specified
+  - Error handling: tool not found, missing command, execution failure
+
+## [0.17.0] - 2026-01-04
+
+### Added
+- **Writer Agent System** (#39)
+  - `co write <type> --agent <name>` - Generate content using writer agents
+  - Agent backends: `manual` (interactive prompts), `claude` (skeleton for LLM), `ollama` (stub)
+  - `--context FILE` to provide additional context from a file
+  - `--in SPACE` to specify target space
+  - `--name NAME` to skip name prompt
+  - Agent schema extended with `backend` and `context` fields
+  - New `agents/writer.md` example agent
+  - Output validated against content schemas
+
+## [0.16.0] - 2026-01-04
+
+### Added
+- **Plan & Execute Workflow** (#38)
+  - `co conduct plan <objective>` - Create structured use-case proposals with acceptance criteria
+  - `co conduct execute <id>` - Drive plans through git workflow states (todo → in-progress → review → done)
+  - Two modes: Manual (interactive prompts) or Assisted (skeleton for LLM)
+  - `--context FILE` to load context from a file
+  - `--repo <alias>` for cross-repo operations
+  - Auto-creates GitHub issue on plan creation
+  - Branch creation on execute, PR tracking via `gh` CLI
+  - Space-aware architecture with global repo registry
+
+## [0.15.0] - 2026-01-04
+
+### Added
+- **GitHub as Source of Truth** (#36)
+  - `co gh issue list` - List issues from GitHub repository
+  - `co gh issue show <number>` - Show issue details
+  - `co collab pull --all` - Pull all open issues to local markdown files
+  - `co collab pull <number>...` - Pull specific issues
+  - GitHub → CO mapping: labels to type/priority, assignees, state to status
+  - New `core/src/github/` module with types, mapping, and GhCli wrapper
+
+## [0.14.0] - 2026-01-04
+
+### Added
+- **Space Isolation & Commit Guards** (#47)
+  - `SpaceLocation` detection: automatically detect if you're in a space or at repo root
+  - `co status` now shows current location context (space vs repo root)
+  - `co init --check` to find unprotected spaces (not gitignored)
+  - Walking directory tree to find space markers (README.md with `type: space`)
+
+### Changed
+- Status command now displays location context with commit guard warnings
+
+## [0.13.1] - 2026-01-04
+
+### Changed
+- **Terminology Refactor** (#49)
+  - Standardized terminology: "Space" is the canonical term for namespace directories
+  - Deprecated "scope" from system references (backwards-compatible aliases remain)
+  - "Context" now exclusively refers to user-provided content/prompts
+  - Renamed `core/src/scope.rs` → `core/src/space.rs`
+  - Updated all CLI help text, commands, and i18n labels
+  - Updated `type: context` → `type: space` in frontmatter
+  - All tests and validation messages updated
+
+## [0.13.0] - 2026-01-03
+
+### Added
+- **Collaborative Content Creation** (#48)
+  - `co create` - Interactive content creation with role selection
+  - User role: Structured prompts for user-stories (AS A / I NEED / SO THAT) and tasks (GIVEN / WHEN / THEN)
+  - Agent role: Creates skeleton templates for Claude Code to fill in
+  - `--story` flag to link tasks to parent user stories
+  - `## Prompt` section for context persistence
+
+## [0.12.2] - 2026-01-04
+
+### Added
+- CLAUDE.md development instructions (#56, #57)
+
+### Changed
+- Streamlined versioning workflow: version bump in same PR (#59)
+- Added branch cleanup instructions
+
+## [0.12.1] - 2026-01-04
+
+### Added
+- CHANGELOG.md with complete version history (#52)
+
+### Changed
+- Versioning policy: issues drive releases (#53)
+
+## [0.12.0] - 2026-01-03
+
+### Added
+- **Spaces & Multi-Repo SSH** (#37, #45)
+  - `co space list` - List all registered spaces
+  - `co space current` - Show current space details
+  - `co repo add --ssh-host` - Configure SSH identity per repo
+  - Auto-detect current space from working directory
+- **Extensible Content Types** (#35, #44)
+  - Custom content types via `schema.yaml`
+  - `co schema list` - List all available types (built-in + custom)
+  - Validation support for custom types
+- **Auto-gitignore on init**
+  - `co init <name>` automatically adds space to `.gitignore`
+  - Prevents accidental commits of user spaces to co home
+
+### Fixed
+- Language validation now accepts known languages (english, portuguese, etc.) without requiring directory
+- Content type pluralization: `user-story` → `user-stories/` (not `user-storys/`)
+- Clippy warnings resolved for CI compliance (#46)
+
+## [0.11.0] - 2026-01-03
+
+### Added
+- **Work Item Types & Content Parsing** (#33, #34)
+  - User-story sections: `## As`, `## I Need`, `## To`
+  - Task sections: `## Given`, `## When`, `## Then`
+  - Built-in types: `user-story`, `task`, `epic`, `release`
+  - Content section validation for structured formats
+  - `work/schema.yaml` for work item type definitions
+
+## [0.10.0] - 2026-01-03
+
+### Added
+- **Feature System** (#31)
+  - Automatic discovery of `agents/` and `tools/` directories
+  - Schema-based content type registration via `schema.yaml`
+  - Feature registry for extensibility
+  - `co config show` displays discovered features
+
+### Fixed
+- Version updated to 0.10.1 with UI reorganization (#32)
+
+## [0.9.0] - 2026-01-02
+
+### Added
+- **Interactive REPL** (#28)
+  - `co lead` - Interactive exploration mode
+  - Commands: `status`, `locate`, `use <scope>`, `help`, `quit`
+  - Scope-aware prompts
+  - Real-time content navigation
+
+## [0.6.0] - 2026-01-02
+
+### Added
+- **Validation System** (#27)
+  - `co validate <item>` - Validate specific content
+  - `co validate all` - Validate entire workspace
+  - Frontmatter validation (required fields, types)
+  - Internal link validation (`[[references]]`)
+  - Language and scope existence checks
+  - Severity levels: Error, Warning
+
+## [0.5.0] - 2026-01-02
+
+### Added
+- **Index & Performance** (#25)
+  - SQLite-based content indexing
+  - `co locate build` - Build/rebuild index
+  - `co locate --stats` - Show index statistics
+  - Incremental index updates (only modified files)
+  - Full-text search via FTS5
+
+### Fixed
+- Deprecated exports removed, CI workflow fixed (#26)
+
+## [0.4.0] - 2026-01-02
+
+### Added
+- **Query System** (#23)
+  - `co locate` - Unified search command
+  - Filter by type: `co locate --type task`
+  - Filter by scope: `co locate --scope private`
+  - Full-text search: `co locate "search term"`
+  - Combined filters and search
+
+### Changed
+- Unified `find` and `search` into single `co locate` command (#24)
+
+## [0.3.0] - 2026-01-02
+
+### Added
+- **Content Management** (#22)
+  - `co new <type> <name>` - Create new content
+  - `co show <item>` - Display content
+  - `co update <item> --status <status>` - Update metadata
+  - `co delete <item>` - Remove content
+  - Frontmatter parsing with YAML support
+  - Content type detection
+
+## [0.2.0] - 2026-01-02
+
+### Added
+- **Language Foundations** (#21)
+  - Multi-language support (english, portuguese, guarani-mbya)
+  - Internationalization (i18n) for CLI messages
+  - `co lang <code>` - Set UI language
+  - `co languages` - List supported languages
+  - Lexicon structure for definitions
+  - Language-specific directories (`en/`, `pt/`, `gun/`)
+
+## [0.1.0] - 2026-01-02
+
+### Added
+- Initial release
+- Graph-based content management foundation
+- `co init <name>` - Initialize context
+- `co list` - List contexts and languages
+- `co status` - Show workspace status
+- Basic CLI structure with clap
+- Workspace configuration (`.co/config.yaml`)
+
+---
+
+## Roadmap
+
+### Upcoming (v1.0)
+- [x] #36 - GitHub as Source of Truth (sync issues/PRs)
+- [x] #38 - Plan & Execute Workflow
+- [x] #39 - Writer Agent System
+- [x] #40 - Tools & Extensions
+- [x] #41 - Analyze Command
+- [ ] #42 - Documentation Polish
+- [x] #43 - Archive & Storage
+- [x] #47 - Space Isolation & Commit Guards
+- [x] #48 - Collaborative Content Creation (User + Agent)
+- [x] #49 - Terminology Refactor (space/context/scope)
