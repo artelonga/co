@@ -17,17 +17,19 @@ Other in-flight work that doesn't bump the scaffold version:
 
 ## Upcoming releases (the plan)
 
-### 1.18.0 — "consolidation" (no schema changes)
+### "1.18 era" — consolidation (NOT a scaffold version bump)
 
-Target: ship within a week. Pure cleanup + dormant features going live.
+Target: ongoing housekeeping. None of these items modify the deployed binary, so no `Cargo.toml` bump is warranted.
 
-- **CO-67** prod seed — `artelonga` + `rfq` universes created on prod, content uploaded (operational, not a code release per se but worth tracking)
-- **CO-82 ops** — generate prod API token, set Fly secrets on UAT, verify mirror runs on next reset (operational; the code is already in 1.16.0)
-- Branch cleanup — drop the 50+ stale `feat/CO-*` branches from old completed work
-- `co-dev` repo archived on GitHub
-- `dev/co-auto` polish (CO-84 step 2): split `auto.rs` into module files, migrate `run()` to use `Pipeline`
+| Item | State (2026-04-27) |
+|------|---------------------|
+| Local merged-branch cleanup (65→30) | ✓ done |
+| `co-dev` archived on GitHub + tag pushed | ✓ done |
+| **CO-67** prod seed (artelonga + rfq + content) | gated on email-code login |
+| **CO-82 ops** — generate prod API token, set Fly secrets, verify mirror | gated on email-code login |
+| **`dev/co-auto` polish (CO-84 step 2)** — split `auto.rs` into module files, migrate `run()` to `Pipeline` | versioned independently as `co-auto 0.2.0` when shipped |
 
-Gating decision: 1.18.0 is the version-bump that captures the post-consolidation state. CO-67 and CO-82 ops are operational tasks; they don't strictly need a version bump but the act of running them changes the prod data shape and is worth tagging.
+When CO-67 + CO-82 ops run, they change prod data shape but not the deployed binary. Note them in `CHANGELOG.md` under the next scaffold release that ships after.
 
 ### 1.19.0 — "post-GitHub cleanup" (small schema change)
 
