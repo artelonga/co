@@ -189,7 +189,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(user_stats_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
         .route("/v1/auth/logout", post(logout_handler))
-        // CO-44: password-based login for UAT (returns 404 in prod)
+        // CO-85: generic password-based login (any env, user must have password_hash set)
+        .route("/v1/auth/password-login", post(password_login_handler))
+        // CO-44: compat alias — returns 404 in prod (kept for scripts and CLAUDE.md docs)
         .route("/v1/auth/uat-login", post(uat_login_handler));
 
     // --- Board public routes (GET — no auth required) ---
@@ -599,6 +601,18 @@ pub async fn start_server(config: WebConfig) {
     } else {
         false
     };
+
+    // CO-85: seed admin user from env (idempotent, runs in any env).
+    {
+        let email = std::env::var("CO_SEED_ADMIN_EMAIL").ok();
+        let hash = std::env::var("CO_SEED_ADMIN_PASSWORD_HASH").ok();
+        if let (Some(email), Some(hash)) = (email, hash) {
+            let mut storage = Storage::new(&config.data_dir);
+            if let Err(e) = storage.seed_admin_user_from_env(&email, &hash) {
+                tracing::error!("Failed to seed admin user from env: {e}");
+            }
+        }
+    }
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
     let seed_path = std::path::Path::new(&config.data_dir).join("seed.sql");
@@ -1577,27 +1591,24 @@ async fn logout_handler() -> Response {
         .into_response()
 }
 
-// --- UAT: password-based login (CO-44) ---
+// --- Password-based login (CO-85) ---
 
-/// Request body for the UAT password login endpoint.
+/// Request body for password login.
 #[derive(serde::Deserialize)]
-struct UatLoginRequest {
+struct PasswordLoginRequest {
     email: String,
     password: String,
 }
 
-/// POST /api/v1/auth/uat-login — email + password login for UAT testing.
+/// POST /api/v1/auth/password-login — Argon2id password login, any environment.
 ///
-/// Only available when `CO_ENV=uat`. Returns 404 in production so the endpoint
-/// existence is not revealed to non-UAT deployments.
-async fn uat_login_handler(
+/// Succeeds when the user record has a non-NULL `password_hash` set.
+/// Returns 401 for unknown email, wrong password, or missing hash — all
+/// indistinguishable to callers to prevent user enumeration.
+async fn password_login_handler(
     State(state): State<AppState>,
-    Json(req): Json<UatLoginRequest>,
+    Json(req): Json<PasswordLoginRequest>,
 ) -> Result<Response, AppError> {
-    if !state.config.is_uat() {
-        return Err(AppError::NotFound("Not found".into()));
-    }
-
     let email = req.email.trim().to_lowercase();
 
     let (user, hash_opt) = {
@@ -1641,4 +1652,249 @@ async fn uat_login_handler(
         }),
     )
         .into_response())
+}
+
+/// POST /api/v1/auth/uat-login — compat alias for UAT scripts and CLAUDE.md docs.
+///
+/// Delegates to `password_login_handler` when `CO_ENV=uat`; returns 404 in
+/// production so the endpoint existence is not revealed to non-UAT deployments.
+async fn uat_login_handler(
+    State(state): State<AppState>,
+    Json(req): Json<PasswordLoginRequest>,
+) -> Result<Response, AppError> {
+    if !state.config.is_uat() {
+        return Err(AppError::NotFound("Not found".into()));
+    }
+    password_login_handler(State(state), Json(req)).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use http_body_util::BodyExt;
+    use tempfile::tempdir;
+    use tower::ServiceExt;
+
+    use crate::config::WebConfig;
+    use crate::experiment::ExperimentStore;
+    use crate::storage::Storage;
+
+    fn test_config(dir: &std::path::Path) -> WebConfig {
+        WebConfig {
+            port: 3000,
+            data_dir: dir.to_str().unwrap().to_string(),
+            static_dir: "co-web/static".to_string(),
+            default_variant: "a".to_string(),
+            experiments: false,
+            plugins_dir: "plugins".to_string(),
+            game_db_path: None,
+            universo_dir: "quilomboaraucaria".to_string(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "prod".into(),
+        }
+    }
+
+    fn build_test_router(dir: &std::path::Path) -> axum::Router {
+        let config = test_config(dir);
+        let storage = Storage::new(&config.data_dir);
+        let experiment = ExperimentStore::new(&config.data_dir);
+        let auth_store = crate::auth::AuthStore::new(dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_db_path = dir.join("game_test.db");
+        let game_storage = Arc::new(
+            game_core::storage::Storage::open(&game_db_path)
+                .expect("Failed to open test game storage"),
+        );
+        let state: AppState = Arc::new(AppStateInner {
+            storage: Mutex::new(storage),
+            experiment: Mutex::new(experiment),
+            config,
+            auth_store: Mutex::new(auth_store),
+            mail,
+            game_storage,
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            doc_rooms: crate::ws::new_room_manager(),
+        });
+        build_router(state, None)
+    }
+
+    fn argon2_hash(password: &str) -> String {
+        use argon2::Argon2;
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .expect("hash failed")
+            .to_string()
+    }
+
+    fn insert_test_user(dir: &std::path::Path, email: &str, password_hash: Option<&str>) -> String {
+        let storage = Storage::new(dir.to_str().unwrap());
+        let id = format!(
+            "usr_test_{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+        );
+        let now = chrono::Utc::now().to_rfc3339();
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO users (id, email, display_name, tier, created_at, password_hash) \
+             VALUES (?1, ?2, 'Test', 'player', ?3, ?4)",
+                rusqlite::params![id, email, now, password_hash],
+            )
+            .expect("insert test user");
+        id
+    }
+
+    async fn body_str(body: Body) -> String {
+        let bytes = body.collect().await.unwrap().to_bytes();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    }
+
+    // --- password-login endpoint tests ---
+
+    #[tokio::test]
+    async fn test_password_login_valid_creds() {
+        let dir = tempdir().unwrap();
+        let hash = argon2_hash("correctpassword");
+        insert_test_user(dir.path(), "alice@example.com", Some(&hash));
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password-login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"alice@example.com","password":"correctpassword"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = body_str(resp.into_body()).await;
+        assert!(body.contains("alice@example.com"), "body: {body}");
+    }
+
+    #[tokio::test]
+    async fn test_password_login_wrong_password() {
+        let dir = tempdir().unwrap();
+        let hash = argon2_hash("correctpassword");
+        insert_test_user(dir.path(), "bob@example.com", Some(&hash));
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password-login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"bob@example.com","password":"wrongpassword"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_password_login_no_password_hash() {
+        let dir = tempdir().unwrap();
+        insert_test_user(dir.path(), "carol@example.com", None);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/auth/password-login")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"email":"carol@example.com","password":"anypassword"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    // --- seed_admin_user_from_env drift detection tests ---
+
+    #[test]
+    fn test_seed_admin_user_from_env_inserts_new_user() {
+        let dir = tempdir().unwrap();
+        let mut storage = Storage::new(dir.path().to_str().unwrap());
+        let hash = argon2_hash("adminpass");
+
+        storage
+            .seed_admin_user_from_env("admin@example.com", &hash)
+            .unwrap();
+
+        let (_, stored_hash) = storage
+            .get_user_by_email_with_hash("admin@example.com")
+            .expect("user should exist");
+        assert_eq!(stored_hash.as_deref(), Some(hash.as_str()));
+    }
+
+    #[test]
+    fn test_seed_admin_user_from_env_same_hash_no_op() {
+        let dir = tempdir().unwrap();
+        let mut storage = Storage::new(dir.path().to_str().unwrap());
+        let hash = argon2_hash("adminpass");
+
+        storage
+            .seed_admin_user_from_env("admin@example.com", &hash)
+            .unwrap();
+        // Second call with same hash — should be a no-op (no error, no change)
+        storage
+            .seed_admin_user_from_env("admin@example.com", &hash)
+            .unwrap();
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE email = 'admin@example.com'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "should not duplicate user on no-op");
+    }
+
+    #[test]
+    fn test_seed_admin_user_from_env_hash_drift_updates() {
+        let dir = tempdir().unwrap();
+        let mut storage = Storage::new(dir.path().to_str().unwrap());
+        let hash1 = argon2_hash("oldpass");
+        let hash2 = argon2_hash("newpass");
+
+        storage
+            .seed_admin_user_from_env("admin@example.com", &hash1)
+            .unwrap();
+        storage
+            .seed_admin_user_from_env("admin@example.com", &hash2)
+            .unwrap();
+
+        let (_, stored_hash) = storage
+            .get_user_by_email_with_hash("admin@example.com")
+            .expect("user should exist");
+        assert_eq!(
+            stored_hash.as_deref(),
+            Some(hash2.as_str()),
+            "hash should be updated when drift detected"
+        );
+    }
 }
