@@ -5,6 +5,13 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.3] — 2026-04-27
+
+### Fixed — CO-82: throttle mirror to stay under prod's 60 req/min cap
+
+- First-run-on-prod mirror copied 59 of 70 quilomboaraucaria entries before tripping the per-token rate limit (HTTP 429). Adds a 1-second sleep between entry copies in `co-web/src/uat_mirror.rs`. At ~30 prod requests/min (2 GETs per entry), well below the 60/min cap with headroom for the metadata/list calls at start of each universe.
+- A 200-entry universe now takes ~3.5 minutes to mirror — acceptable for an occasional UAT reset.
+
 ## [1.18.2] — 2026-04-27
 
 ### Fixed — CO-82: mirror works end-to-end (no longer needs `/api/v1/universes`)

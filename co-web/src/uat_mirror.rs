@@ -199,9 +199,16 @@ async fn mirror_one_universe(
         .json()
         .await?;
 
+    // Throttle: prod's vault auth (CO-35) rate-limits at 60 req/min per token.
+    // Each entry copy = 2 prod requests (GET) + 1 local PUT. Pace at one
+    // entry/second to keep the prod-side budget at ~30 req/min — plenty of
+    // headroom and well below the cap.
+    let throttle = std::time::Duration::from_millis(1000);
+
     let mut ok = 0usize;
     let mut fail = 0usize;
     for entry in &entries {
+        tokio::time::sleep(throttle).await;
         match copy_entry(
             client,
             prod_url,
