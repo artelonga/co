@@ -10,6 +10,7 @@ members = [
     # co-cli does NOT pull these. Build explicitly: `cargo build -p co-auto`.
     "dev/co-auto",
     "dev/co-pwhash",
+    "dev/co-token",
 ]
 default-members = [
     "core",

@@ -1,0 +1,15 @@
+[package]
+name = "co-token"
+version = "0.1.0"
+edition = "2024"
+description = "co-token — encrypted token storage via OS keychain (dev tool, not part of CO scaffold)"
+license = "MIT"
+repository = "https://github.com/artelonga/co"
+publish = false
+
+[[bin]]
+name = "co-token"
+path = "src/main.rs"
+
+[dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native-sync-persistent", "windows-native"] }
