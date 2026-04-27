@@ -16,7 +16,13 @@
       "Bash(pkill -f \"target/debug/co-web\")",
       "Bash(JWT_SECRET=dev-test-secret cargo run -p co-web)",
       "Bash(curl -s http://localhost:8742/api/health)",
-      "Bash(grep -r \"deploy\\\\|url\\\\|origin\\\\|host\" package.json svelte.config.js vite.config.*)"
+      "Bash(grep -r \"deploy\\\\|url\\\\|origin\\\\|host\" package.json svelte.config.js vite.config.*)",
+      "Bash(flyctl deploy *)",
+      "Bash(git mv *)",
+      "Bash(cargo build *)",
+      "Bash(git add *)",
+      "Bash(git commit -m 'fix\\(co-web\\): serve vendored mermaid from /shared/vendor/ *)",
+      "Bash(git push *)"
     ]
   }
 }

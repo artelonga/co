@@ -324,7 +324,7 @@
         return;
       }
       const script = document.createElement('script');
-      script.src = '/static/vendor/mermaid.min.js';
+      script.src = '/shared/vendor/mermaid.min.js';
       script.async = true;
       script.onload = () => {
         try {
