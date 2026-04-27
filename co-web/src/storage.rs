@@ -1831,24 +1831,29 @@ impl Storage {
                 tracing::info!("admin user already seeded: {email} (hash unchanged)");
             }
             Some((user_id, _)) => {
+                // CO-90: tier is billing-only; do not write 'admin' here. The
+                // seeded user gets privileged access via per-universe ownership,
+                // not a global tier bypass.
                 self.conn.execute(
-                    "UPDATE users SET password_hash = ?1, tier = 'admin' WHERE id = ?2",
+                    "UPDATE users SET password_hash = ?1 WHERE id = ?2",
                     params![password_hash, user_id],
                 )?;
-                tracing::info!("admin user seeded: {email} (hash updated)");
+                tracing::info!("seeded user updated: {email} (hash refreshed)");
             }
             None => {
                 let id = format!(
-                    "usr_admin_{}",
+                    "usr_{}",
                     &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
                 );
                 let now = Utc::now().to_rfc3339();
+                // CO-90: tier='user' (billing default). Authority over system
+                // universes comes from owner_id, not tier.
                 self.conn.execute(
                     "INSERT INTO users (id, email, display_name, tier, created_at, password_hash) \
-                     VALUES (?1, ?2, 'admin', 'admin', ?3, ?4)",
+                     VALUES (?1, ?2, ?2, 'user', ?3, ?4)",
                     params![id, email, now, password_hash],
                 )?;
-                tracing::info!("admin user seeded: {email}");
+                tracing::info!("seeded user created: {email}");
             }
         }
         Ok(())

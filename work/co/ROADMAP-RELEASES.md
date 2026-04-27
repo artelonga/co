@@ -10,6 +10,8 @@
 | 1.15.1  | 2026-04-26 | CO-66 API hygiene (500→409, seed idempotent, no auto-stop UAT) | UAT + prod |
 | 1.16.0  | 2026-04-26 | CO-82 UAT mirror (dormant — env vars unset) | UAT + prod |
 | 1.17.0  | 2026-04-27 | CO-83 Mermaid.js diagram rendering       | UAT + prod |
+| 1.18.0  | 2026-04-27 | CO-85 password-login on prod             | UAT + prod |
+| 1.18.1  | 2026-04-27 | CO-90 (preview): seed uses `tier='user'` (no global admin) | local |
 
 Other in-flight work that doesn't bump the scaffold version:
 - **CO-84** — `co-auto` extracted into `dev/co-auto` (own version 0.1.0, NOT in scaffold workspace default-members)
@@ -66,7 +68,13 @@ After 1.18.0 ships, CO-67 + CO-82 ops become runnable without log-fishing.
 
 Risk: schema migration on live prod DB. Mitigation: online migration via `ALTER TABLE … DROP COLUMN`, validate post-migration via UAT first.
 
-### 1.20.0 (or 1.x sweep) — "small features pile"
+### 1.20.0 — "drop global admin tier" (multi-user readiness)
+
+- **CO-90** — drop `tier='admin'` as a global authority signal. Audit and remove all `tier=='admin'` bypasses (`dev_board.rs:31`, `universe_routes.rs:765`). Define `tier` as billing-only (`anonymous`/`user`/`pro`). Migration converts existing `tier='admin'` rows to `'user'`. Every privileged action becomes per-universe (CO-49 enforces this). Spec: `work/co/CO-90.md`.
+
+Why before 2.0: the `tier` cleanup is multi-user-readiness. Shipping CO-77 sharding without it risks a second user accidentally getting global authority via a misconfigured tier write.
+
+### 1.21.0 (or 1.x sweep) — "small features pile"
 
 Floating release for whichever of these land first:
 - **CO-83 polish** — wire `renderMermaidBlocks` into other render paths (board cards, content page, template universe). Currently only the entry zoom view triggers it.
@@ -195,4 +203,5 @@ Branches stay short-lived; merge to main and push directly. No long-lived releas
 | CO-87 | `work/co/CO-87.md` | todo | 3.0.0 |
 | CO-88 | `work/co/CO-88.md` | todo | 3.0.0 (CI gate from then on) |
 | CO-89 | `work/co/CO-89.md` | todo | 2.1+ |
+| CO-90 | `work/co/CO-90.md` | todo (preview shipped 1.18.1) | 1.20.0 |
 | CO-77-PLAN | `work/co/CO-77-PLAN.md` | planning | 2.0.0 |

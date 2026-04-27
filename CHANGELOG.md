@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.1] — 2026-04-27
+
+### Fixed — CO-90 (preview): seeded user gets `tier='user'`, not `tier='admin'`
+
+- `Storage::seed_admin_user_from_env`: switched both insert and update branches from `tier='admin'` to `tier='user'`. The seeded account is just a regular user; privileged access to system universes (template, yggdrasil, dados, co-dev) comes from being the `owner_id` of those universes, not from a global tier value.
+- This is a surgical preview of CO-90 (drop the global admin tier entirely). Full CO-90 audits and removes all remaining `tier=='admin'` bypasses in handlers (`dev_board.rs:31`, `universe_routes.rs:765`).
+- Display name now defaults to the email itself (was hardcoded `'admin'`); operators can update later.
+- User id prefix changed `usr_admin_` → `usr_`.
+- Existing users with `tier='admin'` from a 1.18.0 deploy are NOT auto-migrated by this patch — CO-90 ships a proper migration. To force a refresh now: change the password hash secret slightly (re-run hash generator) so the drift-detection branch updates the row.
+
 ## [1.18.0] — 2026-04-27
 
 ### Added — CO-85: Password-login on prod — replace email-code friction with Argon2id auth

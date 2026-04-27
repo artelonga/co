@@ -1,0 +1,16 @@
+[package]
+name = "co-pwhash"
+version = "0.1.0"
+edition = "2024"
+description = "co-pwhash — Argon2id password hash generator (dev tool, not part of CO scaffold)"
+license = "MIT"
+repository = "https://github.com/artelonga/co"
+publish = false
+
+[[bin]]
+name = "co-pwhash"
+path = "src/main.rs"
+
+[dependencies]
+argon2 = { workspace = true }
+rand = { workspace = true }

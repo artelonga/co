@@ -460,7 +460,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -524,7 +524,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -537,8 +537,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "co-pwhash"
+version = "0.1.0"
+dependencies = [
+ "argon2",
+ "rand 0.8.5",
+]
+
+[[package]]
 name = "co-web"
-version = "1.18.0"
+version = "1.18.1"
 dependencies = [
  "anyhow",
  "argon2",
