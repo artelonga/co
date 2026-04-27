@@ -373,6 +373,30 @@ curl -s -X POST https://co-artelonga-uat.fly.dev/api/v1/auth/uat-login \
 
 The `uat-login` endpoint returns **404 in production** (`CO_ENV` unset). Only available on UAT.
 
+### Password-login in Production (CO-85)
+
+Admin users with `password_hash` set can log in via `POST /api/v1/auth/password-login` in **any environment** (including prod). This endpoint has no env gate.
+
+```bash
+# Login as admin on prod
+curl -sc cookies.txt -X POST https://co-artelonga.fly.dev/api/v1/auth/password-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"yuri@artelonga.com.br","password":"<your-password>"}'
+# → 200, Set-Cookie: session=<JWT>
+```
+
+The admin user is seeded at startup via env vars:
+```bash
+flyctl secrets set CO_SEED_ADMIN_EMAIL=yuri@artelonga.com.br \
+                   CO_SEED_ADMIN_PASSWORD_HASH="$HASH" \
+                   -a co-artelonga
+```
+
+Generate the hash locally:
+```bash
+HASH=$(printf 'mySecretPassword' | argon2 "$(openssl rand -hex 16)" -id -t 3 -m 16 -p 1 -e)
+```
+
 ### UAT Database Reset
 
 Touch the reset flag and restart the machine to wipe all non-user data:

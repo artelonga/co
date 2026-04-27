@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] — 2026-04-27
+
+### Added — CO-85: Password-login on prod — replace email-code friction with Argon2id auth
+
+- `POST /api/v1/auth/password-login`: new env-agnostic endpoint; works in any deployment when the user record has a `password_hash` set. Returns the same JWT + `Set-Cookie: session=<JWT>` response shape as `uat-login`. Returns 401 for unknown email, wrong password, or missing hash (no information leak).
+- `POST /api/v1/auth/uat-login`: kept as a compat alias for UAT scripts and CLAUDE.md docs; delegates to the same handler when `CO_ENV=uat`, returns 404 in production (unchanged behavior).
+- `seed_admin_user_from_env()` in `Storage`: idempotent startup seed driven by `CO_SEED_ADMIN_EMAIL` + `CO_SEED_ADMIN_PASSWORD_HASH` env vars. Drift detection: if the user exists with the same hash, no-op; if the hash differs, updates hash + tier. If the user is missing, inserts with `tier=admin`. Logs once per startup: "admin user seeded: `<email>`".
+- Called from `start_server` after migrations and before other seeds, any env.
+- Warns at startup if `CO_SEED_ADMIN_PASSWORD_HASH` does not start with `$argon2id$` (likely misconfiguration).
+- Unit tests: `password-login` success, wrong-password 401, missing-hash 401; seed drift detection (no-op, update, insert).
+
 ## [1.17.0] — 2026-04-27
 
 ### Added — CO-83: Mermaid.js diagram rendering

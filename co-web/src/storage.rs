@@ -1797,6 +1797,63 @@ impl Storage {
         Ok(())
     }
 
+    /// Seed an admin user from env vars `CO_SEED_ADMIN_EMAIL` + `CO_SEED_ADMIN_PASSWORD_HASH`.
+    ///
+    /// Idempotent with drift detection:
+    /// - User missing → insert (tier=admin).
+    /// - User exists, hash unchanged → no-op.
+    /// - User exists, hash differs → update hash + tier.
+    pub fn seed_admin_user_from_env(
+        &mut self,
+        email: &str,
+        password_hash: &str,
+    ) -> anyhow::Result<()> {
+        if !password_hash.starts_with("$argon2id$") {
+            tracing::warn!(
+                "CO_SEED_ADMIN_PASSWORD_HASH does not look like an Argon2id hash \
+                 (expected '$argon2id$v=19$m=...$...'). Check your configuration."
+            );
+        }
+
+        let email = email.trim().to_lowercase();
+
+        let existing = self
+            .conn
+            .query_row(
+                "SELECT id, password_hash FROM users WHERE email = ?1",
+                params![email],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?)),
+            )
+            .ok();
+
+        match existing {
+            Some((_, ref existing_hash)) if existing_hash.as_deref() == Some(password_hash) => {
+                tracing::info!("admin user already seeded: {email} (hash unchanged)");
+            }
+            Some((user_id, _)) => {
+                self.conn.execute(
+                    "UPDATE users SET password_hash = ?1, tier = 'admin' WHERE id = ?2",
+                    params![password_hash, user_id],
+                )?;
+                tracing::info!("admin user seeded: {email} (hash updated)");
+            }
+            None => {
+                let id = format!(
+                    "usr_admin_{}",
+                    &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
+                );
+                let now = Utc::now().to_rfc3339();
+                self.conn.execute(
+                    "INSERT INTO users (id, email, display_name, tier, created_at, password_hash) \
+                     VALUES (?1, ?2, 'admin', 'admin', ?3, ?4)",
+                    params![id, email, now, password_hash],
+                )?;
+                tracing::info!("admin user seeded: {email}");
+            }
+        }
+        Ok(())
+    }
+
     /// Remove all anonymous universes (keys starting with `anon-`) from the
     /// database and from the filesystem. Called on UAT startup so each session
     /// starts from a clean slate.
