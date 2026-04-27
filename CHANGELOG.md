@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] — 2026-04-26
+
+### Added — CO-82: UAT mirrors prod content on reset
+
+- `co-web/src/uat_mirror.rs`: opt-in mirror that runs in a tokio task after a UAT reset; logs into local UAT as yuri, pulls yuri's prod universes via the Vault REST API, and replays content into UAT through the same write path
+- `co-web/src/server.rs`: `uat_startup` now returns whether reset just happened; `start_server` spawns the mirror task when env vars are present
+- Gated by env: `UAT_MIRROR_PROD=true`, `UAT_PROD_URL`, `UAT_PROD_TOKEN`. When unset, behavior is identical to before the patch (empty placeholders after reset)
+- System universes (`template`, `yggdrasil`, `co-dev`, `co-experience`, `dados`) skipped — they have their own seed paths
+- Per-universe failures logged, not fatal — prod-down or token-expired never crashes UAT
+- Code only runs when `CO_ENV=uat`; on prod the mirror branch is unreachable
+- Cargo.toml: `reqwest` gains `cookies` feature; new `percent-encoding` dep
+- Operationalization (set Fly secrets `UAT_PROD_TOKEN` etc.) deferred — feature ships dormant
+
 ## [1.15.1] — 2026-04-26
 
 ### Fixed — CO-66: API hygiene — 500→409 on duplicate key, seed idempotency, UAT no-auto-stop
