@@ -20,16 +20,18 @@ COPY game-core/Cargo.toml game-core/Cargo.toml
 # still validates they exist, so include the manifest (and a stub source) in
 # the build context. The actual dev binary is never compiled in the prod image.
 COPY dev/co-auto/Cargo.toml dev/co-auto/Cargo.toml
+COPY dev/co-pwhash/Cargo.toml dev/co-pwhash/Cargo.toml
 
 # Dummy lib.rs for each crate so cargo can resolve the workspace
-RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src && \
+RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src dev/co-pwhash/src && \
     echo "pub fn _dummy() {}" > core/src/lib.rs && \
     echo "fn main() {}" > co-cli/src/main.rs && \
     echo "pub fn _dummy() {}" > co-web/src/lib.rs && \
     echo "pub fn _dummy() {}" > co/src/lib.rs && \
     echo "pub fn _dummy() {}" > game-core/src/lib.rs && \
     echo "pub fn _dummy() {}" > dev/co-auto/src/lib.rs && \
-    echo "fn main() {}" > dev/co-auto/src/main.rs
+    echo "fn main() {}" > dev/co-auto/src/main.rs && \
+    echo "fn main() {}" > dev/co-pwhash/src/main.rs
 
 # Build deps only (cached unless Cargo.toml/lock change)
 RUN cargo build --release -p co-web 2>/dev/null || true
