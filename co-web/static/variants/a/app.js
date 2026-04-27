@@ -2784,6 +2784,7 @@
             const md2 = window.CoMarkdown;
             if (md2 && md2.enableImageZoom) md2.enableImageZoom(zoomBody);
             if (md2 && md2.highlightCode) md2.highlightCode(zoomBody);
+            if (md2 && md2.renderMermaidBlocks) md2.renderMermaidBlocks(zoomBody);
 
             zoomBody.addEventListener('dblclick', enterEditMode, { once: true });
         }

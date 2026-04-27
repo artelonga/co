@@ -276,6 +276,128 @@
     });
   }
 
+  // ===== Mermaid (CO-83) =====
+
+  let _mermaidLoading = null;
+  let _mermaidReady = false;
+  let _mermaidIdCounter = 0;
+
+  /**
+   * Read the current Co theme tokens and map them to mermaid themeVariables.
+   * Re-reading on every render lets diagrams re-style after theme switches.
+   */
+  function _mermaidThemeVars() {
+    const css = global.getComputedStyle(document.documentElement);
+    const v = (name, fallback) => {
+      const val = css.getPropertyValue(name).trim();
+      return val || fallback;
+    };
+    const bg = v('--bg', v('--md-surface', '#fff'));
+    const text = v('--text', v('--md-on-surface', '#1a1a1a'));
+    const accent = v('--accent', v('--md-primary', '#2d4a22'));
+    const muted = v('--text-muted', v('--md-on-surface-variant', '#666'));
+    const border = v('--border', v('--md-outline', '#ccc'));
+    return {
+      background: bg,
+      primaryColor: accent,
+      primaryTextColor: text,
+      primaryBorderColor: border,
+      lineColor: muted,
+      secondaryColor: v('--card-bg', bg),
+      tertiaryColor: bg,
+      textColor: text,
+      mainBkg: v('--card-bg', bg),
+    };
+  }
+
+  /**
+   * Lazy-load the vendored mermaid.min.js. Resolves to `global.mermaid`.
+   */
+  function _ensureMermaid() {
+    if (_mermaidReady) return Promise.resolve(global.mermaid);
+    if (_mermaidLoading) return _mermaidLoading;
+
+    _mermaidLoading = new Promise((resolve, reject) => {
+      if (global.mermaid) {
+        _mermaidReady = true;
+        resolve(global.mermaid);
+        return;
+      }
+      const script = document.createElement('script');
+      script.src = '/static/vendor/mermaid.min.js';
+      script.async = true;
+      script.onload = () => {
+        try {
+          global.mermaid.initialize({
+            startOnLoad: false,
+            theme: 'base',
+            themeVariables: _mermaidThemeVars(),
+            securityLevel: 'strict',
+            flowchart: { htmlLabels: false },
+          });
+          _mermaidReady = true;
+          resolve(global.mermaid);
+        } catch (e) { reject(e); }
+      };
+      script.onerror = () => reject(new Error('failed to load mermaid'));
+      document.head.appendChild(script);
+    });
+    return _mermaidLoading;
+  }
+
+  /**
+   * Find ```mermaid code blocks in `container` and replace each with rendered
+   * SVG. Idempotent: skips blocks already replaced (marked with
+   * data-mermaid-rendered).
+   *
+   * @param {HTMLElement} container
+   */
+  function renderMermaidBlocks(container) {
+    if (!container) return;
+    const blocks = container.querySelectorAll(
+      'pre > code.language-mermaid:not([data-mermaid-rendered])'
+    );
+    if (!blocks.length) return;
+
+    _ensureMermaid().then(mermaid => {
+      // Re-apply theme each time in case the user switched palette since load.
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: 'base',
+          themeVariables: _mermaidThemeVars(),
+          securityLevel: 'strict',
+          flowchart: { htmlLabels: false },
+        });
+      } catch (_) { /* mermaid may reject re-init in some versions; ignore */ }
+
+      blocks.forEach(async (codeEl) => {
+        codeEl.setAttribute('data-mermaid-rendered', 'true');
+        const src = codeEl.textContent;
+        const id = `co-mermaid-${++_mermaidIdCounter}`;
+        try {
+          const { svg } = await mermaid.render(id, src);
+          const wrapper = document.createElement('div');
+          wrapper.className = 'co-mermaid';
+          wrapper.innerHTML = svg;
+          const pre = codeEl.parentElement;
+          if (pre && pre.parentElement) pre.parentElement.replaceChild(wrapper, pre);
+        } catch (err) {
+          const errBox = document.createElement('div');
+          errBox.className = 'co-mermaid-error';
+          errBox.style.cssText = 'border:1px solid #c33;padding:8px;color:#c33;font-family:monospace;white-space:pre-wrap';
+          errBox.textContent = 'Mermaid render failed: ' + (err && err.message ? err.message : String(err));
+          const pre = codeEl.parentElement;
+          if (pre && pre.parentElement) pre.parentElement.replaceChild(errBox, pre);
+        }
+      });
+    }).catch(err => {
+      // Mermaid script failed to load. Leave code blocks untouched but log.
+      // eslint-disable-next-line no-console
+      console.warn('CoMarkdown: mermaid load failed', err);
+    });
+  }
+
   // ===== Expose =====
 
   global.CoMarkdown = {
@@ -288,5 +410,6 @@
     resolveWikilinks,
     highlightCode,
     enableImageZoom,
+    renderMermaidBlocks,
   };
 })(window);

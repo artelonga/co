@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] — 2026-04-27
+
+### Added — CO-83: Mermaid.js diagram rendering
+
+- `co-web/static/vendor/mermaid.min.js` (v10.9.0, 3.2 MB): vendored for offline-first rendering and tighter CSP; lazy-loaded only when a page contains a ```` ```mermaid ```` block
+- `co-web/static/shared/markdown.js`: new `renderMermaidBlocks(container)` post-processor follows the existing `highlightCode` / `enableImageZoom` pattern. Idempotent (skips already-rendered blocks via `data-mermaid-rendered`), error-safe (invalid syntax → inline error box, doesn't crash the page)
+- Theme bridge: reads CSS custom properties (`--bg`, `--accent`, `--text`, `--md-primary`, etc.) and maps them to Mermaid's `themeVariables`, so diagrams adapt to all 12 Co themes. Re-applied on each render so theme switches re-style new diagrams
+- `securityLevel: 'strict'` and `htmlLabels: false` — no inline `<a>` href in diagrams (admits typed wikilinks later via CO-74), no embedded HTML
+- Wired into the entry zoom view in `co-web/static/variants/a/app.js` next to the existing `highlightCode` call. Other variants/render paths can opt in similarly
+- Seed diagram: `docs/diagrams/deployment.md` — C4 Container view of the UAT + prod deployment topology
+- Supports all Mermaid v10 diagram types: flowchart, sequenceDiagram, stateDiagram-v2, classDiagram, erDiagram, gantt, C4Context/Container/Component/Deployment
+
 ## [1.16.0] — 2026-04-26
 
 ### Added — CO-82: UAT mirrors prod content on reset
