@@ -11,7 +11,9 @@
 | 1.16.0  | 2026-04-26 | CO-82 UAT mirror (dormant — env vars unset) | UAT + prod |
 | 1.17.0  | 2026-04-27 | CO-83 Mermaid.js diagram rendering       | UAT + prod |
 | 1.18.0  | 2026-04-27 | CO-85 password-login on prod             | UAT + prod |
-| 1.18.1  | 2026-04-27 | CO-90 (preview): seed uses `tier='user'` (no global admin) | local |
+| 1.18.1  | 2026-04-27 | CO-90 (preview): seed uses `tier='user'` (no global admin) | UAT + prod |
+| 1.18.2  | 2026-04-27 | CO-82 mirror end-to-end (configured universe list, no /api/v1/universes auth refactor) | UAT + prod |
+| 1.18.3  | 2026-04-27 | CO-82 mirror throttle (1s/entry under prod's 60 req/min) — quilombo 70 entries fully replicated to UAT | UAT + prod |
 
 Other in-flight work that doesn't bump the scaffold version:
 - **CO-84** — `co-auto` extracted into `dev/co-auto` (own version 0.1.0, NOT in scaffold workspace default-members)
@@ -40,17 +42,17 @@ The 3.0 jump is driven by CO-86 (file format), CO-87 (layer traits), CO-88 (pipe
 
 ## Upcoming releases
 
-### "1.18 era" — consolidation (NOT a scaffold version bump)
+### "1.18 era" — consolidation (mostly done as of 2026-04-27)
 
-Ongoing housekeeping. None of these items modify the deployed binary, so no `Cargo.toml` bump is warranted.
-
-| Item | State (2026-04-27) |
-|------|---------------------|
+| Item | State |
+|------|-------|
 | Local merged-branch cleanup (65→30) | ✓ done |
 | `co-dev` archived on GitHub + tag pushed | ✓ done |
-| **CO-67** prod seed (artelonga + rfq + content) | gated on prod login |
-| **CO-82 ops** — generate prod API token, set Fly secrets, verify mirror | gated on prod login |
-| **`dev/co-auto` polish (CO-84 step 2)** — split `auto.rs` into module files, migrate `run()` to `Pipeline` | versioned independently as `co-auto 0.2.0` when shipped |
+| **CO-85** password-login on prod | ✓ shipped 1.18.0 |
+| **CO-90 (preview)** — seed uses `tier='user'` | ✓ shipped 1.18.1 |
+| **CO-82 ops** — token + Fly secrets + reset; **mirror works end-to-end** (1.18.3) | ✓ done |
+| **CO-67** prod seed (artelonga + rfq + content) | runnable: `bash scripts/seed-prod-universes.sh PASSWORD` |
+| **`dev/co-auto` polish (CO-84 step 2)** — split `auto.rs`, migrate `run()` to `Pipeline` | versioned independently as `co-auto 0.2.0` when shipped |
 
 ### 1.18.0 — "password auth on prod" (small, unblocks operations)
 
@@ -101,14 +103,27 @@ Out of scope (defer to 2.1+):
 
 **Why 2.0**: every storage method changes internally. The Storage trait surface stays compatible, but the migration is non-reversible without restoring backups.
 
-### 2.1+ — "manifest" (additive on top of 2.0)
+### 2.1+ — "manifest + git-backed universes" (additive on top of 2.0)
 
+The biggest user-visible win in 2.x. Every repo-backed universe gets a uniform git-changelog view, contributor profiles, event calendar, and live analytics dashboards.
+
+- **CO-89** (priority: critical) — git-backed universes: any universe with `git_source` set ingests commits/profiles/events as content; per-universe analytics + Mermaid Gantt views; generalizes the `co-dev` pattern to `artelonga`, `quilomboaraucaria`, `rfq`, and any future user's repo-backed universe
 - **CO-72** doc-generator hooks (scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc) — needs CO-78 stable
-- **CO-73** temporal model (event_at, due_at, scheduled_at, …) — first real test in CO-89's commit timeline
-- **CO-74** relationship graph + query DSL + typed wikilink promotion
+- **CO-73** temporal model (event_at, due_at, scheduled_at, …) — first real test is CO-89's commit timeline + Gantt
+- **CO-74** relationship graph + query DSL + typed wikilink promotion — `commit → task` resolution from CO-89's parsed commit messages is the canonical case
 - **CO-78 (full)** job queue + worker pool — Redis-backed if SQLite contention shows
 - **CO-79 (full)** caching layer with Redis L2
-- **CO-89** co-dev expanded universe — git history as `commit` entries, profiles, events, analytics dashboards (validates CO-73 + CO-74 + CO-83 with real, growing data)
+
+Sequencing inside 2.x:
+```
+CO-77 (per-universe SQLite) ✓ ships first → CO-70 (manifest) → CO-71 (validator+JSON storage)
+                                                ↓
+                                         CO-78 lite job queue
+                                                ↓
+                                         CO-89 git-backed universes ← biggest user win
+                                                ↓
+                                         CO-72 (doc gen) + CO-73/74 (temporal + relations) — validated by CO-89's data
+```
 
 ### 2.2+ — "history"
 
@@ -202,6 +217,6 @@ Branches stay short-lived; merge to main and push directly. No long-lived releas
 | CO-86 | `work/co/CO-86.md` | todo | 3.0.0 |
 | CO-87 | `work/co/CO-87.md` | todo | 3.0.0 |
 | CO-88 | `work/co/CO-88.md` | todo | 3.0.0 (CI gate from then on) |
-| CO-89 | `work/co/CO-89.md` | todo | 2.1+ |
+| CO-89 | `work/co/CO-89.md` | **scope expanded** — multi-universe git ingestion, not just co-dev | 2.1+ (priority: critical within 2.x) |
 | CO-90 | `work/co/CO-90.md` | todo (preview shipped 1.18.1) | 1.20.0 |
 | CO-77-PLAN | `work/co/CO-77-PLAN.md` | planning | 2.0.0 |
