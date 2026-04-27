@@ -16,14 +16,20 @@ COPY co-cli/Cargo.toml co-cli/Cargo.toml
 COPY co-web/Cargo.toml co-web/Cargo.toml
 COPY co/Cargo.toml co/Cargo.toml
 COPY game-core/Cargo.toml game-core/Cargo.toml
+# CO-84: dev/ crates are workspace members but NOT in default-members. Cargo
+# still validates they exist, so include the manifest (and a stub source) in
+# the build context. The actual dev binary is never compiled in the prod image.
+COPY dev/co-auto/Cargo.toml dev/co-auto/Cargo.toml
 
 # Dummy lib.rs for each crate so cargo can resolve the workspace
-RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src && \
+RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src && \
     echo "pub fn _dummy() {}" > core/src/lib.rs && \
     echo "fn main() {}" > co-cli/src/main.rs && \
     echo "pub fn _dummy() {}" > co-web/src/lib.rs && \
     echo "pub fn _dummy() {}" > co/src/lib.rs && \
-    echo "pub fn _dummy() {}" > game-core/src/lib.rs
+    echo "pub fn _dummy() {}" > game-core/src/lib.rs && \
+    echo "pub fn _dummy() {}" > dev/co-auto/src/lib.rs && \
+    echo "fn main() {}" > dev/co-auto/src/main.rs
 
 # Build deps only (cached unless Cargo.toml/lock change)
 RUN cargo build --release -p co-web 2>/dev/null || true
@@ -35,6 +41,7 @@ COPY co-cli/ co-cli/
 COPY co-web/ co-web/
 COPY co/ co/
 COPY game-core/ game-core/
+COPY dev/ dev/
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
