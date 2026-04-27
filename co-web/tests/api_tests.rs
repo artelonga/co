@@ -1258,9 +1258,7 @@ async fn test_update_universe_visibility_flip() {
                 .uri("/api/v1/universes/flip-test")
                 .header(header::CONTENT_TYPE, "application/json")
                 .header(header::AUTHORIZATION, test_bearer())
-                .body(Body::from(
-                    r#"{"visibility":"public-subscribable"}"#,
-                ))
+                .body(Body::from(r#"{"visibility":"public-subscribable"}"#))
                 .unwrap(),
         )
         .await

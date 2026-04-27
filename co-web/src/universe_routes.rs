@@ -110,7 +110,14 @@ pub async fn create_universe(
             "Universe name must be 100 characters or fewer".into(),
         ));
     }
-    let universe = lock_storage(&state)?.create_universe(body, &user_id.0)?;
+    let mut storage = lock_storage(&state)?;
+    if storage.get_universe(&body.key).is_some() {
+        return Err(AppError::Conflict(format!(
+            "Universe key '{}' is already taken",
+            body.key
+        )));
+    }
+    let universe = storage.create_universe(body, &user_id.0)?;
     Ok((StatusCode::CREATED, Json(universe)))
 }
 
@@ -1752,5 +1759,59 @@ mod tests {
             !results.iter().any(|u| u.key == "private-proj"),
             "private universe must not appear in search results"
         );
+    }
+
+    // --- CO-66: 409 on duplicate universe key ---
+
+    /// POST /api/v1/universes with an existing key returns 409 Conflict.
+    #[tokio::test]
+    async fn test_create_universe_duplicate_key_returns_409() {
+        use axum::body::Body;
+        use axum::http::Request;
+        use tower::ServiceExt;
+
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let (mut storage, dir) = make_storage();
+
+        // Pre-create the universe directly in storage.
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "dupe-uni".into(),
+                    name: "Dupe Universe".into(),
+                    description: String::new(),
+                },
+                "usr_owner",
+            )
+            .unwrap();
+
+        let (router, _tmp) = make_universe_router(storage, dir.path());
+
+        let (token, _) =
+            crate::auth::sign_jwt("usr_owner", "owner@example.com", "player", "test-secret")
+                .unwrap();
+
+        let payload = serde_json::json!({
+            "key": "dupe-uni",
+            "name": "Another Universe",
+            "description": ""
+        });
+        let response = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/universes")
+                    .header("Content-Type", "application/json")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        let body = body_bytes(response).await;
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["error"], "conflict");
     }
 }

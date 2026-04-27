@@ -69,6 +69,39 @@ async fn test_quilombo_seed_idempotent() {
     assert_eq!(u.owner_id, "system");
 }
 
+/// CO-66: re-seeding preserves user-edited description (INSERT OR IGNORE, never UPDATE).
+#[tokio::test]
+async fn test_quilombo_seed_preserves_user_edited_description() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+
+    // Seed once (simulates first server boot).
+    storage.seed_quilombo_universe();
+
+    // User edits the description via the API (simulated as a direct DB write).
+    storage
+        .conn()
+        .execute(
+            "UPDATE universes SET description = 'Descrição editada pelo usuário' \
+             WHERE key = 'quilomboaraucaria'",
+            rusqlite::params![],
+        )
+        .unwrap();
+
+    let after_edit = storage.get_universe("quilomboaraucaria").unwrap();
+    assert_eq!(after_edit.description, "Descrição editada pelo usuário");
+
+    // Seed again (simulates server restart where the guard is absent or ignored).
+    storage.seed_quilombo_universe();
+
+    // Description must still be the user-edited value.
+    let after_reseed = storage.get_universe("quilomboaraucaria").unwrap();
+    assert_eq!(
+        after_reseed.description, "Descrição editada pelo usuário",
+        "seed must not overwrite user-edited description"
+    );
+}
+
 /// Universe uses the quilombo theme preset.
 #[tokio::test]
 async fn test_quilombo_theme_preset() {
