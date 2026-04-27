@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.1] — 2026-04-26
+
+### Fixed — CO-66: API hygiene — 500→409 on duplicate key, seed idempotency, UAT no-auto-stop
+
+- `co-web/src/universe_routes.rs`: `POST /api/v1/universes` with an existing key now returns 409 Conflict with `{"error":"conflict"}` body instead of 500 Internal Server Error; lock is held across the existence check and insert to prevent TOCTOU
+- `co-web/tests/quilombo_tests.rs`: new test `test_quilombo_seed_preserves_user_edited_description` verifies `seed_quilombo_universe` (INSERT OR IGNORE) never overwrites a user-edited description
+- `fly.uat.toml`: set `auto_stop_machines = false` — UAT machine stays running through idle periods so cold-start latency does not block testing
+
 ## [1.15.0] — 2026-04-26
 
 ### Added — CO-65: visibility on `PUT /api/v1/universes/:slug`

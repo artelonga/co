@@ -117,7 +117,8 @@ fn resolve_space(workdir: &Path, space: Option<&str>) -> Result<(String, PathBuf
             .flatten()
         {
             let path = entry.path();
-            if path.is_dir() && path.join("project.yaml").exists()
+            if path.is_dir()
+                && path.join("project.yaml").exists()
                 && let Some(name) = path.file_name().and_then(|n| n.to_str())
             {
                 found.push((name.to_string(), path));

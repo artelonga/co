@@ -1304,7 +1304,12 @@ pub trait ContextBuilder: Send + Sync {
 
 /// Runs the task (Claude Code, shell, custom binary, …).
 pub trait Executor: Send + Sync {
-    fn execute(&self, task: &Task, context: &TaskContext, workdir: &Path) -> Result<ExecutionResult>;
+    fn execute(
+        &self,
+        task: &Task,
+        context: &TaskContext,
+        workdir: &Path,
+    ) -> Result<ExecutionResult>;
 }
 
 /// Reviews an Executor result against acceptance criteria.
@@ -1435,7 +1440,12 @@ pub struct ShellExecutor {
 }
 
 impl Executor for ShellExecutor {
-    fn execute(&self, _task: &Task, _context: &TaskContext, workdir: &Path) -> Result<ExecutionResult> {
+    fn execute(
+        &self,
+        _task: &Task,
+        _context: &TaskContext,
+        workdir: &Path,
+    ) -> Result<ExecutionResult> {
         let output = Command::new("sh")
             .arg("-c")
             .arg(&self.command)
