@@ -43,7 +43,18 @@ struct VaultListEntry {
     path: String,
 }
 
+/// Default universe keys to mirror when `UAT_MIRROR_UNIVERSES` env var is unset.
+const DEFAULT_UNIVERSES: &[&str] = &["artelonga", "quilomboaraucaria", "rfq"];
+
 /// Mirror prod universes to UAT. Idempotent — safe to retry.
+///
+/// The set of universes to mirror is read from `UAT_MIRROR_UNIVERSES`
+/// (comma-separated keys). Default: `artelonga,quilomboaraucaria,rfq`.
+///
+/// Discovery via `GET /api/v1/universes` was tried earlier but that endpoint
+/// requires JWT auth (not API tokens). Per-universe metadata (`GET
+/// /api/v1/universes/:slug`) is public, and the vault routes accept API
+/// tokens, so we iterate a configured list and skip any that 404 on prod.
 pub async fn mirror_prod_to_uat(prod_url: &str, prod_token: &str, local_url: &str) -> Result<()> {
     tracing::info!("UAT mirror: starting (prod={prod_url}, local={local_url})");
 
@@ -55,26 +66,66 @@ pub async fn mirror_prod_to_uat(prod_url: &str, prod_token: &str, local_url: &st
     // 1. Login to local UAT as yuri to get a write-capable session cookie.
     let local_session = uat_login(&client, local_url).await.context("uat-login")?;
 
-    // 2. List yuri's universes on prod.
-    let universes = list_prod_universes(&client, prod_url, prod_token)
-        .await
-        .context("list prod universes")?;
+    // 2. Resolve the set of universes to mirror.
+    let universe_keys: Vec<String> = std::env::var("UAT_MIRROR_UNIVERSES")
+        .ok()
+        .and_then(|s| {
+            let v: Vec<String> = s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            if v.is_empty() { None } else { Some(v) }
+        })
+        .unwrap_or_else(|| DEFAULT_UNIVERSES.iter().map(|s| s.to_string()).collect());
     tracing::info!(
-        "UAT mirror: prod has {} universe(s) to consider",
-        universes.len()
+        "UAT mirror: configured to mirror {} universe(s): {:?}",
+        universe_keys.len(),
+        universe_keys
     );
 
     // 3. Mirror each one. Per-universe failures are logged and skipped.
-    for u in universes {
+    for key in universe_keys {
+        let info = match fetch_prod_universe(&client, prod_url, &key).await {
+            Ok(Some(info)) => info,
+            Ok(None) => {
+                tracing::warn!("UAT mirror: '{key}' not found on prod (skipping)");
+                continue;
+            }
+            Err(e) => {
+                tracing::error!("UAT mirror: failed to fetch '{key}' from prod: {e:#}");
+                continue;
+            }
+        };
         if let Err(e) =
-            mirror_one_universe(&client, prod_url, prod_token, local_url, &local_session, &u).await
+            mirror_one_universe(&client, prod_url, prod_token, local_url, &local_session, &info)
+                .await
         {
-            tracing::error!("UAT mirror: '{}' failed: {e:#}", u.key);
+            tracing::error!("UAT mirror: '{}' failed: {e:#}", info.key);
         }
     }
 
     tracing::info!("UAT mirror: done");
     Ok(())
+}
+
+/// Fetch metadata for a single prod universe via the public endpoint.
+/// Returns `Ok(None)` if the universe doesn't exist (404), `Err` for other
+/// failures.
+async fn fetch_prod_universe(
+    client: &reqwest::Client,
+    prod_url: &str,
+    key: &str,
+) -> Result<Option<UniverseInfo>> {
+    let resp = client
+        .get(format!("{prod_url}/api/v1/universes/{key}"))
+        .send()
+        .await?;
+    if resp.status() == reqwest::StatusCode::NOT_FOUND {
+        return Ok(None);
+    }
+    let info: UniverseInfo = resp.error_for_status()?.json().await?;
+    Ok(Some(info))
 }
 
 async fn uat_login(client: &reqwest::Client, local_url: &str) -> Result<String> {
@@ -92,20 +143,6 @@ async fn uat_login(client: &reqwest::Client, local_url: &str) -> Result<String> 
     Ok(session)
 }
 
-async fn list_prod_universes(
-    client: &reqwest::Client,
-    prod_url: &str,
-    prod_token: &str,
-) -> Result<Vec<UniverseInfo>> {
-    let resp = client
-        .get(format!("{prod_url}/api/v1/universes"))
-        .bearer_auth(prod_token)
-        .send()
-        .await?
-        .error_for_status()?;
-    let universes: Vec<UniverseInfo> = resp.json().await?;
-    Ok(universes)
-}
 
 async fn mirror_one_universe(
     client: &reqwest::Client,

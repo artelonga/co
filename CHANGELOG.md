@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.2] — 2026-04-27
+
+### Fixed — CO-82: mirror works end-to-end (no longer needs `/api/v1/universes`)
+
+- `co-web/src/uat_mirror.rs`: stopped calling `GET /api/v1/universes` (which requires JWT and rejected the API token). Mirror now reads a configured list of universe keys from the `UAT_MIRROR_UNIVERSES` env var (default: `artelonga,quilomboaraucaria,rfq`), fetches each via the public per-universe metadata endpoint (`GET /api/v1/universes/:slug`, no auth), and copies content via the vault routes (which already accept API tokens).
+- Vault routes were already accepting API tokens via `vault_auth`; `/api/v1/universes/{slug}` for metadata is public — so the mirror's hot path now works without any auth-middleware refactor.
+- Added `co-web/src/auth.rs::require_auth_with_token`: a stateful middleware that accepts JWT *or* API token. Currently unused — added as scaffolding for future routes a long-lived background worker needs to hit (CO-89 git ingestion, future external integrations). Mounting it on the existing universe protected routes requires threading state through the router builder; deferred to CO-91 or absorbed into CO-90.
+- 404 on a configured universe is logged and skipped, not fatal.
+
+### Operational
+
+After deploy: existing `UAT_PROD_TOKEN` secret already in place from operationalize-prod.sh. The mirror will pick up the universe list from defaults; override via `flyctl secrets set UAT_MIRROR_UNIVERSES='foo,bar' -a co-artelonga-uat`.
+
 ## [1.18.1] — 2026-04-27
 
 ### Fixed — CO-90 (preview): seeded user gets `tier='user'`, not `tier='admin'`

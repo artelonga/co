@@ -110,8 +110,11 @@ pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String>
 
 /// Axum middleware that validates a Bearer JWT or `session` cookie and injects
 /// [`UserId`] into request extensions. Returns 401 with a JSON error on failure.
+///
+/// JWT-only — does NOT accept API tokens. For routes that should accept API
+/// tokens too (e.g., paths a long-lived background worker hits), use
+/// `require_auth_with_token` (state-aware variant).
 pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response, Response> {
-    // Try Authorization: Bearer header first, then fall back to session cookie.
     let token = req
         .headers()
         .get("authorization")
@@ -138,6 +141,52 @@ pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response
     })?;
 
     req.extensions_mut().insert(UserId(token_data.claims.sub));
+    Ok(next.run(req).await)
+}
+
+/// Like [`require_auth`] but also accepts API tokens (CO-35) as a fallback
+/// after JWT validation fails. Used for endpoints background workers hit
+/// (CO-82 mirror, future external integrations) where a 7-day JWT is
+/// inadequate.
+///
+/// Mount via `axum::middleware::from_fn_with_state(state.clone(), require_auth_with_token)`.
+pub async fn require_auth_with_token(
+    axum::extract::State(state): axum::extract::State<crate::server::AppState>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    let token = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| extract_session_cookie(req.headers()))
+        .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
+
+    let secret = jwt_secret();
+    let validation = Validation::new(Algorithm::HS256);
+    if let Ok(data) = decode::<Claims>(
+        &token,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    ) {
+        req.extensions_mut().insert(UserId(data.claims.sub));
+        return Ok(next.run(req).await);
+    }
+
+    // Lookup + immediately drop the lock before the next.run().await below.
+    let user_id = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| unauthorized("Storage lock failed"))?;
+        match storage.get_api_token_by_value(&token) {
+            Ok(Some(tok)) => tok.user_id.clone(),
+            _ => return Err(unauthorized("Invalid or expired token")),
+        }
+    };
+    req.extensions_mut().insert(UserId(user_id));
     Ok(next.run(req).await)
 }
 
