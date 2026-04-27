@@ -1255,3 +1255,381 @@ fn save_tracker(tracker: &RunTracker) -> Result<()> {
     fs::write(runs_dir.join(format!("{}.yaml", tracker.run_id)), content)?;
     Ok(())
 }
+
+// ============================================================================
+// Composable trait surface (CO-84)
+// ============================================================================
+//
+// The procedural `run()` above remains the production path for v1. The traits
+// below give a parallel surface that's pluggable, mockable, and testable.
+// Future work will migrate `run()` to use a `Pipeline` of these trait objects.
+
+/// Captures the assembled context (CLAUDE.md, task body, parent epic, project,
+/// roadmap) that an Executor receives. Named `TaskContext` to avoid collision
+/// with `anyhow::Context`.
+#[derive(Debug, Clone)]
+pub struct TaskContext {
+    pub text: String,
+}
+
+/// Outcome of an Executor run.
+#[derive(Debug, Clone)]
+pub struct ExecutionResult {
+    pub success: bool,
+    pub stdout: String,
+    pub stderr: String,
+}
+
+/// Outcome of a Reviewer's verdict.
+#[derive(Debug, Clone)]
+pub struct ReviewVerdict {
+    pub passed: bool,
+    pub details: String,
+}
+
+/// Source of tasks (filesystem, GitHub Issues, Linear, …).
+pub trait TaskSource: Send + Sync {
+    fn list_tasks(&self) -> Result<Vec<Task>>;
+}
+
+/// Picks the next task to run from a candidate set.
+pub trait TaskSelector: Send + Sync {
+    fn pick_next<'a>(&self, tasks: &'a [Task]) -> Option<&'a Task>;
+}
+
+/// Builds the multi-layer context an Executor will see.
+pub trait ContextBuilder: Send + Sync {
+    fn build(&self, task: &Task, all_tasks: &[Task], workdir: &Path) -> Result<TaskContext>;
+}
+
+/// Runs the task (Claude Code, shell, custom binary, …).
+pub trait Executor: Send + Sync {
+    fn execute(&self, task: &Task, context: &TaskContext, workdir: &Path) -> Result<ExecutionResult>;
+}
+
+/// Reviews an Executor result against acceptance criteria.
+pub trait Reviewer: Send + Sync {
+    fn review(&self, task: &Task, result: &ExecutionResult) -> Result<ReviewVerdict>;
+}
+
+/// Finalizes a passed task (commit, PR, status update, notification, …).
+pub trait Finalizer: Send + Sync {
+    fn finalize(&self, task: &Task, verdict: &ReviewVerdict, workdir: &Path) -> Result<()>;
+}
+
+// --- Default implementations -------------------------------------------------
+
+/// Loads tasks from `*.md` files in a data directory (current behavior).
+pub struct FilesystemTaskSource {
+    pub data_dir: PathBuf,
+    pub project_key: String,
+}
+
+impl TaskSource for FilesystemTaskSource {
+    fn list_tasks(&self) -> Result<Vec<Task>> {
+        load_tasks(&self.data_dir, &self.project_key)
+    }
+}
+
+/// Picks the highest-priority unblocked todo/in_progress task (current behavior).
+pub struct UnblockedFirstSelector;
+
+impl TaskSelector for UnblockedFirstSelector {
+    fn pick_next<'a>(&self, tasks: &'a [Task]) -> Option<&'a Task> {
+        let picked = select_next_task(tasks)?;
+        tasks.iter().find(|t| t.id == picked.id)
+    }
+}
+
+/// Builds the layered context (CLAUDE.md, task, parent, project, roadmap).
+pub struct DefaultContextBuilder {
+    pub data_dir: PathBuf,
+}
+
+impl ContextBuilder for DefaultContextBuilder {
+    fn build(&self, task: &Task, all_tasks: &[Task], workdir: &Path) -> Result<TaskContext> {
+        let text = build_context(task, &self.data_dir, all_tasks, Some(workdir))?;
+        Ok(TaskContext { text })
+    }
+}
+
+/// Wraps the existing acceptance-criteria parser.
+pub struct AcceptanceReviewer;
+
+impl Reviewer for AcceptanceReviewer {
+    fn review(&self, task: &Task, _result: &ExecutionResult) -> Result<ReviewVerdict> {
+        let r = review_criteria(task)?;
+        Ok(ReviewVerdict {
+            passed: r.passed,
+            details: format!("{}/{} acceptance criteria met", r.met, r.total),
+        })
+    }
+}
+
+/// Marks a task as `done` in its frontmatter.
+pub struct StatusUpdateFinalizer;
+
+impl Finalizer for StatusUpdateFinalizer {
+    fn finalize(&self, task: &Task, _verdict: &ReviewVerdict, _workdir: &Path) -> Result<()> {
+        update_task_status(task, "done")
+    }
+}
+
+// --- Compositional combinators ----------------------------------------------
+
+/// Federate multiple task sources. Order is preserved; duplicate keys win to
+/// the first source that defines them.
+pub struct MultiTaskSource(pub Vec<Box<dyn TaskSource>>);
+
+impl TaskSource for MultiTaskSource {
+    fn list_tasks(&self) -> Result<Vec<Task>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        for src in &self.0 {
+            for t in src.list_tasks()? {
+                if seen.insert(t.key.clone()) {
+                    out.push(t);
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// Run reviewers in order; short-circuit on the first failure.
+pub struct ChainedReviewer(pub Vec<Box<dyn Reviewer>>);
+
+impl Reviewer for ChainedReviewer {
+    fn review(&self, task: &Task, result: &ExecutionResult) -> Result<ReviewVerdict> {
+        for r in &self.0 {
+            let v = r.review(task, result)?;
+            if !v.passed {
+                return Ok(v);
+            }
+        }
+        Ok(ReviewVerdict {
+            passed: true,
+            details: "all reviewers passed".into(),
+        })
+    }
+}
+
+/// Run all finalizers, returning the first error (if any).
+pub struct ChainedFinalizer(pub Vec<Box<dyn Finalizer>>);
+
+impl Finalizer for ChainedFinalizer {
+    fn finalize(&self, task: &Task, verdict: &ReviewVerdict, workdir: &Path) -> Result<()> {
+        for f in &self.0 {
+            f.finalize(task, verdict, workdir)?;
+        }
+        Ok(())
+    }
+}
+
+// --- Alternative implementations (for testing + future extension) -----------
+
+/// Runs an arbitrary shell command instead of Claude Code. Useful for tests
+/// and for codebases where the loop is "execute a script, check exit code."
+pub struct ShellExecutor {
+    pub command: String,
+}
+
+impl Executor for ShellExecutor {
+    fn execute(&self, _task: &Task, _context: &TaskContext, workdir: &Path) -> Result<ExecutionResult> {
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(&self.command)
+            .current_dir(workdir)
+            .output()
+            .context("Failed to spawn shell")?;
+        Ok(ExecutionResult {
+            success: output.status.success(),
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
+    }
+}
+
+// --- Pipeline orchestrator --------------------------------------------------
+
+/// Composes a TaskSource → TaskSelector → ContextBuilder → Executor → Reviewer
+/// → Finalizers pipeline. Holds boxed trait objects so each phase is swappable
+/// at construction.
+pub struct Pipeline {
+    pub source: Box<dyn TaskSource>,
+    pub selector: Box<dyn TaskSelector>,
+    pub context_builder: Box<dyn ContextBuilder>,
+    pub executor: Box<dyn Executor>,
+    pub reviewer: Box<dyn Reviewer>,
+    pub finalizers: Vec<Box<dyn Finalizer>>,
+}
+
+/// Outcome of a single `Pipeline::run_once` call.
+pub struct PipelineRun {
+    pub task_key: String,
+    pub verdict: ReviewVerdict,
+}
+
+impl Pipeline {
+    /// Constructs a pipeline that mirrors today's procedural `run()` behavior:
+    /// filesystem source, unblocked-first selector, default context builder,
+    /// no executor (caller must supply one), acceptance reviewer, status-update
+    /// finalizer.
+    pub fn default_for(
+        data_dir: PathBuf,
+        project_key: String,
+        executor: Box<dyn Executor>,
+    ) -> Self {
+        Self {
+            source: Box::new(FilesystemTaskSource {
+                data_dir: data_dir.clone(),
+                project_key,
+            }),
+            selector: Box::new(UnblockedFirstSelector),
+            context_builder: Box::new(DefaultContextBuilder { data_dir }),
+            executor,
+            reviewer: Box::new(AcceptanceReviewer),
+            finalizers: vec![Box::new(StatusUpdateFinalizer)],
+        }
+    }
+
+    /// One iteration: pick → context → execute → review → finalize (if passed).
+    pub fn run_once(&self, workdir: &Path) -> Result<Option<PipelineRun>> {
+        let tasks = self.source.list_tasks()?;
+        let task = match self.selector.pick_next(&tasks) {
+            Some(t) => t,
+            None => return Ok(None),
+        };
+        let context = self.context_builder.build(task, &tasks, workdir)?;
+        let result = self.executor.execute(task, &context, workdir)?;
+        let verdict = self.reviewer.review(task, &result)?;
+        if verdict.passed {
+            for f in &self.finalizers {
+                f.finalize(task, &verdict, workdir)?;
+            }
+        }
+        Ok(Some(PipelineRun {
+            task_key: task.key.clone(),
+            verdict,
+        }))
+    }
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mk_task(id: u64, key: &str, title: &str) -> Task {
+        Task {
+            id,
+            key: key.into(),
+            title: title.into(),
+            status: "todo".into(),
+            priority: "medium".into(),
+            parent: None,
+            labels: vec![],
+            module: None,
+            body: String::new(),
+            file_path: PathBuf::from("/tmp/nonexistent"),
+        }
+    }
+
+    /// Static source for tests — yields a fixed list.
+    struct StaticTaskSource(Vec<Task>);
+    impl TaskSource for StaticTaskSource {
+        fn list_tasks(&self) -> Result<Vec<Task>> {
+            Ok(self.0.clone())
+        }
+    }
+
+    struct AlwaysPassReviewer;
+    impl Reviewer for AlwaysPassReviewer {
+        fn review(&self, _task: &Task, _r: &ExecutionResult) -> Result<ReviewVerdict> {
+            Ok(ReviewVerdict {
+                passed: true,
+                details: "ok".into(),
+            })
+        }
+    }
+
+    struct AlwaysFailReviewer;
+    impl Reviewer for AlwaysFailReviewer {
+        fn review(&self, _task: &Task, _r: &ExecutionResult) -> Result<ReviewVerdict> {
+            Ok(ReviewVerdict {
+                passed: false,
+                details: "always fails".into(),
+            })
+        }
+    }
+
+    #[test]
+    fn multi_task_source_federates_and_dedupes() {
+        let a = StaticTaskSource(vec![
+            mk_task(1, "CO-1", "First"),
+            mk_task(2, "CO-2", "Second"),
+        ]);
+        let b = StaticTaskSource(vec![
+            mk_task(2, "CO-2", "Duplicate of second"), // dedup wins to first
+            mk_task(3, "EXTRA-3", "Extra from b"),
+        ]);
+        let multi = MultiTaskSource(vec![Box::new(a), Box::new(b)]);
+        let tasks = multi.list_tasks().unwrap();
+        assert_eq!(tasks.len(), 3);
+        assert_eq!(tasks[0].title, "First");
+        assert_eq!(tasks[1].title, "Second"); // first source's version wins
+        assert_eq!(tasks[2].key, "EXTRA-3");
+    }
+
+    #[test]
+    fn chained_reviewer_short_circuits_on_failure() {
+        let chain = ChainedReviewer(vec![
+            Box::new(AlwaysFailReviewer),
+            Box::new(AlwaysPassReviewer), // never reached
+        ]);
+        let task = mk_task(1, "CO-1", "x");
+        let result = ExecutionResult {
+            success: true,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let verdict = chain.review(&task, &result).unwrap();
+        assert!(!verdict.passed);
+        assert_eq!(verdict.details, "always fails");
+    }
+
+    #[test]
+    fn chained_reviewer_passes_when_all_pass() {
+        let chain = ChainedReviewer(vec![
+            Box::new(AlwaysPassReviewer),
+            Box::new(AlwaysPassReviewer),
+        ]);
+        let task = mk_task(1, "CO-1", "x");
+        let result = ExecutionResult {
+            success: true,
+            stdout: String::new(),
+            stderr: String::new(),
+        };
+        let verdict = chain.review(&task, &result).unwrap();
+        assert!(verdict.passed);
+        assert_eq!(verdict.details, "all reviewers passed");
+    }
+
+    #[test]
+    fn shell_executor_runs_command() {
+        let exec = ShellExecutor {
+            command: "echo hello-from-shell-exec".into(),
+        };
+        let task = mk_task(1, "CO-1", "x");
+        let context = TaskContext {
+            text: String::new(),
+        };
+        let tmp = std::env::temp_dir();
+        let result = exec.execute(&task, &context, &tmp).unwrap();
+        assert!(result.success);
+        assert!(result.stdout.contains("hello-from-shell-exec"));
+    }
+}
