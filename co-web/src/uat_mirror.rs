@@ -44,11 +44,7 @@ struct VaultListEntry {
 }
 
 /// Mirror prod universes to UAT. Idempotent — safe to retry.
-pub async fn mirror_prod_to_uat(
-    prod_url: &str,
-    prod_token: &str,
-    local_url: &str,
-) -> Result<()> {
+pub async fn mirror_prod_to_uat(prod_url: &str, prod_token: &str, local_url: &str) -> Result<()> {
     tracing::info!("UAT mirror: starting (prod={prod_url}, local={local_url})");
 
     let client = reqwest::Client::builder()
@@ -63,11 +59,16 @@ pub async fn mirror_prod_to_uat(
     let universes = list_prod_universes(&client, prod_url, prod_token)
         .await
         .context("list prod universes")?;
-    tracing::info!("UAT mirror: prod has {} universe(s) to consider", universes.len());
+    tracing::info!(
+        "UAT mirror: prod has {} universe(s) to consider",
+        universes.len()
+    );
 
     // 3. Mirror each one. Per-universe failures are logged and skipped.
     for u in universes {
-        if let Err(e) = mirror_one_universe(&client, prod_url, prod_token, local_url, &local_session, &u).await {
+        if let Err(e) =
+            mirror_one_universe(&client, prod_url, prod_token, local_url, &local_session, &u).await
+        {
             tracing::error!("UAT mirror: '{}' failed: {e:#}", u.key);
         }
     }
@@ -115,7 +116,10 @@ async fn mirror_one_universe(
     u: &UniverseInfo,
 ) -> Result<()> {
     // Skip system-managed universes that have their own seed paths (template, yggdrasil, dados).
-    if matches!(u.key.as_str(), "template" | "yggdrasil" | "dados" | "co-experience" | "co-dev") {
+    if matches!(
+        u.key.as_str(),
+        "template" | "yggdrasil" | "dados" | "co-experience" | "co-dev"
+    ) {
         tracing::debug!("UAT mirror: skipping system universe '{}'", u.key);
         return Ok(());
     }
@@ -161,7 +165,17 @@ async fn mirror_one_universe(
     let mut ok = 0usize;
     let mut fail = 0usize;
     for entry in &entries {
-        match copy_entry(client, prod_url, prod_token, local_url, local_session, &u.key, &entry.path).await {
+        match copy_entry(
+            client,
+            prod_url,
+            prod_token,
+            local_url,
+            local_session,
+            &u.key,
+            &entry.path,
+        )
+        .await
+        {
             Ok(()) => ok += 1,
             Err(e) => {
                 fail += 1;
@@ -169,7 +183,11 @@ async fn mirror_one_universe(
             }
         }
     }
-    tracing::info!("UAT mirror: {} -> {ok} ok, {fail} fail (of {})", u.key, entries.len());
+    tracing::info!(
+        "UAT mirror: {} -> {ok} ok, {fail} fail (of {})",
+        u.key,
+        entries.len()
+    );
     Ok(())
 }
 
@@ -195,7 +213,9 @@ async fn copy_entry(
     }
 
     let body: VaultGet = client
-        .get(format!("{prod_url}/api/v1/universes/{universe_key}/vault/{encoded_path}"))
+        .get(format!(
+            "{prod_url}/api/v1/universes/{universe_key}/vault/{encoded_path}"
+        ))
         .bearer_auth(prod_token)
         .send()
         .await?
@@ -204,7 +224,9 @@ async fn copy_entry(
         .await?;
 
     client
-        .put(format!("{local_url}/api/v1/universes/{universe_key}/vault/{encoded_path}"))
+        .put(format!(
+            "{local_url}/api/v1/universes/{universe_key}/vault/{encoded_path}"
+        ))
         .header("cookie", format!("session={local_session}"))
         .header("content-type", "text/markdown")
         .body(body.content)
