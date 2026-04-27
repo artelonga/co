@@ -1,0 +1,22 @@
+[package]
+name = "co-auto"
+version = "0.1.0"
+edition = "2024"
+description = "co-auto — automated task execution pipeline (developer tooling, NOT part of the CO scaffold)"
+license = "MIT"
+repository = "https://github.com/artelonga/co"
+publish = false
+
+[[bin]]
+name = "co-auto"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true }
+colored = "2.0"
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+whoami = "1"
+dirs = "5"

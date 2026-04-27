@@ -9,7 +9,6 @@
 //! - `co repl` - Interactive mode
 
 use clap::{Parser, Subcommand};
-use colored::Colorize;
 
 mod commands;
 mod docs;
@@ -30,68 +29,6 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Automated task execution pipeline
-    ///
-    /// Picks the next unblocked task, builds multi-layer context,
-    /// launches Claude Code with --dangerously-skip-permissions,
-    /// reviews against acceptance criteria, and cycles.
-    ///
-    /// Examples:
-    ///   co auto --space gp
-    ///   co auto --space gp --task GP-2
-    ///   co auto --space gp --cycle --max-tasks 3
-    ///   co auto --space gp --dry-run
-    ///   co auto --space gp --teams
-    Auto {
-        /// Target space containing tasks
-        #[arg(short, long, default_value = "gp")]
-        space: String,
-
-        /// Execute a specific task (e.g., GP-2)
-        #[arg(short, long)]
-        task: Option<String>,
-
-        /// Cycle through tasks continuously
-        #[arg(long)]
-        cycle: bool,
-
-        /// Dry run (show what would execute without running)
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Maximum tasks to process
-        #[arg(long)]
-        max_tasks: Option<usize>,
-
-        /// Enable Claude Code agent teams for parallel execution
-        #[arg(long)]
-        teams: bool,
-
-        /// Model to use (default: sonnet)
-        #[arg(long, default_value = "sonnet")]
-        model: String,
-
-        /// Timeout per task in seconds
-        #[arg(long, default_value = "600")]
-        timeout: u64,
-
-        /// Working directory for Claude Code
-        #[arg(short, long)]
-        workdir: Option<String>,
-
-        /// Explicit data directory (overrides workspace detection)
-        #[arg(long, env = "CO_DATA_DIR")]
-        data_dir: Option<String>,
-
-        /// CO workspace root (alternative to --data-dir)
-        #[arg(long, env = "CO_WORKSPACE")]
-        workspace: Option<String>,
-
-        /// Run headless (invisible -p mode instead of interactive session)
-        #[arg(long)]
-        headless: bool,
-    },
-
     /// Initialize a new space
     Init {
         /// Space name (e.g., "private", "work")
@@ -959,39 +896,6 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Auto {
-            space,
-            task,
-            cycle,
-            dry_run,
-            max_tasks,
-            teams,
-            model,
-            timeout,
-            workdir,
-            data_dir,
-            workspace,
-            headless,
-        } => {
-            let config = commands::auto::AutoConfig {
-                space,
-                task_id: task,
-                cycle,
-                dry_run,
-                max_tasks,
-                teams,
-                model,
-                timeout_secs: timeout,
-                workdir,
-                data_dir,
-                workspace,
-                interactive: !headless,
-            };
-            if let Err(e) = commands::auto::run(config) {
-                eprintln!("{}: {}", "error".red().bold(), e);
-                std::process::exit(1);
-            }
-        }
         Commands::Init { name, check } => {
             if check {
                 commands::init::check_unprotected_spaces();

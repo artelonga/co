@@ -483,6 +483,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "co-auto"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "colored",
+ "dirs",
+ "serde_json",
+ "serde_yaml",
+ "whoami",
+]
+
+[[package]]
 name = "co-cli"
 version = "0.28.0"
 dependencies = [
