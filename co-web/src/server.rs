@@ -431,12 +431,16 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result
 /// - Clean up anonymous universes from the previous session.
 /// - Seed `{data_dir}/co/` from `/app/seed-co/` if the directory is missing
 ///   (so the CO dev board has content on first boot).
-fn uat_startup(config: &WebConfig) {
+///
+/// Returns `true` if the reset flag was processed during this startup (CO-82
+/// uses this to gate the prod-mirror task).
+fn uat_startup(config: &WebConfig) -> bool {
     let data_dir = std::path::Path::new(&config.data_dir);
     let reset_flag = data_dir.join("uat-reset.flag");
+    let reset_just_happened = reset_flag.exists();
 
     // --- Reset flag handling ---
-    if reset_flag.exists() {
+    if reset_just_happened {
         tracing::info!("UAT: reset flag detected — resetting database...");
 
         // 0. Delete flag FIRST so a crash/restart doesn't re-trigger reset.
@@ -541,6 +545,8 @@ fn uat_startup(config: &WebConfig) {
             );
         }
     }
+
+    reset_just_happened
 }
 
 /// Start the web server with the given config.
@@ -587,10 +593,12 @@ pub async fn start_server(config: WebConfig) {
     }
 
     // CO-44: UAT-specific startup — runs only when CO_ENV=uat.
-    if config.is_uat() {
+    let uat_reset_just_happened = if config.is_uat() {
         tracing::info!("UAT mode enabled (CO_ENV=uat)");
-        uat_startup(&config);
-    }
+        uat_startup(&config)
+    } else {
+        false
+    };
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
     let seed_path = std::path::Path::new(&config.data_dir).join("seed.sql");
@@ -662,6 +670,30 @@ pub async fn start_server(config: WebConfig) {
 
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);
+
+    // CO-82: spawn UAT mirror task if reset just happened and env is configured.
+    // Runs in the background after the server binds; failures are logged, not fatal.
+    if uat_reset_just_happened
+        && std::env::var("UAT_MIRROR_PROD").is_ok_and(|v| v == "true" || v == "1")
+    {
+        let prod_url = std::env::var("UAT_PROD_URL").unwrap_or_default();
+        let prod_token = std::env::var("UAT_PROD_TOKEN").unwrap_or_default();
+        let local_url = format!("http://localhost:{}", config.port);
+        if !prod_url.is_empty() && !prod_token.is_empty() {
+            tokio::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                if let Err(e) =
+                    crate::uat_mirror::mirror_prod_to_uat(&prod_url, &prod_token, &local_url).await
+                {
+                    tracing::error!("UAT mirror failed: {e:#}");
+                }
+            });
+        } else {
+            tracing::warn!(
+                "UAT_MIRROR_PROD set but UAT_PROD_URL or UAT_PROD_TOKEN missing — skipping mirror"
+            );
+        }
+    }
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
     axum::serve(listener, app)

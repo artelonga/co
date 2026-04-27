@@ -24,6 +24,7 @@ pub mod server;
 pub mod storage;
 pub mod telemetry;
 pub mod theme_engine;
+pub mod uat_mirror;
 pub mod uat_routes;
 pub mod universe_routes;
 pub mod universo;
