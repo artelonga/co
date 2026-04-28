@@ -79,6 +79,7 @@ Why before 2.0: the `tier` cleanup is multi-user-readiness. Shipping CO-77 shard
 ### 1.21.0 (or 1.x sweep) — "small features pile"
 
 Floating release for whichever of these land first:
+- **CO-91 Phase 1** — `co sync push` subcommand replaces `scripts/seed-prod-universes.sh`. Same behavior, first-class CLI surface. Spec: `work/co/CO-91.md`.
 - **CO-83 polish** — wire `renderMermaidBlocks` into other render paths (board cards, content page, template universe). Currently only the entry zoom view triggers it.
 - **CO-78 (lite)** — minimal SQLite-backed job queue for non-blocking ops; precedes CO-72 doc generators
 - **CO-79 (lite)** — manifest LRU + theme.css ETag (the no-Redis subset, valid before CO-77)
@@ -149,7 +150,7 @@ Out of scope (3.x+):
 
 ### 3.1+ — "ecosystem" (additive on top of 3.0)
 
-- **CO-51** `co sync` CLI — was deferred from v1; once `.co` + layers + op log are live, this becomes meaningful as a single-arg `co sync push|pull|watch`
+- **CO-91 Phases 2-4** — `co sync` multi-deployment + `co sync watch` + content-negotiated `.co` wire format. CO-91 supersedes the original CO-51 "co sync" idea; the post-pivot architecture (jj-tracked, layer-composed, token-authed) is the correct shape
 - **CO-58** desktop tray sync app (INFRA-2)
 - **CO-69** PWA offline (INFRA-4)
 - **CO-80 (full)** per-tier rate limiting + quota
@@ -219,4 +220,5 @@ Branches stay short-lived; merge to main and push directly. No long-lived releas
 | CO-88 | `work/co/CO-88.md` | todo | 3.0.0 (CI gate from then on) |
 | CO-89 | `work/co/CO-89.md` | **scope expanded** — multi-universe git ingestion, not just co-dev | 2.1+ (priority: critical within 2.x) |
 | CO-90 | `work/co/CO-90.md` | todo (preview shipped 1.18.1) | 1.20.0 |
+| CO-91 | `work/co/CO-91.md` | todo (script prototype shipped) | 1.21.0 (Phase 1) → 2.0+ (Phases 2-4) |
 | CO-77-PLAN | `work/co/CO-77-PLAN.md` | planning | 2.0.0 |
