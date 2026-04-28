@@ -221,4 +221,6 @@ Branches stay short-lived; merge to main and push directly. No long-lived releas
 | CO-89 | `work/co/CO-89.md` | **scope expanded** — multi-universe git ingestion, not just co-dev | 2.1+ (priority: critical within 2.x) |
 | CO-90 | `work/co/CO-90.md` | todo (preview shipped 1.18.1) | 1.20.0 |
 | CO-91 | `work/co/CO-91.md` | todo (script prototype shipped) | 1.21.0 (Phase 1) → 2.0+ (Phases 2-4) |
+| CO-92 | `work/co/CO-92.md` | shipped 1.19.0 (Phase 1) | 1.19.0 |
+| CO-93 | `work/co/CO-93.md` | todo — universe types + sync + deployment unified architecture | 1.20.0 (visibility refactor) → 3.0 (encryption) → 3.1 (proposals) → 3.2 (static export) |
 | CO-77-PLAN | `work/co/CO-77-PLAN.md` | planning | 2.0.0 |
