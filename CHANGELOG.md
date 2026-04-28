@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.4] — 2026-04-28
+
+### Fixed — SPA login form now uses CO-85's universal `/api/v1/auth/password-login`
+
+- `co-web/static/variants/a/app.js`: replaced the call to `/api/v1/auth/uat-login` with `/api/v1/auth/password-login`. The UAT-only endpoint returns 404 in prod by design, which is why the SPA login form failed silently in production. The new endpoint works on both UAT (with `yuri@uat.local`/`uat`) and prod (with the env-seeded admin email/password), so the same code path covers all deployments.
+- Same request/response shape; no other UI changes.
+
+### Credential reference
+
+- **UAT** browser login at `https://co-artelonga-uat.fly.dev`: `yuri@uat.local` / `uat`
+- **Prod** browser login at `https://co-artelonga.fly.dev`: `yuri@artelonga.com.br` / the password set via `CO_SEED_ADMIN_PASSWORD_HASH`
+
 ## [1.18.3] — 2026-04-27
 
 ### Fixed — CO-82: throttle mirror to stay under prod's 60 req/min cap

@@ -505,19 +505,20 @@
             await apiFetch('/api/v1/auth/logout', { method: 'POST' }, true);
         },
         async loginWithPassword(usuario, senha) {
-            // If it looks like an email, try UAT login first (CO-44)
+            // If it looks like an email, use the universal password-login (CO-85).
+            // Works on both UAT (yuri@uat.local/uat) and prod (yuri@artelonga.com.br/<password>).
+            // The legacy uat-login endpoint is a 404 in prod by design; password-login replaces it.
             if (usuario.includes('@')) {
-                const uatResp = await apiFetch('/api/v1/auth/uat-login', {
+                const resp = await apiFetch('/api/v1/auth/password-login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ email: usuario, password: senha }),
                 }, true);
-                if (uatResp && uatResp.user_id) {
-                    // Normalize response shape to match quilombo login
-                    return { usuario: uatResp.display_name || uatResp.email, ...uatResp };
+                if (resp && resp.user_id) {
+                    return { usuario: resp.display_name || resp.email, ...resp };
                 }
             }
-            // Fallback: quilombo legacy username/password login
+            // Fallback: quilombo legacy username/password login (no @ in identifier)
             return apiFetch('/api/v1/quilombo/auth/login', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
