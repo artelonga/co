@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.5] — 2026-04-28
+
+### Fixed — seeded admin sees content on login (universe memberships auto-set)
+
+After CO-85 + CO-90 (preview) shipped, a freshly-seeded prod admin (`yuri@artelonga.com.br`) logged in to an empty SPA dashboard because `list_universes_for_user` returns only owned/member/subscribed universes — and the seed didn't make the new user a member of anything.
+
+- `Storage::ensure_admin_universe_memberships(email)`: idempotent post-seed step that adds the seeded admin as `admin` member of every existing system universe (`template`, `quilomboaraucaria`, `yggdrasil`, `dados`, `co-dev`, `co-experience`). Skips universes that don't exist yet.
+- `co-web/src/server.rs::start_server`: calls `ensure_admin_universe_memberships` immediately after `seed_admin_user_from_env`, ensuring it runs on every boot (idempotent — `INSERT OR IGNORE`).
+- After this deploy + a Fly machine restart, prod yuri sees system universes in their sidebar on next login.
+
+This is still CO-90 preview territory; the full ownership transfer (yuri becomes `owner_id`, not just member) ships in CO-90 for 1.20.0.
+
 ## [1.18.4] — 2026-04-28
 
 ### Fixed — SPA login form now uses CO-85's universal `/api/v1/auth/password-login`

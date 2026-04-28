@@ -603,6 +603,8 @@ pub async fn start_server(config: WebConfig) {
     };
 
     // CO-85: seed admin user from env (idempotent, runs in any env).
+    // CO-90 (preview): also ensure the seeded admin is a member of every
+    // existing system universe so the SPA shows them post-login.
     {
         let email = std::env::var("CO_SEED_ADMIN_EMAIL").ok();
         let hash = std::env::var("CO_SEED_ADMIN_PASSWORD_HASH").ok();
@@ -610,6 +612,9 @@ pub async fn start_server(config: WebConfig) {
             let mut storage = Storage::new(&config.data_dir);
             if let Err(e) = storage.seed_admin_user_from_env(&email, &hash) {
                 tracing::error!("Failed to seed admin user from env: {e}");
+            }
+            if let Err(e) = storage.ensure_admin_universe_memberships(&email) {
+                tracing::error!("Failed to ensure admin universe memberships: {e}");
             }
         }
     }

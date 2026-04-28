@@ -1859,6 +1859,73 @@ impl Storage {
         Ok(())
     }
 
+    /// CO-90 (preview): make the seeded admin user a member of every existing
+    /// system-owned universe so the SPA shows them in the user's sidebar after
+    /// login. Idempotent (`INSERT OR IGNORE`). Skips universes that don't
+    /// exist yet — call this AFTER all universe seeds.
+    ///
+    /// Without this, a freshly-seeded admin logs in to an empty dashboard
+    /// because `list_universes_for_user` only returns owned + member +
+    /// subscribed universes.
+    pub fn ensure_admin_universe_memberships(&mut self, email: &str) -> anyhow::Result<()> {
+        let email = email.trim().to_lowercase();
+        let user_id: String = match self.conn.query_row(
+            "SELECT id FROM users WHERE email = ?1",
+            params![email],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => {
+                tracing::warn!(
+                    "ensure_admin_universe_memberships: no user for {email} (seed first)"
+                );
+                return Ok(());
+            }
+        };
+
+        // System universes the seeded admin should see immediately.
+        // Order is irrelevant; `INSERT OR IGNORE` handles repeats.
+        let system_keys = [
+            "template",
+            "quilomboaraucaria",
+            "yggdrasil",
+            "dados",
+            "co-dev",
+            "co-experience",
+        ];
+        let now = Utc::now().to_rfc3339();
+        let mut added = 0usize;
+        for key in system_keys {
+            // Skip universes that don't exist (haven't been seeded yet).
+            let exists: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM universes WHERE key = ?1",
+                    params![key],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            if !exists {
+                continue;
+            }
+            let n = self.conn.execute(
+                "INSERT OR IGNORE INTO universe_members \
+                 (universe_key, user_id, role, joined_at) \
+                 VALUES (?1, ?2, 'admin', ?3)",
+                params![key, user_id, now],
+            )?;
+            if n > 0 {
+                added += 1;
+            }
+        }
+        if added > 0 {
+            tracing::info!(
+                "ensure_admin_universe_memberships: added {email} to {added} universe(s) as admin"
+            );
+        }
+        Ok(())
+    }
+
     /// Remove all anonymous universes (keys starting with `anon-`) from the
     /// database and from the filesystem. Called on UAT startup so each session
     /// starts from a clean slate.
