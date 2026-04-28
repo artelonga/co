@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Timeline — Co</title>
+<style>
+:root {
+    --bg: #0d0d0e;
+    --bg-soft: #15161a;
+    --text: #e8e6e1;
+    --text-muted: #888;
+    --accent: #7fb3a8;
+    --accent-strong: #a8d8c8;
+    --line: #2a2b30;
+    --grid: #1a1b1f;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
+
+#header {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 10;
+    padding: 12px 24px; background: linear-gradient(180deg, rgba(13,13,14,0.95) 0%, rgba(13,13,14,0) 100%);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    pointer-events: none;
+}
+#header h1 { font-size: 14px; font-weight: 500; margin: 0; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); pointer-events: auto; }
+#header .right { font-size: 12px; color: var(--text-muted); pointer-events: auto; }
+#header a { color: var(--accent); text-decoration: none; }
+
+#timeline-svg { display: block; width: 100vw; height: 100vh; cursor: grab; user-select: none; }
+#timeline-svg.dragging { cursor: grabbing; }
+
+#focus-readout {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    padding: 8px 16px; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 6px; font-size: 13px; color: var(--text); z-index: 5;
+    font-variant-numeric: tabular-nums;
+}
+#focus-readout .label { color: var(--text-muted); margin-right: 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+
+#hint {
+    position: absolute; bottom: 24px; right: 24px; z-index: 5;
+    font-size: 11px; color: var(--text-muted); max-width: 280px; text-align: right;
+}
+#hint code { background: var(--bg-soft); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+
+#error { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 24px; background: var(--bg-soft); border: 1px solid #c33; border-radius: 8px; max-width: 480px; }
+.event-tooltip { position: absolute; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; max-width: 360px; pointer-events: none; z-index: 20; font-size: 13px; line-height: 1.5; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+.event-tooltip .title { font-size: 14px; font-weight: 600; margin: 0 0 6px 0; color: var(--accent-strong); }
+.event-tooltip .date { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.event-tooltip .description { color: var(--text); margin: 0; }
+</style>
+</head>
+<body>
+
+<div id="header">
+    <h1>Timeline</h1>
+    <div class="right">
+        <span id="event-count">—</span> events from <code id="universe-key">…</code>
+        · <a href="#" id="reset-btn">reset</a>
+    </div>
+</div>
+
+<svg id="timeline-svg" preserveAspectRatio="none"></svg>
+
+<div id="focus-readout">
+    <span class="label">focus</span><span id="focus-year">—</span>
+</div>
+
+<div id="hint">
+    drag horizontally to pan · scroll to zoom · click event for detail<br>
+    near focus: 1 px ≈ 1 year · far: log10 scale
+</div>
+
+<div id="error" style="display:none"></div>
+
+<script>
+(function() {
+'use strict';
+
+// ===== Data fetch =====
+
+const params = new URLSearchParams(location.search);
+const universe = params.get('u') || 'co-dev';
+const initialYear = parseFloat(params.get('y'));
+document.getElementById('universe-key').textContent = universe;
+
+async function fetchEvents() {
+    const resp = await fetch(`/api/v1/universes/${encodeURIComponent(universe)}/entries?type=event`, {
+        credentials: 'include',
+    });
+    if (resp.status === 401) {
+        showError('You need to log in to view events from this universe.<br><a href="/co" style="color:var(--accent)">Go to login</a>');
+        return [];
+    }
+    if (resp.status === 404) {
+        showError(`Universe <code>${universe}</code> not found.`);
+        return [];
+    }
+    if (!resp.ok) {
+        showError(`Failed to load events: HTTP ${resp.status}`);
+        return [];
+    }
+    const data = await resp.json();
+    const entries = data.entries || data || [];
+
+    // Parse frontmatter and filter to events with a usable date.
+    return entries
+        .map(e => {
+            // frontmatter may be in `frontmatter_json` (string), `frontmatter` (obj), or in-line
+            let fm = {};
+            if (typeof e.frontmatter === 'object' && e.frontmatter) fm = e.frontmatter;
+            else if (e.frontmatter_json) {
+                try { fm = JSON.parse(e.frontmatter_json); } catch (_) {}
+            }
+            const year = parseDateYear(fm);
+            if (year === null) return null;
+            return {
+                path: e.path,
+                title: fm.title || e.title || e.path,
+                year,
+                date: fm.date || null,
+                time: fm.time || null,
+                description: fm.description || '',
+                body: e.body || '',
+            };
+        })
+        .filter(Boolean)
+        .sort((a, b) => a.year - b.year);
+}
+
+function parseDateYear(fm) {
+    // Prefer explicit `date_year` (signed integer); fallback to ISO `date`.
+    if (typeof fm.date_year === 'number') return fm.date_year;
+    if (typeof fm.date_year === 'string') {
+        const n = parseFloat(fm.date_year);
+        if (!isNaN(n)) return n;
+    }
+    if (typeof fm.date === 'string') {
+        // Try ISO date YYYY-MM-DD or signed YYYYY etc.
+        const m = fm.date.match(/^(-?\d+)/);
+        if (m) {
+            const y = parseInt(m[1], 10);
+            if (!isNaN(y)) return y;
+        }
+    }
+    return null;
+}
+
+function showError(msg) {
+    const el = document.getElementById('error');
+    el.innerHTML = msg;
+    el.style.display = 'block';
+}
+
+// ===== Coordinate transform =====
+//
+// Linear near focus, log10 outside.
+//
+//   |delta| < LINEAR  → pixel = sign(delta) * |delta| * LINEAR_SCALE
+//   |delta| >= LINEAR → pixel = sign(delta) * (LINEAR*LINEAR_SCALE + log10(|delta|-LINEAR+1) * LOG_SCALE)
+
+const LINEAR_HALF_SPAN = 100;     // years on each side of focus that scale linearly
+const LINEAR_SCALE = 4;            // pixels per year in linear region
+const LOG_SCALE = 90;              // pixels per decade in logarithmic region
+const FOCUS_OFFSET_X = 0;          // focus is at viewport center
+
+const state = {
+    focus: isNaN(initialYear) ? 2026 : initialYear,
+    width: 0,
+    height: 0,
+    events: [],
+    hoveredEvent: null,
+};
+
+function yearToPixel(year) {
+    const delta = year - state.focus;
+    const sign = delta < 0 ? -1 : 1;
+    const absDelta = Math.abs(delta);
+    if (absDelta < LINEAR_HALF_SPAN) {
+        return sign * absDelta * LINEAR_SCALE;
+    }
+    const linearMax = LINEAR_HALF_SPAN * LINEAR_SCALE;
+    const logPart = Math.log10(absDelta - LINEAR_HALF_SPAN + 1);
+    return sign * (linearMax + logPart * LOG_SCALE);
+}
+
+function pixelToYear(px) {
+    // Inverse — used for hit-testing the user's drag.
+    const sign = px < 0 ? -1 : 1;
+    const absPx = Math.abs(px);
+    const linearMax = LINEAR_HALF_SPAN * LINEAR_SCALE;
+    if (absPx < linearMax) {
+        return state.focus + sign * absPx / LINEAR_SCALE;
+    }
+    const logPx = absPx - linearMax;
+    const absDelta = Math.pow(10, logPx / LOG_SCALE) + LINEAR_HALF_SPAN - 1;
+    return state.focus + sign * absDelta;
+}
+
+// ===== Rendering =====
+
+const svg = document.getElementById('timeline-svg');
+
+function fmtYear(y) {
+    if (y >= 1e9) return (y / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' Gya'; // Giga-years (post)
+    if (y <= -1e9) return (-y / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' Gya BP';
+    if (y >= 1e6) return (y / 1e6).toFixed(2).replace(/\.?0+$/, '') + ' Mya';
+    if (y <= -1e6) return (-y / 1e6).toFixed(2).replace(/\.?0+$/, '') + ' Mya BP';
+    if (y >= 10000) return (y / 1000).toFixed(1).replace(/\.0$/, '') + ' kya';
+    if (y <= -10000) return (-y / 1000).toFixed(1).replace(/\.0$/, '') + ' kya BP';
+    if (y < 0) return Math.abs(y).toLocaleString() + ' BCE';
+    return y.toLocaleString() + ' CE';
+}
+
+function fmtFocus(y) {
+    // Friendlier label for the focus readout
+    if (Math.abs(y) >= 1000000) return Math.round(y).toLocaleString() + ' (' + fmtYear(y) + ')';
+    if (Math.abs(y) < 10000) return Math.round(y).toLocaleString();
+    return Math.round(y).toLocaleString() + ' (' + fmtYear(y) + ')';
+}
+
+function render() {
+    const w = state.width;
+    const h = state.height;
+    const cx = w / 2;
+    const yLine = h / 2;
+
+    // SVG dynamic viewBox
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+    // Build content
+    const parts = [];
+
+    // Background grid: ticks at decade marks logarithmically
+    const tickYears = computeTickYears();
+    for (const ty of tickYears) {
+        const x = cx + yearToPixel(ty);
+        if (x < -100 || x > w + 100) continue;
+        const isMajor = isMajorTick(ty);
+        const lineColor = isMajor ? 'var(--line)' : 'var(--grid)';
+        const labelColor = isMajor ? 'var(--text-muted)' : 'var(--grid)';
+        parts.push(`<line x1="${x}" x2="${x}" y1="0" y2="${h}" stroke="${lineColor}" stroke-width="1"/>`);
+        if (isMajor) {
+            parts.push(`<text x="${x}" y="${h - 8}" fill="${labelColor}" font-size="10" text-anchor="middle">${escapeXml(fmtYear(ty))}</text>`);
+        }
+    }
+
+    // The horizontal axis
+    parts.push(`<line x1="0" x2="${w}" y1="${yLine}" y2="${yLine}" stroke="var(--text-muted)" stroke-width="1"/>`);
+
+    // Focus marker (red line at viewport center)
+    parts.push(`<line x1="${cx}" x2="${cx}" y1="${yLine - 30}" y2="${yLine + 30}" stroke="var(--accent)" stroke-width="2"/>`);
+    parts.push(`<circle cx="${cx}" cy="${yLine}" r="5" fill="var(--accent)"/>`);
+
+    // Events
+    state.events.forEach((ev, i) => {
+        const x = cx + yearToPixel(ev.year);
+        if (x < -50 || x > w + 50) return;
+        const stagger = (i % 3) * 22;
+        const evY = yLine - 50 - stagger;
+        parts.push(`<line x1="${x}" x2="${x}" y1="${yLine}" y2="${evY + 10}" stroke="var(--accent-strong)" stroke-width="1" opacity="0.5"/>`);
+        parts.push(`<circle cx="${x}" cy="${yLine}" r="6" fill="var(--accent-strong)" data-event-idx="${i}" class="ev-dot" style="cursor:pointer"/>`);
+        parts.push(`<text x="${x + 10}" y="${evY + 4}" fill="var(--text)" font-size="13" font-weight="500" data-event-idx="${i}">${escapeXml(truncate(ev.title, 50))}</text>`);
+        parts.push(`<text x="${x + 10}" y="${evY + 20}" fill="var(--text-muted)" font-size="10">${escapeXml(fmtYear(ev.year))}</text>`);
+    });
+
+    svg.innerHTML = parts.join('');
+
+    // Update focus readout
+    document.getElementById('focus-year').textContent = fmtFocus(state.focus);
+}
+
+function computeTickYears() {
+    // Generate ticks adapted to the current focus + transform.
+    // Strategy: emit ticks at 0, ±1, ±10, ±100, ... powers of 10 from focus,
+    // plus dense ticks every year in the linear region.
+    const ticks = [];
+    // Linear region: every 10 years if room
+    for (let dy = -LINEAR_HALF_SPAN; dy <= LINEAR_HALF_SPAN; dy += 10) {
+        ticks.push(state.focus + dy);
+    }
+    // Log region: powers of 10 (and 2x, 5x for richer grid)
+    for (let exp = 2; exp <= 10; exp++) {
+        const base = Math.pow(10, exp);
+        for (const m of [1, 2, 5]) {
+            ticks.push(state.focus + base * m);
+            ticks.push(state.focus - base * m);
+        }
+    }
+    return ticks;
+}
+
+function isMajorTick(y) {
+    const dy = Math.abs(y - state.focus);
+    if (dy === 0) return true;
+    if (dy < LINEAR_HALF_SPAN) return dy % 50 === 0;
+    // Log: only powers of 10
+    const log = Math.log10(dy);
+    return Math.abs(log - Math.round(log)) < 0.001;
+}
+
+function truncate(s, n) { return s.length <= n ? s : s.slice(0, n - 1) + '…'; }
+function escapeXml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ===== Interaction =====
+
+let dragging = false;
+let dragStartX = 0;
+let dragStartFocus = 0;
+
+svg.addEventListener('mousedown', e => {
+    dragging = true;
+    dragStartX = e.clientX;
+    dragStartFocus = state.focus;
+    svg.classList.add('dragging');
+    hideTooltip();
+});
+
+window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const dx = e.clientX - dragStartX;
+    // Pan via inverse pixelToYear from dragStartFocus
+    // We're at center cx; mouse moves dx pixels right = focus shifts left
+    state.focus = dragStartFocus - pixelToYearDelta(dx);
+    render();
+});
+
+window.addEventListener('mouseup', () => {
+    dragging = false;
+    svg.classList.remove('dragging');
+});
+
+function pixelToYearDelta(px) {
+    // How many years does `px` pixels represent at current scale, near the center?
+    // Use linear-region scale for responsive panning.
+    const sign = px < 0 ? -1 : 1;
+    const absPx = Math.abs(px);
+    const linearMax = LINEAR_HALF_SPAN * LINEAR_SCALE;
+    if (absPx < linearMax) return sign * absPx / LINEAR_SCALE;
+    const logPx = absPx - linearMax;
+    return sign * (Math.pow(10, logPx / LOG_SCALE) + LINEAR_HALF_SPAN - 1);
+}
+
+svg.addEventListener('wheel', e => {
+    e.preventDefault();
+    // Vertical wheel: pan along the timeline (keep things simple — scroll = pan)
+    // Horizontal trackpad swipe also lands here on macOS as deltaX
+    const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
+    state.focus += pixelToYearDelta(dx) * 0.5;
+    render();
+}, { passive: false });
+
+svg.addEventListener('mousemove', e => {
+    const target = e.target;
+    if (target.tagName === 'circle' && target.classList.contains('ev-dot')) {
+        const idx = parseInt(target.getAttribute('data-event-idx'), 10);
+        showTooltip(state.events[idx], e.clientX, e.clientY);
+    } else {
+        hideTooltip();
+    }
+});
+
+let tooltipEl = null;
+function showTooltip(ev, x, y) {
+    if (!tooltipEl) {
+        tooltipEl = document.createElement('div');
+        tooltipEl.className = 'event-tooltip';
+        document.body.appendChild(tooltipEl);
+    }
+    tooltipEl.innerHTML = `
+        <div class="title">${escapeXml(ev.title)}</div>
+        <div class="date">${escapeXml(fmtYear(ev.year))}${ev.time ? ' · ' + escapeXml(ev.time) : ''}</div>
+        <p class="description">${escapeXml(ev.description || ev.body.slice(0, 200))}</p>
+    `;
+    tooltipEl.style.left = Math.min(x + 16, state.width - 380) + 'px';
+    tooltipEl.style.top = (y + 16) + 'px';
+}
+function hideTooltip() {
+    if (tooltipEl) tooltipEl.remove();
+    tooltipEl = null;
+}
+
+document.getElementById('reset-btn').addEventListener('click', e => {
+    e.preventDefault();
+    state.focus = 2026;
+    render();
+});
+
+// ===== Resize handling =====
+
+function handleResize() {
+    state.width = window.innerWidth;
+    state.height = window.innerHeight;
+    render();
+}
+window.addEventListener('resize', handleResize);
+
+// ===== Init =====
+
+(async function init() {
+    handleResize();
+    state.events = await fetchEvents();
+    document.getElementById('event-count').textContent = state.events.length;
+    if (state.events.length === 0 && !document.getElementById('error').style.display) {
+        showError(`No events with <code>type: event</code> found in <code>${universe}</code>.<br>Add some markdown files with <code>type: event</code> + <code>date_year: &lt;signed integer&gt;</code> in their frontmatter.`);
+    }
+    render();
+})();
+
+})();
+</script>
+
+</body>
+</html>

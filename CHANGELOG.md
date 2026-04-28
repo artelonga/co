@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] — 2026-04-28
+
+### Added — CO-92: unified timeline view with linear+log scrolling
+
+- `co-web/static/shared/timeline.html` (~470 lines): standalone HTML/SVG/JS timeline page that renders events from any universe on a horizontal time axis. No framework, no build step. Visit `/shared/timeline.html?u=<universe>`.
+- **Coordinate transform**: linear within ±100 years of focus (4 px/year), logarithmic beyond (90 px/decade). One 1920px screen spans 4.6 Gya → 302,026 CE simultaneously while keeping year-scale resolution near the present.
+- **Date format**: events use `type: event` + `date_year: <signed integer>` in frontmatter. Optional `date: YYYY-MM-DD` and `time: HH:MM` for modern events.
+- **Interactions**: drag to pan, mouse wheel/trackpad scroll to pan, hover dots for tooltips, reset button.
+- **Friendly year labels**: `4.6 Gya BP` (4.6 billion years before present), `300 kya BP` (300,000), `2026 CE`, `302026 CE`.
+- 4 sample events under `work/timeline-samples/` covering Earth formation (-4.6 Gya), *Homo sapiens* emergence (-300 kya), now (2026), and +300 kya (302,026).
+- `scripts/seed-timeline-events.sh`: uploads samples to a target universe via `co-token` auth.
+
+Spec: `work/co/CO-92.md`. Phase 1 (standalone page, this release). Phases 2-4 (SPA integration, CO-73 / CO-89 wiring) deferred to follow-ups.
+
 ## [1.18.5] — 2026-04-28
 
 ### Fixed — seeded admin sees content on login (universe memberships auto-set)
