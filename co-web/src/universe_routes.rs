@@ -301,6 +301,73 @@ pub async fn update_universe(
     })))
 }
 
+/// POST /api/v1/universes/:slug/duplicate — create an owner-controlled copy of
+/// a universe (CO-95 preview). Unlike `/clone` (which is anon-friendly and
+/// gated on the source being public/template), `/duplicate` requires
+/// authentication and lets the caller copy ANY universe they have read access
+/// to (owner, member, or public).
+///
+/// The new universe is owned by the caller, defaults to `private`, and is a
+/// snapshot of the source's entries at the moment of duplication. Future ops
+/// on either side are independent — no shared state. (Lineage tracking via
+/// `parent_universe_key` is CO-95 territory and not in this preview.)
+///
+/// Use case: `quilomboaraucaria` → `quilombo-blog` for parallel testing,
+/// scalability analysis, or a materialized "dev branch" of any universe.
+pub async fn duplicate_universe(
+    State(state): State<AppState>,
+    Path(source_slug): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CloneUniverse>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Unauthorized("Authentication required".into()))?;
+
+    validate_universe_key(&body.key)?;
+    if body.name.trim().is_empty() {
+        return Err(AppError::BadRequest("Universe name cannot be empty".into()));
+    }
+    if body.name.len() > 100 {
+        return Err(AppError::BadRequest(
+            "Universe name must be 100 characters or fewer".into(),
+        ));
+    }
+
+    // Verify source exists and caller has read access (owner, member,
+    // template, or public-subscribable).
+    {
+        let storage = lock_storage(&state)?;
+        let source = storage.get_universe(&source_slug).ok_or_else(|| {
+            AppError::NotFound(format!("Universe '{}' not found", source_slug))
+        })?;
+        let has_access = source.owner_id == user_id
+            || source.is_template
+            || source.is_public
+            || storage.is_universe_member(&source_slug, &user_id);
+        if !has_access {
+            return Err(AppError::Forbidden(
+                "Not authorized to duplicate this universe".into(),
+            ));
+        }
+        if storage.get_universe(&body.key).is_some() {
+            return Err(AppError::Conflict(format!(
+                "Universe key '{}' is already taken",
+                body.key
+            )));
+        }
+    }
+
+    let universe = lock_storage(&state)?.clone_universe(
+        &source_slug,
+        &body.key,
+        &body.name,
+        &body.description,
+        &user_id,
+    )?;
+
+    Ok((StatusCode::CREATED, Json(universe)))
+}
+
 // POST /api/v1/universes/:slug/clone — clone a universe (no auth required)
 pub async fn clone_universe(
     State(state): State<AppState>,
@@ -954,6 +1021,9 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/theme.css", get(get_universe_theme_css))
         .route("/{slug}/projects", get(list_universe_projects))
         .route("/{slug}/clone", post(clone_universe))
+        // CO-95 preview: owner-controlled duplication. Auth resolved inline
+        // (accepts JWT or API token) since this isn't behind require_auth.
+        .route("/{slug}/duplicate", post(duplicate_universe))
         // CO-50: git config read + webhook (no auth)
         .route("/{slug}/git", get(get_universe_git))
         .route("/{slug}/webhook", post(webhook_sync));

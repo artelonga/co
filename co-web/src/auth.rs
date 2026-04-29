@@ -93,6 +93,45 @@ pub fn jwt_secret() -> String {
     std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
 }
 
+/// Resolve the calling user_id from a request's headers, accepting either:
+///   - Bearer JWT (or session cookie)
+///   - Long-lived API token (CO-35) — looked up in the `api_tokens` table
+///
+/// Used by handlers that don't sit behind the JWT-only `require_auth`
+/// middleware but still need to identify the caller (e.g., universe
+/// duplicate, future co-tools API). Returns `None` if no valid auth is
+/// present.
+pub fn resolve_user_id(
+    state: &crate::server::AppState,
+    headers: &axum::http::HeaderMap,
+) -> Option<String> {
+    let bearer = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| extract_session_cookie(headers))?;
+
+    // Try JWT first.
+    let secret = jwt_secret();
+    let validation = Validation::new(Algorithm::HS256);
+    if let Ok(data) = decode::<Claims>(
+        &bearer,
+        &DecodingKey::from_secret(secret.as_bytes()),
+        &validation,
+    ) {
+        return Some(data.claims.sub);
+    }
+
+    // Fall back to API token via storage.
+    let storage = state.storage.lock().ok()?;
+    storage
+        .get_api_token_by_value(&bearer)
+        .ok()
+        .flatten()
+        .map(|tok| tok.user_id)
+}
+
 /// Extracts the session token from the `Cookie` header, if present.
 pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;

@@ -62,19 +62,33 @@ Target: ~1 day of work.
 
 After 1.18.0 ships, CO-67 + CO-82 ops become runnable without log-fishing.
 
-### 1.19.0 — "post-GitHub cleanup" (small schema change)
+### 1.19.x — released 2026-04-28/29
 
-- **CO-64** — delete `co-web/src/git_sync.rs`, drop the `git_*` columns from `universes` (online migration), remove `PUT /:slug/git`, `POST /:slug/sync`, `POST /:slug/webhook` routes
-- Mark CO-50 + CO-55 as `status: deprecated` in their task files
-- Write `co/docs/ARCHITECTURE.md` consolidating the post-GitHub data model
+| Version | Date | Bundles |
+|---------|------|---------|
+| 1.19.0 | 2026-04-28 | CO-83 Mermaid + CO-92 Timeline |
+| 1.19.1 | 2026-04-29 | CO-94 Phase 1: Conteúdo view shows untyped markdown; seed script tightened |
+| 1.19.2 | 2026-04-29 | telemetry 415 fix, favicon SVG, PWA manifest fix, modern palette default |
 
-Risk: schema migration on live prod DB. Mitigation: online migration via `ALTER TABLE … DROP COLUMN`, validate post-migration via UAT first.
+### 1.20.0 — universe duplication + branching primer (this release)
 
-### 1.20.0 — "drop global admin tier" (multi-user readiness)
+- **CO-95 Phase 1** — `POST /api/v1/universes/:source/duplicate` — owner-controlled snapshot copy. Auth via JWT or API token. Use case: `quilomboaraucaria → quilombo-blog` for parallel scalability/latency testing. Foundation for the full branching model in 2.x.
+- **`auth::resolve_user_id`** — helper that accepts JWT or API token, used by the new duplicate endpoint and future ones.
 
-- **CO-90** — drop `tier='admin'` as a global authority signal. Audit and remove all `tier=='admin'` bypasses (`dev_board.rs:31`, `universe_routes.rs:765`). Define `tier` as billing-only (`anonymous`/`user`/`pro`). Migration converts existing `tier='admin'` rows to `'user'`. Every privileged action becomes per-universe (CO-49 enforces this). Spec: `work/co/CO-90.md`.
+### 1.21.0 — universe CRUD UI + post-GitHub cleanup
 
-Why before 2.0: the `tier` cleanup is multi-user-readiness. Shipping CO-77 sharding without it risks a second user accidentally getting global authority via a misconfigured tier write.
+- **CO-96 Phase 1** — `+ New universe` button in sidebar; modal with optional "copy from"; redirects to new universe. Spec: `work/co/CO-96.md`.
+- **CO-64** — delete `co-web/src/git_sync.rs`; drop `git_*` columns from `universes` (online migration); remove `PUT/POST` git routes; mark CO-50/CO-55 deprecated. Write `co/docs/ARCHITECTURE.md`.
+- **CO-90** — drop `tier='admin'` as global authority. Refactor `tier` to `BillingTier` enum. Audit + remove the two remaining bypasses.
+
+### 1.22.0 — small features pile + CRUD Phase 2
+
+- **CO-96 Phase 2** — sidebar context menu (rename / change visibility / duplicate / settings); settings tab on board
+- **CO-91 Phase 1** — `co sync push` subcommand
+- **CO-83 polish** — wire `renderMermaidBlocks` into other render paths
+- **CO-78 (lite)** — minimal SQLite-backed job queue
+- **CO-79 (lite)** — manifest LRU + theme.css ETag
+- **CO-80 (lite)** — token bucket rate limiting
 
 ### 1.21.0 (or 1.x sweep) — "small features pile"
 
@@ -87,14 +101,16 @@ Floating release for whichever of these land first:
 
 Each is a minor bump.
 
-### 2.0.0 — "scale" (BREAKING — schema reorganization)
+### 2.0.0 — "scale + branching" (BREAKING — schema reorganization)
 
-**Headline**: storage shards from one `co.db` to `meta.db` + per-universe `data.db` files. Detailed plan: `work/co/CO-77-PLAN.md`.
+**Headline**: storage shards from one `co.db` to `meta.db` + per-universe `data.db` files. Detailed plan: `work/co/CO-77-PLAN.md`. Branching becomes O(1) (filesystem copy-on-write) once each universe is its own DB file.
 
 In scope:
 - **CO-77** per-universe SQLite + meta.db + LiteFS read replicas
+- **CO-95 Phase 2** — universe-scoped op log (every PUT/DELETE recorded as append-only event); foundation for replay + merge
 - **CO-71** per-universe schema validator + generic JSON entry storage (lands AFTER 77 because it depends on per-universe DB to scale)
 - **CO-70** manifest format spec (`_universe.yaml`)
+- **CO-96 Phase 3** — soft-delete + 30-day trash
 
 Out of scope (defer to 2.1+):
 - CO-72 doc-generator hooks (needs CO-78 job queue stable first)
@@ -104,11 +120,13 @@ Out of scope (defer to 2.1+):
 
 **Why 2.0**: every storage method changes internally. The Storage trait surface stays compatible, but the migration is non-reversible without restoring backups.
 
-### 2.1+ — "manifest + git-backed universes" (additive on top of 2.0)
+### 2.1+ — "manifest + git-backed universes + replay" (additive on top of 2.0)
 
-The biggest user-visible win in 2.x. Every repo-backed universe gets a uniform git-changelog view, contributor profiles, event calendar, and live analytics dashboards.
+The biggest user-visible win in 2.x. Every repo-backed universe gets a uniform git-changelog view, contributor profiles, event calendar, and live analytics dashboards. Plus: branch replay engine for "show this universe at op X" / deterministic snapshots.
 
 - **CO-89** (priority: critical) — git-backed universes: any universe with `git_source` set ingests commits/profiles/events as content; per-universe analytics + Mermaid Gantt views; generalizes the `co-dev` pattern to `artelonga`, `quilomboaraucaria`, `rfq`, and any future user's repo-backed universe
+- **CO-95 Phase 3** — replay engine + branch lineage. Given `(base_universe, base_op_id, target_op_id)`, reconstruct any historical state. Branches gain `parent_universe_key`, `forked_at_op_id`, `forked_at` metadata.
+- **CO-75** — version reconstruction (companion to CO-95 Phase 3)
 - **CO-72** doc-generator hooks (scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc) — needs CO-78 stable
 - **CO-73** temporal model (event_at, due_at, scheduled_at, …) — first real test is CO-89's commit timeline + Gantt
 - **CO-74** relationship graph + query DSL + typed wikilink promotion — `commit → task` resolution from CO-89's parsed commit messages is the canonical case
@@ -126,10 +144,10 @@ CO-77 (per-universe SQLite) ✓ ships first → CO-70 (manifest) → CO-71 (vali
                                          CO-72 (doc gen) + CO-73/74 (temporal + relations) — validated by CO-89's data
 ```
 
-### 2.2+ — "history"
+### 2.2+ — "history + merge"
 
-- **CO-61** sync protocol v1 (op log, HLC, content-addressed blobs, 3-way merge)
-- **CO-75** version reconstruction (replay op log to any timestamp; auto-changelog)
+- **CO-61** sync protocol v1 (op log, HLC, content-addressed blobs, 3-way merge) — absorbed into CO-95 phasing
+- **CO-95 Phase 4** — merge / promote / revert / cherry-pick on the op log; full git-like operations on universes
 - **CO-62** quilombo-blog sync adapter
 
 ### 3.0.0 — "protocol" (BREAKING — `.co` becomes the wire format)

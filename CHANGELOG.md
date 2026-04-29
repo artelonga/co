@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] — 2026-04-29
+
+### Added — CO-95 Phase 1: owner-controlled universe duplication
+
+- New endpoint `POST /api/v1/universes/:source/duplicate` accepts JWT or API token (via the new `auth::resolve_user_id` helper). Verifies the caller has read access to the source (owner / member / public / template), then bulk-copies entries into a new universe owned by the caller. New universe defaults to `private` visibility.
+- Differs from the existing `/clone` endpoint: requires authentication, allows duplicating private universes the caller is a member of, and sets ownership to the caller (no anon-XXX fallback).
+- Use case: `quilomboaraucaria` → `quilombo-blog` for parallel scalability + latency analysis without disturbing the original. Generalizes to any "materialized dev branch" workflow today; full lineage tracking + merge / promote / revert lands in CO-95 Phase 4.
+- `scripts/duplicate-universe.sh <source> <target>` — keychain-token-backed helper.
+
+### Added — `auth::resolve_user_id`
+
+Helper for handlers outside the JWT-only `require_auth` middleware that still need to identify the caller. Tries Bearer JWT first, then falls back to API token via `Storage::get_api_token_by_value`. Used by the new duplicate endpoint; future use by CO-91 sync, CO-93 universe-type changes, etc.
+
+### Spec
+
+- `work/co/CO-95.md`: Universe branching — 4-phase plan (snapshot → op log → replay → merge). Phase 1 ships in this release.
+- `work/co/CO-96.md`: Universe CRUD UX in the SPA — sidebar `+ New universe` button, context menu (rename / change visibility / duplicate / delete), settings tab, soft-delete + 30-day trash. 3 phases mapped to 1.20.0 / 1.21.0 / 1.22.0.
+
 ## [1.19.2] — 2026-04-29
 
 ### Fixed — telemetry beacon 415, missing favicon, missing PWA icon
