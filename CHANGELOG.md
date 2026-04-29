@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] — 2026-04-29
+
+### Fixed — bulk-imported markdown now visible in the Conteúdo view (CO-94 Phase 1)
+
+After running CO-67 prod seed (artelonga, rfq, qa-dev populated with ~146/12/93 local files), the SPA's Conteúdo tab was rendering "Nenhuma página" because it filters entries by `type=page|task|event|clip` but the bulk-imported markdown has no `type:` set in frontmatter.
+
+- `co-web/static/variants/a/app.js::renderConteudo`: fetches all entries via `getUniverseEntries(slug)` in addition to the typed queries; folds untyped `.md` files into the page list before building the folder tree. Existing typed sections (Tasks, Events, Clips) unchanged.
+
+### Fixed — seed script no longer uploads `.claude/` runtime state
+
+The earlier seed run captured `.claude/worktrees/agent-XXX/...` files (co-auto runtime state) into `rfq` and `qa-dev`. The find command's exclude list missed these.
+
+- `scripts/seed-prod-universes.sh`: added `.claude/`, `.obsidian/`, `.cache/`, `.vercel/`, `seed-co/` to the exclude paths
+- Fixed `ensure_jj_repo` stderr/stdout: jj init noise was being captured into the commit_id variable, polluting the changelog snippets. Init output now goes to stderr.
+- Added `scripts/cleanup-vault-noise.sh`: idempotent helper that deletes vault entries matching noise patterns. Dry-run by default; pass `--execute` to actually delete.
+
+### Spec
+
+- `work/co/CO-94.md`: Obsidian-like vault viewer. Phase 1 ships in this release; Phases 2-3 (dedicated Vault tab with file tree + viewer + Cmd+P search + wikilink/backlink resolution + drag-and-drop reorganization) deferred to 1.20+ and 3.x.
+
 ## [1.19.0] — 2026-04-28
 
 ### Added — CO-92: unified timeline view with linear+log scrolling

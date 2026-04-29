@@ -52,8 +52,9 @@ done
 ensure_jj_repo() {
     local root="$1"
     if [[ ! -d "$root/.jj" ]]; then
-        echo "  initializing jj wrapper over git in $root ..."
-        ( cd "$root" && jj git init --colocate ) 2>&1 | sed 's/^/    /'
+        # Send init noise to stderr so it doesn't pollute the captured commit_id.
+        echo "  initializing jj wrapper over git in $root ..." >&2
+        ( cd "$root" && jj git init --colocate ) 2>&1 | sed 's/^/    /' >&2
     fi
     # `jj snapshot` is implicit on every jj command; running anything refreshes the working copy.
     ( cd "$root" && jj log -r @ --no-graph -T 'commit_id' ) 2>/dev/null | head -1
@@ -68,6 +69,9 @@ changed_md_files() {
             -not -path './node_modules/*' -not -path './.git/*' -not -path './.jj/*' \
             -not -path './target/*' -not -path './build/*' \
             -not -path './dist/*' -not -path './.next/*' -not -path './.svelte-kit/*' \
+            -not -path './.claude/*' -not -path './.obsidian/*' \
+            -not -path './.cache/*' -not -path './.vercel/*' \
+            -not -path './seed-co/*' \
             | sed 's|^./||' )
         return
     fi
@@ -76,6 +80,9 @@ changed_md_files() {
         # Baseline lost (repo rewritten?); fall back to full upload
         ( cd "$root" && find . -type f -name '*.md' \
             -not -path './.git/*' -not -path './.jj/*' \
+            -not -path './.claude/*' -not -path './.obsidian/*' \
+            -not -path './.cache/*' -not -path './.vercel/*' \
+            -not -path './seed-co/*' \
             | sed 's|^./||' )
         return
     fi

@@ -2461,12 +2461,28 @@
 
         try { await loadEditorBundle(); } catch (_) {}
 
-        const [taskEntries, eventEntries, pageEntries, clipEntries] = await Promise.all([
+        const [taskEntries, eventEntries, pageEntries, clipEntries, allEntries] = await Promise.all([
             api.getUniverseEntries(slug, 'task'),
             api.getUniverseEntries(slug, 'event'),
             api.getUniverseEntries(slug, 'page'),
             api.getUniverseEntries(slug, 'clip'),
+            api.getUniverseEntries(slug),
         ]);
+
+        // CO-94 preview: bulk-imported markdown without an explicit `type:` in
+        // frontmatter ends up untyped. Fold those into the Pages folder tree
+        // so the Conteúdo view actually shows them.
+        const knownPaths = new Set([
+            ...taskEntries.map(e => e.path),
+            ...eventEntries.map(e => e.path),
+            ...pageEntries.map(e => e.path),
+            ...clipEntries.map(e => e.path),
+        ]);
+        for (const e of allEntries) {
+            if (!knownPaths.has(e.path) && (e.path || '').endsWith('.md')) {
+                pageEntries.push(e);
+            }
+        }
 
         function entryFm(e) { return e.frontmatter || {}; }
         function entryTitle(e) { return e.title || entryFm(e).title || e.path || ''; }
