@@ -147,7 +147,7 @@ upload_files_with_auth() {
 
 verify_counts_with_auth() {
     local auth="$1"
-    for slug in artelonga quilomboaraucaria rfq; do
+    for slug in artelonga quilomboaraucaria rfq qa-dev; do
         count=$(curl -s -H "$auth" "$PROD/api/v1/universes/$slug" | \
             python3 -c "import sys,json; print(json.load(sys.stdin).get('content_count','?'))" 2>/dev/null)
         echo "  $slug: count=$count"
@@ -212,14 +212,20 @@ if [[ "${1:-}" == "--bootstrap" ]]; then
             *)   echo "  ✗ $key HTTP $code: $(cat /tmp/seed-resp.json)"; exit 1 ;;
         esac
     }
+    # Same pattern as co (public) ↔ co-dev (raw working files):
+    #   quilomboaraucaria = public-facing content (currently 70 entries from migration)
+    #   qa-dev            = raw notes / working files (yuri's local Obsidian-style vault)
+    # Form/presentation will be split later; for now everything raw goes to qa-dev.
     create_with_cookie artelonga "ArteLonga" "Rede de marcas e empreendedores"
     create_with_cookie rfq       "RFQ"        "Quote engine for prediction market making"
+    create_with_cookie qa-dev    "QA Dev"     "Raw working files for Quilombo Araucária — content to be split into form/data later"
 
     echo "[bootstrap 3/5] full upload (jj snapshots baseline for delta runs) ..."
     SESSION=$(awk '/\tsession\t/ {print $7}' "$COOKIES")
     COOKIE_AUTH="Cookie: session=$SESSION"
-    upload_universe_delta artelonga /Users/artelonga/projects/ArteLonga "$COOKIE_AUTH"
-    upload_universe_delta rfq       /Users/artelonga/projects/rfq-gateway "$COOKIE_AUTH"
+    upload_universe_delta artelonga /Users/artelonga/projects/ArteLonga       "$COOKIE_AUTH"
+    upload_universe_delta rfq       /Users/artelonga/projects/rfq-gateway     "$COOKIE_AUTH"
+    upload_universe_delta qa-dev    /Users/artelonga/projects/quilomboaraucaria "$COOKIE_AUTH"
 
     echo "[bootstrap 4/5] generate long-lived API token for re-uploads ..."
     TBODY=$(curl -sb "$COOKIES" -X POST "$PROD/api/v1/auth/token" \
@@ -271,8 +277,9 @@ case "$CODE" in
 esac
 
 echo "[2/3] delta upload (jj diff against baseline) ..."
-upload_universe_delta artelonga /Users/artelonga/projects/ArteLonga "$TOKEN_AUTH"
-upload_universe_delta rfq       /Users/artelonga/projects/rfq-gateway "$TOKEN_AUTH"
+upload_universe_delta artelonga /Users/artelonga/projects/ArteLonga       "$TOKEN_AUTH"
+upload_universe_delta rfq       /Users/artelonga/projects/rfq-gateway     "$TOKEN_AUTH"
+upload_universe_delta qa-dev    /Users/artelonga/projects/quilomboaraucaria "$TOKEN_AUTH"
 
 echo "[3/3] verify counts ..."
 verify_counts_with_auth "$TOKEN_AUTH"
