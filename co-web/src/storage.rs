@@ -3777,6 +3777,22 @@ impl Storage {
             }
         }
 
+        // CO-95: copy any remaining entries that weren't picked up by the
+        // project/task/page paths above (events, clips, untyped markdown,
+        // doc.* generated entries, etc.). Bulk-insert with the new
+        // universe_key; preserves path/title/frontmatter/body verbatim so
+        // the duplicate is a true snapshot.
+        let other_count: i64 = self.conn.execute(
+            "INSERT OR IGNORE INTO entries \
+             (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at) \
+             SELECT path, ?1, entry_type, title, frontmatter_json, body, body_hash, ?2, ?2 \
+             FROM entries \
+             WHERE universe_key = ?3 \
+               AND entry_type NOT IN ('project', 'task', 'page')",
+            params![new_key, now_str, source_key],
+        )? as i64;
+        cloned_entries += other_count;
+
         // Set content_count
         self.conn.execute(
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",

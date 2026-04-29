@@ -5,6 +5,15 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.1] — 2026-04-29
+
+### Fixed — universe duplication now copies ALL entry types
+
+`Storage::clone_universe` had project + task + page-specific copy paths but skipped everything else (events, clips, doc.*, untyped markdown). The first 1.20.0 duplicate of `quilomboaraucaria` produced an empty universe because all 70 source entries were `event` type from the legacy quilombo-blog migration.
+
+- Added a final bulk `INSERT INTO entries SELECT FROM entries` step that copies all entry types not covered by the typed paths (entry_type NOT IN ('project','task','page')). Source paths/titles/frontmatter/body preserved verbatim — the duplicate is a true snapshot.
+- `INSERT OR IGNORE` makes it safe to re-run if a partial copy needs completion.
+
 ## [1.20.0] — 2026-04-29
 
 ### Added — CO-95 Phase 1: owner-controlled universe duplication
