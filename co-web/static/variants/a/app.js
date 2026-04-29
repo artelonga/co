@@ -285,7 +285,6 @@
         const href = `/api/v1/universes/${slug}/theme.css`;
         let link = document.getElementById('co-theme-css');
         if (link) {
-            // Hot-swap: update href (browser reloads only this stylesheet).
             if (link.href !== new URL(href, document.baseURI).href) {
                 link.href = href;
             }
@@ -341,16 +340,29 @@
         state.universeConfig = config;
         const slug = state.currentUniverseSlug;
 
-        // Clear any user palette override so universe theme takes effect.
-        // User can manually switch via the palette dropdown afterward.
+        // User-level theme override (CO-94 follow-up): if `co_user_palette` is
+        // set in localStorage, it wins over the universe's per-board theme.
+        // Default to 'modern' for first-time visitors so the look is
+        // consistent across all boards. User can later change via the palette
+        // dropdown; clearing the override returns to per-universe themes.
+        if (!localStorage.getItem('co_user_palette')) {
+            try { localStorage.setItem('co_user_palette', 'modern'); } catch (_) {}
+        }
+        const userPalette = localStorage.getItem('co_user_palette');
+
+        // Clear the legacy per-session override key so the user-level one wins.
         localStorage.removeItem('co_named_palette');
         document.documentElement.removeAttribute('data-palette');
 
         // 1. CO-30: Load generated theme.css from the server (hot-swap on change).
+        // The user's palette override applies via data-palette attribute on
+        // <html> below; CSS rules `[data-palette="modern"]` etc. provide the
+        // color tokens that override the universe-themed defaults.
         if (slug) loadThemeCss(slug);
 
         // 2. Set data-palette attribute for structural CSS rules (modal styling, etc.).
-        const paletteKey = THEME_PALETTE_MAP[config.theme_preset] ?? '';
+        const effectivePreset = userPalette || config.theme_preset;
+        const paletteKey = THEME_PALETTE_MAP[effectivePreset] ?? '';
         if (paletteKey) {
             document.documentElement.setAttribute('data-palette', paletteKey);
         } else {

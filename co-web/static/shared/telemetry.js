@@ -63,8 +63,14 @@
     const m = location.pathname.match(/^\/co\/([^/]+)/);
     if (m && m[1] !== 'co-dev') body.universe_key = m[1];
 
+    // sendBeacon with a string body sends Content-Type: text/plain (or none),
+    // which the server's Json extractor rejects with 415. Use a Blob with
+    // explicit application/json type so the beacon carries the right CT.
     navigator.sendBeacon
-      ? navigator.sendBeacon('/api/v1/telemetry/event', JSON.stringify(body))
+      ? navigator.sendBeacon(
+          '/api/v1/telemetry/event',
+          new Blob([JSON.stringify(body)], { type: 'application/json' })
+        )
       : fetch('/api/v1/telemetry/event', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.2] — 2026-04-29
+
+### Fixed — telemetry beacon 415, missing favicon, missing PWA icon
+
+Three cosmetic console errors visible after first prod login post-1.19.1:
+- `POST /api/v1/telemetry/event` returned 415 because `navigator.sendBeacon` with a string body sends `Content-Type: text/plain`, which axum's `Json` extractor rejects. Patched `co-web/static/shared/telemetry.js` to use a `Blob` with `type: 'application/json'`.
+- `/favicon.ico` 404'd — added `co-web/static/shared/favicon.svg` (Co wordmark) and a `<link rel="icon" type="image/svg+xml">` in `variants/a/index.html`.
+- PWA manifest icon 404'd because `/shared/icon-192.png` and `/shared/icon-512.png` didn't exist. Updated `manifest.json` to reference the SVG favicon (PWA spec accepts SVG with `purpose: "any"`).
+
+### Added — user-level Modern palette default (CO-94 follow-up)
+
+- `applyUniverseConfig` now respects a `co_user_palette` localStorage key. On first visit, it's seeded with `'modern'` so every universe board renders with the Modern palette by default. The user can later switch via the existing palette dropdown; clearing the override returns to per-universe themes.
+- This is the "session-token-like" theme preference: set once locally, applied across all boards and tables. Server-side personalization (per-user theme preference stored on the user row) is a follow-up.
+
 ## [1.19.1] — 2026-04-29
 
 ### Fixed — bulk-imported markdown now visible in the Conteúdo view (CO-94 Phase 1)
