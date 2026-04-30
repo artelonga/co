@@ -24,6 +24,35 @@ updated_at: 2026-04-29T00:00:00Z
 
 ---
 
+## Status as of 2026-04-30
+
+| Wave | Task | Ticket | Status |
+|---|---|---|---|
+| 1 | A1 — commit + push | (chore) | ✅ done — commits `318093d`, `d2522cf`, `3cc1f40` |
+| 1 | A2 — smoke test | CO-103 | 🟡 in_progress (handed off to co-auto) |
+| 1 | A3 — deep health | CO-106 | ⬜ ready to hand off (parallel-safe with A2) |
+| 2 | B1 — create modal | CO-96 P1 | ⬜ blocked on A1 (done); coordinate with B2 |
+| 2 | B2 — hierarchical | CO-98 | ⬜ run before B1 (B1 will use parent_key) |
+| 2 | B3 — mermaid in home | CO-107 | ⬜ small, parallel-safe |
+| 2 | B4 — onboarding | CO-99 | ⬜ parallel-safe with B3 |
+| 3 | C1 — backups | CO-104 | ⬜ scripts-only, runs anytime |
+| 3 | C2 — load tests | CO-101 | ⬜ run after C1 has a backup baseline |
+| 3 | C3 — docs pass | CO-100 | ⬜ run after most code is in place |
+| 3 | C4 — admin dashboard | CO-105 | ⬜ |
+| 4 | D1 — rename/visibility | CO-96 P2 | ⬜ after CO-96 P1 |
+| 4 | D2 — soft-delete | CO-96 P3 | ⬜ after CO-96 P2 |
+| 4 | D3 — visitor token | CO-97 | ⏸ blocked on May 13 telemetry-flip data |
+| 4 | D4 — PWA offline | CO-69 P1 | ⬜ |
+| 5 | E1 — rate limiting | CO-80 P1 | ⬜ |
+| 5 | E2 — caching | CO-79 P1 | ⬜ |
+| 5 | E3 — v1.0 verification + tag | (chore) | ⬜ |
+
+**Coordination notes** (read before kicking off agents):
+
+- **CO-103 ⇄ CO-106 ⇄ CO-98.** CO-103's check #2 hits `/api/health/deep` (CO-106) and check #4 asserts `parent_key=template` (CO-98). Until those land, the smoke script's spec already says "soft-skip if 404 / soft-warn if assertion mismatches" — the agent running CO-103 should honor this. Once CO-106 + CO-98 land, a small follow-up tightens both checks to hard-fail.
+- **`app.js` is the conflict surface.** B1, B2, B3, B4 all touch it. Run B2 (CO-98) first since it changes the data model that B1 consumes; then B1; then B3 + B4 in parallel worktrees.
+- **Version bumps serialise.** Every code-touching task bumps `Cargo.toml` + `co-cli/Cargo.toml`. Two agents bumping the same file conflict on merge. If multiple in worktrees, last-merged rebases.
+
 ## Wave 1 — Foundation (≈1.5 h, sequential)
 
 Stop the bleeding. Nothing new visible to users yet, but everything that follows is safer.
@@ -74,26 +103,24 @@ Each failure prints a clear line with the gap. Add a CHANGELOG entry. Bump
 patch version. The script must be idempotent and runnable without auth.
 ```
 
-### A3 — `/api/health/deep` endpoint
+### A3 — `/api/health/deep` endpoint (CO-106)
 
 | | |
 |---|---|
 | Type | `feat` |
 | Estimate | 30 min |
-| Branch | `feat/health-deep` |
-| Files | `co-web/src/server.rs` (or `health.rs`), tests |
-| Acceptance | `GET /api/health/deep` returns 200 with JSON `{status, db_read_ms, db_write_ms, disk_writable, version}` when healthy; 503 if any probe fails |
+| Branch | `feat/co-106-deep-health` |
+| Files | `co-web/src/server.rs` (or new `health.rs`), tests |
+| Acceptance | `GET /api/health/deep` returns 200 with JSON when all probes pass; 503 with same JSON shape (with `ok: false` on the failing probe) on any failure |
+| Spec | `work/co/CO-106.md` |
 
 **co-auto prompt:**
 ```
-Add a /api/health/deep endpoint. It probes:
-  1. Read: SELECT 1 FROM users LIMIT 1 (timing in ms)
-  2. Write: insert + delete a row in a `health_probes` table (or use sqlite_master timestamp)
-  3. Disk: write a temp file in data_dir, read back, delete
-Returns JSON {status: "ok"|"degraded", db_read_ms, db_write_ms, disk_writable, version}.
-503 if any step fails. Add Rust unit tests with a tempdir. Document in
-docs/OPERATIONS.md (file may not exist yet — create it minimally).
+co-auto --task CO-106 --space co
 ```
+Spec at `work/co/CO-106.md` lists the three probes (db_read, db_write,
+disk_writable), the response shape, the lazy-create `health_probes` table,
+and the no-cache headers. Parallel-safe with CO-103 (no shared files).
 
 ---
 
@@ -170,25 +197,25 @@ Tests:
   sidebar.
 ```
 
-### B3 — Mermaid in universe home page
+### B3 — Mermaid in universe home page (CO-107)
 
 | | |
 |---|---|
 | Type | `feat` |
 | Estimate | 30 min |
-| Branch | `feat/mermaid-home` |
-| Files | `co-web/static/variants/a/app.js` (renderUniverseHome) |
-| Acceptance | `index.md` containing a `\`\`\`mermaid` block renders the diagram; lazy loads the bundle; theme-aware via CSS vars |
+| Branch | `feat/co-107-mermaid-home` |
+| Files | `co-web/static/variants/a/app.js` (renderUniverseHome), `co-web/seed/template/sobre.md` (sample diagram) |
+| Acceptance | `index.md` (or any seeded template page) containing a `\`\`\`mermaid` block renders the diagram in the universe-home view; lazy loads the bundle; theme-aware via CSS vars |
+| Spec | `work/co/CO-107.md` |
 
 **co-auto prompt:**
 ```
-In renderUniverseHome (app.js), after setting body.innerHTML with the
-indexEntry.body markdown, call window.CoMarkdown.renderMermaidBlocks(body) if
-the function exists (defined in /shared/markdown.js). Mermaid bundle is
-already lazy-loaded by that helper. No new dependency. Add a Mermaid block to
-co-web/seed/timeline/tempo-index.md showing the three timeline universes as a
-graph (template → [tempo, universo, humanity]) so we can verify it renders.
+co-auto --task CO-107 --space co
 ```
+Spec at `work/co/CO-107.md`. Tiny ticket — wires the existing
+`renderMermaidBlocks` helper (CO-83, shipped) into the new
+`renderUniverseHome` surface (CO-Universe-Home, shipped 1.20.11) and adds a
+sample diagram of the timeline trio to template's content.
 
 ### B4 — CO-99: First-time onboarding banner
 
@@ -482,7 +509,7 @@ With 2-3 worktrees running in parallel for Wave 2-4, calendar wall-clock could b
 ## Pre-flight checklist before kicking off
 
 - [ ] Wave 1 commits the working tree first (so future agents start from a clean base).
-- [ ] Each `co-auto` invocation gets the task spec via `--task CO-XXX --space co --workspace /Users/artelonga/projects/co`.
+- [ ] Each `co-auto` invocation gets the task spec via `--task CO-XXX --space co`.
 - [ ] Operator (yuri) reviews each PR before merge — agents propose, human disposes.
 - [ ] Marketing endpoint flip (separate repo) happens between Wave 1 and Wave 2 so telemetry data starts flowing for CO-97 evaluation in Wave 4.
 - [ ] May 13 cron auto-fires the telemetry verification — block CO-97 (D3) until that report.
