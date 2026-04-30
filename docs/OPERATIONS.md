@@ -84,6 +84,14 @@ EXPECTED_SW_CACHE_NAME='co-v3-network-first'
 
 When the seed JSON is edited (events added/removed), update the smoke script **in the same commit**.
 
+### Wave 2 regression gate (CO-138)
+
+```bash
+BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/wave-2/ --project=chromium-desktop
+```
+
+Covers: CO-98 sidebar tree nesting, CO-107 Mermaid SVG rendering, CO-99 onboarding banner lifecycle.
+
 ---
 
 ## Deploy procedure
@@ -186,3 +194,51 @@ A scheduled agent handles this — see the `schedule` entry in `.claude/settings
 Set `CO_BACKUP_BUCKET=artelonga-co-backups` and ensure AWS credentials are
 available. `scripts/restore.sh` will pull from S3 automatically when the env
 var is set and the local `backups/` directory has no match.
+
+---
+
+## Edge / CDN (CO-117)
+
+`co.artelonga.com.br` runs behind Cloudflare CDN (proxied DNS, cache rules per spec).
+
+### Cache rule summary
+
+| Path | Behavior | Edge TTL |
+|------|----------|----------|
+| `/api/*` | Bypass | — |
+| `/_app/immutable/*` | Cache | 1 year |
+| `*.css` | Cache | 1 hour |
+| `*.png / .svg / .webp / .avif` | Cache | 1 day |
+| HTML pages | Cache by status | 60 s |
+
+Auth responses (`Set-Cookie: session=`) are never cached — Cloudflare's
+"Bypass cache on Cookie" rule + the origin's `Cache-Control: private, no-store`
+provide defense in depth.
+
+### Initial setup
+
+```bash
+cd infra/cloudflare
+cp terraform.tfvars.example terraform.tfvars
+# fill in cloudflare_api_token, zone_id, fly_ipv4
+terraform init && terraform apply
+```
+
+### Verification
+
+```bash
+./tools/cf-verify.sh
+```
+
+### DNS migration steps (manual, one-time)
+
+1. Log into Cloudflare dashboard → add `artelonga.com.br` zone
+2. Note the Cloudflare nameservers and update at registrar
+3. After propagation: `terraform apply` applies the A record + cache rules
+4. Verify with `./tools/cf-verify.sh`
+
+### Fly origin notes
+
+No changes needed to the Fly app. The origin continues to receive requests
+from Cloudflare IPs. Ensure `Cache-Control: private, no-store` is set on
+all auth responses (already the case in co-web auth handlers).
