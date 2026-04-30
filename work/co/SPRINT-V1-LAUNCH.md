@@ -3,14 +3,16 @@ title: "Sprint plan — current state to v1.0 launch (hours, not months)"
 status: living
 priority: critical
 created_at: 2026-04-29T00:00:00Z
-updated_at: 2026-04-29T00:00:00Z
+updated_at: 2026-04-30T08:49:22Z
+supersedes_doc: ROADMAP-V1-LAUNCH.md
+governed_by: ROADMAP-V2-PLATFORM-REVIEW.md
 ---
 
-# Sprint plan — to v1.0 in agent-hours
+# Sprint plan — Wave / Phase reconciliation as of 2026-04-30
 
-**Working assumption:** each task is one `co-auto --task CO-XXX --space co` run, branching off `main`, completing with a passing build + tests + clippy + a deploy to UAT. Estimates are wall-clock for the agent.
+This is the **operator's day-to-day execution view**. The strategic doc is `work/co/ROADMAP-V2-PLATFORM-REVIEW.md` — that one introduced the **Phase 0–5** framing (epics CO-111…CO-116) which supersedes `ROADMAP-V1-LAUNCH.md`'s Tier 0–5. The Wave 1–5 sequencing here is the same content; the column on the right tells you which Phase each Wave-task lives under in the V2 framing.
 
-**Ordering rule:** later waves assume earlier waves merged. Within a wave, tasks marked `[parallel]` can run in separate worktrees; `[sequential]` must wait for the prior task in the wave.
+**Working assumption:** each task is one `co-auto --task CO-XXX --space co` run, branching off `main`, completing with a passing build + tests + clippy + a deploy to UAT.
 
 **Definition of done for each task:**
 1. Branch + PR (or direct commit per project policy)
@@ -24,34 +26,106 @@ updated_at: 2026-04-29T00:00:00Z
 
 ---
 
-## Status as of 2026-04-30
+## Wave → Phase mapping
 
-| Wave | Task | Ticket | Status |
+| Wave (V1) | Phase (V2) | Theme | Epic |
 |---|---|---|---|
-| 1 | A1 — commit + push | (chore) | ✅ done — commits `318093d`, `d2522cf`, `3cc1f40` |
-| 1 | A2 — smoke test | CO-103 | 🟡 in_progress (handed off to co-auto) |
-| 1 | A3 — deep health | CO-106 | ⬜ ready to hand off (parallel-safe with A2) |
-| 2 | B1 — create modal | CO-96 P1 | ⬜ blocked on A1 (done); coordinate with B2 |
-| 2 | B2 — hierarchical | CO-98 | ⬜ run before B1 (B1 will use parent_key) |
-| 2 | B3 — mermaid in home | CO-107 | ⬜ small, parallel-safe |
-| 2 | B4 — onboarding | CO-99 | ⬜ parallel-safe with B3 |
-| 3 | C1 — backups | CO-104 | ⬜ scripts-only, runs anytime |
-| 3 | C2 — load tests | CO-101 | ⬜ run after C1 has a backup baseline |
-| 3 | C3 — docs pass | CO-100 | ⬜ run after most code is in place |
-| 3 | C4 — admin dashboard | CO-105 | ⬜ |
-| 4 | D1 — rename/visibility | CO-96 P2 | ⬜ after CO-96 P1 |
-| 4 | D2 — soft-delete | CO-96 P3 | ⬜ after CO-96 P2 |
-| 4 | D3 — visitor token | CO-97 | ⏸ blocked on May 13 telemetry-flip data |
-| 4 | D4 — PWA offline | CO-69 P1 | ⬜ |
-| 5 | E1 — rate limiting | CO-80 P1 | ⬜ |
-| 5 | E2 — caching | CO-79 P1 | ⬜ |
-| 5 | E3 — v1.0 verification + tag | (chore) | ⬜ |
+| 1 — Foundation | **Phase 0** product side | Smoke, deep-health, backups | CO-111 |
+| 2 — Demoable v1.1 | **Phase 1** product side | Universe CRUD, hierarchy, onboarding, mermaid, docs, dashboard | CO-112 |
+| 3 — Operations | **Phase 1** ops + **Phase 2** ops | Backups, load tests, archive, mbya | CO-112, CO-113 |
+| 4 — Polish | **Phase 2** product side | Soft-delete, PWA offline, visitor token | CO-113 |
+| 5 — Hardening | **Phase 2** infra side | Rate limit, caching, v1.0 tag | CO-113 |
 
-**Coordination notes** (read before kicking off agents):
+The **new V2 platform infrastructure** (Cloudflare CDN, WAE, ClickHouse, Redpanda, Iceberg, Flink, deployer adapters) lives in additional tickets (CO-117…CO-136) listed below in their respective Phases. Those are interleaved with Wave 2-5 items per V2 §G's guidance: **finish current product wave first**, then file the new platform tickets, then resume.
 
-- **CO-103 ⇄ CO-106 ⇄ CO-98.** CO-103's check #2 hits `/api/health/deep` (CO-106) and check #4 asserts `parent_key=template` (CO-98). Until those land, the smoke script's spec already says "soft-skip if 404 / soft-warn if assertion mismatches" — the agent running CO-103 should honor this. Once CO-106 + CO-98 land, a small follow-up tightens both checks to hard-fail.
+---
+
+## Status — current sprint
+
+### Phase 0 (Foundation — Wave 1, ~done)
+
+| Task | Ticket | Status |
+|---|---|---|
+| A1 — commit + push baseline | (chore) | ✅ done — `318093d`, `d2522cf`, `3cc1f40` |
+| A2 — smoke test scripts | CO-103 | ✅ done — `5002540`, `0e95e78`, `2e9ec7d` |
+| A3 — `/api/health/deep` | CO-106 | ✅ done (folded into A2's commit) |
+| C1 — S3 backup automation | CO-104 | ⬜ not started — Wave 3, Phase 0 ops |
+| **NEW: PLAT-1** — Cloudflare in front | CO-117 | ⬜ blocked until product Wave 2 ships (per V2 §G) |
+| **NEW: PLAT-2** — WAE telemetry binding | CO-118 | ⬜ depends on CO-117 |
+| **NEW: PLAT-3** — Restore drill | CO-119 | ⬜ depends on CO-104 |
+
+### Phase 1 (Demoable + telemetry — Wave 2, in flight)
+
+| Task | Ticket | Status |
+|---|---|---|
+| B2 — hierarchical universes | **CO-98** | ⬜ **next up** — run before B1 |
+| B1 — create-universe modal | CO-96 P1 | ⬜ after B2 (uses parent_key) |
+| B3 — mermaid in universe home | CO-107 | ⬜ small, parallel-safe |
+| B4 — onboarding 3-step coach | CO-99 | ⬜ parallel-safe with B3 |
+| C3 — docs pass | CO-100 | ⬜ run after Wave 2 closes |
+| C4 — admin dashboard | CO-105 | ⬜ |
+| **NEW: PLAT-4** — co-agent adapter trait | CO-120 | ⬜ Phase 1 platform infra |
+| **NEW: PLAT-5** — A/B primitives on OLTP | CO-121 | ⬜ Phase 1 platform infra |
+| **NEW: PLAT-6** — Quota/tier model spec | CO-122 | ⬜ Phase 1 platform infra (no enforcement yet) |
+
+### Phase 2 (Sustained public test — Wave 3 + Wave 4 + Wave 5)
+
+| Task | Ticket | Status |
+|---|---|---|
+| C2 — load tests (k6) | CO-101 | ⬜ |
+| Universe archive + external-HD backup | CO-108 | ⬜ |
+| Mbya stress-test corpus | CO-109 | ⬜ |
+| D1 — rename/visibility | CO-96 P2 | ⬜ |
+| D2 — soft-delete + 30-day trash | CO-96 P3 | ⬜ |
+| D3 — visitor token unification | CO-97 | ⏸ blocked on May 13 telemetry-flip data |
+| D4 — PWA offline Phase 1 | CO-69 P1 | ⬜ |
+| E1 — rate limiting | CO-80 P1 | ⬜ |
+| E2 — caching | CO-79 P1 | ⬜ |
+| **NEW: PLAT-7** — ClickHouse single-node | CO-123 | ⬜ Phase 2 platform infra |
+| **NEW: PLAT-8** — co-agent variants (CF Workers, Vercel) | CO-124 | ⬜ Phase 2 platform infra |
+
+### Phase 3 (Real collaboration + streaming — post-v1.0)
+
+| Task | Ticket | Status |
+|---|---|---|
+| Sync Protocol v1 | CO-61 | ⬜ |
+| Idempotency + conflict resolution | CO-54 | ⬜ |
+| CLI sync (folds into CO-91) | CO-51 | ⬜ |
+| Universe branching Phase 2-4 | CO-95 | ⬜ |
+| Desktop tray + PWA Phase 2-4 | CO-58 | ⬜ |
+| Obsidian deep-sync | CO-68 | ⬜ |
+| **NEW** Redpanda + Iceberg Topics | CO-125 | ⬜ |
+| **NEW** Lakekeeper REST catalog + Iceberg-on-R2 | CO-126 | ⬜ |
+| **NEW** Flink session stitching | CO-127 | ⬜ |
+| **NEW** Apple-style 4-way conflict UI | CO-128 | ⬜ user-named v1 requirement |
+| **NEW** Jujutsu-shaped changelog renderer | CO-129 | ⬜ user-named v1 requirement |
+
+### Phase 4 (Encrypted + privileged compute zone — post-v1.0)
+
+| Task | Ticket | Status |
+|---|---|---|
+| `.co` envelope format | CO-86 | ⬜ |
+| Composable layer stack | CO-87 | ⬜ |
+| Filesystem-as-Web (E2E remote editing) | CO-110 | ⬜ |
+| **NEW** Privileged compute zone | CO-130 | ⬜ |
+| **NEW** Aggregation allow-list + k-anon DLP | CO-131 | ⬜ |
+| **NEW** Key-access audit log | CO-132 | ⬜ |
+
+### Phase 5 (Programmable platform + multi-target deployer — long horizon)
+
+Co becomes the only surface. `deploy.yaml` schema + per-universe manifest validation; deployer adapter trait; static-on-R2 + Cloudflare Pages adapters; Pinot evaluated against real traffic.
+
+CO-63, CO-70, CO-71, CO-72, CO-73, CO-74, CO-75, CO-89, CO-88 (all programmable-platform tickets) plus CO-133, CO-134, CO-135, CO-136 (deployer adapters + Pinot eval).
+
+---
+
+## Coordination notes (read before kicking off agents)
+
 - **`app.js` is the conflict surface.** B1, B2, B3, B4 all touch it. Run B2 (CO-98) first since it changes the data model that B1 consumes; then B1; then B3 + B4 in parallel worktrees.
 - **Version bumps serialise.** Every code-touching task bumps `Cargo.toml` + `co-cli/Cargo.toml`. Two agents bumping the same file conflict on merge. If multiple in worktrees, last-merged rebases.
+- **Per V2 §G:** finish Wave 2 (Phase 1 product side) before starting CO-117/118/119/120/121/122 (Phase 0+1 platform side). Don't interleave product CRUD work with Cloudflare account setup mid-sprint.
+- **CO-104 still pending.** Backup automation is product-side ops, not platform infra. Can run parallel-to-Wave-2 since it touches `scripts/` only. Closes Phase 0.
+- **CO-128 + CO-129 are user-named v1 requirements** that the original V1 sprint missed. They're in Phase 3 now. If you want them earlier, reframe as Wave 4 (Phase 2.5).
 
 ## Wave 1 — Foundation (≈1.5 h, sequential)
 

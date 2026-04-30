@@ -1,12 +1,28 @@
 ---
-title: "Release roadmap — current state to final v1 launch"
-status: living
+title: "Release roadmap — current state to final v1 launch (SUPERSEDED)"
+status: superseded
+superseded_by: ROADMAP-V2-PLATFORM-REVIEW.md
 priority: high
 created_at: 2026-04-29T00:00:00Z
-updated_at: 2026-04-29T00:00:00Z
+updated_at: 2026-04-30T08:49:22Z
 ---
 
-# Release roadmap
+# Release roadmap (V1 — superseded 2026-04-30)
+
+> **This doc is superseded by [`ROADMAP-V2-PLATFORM-REVIEW.md`](ROADMAP-V2-PLATFORM-REVIEW.md).**
+>
+> The V2 doc keeps the **capability gates** of the V1 Tier 0–5 model but reframes them as **Phase 0–5** with explicit infrastructure deltas (Cloudflare CDN, Workers Analytics Engine, ClickHouse, Redpanda, Iceberg-on-R2, Flink, deployer adapters) drawn from the SR engineer's plan and `docs/platform-evaluation.md`. The V2 framing also adds four user-named v1 requirements that V1 missed:
+>
+> 1. Apple-style 4-way conflict UX (CO-128)
+> 2. Jujutsu-shaped changelog renderer (CO-129)
+> 3. Restore-drill cadence, not just snapshots (CO-119)
+> 4. Multi-target deployer abstraction (CO-133/134/135)
+>
+> The Tier 0–5 → Phase 0–5 mapping table is in `SPRINT-V1-LAUNCH.md`. The V1 doc is kept in tree as a historical record of how the original framing read; **do not consult it for current planning**.
+
+---
+
+# Release roadmap (V1 archived content below)
 
 A staged plan from **today (1.21.x — public test on `co.artelonga.com.br`)** to **stable v1 launch**. Tiers are gated by what real users can plausibly do without help; each gate adds a class of capability.
 
