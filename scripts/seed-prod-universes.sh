@@ -66,12 +66,12 @@ changed_md_files() {
     local root="$1" baseline="$2"
     if [[ -z "$baseline" || "$FORCE_FULL" == "1" ]]; then
         ( cd "$root" && find . -type f -name '*.md' \
-            -not -path './node_modules/*' -not -path './.git/*' -not -path './.jj/*' \
-            -not -path './target/*' -not -path './build/*' \
-            -not -path './dist/*' -not -path './.next/*' -not -path './.svelte-kit/*' \
-            -not -path './.claude/*' -not -path './.obsidian/*' \
-            -not -path './.cache/*' -not -path './.vercel/*' \
-            -not -path './seed-co/*' \
+            -not -path '*/node_modules/*' -not -path '*/.git/*' -not -path '*/.jj/*' \
+            -not -path '*/target/*' -not -path '*/build/*' \
+            -not -path '*/dist/*' -not -path '*/.next/*' -not -path '*/.svelte-kit/*' \
+            -not -path '*/.claude/*' -not -path '*/.obsidian/*' \
+            -not -path '*/.cache/*' -not -path '*/.vercel/*' \
+            -not -path '*/seed-co/*' -not -path '*/.venv/*' -not -path '*/__pycache__/*' \
             | sed 's|^./||' )
         return
     fi

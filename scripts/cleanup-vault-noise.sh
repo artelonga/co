@@ -32,7 +32,7 @@ if [[ -z "$TOKEN" ]]; then
 fi
 
 # Patterns to delete (substring match in entry path)
-NOISE_PATTERNS='\.claude/|\.obsidian/|\.cache/|seed-co/'
+NOISE_PATTERNS='\.claude/|\.obsidian/|\.cache/|seed-co/|node_modules/|/\.venv/|/__pycache__/|/target/|/dist/|/build/|/\.next/|/\.svelte-kit/'
 
 echo "Mode: $([[ $EXECUTE == 1 ]] && echo EXECUTE || echo DRY-RUN)"
 echo "Target: $URL"
@@ -70,7 +70,7 @@ for slug in artelonga rfq qa-dev quilomboaraucaria; do
             200|204) deleted=$((deleted+1));;
             *) echo "    HTTP $code: $path" ;;
         esac
-        sleep 0.05
+        sleep 1.1
     done <<< "$matched"
     echo "  deleted $deleted/$n"
 done
