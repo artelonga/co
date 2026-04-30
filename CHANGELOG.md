@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.7] — 2026-04-30
+
+### Removed — CO-64: git-sync dead code + migration v23 drops git_* columns
+
+- Deleted `co-web/src/git_sync.rs` (365 lines, dead since Vault API pivot)
+- Removed `UniverseGitConfig` struct and git storage methods
+- Removed route handlers: `update_universe_git`, `manual_sync`, `webhook_sync`
+- Migration v23: `ALTER TABLE universes DROP COLUMN` for 6 git_* columns
+- Added `docs/ARCHITECTURE.md` — post-GitHub data model overview
+- CO-50, CO-55 marked deprecated
+
 ## [1.22.6] — 2026-04-30
 
 ### Added — CO-138: Wave 2 Playwright e2e coverage (sidebar tree, mermaid, onboarding)

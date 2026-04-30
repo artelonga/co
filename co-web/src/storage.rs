@@ -738,6 +738,41 @@ impl Storage {
                 .expect("migration v22: version insert");
         }
 
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 23 {
+            // CO-64: drop git-sync columns — dead since Vault API replaced git-clone-on-server
+            for col in [
+                "git_repo",
+                "git_path",
+                "git_branch",
+                "git_commit_hash",
+                "git_synced_at",
+                "git_sync_error",
+            ] {
+                // DROP INDEX first (SQLite requires this before dropping an indexed column)
+                let _ = self
+                    .conn
+                    .execute_batch(&format!("DROP INDEX IF EXISTS idx_universes_{col};"));
+                let _ = self
+                    .conn
+                    .execute_batch(&format!("ALTER TABLE universes DROP COLUMN {col};"));
+            }
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (23)",
+                    [],
+                )
+                .expect("migration v23: version insert");
+        }
+
         // CO-137 unconditional backfill: ensure parent_key exists even when
         // schema_version already shows 22 but the ALTER TABLE never ran (the
         // exact prod failure mode this ticket investigates). ensure_column is a
@@ -3039,93 +3074,6 @@ impl Storage {
 
         std::fs::write(yaml_path, yaml)?;
         Ok(())
-    }
-
-    // --- Universe git config (CO-50) ---
-
-    /// Get the git repository configuration for a universe.
-    pub fn get_universe_git_config(&self, key: &str) -> Option<crate::models::UniverseGitConfig> {
-        self.conn
-            .query_row(
-                "SELECT git_repo, git_path, git_branch, git_commit_hash, git_synced_at, git_sync_error \
-                 FROM universes WHERE key = ?1 AND git_repo IS NOT NULL",
-                params![key],
-                |row| {
-                    Ok(crate::models::UniverseGitConfig {
-                        universe_key: key.to_string(),
-                        repo: row.get(0)?,
-                        path: row.get(1)?,
-                        branch: row
-                            .get::<_, Option<String>>(2)?
-                            .unwrap_or_else(|| "main".into()),
-                        commit_hash: row.get(3)?,
-                        synced_at: row
-                            .get::<_, Option<String>>(4)?
-                            .as_deref()
-                            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                            .map(|dt| dt.with_timezone(&chrono::Utc)),
-                        sync_error: row.get(5)?,
-                    })
-                },
-            )
-            .ok()
-    }
-
-    /// Set (or update) the git repository configuration for a universe.
-    pub fn set_universe_git_config(
-        &mut self,
-        key: &str,
-        repo: &str,
-        path: Option<&str>,
-        branch: &str,
-    ) -> anyhow::Result<()> {
-        self.conn.execute(
-            "UPDATE universes SET git_repo = ?1, git_path = ?2, git_branch = ?3, \
-             git_commit_hash = NULL, git_synced_at = NULL, git_sync_error = NULL \
-             WHERE key = ?4",
-            params![repo, path, branch, key],
-        )?;
-        Ok(())
-    }
-
-    /// Record a successful sync: store the new commit hash and timestamp.
-    pub fn update_universe_git_sync(&mut self, key: &str, commit_hash: &str) -> anyhow::Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.conn.execute(
-            "UPDATE universes SET git_commit_hash = ?1, git_synced_at = ?2, git_sync_error = NULL \
-             WHERE key = ?3",
-            params![commit_hash, now, key],
-        )?;
-        Ok(())
-    }
-
-    /// Record a sync error (update synced_at so we don't retry for 5 min).
-    pub fn set_universe_git_error(&mut self, key: &str, error: &str) -> anyhow::Result<()> {
-        let now = Utc::now().to_rfc3339();
-        self.conn.execute(
-            "UPDATE universes SET git_sync_error = ?1, git_synced_at = ?2 WHERE key = ?3",
-            params![error, now, key],
-        )?;
-        Ok(())
-    }
-
-    /// Upsert all entries for a universe (used after a git sync).
-    pub fn upsert_entries_from_sync(
-        &mut self,
-        universe_key: &str,
-        entries: &[co::entry::Entry],
-    ) -> anyhow::Result<usize> {
-        let index = crate::entry_index::EntryIndex::new(&self.conn);
-        for entry in entries {
-            index.upsert(universe_key, entry)?;
-        }
-        // Update content_count
-        let count = entries.len() as i64;
-        self.conn.execute(
-            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-            params![count, universe_key],
-        )?;
-        Ok(entries.len())
     }
 
     // --- Check if data exists ---

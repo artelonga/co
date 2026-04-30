@@ -9,6 +9,8 @@
 
 ---
 
+> Architecture overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+
 ## Quick Start
 
 ### Option A — CLI (Rust)
