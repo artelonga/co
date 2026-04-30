@@ -84,6 +84,14 @@ EXPECTED_SW_CACHE_NAME='co-v3-network-first'
 
 When the seed JSON is edited (events added/removed), update the smoke script **in the same commit**.
 
+### Wave 2 regression gate (CO-138)
+
+```bash
+BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/wave-2/ --project=chromium-desktop
+```
+
+Covers: CO-98 sidebar tree nesting, CO-107 Mermaid SVG rendering, CO-99 onboarding banner lifecycle.
+
 ---
 
 ## Deploy procedure
