@@ -605,6 +605,8 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("Seeding Yggdrasil universe...");
             storage.seed_yggdrasil_universe();
         }
+        // CO-140: seed co-dev board universe — idempotent, always safe.
+        storage.seed_co_dev_universe();
         // Timeline trio (`tempo`, `humanity`, `universo`). Always re-seed —
         // the JSON manifests in the binary are the source of truth, and
         // `upsert_entry_row` makes overwriting safe.

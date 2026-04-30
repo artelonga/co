@@ -22,7 +22,17 @@
       "Bash(cargo build *)",
       "Bash(git add *)",
       "Bash(git commit -m 'fix\\(co-web\\): serve vendored mermaid from /shared/vendor/ *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(curl -fsS https://co-artelonga-uat.fly.dev/api/health)",
+      "Bash(curl -s -o /tmp/r.json -w \"HTTP=%{http_code} bytes=%{size_download}\\\\n\" \"https://co-artelonga.fly.dev/api/v1/universes/co-dev/entries?type=event\")",
+      "Read(//private/tmp/**)",
+      "Bash(co-token get *)",
+      "Bash(curl -s -o /tmp/r.json -w 'HTTP=%{http_code} bytes=%{size_download}\\\\n' -H 'Authorization: Bearer __TRACKED_VAR__' 'https://co-artelonga.fly.dev/api/v1/universes/co-dev/entries?type=event')",
+      "Bash(curl -s -o /tmp/r.json -w \"HTTP=%{http_code} bytes=%{size_download}\\\\n\" \"https://co-artelonga-uat.fly.dev/api/v1/universes/quilomboaraucaria/entries?type=event\")",
+      "Bash(python3 -c ' *)",
+      "Bash(curl -s \"https://co-artelonga.fly.dev/api/v1/universes/quilomboaraucaria\")",
+      "Bash(curl -s -o /dev/null -w \"  HTTP=%{http_code}\\\\n\" \"https://co-artelonga.fly.dev/api/v1/universes/artelonga\")",
+      "Bash(curl -s -o /dev/null -w \"  HTTP=%{http_code}\\\\n\" \"https://co-artelonga.fly.dev/api/v1/universes/rfq\")"
     ]
   }
 }

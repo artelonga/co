@@ -3605,6 +3605,26 @@ impl Storage {
         tracing::info!("Yggdrasil universe seeded (key=yggdrasil, requires_login=true)");
     }
 
+    // --- CO Dev universe (CO-53 / CO-140) ---
+
+    /// Seed the `co-dev` private universe — the CO platform development board.
+    ///
+    /// Owned by 'system', private, scholarly-dark, board layout.
+    /// `ensure_admin_universe_memberships` makes Yuri a member so it appears
+    /// in his sidebar. Idempotent via INSERT OR IGNORE.
+    pub fn seed_co_dev_universe(&mut self) {
+        let now = Utc::now().to_rfc3339();
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public, \
+              requires_login, visibility, theme_preset, layout, content_count) \
+             VALUES ('co-dev', 'CO Dev', \
+             'CO platform development board — all tickets, sprints, and architecture', \
+             'system', ?1, 0, 0, 1, 'requires_login', 'scholarly-dark', 'board', 0)",
+            params![now],
+        );
+    }
+
     /// Returns true if the given timeline universe already exists.
     pub fn timeline_universe_exists(&self, key: &str) -> bool {
         self.get_universe(key).is_some()
