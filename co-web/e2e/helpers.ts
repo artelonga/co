@@ -74,3 +74,27 @@ export async function createTask(
 export async function getTaskCount(page: Page): Promise<number> {
   return page.locator(".task-card").count();
 }
+
+/**
+ * Login as admin. On UAT uses uat-login (magic credentials, no env vars needed);
+ * on prod / local uses password-login via CO_ADMIN_EMAIL + CO_ADMIN_PASSWORD env vars.
+ *
+ * The POST sets a session cookie on the page context automatically — subsequent
+ * page.goto() calls will carry the cookie without any extra setup.
+ */
+export async function loginAsAdmin(page: Page): Promise<void> {
+  const base = process.env.BASE_URL ?? "http://localhost:3000";
+  if (base.includes("uat")) {
+    // UAT: magic credentials, no env vars needed
+    await page.request.post(`${base}/api/v1/auth/uat-login`, {
+      data: { email: "yuri@uat.local", password: "uat" },
+    });
+  } else {
+    // Prod / local: CO_ADMIN_EMAIL + CO_ADMIN_PASSWORD env vars
+    const email = process.env.CO_ADMIN_EMAIL ?? "";
+    const password = process.env.CO_ADMIN_PASSWORD ?? "";
+    await page.request.post(`${base}/api/v1/auth/password-login`, {
+      data: { email, password },
+    });
+  }
+}

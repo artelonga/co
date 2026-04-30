@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.6] — 2026-04-30
+
+### Added — CO-138: Wave 2 Playwright e2e coverage (sidebar tree, mermaid, onboarding)
+
+Three Playwright test suites under `co-web/e2e/wave-2/` that drive Chromium against UAT (or a local server with seeded fixtures):
+
+- `co-web/e2e/wave-2/co-98-sidebar-tree.spec.ts` — verifies the timeline trio (`tempo`, `humanity`, `universo`) appears nested under `template` in the sidebar, with chevron toggle and CSS indent.
+- `co-web/e2e/wave-2/co-107-mermaid.spec.ts` — asserts the template home renders a Mermaid SVG containing the trio node labels, and that universes without Mermaid blocks do not load the Mermaid bundle.
+- `co-web/e2e/wave-2/co-99-onboarding.spec.ts` — exercises the 3-step onboarding banner lifecycle: cookie set on dismiss, reload suppression, mobile viewport suppression, and no banner for logged-in users.
+
+Additional infrastructure:
+- `co-web/e2e/helpers.ts`: `loginAsAdmin` helper — UAT uses magic `uat-login`, prod/local uses `password-login` via `CO_ADMIN_EMAIL` + `CO_ADMIN_PASSWORD` env vars.
+- `co-web/playwright.config.ts`: `baseURL` now reads `process.env.BASE_URL ?? "http://localhost:3000"` so `BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test` works.
+- `docs/OPERATIONS.md`: Wave 2 regression gate command added to post-deploy section.
+
 ## [1.22.5] — 2026-04-30
 
 ### Fixed — CO-137: harden ALTER ADD COLUMN migrations against partial-application + diagnostic endpoint
