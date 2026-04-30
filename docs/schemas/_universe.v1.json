@@ -1,0 +1,210 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/schemas/_universe.v1.json",
+  "title": "Universe Manifest",
+  "description": "_universe.yaml — per-universe manifest for the CO platform (schema_version: 1)",
+  "type": "object",
+  "required": ["schema_version", "name"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest schema version. A bump triggers entry-payload migration (see CO-71)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Human-readable universe name."
+    },
+    "content_types": {
+      "type": "array",
+      "maxItems": 100,
+      "description": "Content type declarations. Maximum 100 per manifest.",
+      "items": { "$ref": "#/$defs/ContentType" }
+    },
+    "doc_generators": {
+      "type": "array",
+      "description": "External doc-generator hooks (scaladoc, sphinx, …). Runs are always async jobs.",
+      "items": { "$ref": "#/$defs/DocGenerator" }
+    },
+    "relationships": {
+      "type": "array",
+      "description": "Explicit relationships between content types.",
+      "items": { "$ref": "#/$defs/Relationship" }
+    },
+    "views": {
+      "type": "array",
+      "description": "Named views (gantt, calendar, …) over content types.",
+      "items": { "$ref": "#/$defs/View" }
+    }
+  },
+  "$defs": {
+    "ContentType": {
+      "type": "object",
+      "required": ["name"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Content type name (e.g. tarefa, evento, nota)."
+        },
+        "schema": {
+          "type": "object",
+          "description": "Field definitions keyed by field name.",
+          "additionalProperties": { "$ref": "#/$defs/FieldDef" }
+        },
+        "presentation": { "$ref": "#/$defs/Presentation" },
+        "indexes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Field names to index for fast queries."
+        }
+      }
+    },
+    "FieldDef": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["string", "number", "boolean", "date", "enum", "ref", "ref_list"],
+          "description": "Scalar type of the field."
+        },
+        "required": {
+          "type": "boolean",
+          "default": false,
+          "description": "Whether this field is required on every entry."
+        },
+        "values": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1,
+          "description": "Allowed values (required when type == enum)."
+        },
+        "semantic": {
+          "type": "string",
+          "enum": ["due", "event", "created", "updated"],
+          "description": "Semantic meaning for date fields."
+        },
+        "target": {
+          "type": "string",
+          "description": "Target content type name (required when type == ref or ref_list)."
+        }
+      },
+      "if": { "properties": { "type": { "const": "enum" } } },
+      "then": { "required": ["values"] },
+      "else": {
+        "if": {
+          "properties": { "type": { "enum": ["ref", "ref_list"] } }
+        },
+        "then": { "required": ["target"] }
+      }
+    },
+    "Presentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "board": {
+          "type": "object",
+          "required": ["columns"],
+          "additionalProperties": false,
+          "properties": {
+            "columns": {
+              "type": "array",
+              "items": { "type": "string" },
+              "minItems": 1,
+              "description": "Enum values shown as kanban columns, in order."
+            }
+          }
+        },
+        "list": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sort": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Field names to sort by (ascending)."
+            }
+          }
+        },
+        "calendar": {
+          "type": "object",
+          "required": ["date_field"],
+          "additionalProperties": false,
+          "properties": {
+            "date_field": {
+              "type": "string",
+              "description": "Field name that drives the calendar date axis."
+            }
+          }
+        }
+      }
+    },
+    "DocGenerator": {
+      "type": "object",
+      "required": ["format", "source_dir", "output_type", "on"],
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "type": "string",
+          "description": "Generator format identifier (e.g. scaladoc, sphinx, openapi)."
+        },
+        "source_dir": {
+          "type": "string",
+          "description": "Source directory relative to the universe root."
+        },
+        "output_type": {
+          "type": "string",
+          "description": "Content type name for generated entries (e.g. doc.scala)."
+        },
+        "on": {
+          "type": "string",
+          "enum": ["sync", "push", "manual"],
+          "description": "When the generator runs. Always executed as an async job."
+        }
+      }
+    },
+    "Relationship": {
+      "type": "object",
+      "required": ["from", "to", "cardinality"],
+      "additionalProperties": false,
+      "properties": {
+        "from": {
+          "type": "string",
+          "description": "Source in 'content_type.field' notation."
+        },
+        "to": {
+          "type": "string",
+          "description": "Target content type name."
+        },
+        "cardinality": {
+          "type": "string",
+          "enum": ["one-to-one", "one-to-many", "many-to-one", "many-to-many"]
+        }
+      }
+    },
+    "View": {
+      "type": "object",
+      "required": ["name", "type", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "type": {
+          "type": "string",
+          "description": "View type (e.g. gantt, timeline, kanban, calendar)."
+        },
+        "source": {
+          "type": "string",
+          "description": "Content type name this view operates on."
+        },
+        "date_start": { "type": "string" },
+        "date_end":   { "type": "string" },
+        "date_field": { "type": "string" }
+      }
+    }
+  }
+}

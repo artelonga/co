@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] — 2026-04-30
+
+### Added — CO-70: Manifest format spec — `_universe.yaml` at universe root
+
+- `core/src/manifest.rs` — typed `Manifest` struct hierarchy parsed from `_universe.yaml`
+- `parse()` / `parse_str()` — validates size cap (100 KB), content-type count cap (100), field-path errors, and forward-compat warnings for unknown top-level keys
+- `default_manifest(name)` — returns a board-of-tasks manifest matching pre-manifest behaviour (`task` type, `[todo, doing, done]` board columns)
+- `Manifest::triggers_migration_from(stored_version)` — CO-71 hook for entry-payload migration on schema version bump
+- `docs/schemas/_universe.v1.json` — JSON Schema (draft 2020-12) for `_universe.yaml` v1
+
 ## [1.22.7] — 2026-04-30
 
 ### Removed — CO-64: git-sync dead code + migration v23 drops git_* columns
