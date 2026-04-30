@@ -20,6 +20,121 @@ Additional infrastructure:
 - `co-web/playwright.config.ts`: `baseURL` now reads `process.env.BASE_URL ?? "http://localhost:3000"` so `BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test` works.
 - `docs/OPERATIONS.md`: Wave 2 regression gate command added to post-deploy section.
 
+## [1.22.5] — 2026-04-30
+
+### Fixed — CO-137: harden ALTER ADD COLUMN migrations against partial-application + diagnostic endpoint
+
+**Root cause investigation (CO-137):** Migration v22 (`parent_key` on `universes`) was checked with `if current_version < 22` after a fresh `MAX(version)` read — mechanically correct. Code analysis suggests the most likely failure mode is a stale `schema_version=22` row recorded without the matching `ALTER TABLE` completing (volume snapshot edge case or a previous deploy that committed the version row but not the schema change). The diagnostic endpoint added in this release confirms prod schema state.
+
+**Structural fix:** Replaced bare `ALTER TABLE … ADD COLUMN` calls in migrations v17–v22 with `ensure_column` — a `pragma_table_info`-guarded helper that is a no-op when the column already exists. This makes every column-add migration idempotent: re-running a partially-applied migration recovers cleanly instead of panicking on "duplicate column name."
+
+Additionally, an **unconditional post-migration backfill** runs after all versioned blocks to ensure `parent_key` exists on the `universes` table regardless of what `schema_version` records, closing the exact failure mode from the 2026-04-30 prod incident.
+
+**Changes:**
+- `co-web/src/storage.rs`: `ensure_column` helper + unit tests (4 cases incl. partial-migration recovery simulation)
+- Migrations v17, v18, v20, v21, v22 updated to use `ensure_column` + `INSERT OR IGNORE` for version row
+- Unconditional `parent_key` backfill after all migrations
+- `co-web/src/gestao_routes.rs`: `GET /api/v1/gestao/_schema_check` (GitHub admin auth) returning `universes` column list + `schema_version` rows
+
+## [1.22.4] — 2026-04-30
+
+### Fixed — `get_universe` resilient to partially-applied parent_key migration (prod hotfix)
+
+**Symptom on prod (1.22.3):** `GET /api/v1/universes/template`, `/api/v1/universes/tempo`, etc. returned 404 "not found" even though the universes were seeded (filesystem dirs present, startup logs confirmed `Timeline universe '<key>' seeded`). Sibling endpoints that didn't go through `get_universe` (`/theme.css`, `/config`) continued to work.
+
+**Root cause:** since 1.22.0, `Storage::get_universe` and `list_universes_for_user` selected `parent_key` (added by migration v22). When the column wasn't actually present on the DB at query time — for any reason (migration not yet applied, partial schema state, drift between machines) — the SELECT errored, `.ok()` swallowed the error, and the function returned `None`, indistinguishable from "universe doesn't exist". UAT was unaffected because its DB had the column; prod was not.
+
+**Fix:** split the SELECT into two queries.
+1. The stable schema (everything ≤ schema_v 17) — must succeed for any prod DB still in service.
+2. A separate `SELECT parent_key FROM universes WHERE key = ?` that opportunistically fetches `parent_key`. If the column doesn't exist or the row is missing, gracefully returns `None`.
+
+Applied to:
+- `get_universe`
+- `list_universes_for_user` (per-row second query — slight overhead, fine at our scale)
+- `search_public_universes` (parent_key set to `None` unconditionally — search results don't surface parent_key in any UX path)
+
+This is the right shape for any column added by a recent migration: the read-path should not assume the migration has landed, especially when the assumption is buried inside `.ok()` and silently maps to "not found."
+
+After this fix, even if migration v22 didn't run (or ran and was rolled back), the API behaves correctly — the trio still has `parent_key="template"` on UAT (DB has the column), and the trio is reachable on prod (degrades to `parent_key=None` if the column happens to be missing).
+
+## [1.22.3] — 2026-04-30
+
+### Fixed — `parent_key` now exposed by `GET /api/v1/universes/:slug` (CO-98 follow-up)
+
+Surfaced during UAT smoke verification of 1.22.2: the public universe-info endpoint returns a stripped `UniverseInfo` DTO, not the raw `Universe` struct. Adding `parent_key` to `models::Universe` (1.22.0) was therefore not enough — the field was silently dropped by the DTO before serialization.
+
+- `co-web/src/universe_routes.rs::UniverseInfo` — adds `parent_key: Option<String>` with `#[serde(skip_serializing_if = "Option::is_none")]` so top-level universes still emit no extra field.
+- `get_universe_info` — passes `universe.parent_key` through to the DTO.
+
+`GET /api/v1/universes` (the bulk list) was unaffected — that endpoint already returned raw `Universe` instances and emitted `parent_key` correctly.
+
+After this fix, `curl /api/v1/universes/tempo | jq .parent_key` returns `"template"` as the CO-98 spec required.
+
+## [1.22.2] — 2026-04-30
+
+### Added — onboarding coach mark for first-time anonymous visitors (CO-99)
+
+Three-step floating banner (bottom-right, ~320×120px) introducing first-time anonymous visitors on the template universe to the platform's narrative. **Non-blocking** — does not capture clicks behind it. Cookie-gated for one year on dismissal/completion.
+
+Steps (PT-BR copy):
+1. **Visões** — names the four views (Quadro / Tabela / Conteúdo / Linha do tempo) and points to the header tabs.
+2. **Linha do tempo** — explains the log-scale and links to the multi-overlay at `/shared/timeline.html?u=tempo,universo,humanity` (opens in new tab).
+3. **Crie seu universo** — points users at the new `+ Novo universo` sidebar button (CO-96 P1) once they create an account.
+
+Show conditions (all must be true):
+- `state.isTemplate === true`
+- `await api.me()` returned null (anonymous)
+- `co_onboarded` cookie is **not** set
+- viewport width ≥ 720px (mobile UX deferred)
+
+Dismissal sets `co_onboarded=1; Path=/; Max-Age=31536000; SameSite=Lax`. Theme-aware via CSS custom properties (`--card-bg`, `--accent`, `--border`, `--shadow-md`, `--text-muted`); inline-styled for self-containment, no new CSS file needed.
+
+`setupOnboarding()` is invoked from `init()` on both the anonymous-template branch and the fallback-to-template branch. Internal gates re-check viewport + cookie + state defensively, so a future caller can't accidentally show the banner to the wrong audience.
+
+Telemetry (onboarding completion rate) is deferred to the admin-dashboard ticket (CO-105) per spec — banner today is purely client-side cookie-driven.
+
+## [1.22.1] — 2026-04-30
+
+### Added — universe create modal Phase 1 (CO-96 P1)
+
+The existing "Criar universo" modal (previously banner-only and always cloned `template`) now supports the full Phase 1 surface from CO-96:
+
+- **`+ Novo universo` button in the sidebar header.** Always visible; opens the modal with a fresh empty form (visibility=private, copy-from off).
+- **Description field** — optional textarea (rows=2).
+- **Visibility radio group** — `Privado · Público assinável · Login obrigatório`. Default: `private` to match server semantics.
+- **Copy-from existing universe** — checkbox + dropdown. Source dropdown is populated from `state.userUniverses` (plus a stable `Template (CO)` fallback) on every open.
+- **Branched submit** — copy-from off → `POST /api/v1/universes` (empty); copy-from on → `POST /api/v1/universes/<source>/duplicate` (CO-95). Visibility ≠ private is applied via a follow-up `PUT /api/v1/universes/:slug` to keep the create endpoint shape unchanged.
+
+The legacy banner CTA (`btn-criar-universo`) keeps its old behavior — the click handler now passes `{ copyFromTemplate: true }` to prefill copy-from from `template`, preserving the anonymous-visitor flow.
+
+Out of scope for Phase 1 (per the ticket): debounced key-uniqueness check (server already rejects 409 on duplicate); rename/visibility-change context menu; soft-delete. Those land in Phase 2/3 of CO-96.
+
+## [1.22.0] — 2026-04-30
+
+Wave 2 of the v1-launch sprint, partial: universe hierarchy (CO-98) and home-page Mermaid (CO-107). Create modal (CO-96 P1) and onboarding banner (CO-99) are open as separate work.
+
+### Added — hierarchical universes (CO-98)
+
+Each universe row now carries an optional `parent_key` pointer. Top-level universes have `parent_key = NULL`; children render nested under their parent in the SPA sidebar with a 16px indent and a chevron (`▸ / ▾`).
+
+- **Migration v22** — `ALTER TABLE universes ADD COLUMN parent_key TEXT; CREATE INDEX idx_universes_parent_key ON universes(parent_key);`. Nullable, no FK — orphan children (parent disappears) gracefully fall back to top-level rendering.
+- **Models** — `Universe.parent_key: Option<String>` added; serialized in API responses (`#[serde(skip_serializing_if = "Option::is_none")]`), so universes without a parent emit no extra field.
+- **Seed** — `seed_timeline_universe` now sets `parent_key = 'template'` on the trio (`tempo`, `humanity`, `universo`). An idempotent UPDATE backfills `parent_key` on existing rows from prior versions.
+- **SPA** — `renderSidebar` builds a tree from the flat `state.userUniverses` list and renders top-level → children with chevron toggles. Per-parent expansion state persists in `localStorage` (`co_universe_tree_<key>`); default expanded if a child is the active universe.
+- **Storage tests** — `SEED_TEMPLATE_INDEX_MD` added to the embedded-seed roundtrip suite; existing 143 tests pass unchanged.
+
+### Added — Mermaid diagrams in universe-home (CO-107)
+
+`renderUniverseHome` now post-processes Mermaid fenced blocks via the existing `CoMarkdown.renderMermaidBlocks` helper. Lazy-loaded; no overhead when an `index.md` has no Mermaid blocks.
+
+Template now ships a root-level `index.md` (in addition to the `content/` legal pages) showing the **Template → Tempo / Universo / Humanidade** trio as a directed graph, with palette tokens matching `timeline.html`. Visible on `co.artelonga.com.br/co` and any future template clone.
+
+- `co-web/seed/template/index.md` — new home-page seed (Mermaid + view explainer in PT-BR)
+- `co-web/src/storage.rs::reseed_template_content_pages` — adds `("index.md", SEED_TEMPLATE_INDEX_MD)` to the always-overwrite list (idempotent re-seed on every boot)
+- `co-web/static/variants/a/app.js::renderUniverseHome` — calls `renderMermaidBlocks(body)` after the markdown renders
+
+Constraint preserved: existing universes whose `index.md` has no Mermaid block trigger no extra network requests and no JS errors (helper short-circuits when no fence is present).
+
 ## [1.21.2] — 2026-04-30
 
 ### Added — per-deploy regression smoke scripts (CO-103)

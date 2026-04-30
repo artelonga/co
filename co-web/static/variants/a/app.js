@@ -872,17 +872,50 @@
     function renderSidebar() {
         const list = $('#project-list');
 
-        // Universe switcher (visible when logged in with multiple universes)
+        // Universe switcher (visible when logged in with multiple universes).
+        // CO-98: hierarchical rendering — universes with `parent_key` referring
+        // to another universe in the user's list are nested under that parent
+        // with a 16px indent + chevron. Orphan children (parent not in the
+        // user's universes) fall back to top-level rendering.
         let universeHtml = '';
         if (state.userUniverses && state.userUniverses.length > 1) {
+            const universes = state.userUniverses;
+            const seen = new Set(universes.map(u => u.key));
+            const childrenByParent = {};
+            const topLevel = [];
+            universes.forEach(u => {
+                if (u.parent_key && seen.has(u.parent_key)) {
+                    (childrenByParent[u.parent_key] = childrenByParent[u.parent_key] || []).push(u);
+                } else {
+                    topLevel.push(u);
+                }
+            });
+
+            const renderUniverseItem = (u, depth) => {
+                const active = u.key === state.currentUniverseSlug ? ' active' : '';
+                const kids = childrenByParent[u.key];
+                const hasKids = !!(kids && kids.length);
+                const expandKey = `co_universe_tree_${u.key}`;
+                const stored = localStorage.getItem(expandKey);
+                const containsActive = hasKids
+                    && kids.some(k => k.key === state.currentUniverseSlug);
+                const expanded = stored !== null ? (stored === '1') : containsActive;
+                const indent = 12 + depth * 16;
+                const chevron = hasKids
+                    ? `<span class="sidebar-universe-chevron" data-toggle="${u.key}" style="display:inline-block;width:14px;text-align:center;cursor:pointer;user-select:none">${expanded ? '▾' : '▸'}</span>`
+                    : '<span class="sidebar-universe-chevron-spacer" style="display:inline-block;width:14px"></span>';
+                let html = `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${u.key}" style="padding-left:${indent}px">
+                    ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}</span>
+                </div>`;
+                if (hasKids && expanded) {
+                    for (const k of kids) html += renderUniverseItem(k, depth + 1);
+                }
+                return html;
+            };
+
             universeHtml = `<div class="sidebar-universes">
                 <div class="sidebar-universe-label">${window.t ? window.t('universes') : 'Universos'}</div>
-                ${state.userUniverses.map(u => {
-                    const active = u.key === state.currentUniverseSlug ? ' active' : '';
-                    return `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${u.key}">
-                        <span class="sidebar-item-name">${esc(u.name || u.key)}</span>
-                    </div>`;
-                }).join('')}
+                ${topLevel.map(u => renderUniverseItem(u, 0)).join('')}
                 <hr class="sidebar-divider">
             </div>`;
         }
@@ -895,6 +928,23 @@
                     <span class="sidebar-item-name">${esc(p.name)}</span>
                 </div>`;
         }).join('');
+
+        // CO-98: chevron click toggles expansion without switching universes.
+        // Bind BEFORE the universe-item click handler so e.stopPropagation is
+        // honored (the universe-item handler does an async universe switch).
+        list.querySelectorAll('.sidebar-universe-chevron[data-toggle]').forEach(c => {
+            c.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const k = c.dataset.toggle;
+                const expandKey = `co_universe_tree_${k}`;
+                const stored = localStorage.getItem(expandKey);
+                const wasOpen = stored === null
+                    ? (state.userUniverses || []).some(u => u.parent_key === k && u.key === state.currentUniverseSlug)
+                    : stored === '1';
+                localStorage.setItem(expandKey, wasOpen ? '0' : '1');
+                renderSidebar();
+            });
+        });
 
         // Universe switching (click) + rename (double-click)
         list.querySelectorAll('.sidebar-universe-item').forEach(el => {
@@ -3925,6 +3975,12 @@
             const md = window.CoMarkdown;
             const html = md ? md.renderMarkdown(indexEntry.body) : esc(indexEntry.body);
             body.innerHTML = `<article class="universe-home-md md-body">${html}</article>`;
+            // Post-process Mermaid fenced blocks (CO-107). The helper lazy-loads
+            // the bundle only if a `mermaid` block is present, so this is a no-op
+            // when index.md has none.
+            if (md && typeof md.renderMermaidBlocks === 'function') {
+                md.renderMermaidBlocks(body);
+            }
             return;
         }
 
@@ -4357,6 +4413,87 @@
         // No-op: users always work on their own clone, never on read-only template
     }
 
+    // ===== Onboarding Banner (CO-99) =====
+    //
+    // Three-step coach mark for first-time anonymous visitors on the template
+    // universe. Non-blocking floating card. Visible only when:
+    //   - state.isTemplate === true
+    //   - api.me() returned null (anonymous)
+    //   - cookie `co_onboarded` is NOT set
+    //   - viewport width >= 720px
+    // Once dismissed (Pular) or completed (after step 3), sets the cookie for
+    // a year to avoid re-display on subsequent visits.
+
+    function setupOnboarding() {
+        const banner = document.getElementById('onboarding-banner');
+        if (!banner) return;
+
+        // Cookie gate. If already onboarded, never show.
+        if (/(?:^|;\s*)co_onboarded=1(?:;|$)/.test(document.cookie || '')) return;
+
+        // Viewport gate. Mobile UX is deferred per the ticket.
+        if (window.innerWidth < 720) return;
+
+        // Anonymous-on-template gate. setupOnboarding is invoked only from the
+        // anonymous-template branch in init(); we re-check state defensively
+        // so a future caller can't show the banner for the wrong audience.
+        if (!state.isTemplate) return;
+
+        const titleEl = document.getElementById('onboarding-title');
+        const bodyEl = document.getElementById('onboarding-body');
+        const stepEl = document.getElementById('onboarding-step-indicator');
+        const skipBtn = document.getElementById('onboarding-skip');
+        const nextBtn = document.getElementById('onboarding-next');
+        if (!titleEl || !bodyEl || !stepEl || !skipBtn || !nextBtn) return;
+
+        const steps = [
+            {
+                title: 'Visões',
+                bodyHtml: 'O Co tem várias visões do mesmo conteúdo: <strong>Quadro</strong>, <strong>Tabela</strong>, <strong>Conteúdo</strong>, <strong>Linha do tempo</strong>. Clique nas abas acima para alternar.',
+                cta: 'Próximo',
+            },
+            {
+                title: 'Linha do tempo',
+                bodyHtml: 'A linha do tempo mostra eventos numa escala log: do Big Bang ao agora. <a href="/shared/timeline.html?u=tempo,universo,humanity" target="_blank" rel="noopener">Abrir linha do tempo →</a>',
+                cta: 'Próximo',
+            },
+            {
+                title: 'Crie seu universo',
+                bodyHtml: 'Quando quiser organizar suas próprias coisas, faça login e clique em <strong>+ Novo universo</strong> na barra lateral.',
+                cta: 'Concluir',
+            },
+        ];
+
+        let current = 0; // 0-indexed step
+
+        function render() {
+            const s = steps[current];
+            titleEl.textContent = s.title;
+            bodyEl.innerHTML = s.bodyHtml;
+            stepEl.textContent = `${current + 1} / 3`;
+            nextBtn.textContent = s.cta;
+        }
+
+        function dismiss() {
+            // Year-long cookie. Path=/ so it applies across the whole SPA.
+            document.cookie = 'co_onboarded=1; Path=/; Max-Age=31536000; SameSite=Lax';
+            banner.classList.add('hidden');
+        }
+
+        nextBtn.addEventListener('click', () => {
+            if (current < steps.length - 1) {
+                current += 1;
+                render();
+            } else {
+                dismiss();
+            }
+        });
+        skipBtn.addEventListener('click', dismiss);
+
+        render();
+        banner.classList.remove('hidden');
+    }
+
     // ===== Criar Universo Modal =====
 
     function setupCriarModal() {
@@ -4368,18 +4505,59 @@
         const form = document.getElementById('criar-form');
         const nameInput = document.getElementById('criar-name');
         const slugInput = document.getElementById('criar-slug');
+        const descInput = document.getElementById('criar-description');
+        const copyToggle = document.getElementById('criar-copy-from-toggle');
+        const copySource = document.getElementById('criar-copy-from-source');
         const errorEl = document.getElementById('criar-error');
 
-        function open() {
+        // CO-96 P1: populate the copy-from source select from the user's universes.
+        // Always offers `template` as a stable fallback. Re-populated on every open
+        // so newly-added universes appear without a page reload.
+        function populateCopyFromSources() {
+            if (!copySource) return;
+            const universes = (state.userUniverses || [])
+                .filter(u => u.key && u.key !== 'template');
+            copySource.innerHTML = '<option value="template">Template (CO)</option>'
+                + universes.map(u =>
+                    `<option value="${u.key}">${esc(u.name || u.key)}</option>`
+                ).join('');
+        }
+
+        // CO-96 P1: open() accepts an optional `defaults` object to prefill the
+        // form. The banner CTA passes { copyFromTemplate: true } so the legacy
+        // "always clone template" flow still works; the sidebar CTA passes
+        // nothing for a fresh empty form (visibility=private, no copy-from).
+        function open(defaults) {
+            const d = defaults || {};
+            populateCopyFromSources();
             overlay.classList.remove('hidden');
             nameInput.value = '';
             slugInput.value = '';
+            if (descInput) descInput.value = '';
+            // Reset visibility radios to private (default for new universes).
+            const privacyRadio = form.querySelector('input[name="criar-visibility"][value="private"]');
+            if (privacyRadio) privacyRadio.checked = true;
+            // Copy-from toggle handling.
+            if (copyToggle) {
+                copyToggle.checked = !!d.copyFromTemplate;
+                if (copySource) {
+                    copySource.classList.toggle('hidden', !copyToggle.checked);
+                    if (d.copyFromTemplate) copySource.value = 'template';
+                }
+            }
             if (errorEl) errorEl.classList.add('hidden');
             nameInput.focus();
         }
 
         function close() {
             overlay.classList.add('hidden');
+        }
+
+        // Toggle visibility of the source-select when the checkbox flips.
+        if (copyToggle && copySource) {
+            copyToggle.addEventListener('change', () => {
+                copySource.classList.toggle('hidden', !copyToggle.checked);
+            });
         }
 
         const slugPreview = document.getElementById('criar-slug-preview');
@@ -4420,12 +4598,41 @@
             const name = nameInput.value.trim();
             const key = slugInput.value.trim();
             if (!name || !key) return;
+            const description = descInput ? descInput.value.trim() : '';
+            const visibilityEl = form.querySelector('input[name="criar-visibility"]:checked');
+            const visibility = visibilityEl ? visibilityEl.value : 'private';
+            const copyFrom = (copyToggle && copyToggle.checked && copySource)
+                ? copySource.value
+                : null;
 
             const submitBtn = document.getElementById('criar-submit');
             if (submitBtn) submitBtn.disabled = true;
             if (errorEl) errorEl.classList.add('hidden');
 
-            const result = await api.cloneUniverse('template', { name, key, description: '' });
+            // CO-96 P1: branch between empty-create and copy-from paths.
+            //  - Copy-from → POST /api/v1/universes/<source>/duplicate (CO-95).
+            //  - Empty     → POST /api/v1/universes (existing endpoint).
+            // Either way: visibility is set client-side; if the empty-create
+            // endpoint doesn't honor the field today, follow up with a PUT.
+            let result;
+            if (copyFrom) {
+                result = await api.cloneUniverse(copyFrom, { name, key, description });
+            } else {
+                result = await apiFetch('/api/v1/universes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, name, description }),
+                }, true);
+                // Visibility cannot be set on POST today; follow up with PUT.
+                // No-op for the default `private` since that's the server default.
+                if (result && visibility !== 'private') {
+                    await apiFetch(`/api/v1/universes/${encodeURIComponent(key)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ visibility }),
+                    }, true);
+                }
+            }
             if (submitBtn) submitBtn.disabled = false;
 
             if (!result) return; // apiFetch already showed error toast
@@ -4435,7 +4642,8 @@
             setUniverseSlugInUrl(result.key);
             state.currentUniverseSlug = result.key;
             state.isTemplate = false;
-            // Seed universe info from clone response (content_count already set)
+            // Seed universe info from response (content_count present on
+            // clone path; defaults to 0 on empty-create).
             state.universeInfo = {
                 key: result.key,
                 name: result.name,
@@ -4449,9 +4657,15 @@
             await bootAppForUniverse(result.key);
         });
 
-        // Wire the CTA button in the banner
+        // CO-96 P1: sidebar `+ Novo universo` button opens the modal with no
+        // defaults — fresh empty form, visibility=private, copy-from off.
+        const btnSidebarNew = document.getElementById('btn-sidebar-new-universe');
+        if (btnSidebarNew) btnSidebarNew.addEventListener('click', () => open());
+
+        // Wire the CTA button in the banner — anonymous-visitor flow always
+        // wants a clone of `template`, so prefill copy-from accordingly.
         const btnCriar = document.getElementById('btn-criar-universo');
-        if (btnCriar) btnCriar.addEventListener('click', open);
+        if (btnCriar) btnCriar.addEventListener('click', () => open({ copyFromTemplate: true }));
 
         // Wire "Entrar" in the banner to the login modal
         const btnEntrar = document.getElementById('btn-banner-entrar');
@@ -5228,6 +5442,9 @@
             }
             // Anonymous or logged-in with no community → show template
             showTemplateBanner();
+            // CO-99: onboarding coach mark for first-time anonymous visitors.
+            // Internally gated on cookie + viewport + state.isTemplate.
+            setupOnboarding();
             await bootAppForUniverse('template');
             return;
         }
@@ -5261,6 +5478,8 @@
         state.isTemplate = true;
         setUniverseSlugInUrl('template');
         showTemplateBanner();
+        // CO-99: onboarding for the fallback-to-template path too.
+        setupOnboarding();
         await bootAppForUniverse('template');
     }
 

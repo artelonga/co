@@ -590,7 +590,9 @@ pub async fn start_server(config: WebConfig) {
             // always renders with the intended default — old migrations could
             // have left it on 'scholarly-light'.
             storage.ensure_template_theme_preset("modern");
-            tracing::info!("Template content pages refreshed from bundled seed files; theme preset pinned to 'modern'");
+            tracing::info!(
+                "Template content pages refreshed from bundled seed files; theme preset pinned to 'modern'"
+            );
         }
         // CO-41: seed quilomboaraucaria public universe once on first boot.
         if !storage.quilombo_universe_exists() {
@@ -818,17 +820,29 @@ async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
                 Ok(_) => "ok".to_string(),
                 Err(e) => format!("error: {e}"),
             };
-            let disk = if storage.data_dir.exists() { "ok".to_string() } else { "missing".to_string() };
+            let disk = if storage.data_dir.exists() {
+                "ok".to_string()
+            } else {
+                "missing".to_string()
+            };
             (db, disk)
         }
     };
 
     let all_ok = db_status == "ok" && disk_status == "ok";
-    let code = if all_ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    let code = if all_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
     (
         code,
         Json(HealthDeepResponse {
-            status: if all_ok { "ok".into() } else { "degraded".into() },
+            status: if all_ok {
+                "ok".into()
+            } else {
+                "degraded".into()
+            },
             db: db_status,
             disk: disk_status,
         }),

@@ -102,10 +102,31 @@ pub struct ConteudoResumo {
     pub caminho: String,
 }
 
+// CO-137: schema diagnostic types
+
+#[derive(Debug, Serialize)]
+pub struct SchemaColumn {
+    pub cid: i64,
+    pub name: String,
+    #[serde(rename = "type")]
+    pub col_type: String,
+    pub notnull: i64,
+    pub dflt_value: Option<String>,
+    pub pk: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SchemaCheckResponse {
+    pub universes_columns: Vec<SchemaColumn>,
+    pub schema_versions: Vec<i64>,
+}
+
 // ---- Router ----
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        // CO-137: diagnostic endpoint — confirms prod schema state for universes table
+        .route("/_schema_check", get(schema_check_handler))
         // Validate & publish
         .route("/validar", post(validar_handler))
         .route("/publicar", post(publicar_handler))
@@ -733,4 +754,55 @@ fn rebuild_md(fm: &HashMap<String, String>, body: &str) -> String {
     } else {
         format!("---\n{}\n---\n\n{}\n", frontmatter, body)
     }
+}
+
+// CO-137: diagnostic endpoint — returns universes column list + schema_version rows.
+// Used to confirm prod schema state after the parent_key migration incident.
+// Accessible at GET /api/v1/gestao/_schema_check (requires GitHub admin auth).
+async fn schema_check_handler(
+    State(state): State<AppState>,
+    _admin: GitHubAdmin,
+) -> Result<Json<SchemaCheckResponse>, AppError> {
+    let storage = state
+        .storage
+        .lock()
+        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let conn = storage.conn();
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT cid, name, type, \"notnull\", dflt_value, pk \
+             FROM pragma_table_info('universes') ORDER BY cid",
+        )
+        .map_err(|e| AppError::Internal(format!("pragma_table_info: {e}")))?;
+
+    let universes_columns: Vec<SchemaColumn> = stmt
+        .query_map([], |row| {
+            Ok(SchemaColumn {
+                cid: row.get(0)?,
+                name: row.get(1)?,
+                col_type: row.get(2)?,
+                notnull: row.get(3)?,
+                dflt_value: row.get(4)?,
+                pk: row.get(5)?,
+            })
+        })
+        .map_err(|e| AppError::Internal(format!("columns query_map: {e}")))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut stmt = conn
+        .prepare("SELECT version FROM schema_version ORDER BY version")
+        .map_err(|e| AppError::Internal(format!("schema_version query: {e}")))?;
+
+    let schema_versions: Vec<i64> = stmt
+        .query_map([], |row| row.get(0))
+        .map_err(|e| AppError::Internal(format!("versions query_map: {e}")))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(SchemaCheckResponse {
+        universes_columns,
+        schema_versions,
+    }))
 }
