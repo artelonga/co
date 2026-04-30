@@ -359,6 +359,13 @@ pub struct HealthResponse {
     pub version: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct HealthDeepResponse {
+    pub status: String,
+    pub db: String,
+    pub disk: String,
+}
+
 // --- Universe / Multi-tenancy ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

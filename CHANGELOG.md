@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.2] — 2026-04-30
+
+### Added — per-deploy regression smoke scripts (CO-103)
+
+Two one-shot bash scripts that verify post-deploy invariants and exit non-zero with a diagnostic on any miss:
+
+- `scripts/smoke-prod.sh` — targets `https://co.artelonga.com.br` (override via `BASE_URL`).
+- `scripts/smoke-uat.sh` — targets `https://co-artelonga-uat.fly.dev` (override via `BASE_URL`).
+- `scripts/smoke-lib.sh` — shared helpers (`check_status`, `check_json_field`, `check_count`).
+
+10 checks in order: health, health-deep, template universe, timeline trio shape + event counts (21/26/28 pinned), themes CSS (`--accent: #6366f1`), static assets, service worker cache name, auth reachability (bogus login → 401), template entries total, favicon.
+
+`docs/OPERATIONS.md` added with the full smoke-test runbook and deploy procedure.
+
+### Added — `GET /api/health/deep`
+
+New endpoint that verifies DB read+write (SAVEPOINT/ROLLBACK proves write access without modifying data) and disk accessibility. Returns `{"status":"ok","db":"ok","disk":"ok"}` on success or HTTP 503 with `"status":"degraded"` if any subsystem is unhealthy.
+
 ## [1.21.1] — 2026-04-26
 
 ### Added — multi-universe overlay + smooth event travel in the timeline

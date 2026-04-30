@@ -202,7 +202,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/projects/{key}/tasks/{id}/comments", get(list_comments))
         .route("/projects/{key}/activity", get(list_activity))
         .route("/projects/{key}/dashboard", get(get_dashboard))
-        .route("/health", get(health_check));
+        .route("/health", get(health_check))
+        .route("/health/deep", get(health_check_deep));
 
     // --- Board protected routes (write ops + list — JWT required) ---
     let board_protected = Router::new()
@@ -805,6 +806,33 @@ async fn health_check() -> Json<HealthResponse> {
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
     })
+}
+
+async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
+    let (db_status, disk_status) = match lock_storage(&state) {
+        Err(_) => ("lock failed".to_string(), "lock failed".to_string()),
+        Ok(storage) => {
+            let db = match storage.conn().execute_batch(
+                "SAVEPOINT health_deep; ROLLBACK TO SAVEPOINT health_deep; RELEASE SAVEPOINT health_deep;",
+            ) {
+                Ok(_) => "ok".to_string(),
+                Err(e) => format!("error: {e}"),
+            };
+            let disk = if storage.data_dir.exists() { "ok".to_string() } else { "missing".to_string() };
+            (db, disk)
+        }
+    };
+
+    let all_ok = db_status == "ok" && disk_status == "ok";
+    let code = if all_ok { StatusCode::OK } else { StatusCode::SERVICE_UNAVAILABLE };
+    (
+        code,
+        Json(HealthDeepResponse {
+            status: if all_ok { "ok".into() } else { "degraded".into() },
+            db: db_status,
+            disk: disk_status,
+        }),
+    )
 }
 
 // --- Variant-aware static file serving ---
