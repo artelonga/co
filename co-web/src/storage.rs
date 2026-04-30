@@ -7,6 +7,69 @@ use serde_json::json;
 use crate::entry_index::{EntryRow, make_entry};
 use crate::models::*;
 
+// --- Seed content (template universe legal + intro pages) ---
+//
+// Content lives as plain `.md` files under `co-web/seed/template/` so it can be
+// edited as markdown rather than as Rust string literals. Files are embedded at
+// compile time via `include_str!`. Frontmatter (slug/title/order/tags) becomes
+// the entry metadata; the body becomes the entry body.
+
+const SEED_SOBRE_MD: &str = include_str!("../seed/template/sobre.md");
+const SEED_TERMOS_MD: &str = include_str!("../seed/template/termos.md");
+const SEED_PRIVACIDADE_MD: &str = include_str!("../seed/template/privacidade.md");
+const SEED_DADOS_RASTREADOS_MD: &str = include_str!("../seed/template/dados-rastreados.md");
+const SEED_LINHAS_DO_TEMPO_MD: &str = include_str!("../seed/template/linhas-do-tempo.md");
+
+// Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
+// each backed by a JSON event manifest + a markdown index/front page. Loaded
+// at compile time and seeded once on first boot.
+const SEED_TIMELINE_TEMPO_JSON: &str = include_str!("../seed/timeline/tempo.json");
+const SEED_TIMELINE_HUMANITY_JSON: &str = include_str!("../seed/timeline/humanity.json");
+const SEED_TIMELINE_UNIVERSO_JSON: &str = include_str!("../seed/timeline/universo.json");
+const SEED_TIMELINE_TEMPO_INDEX_MD: &str = include_str!("../seed/timeline/tempo-index.md");
+const SEED_TIMELINE_HUMANITY_INDEX_MD: &str = include_str!("../seed/timeline/humanity-index.md");
+const SEED_TIMELINE_UNIVERSO_INDEX_MD: &str = include_str!("../seed/timeline/universo-index.md");
+
+/// Split a `.md` file with YAML frontmatter into `(frontmatter_yaml, body)`.
+/// If no frontmatter is present, returns `("", whole_input)`.
+fn split_frontmatter(md: &str) -> (&str, &str) {
+    let s = md
+        .strip_prefix("---\n")
+        .or_else(|| md.strip_prefix("---\r\n"));
+    let Some(rest) = s else { return ("", md) };
+    if let Some(end) = rest.find("\n---\n") {
+        return (&rest[..end], rest[end + 5..].trim_start_matches('\n'));
+    }
+    if let Some(end) = rest.find("\r\n---\r\n") {
+        return (
+            &rest[..end],
+            rest[end + 7..].trim_start_matches(['\n', '\r']),
+        );
+    }
+    ("", md)
+}
+
+/// Convert the YAML frontmatter of a seed page into a `serde_json::Value` and
+/// stamp `created`/`modified` to the supplied timestamp (so seeds always show
+/// "now" rather than the file's original creation date).
+fn seed_page_frontmatter(md: &str, now_str: &str) -> serde_json::Value {
+    let (fm_yaml, _) = split_frontmatter(md);
+    let mut fm: serde_json::Value = serde_yaml::from_str::<serde_yaml::Value>(fm_yaml)
+        .ok()
+        .and_then(|v| serde_json::to_value(v).ok())
+        .unwrap_or_else(|| json!({}));
+    if let Some(obj) = fm.as_object_mut() {
+        obj.insert("created".into(), json!(now_str));
+        obj.insert("modified".into(), json!(now_str));
+    }
+    fm
+}
+
+fn seed_page_body(md: &str) -> &str {
+    let (_, body) = split_frontmatter(md);
+    body
+}
+
 pub struct Storage {
     conn: Connection,
     pub data_dir: PathBuf,
@@ -1926,6 +1989,191 @@ impl Storage {
         Ok(())
     }
 
+    /// Re-home a known list of personal universes to the admin's CURRENT
+    /// user_id, regardless of whether the prior owner is still in `users`.
+    ///
+    /// `rescue_orphan_universes` only catches truly dangling `owner_id` values
+    /// (no row in `users`). But a more common failure mode is two valid users:
+    /// the prior admin (still in `users` from a stale bootstrap), and the
+    /// current admin (re-seeded). The universes still point at the prior
+    /// admin's id, so the new admin can't see them.
+    ///
+    /// This function is targeted — it only touches the well-known personal
+    /// universes named in the bootstrap script. Idempotent. Returns the number
+    /// of universes re-homed.
+    pub fn ensure_admin_owns_personal_universes(
+        &mut self,
+        admin_email: &str,
+        keys: &[&str],
+    ) -> anyhow::Result<usize> {
+        let admin_email = admin_email.trim().to_lowercase();
+        let admin_user_id: String = match self.conn.query_row(
+            "SELECT id FROM users WHERE email = ?1",
+            params![admin_email],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => return Ok(0),
+        };
+        let now = Utc::now().to_rfc3339();
+        let mut rehomed = 0usize;
+        for key in keys {
+            let current_owner: Option<String> = self
+                .conn
+                .query_row(
+                    "SELECT owner_id FROM universes WHERE key = ?1",
+                    params![key],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            let Some(current_owner) = current_owner else {
+                continue; // universe doesn't exist
+            };
+            if current_owner == admin_user_id {
+                // Still ensure membership row exists (defensive).
+                self.conn.execute(
+                    "INSERT OR IGNORE INTO universe_members \
+                     (universe_key, user_id, role, joined_at) \
+                     VALUES (?1, ?2, 'owner', ?3)",
+                    params![key, admin_user_id, now],
+                )?;
+                continue;
+            }
+            self.conn.execute(
+                "UPDATE universes SET owner_id = ?1 WHERE key = ?2",
+                params![admin_user_id, key],
+            )?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO universe_members \
+                 (universe_key, user_id, role, joined_at) \
+                 VALUES (?1, ?2, 'owner', ?3)",
+                params![key, admin_user_id, now],
+            )?;
+            tracing::info!(
+                "ensure_admin_owns_personal_universes: re-homed {key} from {current_owner} to {admin_email}"
+            );
+            rehomed += 1;
+        }
+        Ok(rehomed)
+    }
+
+    /// Delete anonymous-clone universes (key prefix `u-` or `anon-`) whose
+    /// owner has been re-homed to the supplied admin user. These are the
+    /// "Meu Co" clones that pile up on the admin's sidebar after a previous
+    /// version of `rescue_orphan_universes` grabbed them.
+    ///
+    /// Only deletes universes whose owner currently equals the admin's user
+    /// id — does NOT touch anon clones that genuinely belong to someone else,
+    /// or that retain their original `anon-...` owner_id.
+    ///
+    /// Idempotent. Returns the number of universes removed.
+    pub fn cleanup_admin_anon_clutter(&mut self, admin_email: &str) -> anyhow::Result<usize> {
+        let admin_email = admin_email.trim().to_lowercase();
+        let admin_user_id: String = match self.conn.query_row(
+            "SELECT id FROM users WHERE email = ?1",
+            params![admin_email],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => return Ok(0),
+        };
+        let keys: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT key FROM universes \
+                 WHERE owner_id = ?1 \
+                   AND (key LIKE 'u-%' OR key LIKE 'anon-%')",
+            )?;
+            stmt.query_map(params![admin_user_id], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let mut removed = 0usize;
+        for key in &keys {
+            let _ = self
+                .conn
+                .execute("DELETE FROM entries WHERE universe_key = ?1", params![key]);
+            let _ = self.conn.execute(
+                "DELETE FROM universe_members WHERE universe_key = ?1",
+                params![key],
+            );
+            let n = self
+                .conn
+                .execute("DELETE FROM universes WHERE key = ?1", params![key])?;
+            if n > 0 {
+                let universe_dir = self.data_dir.join("universes").join(key);
+                if universe_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&universe_dir);
+                }
+                removed += 1;
+            }
+        }
+        if removed > 0 {
+            tracing::info!(
+                "cleanup_admin_anon_clutter: removed {removed} stale anon-clone universe(s) from {admin_email}"
+            );
+        }
+        Ok(removed)
+    }
+
+    /// Re-home universes whose `owner_id` no longer maps to any user — typically
+    /// the result of a data wipe or migration that re-seeded the admin user
+    /// with a different uuid, leaving prior universes orphaned.
+    ///
+    /// For every universe with a dangling `owner_id`, set the owner to the
+    /// supplied admin user_id and ensure they're a member with role='owner'.
+    /// Idempotent. Returns the number of universes re-homed.
+    pub fn rescue_orphan_universes(&mut self, admin_email: &str) -> anyhow::Result<usize> {
+        let admin_email = admin_email.trim().to_lowercase();
+        let admin_user_id: String = match self.conn.query_row(
+            "SELECT id FROM users WHERE email = ?1",
+            params![admin_email],
+            |row| row.get(0),
+        ) {
+            Ok(id) => id,
+            Err(_) => return Ok(0),
+        };
+
+        // Find universes whose owner_id has no row in users — but skip the
+        // 'system' sentinel (template, quilomboaraucaria, yggdrasil, etc.)
+        // AND skip anonymous-clone universes (key starts with `anon-` or
+        // `u-`). Those should be deleted by `cleanup_anon_universes`, not
+        // re-homed to the admin (otherwise the admin's sidebar fills up
+        // with hundreds of orphaned "Meu Co" clones from past visitors).
+        let orphan_keys: Vec<String> = {
+            let mut stmt = self.conn.prepare(
+                "SELECT u.key FROM universes u \
+                 LEFT JOIN users usr ON usr.id = u.owner_id \
+                 WHERE usr.id IS NULL \
+                   AND u.owner_id != 'system' \
+                   AND u.key NOT LIKE 'anon-%' \
+                   AND u.key NOT LIKE 'u-%'",
+            )?;
+            stmt.query_map([], |row| row.get(0))?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        let now = Utc::now().to_rfc3339();
+        let mut rescued = 0usize;
+        for key in &orphan_keys {
+            self.conn.execute(
+                "UPDATE universes SET owner_id = ?1 WHERE key = ?2",
+                params![admin_user_id, key],
+            )?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO universe_members \
+                 (universe_key, user_id, role, joined_at) \
+                 VALUES (?1, ?2, 'owner', ?3)",
+                params![key, admin_user_id, now],
+            )?;
+            tracing::info!(
+                "rescue_orphan_universes: re-homed {key} to {admin_email}"
+            );
+            rescued += 1;
+        }
+        Ok(rescued)
+    }
+
     /// Remove all anonymous universes (keys starting with `anon-`) from the
     /// database and from the filesystem. Called on UAT startup so each session
     /// starts from a clean slate.
@@ -2120,7 +2368,11 @@ impl Storage {
     }
 
     pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
-        // Owned/member universes + subscribed universes, deduplicated.
+        // Owned + member + subscribed universes, deduplicated.
+        // Also include `owner_id = user_id` directly as a defensive fallback —
+        // `create_universe` inserts an owner row in `universe_members`, but
+        // historic data or a partial migration could leave that row missing,
+        // which would silently hide the user's own universe from their sidebar.
         let mut stmt = self
             .conn
             .prepare(
@@ -2128,11 +2380,12 @@ impl Storage {
                  u.is_template, u.is_public, u.content_count, \
                  COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
                  FROM universes u \
-                 WHERE u.key IN ( \
-                   SELECT universe_key FROM universe_members WHERE user_id = ?1 \
-                   UNION \
-                   SELECT universe_key FROM subscriptions WHERE user_id = ?1 \
-                 ) \
+                 WHERE u.owner_id = ?1 \
+                    OR u.key IN ( \
+                      SELECT universe_key FROM universe_members WHERE user_id = ?1 \
+                      UNION \
+                      SELECT universe_key FROM subscriptions WHERE user_id = ?1 \
+                    ) \
                  ORDER BY u.created_at ASC",
             )
             .expect("Failed to prepare list_universes_for_user");
@@ -2385,8 +2638,11 @@ impl Storage {
             None => return UniverseAccess::Denied,
         };
 
-        // 1. Template universes are readable by everyone.
-        if universe.visibility == "template" {
+        // 1. Template / public-static universes are readable by everyone.
+        // `public-static` is the visibility for the seeded read-only public
+        // universes (template, timeline trio, etc.) — content is curated and
+        // never login-gated.
+        if universe.visibility == "template" || universe.visibility == "public-static" {
             return UniverseAccess::ReadOnly;
         }
 
@@ -2968,291 +3224,59 @@ impl Storage {
             let _ = upsert_entry_row(&self.conn, "template", &task_entry);
         }
 
-        // --- Content pages: intro article, terms, privacy ---
+        // Seed/refresh the template's content pages (intro + legal).
+        // Extracted so it can also run unconditionally on each startup.
+        self.reseed_template_content_pages();
+    }
 
-        let intro_page = make_entry(
-            "content/sobre.md",
-            json!({
-                "type": "page",
-                "slug": "sobre",
-                "title": "Co — Consciência Coletiva",
-                "order": 1,
-                "tags": ["sobre", "manifesto"],
-                "created": now_str,
-                "modified": now_str
-            }),
-            "# **Co**nsciência **Co**letiva\n\n\
-             Co é uma plataforma para organizar ideias, projetos e pessoas.\n\n\
-             Três verbos definem o que fazemos:\n\n\
-             - **Co**criar — cada cartão é uma ideia. Escreva, arraste, conecte.\n\
-             - **Co**laborar — convide pessoas para seu universo. Editem juntos, em tempo real.\n\
-             - **Co**nectar os pontos — seus universos formam uma rede. Cada perfil é uma presença online.\n\n\
-             ## O que é um universo?\n\n\
-             Um universo é seu espaço. Pode ser um projeto pessoal, um portfólio, \
-             um blog, ou o painel de uma equipe. Você decide o que entra e como aparece.\n\n\
-             Universos privados são como perfis — sua identidade digital. \
-             Universos públicos são vitrines para o mundo.\n\n\
-             ## Tudo é Markdown\n\n\
-             Cada tarefa, cada página, cada nota é um arquivo `.md` com metadados YAML. \
-             Isso significa que seu conteúdo é portátil: sincronize com o Obsidian, \
-             edite no VS Code, versione no Git.\n\n\
-             Você nunca fica preso. O conteúdo é seu.\n\n\
-             ## Código aberto\n\n\
-             Co é software livre, licenciado sob MIT. \
-             O código está no [GitHub](https://github.com/artelonga/co). \
-             Contribuições são bem-vindas.\n\n\
-             ---\n\n\
-             *Co — conectando os pontos.*",
+    /// Force the template universe's `theme_preset` to a known value.
+    ///
+    /// Earlier migrations defaulted `theme_preset` to `'scholarly-light'` and
+    /// updated the existing template row to match — even though the seed code
+    /// today uses `'modern'`. Because the row is then `INSERT OR IGNORE`d on
+    /// every boot, the migration value is sticky. This setter overrides it on
+    /// every startup so the template page is consistently rendered with the
+    /// product's intended default look.
+    pub fn ensure_template_theme_preset(&self, preset: &str) {
+        let _ = self.conn.execute(
+            "UPDATE universes SET theme_preset = ?1 WHERE key = 'template'",
+            params![preset],
         );
-        if let Err(e) = co::entry::write_entry(&universe_root, &intro_page) {
-            tracing::warn!("Failed to write intro page file: {e}");
-        }
-        if let Err(e) = upsert_entry_row(&self.conn, "template", &intro_page) {
-            tracing::warn!("Failed to upsert intro page: {e}");
-        }
+    }
 
-        let termos_page = make_entry(
-            "content/termos.md",
-            json!({
-                "type": "page",
-                "slug": "termos",
-                "title": "Termos de Uso",
-                "order": 10,
-                "tags": ["legal"],
-                "created": now_str,
-                "modified": now_str
-            }),
-            "# Termos de Uso\n\n\
-             Última atualização: abril de 2026\n\n\
-             ## 1. Aceitação dos termos\n\n\
-             Ao acessar e usar o Co (\"Plataforma\"), você concorda com estes Termos de Uso. \
-             Se não concordar, não utilize a Plataforma.\n\n\
-             ## 2. Descrição do serviço\n\n\
-             O Co é uma plataforma de gestão de conteúdo em grafo, oferecida como software \
-             livre (licença MIT). A Plataforma permite criar, organizar e compartilhar conteúdo \
-             em formato Markdown através de \"universos\" — espaços de trabalho pessoais ou colaborativos.\n\n\
-             ## 3. Contas e universos\n\n\
-             - Visitantes podem usar a Plataforma sem conta, com limite de 100 entradas por universo anônimo.\n\
-             - Ao criar uma conta, você é responsável por manter a segurança de suas credenciais.\n\
-             - Universos privados são visíveis apenas para o proprietário e membros convidados.\n\
-             - Universos públicos são acessíveis a qualquer pessoa com o link.\n\n\
-             ## 4. Conteúdo do usuário\n\n\
-             - Você mantém todos os direitos sobre o conteúdo que cria.\n\
-             - O conteúdo é armazenado como arquivos Markdown e pode ser exportado a qualquer momento.\n\
-             - Não nos responsabilizamos por conteúdo criado por usuários.\n\
-             - Conteúdo que viole leis brasileiras poderá ser removido sem aviso prévio.\n\n\
-             ## 5. Uso aceitável\n\n\
-             Você concorda em não usar a Plataforma para:\n\
-             - Distribuir conteúdo ilegal, difamatório ou que viole direitos de terceiros\n\
-             - Tentar acessar contas ou universos de outros usuários sem autorização\n\
-             - Sobrecarregar intencionalmente a infraestrutura da Plataforma\n\n\
-             ## 6. Disponibilidade\n\n\
-             A Plataforma é oferecida \"como está\", sem garantias de disponibilidade contínua. \
-             Faremos esforços razoáveis para manter o serviço operacional.\n\n\
-             ## 7. Privacidade\n\n\
-             O tratamento de dados pessoais é descrito na nossa Política de Privacidade.\n\n\
-             ## 8. Modificações\n\n\
-             Estes termos podem ser atualizados. Alterações significativas serão comunicadas \
-             através da Plataforma.\n\n\
-             ## 9. Contato\n\n\
-             Dúvidas: yuri@artelonga.com.br\n\n\
-             ---\n\n\
-             *Arte Longa — Curitiba, PR, Brasil*",
-        );
-        if let Err(e) = co::entry::write_entry(&universe_root, &termos_page) {
-            tracing::warn!("Failed to write termos page file: {e}");
+    /// Always-overwrite seed of the template universe's content pages from the
+    /// embedded `seed/template/*.md` files.
+    ///
+    /// Called both from `seed_template_universe()` (first-boot path) and on
+    /// every server startup, so the binary's bundled legal/intro content is
+    /// the source of truth — even when the database already exists from a
+    /// prior version. `upsert_entry_row` does an `INSERT OR REPLACE`, so this
+    /// is safe to call repeatedly.
+    pub fn reseed_template_content_pages(&mut self) {
+        if !self.template_exists() {
+            return; // template universe not seeded yet — first-boot path will handle it
         }
-        if let Err(e) = upsert_entry_row(&self.conn, "template", &termos_page) {
-            tracing::warn!("Failed to upsert termos page: {e}");
-        }
+        let now_str = Utc::now().to_rfc3339();
+        let universe_root = self.universe_root("template");
 
-        let privacidade_page = make_entry(
-            "content/privacidade.md",
-            json!({
-                "type": "page",
-                "slug": "privacidade",
-                "title": "Política de Privacidade",
-                "order": 11,
-                "tags": ["legal"],
-                "created": now_str,
-                "modified": now_str
-            }),
-            "# Política de Privacidade\n\n\
-             Última atualização: abril de 2026\n\n\
-             ## 1. Dados coletados\n\n\
-             O Co coleta o mínimo necessário para o funcionamento da Plataforma:\n\n\
-             - **Conta:** e-mail (para autenticação), nome de exibição (opcional)\n\
-             - **Conteúdo:** textos, tarefas e arquivos que você cria nos seus universos\n\
-             - **Cookies:** sessão de autenticação, preferência de idioma, tema visual\n\
-             - **Logs:** endereço IP (anonimizado), páginas acessadas, para fins de segurança\n\n\
-             ## 2. Uso dos dados\n\n\
-             Seus dados são usados exclusivamente para:\n\
-             - Autenticar sua conta e manter sua sessão\n\
-             - Armazenar e exibir seu conteúdo\n\
-             - Melhorar a Plataforma (estatísticas agregadas e anônimas)\n\n\
-             **Não vendemos, compartilhamos ou cedemos seus dados a terceiros.**\n\n\
-             ## 3. Armazenamento\n\n\
-             - Dados são armazenados em servidores na região de São Paulo (GRU) via Fly.io\n\
-             - Conteúdo é armazenado como arquivos Markdown + banco de dados SQLite\n\
-             - Backups automáticos são realizados diariamente\n\n\
-             ## 4. Cookies\n\n\
-             Utilizamos cookies estritamente necessários:\n\n\
-             | Cookie | Finalidade | Duração |\n\
-             |--------|-----------|--------|\n\
-             | `session` | Autenticação (JWT) | 30 dias |\n\
-             | `co_lang` | Idioma da interface | 1 ano |\n\
-             | `co_named_palette` | Tema visual | 1 ano |\n\
-             | `co_local_universe` | Universo anônimo local | Sessão |\n\n\
-             Não utilizamos cookies de rastreamento, analytics de terceiros ou publicidade.\n\n\
-             ## 5. Telemetria e Análise\n\n\
-             Para melhorar a Plataforma e identificar problemas, coletamos dados de uso \
-             agregados e anonimizados. **Nenhum dado pessoal é coletado sem seu consentimento.**\n\n\
-             ### Dados coletados (anônimos)\n\
-             - Páginas visitadas e tempo de permanência\n\
-             - Cliques em botões e ações principais (criar tarefa, mudar tema, etc.)\n\
-             - Erros encontrados (para debug)\n\
-             - Performance da aplicação\n\
-             - Tipo de dispositivo (desktop/mobile/tablet) e navegador\n\n\
-             ### Dados anonimizados\n\
-             - Endereço IP é convertido em hash diário (impossível reverter)\n\
-             - Identificador de visitante é aleatório, sem ligação com identidade real\n\n\
-             ### Lista completa\n\
-             Para transparência total, mantemos uma lista exaustiva de tudo que rastreamos:\n\n\
-             → [Lista completa de dados rastreados](/co/template?path=content/dados-rastreados.md)\n\n\
-             ### Como desativar\n\
-             - Habilite \"Do Not Track\" no seu navegador (respeitamos automaticamente)\n\
-             - Recuse cookies no banner (telemetria não é ativada)\n\
-             - Logged-in users: opt-out em Configurações → Privacidade\n\n\
-             ## 6. Seus direitos (LGPD)\n\n\
-             Conforme a Lei Geral de Proteção de Dados (Lei 13.709/2018), você tem direito a:\n\
-             - Acessar seus dados pessoais\n\
-             - Corrigir dados incompletos ou inexatos\n\
-             - Solicitar a exclusão dos seus dados\n\
-             - Exportar seu conteúdo (Markdown nativo, exportável a qualquer momento)\n\
-             - Revogar consentimento\n\n\
-             Para exercer esses direitos, entre em contato: yuri@artelonga.com.br\n\n\
-             ## 7. Retenção\n\n\
-             - Dados de conta são mantidos enquanto a conta estiver ativa\n\
-             - Universos anônimos (sem conta) podem ser removidos após 90 dias de inatividade\n\
-             - Após exclusão de conta, dados são removidos em até 30 dias\n\n\
-             ## 8. Segurança\n\n\
-             - Senhas são armazenadas com hash Argon2\n\
-             - Comunicação via HTTPS (TLS)\n\
-             - Tokens JWT com expiração\n\
-             - Banco de dados criptografado em repouso\n\n\
-             ## 9. Contato\n\n\
-             Controlador: Yuri — yuri@artelonga.com.br\n\n\
-             ---\n\n\
-             *Arte Longa — Curitiba, PR, Brasil*",
-        );
-        if let Err(e) = co::entry::write_entry(&universe_root, &privacidade_page) {
-            tracing::warn!("Failed to write privacidade page file: {e}");
-        }
-        if let Err(e) = upsert_entry_row(&self.conn, "template", &privacidade_page) {
-            tracing::warn!("Failed to upsert privacidade page: {e}");
-        }
-
-        let dados_rastreados_page = make_entry(
-            "content/dados-rastreados.md",
-            json!({
-                "type": "page",
-                "slug": "dados-rastreados",
-                "title": "Lista completa de dados rastreados",
-                "order": 12,
-                "tags": ["legal"],
-                "created": now_str,
-                "modified": now_str
-            }),
-            "# Lista completa de dados rastreados\n\n\
-             Última atualização: abril de 2026\n\n\
-             Esta página lista TODOS os dados que o Co coleta. Nada além disso é armazenado.\n\n\
-             ## 1. Navegação\n\n\
-             | Campo | Descrição | Anônimo? |\n\
-             |-------|-----------|----------|\n\
-             | `path` | URL visitada | Sim |\n\
-             | `referrer` | Página de origem | Sim |\n\
-             | `universe_key` | Slug do universo | Sim |\n\
-             | `view_mode` | Kanban, tabela, etc. | Sim |\n\
-             | `theme` | Tema ativo | Sim |\n\
-             | `language` | Idioma da interface | Sim |\n\
-             | `duration_ms` | Tempo na página | Sim |\n\n\
-             ## 2. Interações\n\n\
-             | Evento | Quando | Dados |\n\
-             |--------|--------|-------|\n\
-             | `task.create` | Criar tarefa | universe, project, status |\n\
-             | `task.update` | Editar tarefa | universe, project, campo alterado |\n\
-             | `task.delete` | Deletar tarefa | universe, project |\n\
-             | `task.drag` | Mover entre colunas | de_status, para_status |\n\
-             | `theme.change` | Mudar tema | de_tema, para_tema |\n\
-             | `lang.switch` | Mudar idioma | de_lang, para_lang |\n\
-             | `universe.create` | Criar universo | universe (slug) |\n\
-             | `universe.clone` | Clonar template | source, new |\n\
-             | `auth.login` | Login (sucesso/falha) | timestamp, sucesso |\n\
-             | `auth.logout` | Logout | timestamp |\n\
-             | `modal.open` | Abrir modal | nome do modal |\n\
-             | `search.query` | Buscar | hash do termo (não o termo) |\n\n\
-             ## 3. Performance\n\n\
-             | Métrica | Descrição |\n\
-             |---------|----------|\n\
-             | `page_load_ms` | Tempo de carregamento |\n\
-             | `time_to_interactive_ms` | Tempo até interativo |\n\
-             | `api_call_duration_ms` | Latência de cada API |\n\
-             | `ws_connect` | Conexão WebSocket |\n\
-             | `cache_hit` | Cache HIT/MISS |\n\n\
-             ## 4. Erros\n\n\
-             | Campo | Descrição |\n\
-             |-------|----------|\n\
-             | `error_type` | Tipo (4xx, 5xx, JS exception) |\n\
-             | `error_path` | URL onde aconteceu |\n\
-             | `error_message` | Mensagem (sem dados pessoais) |\n\
-             | `stack_trace` | Stack trace (anonimizado) |\n\n\
-             ## 5. Identificação anônima\n\n\
-             | Campo | Descrição | Como é gerado |\n\
-             |-------|-----------|---------------|\n\
-             | `visitor_token` | Identificador único do visitante | nanoid aleatório, salvo em cookie |\n\
-             | `session_id` | ID da sessão atual | Aleatório, expira em 30min |\n\
-             | `ip_hash` | Hash do IP | SHA256(IP + sal_diário) |\n\
-             | `ua_device` | Categoria de dispositivo | desktop/mobile/tablet |\n\
-             | `ua_browser` | Navegador | chrome/firefox/safari/etc |\n\
-             | `ua_os` | Sistema operacional | windows/macos/linux/ios/android |\n\n\
-             ## 6. Dados de conta (apenas para usuários logados)\n\n\
-             | Campo | Quando |\n\
-             |-------|--------|\n\
-             | `user_id` | Sempre que logado |\n\
-             | `email` | Apenas no login (autenticação) |\n\
-             | `display_name` | No registro |\n\
-             | `created_at` | Data de criação da conta |\n\
-             | `last_login_at` | Última sessão |\n\n\
-             ## 7. O que NÃO rastreamos\n\n\
-             - ❌ Endereço IP bruto (apenas hash diário)\n\
-             - ❌ Senhas (apenas hash Argon2)\n\
-             - ❌ Conteúdo de tarefas/notas (apenas metadados de criação)\n\
-             - ❌ Cookies de terceiros\n\
-             - ❌ Pixels de publicidade\n\
-             - ❌ Fingerprinting de navegador\n\
-             - ❌ Dados biométricos\n\
-             - ❌ Localização precisa\n\
-             - ❌ Histórico fora do Co\n\
-             - ❌ Identificadores de outras plataformas\n\n\
-             ## Retenção\n\n\
-             - Eventos detalhados: **90 dias**\n\
-             - Agregados anônimos: **mantidos indefinidamente**\n\
-             - Dados de conta: enquanto a conta estiver ativa\n\
-             - Após exclusão: 30 dias para remoção completa\n\n\
-             ## Seus direitos (LGPD)\n\n\
-             Você pode a qualquer momento:\n\
-             - Solicitar uma cópia dos seus dados: yuri@artelonga.com.br\n\
-             - Pedir exclusão completa\n\
-             - Desativar telemetria (cookie consent)\n\
-             - Exportar todo seu conteúdo (Markdown nativo)\n\n\
-             ---\n\n\
-             *Este documento é exaustivo. Se encontrarmos algo não listado, atualizamos imediatamente.*",
-        );
-        if let Err(e) = co::entry::write_entry(&universe_root, &dados_rastreados_page) {
-            tracing::warn!("Failed to write dados-rastreados page file: {e}");
-        }
-        if let Err(e) = upsert_entry_row(&self.conn, "template", &dados_rastreados_page) {
-            tracing::warn!("Failed to upsert dados-rastreados page: {e}");
+        for (path, md) in [
+            ("content/sobre.md", SEED_SOBRE_MD),
+            ("content/termos.md", SEED_TERMOS_MD),
+            ("content/privacidade.md", SEED_PRIVACIDADE_MD),
+            ("content/dados-rastreados.md", SEED_DADOS_RASTREADOS_MD),
+            ("content/linhas-do-tempo.md", SEED_LINHAS_DO_TEMPO_MD),
+        ] {
+            let entry = make_entry(
+                path,
+                seed_page_frontmatter(md, &now_str),
+                seed_page_body(md),
+            );
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("Failed to write {path} file: {e}");
+            }
+            if let Err(e) = upsert_entry_row(&self.conn, "template", &entry) {
+                tracing::warn!("Failed to upsert {path} page: {e}");
+            }
         }
     }
 
@@ -3497,6 +3521,163 @@ impl Storage {
             params![now_str],
         );
         tracing::info!("Yggdrasil universe seeded (key=yggdrasil, requires_login=true)");
+    }
+
+    /// Returns true if the given timeline universe already exists.
+    pub fn timeline_universe_exists(&self, key: &str) -> bool {
+        self.get_universe(key).is_some()
+    }
+
+    /// Seed a single timeline universe from its JSON manifest + index markdown.
+    ///
+    /// The manifest defines: universe metadata (`key`, `name`, `description`,
+    /// `theme_preset`, `layout`) and an array of `events` each with
+    /// `slug`, `title`, `date_year`, and `description`. Events are written as
+    /// `type: event` entries under `events/<slug>.md`. The index is written
+    /// as `index.md` (rendered as the universe home page).
+    ///
+    /// Idempotent — `INSERT OR IGNORE` for the universe row, `upsert_entry_row`
+    /// for each entry. Safe to re-call on every boot to refresh content.
+    pub fn seed_timeline_universe(
+        &mut self,
+        manifest_json: &str,
+        index_md: &str,
+    ) -> anyhow::Result<()> {
+        let manifest: serde_json::Value = serde_json::from_str(manifest_json)
+            .map_err(|e| anyhow::anyhow!("timeline manifest parse: {e}"))?;
+        let universe = manifest
+            .get("universe")
+            .ok_or_else(|| anyhow::anyhow!("timeline manifest missing `universe`"))?;
+        let key = universe
+            .get("key")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("timeline manifest missing universe.key"))?;
+        let name = universe
+            .get("name")
+            .and_then(|v| v.as_str())
+            .unwrap_or(key);
+        let description = universe
+            .get("description")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let theme_preset = universe
+            .get("theme_preset")
+            .and_then(|v| v.as_str())
+            .unwrap_or("modern");
+        let layout = universe
+            .get("layout")
+            .and_then(|v| v.as_str())
+            .unwrap_or("timeline");
+
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Universe row — public read, no login required, system-owned.
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public, \
+              requires_login, visibility, theme_preset, layout, content_count) \
+             VALUES (?1, ?2, ?3, 'system', ?4, 0, 1, 0, 'public-static', ?5, ?6, 0)",
+            params![key, name, description, now_str, theme_preset, layout],
+        );
+
+        let universe_root = self.universe_root(key);
+
+        // index.md → page entry rendered as the front page by the SPA.
+        let index_entry = make_entry(
+            "index.md",
+            json!({
+                "type": "page",
+                "slug": "index",
+                "title": name,
+                "tags": ["timeline", "index"],
+                "created": now_str,
+                "modified": now_str,
+            }),
+            index_md,
+        );
+        if let Err(e) = co::entry::write_entry(&universe_root, &index_entry) {
+            tracing::warn!("seed_timeline_universe({key}): write index.md: {e}");
+        }
+        if let Err(e) = upsert_entry_row(&self.conn, key, &index_entry) {
+            tracing::warn!("seed_timeline_universe({key}): upsert index.md: {e}");
+        }
+
+        // Each event → `events/<slug>.md` with `type: event`. Body is the
+        // description; frontmatter carries `title`, `date_year`.
+        let events = manifest
+            .get("events")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow::anyhow!("timeline manifest missing `events` array"))?;
+        let mut count = 0usize;
+        for event in events {
+            let slug = event
+                .get("slug")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow::anyhow!("event missing slug"))?;
+            let title = event
+                .get("title")
+                .and_then(|v| v.as_str())
+                .unwrap_or(slug);
+            // `date_year` may exceed i64 range for far-future cosmic events
+            // (e.g. heat death ~10^100). Read as f64 for storage; the SPA
+            // parses it back as a number on the timeline.
+            let date_year = event
+                .get("date_year")
+                .and_then(|v| v.as_f64())
+                .ok_or_else(|| anyhow::anyhow!("event {slug} missing or non-numeric date_year"))?;
+            let description = event
+                .get("description")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let path = format!("events/{}.md", slug);
+            let fm = json!({
+                "type": "event",
+                "slug": slug,
+                "title": title,
+                "date_year": date_year,
+                "description": description,
+                "tags": ["timeline"],
+                "created": now_str,
+                "modified": now_str,
+            });
+            let entry = make_entry(&path, fm, description);
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("seed_timeline_universe({key}): write {path}: {e}");
+            }
+            if let Err(e) = upsert_entry_row(&self.conn, key, &entry) {
+                tracing::warn!("seed_timeline_universe({key}): upsert {path}: {e}");
+            } else {
+                count += 1;
+            }
+        }
+
+        // Update content_count to match what we wrote.
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            params![(count + 1) as i64, key],
+        );
+
+        tracing::info!(
+            "Timeline universe '{}' seeded ({} events + index.md)",
+            key,
+            count
+        );
+        Ok(())
+    }
+
+    /// Seed all three timeline universes (`tempo`, `humanity`, `universo`).
+    /// Each is independent — failure of one doesn't stop the others.
+    pub fn seed_all_timeline_universes(&mut self) {
+        for (label, manifest, index) in [
+            ("tempo", SEED_TIMELINE_TEMPO_JSON, SEED_TIMELINE_TEMPO_INDEX_MD),
+            ("humanity", SEED_TIMELINE_HUMANITY_JSON, SEED_TIMELINE_HUMANITY_INDEX_MD),
+            ("universo", SEED_TIMELINE_UNIVERSO_JSON, SEED_TIMELINE_UNIVERSO_INDEX_MD),
+        ] {
+            if let Err(e) = self.seed_timeline_universe(manifest, index) {
+                tracing::warn!("seed_timeline_universe({label}): {e}");
+            }
+        }
     }
 
     /// Returns true if the given project belongs to a template universe.
@@ -4569,5 +4750,88 @@ pub fn seed_data(storage: &mut Storage) {
 
     for task in plt_tasks {
         storage.create_task("plt", task).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod seed_md_tests {
+    use super::*;
+
+    #[test]
+    fn split_frontmatter_extracts_yaml_and_body() {
+        let md = "---
+slug: foo
+title: Bar
+order: 3
+---
+
+# Heading
+
+Body text.
+";
+        let (fm, body) = split_frontmatter(md);
+        assert!(fm.contains("slug: foo"));
+        assert!(fm.contains("title: Bar"));
+        assert!(body.starts_with("# Heading"));
+        assert!(body.contains("Body text."));
+    }
+
+    #[test]
+    fn split_frontmatter_handles_no_frontmatter() {
+        let md = "# Just markdown
+
+No frontmatter.";
+        let (fm, body) = split_frontmatter(md);
+        assert_eq!(fm, "");
+        assert_eq!(body, md);
+    }
+
+    #[test]
+    fn seed_page_frontmatter_overrides_timestamps() {
+        let md = "---
+slug: x
+title: T
+order: 1
+tags:
+  - a
+created: 2020-01-01T00:00:00Z
+modified: 2020-01-01T00:00:00Z
+---
+
+body";
+        let now = "2026-04-26T00:00:00+00:00";
+        let fm = seed_page_frontmatter(md, now);
+        assert_eq!(fm.get("slug").and_then(|v| v.as_str()), Some("x"));
+        assert_eq!(fm.get("title").and_then(|v| v.as_str()), Some("T"));
+        assert_eq!(fm.get("created").and_then(|v| v.as_str()), Some(now));
+        assert_eq!(fm.get("modified").and_then(|v| v.as_str()), Some(now));
+    }
+
+    #[test]
+    fn embedded_seed_md_files_parse() {
+        for md in [
+            SEED_SOBRE_MD,
+            SEED_TERMOS_MD,
+            SEED_PRIVACIDADE_MD,
+            SEED_DADOS_RASTREADOS_MD,
+            SEED_LINHAS_DO_TEMPO_MD,
+        ] {
+            let now = "2026-04-26T00:00:00+00:00";
+            let fm = seed_page_frontmatter(md, now);
+            assert!(
+                fm.get("slug").and_then(|v| v.as_str()).is_some(),
+                "missing slug"
+            );
+            assert!(
+                fm.get("title").and_then(|v| v.as_str()).is_some(),
+                "missing title"
+            );
+            let body = seed_page_body(md);
+            assert!(
+                body.starts_with("# "),
+                "body should start with H1, got: {:?}",
+                &body[..40.min(body.len())]
+            );
+        }
     }
 }

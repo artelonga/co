@@ -378,9 +378,33 @@
         });
         // cookie-privacy-link opens privacy page in new tab (no JS handler needed)
 
-        // Register PWA service worker
+        // Register PWA service worker. When a new SW takes control of the
+        // page (i.e. a deploy happened), reload once so the user gets the
+        // fresh app.js / style.css instead of whatever the old SW had cached.
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').catch(function() {});
+            navigator.serviceWorker.register('/sw.js').then(function (reg) {
+                // Listen for an updated SW being installed.
+                reg.addEventListener('updatefound', function () {
+                    var newSW = reg.installing;
+                    if (!newSW) return;
+                    newSW.addEventListener('statechange', function () {
+                        if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+                            // A new SW has been installed and an old one is in control.
+                            // Tell it to skipWaiting so the new one takes over.
+                            newSW.postMessage({ type: 'SKIP_WAITING' });
+                        }
+                    });
+                });
+            }).catch(function () {});
+
+            // When control transfers to a new SW, reload exactly once so the
+            // page is served by the fresh worker (and gets fresh asset URLs).
+            var _swReloaded = false;
+            navigator.serviceWorker.addEventListener('controllerchange', function () {
+                if (_swReloaded) return;
+                _swReloaded = true;
+                window.location.reload();
+            });
         }
     })();
     </script>

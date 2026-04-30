@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,10 +10,16 @@
     --bg-soft: #15161a;
     --text: #e8e6e1;
     --text-muted: #888;
-    --accent: #7fb3a8;
-    --accent-strong: #a8d8c8;
     --line: #2a2b30;
     --grid: #1a1b1f;
+
+    /* Per-universe palette (luminance-balanced for dark bg) */
+    --color-tempo:    #a8d8c8;   /* teal */
+    --color-tempo-dim:    #5a8278;
+    --color-universo: #b1c4e8;   /* blue */
+    --color-universo-dim: #5e6f95;
+    --color-humanity: #e8c4a3;   /* warm */
+    --color-humanity-dim: #95745a;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
@@ -21,12 +27,47 @@ html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Bl
 #header {
     position: absolute; top: 0; left: 0; right: 0; z-index: 10;
     padding: 12px 24px; background: linear-gradient(180deg, rgba(13,13,14,0.95) 0%, rgba(13,13,14,0) 100%);
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    display: flex; align-items: center; gap: 20px;
     pointer-events: none;
+    flex-wrap: wrap;
 }
-#header h1 { font-size: 14px; font-weight: 500; margin: 0; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); pointer-events: auto; }
-#header .right { font-size: 12px; color: var(--text-muted); pointer-events: auto; }
-#header a { color: var(--accent); text-decoration: none; }
+#header h1 { font-size: 14px; font-weight: 500; margin: 0; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-muted); pointer-events: auto; min-width: 80px; }
+#header .right { font-size: 12px; color: var(--text-muted); pointer-events: auto; display: flex; gap: 12px; align-items: center; margin-left: auto; }
+#header a { color: inherit; text-decoration: none; pointer-events: auto; }
+
+#universe-toggles { display: flex; gap: 8px; pointer-events: auto; }
+.uni-toggle {
+    background: transparent;
+    border: 1px solid var(--line);
+    color: var(--text-muted);
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 14px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.uni-toggle:hover { color: var(--text); }
+.uni-toggle.active[data-key="tempo"]    { border-color: var(--color-tempo);    color: var(--color-tempo);    background: rgba(168,216,200,0.08); }
+.uni-toggle.active[data-key="universo"] { border-color: var(--color-universo); color: var(--color-universo); background: rgba(177,196,232,0.08); }
+.uni-toggle.active[data-key="humanity"] { border-color: var(--color-humanity); color: var(--color-humanity); background: rgba(232,196,163,0.08); }
+
+#nav-controls { display: flex; gap: 4px; pointer-events: auto; }
+.nav-btn {
+    background: var(--bg-soft);
+    border: 1px solid var(--line);
+    color: var(--text);
+    width: 28px; height: 28px;
+    border-radius: 14px;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 14px;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+    transition: border-color 0.15s, color 0.15s;
+}
+.nav-btn:hover { border-color: var(--text); color: var(--text); }
+.nav-btn:disabled { opacity: 0.3; cursor: default; }
 
 #timeline-svg { display: block; width: 100vw; height: 100vh; cursor: grab; user-select: none; }
 #timeline-svg.dragging { cursor: grabbing; }
@@ -41,36 +82,51 @@ html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Bl
 
 #hint {
     position: absolute; bottom: 24px; right: 24px; z-index: 5;
-    font-size: 11px; color: var(--text-muted); max-width: 280px; text-align: right;
+    font-size: 11px; color: var(--text-muted); max-width: 280px; text-align: right; line-height: 1.5;
 }
-#hint code { background: var(--bg-soft); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
+#hint code, #hint kbd { background: var(--bg-soft); padding: 1px 5px; border-radius: 3px; font-size: 10px; }
 
-#error { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); padding: 24px; background: var(--bg-soft); border: 1px solid #c33; border-radius: 8px; max-width: 480px; }
-.event-tooltip { position: absolute; background: var(--bg-soft); border: 1px solid var(--line); border-radius: 6px; padding: 12px 16px; max-width: 360px; pointer-events: none; z-index: 20; font-size: 13px; line-height: 1.5; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
-.event-tooltip .title { font-size: 14px; font-weight: 600; margin: 0 0 6px 0; color: var(--accent-strong); }
+#error {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    padding: 24px; background: var(--bg-soft); border: 1px solid #c33; border-radius: 8px; max-width: 480px;
+    z-index: 30;
+}
+.event-tooltip {
+    position: absolute; background: var(--bg-soft); border: 1px solid var(--line);
+    border-radius: 6px; padding: 12px 16px; max-width: 360px; pointer-events: none;
+    z-index: 20; font-size: 13px; line-height: 1.5; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+}
+.event-tooltip .title { font-size: 14px; font-weight: 600; margin: 0 0 6px 0; }
 .event-tooltip .date { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 8px; }
+.event-tooltip .source { font-size: 10px; color: var(--text-muted); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; }
 .event-tooltip .description { color: var(--text); margin: 0; }
 </style>
 </head>
 <body>
 
 <div id="header">
-    <h1>Timeline</h1>
+    <h1 id="header-title">Linha do tempo</h1>
+    <div id="universe-toggles"></div>
+    <div id="nav-controls">
+        <button class="nav-btn" id="prev-btn" title="Evento anterior (←)">‹</button>
+        <button class="nav-btn" id="next-btn" title="Próximo evento (→)">›</button>
+    </div>
     <div class="right">
-        <span id="event-count">—</span> events from <code id="universe-key">…</code>
+        <span id="event-count">—</span>
         · <a href="#" id="reset-btn">reset</a>
+        · <a href="https://scaleofuniverse.com/pt" target="_blank" rel="noopener" title="Inspiração: Scale of the Universe (escala de distância)">scale ↗</a>
     </div>
 </div>
 
 <svg id="timeline-svg" preserveAspectRatio="none"></svg>
 
 <div id="focus-readout">
-    <span class="label">focus</span><span id="focus-year">—</span>
+    <span class="label">foco</span><span id="focus-year">—</span>
 </div>
 
 <div id="hint">
-    drag horizontally to pan · scroll to zoom · click event for detail<br>
-    near focus: 1 px ≈ 1 year · far: log10 scale
+    arraste para navegar · role para zoom<br>
+    <kbd>←</kbd> <kbd>→</kbd> evento anterior / próximo · clique evento p/ detalhe
 </div>
 
 <div id="error" style="display:none"></div>
@@ -79,66 +135,74 @@ html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, Bl
 (function() {
 'use strict';
 
+// ===== Universes shown / palette =====
+
+const UNIVERSE_DEFS = [
+    { key: 'tempo',    label: 'Tempo',      color: 'var(--color-tempo)',    colorDim: 'var(--color-tempo-dim)' },
+    { key: 'universo', label: 'Universo',   color: 'var(--color-universo)', colorDim: 'var(--color-universo-dim)' },
+    { key: 'humanity', label: 'Humanidade', color: 'var(--color-humanity)', colorDim: 'var(--color-humanity-dim)' },
+];
+
+// ===== URL parsing — supports ?u=tempo,humanity,universo or ?u=tempo =====
+
+function readActiveFromUrl() {
+    const params = new URLSearchParams(location.search);
+    const raw = params.get('u') || 'tempo';
+    const keys = raw.split(',').map(s => s.trim()).filter(Boolean);
+    const valid = UNIVERSE_DEFS.map(u => u.key);
+    return new Set(keys.filter(k => valid.includes(k)));
+}
+
+function writeActiveToUrl(active) {
+    const url = new URL(location.href);
+    const keys = UNIVERSE_DEFS.filter(u => active.has(u.key)).map(u => u.key);
+    if (keys.length === 0) {
+        url.searchParams.delete('u');
+    } else {
+        url.searchParams.set('u', keys.join(','));
+    }
+    history.replaceState({}, '', url.toString());
+}
+
 // ===== Data fetch =====
 
-const params = new URLSearchParams(location.search);
-const universe = params.get('u') || 'co-dev';
-const initialYear = parseFloat(params.get('y'));
-document.getElementById('universe-key').textContent = universe;
-
-async function fetchEvents() {
-    const resp = await fetch(`/api/v1/universes/${encodeURIComponent(universe)}/entries?type=event`, {
-        credentials: 'include',
-    });
-    if (resp.status === 401) {
-        showError('You need to log in to view events from this universe.<br><a href="/co" style="color:var(--accent)">Go to login</a>');
-        return [];
-    }
-    if (resp.status === 404) {
-        showError(`Universe <code>${universe}</code> not found.`);
-        return [];
-    }
-    if (!resp.ok) {
-        showError(`Failed to load events: HTTP ${resp.status}`);
-        return [];
-    }
-    const data = await resp.json();
-    const entries = data.entries || data || [];
-
-    // Parse frontmatter and filter to events with a usable date.
-    return entries
-        .map(e => {
-            // frontmatter may be in `frontmatter_json` (string), `frontmatter` (obj), or in-line
-            let fm = {};
-            if (typeof e.frontmatter === 'object' && e.frontmatter) fm = e.frontmatter;
-            else if (e.frontmatter_json) {
-                try { fm = JSON.parse(e.frontmatter_json); } catch (_) {}
-            }
-            const year = parseDateYear(fm);
-            if (year === null) return null;
-            return {
-                path: e.path,
-                title: fm.title || e.title || e.path,
-                year,
-                date: fm.date || null,
-                time: fm.time || null,
-                description: fm.description || '',
-                body: e.body || '',
-            };
-        })
-        .filter(Boolean)
-        .sort((a, b) => a.year - b.year);
+async function fetchUniverseEvents(key) {
+    try {
+        const resp = await fetch(`/api/v1/universes/${encodeURIComponent(key)}/entries?type=event`, {
+            credentials: 'include',
+        });
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        const entries = data.entries || data || [];
+        return entries
+            .map(e => {
+                let fm = {};
+                if (typeof e.frontmatter === 'object' && e.frontmatter) fm = e.frontmatter;
+                else if (e.frontmatter_json) {
+                    try { fm = JSON.parse(e.frontmatter_json); } catch (_) {}
+                }
+                const year = parseDateYear(fm);
+                if (year === null) return null;
+                return {
+                    universe: key,
+                    path: e.path,
+                    title: fm.title || e.title || e.path,
+                    year,
+                    description: fm.description || '',
+                    body: e.body || '',
+                };
+            })
+            .filter(Boolean);
+    } catch (_) { return []; }
 }
 
 function parseDateYear(fm) {
-    // Prefer explicit `date_year` (signed integer); fallback to ISO `date`.
     if (typeof fm.date_year === 'number') return fm.date_year;
     if (typeof fm.date_year === 'string') {
         const n = parseFloat(fm.date_year);
         if (!isNaN(n)) return n;
     }
     if (typeof fm.date === 'string') {
-        // Try ISO date YYYY-MM-DD or signed YYYYY etc.
         const m = fm.date.match(/^(-?\d+)/);
         if (m) {
             const y = parseInt(m[1], 10);
@@ -154,28 +218,26 @@ function showError(msg) {
     el.style.display = 'block';
 }
 
-// ===== Coordinate transform =====
-//
-// Linear near focus, log10 outside.
-//
-//   |delta| < LINEAR  → pixel = sign(delta) * |delta| * LINEAR_SCALE
-//   |delta| >= LINEAR → pixel = sign(delta) * (LINEAR*LINEAR_SCALE + log10(|delta|-LINEAR+1) * LOG_SCALE)
+// ===== Coordinate transform: linear near focus, log10 outside =====
 
-const LINEAR_HALF_SPAN = 100;     // years on each side of focus that scale linearly
-const LINEAR_SCALE = 4;            // pixels per year in linear region
-const LOG_SCALE = 90;              // pixels per decade in logarithmic region
-const FOCUS_OFFSET_X = 0;          // focus is at viewport center
+const LINEAR_HALF_SPAN = 100;
+const LINEAR_SCALE = 4;
+const LOG_SCALE = 90;
 
 const state = {
-    focus: isNaN(initialYear) ? 2026 : initialYear,
+    focus: 2026,
     width: 0,
     height: 0,
-    events: [],
+    activeKeys: new Set(['tempo']),
+    eventsByUniverse: new Map(),  // key → events[]
+    allEvents: [],                // flat sorted list across active universes
     hoveredEvent: null,
+    animFrame: null,
 };
 
-function yearToPixel(year) {
-    const delta = year - state.focus;
+function yearToPixel(year, focus) {
+    const f = focus !== undefined ? focus : state.focus;
+    const delta = year - f;
     const sign = delta < 0 ? -1 : 1;
     const absDelta = Math.abs(delta);
     if (absDelta < LINEAR_HALF_SPAN) {
@@ -186,17 +248,102 @@ function yearToPixel(year) {
     return sign * (linearMax + logPart * LOG_SCALE);
 }
 
-function pixelToYear(px) {
-    // Inverse — used for hit-testing the user's drag.
+function pixelToYearDelta(px) {
     const sign = px < 0 ? -1 : 1;
     const absPx = Math.abs(px);
     const linearMax = LINEAR_HALF_SPAN * LINEAR_SCALE;
-    if (absPx < linearMax) {
-        return state.focus + sign * absPx / LINEAR_SCALE;
-    }
+    if (absPx < linearMax) return sign * absPx / LINEAR_SCALE;
     const logPx = absPx - linearMax;
-    const absDelta = Math.pow(10, logPx / LOG_SCALE) + LINEAR_HALF_SPAN - 1;
-    return state.focus + sign * absDelta;
+    return sign * (Math.pow(10, logPx / LOG_SCALE) + LINEAR_HALF_SPAN - 1);
+}
+
+// ===== Smooth travel between events =====
+
+function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+function travelTo(targetYear, durationMs) {
+    if (durationMs === undefined) durationMs = 750;
+    if (state.animFrame) cancelAnimationFrame(state.animFrame);
+    if (!isFinite(targetYear)) return;
+
+    // The pixel position of the target at t=0 (start). At t=1 we want it at 0.
+    // We interpolate desired pixel from startPixel→0 with easing, and at each
+    // frame compute the focus that places target at desiredPixel. This gives
+    // visual constant-pixel-velocity travel which feels smooth across both
+    // linear and log regions.
+    const startPixel = yearToPixel(targetYear);
+    if (startPixel === 0) return;
+    const startTime = performance.now();
+
+    function frame(now) {
+        const t = Math.min(1, (now - startTime) / durationMs);
+        const eased = easeInOutCubic(t);
+        const desiredPixel = startPixel * (1 - eased);
+        // focus = targetYear - pixelToYearDelta(desiredPixel)
+        state.focus = targetYear - pixelToYearDelta(desiredPixel);
+        render();
+        if (t < 1) {
+            state.animFrame = requestAnimationFrame(frame);
+        } else {
+            state.animFrame = null;
+            state.focus = targetYear;
+            render();
+        }
+    }
+    state.animFrame = requestAnimationFrame(frame);
+}
+
+function nextEvent() {
+    const sorted = state.allEvents.slice().sort((a, b) => a.year - b.year);
+    // Use small epsilon to avoid sticking on current focus year
+    const eps = Math.abs(state.focus) * 1e-9 + 1e-3;
+    const nx = sorted.find(e => e.year > state.focus + eps);
+    if (nx) travelTo(nx.year);
+}
+
+function prevEvent() {
+    const sorted = state.allEvents.slice().sort((a, b) => b.year - a.year);
+    const eps = Math.abs(state.focus) * 1e-9 + 1e-3;
+    const pv = sorted.find(e => e.year < state.focus - eps);
+    if (pv) travelTo(pv.year);
+}
+
+// ===== Toggles =====
+
+function renderUniverseToggles() {
+    const wrap = document.getElementById('universe-toggles');
+    wrap.innerHTML = UNIVERSE_DEFS.map(u =>
+        `<button class="uni-toggle${state.activeKeys.has(u.key) ? ' active' : ''}" data-key="${u.key}">${u.label}</button>`
+    ).join('');
+    wrap.querySelectorAll('.uni-toggle').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const k = btn.dataset.key;
+            if (state.activeKeys.has(k)) state.activeKeys.delete(k);
+            else state.activeKeys.add(k);
+            writeActiveToUrl(state.activeKeys);
+            renderUniverseToggles();
+            recomputeAllEvents();
+            updateEventCount();
+            render();
+        });
+    });
+}
+
+function recomputeAllEvents() {
+    const flat = [];
+    for (const k of state.activeKeys) {
+        const list = state.eventsByUniverse.get(k) || [];
+        flat.push(...list);
+    }
+    state.allEvents = flat;
+}
+
+function universeColor(key, dim) {
+    const def = UNIVERSE_DEFS.find(u => u.key === key);
+    if (!def) return 'var(--text)';
+    return dim ? def.colorDim : def.color;
 }
 
 // ===== Rendering =====
@@ -204,21 +351,32 @@ function pixelToYear(px) {
 const svg = document.getElementById('timeline-svg');
 
 function fmtYear(y) {
-    if (y >= 1e9) return (y / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' Gya'; // Giga-years (post)
+    if (y >= 1e9) return (y / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' Gya';
     if (y <= -1e9) return (-y / 1e9).toFixed(2).replace(/\.?0+$/, '') + ' Gya BP';
     if (y >= 1e6) return (y / 1e6).toFixed(2).replace(/\.?0+$/, '') + ' Mya';
     if (y <= -1e6) return (-y / 1e6).toFixed(2).replace(/\.?0+$/, '') + ' Mya BP';
     if (y >= 10000) return (y / 1000).toFixed(1).replace(/\.0$/, '') + ' kya';
     if (y <= -10000) return (-y / 1000).toFixed(1).replace(/\.0$/, '') + ' kya BP';
-    if (y < 0) return Math.abs(y).toLocaleString() + ' BCE';
-    return y.toLocaleString() + ' CE';
+    if (y < 0) return Math.abs(y).toLocaleString() + ' AEC';
+    return y.toLocaleString() + ' EC';
 }
 
 function fmtFocus(y) {
-    // Friendlier label for the focus readout
-    if (Math.abs(y) >= 1000000) return Math.round(y).toLocaleString() + ' (' + fmtYear(y) + ')';
+    if (Math.abs(y) >= 1e6) return Math.round(y).toLocaleString() + ' (' + fmtYear(y) + ')';
     if (Math.abs(y) < 10000) return Math.round(y).toLocaleString();
     return Math.round(y).toLocaleString() + ' (' + fmtYear(y) + ')';
+}
+
+// Vertical lane per universe so overlapping events don't collide.
+function laneOffset(universeKey) {
+    const idx = UNIVERSE_DEFS.findIndex(u => u.key === universeKey);
+    if (idx < 0) return 0;
+    // Active universes get assigned compact lanes among the visible ones
+    const visibleKeys = UNIVERSE_DEFS.filter(u => state.activeKeys.has(u.key)).map(u => u.key);
+    const visIdx = visibleKeys.indexOf(universeKey);
+    if (visIdx < 0) return 0;
+    // Spread upward from axis line
+    return -60 - visIdx * 80;
 }
 
 function render() {
@@ -227,62 +385,75 @@ function render() {
     const cx = w / 2;
     const yLine = h / 2;
 
-    // SVG dynamic viewBox
     svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
 
-    // Build content
     const parts = [];
 
-    // Background grid: ticks at decade marks logarithmically
+    // Background grid
     const tickYears = computeTickYears();
     for (const ty of tickYears) {
         const x = cx + yearToPixel(ty);
         if (x < -100 || x > w + 100) continue;
         const isMajor = isMajorTick(ty);
         const lineColor = isMajor ? 'var(--line)' : 'var(--grid)';
-        const labelColor = isMajor ? 'var(--text-muted)' : 'var(--grid)';
         parts.push(`<line x1="${x}" x2="${x}" y1="0" y2="${h}" stroke="${lineColor}" stroke-width="1"/>`);
         if (isMajor) {
-            parts.push(`<text x="${x}" y="${h - 8}" fill="${labelColor}" font-size="10" text-anchor="middle">${escapeXml(fmtYear(ty))}</text>`);
+            parts.push(`<text x="${x}" y="${h - 8}" fill="var(--text-muted)" font-size="10" text-anchor="middle">${escapeXml(fmtYear(ty))}</text>`);
         }
     }
 
-    // The horizontal axis
+    // Horizontal axis
     parts.push(`<line x1="0" x2="${w}" y1="${yLine}" y2="${yLine}" stroke="var(--text-muted)" stroke-width="1"/>`);
 
-    // Focus marker (red line at viewport center)
-    parts.push(`<line x1="${cx}" x2="${cx}" y1="${yLine - 30}" y2="${yLine + 30}" stroke="var(--accent)" stroke-width="2"/>`);
-    parts.push(`<circle cx="${cx}" cy="${yLine}" r="5" fill="var(--accent)"/>`);
+    // Focus marker (white, neutral)
+    parts.push(`<line x1="${cx}" x2="${cx}" y1="${yLine - 30}" y2="${yLine + 30}" stroke="var(--text)" stroke-width="2" opacity="0.9"/>`);
+    parts.push(`<circle cx="${cx}" cy="${yLine}" r="5" fill="var(--text)"/>`);
 
-    // Events
-    state.events.forEach((ev, i) => {
-        const x = cx + yearToPixel(ev.year);
-        if (x < -50 || x > w + 50) return;
-        const stagger = (i % 3) * 22;
-        const evY = yLine - 50 - stagger;
-        parts.push(`<line x1="${x}" x2="${x}" y1="${yLine}" y2="${evY + 10}" stroke="var(--accent-strong)" stroke-width="1" opacity="0.5"/>`);
-        parts.push(`<circle cx="${x}" cy="${yLine}" r="6" fill="var(--accent-strong)" data-event-idx="${i}" class="ev-dot" style="cursor:pointer"/>`);
-        parts.push(`<text x="${x + 10}" y="${evY + 4}" fill="var(--text)" font-size="13" font-weight="500" data-event-idx="${i}">${escapeXml(truncate(ev.title, 50))}</text>`);
-        parts.push(`<text x="${x + 10}" y="${evY + 20}" fill="var(--text-muted)" font-size="10">${escapeXml(fmtYear(ev.year))}</text>`);
-    });
+    // Events — each in its universe's lane and color.
+    // Stagger within a lane by a small per-event offset to avoid label overlap.
+    const eventsByLane = new Map();
+    for (const ev of state.allEvents) {
+        if (!eventsByLane.has(ev.universe)) eventsByLane.set(ev.universe, []);
+        eventsByLane.get(ev.universe).push(ev);
+    }
+
+    let globalIdx = 0;
+    for (const [uniKey, evs] of eventsByLane) {
+        const baseY = yLine + laneOffset(uniKey);
+        const color = universeColor(uniKey);
+        const colorDim = universeColor(uniKey, true);
+        evs.forEach((ev, i) => {
+            const x = cx + yearToPixel(ev.year);
+            if (x < -50 || x > w + 50) { globalIdx++; return; }
+            const stagger = (i % 3) * 18;
+            const evY = baseY - stagger;
+            parts.push(`<line x1="${x}" x2="${x}" y1="${yLine}" y2="${evY + 10}" stroke="${colorDim}" stroke-width="1" opacity="0.5"/>`);
+            parts.push(`<circle cx="${x}" cy="${yLine}" r="6" fill="${color}" data-event-idx="${globalIdx}" class="ev-dot" style="cursor:pointer"/>`);
+            parts.push(`<text x="${x + 10}" y="${evY + 4}" fill="${color}" font-size="13" font-weight="500" data-event-idx="${globalIdx}">${escapeXml(truncate(ev.title, 50))}</text>`);
+            parts.push(`<text x="${x + 10}" y="${evY + 20}" fill="var(--text-muted)" font-size="10">${escapeXml(fmtYear(ev.year))}</text>`);
+            globalIdx++;
+        });
+    }
+
+    // Empty state hint
+    if (state.allEvents.length === 0 && state.activeKeys.size === 0) {
+        parts.push(`<text x="${cx}" y="${yLine - 60}" fill="var(--text-muted)" font-size="14" text-anchor="middle">Selecione um universo acima para mostrar eventos</text>`);
+    }
 
     svg.innerHTML = parts.join('');
-
-    // Update focus readout
     document.getElementById('focus-year').textContent = fmtFocus(state.focus);
+
+    // Disable nav buttons if no events
+    document.getElementById('prev-btn').disabled = state.allEvents.length === 0;
+    document.getElementById('next-btn').disabled = state.allEvents.length === 0;
 }
 
 function computeTickYears() {
-    // Generate ticks adapted to the current focus + transform.
-    // Strategy: emit ticks at 0, ±1, ±10, ±100, ... powers of 10 from focus,
-    // plus dense ticks every year in the linear region.
     const ticks = [];
-    // Linear region: every 10 years if room
     for (let dy = -LINEAR_HALF_SPAN; dy <= LINEAR_HALF_SPAN; dy += 10) {
         ticks.push(state.focus + dy);
     }
-    // Log region: powers of 10 (and 2x, 5x for richer grid)
-    for (let exp = 2; exp <= 10; exp++) {
+    for (let exp = 2; exp <= 12; exp++) {
         const base = Math.pow(10, exp);
         for (const m of [1, 2, 5]) {
             ticks.push(state.focus + base * m);
@@ -296,7 +467,6 @@ function isMajorTick(y) {
     const dy = Math.abs(y - state.focus);
     if (dy === 0) return true;
     if (dy < LINEAR_HALF_SPAN) return dy % 50 === 0;
-    // Log: only powers of 10
     const log = Math.log10(dy);
     return Math.abs(log - Math.round(log)) < 0.001;
 }
@@ -318,13 +488,12 @@ svg.addEventListener('mousedown', e => {
     dragStartFocus = state.focus;
     svg.classList.add('dragging');
     hideTooltip();
+    if (state.animFrame) { cancelAnimationFrame(state.animFrame); state.animFrame = null; }
 });
 
 window.addEventListener('mousemove', e => {
     if (!dragging) return;
     const dx = e.clientX - dragStartX;
-    // Pan via inverse pixelToYear from dragStartFocus
-    // We're at center cx; mouse moves dx pixels right = focus shifts left
     state.focus = dragStartFocus - pixelToYearDelta(dx);
     render();
 });
@@ -334,21 +503,8 @@ window.addEventListener('mouseup', () => {
     svg.classList.remove('dragging');
 });
 
-function pixelToYearDelta(px) {
-    // How many years does `px` pixels represent at current scale, near the center?
-    // Use linear-region scale for responsive panning.
-    const sign = px < 0 ? -1 : 1;
-    const absPx = Math.abs(px);
-    const linearMax = LINEAR_HALF_SPAN * LINEAR_SCALE;
-    if (absPx < linearMax) return sign * absPx / LINEAR_SCALE;
-    const logPx = absPx - linearMax;
-    return sign * (Math.pow(10, logPx / LOG_SCALE) + LINEAR_HALF_SPAN - 1);
-}
-
 svg.addEventListener('wheel', e => {
     e.preventDefault();
-    // Vertical wheel: pan along the timeline (keep things simple — scroll = pan)
-    // Horizontal trackpad swipe also lands here on macOS as deltaX
     const dx = e.deltaX !== 0 ? e.deltaX : e.deltaY;
     state.focus += pixelToYearDelta(dx) * 0.5;
     render();
@@ -358,9 +514,19 @@ svg.addEventListener('mousemove', e => {
     const target = e.target;
     if (target.tagName === 'circle' && target.classList.contains('ev-dot')) {
         const idx = parseInt(target.getAttribute('data-event-idx'), 10);
-        showTooltip(state.events[idx], e.clientX, e.clientY);
+        const ev = state.allEvents[idx];
+        if (ev) showTooltip(ev, e.clientX, e.clientY);
     } else {
         hideTooltip();
+    }
+});
+
+svg.addEventListener('click', e => {
+    const target = e.target;
+    if (target.tagName === 'circle' && target.classList.contains('ev-dot')) {
+        const idx = parseInt(target.getAttribute('data-event-idx'), 10);
+        const ev = state.allEvents[idx];
+        if (ev) travelTo(ev.year);
     }
 });
 
@@ -371,9 +537,13 @@ function showTooltip(ev, x, y) {
         tooltipEl.className = 'event-tooltip';
         document.body.appendChild(tooltipEl);
     }
+    const def = UNIVERSE_DEFS.find(u => u.key === ev.universe);
+    const sourceLabel = def ? def.label : ev.universe;
+    const titleColor = universeColor(ev.universe);
     tooltipEl.innerHTML = `
-        <div class="title">${escapeXml(ev.title)}</div>
-        <div class="date">${escapeXml(fmtYear(ev.year))}${ev.time ? ' · ' + escapeXml(ev.time) : ''}</div>
+        <div class="source" style="color:${titleColor}">${escapeXml(sourceLabel)}</div>
+        <div class="title" style="color:${titleColor}">${escapeXml(ev.title)}</div>
+        <div class="date">${escapeXml(fmtYear(ev.year))}</div>
         <p class="description">${escapeXml(ev.description || ev.body.slice(0, 200))}</p>
     `;
     tooltipEl.style.left = Math.min(x + 16, state.width - 380) + 'px';
@@ -386,11 +556,17 @@ function hideTooltip() {
 
 document.getElementById('reset-btn').addEventListener('click', e => {
     e.preventDefault();
-    state.focus = 2026;
-    render();
+    travelTo(2026);
 });
+document.getElementById('prev-btn').addEventListener('click', prevEvent);
+document.getElementById('next-btn').addEventListener('click', nextEvent);
 
-// ===== Resize handling =====
+window.addEventListener('keydown', e => {
+    if (e.target && /^(input|textarea|select)$/i.test(e.target.tagName)) return;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); prevEvent(); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nextEvent(); }
+    else if (e.key === 'Home' || e.key === '0') { e.preventDefault(); travelTo(2026); }
+});
 
 function handleResize() {
     state.width = window.innerWidth;
@@ -399,14 +575,42 @@ function handleResize() {
 }
 window.addEventListener('resize', handleResize);
 
+function updateEventCount() {
+    const n = state.allEvents.length;
+    const universes = state.activeKeys.size;
+    if (n === 0) {
+        document.getElementById('event-count').textContent = universes === 0 ? 'nenhum universo' : 'nenhum evento';
+    } else {
+        document.getElementById('event-count').textContent =
+            (n === 1 ? '1 evento' : `${n} eventos`) +
+            (universes > 1 ? ` · ${universes} universos` : '');
+    }
+}
+
 // ===== Init =====
 
 (async function init() {
+    state.activeKeys = readActiveFromUrl();
+    if (state.activeKeys.size === 0) state.activeKeys.add('tempo');
+
+    // Optional initial year
+    const initialYear = parseFloat(new URLSearchParams(location.search).get('y'));
+    if (!isNaN(initialYear)) state.focus = initialYear;
+
     handleResize();
-    state.events = await fetchEvents();
-    document.getElementById('event-count').textContent = state.events.length;
-    if (state.events.length === 0 && !document.getElementById('error').style.display) {
-        showError(`No events with <code>type: event</code> found in <code>${universe}</code>.<br>Add some markdown files with <code>type: event</code> + <code>date_year: &lt;signed integer&gt;</code> in their frontmatter.`);
+    renderUniverseToggles();
+
+    // Fetch events for all known universes in parallel (they're cached for free
+    // toggling once loaded).
+    await Promise.all(UNIVERSE_DEFS.map(async u => {
+        const events = await fetchUniverseEvents(u.key);
+        state.eventsByUniverse.set(u.key, events);
+    }));
+    recomputeAllEvents();
+    updateEventCount();
+
+    if (state.allEvents.length === 0 && state.activeKeys.size > 0) {
+        showError(`Nenhum evento encontrado nos universos selecionados.`);
     }
     render();
 })();

@@ -5,6 +5,187 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.1] — 2026-04-26
+
+### Added — multi-universe overlay + smooth event travel in the timeline
+
+The timeline visualization at `/shared/timeline.html` is now demoable. Three improvements working together:
+
+- **Multi-universe overlay.** `?u=tempo,humanity,universo` (comma-separated) renders events from any combination of the three timeline universes on the same canvas. Each universe gets its own color (teal / blue / warm) and its own vertical lane so events don't collide. URL syncs in real time when you toggle universes via the header chips.
+- **Prev/next event with smooth travel.** Header has `‹ ›` buttons; arrow keys also work. Pressing one animates the focus to the next/previous event with a 750ms ease-in-out-cubic over interpolated pixel-space — so traveling from "Big Bang" to "Andromeda collision" pans smoothly across both linear and log regions instead of teleporting. Clicking an event on the timeline travels to it the same way. `Home` / `0` returns to 2026.
+- **Cleaner empty / disabled states.** Nav buttons are disabled when no events are loaded. An on-canvas hint explains how to toggle when all universes are off.
+
+### Added — `Linhas do tempo` featured page in the template universe
+
+`co-web/seed/template/linhas-do-tempo.md` is a new public page that documents the timeline trio as a curated category under the template universe. Direct links to all three timelines, the combined view (`?u=tempo,humanity,universo`), and a "build your own" note showing the `type: event` + `date_year` frontmatter convention. Re-seeded on every boot.
+
+### Fixed — admin sidebar polluted with anonymous "Meu Co" clones
+
+A previous version of `rescue_orphan_universes` re-homed orphan anonymous-clone universes (key prefix `u-`) to the admin user, polluting their sidebar with clones from old visitors. Two changes:
+
+- `rescue_orphan_universes` now skips keys matching `u-%` and `anon-%` — those are anonymous clones, not real personal universes.
+- New `cleanup_admin_anon_clutter(admin_email)` runs on every startup after the seed admin is ensured. It deletes anonymous-clone universes still owned by the admin (legacy from the prior buggy rescue), along with their entries, members, and on-disk universe directory. Idempotent.
+
+### Added — `public-static` visibility recognized by access control
+
+`check_universe_access` now returns `ReadOnly` for universes with `visibility = 'public-static'`, matching the existing handling of `visibility = 'template'`. Without this, the new timeline universes were 404'ing for anonymous visitors even though `is_public = 1`.
+
+## [1.21.0] — 2026-04-26
+
+### Added — three timeline universes (`tempo`, `humanity`, `universo`)
+
+The CO-92 timeline visualization now ships with three sibling universes seeded out of the box:
+
+- **`tempo`** — meta-universe explaining the time-scale concept itself. 21 events bridging cosmic and human history (Big Bang → Now → heat death). Acts as the "what is this view" front door.
+- **`humanity`** — focused on our species. 26 events from the emergence of Homo sapiens through agriculture, writing, the printing press, the Industrial Revolution, computing, the Web, and the present.
+- **`universo`** — full cosmic timeline. 28 events from inflation through stelliferous era, Sun's red giant phase, last star, black-hole evaporation, and heat death.
+
+Inspired by [scaleofuniverse.com/pt](https://scaleofuniverse.com/pt) but with **emphasis on time** rather than spatial scale. Each universe is `is_public=1`, `requires_login=0`, system-owned, modern theme, layout=`timeline`.
+
+Architecture: each universe is a regular Co universe (just system-seeded). Events are markdown entries with `type: event` and a numeric `date_year` in frontmatter. Content is split from form — manifests live as JSON at `co-web/seed/timeline/{tempo,humanity,universo}.json` plus an `index.md` per universe; storage.rs only orchestrates seeding (`seed_timeline_universe`, `seed_all_timeline_universes`). Idempotent re-seed on every startup so JSON edits ship in the next deploy without manual data migration.
+
+### Changed — timeline UI: cross-universe nav + scaleofuniverse link
+
+`/shared/timeline.html` now shows a header tab bar with `Tempo` / `Universo` / `Humanidade` so demo viewers can flip between the three views in one click. Active universe is highlighted with an accent underline. The "scale ↗" link in the header credits scaleofuniverse.com as inspiration. Default `?u=` is now `tempo` (was `template`). Hint and error strings localized to PT-BR. Header title fetched from `/api/v1/universes/:slug` so it shows the friendly name ("Universo", not the slug).
+
+## [1.20.11] — 2026-04-26
+
+### Fixed — universe with no projects left the spinner up forever
+
+`renderContent()` returned silently with `if (!state.currentProject) return;` — leaving the loading-spinner from `bootAppForUniverse` rendered indefinitely whenever the universe had no projects (or the projects fetch failed). With artelonga / qa-dev / etc. having content uploaded via vault but no canonical "project" entry, the SPA was stuck at "Carregando…" for any logged-in user opening those universes. Replaced the silent return with a call to a new `renderUniverseHome()` that always paints something visible, so the spinner can never persist past `render()`.
+
+### Added — universe home / front page rendered from `index.md`
+
+Each universe can now ship an `index.md` at its root. When the user enters the universe (and there's no project to render the kanban for), the SPA fetches that file and renders its body as a hero page: title from `universe.name`, description from `universe.description`, and the markdown body in the main area.
+
+If `index.md` doesn't exist, a friendly empty state explains how to add one and reports how many entries the universe has, so the page is never spooky-blank. Mirrors the convention of `README.md` for git repos / `CLAUDE.md` for instruction files: a "what is this" front page that anyone landing here can read without scrolling.
+
+### Added — boot watchdog + per-fetch timeouts in `bootAppForUniverse`
+
+Each fetch step (`getUniverseInfo`, `getUniverseConfig`, `getUniverseProjects`, `selectProject`) is now wrapped in `withTimeout(promise, 8000)` so any individual hang resolves to `null` after 8s instead of blocking the whole boot. An outer 20-second watchdog renders a recovery card with "Recarregar / Voltar ao template / Reset cache" links if the boot doesn't complete — defensive against any future hang in code I haven't audited.
+
+## [1.20.10] — 2026-04-26
+
+### Fixed — service worker was caching every JS deploy into oblivion
+
+`co-web/static/shared/sw.js` (the actual served file — `static/sw.js` was a stale duplicate that the server doesn't read) was cache-first for every static asset including `app.js` and `style.css`. Even `Cmd+Shift+R` couldn't bypass it: browsers route reload requests through the SW, and the SW was happily returning yesterday's bytes from `caches.match()` while only updating the cache for *next time*. So users complained that "modern theme doesn't stick" / "hard refresh doesn't load" — they were never actually receiving any of the 1.20.5 → 1.20.9 fixes.
+
+Rewrote the SW with a **network-first** strategy for HTML/JS/CSS (deploys propagate immediately, fall back to cache only when offline) and cache-first only for icons/fonts/manifest. Also:
+
+- Bumped `CACHE_NAME` to `co-v3-network-first`, so existing clients purge their stale cache when the new SW activates.
+- Registration in `index.html` now listens for `updatefound`, calls `SKIP_WAITING` on the new worker, then reloads the page on `controllerchange` so users get the fresh bundle without manual intervention.
+- Removed the `STATIC_ASSETS` precache list except for the manifest + favicon — precaching `app.js` was the original sin.
+
+Existing users will see one auto-reload the next time they open the app; subsequent deploys arrive normally without that bounce.
+
+## [1.20.9] — 2026-04-26
+
+### Fixed — universe switch could leave the spinner up forever
+
+If `selectProject`, `getUniverseProjects`, or any other async step inside `bootAppForUniverse` threw, the function fell through without clearing `state.switchingUniverse` or calling `hideLoading()`. The spinner stayed visible and the sidebar's universe-click handler refused further switches (it short-circuits on `state.switchingUniverse`). Wrapped the whole boot sequence in `try { ... } finally { state.switchingUniverse = false; hideLoading(); render(); }` so a failure can never wedge the UI. Each fetch step also has its own try-catch with `console.warn` so a bad universe degrades gracefully instead of cascading.
+
+### Changed — modern palette is now the unconditional default
+
+`loadThemeCss` previously fell back to the universe's own theme.css when `co_user_palette` wasn't set. With user feedback that modern should "stick" across every universe, the function now defaults to `modern` if no palette is stored and persists that choice. A per-load cache-buster (`?v=<unix>`) is appended so a recent change is picked up even when the browser was sitting on a stale theme.css.
+
+### Changed — Conteúdo sections and folders default to collapsed
+
+The Páginas section and every nested folder now start closed; the user expands what they want to look at. Saved-state in localStorage still wins, so once you open a folder it remembers next time. This makes universes with hundreds of entries (artelonga: 146, quilomboaraucaria: 70) approachable from a clean slate instead of dumping the whole tree on first render.
+
+## [1.20.8] — 2026-04-26
+
+### Fixed — modern theme actually loads modern colors
+
+`loadThemeCss` was loading `template`'s `theme.css` when a user override was active. But `template` had `theme_preset='scholarly-light'` in the DB (left over from an earlier migration), so "modern override" was actually rendering scholarly browns. Two fixes:
+
+- New endpoint `GET /api/v1/themes/:preset` returns the CSS for any built-in preset directly from the compiled-in `ThemePreset::by_name()`, independent of any universe's stored config. SPA's `loadThemeCss` now hits this endpoint when `co_user_palette` is set, so the user's choice always wins.
+- Added `Storage::ensure_template_theme_preset()` and call it on every startup with `'modern'`. This brings the template universe's stored preset back in line with what the seed code intended, fixing the public landing page's appearance for unauthenticated visitors.
+
+### Added — frontmatter preview when entry body is empty
+
+Many universes encode their actual content as structured frontmatter rather than markdown body — e.g. artelonga's 146 entries are mostly member/community/service profiles with rich `nome` / `papel` / `bio` / `funcao` / `descricao` fields and no body. The Conteúdo view's `cardBodyHtml` now falls back to a compact key-value preview of the user-meaningful frontmatter fields when the body is empty (skipping scaffolding keys like `type`, `slug`, `created`, `tags`). Image URLs render as thumbnails; HTTP URLs as links. Up to 8 fields shown. New CSS classes: `.conteudo-fm-preview`, `.conteudo-fm-row`, `.conteudo-fm-key`, `.conteudo-fm-val`, `.conteudo-fm-img`.
+
+## [1.20.7] — 2026-04-26
+
+### Fixed — known personal universes now always belong to the current admin
+
+`rescue_orphan_universes` only catches universes whose `owner_id` has no row in `users`. But after the prod data was bootstrapped, then partially wiped, then re-seeded, a more subtle state emerged: the prior admin user_id is **still in the users table** (left over), and `artelonga` / `rfq` / `qa-dev` still point at it. The current admin can't see them, but rescue skips them because the owner is technically a valid user.
+
+Added `Storage::ensure_admin_owns_personal_universes(email, keys)` and called it on every startup with the well-known personal universe keys (`artelonga`, `rfq`, `qa-dev` — same list the bootstrap script seeds). For each of those keys, if it exists and its `owner_id != current admin user_id`, re-home it to the current admin and ensure an `owner` membership row. If it already belongs to the right user, only the membership row is reconciled (defensive). Idempotent — does nothing on a clean DB.
+
+## [1.20.6] — 2026-04-26
+
+### Changed — universe switching is now an atomic transition
+
+`bootAppForUniverse` was a chain of partial state mutations interleaved with async fetches. The result was visible jank: cards from the previous universe lingered while the new one's config loaded, the settings gear flickered, and the theme swap landed at an unpredictable point in the sequence. Rewrote the flow:
+
+1. Set `state.switchingUniverse = true` and reset all per-universe collections (`tasks`, `projects`, `currentProject`, `universeInfo`, `universeConfig`) up front, so nothing from the previous universe can leak through.
+2. Show the loading spinner — it clears the content area immediately.
+3. Apply the new theme/config FIRST (single hot-swap of `<link id="co-theme-css">`), so the spinner sits on the right palette.
+4. Fetch projects, then drill into the first one.
+5. Drop the flag and call `render()` exactly once.
+
+The sidebar click handler now also marks the clicked item active immediately (before any fetch), and rapid double-clicks during a transition are ignored. Template banner show/hide is decided by the slug check (`isTemplate = slug === 'template'`) instead of being unconditionally hidden.
+
+## [1.20.5] — 2026-04-26
+
+### Fixed — orphan universes re-homed to the seeded admin
+
+When the admin user was re-created after a data wipe (new uuid), prior universes still pointed to the old user_id and silently disappeared from the new admin's sidebar — even though `list_universes_for_user` already had the owner_id fallback. Added `Storage::rescue_orphan_universes(admin_email)` that runs on every startup right after `seed_admin_user_from_env`: any universe whose `owner_id` no longer exists in `users` (and isn't the `system` sentinel) gets re-homed to the seeded admin and an `INSERT OR IGNORE` membership row is added. Idempotent — does nothing on a healthy database.
+
+### Fixed — modern theme override now actually applies cross-universe
+
+Setting `co_user_palette = modern` in localStorage was supposed to make the modern look win over each universe's own `theme_preset`. The SPA was setting `data-palette="modern"` on `<html>`, but no CSS rules implement that selector — meanwhile `loadThemeCss(slug)` kept loading the universe's native theme.css (e.g. quilombo's earth tones), which overrode everything. Fixed by routing `loadThemeCss` through a preset-to-source map: when a user override is active, load the matching system universe's theme.css (`modern` → `template`) instead of the current board's. The same `<link id="co-theme-css">` element is reused, so the swap is hot.
+
+## [1.20.4] — 2026-04-26
+
+### Fixed — owner could be silently hidden from their own sidebar
+
+`list_universes_for_user` only matched against `universe_members` and `subscriptions` rows. `create_universe` always inserts an owner row in `universe_members`, but if that row is ever lost (historic data, partial migration, manual cleanup), the owner stops seeing their own universe in the SPA sidebar. Added `WHERE u.owner_id = ?1 OR u.key IN (...members/subs...)` as a defensive fallback so ownership alone is enough to qualify.
+
+### Added — stats strip in Conteúdo view
+
+The Conteúdo view now shows a compact stats header above the sections: total entries, page count, task count, event count, distinct tag count, and last-edited relative time. Derived from the entries already loaded for the view (no extra API call). Renders unobtrusively as a single horizontal strip; collapses to two rows on mobile.
+
+## [1.20.3] — 2026-04-26
+
+### Fixed — `/entries` (no type filter) returned empty list
+
+`EntryIndex::query` always added `entry_type = ?2` to the WHERE clause, even when called with an empty string. The `list_entries` route's "no type" branch passed `""`, so `GET /api/v1/universes/:slug/entries` (no `?type=`) returned 0 rows for every universe — even when filtered queries by type counted entries correctly. Visible symptom: SPA's Conteúdo view showed correct counts in the sidebar but rendered nothing in the main panel because the `allEntries` merge step (used to fold untyped markdown into the page tree) got an empty array.
+
+Fix: `query` now omits the `entry_type` clause when the type is empty, so passing `""` truly means "any type". Filtered queries continue to work exactly as before.
+
+### Fixed — timeline default universe was `co-dev`
+
+`co-web/static/shared/timeline.html` defaulted `?u=` to `co-dev` (an internal-only universe), causing 404s on prod where co-dev is not seeded. Default is now `template`, which exists everywhere.
+
+## [1.20.2] — 2026-04-26
+
+### Changed — legal pages refresh for public test
+
+Rewrote the four template seed pages for the initial public-test launch on `co.artelonga.com.br`:
+
+- **Honest framing of encryption.** Previous wording implied "banco de dados criptografado em repouso" — that's roadmap (CO-86, v3.0), not current state. New text describes what's implemented today (TLS 1.3, Argon2id, access control, isolated SQLite) and explicitly calls out that bodies are plaintext at rest, with the v3.0 envelope-encryption plan stated as the path forward. For sensitive content, recommends self-hosting until v3.0.
+- **Two hosting models documented.** Auto-hospedagem (MIT, you control everything, this policy doesn't apply) vs. instância gerenciada Arte Longa (`co.artelonga.com.br`, GRU region, controlador é Yuri). Each modality's responsibilities made explicit.
+- **Public-test disclosure in Termos.** New §3 says "estado do produto: teste público inicial" — no formal SLA, expect breakage between versions, recommend waiting for v3.0 for production-critical use.
+- **Updated `dados-rastreados.md`** with the actual telemetry event taxonomy used in the SPA (matches `static/shared/telemetry.js`), and clarifies that body content is never sent in telemetry payloads.
+- **LGPD §6/§7 sharpened:** added 15-day response SLA, removed vague phrasing.
+
+### Fixed — template content pages now refresh on every boot
+
+`seed_template_universe()` was gated on first-boot only (`!storage.template_exists()`), which meant any update to the bundled seed pages would never reach existing deployments without a full UAT-style data reset. Extracted the four content pages into `reseed_template_content_pages()` and call it unconditionally on every server startup. Tasks and projects within the template are still seed-once (user can edit them); content pages always track the binary.
+
+### Refactored — content separated from form
+
+Seed content for the template universe (sobre, termos, privacidade, dados-rastreados) was previously embedded as multi-hundred-line Rust string literals inside `seed_template_universe()`. That made `storage.rs` a 3000+ line monolith mixing schema, queries, and prose.
+
+- Moved the four pages to `co-web/seed/template/*.md` — editable as plain markdown.
+- Added a tiny frontmatter parser (`split_frontmatter`, `seed_page_frontmatter`, `seed_page_body`) that turns a `.md` file with YAML frontmatter into the `(metadata_json, body_str)` pair `make_entry` expects.
+- Files are embedded at compile time via `include_str!`, so no runtime filesystem dependency — single binary, single artifact.
+- `created` / `modified` timestamps are stamped at seed time (so freshly seeded universes show "now"), but everything else (slug, title, order, tags) is read from the .md file's frontmatter — that's the single source of truth.
+- 4 unit tests cover the parser and verify all 4 embedded files parse cleanly.
+- Net: `storage.rs` shrank by ~430 lines.
+
 ## [1.20.1] — 2026-04-29
 
 ### Fixed — universe duplication now copies ALL entry types

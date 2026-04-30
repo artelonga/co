@@ -337,9 +337,9 @@ pub async fn duplicate_universe(
     // template, or public-subscribable).
     {
         let storage = lock_storage(&state)?;
-        let source = storage.get_universe(&source_slug).ok_or_else(|| {
-            AppError::NotFound(format!("Universe '{}' not found", source_slug))
-        })?;
+        let source = storage
+            .get_universe(&source_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", source_slug)))?;
         let has_access = source.owner_id == user_id
             || source.is_template
             || source.is_public
@@ -722,6 +722,70 @@ fn config_etag(theme_preset: &str, custom_tokens: Option<&serde_json::Value>) ->
     format!("\"{}\"", hasher.finish())
 }
 
+/// GET /api/v1/themes/:preset.css
+///
+/// Returns the CSS for a built-in preset by name, independent of any universe.
+/// Used by the SPA when `co_user_palette` is set so the user's preferred theme
+/// wins regardless of the active board's stored `theme_preset`.
+///
+/// Unknown preset → 404. Cached aggressively since the preset definitions are
+/// compiled in and don't change at runtime.
+pub async fn get_preset_theme_css(
+    Path(preset_name): Path<String>,
+    headers: HeaderMap,
+) -> impl IntoResponse {
+    // Strip optional `.css` suffix so the route matches both `/themes/modern`
+    // and `/themes/modern.css`.
+    let name = preset_name
+        .strip_suffix(".css")
+        .unwrap_or(&preset_name)
+        .to_string();
+
+    let preset = match crate::theme_engine::ThemePreset::by_name(&name) {
+        Some(p) => p,
+        None => {
+            return (
+                StatusCode::NOT_FOUND,
+                [(header::CONTENT_TYPE, "text/plain")],
+                format!("Unknown theme preset '{name}'"),
+            )
+                .into_response();
+        }
+    };
+
+    let etag = config_etag(&name, None);
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        && inm == etag
+    {
+        return StatusCode::NOT_MODIFIED.into_response();
+    }
+
+    let css = crate::theme_engine::generate_css(&preset, None);
+
+    (
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("text/css; charset=utf-8"),
+            ),
+            (
+                header::CACHE_CONTROL,
+                axum::http::HeaderValue::from_static("public, max-age=300, must-revalidate"),
+            ),
+            (
+                header::ETAG,
+                axum::http::HeaderValue::from_str(&etag)
+                    .unwrap_or_else(|_| axum::http::HeaderValue::from_static("\"0\"")),
+            ),
+        ],
+        css,
+    )
+        .into_response()
+}
+
 /// GET /api/v1/universes/:slug/theme.css
 ///
 /// Returns a generated CSS stylesheet with all design tokens for the universe's
@@ -1052,7 +1116,14 @@ pub fn router() -> Router<AppState> {
 
 /// Standalone router for the `/api/v1/themes` namespace (no auth layer).
 pub fn themes_router() -> Router<AppState> {
-    Router::new().route("/available", get(get_available_themes))
+    Router::new()
+        .route("/available", get(get_available_themes))
+        // Direct preset CSS — used by the SPA's user-level palette override so
+        // we don't depend on any universe's stored theme_preset.
+        // Route is `/{preset}` (without `.css`) because Axum's matchit doesn't
+        // accept literal suffixes on dynamic segments. The handler still
+        // tolerates a `.css` suffix on the preset name.
+        .route("/{preset}", get(get_preset_theme_css))
 }
 
 // ---------------------------------------------------------------------------

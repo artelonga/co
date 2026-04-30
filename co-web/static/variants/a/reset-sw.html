@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Reset Co</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    max-width: 480px;
+    margin: 4em auto;
+    padding: 1.5em;
+    color: #111827;
+    line-height: 1.5;
+    background: #f8f9fa;
+  }
+  h1 { font-size: 18px; font-weight: 600; }
+  pre {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    padding: 0.75em;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 13px;
+    white-space: pre-wrap;
+    margin: 1em 0;
+    min-height: 1.5em;
+  }
+  .ok { color: #059669; }
+  .err { color: #dc2626; }
+  .step { margin: 0.25em 0; }
+  a { color: #6366f1; }
+</style>
+</head>
+<body>
+<h1>Reset do Service Worker e cache do Co</h1>
+<p>Esta página força a desinstalação de qualquer Service Worker antigo e limpa
+todos os caches locais do Co. Útil quando uma nova versão não está chegando
+(symptoms: tela travada em "Loading...", tema visual incorreto, hard-refresh
+sem efeito).</p>
+
+<pre id="log"></pre>
+
+<p>Quando terminar, clique aqui para voltar ao app:
+<a href="/" id="home" style="display:none">→ Voltar ao Co</a></p>
+
+<script>
+(async function() {
+  const log = document.getElementById('log');
+  const home = document.getElementById('home');
+  const append = (msg, cls) => {
+    const div = document.createElement('div');
+    div.className = 'step' + (cls ? ' ' + cls : '');
+    div.textContent = msg;
+    log.appendChild(div);
+  };
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const regs = await navigator.serviceWorker.getRegistrations();
+      append('Service Workers ativos: ' + regs.length);
+      for (const r of regs) {
+        const ok = await r.unregister();
+        append(`  - desregistrado: ${r.scope || '(sem escopo)'} → ${ok ? 'ok' : 'falhou'}`, ok ? 'ok' : 'err');
+      }
+    } else {
+      append('navigator.serviceWorker não suportado');
+    }
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      append(`Caches encontrados: ${keys.length}`);
+      for (const k of keys) {
+        const ok = await caches.delete(k);
+        append(`  - deletado "${k}" → ${ok ? 'ok' : 'falhou'}`, ok ? 'ok' : 'err');
+      }
+    }
+
+    try { localStorage.removeItem('co_named_palette'); } catch (_) {}
+    append('localStorage co_named_palette limpo');
+
+    append('---');
+    append('Tudo certo. Carregando o Co em 1s...', 'ok');
+    home.style.display = 'inline';
+    setTimeout(() => { window.location.replace('/'); }, 1200);
+  } catch (e) {
+    append('Erro: ' + e.message, 'err');
+    append('Tente: DevTools → Application → Service Workers → Unregister; depois Storage → Clear site data.');
+    home.style.display = 'inline';
+  }
+})();
+</script>
+</body>
+</html>

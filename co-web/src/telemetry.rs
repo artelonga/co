@@ -519,6 +519,165 @@ pub async fn track_event_handler(
 }
 
 // ---------------------------------------------------------------------------
+// Marketing-schema event endpoint — POST /api/v1/telemetry/events (batched)
+//
+// Accepts the schema from artelonga/ArteLonga docs/analytics-api.md so the
+// static marketing site can ship its batched events into this same table.
+// Each marketing Event is translated to an EventRow; site-level fields not
+// present in the column schema (utm, experiments, vw/vh, lang, ua_brand, tz,
+// query, ref) are stashed into `properties`.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct MarketingEvent {
+    pub s: i64,
+    pub site: String,
+    pub name: String,
+    pub sid: String,
+    pub vid: String,
+    pub ts: Option<i64>,
+    pub tz: Option<String>,
+    pub path: Option<String>,
+    pub query: Option<String>,
+    #[serde(rename = "ref")]
+    pub referrer: Option<String>,
+    pub vw: Option<i64>,
+    pub vh: Option<i64>,
+    pub lang: Option<String>,
+    pub ua_brand: Option<String>,
+    pub utm: Option<serde_json::Value>,
+    pub experiments: Option<serde_json::Value>,
+    pub props: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MarketingBatch {
+    pub schema: i64,
+    pub batch: Vec<MarketingEvent>,
+}
+
+const MARKETING_MAX_BATCH: usize = 200;
+
+pub async fn marketing_events_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<MarketingBatch>,
+) -> impl IntoResponse {
+    if body.schema != 1 {
+        return StatusCode::BAD_REQUEST;
+    }
+    if body.batch.is_empty() || body.batch.len() > MARKETING_MAX_BATCH {
+        return StatusCode::BAD_REQUEST;
+    }
+
+    let ua = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+    if is_bot(&ua) {
+        return StatusCode::NO_CONTENT;
+    }
+
+    let ip_hash = hash_ip_daily(&extract_ip_from_headers(&headers));
+    let ua_device = parse_ua_device(&ua).to_string();
+    let ua_browser = parse_ua_browser(&ua).to_string();
+    let ua_os = parse_ua_os(&ua).to_string();
+
+    let mut rows: Vec<EventRow> = Vec::with_capacity(body.batch.len());
+    for ev in body.batch {
+        if ev.name.is_empty() || ev.name.len() > 64 {
+            continue;
+        }
+
+        let mut props_obj = match ev.props {
+            Some(serde_json::Value::Object(m)) => m,
+            _ => serde_json::Map::new(),
+        };
+        props_obj.insert("site".into(), serde_json::Value::String(ev.site.clone()));
+        if let Some(v) = ev.tz {
+            props_obj.insert("tz".into(), serde_json::Value::String(v));
+        }
+        if let Some(v) = ev.query {
+            props_obj.insert("query".into(), serde_json::Value::String(v));
+        }
+        if let Some(v) = ev.referrer {
+            props_obj.insert("ref".into(), serde_json::Value::String(v));
+        }
+        if let Some(v) = ev.vw {
+            props_obj.insert("vw".into(), serde_json::Value::from(v));
+        }
+        if let Some(v) = ev.vh {
+            props_obj.insert("vh".into(), serde_json::Value::from(v));
+        }
+        if let Some(v) = ev.lang {
+            props_obj.insert("lang".into(), serde_json::Value::String(v));
+        }
+        if let Some(v) = ev.ua_brand {
+            props_obj.insert("ua_brand".into(), serde_json::Value::String(v));
+        }
+        if let Some(v) = ev.utm {
+            props_obj.insert("utm".into(), v);
+        }
+        if let Some(v) = ev.experiments {
+            props_obj.insert("experiments".into(), v);
+        }
+
+        let timestamp = ev
+            .ts
+            .and_then(chrono::DateTime::<chrono::Utc>::from_timestamp_millis)
+            .unwrap_or_else(chrono::Utc::now)
+            .to_rfc3339();
+
+        rows.push(EventRow {
+            timestamp,
+            visitor_token: Some(ev.vid),
+            user_id: None,
+            session_id: Some(ev.sid),
+            event_type: derive_event_type_from_marketing(&ev.name),
+            event_name: ev.name,
+            universe_key: None,
+            path: ev.path,
+            properties: Some(serde_json::Value::Object(props_obj)),
+            duration_ms: None,
+            ip_hash: Some(ip_hash.clone()),
+            ua_device: Some(ua_device.clone()),
+            ua_browser: Some(ua_browser.clone()),
+            ua_os: Some(ua_os.clone()),
+        });
+    }
+
+    if rows.is_empty() {
+        return StatusCode::NO_CONTENT;
+    }
+
+    let state_clone = Arc::clone(&state);
+    tokio::spawn(async move {
+        if let Ok(storage) = state_clone.storage.lock() {
+            for row in &rows {
+                insert_event(storage.conn(), row);
+            }
+        }
+    });
+
+    StatusCode::NO_CONTENT
+}
+
+fn derive_event_type_from_marketing(name: &str) -> String {
+    if name == "page_view" || name == "page_end" || name.starts_with("page_") {
+        "pageview".to_string()
+    } else if name == "js_error" || name == "js_promise_rejection" {
+        "error".to_string()
+    } else if name.starts_with("perf_") {
+        "performance".to_string()
+    } else if name == "experiment_exposure" {
+        "experiment".to_string()
+    } else {
+        "interaction".to_string()
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Admin endpoints — require GitHub admin auth via extension layers in server.rs
 // ---------------------------------------------------------------------------
 
@@ -753,9 +912,14 @@ function clearError() { document.getElementById('error').style.display = 'none';
 // Routers
 // ---------------------------------------------------------------------------
 
-/// Public telemetry endpoint — accepts client-side events.
+/// Public telemetry endpoints — accept client-side events.
+///
+/// `POST /event`  — Co's internal client (single-event shape, /api/v1/telemetry/event).
+/// `POST /events` — marketing batch shape (artelonga.com.br's analytics.js).
 pub fn router() -> Router<AppState> {
-    Router::new().route("/event", post(track_event_handler))
+    Router::new()
+        .route("/event", post(track_event_handler))
+        .route("/events", post(marketing_events_handler))
 }
 
 /// Admin-only telemetry endpoints.

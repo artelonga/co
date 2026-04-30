@@ -282,7 +282,26 @@
     // ---------------------------------------------------------------------------
     function loadThemeCss(slug) {
         if (!slug) return;
-        const href = `/api/v1/universes/${slug}/theme.css`;
+        // User-level palette override wins: if `co_user_palette` is set, load
+        // the preset CSS directly from `/api/v1/themes/<preset>` (this
+        // endpoint reads from the compiled-in preset definition, independent
+        // of any universe's stored `theme_preset`). Default to 'modern' if
+        // unset so first-time visitors get the intended look across boards.
+        let userPalette = null;
+        try {
+            userPalette = localStorage.getItem('co_user_palette');
+            if (!userPalette) {
+                userPalette = 'modern';
+                localStorage.setItem('co_user_palette', 'modern');
+            }
+        } catch (_) {
+            userPalette = 'modern';
+        }
+        // Cache-bust per-page-load so a recent palette change is picked up
+        // even if the browser is sitting on a stale theme.css. The `?v=` is
+        // ignored by the server but invalidates the browser cache key.
+        const v = (window._coBootTs ||= Math.floor(Date.now() / 1000));
+        const href = `/api/v1/themes/${encodeURIComponent(userPalette)}?v=${v}`;
         let link = document.getElementById('co-theme-css');
         if (link) {
             if (link.href !== new URL(href, document.baseURI).href) {
@@ -882,10 +901,15 @@
             el.addEventListener('click', async () => {
                 const slug = el.dataset.universe;
                 if (slug === state.currentUniverseSlug) return;
+                if (state.switchingUniverse) return; // ignore rapid double-clicks during transition
+                // Mark the clicked item active immediately so the sidebar
+                // reflects the user's intent without waiting for the fetch.
+                list.querySelectorAll('.sidebar-universe-item').forEach(x => x.classList.remove('active'));
+                el.classList.add('active');
                 setUniverseSlugInUrl(slug);
                 state.currentUniverseSlug = slug;
-                state.isTemplate = false;
-                hideTemplateBanner();
+                state.isTemplate = (slug === 'template');
+                if (state.isTemplate) showTemplateBanner(); else hideTemplateBanner();
                 await bootAppForUniverse(slug);
             });
             el.addEventListener('dblclick', (e) => {
@@ -2503,14 +2527,59 @@
             return Array.isArray(tags) ? tags : [];
         }
 
-        function cardBodyHtml(body) {
-            if (!body) return '';
-            const md = window.CoMarkdown;
-            if (md) {
-                return `<div class="conteudo-card-body md-body md-fade">${md.renderMarkdown(body)}</div>`;
+        function cardBodyHtml(body, fm) {
+            if (body && body.trim().length > 0) {
+                const md = window.CoMarkdown;
+                if (md) {
+                    return `<div class="conteudo-card-body md-body md-fade">${md.renderMarkdown(body)}</div>`;
+                }
+                const snippet = body.slice(0, 200);
+                return `<div class="conteudo-card-body">${esc(snippet)}${body.length > 200 ? '…' : ''}</div>`;
             }
-            const snippet = body.slice(0, 200);
-            return `<div class="conteudo-card-body">${esc(snippet)}${body.length > 200 ? '…' : ''}</div>`;
+            // Body-empty fallback: many universes encode the actual content as
+            // structured frontmatter (e.g. artelonga members have nome, papel,
+            // bio, funcao but no body). Render a compact key-value list of the
+            // user-meaningful fields so those cards aren't visually blank.
+            return frontmatterPreviewHtml(fm);
+        }
+
+        // Frontmatter keys that are scaffolding rather than content — skip them
+        // in the empty-body preview. (`tags` is rendered separately as chips.)
+        const FM_HIDE_KEYS = new Set([
+            'type', 'slug', 'order', 'tags', 'created', 'modified',
+            'created_at', 'updated_at', 'next_id', 'archived', 'archived_at',
+            'frontmatter', 'parent', 'id', 'key', 'project_key',
+        ]);
+
+        function frontmatterPreviewHtml(fm) {
+            if (!fm || typeof fm !== 'object') return '';
+            const entries = Object.entries(fm)
+                .filter(([k, v]) => !FM_HIDE_KEYS.has(k))
+                .filter(([, v]) => {
+                    if (v === null || v === undefined || v === '') return false;
+                    if (Array.isArray(v) && v.length === 0) return false;
+                    return true;
+                });
+            if (!entries.length) return '';
+            const fmtVal = (v) => {
+                if (Array.isArray(v)) return v.map(x => esc(String(x))).join(', ');
+                if (typeof v === 'object') {
+                    try { return esc(JSON.stringify(v)); } catch (_) { return ''; }
+                }
+                const s = String(v);
+                // If the value looks like a URL (image / link), make it visual.
+                if (/^https?:\/\/|^\//.test(s) && /\.(png|jpe?g|gif|svg|webp)(\?|$)/i.test(s)) {
+                    return `<img src="${esc(s)}" alt="" loading="lazy" class="conteudo-fm-img">`;
+                }
+                if (/^https?:\/\//.test(s)) {
+                    return `<a href="${esc(s)}" target="_blank" rel="noopener">${esc(s)}</a>`;
+                }
+                return esc(s);
+            };
+            const rows = entries.slice(0, 8).map(([k, v]) =>
+                `<div class="conteudo-fm-row"><span class="conteudo-fm-key">${esc(k)}</span><span class="conteudo-fm-val">${fmtVal(v)}</span></div>`
+            ).join('');
+            return `<div class="conteudo-card-body conteudo-fm-preview">${rows}</div>`;
         }
 
         // Read/write section collapse state from localStorage (1 = open, 0 = closed)
@@ -2546,7 +2615,7 @@
                         data-entry-path="${esc(e.path)}"
                         data-entry-title="${esc(entryTitle(e))}">
                 <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                ${cardBodyHtml(e.body)}
+                ${cardBodyHtml(e.body, entryFm(e))}
                 <div class="conteudo-card-footer">
                     ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">#${esc(t)}</span>`).join('')}</div>` : '<span></span>'}
                     ${relDate ? `<span class="conteudo-card-date">${esc(relDate)}</span>` : ''}
@@ -2564,7 +2633,8 @@
                 const folderKey = `co_folder_${encodeURIComponent(child.path)}`;
                 let savedState = null;
                 try { savedState = localStorage.getItem(folderKey); } catch (_) {}
-                const isOpen = savedState !== 'closed';
+                // Folders default to CLOSED; only open if user explicitly opened it before.
+                const isOpen = savedState === 'open';
                 const count = countFolderEntries(child);
                 html += `<div class="co-folder" data-folder-path="${esc(child.path)}" data-folder-key="${esc(folderKey)}">
                     <div class="co-folder-header" data-folder-toggle>
@@ -2598,7 +2668,7 @@
                 return `<div class="conteudo-card conteudo-card-clickable" data-task-id="${taskId}">
                     <div class="conteudo-card-meta">${esc(status)} · ${esc(priority)}</div>
                     <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                    ${cardBodyHtml(e.body)}
+                    ${cardBodyHtml(e.body, entryFm(e))}
                     ${tags.length ? `<div class="conteudo-card-tags">${tags.map(t => `<span class="conteudo-tag">${esc(t)}</span>`).join('')}</div>` : ''}
                 </div>`;
               }).join('')
@@ -2619,7 +2689,7 @@
                 return `<div class="conteudo-card">
                     <div class="conteudo-card-meta">${esc(date)}${local ? ' · ' + esc(local) : ''}</div>
                     <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
-                    ${cardBodyHtml(e.body)}
+                    ${cardBodyHtml(e.body, entryFm(e))}
                 </div>`;
               }).join('')
             : '<p class="conteudo-empty">Nenhum evento próximo</p>';
@@ -2631,7 +2701,7 @@
                 const url = fm.url || fm.link || '';
                 return `<div class="conteudo-card">
                     <div class="conteudo-card-title">${url ? `<a href="${esc(url)}" target="_blank" rel="noopener">${esc(entryTitle(e))}</a>` : esc(entryTitle(e))}</div>
-                    ${cardBodyHtml(e.body)}
+                    ${cardBodyHtml(e.body, entryFm(e))}
                 </div>`;
               }).join('')
             : '<p class="conteudo-empty">Nenhum clipe</p>';
@@ -2640,14 +2710,45 @@
             ? ''
             : `<button class="btn btn-secondary btn-sm co-add-content" id="btn-add-content" style="margin-left:auto;font-size:12px">+ ${window.t ? window.t('add_content') : 'Adicionar conteúdo'}</button>`;
 
+        // All sections start collapsed by default — user expands what they
+        // want to look at. Saved-state in localStorage still wins, so once a
+        // user opens a section it remembers next time.
         const sectionsHtml = [
-            sectionHtml('paginas', 'Páginas', pageEntries.length, pagesBodyHtml, true, null, addContentBtn),
+            sectionHtml('paginas', 'Páginas', pageEntries.length, pagesBodyHtml, false, null, addContentBtn),
             sectionHtml('tarefas', 'Tarefas', taskEntries.length, tasksBodyHtml, false, 'Redundante ao Kanban'),
             sectionHtml('eventos', 'Próximos Eventos', upcomingEvents.length, eventsBodyHtml, false, null),
             clipEntries.length ? sectionHtml('clipes', 'Clipes', clipEntries.length, clipsBodyHtml, false, null) : '',
         ].join('');
 
-        content.innerHTML = `<div class="conteudo-list">${sectionsHtml}</div>`;
+        // Stats strip — quick totals + last activity, derived from allEntries
+        // so untyped markdown counts toward the total too. Renders unobtrusively
+        // above the sections.
+        const totalEntries = allEntries.length;
+        const lastUpdated = allEntries
+            .map(e => e.updated_at || (e.frontmatter || {}).modified || '')
+            .filter(Boolean)
+            .sort()
+            .slice(-1)[0] || '';
+        const lastUpdatedRel = lastUpdated ? relativeDate(lastUpdated) : '';
+        const tagCount = (() => {
+            const seen = new Set();
+            for (const e of allEntries) {
+                const t = (e.frontmatter || {}).tags;
+                if (Array.isArray(t)) t.forEach(x => seen.add(x));
+            }
+            return seen.size;
+        })();
+        const statsHtml = `
+            <div class="conteudo-stats">
+                <div class="conteudo-stat"><span class="conteudo-stat-value">${totalEntries}</span><span class="conteudo-stat-label">${totalEntries === 1 ? 'entrada' : 'entradas'}</span></div>
+                <div class="conteudo-stat"><span class="conteudo-stat-value">${pageEntries.length}</span><span class="conteudo-stat-label">${pageEntries.length === 1 ? 'página' : 'páginas'}</span></div>
+                <div class="conteudo-stat"><span class="conteudo-stat-value">${taskEntries.length}</span><span class="conteudo-stat-label">${taskEntries.length === 1 ? 'tarefa' : 'tarefas'}</span></div>
+                <div class="conteudo-stat"><span class="conteudo-stat-value">${eventEntries.length}</span><span class="conteudo-stat-label">${eventEntries.length === 1 ? 'evento' : 'eventos'}</span></div>
+                <div class="conteudo-stat"><span class="conteudo-stat-value">${tagCount}</span><span class="conteudo-stat-label">${tagCount === 1 ? 'tag' : 'tags'}</span></div>
+                ${lastUpdatedRel ? `<div class="conteudo-stat conteudo-stat-meta"><span class="conteudo-stat-label">Última edição</span><span class="conteudo-stat-value-meta">${esc(lastUpdatedRel)}</span></div>` : ''}
+            </div>`;
+
+        content.innerHTML = `<div class="conteudo-list">${statsHtml}${sectionsHtml}</div>`;
 
         // Section toggle handlers
         content.querySelectorAll('[data-section-toggle]').forEach(header => {
@@ -3769,12 +3870,76 @@
     function renderContent() {
         if (state.loading) return;
         if (state.view === 'conteudo') { renderConteudo(); return; }
-        if (!state.currentProject) return;
+        if (!state.currentProject) {
+            // No project in this universe (or fetch failed). Render an empty
+            // state instead of returning silently — otherwise the loading
+            // spinner stays up forever and the user is stuck.
+            renderUniverseHome();
+            return;
+        }
         if (state.view === 'kanban') renderKanban();
         else if (state.view === 'calendar') renderCalendar();
         else if (state.view === 'table') renderTable();
         else if (state.view === 'timeline') renderTimeline();
         else if (state.view === 'dashboard') renderDashboard();
+    }
+
+    // Universe home / front page. Renders the universe's `index.md` body as a
+    // hero, falling back to a description + empty-state when no index exists.
+    // Also used as the safe-fallback when there's no project to render.
+    async function renderUniverseHome() {
+        const content = $('#content');
+        if (!content) return;
+        const slug = state.currentUniverseSlug;
+        const info = state.universeInfo || {};
+        const name = info.name || slug || '';
+        const description = info.description || '';
+
+        // Render skeleton immediately so spinner clears even if fetch is slow.
+        content.className = 'content universe-home-view';
+        content.innerHTML = `
+            <div class="universe-home">
+                <header class="universe-home-header">
+                    <h1 class="universe-home-title">${esc(name)}</h1>
+                    ${description ? `<p class="universe-home-desc">${esc(description)}</p>` : ''}
+                </header>
+                <div class="universe-home-body" id="universe-home-body">
+                    <div class="universe-home-loading">Carregando…</div>
+                </div>
+            </div>`;
+
+        // Try `index.md` at the universe root. Server responds 404 if absent.
+        let indexEntry = null;
+        try {
+            indexEntry = await apiFetch(
+                `/api/v1/universes/${encodeURIComponent(slug)}/entries/${encodeURIComponent('index.md')}`,
+                {},
+                true
+            );
+        } catch (_) { /* fall through */ }
+
+        const body = $('#universe-home-body');
+        if (!body) return;
+
+        if (indexEntry && indexEntry.body) {
+            const md = window.CoMarkdown;
+            const html = md ? md.renderMarkdown(indexEntry.body) : esc(indexEntry.body);
+            body.innerHTML = `<article class="universe-home-md md-body">${html}</article>`;
+            return;
+        }
+
+        // No index — show a clear "what to do next" empty state, with hints
+        // grounded in what this universe contains. Avoid the spooky blank.
+        const totalEntries = (info.content_count || state.projects?.length || 0);
+        body.innerHTML = `
+            <div class="universe-home-empty">
+                <p>Este universo ainda não tem uma página inicial.</p>
+                <p style="color:var(--text-muted,#6b7280);font-size:13px">
+                    Crie um arquivo <code>index.md</code> na raiz do universo para descrever
+                    o que ele é. Ele será renderizado aqui.
+                </p>
+                ${totalEntries ? `<p style="color:var(--text-muted,#6b7280);font-size:13px">Há <strong>${totalEntries}</strong> entrada(s) neste universo. Acesse pelo menu lateral ou pela visão Conteúdo.</p>` : ''}
+            </div>`;
     }
 
     function render() {
@@ -4670,27 +4835,124 @@
         render();
     }
 
+    // Universe switching: a single atomic transition rather than a chain of
+    // partial updates. The previous version cleared/replaced state piece by
+    // piece while fetching, so old cards, old theme, and old gear icon would
+    // briefly coexist with the new universe's URL and sidebar state.
+    //
+    // New flow:
+    //   1. Mark `state.switchingUniverse = true` so render() / view callbacks
+    //      can short-circuit and avoid painting stale data.
+    //   2. Reset transient per-universe state (tasks, projects, info, config,
+    //      universeInfo) so subsequent reads don't surface leftovers.
+    //   3. Show the loading state (clears the content area).
+    //   4. Apply the new theme/config FIRST — this is cheap and prevents the
+    //      brief flash of the prior universe's palette under the spinner.
+    //   5. Fetch projects + first project's data in parallel where possible.
+    //   6. Drop the switching flag, render once.
+    // Wraps a promise with a hard timeout so a hanging fetch cannot leave the
+    // spinner up forever. Resolves to `null` instead of rejecting, so callers
+    // can treat timeout as a soft failure.
+    function withTimeout(promise, ms, label) {
+        return new Promise((resolve) => {
+            let done = false;
+            const t = setTimeout(() => {
+                if (done) return;
+                done = true;
+                console.warn(`withTimeout(${label}): timed out after ${ms}ms`);
+                resolve(null);
+            }, ms);
+            promise.then(
+                (val) => { if (done) return; done = true; clearTimeout(t); resolve(val); },
+                (err) => { if (done) return; done = true; clearTimeout(t); console.warn(`withTimeout(${label}):`, err); resolve(null); }
+            );
+        });
+    }
+
     async function bootAppForUniverse(slug) {
+        state.switchingUniverse = true;
+        // Wipe per-universe collections so old cards never leak through.
+        state.tasks = [];
+        state.projects = [];
+        state.currentProject = null;
+        state.universeInfo = null;
+        state.universeConfig = null;
+
         showLoading();
-        // Load universe info and form config in parallel (CO-24).
-        const [info, config] = await Promise.all([
-            api.getUniverseInfo(slug),
-            api.getUniverseConfig(slug),
-        ]);
-        if (info) {
-            state.universeInfo = info;
-            renderUsageCount();
-        }
-        if (config) {
-            applyUniverseConfig(config);
+
+        // Outer watchdog: if the whole boot doesn't finish in 20s, force a
+        // recovery so the spinner cannot stick. The user can refresh / pick
+        // another universe / hit /reset-sw.html if something is genuinely
+        // wrong server-side.
+        let watchdogFired = false;
+        const watchdogTimer = setTimeout(() => {
+            watchdogFired = true;
+            state.switchingUniverse = false;
+            const content = $('#content');
+            if (content) {
+                content.innerHTML = `
+                    <div style="padding:24px;max-width:520px;margin:40px auto;background:var(--card-bg,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px">
+                        <h2 style="margin:0 0 12px;font-size:18px">Carregamento demorou demais</h2>
+                        <p style="margin:0 0 12px;color:var(--text-muted,#6b7280)">
+                            Não conseguimos carregar <strong>${esc(slug)}</strong> em 20s. Pode ser uma falha de rede,
+                            um universo grande, ou um service worker antigo.
+                        </p>
+                        <p style="margin:0;display:flex;gap:8px;flex-wrap:wrap">
+                            <button class="btn btn-primary btn-sm" onclick="window.location.reload()">Recarregar</button>
+                            <a class="btn btn-secondary btn-sm" href="/co" style="text-decoration:none">Voltar ao template</a>
+                            <a class="btn btn-secondary btn-sm" href="/reset-sw.html" style="text-decoration:none">Reset cache</a>
+                        </p>
+                    </div>`;
+            }
+        }, 20000);
+
+        try {
+            let info = null;
+            let config = null;
+            try {
+                const [i, c] = await Promise.all([
+                    withTimeout(api.getUniverseInfo(slug), 8000, 'getUniverseInfo'),
+                    withTimeout(api.getUniverseConfig(slug), 8000, 'getUniverseConfig'),
+                ]);
+                info = i; config = c;
+            } catch (e) {
+                console.warn('bootAppForUniverse: info/config fetch failed', e);
+            }
+
+            if (watchdogFired) return;
+
+            if (info) {
+                state.universeInfo = info;
+                renderUsageCount();
+            }
+            if (config) {
+                applyUniverseConfig(config);
+            } else {
+                loadThemeCss(slug);
+            }
             renderSettingsGear(info);
+
+            const projects = await withTimeout(api.getUniverseProjects(slug), 8000, 'getUniverseProjects');
+            if (watchdogFired) return;
+            state.projects = Array.isArray(projects) ? projects : [];
+
+            if (state.projects.length > 0) {
+                try {
+                    // selectProject internally calls refreshTasks which fetches
+                    // /api/projects/:key/tasks — bound the same way.
+                    await withTimeout(selectProject(state.projects[0].key), 8000, 'selectProject');
+                } catch (e) {
+                    console.warn('bootAppForUniverse: selectProject threw', e);
+                }
+            }
+        } finally {
+            clearTimeout(watchdogTimer);
+            if (!watchdogFired) {
+                state.switchingUniverse = false;
+                hideLoading();
+                try { render(); } catch (e) { console.warn('bootAppForUniverse: render threw', e); }
+            }
         }
-        state.projects = await api.getUniverseProjects(slug);
-        if (state.projects.length > 0) {
-            await selectProject(state.projects[0].key);
-        }
-        hideLoading();
-        render();
     }
 
     // ===== Settings Panel (CO-24) =====

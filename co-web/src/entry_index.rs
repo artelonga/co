@@ -161,11 +161,14 @@ impl<'a> EntryIndex<'a> {
         entry_type: &str,
         filters: &JsonValue,
     ) -> anyhow::Result<Vec<EntryRow>> {
-        let mut conditions = vec![
-            "universe_key = ?1".to_string(),
-            "entry_type = ?2".to_string(),
-        ];
-        let mut param_strings: Vec<String> = vec![universe_key.to_string(), entry_type.to_string()];
+        // Empty entry_type means "any type" — used by the unfiltered list_entries
+        // endpoint. When non-empty, restrict by exact type.
+        let mut conditions = vec!["universe_key = ?1".to_string()];
+        let mut param_strings: Vec<String> = vec![universe_key.to_string()];
+        if !entry_type.is_empty() {
+            conditions.push(format!("entry_type = ?{}", param_strings.len() + 1));
+            param_strings.push(entry_type.to_string());
+        }
         let mut order_clause = String::new();
 
         if let Some(obj) = filters.as_object() {

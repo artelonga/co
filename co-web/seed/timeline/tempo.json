@@ -1,0 +1,137 @@
+{
+  "universe": {
+    "key": "tempo",
+    "name": "Tempo",
+    "description": "Escala de tempo — onde tudo se encaixa: do Big Bang ao fim do universo. Inspirado em scaleofuniverse.com, com ênfase em tempo.",
+    "theme_preset": "modern",
+    "layout": "timeline"
+  },
+  "events": [
+    {
+      "slug": "big-bang",
+      "title": "Big Bang",
+      "date_year": -13800000000,
+      "description": "Início do universo observável. Singularidade quente e densa expandindo-se rapidamente."
+    },
+    {
+      "slug": "primeiros-atomos",
+      "title": "Primeiros átomos",
+      "date_year": -13380000000,
+      "description": "Recombinação: prótons e elétrons formam hidrogênio neutro. Universo torna-se transparente — radiação cósmica de fundo é liberada."
+    },
+    {
+      "slug": "primeiras-estrelas",
+      "title": "Primeiras estrelas",
+      "date_year": -13600000000,
+      "description": "Era das primeiras estrelas (Pop III). Massivas, quentes, vidas curtas. Forjam os primeiros elementos pesados."
+    },
+    {
+      "slug": "via-lactea",
+      "title": "Formação da Via Láctea",
+      "date_year": -13500000000,
+      "description": "Galáxia espiral em formação a partir de gás primordial e fusão de proto-galáxias menores."
+    },
+    {
+      "slug": "sistema-solar",
+      "title": "Sistema Solar nasce",
+      "date_year": -4600000000,
+      "description": "Disco protoplanetário em torno do Sol jovem. Planetas se formam por acreção."
+    },
+    {
+      "slug": "terra-forma",
+      "title": "Terra se forma",
+      "date_year": -4540000000,
+      "description": "Acreção do planeta Terra. Pouco depois, colisão com Theia forma a Lua."
+    },
+    {
+      "slug": "primeira-vida",
+      "title": "Primeira vida",
+      "date_year": -3500000000,
+      "description": "Procariontes anaeróbicos nos oceanos. RNA e DNA já presentes."
+    },
+    {
+      "slug": "fotossintese",
+      "title": "Fotossíntese e oxigênio",
+      "date_year": -2400000000,
+      "description": "Cianobactérias liberam oxigênio. Grande Evento de Oxidação reformula a atmosfera."
+    },
+    {
+      "slug": "vida-multicelular",
+      "title": "Vida multicelular",
+      "date_year": -1000000000,
+      "description": "Organismos com células diferenciadas. Caminho para a complexidade biológica."
+    },
+    {
+      "slug": "explosao-cambriana",
+      "title": "Explosão Cambriana",
+      "date_year": -540000000,
+      "description": "Diversificação rápida de filos animais. Quase todos os planos corporais modernos surgem."
+    },
+    {
+      "slug": "extincao-permiana",
+      "title": "Extinção Permiano-Triássica",
+      "date_year": -252000000,
+      "description": "A maior extinção em massa: ~96% das espécies marinhas e ~70% das terrestres."
+    },
+    {
+      "slug": "dinossauros",
+      "title": "Era dos dinossauros",
+      "date_year": -200000000,
+      "description": "Mesozoico: dinossauros dominam ecossistemas terrestres por ~135 milhões de anos."
+    },
+    {
+      "slug": "kpg",
+      "title": "Extinção K-Pg",
+      "date_year": -66000000,
+      "description": "Asteroide em Chicxulub. Fim dos dinossauros não-aviários. Mamíferos prosperam."
+    },
+    {
+      "slug": "hominideos",
+      "title": "Primeiros hominídeos",
+      "date_year": -7000000,
+      "description": "Separação da linhagem que levaria aos humanos modernos do ancestral comum com chimpanzés."
+    },
+    {
+      "slug": "homo-sapiens",
+      "title": "Homo sapiens",
+      "date_year": -300000,
+      "description": "Surgimento do Homo sapiens na África. Cérebros grandes, ferramentas líticas, primeiras práticas simbólicas."
+    },
+    {
+      "slug": "agricultura",
+      "title": "Agricultura",
+      "date_year": -10000,
+      "description": "Revolução Neolítica. Domesticação de plantas e animais. Sedentarização."
+    },
+    {
+      "slug": "agora",
+      "title": "Agora",
+      "date_year": 2026,
+      "description": "Você está aqui. Plataforma Co em teste público inicial. Quilombo Araucária organizando comunidades em Curitiba."
+    },
+    {
+      "slug": "sol-gigante-vermelha",
+      "title": "Sol vira gigante vermelha",
+      "date_year": 5000000000,
+      "description": "Sol esgota hidrogênio no núcleo, expande-se. Mercúrio e Vênus serão consumidos. Terra provavelmente também."
+    },
+    {
+      "slug": "andromeda-colisao",
+      "title": "Colisão com Andrômeda",
+      "date_year": 4500000000,
+      "description": "Via Láctea e Andrômeda fundem-se em uma galáxia elíptica gigante (\"Milkomeda\")."
+    },
+    {
+      "slug": "ultima-estrela",
+      "title": "Última estrela se apaga",
+      "date_year": 100000000000000,
+      "description": "Fim da Era Estelífera. Sem novas estrelas. Universo dominado por anãs marrons, anãs brancas e buracos negros."
+    },
+    {
+      "slug": "morte-termica",
+      "title": "Morte térmica",
+      "date_year": 1000000000000000000,
+      "description": "Era Sombria. Buracos negros evaporam por radiação Hawking. Equilíbrio termodinâmico universal."
+    }
+  ]
+}

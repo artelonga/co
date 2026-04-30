@@ -97,9 +97,15 @@ pub async fn mirror_prod_to_uat(prod_url: &str, prod_token: &str, local_url: &st
                 continue;
             }
         };
-        if let Err(e) =
-            mirror_one_universe(&client, prod_url, prod_token, local_url, &local_session, &info)
-                .await
+        if let Err(e) = mirror_one_universe(
+            &client,
+            prod_url,
+            prod_token,
+            local_url,
+            &local_session,
+            &info,
+        )
+        .await
         {
             tracing::error!("UAT mirror: '{}' failed: {e:#}", info.key);
         }
@@ -142,7 +148,6 @@ async fn uat_login(client: &reqwest::Client, local_url: &str) -> Result<String> 
         .ok_or_else(|| anyhow::anyhow!("no session cookie in uat-login response"))?;
     Ok(session)
 }
-
 
 async fn mirror_one_universe(
     client: &reqwest::Client,

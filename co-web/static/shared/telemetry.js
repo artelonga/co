@@ -3,6 +3,9 @@
  *
  * Privacy-respecting client-side event tracking.
  * - Respects navigator.doNotTrack === '1'
+ * - Respects cross-product opt-out via the apex cookie al_optout=1 on
+ *   .artelonga.com.br (set by artelonga.com.br's analytics client; honored here
+ *   so a single opt-out covers both surfaces).
  * - Requires cookie consent (co_cookie_consent in localStorage)
  * - No PII: no email, no passwords, no entry content
  * - Session ID: random, stored in sessionStorage (expires on tab close)
@@ -12,9 +15,18 @@
 
   // --- Guards ---
 
+  function readCookie(name) {
+    var esc = name.replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+    var m = (document.cookie || '').match(new RegExp('(?:^|; )' + esc + '=([^;]*)'));
+    if (!m) return null;
+    try { return decodeURIComponent(m[1]); } catch (_) { return null; }
+  }
+
   function isTrackingAllowed() {
     // Do Not Track: honour the browser signal
     if (navigator.doNotTrack === '1' || navigator.doNotTrack === 'yes') return false;
+    // Cross-product opt-out: respect the apex-domain cookie set by artelonga.com.br
+    if (readCookie('al_optout') === '1') return false;
     // Cookie consent must be accepted
     if (!localStorage.getItem('co_cookie_consent')) return false;
     return true;

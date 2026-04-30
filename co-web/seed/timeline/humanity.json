@@ -1,0 +1,167 @@
+{
+  "universe": {
+    "key": "humanity",
+    "name": "Humanidade",
+    "description": "História da espécie humana — onde nos colocamos no tempo. Da emergência do Homo sapiens até hoje.",
+    "theme_preset": "modern",
+    "layout": "timeline"
+  },
+  "events": [
+    {
+      "slug": "homo-sapiens",
+      "title": "Homo sapiens",
+      "date_year": -300000,
+      "description": "Surgimento do Homo sapiens na África Oriental. Cérebros similares aos atuais."
+    },
+    {
+      "slug": "out-of-africa",
+      "title": "Saída da África",
+      "date_year": -70000,
+      "description": "Migração do Homo sapiens para fora da África. Encontros e cruzamentos com Neandertais."
+    },
+    {
+      "slug": "australia",
+      "title": "Chegada na Austrália",
+      "date_year": -65000,
+      "description": "Primeiros humanos cruzam mares para chegar à Austrália — primeira evidência de navegação intencional."
+    },
+    {
+      "slug": "arte-rupestre",
+      "title": "Arte rupestre",
+      "date_year": -40000,
+      "description": "Pinturas em cavernas (Chauvet, Lascaux). Pensamento simbólico abstrato consolidado."
+    },
+    {
+      "slug": "americas",
+      "title": "Chegada nas Américas",
+      "date_year": -16000,
+      "description": "Humanos atravessam Beríngia. Início do povoamento das Américas."
+    },
+    {
+      "slug": "agricultura",
+      "title": "Agricultura — Crescente Fértil",
+      "date_year": -10000,
+      "description": "Domesticação de trigo, cevada, ovelhas, cabras. Revolução Neolítica."
+    },
+    {
+      "slug": "primeiras-cidades",
+      "title": "Primeiras cidades",
+      "date_year": -6000,
+      "description": "Uruk, Çatalhöyük. Centros urbanos com milhares de habitantes."
+    },
+    {
+      "slug": "escrita",
+      "title": "Escrita cuneiforme",
+      "date_year": -3500,
+      "description": "Suméria. Primeira escrita conhecida — registros administrativos, depois literatura."
+    },
+    {
+      "slug": "piramides",
+      "title": "Pirâmides de Gizé",
+      "date_year": -2560,
+      "description": "Egito antigo. Engenharia monumental, organização social complexa."
+    },
+    {
+      "slug": "buda",
+      "title": "Buda",
+      "date_year": -500,
+      "description": "Século dos grandes mestres: Buda, Confúcio, pré-socráticos. Período Axial."
+    },
+    {
+      "slug": "imperio-romano",
+      "title": "Império Romano",
+      "date_year": 27,
+      "description": "Augusto torna-se imperador. Pax Romana. Direito, engenharia, lingua franca por séculos."
+    },
+    {
+      "slug": "imprensa",
+      "title": "Imprensa de Gutenberg",
+      "date_year": 1450,
+      "description": "Tipos móveis. Conhecimento se torna replicável em massa."
+    },
+    {
+      "slug": "renascimento",
+      "title": "Renascimento",
+      "date_year": 1450,
+      "description": "Florença. Recuperação de saberes clássicos, novas técnicas artísticas, humanismo."
+    },
+    {
+      "slug": "iluminismo",
+      "title": "Iluminismo",
+      "date_year": 1750,
+      "description": "Razão, ciência, direitos individuais. Bases das democracias modernas."
+    },
+    {
+      "slug": "revolucao-industrial",
+      "title": "Revolução Industrial",
+      "date_year": 1800,
+      "description": "Máquina a vapor, fábricas, urbanização em massa. Reorganização do trabalho."
+    },
+    {
+      "slug": "primeira-guerra",
+      "title": "Primeira Guerra Mundial",
+      "date_year": 1914,
+      "description": "Guerra industrial em escala global. Queda dos impérios. ~17 milhões de mortos."
+    },
+    {
+      "slug": "segunda-guerra",
+      "title": "Segunda Guerra Mundial",
+      "date_year": 1939,
+      "description": "Holocausto. Bombas atômicas em Hiroshima e Nagasaki. ~70 milhões de mortos."
+    },
+    {
+      "slug": "computador",
+      "title": "Primeiro computador",
+      "date_year": 1945,
+      "description": "ENIAC entra em operação. Cálculo digital de propósito geral."
+    },
+    {
+      "slug": "ddl-onu",
+      "title": "Declaração Universal dos Direitos Humanos",
+      "date_year": 1948,
+      "description": "ONU adota a DUDH. Primeira articulação universalista de direitos."
+    },
+    {
+      "slug": "lua",
+      "title": "Humanos na Lua",
+      "date_year": 1969,
+      "description": "Apollo 11. Neil Armstrong e Buzz Aldrin pisam na Lua. Primeira presença humana em outro corpo celeste."
+    },
+    {
+      "slug": "internet",
+      "title": "ARPANET / Internet",
+      "date_year": 1969,
+      "description": "Primeira mensagem entre dois computadores remotos (UCLA → Stanford). Embrião da internet."
+    },
+    {
+      "slug": "web",
+      "title": "World Wide Web",
+      "date_year": 1989,
+      "description": "Tim Berners-Lee propõe a Web no CERN. HTTP, HTML, URLs. Internet se torna universal."
+    },
+    {
+      "slug": "smartphone",
+      "title": "Smartphone",
+      "date_year": 2007,
+      "description": "iPhone lançado. Computação ubíqua na palma da mão. Reorganiza atenção, mídia, política."
+    },
+    {
+      "slug": "ia-deep-learning",
+      "title": "Deep Learning",
+      "date_year": 2012,
+      "description": "AlexNet ganha ImageNet. Redes neurais profundas se tornam dominantes em IA."
+    },
+    {
+      "slug": "ia-llm",
+      "title": "LLMs em escala",
+      "date_year": 2023,
+      "description": "Modelos de linguagem grandes (GPT-4, Claude) tornam-se ferramentas cotidianas. Reorganização do trabalho intelectual."
+    },
+    {
+      "slug": "agora",
+      "title": "Agora",
+      "date_year": 2026,
+      "description": "Você está aqui. Plataforma Co em teste público. Quilombo Araucária organizando o local com infraestrutura digital."
+    }
+  ]
+}

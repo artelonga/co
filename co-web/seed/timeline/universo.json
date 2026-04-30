@@ -1,0 +1,179 @@
+{
+  "universe": {
+    "key": "universo",
+    "name": "Universo",
+    "description": "Linha do tempo cósmica — onde nosso universo se coloca. Do Big Bang à morte térmica. Ênfase em tempo, não distância.",
+    "theme_preset": "modern",
+    "layout": "timeline"
+  },
+  "events": [
+    {
+      "slug": "big-bang",
+      "title": "Big Bang",
+      "date_year": -13800000000,
+      "description": "Singularidade quente. Início do tempo, espaço, matéria e energia conforme conhecemos."
+    },
+    {
+      "slug": "inflacao",
+      "title": "Inflação cósmica",
+      "date_year": -13800000000,
+      "description": "10⁻³⁶ a 10⁻³² segundos após o Big Bang. Universo se expande exponencialmente — fator ~10²⁶."
+    },
+    {
+      "slug": "nucleossintese",
+      "title": "Nucleossíntese primordial",
+      "date_year": -13799999998,
+      "description": "Primeiros 20 minutos. Hidrogênio, hélio e traços de lítio formam-se. Razão atômica do universo definida."
+    },
+    {
+      "slug": "recombinacao",
+      "title": "Recombinação",
+      "date_year": -13420000000,
+      "description": "380.000 anos após o Big Bang. Elétrons combinam-se com prótons. Universo torna-se transparente. CMB liberada."
+    },
+    {
+      "slug": "primeiras-estrelas",
+      "title": "Primeiras estrelas",
+      "date_year": -13600000000,
+      "description": "Era das estrelas Pop III. Primeiras a forjar elementos pesados. Vidas curtas, mortes em supernovas."
+    },
+    {
+      "slug": "primeiras-galaxias",
+      "title": "Primeiras galáxias",
+      "date_year": -13400000000,
+      "description": "Aglomerações iniciais de gás e estrelas. JWST tem observado precursores ainda mais antigos."
+    },
+    {
+      "slug": "via-lactea",
+      "title": "Via Láctea formada",
+      "date_year": -13500000000,
+      "description": "Galáxia espiral barrada. Disco fino consolidado ao longo de bilhões de anos por fusões e acréscimos."
+    },
+    {
+      "slug": "estrelas-segunda-geracao",
+      "title": "Estrelas de segunda geração",
+      "date_year": -10000000000,
+      "description": "Estrelas Pop II. Já contêm metais. Bases para formação planetária."
+    },
+    {
+      "slug": "sol-nasce",
+      "title": "Sol nasce",
+      "date_year": -4600000000,
+      "description": "Nuvem molecular colapsa. Sol entra na sequência principal. Disco protoplanetário em rotação."
+    },
+    {
+      "slug": "terra-forma",
+      "title": "Terra se forma",
+      "date_year": -4540000000,
+      "description": "Acreção planetária. Terra ainda é um inferno fundido — magma oceanos."
+    },
+    {
+      "slug": "lua",
+      "title": "Lua se forma",
+      "date_year": -4510000000,
+      "description": "Hipótese do impacto: Theia (do tamanho de Marte) colide com a Terra. Detritos formam a Lua."
+    },
+    {
+      "slug": "primeira-vida",
+      "title": "Primeira vida",
+      "date_year": -3500000000,
+      "description": "Microfósseis e estromatólitos. Procariontes anaeróbicos. Origem provavelmente em fontes hidrotermais."
+    },
+    {
+      "slug": "fotossintese",
+      "title": "Fotossíntese / oxigenação",
+      "date_year": -2400000000,
+      "description": "Cianobactérias liberam O₂. Grande Evento de Oxidação. Atmosfera reformulada."
+    },
+    {
+      "slug": "vida-multicelular",
+      "title": "Vida multicelular",
+      "date_year": -1000000000,
+      "description": "Eucariontes desenvolvem células diferenciadas. Caminho para a complexidade."
+    },
+    {
+      "slug": "explosao-cambriana",
+      "title": "Explosão Cambriana",
+      "date_year": -540000000,
+      "description": "20 milhões de anos. Quase todos os filos animais modernos surgem. Diversidade explode."
+    },
+    {
+      "slug": "extincao-permiana",
+      "title": "Extinção Permiana",
+      "date_year": -252000000,
+      "description": "A Grande Morte. ~96% das espécies desaparecem. Quase fim da vida complexa."
+    },
+    {
+      "slug": "dinossauros",
+      "title": "Dinossauros dominam",
+      "date_year": -200000000,
+      "description": "Era Mesozoica. ~135 milhões de anos de domínio dos dinossauros não-aviários."
+    },
+    {
+      "slug": "kpg",
+      "title": "Extinção K-Pg",
+      "date_year": -66000000,
+      "description": "Asteroide em Chicxulub. Fim dos dinossauros não-aviários. Mamíferos prosperam."
+    },
+    {
+      "slug": "hominideos",
+      "title": "Linhagem hominídea",
+      "date_year": -7000000,
+      "description": "Separação da linhagem chimpanzé-humano."
+    },
+    {
+      "slug": "homo-sapiens",
+      "title": "Homo sapiens",
+      "date_year": -300000,
+      "description": "Surgimento da nossa espécie."
+    },
+    {
+      "slug": "agora",
+      "title": "Agora",
+      "date_year": 2026,
+      "description": "Você está aqui. Civilização de Tipo 0.7 na escala de Kardashev. Telescópios espaciais ativos."
+    },
+    {
+      "slug": "andromeda",
+      "title": "Colisão Via Láctea + Andrômeda",
+      "date_year": 4500000000,
+      "description": "Galáxias se fundem. Resultado: Milkomeda, uma elíptica gigante."
+    },
+    {
+      "slug": "sol-gigante",
+      "title": "Sol vira gigante vermelha",
+      "date_year": 5000000000,
+      "description": "Hidrogênio do núcleo se esgota. Sol expande-se, engole Mercúrio, Vênus, possivelmente Terra."
+    },
+    {
+      "slug": "ana-branca",
+      "title": "Sol vira anã branca",
+      "date_year": 5300000000,
+      "description": "Camadas externas dispersadas como nebulosa planetária. Núcleo torna-se anã branca."
+    },
+    {
+      "slug": "ultima-formacao-estelar",
+      "title": "Última estrela se forma",
+      "date_year": 100000000000,
+      "description": "Hidrogênio livre se esgota. Galáxias param de formar novas estrelas."
+    },
+    {
+      "slug": "ultima-estrela",
+      "title": "Última estrela se apaga",
+      "date_year": 100000000000000,
+      "description": "Era Estelífera termina. Universo dominado por anãs marrons, anãs brancas, estrelas de nêutrons, buracos negros."
+    },
+    {
+      "slug": "evaporacao-buracos-negros",
+      "title": "Buracos negros evaporam",
+      "date_year": 1000000000000000000000000000000000000000000000000000000000000000000,
+      "description": "Radiação Hawking. Os menores buracos negros se desintegram primeiro. Os supermassivos evaporam por último (~10⁶⁷ anos)."
+    },
+    {
+      "slug": "morte-termica",
+      "title": "Morte térmica",
+      "date_year": 1000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000,
+      "description": "Equilíbrio termodinâmico universal. Entropia máxima. Sem trabalho útil possível. Era Sombria final."
+    }
+  ]
+}

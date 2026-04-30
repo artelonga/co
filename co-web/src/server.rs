@@ -580,6 +580,16 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("No template universe found — seeding template...");
             storage.seed_template_universe();
             tracing::info!("Template universe seeded (universe: template, project: MP)");
+        } else {
+            // Template already exists — refresh the content pages (intro + legal)
+            // so the binary's bundled markdown is the source of truth on every boot.
+            // Tasks/projects are NOT touched (user may have edited those).
+            storage.reseed_template_content_pages();
+            // Force theme preset back to 'modern' so the public landing page
+            // always renders with the intended default — old migrations could
+            // have left it on 'scholarly-light'.
+            storage.ensure_template_theme_preset("modern");
+            tracing::info!("Template content pages refreshed from bundled seed files; theme preset pinned to 'modern'");
         }
         // CO-41: seed quilomboaraucaria public universe once on first boot.
         if !storage.quilombo_universe_exists() {
@@ -592,6 +602,10 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("Seeding Yggdrasil universe...");
             storage.seed_yggdrasil_universe();
         }
+        // Timeline trio (`tempo`, `humanity`, `universo`). Always re-seed —
+        // the JSON manifests in the binary are the source of truth, and
+        // `upsert_entry_row` makes overwriting safe.
+        storage.seed_all_timeline_universes();
     }
 
     // CO-44: UAT-specific startup — runs only when CO_ENV=uat.
@@ -615,6 +629,43 @@ pub async fn start_server(config: WebConfig) {
             }
             if let Err(e) = storage.ensure_admin_universe_memberships(&email) {
                 tracing::error!("Failed to ensure admin universe memberships: {e}");
+            }
+            // Re-home universes whose original owner user_id is no longer in
+            // the users table (e.g. after a wipe / re-seed). Without this, the
+            // universe remains in the DB but the new admin can't see it.
+            match storage.rescue_orphan_universes(&email) {
+                Ok(0) => {}
+                Ok(n) => {
+                    tracing::info!("Re-homed {n} orphan universe(s) to {email}");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to rescue orphan universes: {e}");
+                }
+            }
+            // Force the well-known personal universes (bootstrapped via
+            // scripts/seed-prod-universes.sh) to belong to the current admin
+            // user, even when their prior owner_id is still a valid (stale)
+            // user — not caught by rescue_orphan_universes.
+            const PERSONAL_KEYS: &[&str] = &["artelonga", "rfq", "qa-dev"];
+            match storage.ensure_admin_owns_personal_universes(&email, PERSONAL_KEYS) {
+                Ok(0) => {}
+                Ok(n) => {
+                    tracing::info!("Re-homed {n} personal universe(s) to {email}");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to ensure admin owns personal universes: {e}");
+                }
+            }
+            // Sweep "Meu Co" clutter from admin's sidebar — anon-clone
+            // universes that an earlier rescue_orphan_universes grabbed.
+            match storage.cleanup_admin_anon_clutter(&email) {
+                Ok(0) => {}
+                Ok(n) => {
+                    tracing::info!("Removed {n} stale anon-clone(s) from {email}");
+                }
+                Err(e) => {
+                    tracing::error!("Failed to clean admin anon clutter: {e}");
+                }
             }
         }
     }
