@@ -158,3 +158,51 @@ flyctl logs -a co-artelonga-uat      # UAT live
 flyctl status -a co-artelonga        # Machine state
 flyctl ssh console -a co-artelonga   # Shell access
 ```
+
+---
+
+## Edge / CDN (CO-117)
+
+`co.artelonga.com.br` runs behind Cloudflare CDN (proxied DNS, cache rules per spec).
+
+### Cache rule summary
+
+| Path | Behavior | Edge TTL |
+|------|----------|----------|
+| `/api/*` | Bypass | — |
+| `/_app/immutable/*` | Cache | 1 year |
+| `*.css` | Cache | 1 hour |
+| `*.png / .svg / .webp / .avif` | Cache | 1 day |
+| HTML pages | Cache by status | 60 s |
+
+Auth responses (`Set-Cookie: session=`) are never cached — Cloudflare's
+"Bypass cache on Cookie" rule + the origin's `Cache-Control: private, no-store`
+provide defense in depth.
+
+### Initial setup
+
+```bash
+cd infra/cloudflare
+cp terraform.tfvars.example terraform.tfvars
+# fill in cloudflare_api_token, zone_id, fly_ipv4
+terraform init && terraform apply
+```
+
+### Verification
+
+```bash
+./tools/cf-verify.sh
+```
+
+### DNS migration steps (manual, one-time)
+
+1. Log into Cloudflare dashboard → add `artelonga.com.br` zone
+2. Note the Cloudflare nameservers and update at registrar
+3. After propagation: `terraform apply` applies the A record + cache rules
+4. Verify with `./tools/cf-verify.sh`
+
+### Fly origin notes
+
+No changes needed to the Fly app. The origin continues to receive requests
+from Cloudflare IPs. Ensure `Cache-Control: private, no-store` is set on
+all auth responses (already the case in co-web auth handlers).

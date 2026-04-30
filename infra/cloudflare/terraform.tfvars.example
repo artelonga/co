@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars and fill in values
+# NEVER commit terraform.tfvars (it contains secrets)
+
+cloudflare_api_token = "your-token-here"
+zone_id              = "your-zone-id-here"
+fly_ipv4             = "x.x.x.x"   # from: flyctl ips list -a co-artelonga
+fly_ipv6             = "..."        # optional
