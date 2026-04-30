@@ -784,6 +784,66 @@ impl Storage {
                 "CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);",
             )
             .expect("CO-137 backfill: parent_key index");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 24 {
+            // CO-71: add generic JSON payload column (validated at write, indexed by manifest)
+            // and per-universe manifest_version for migration tracking.
+            ensure_column(
+                &self.conn,
+                "entries",
+                "payload",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            .expect("migration v24: entries.payload column");
+
+            // Backfill payload from frontmatter_json for existing rows.
+            self.conn
+                .execute_batch(
+                    "UPDATE entries SET payload = frontmatter_json WHERE payload = '{}';",
+                )
+                .expect("migration v24: payload backfill");
+
+            ensure_column(
+                &self.conn,
+                "universes",
+                "manifest_version",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v24: universes.manifest_version column");
+
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (24)",
+                    [],
+                )
+                .expect("migration v24: version insert");
+        }
+
+        // CO-71 unconditional backfill: ensure payload exists even on DBs that
+        // ran migration v24 but may have pre-payload rows added by older code.
+        ensure_column(
+            &self.conn,
+            "entries",
+            "payload",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        .expect("CO-71 backfill: payload column");
+        ensure_column(
+            &self.conn,
+            "universes",
+            "manifest_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-71 backfill: manifest_version column");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
