@@ -2368,10 +2368,17 @@ impl Storage {
     }
 
     pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
-        self.conn
+        // CO-98 hardening: query the stable schema first (always present at
+        // schema_v ≥ 17), then opportunistically fetch `parent_key` in a
+        // second query. If migration v22 never landed on this DB (or the
+        // column is otherwise absent), the second query returns None and the
+        // function still produces a valid Universe — instead of returning
+        // 404 to the caller as if the universe didn't exist at all.
+        let mut universe = self
+            .conn
             .query_row(
                 "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-                 COALESCE(requires_login, 0), COALESCE(visibility, 'private'), parent_key \
+                 COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -2386,11 +2393,21 @@ impl Storage {
                         content_count: row.get::<_, i64>(7).unwrap_or(0),
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
-                        parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
+                        parent_key: None,
                     })
                 },
             )
+            .ok()?;
+        universe.parent_key = self
+            .conn
+            .query_row(
+                "SELECT parent_key FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
             .ok()
+            .flatten();
+        Some(universe)
     }
 
     pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
@@ -2404,8 +2421,7 @@ impl Storage {
             .prepare(
                 "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
                  u.is_template, u.is_public, u.content_count, \
-                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
-                 u.parent_key \
+                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
                  FROM universes u \
                  WHERE u.owner_id = ?1 \
                     OR u.key IN ( \
@@ -2416,24 +2432,44 @@ impl Storage {
                  ORDER BY u.created_at ASC",
             )
             .expect("Failed to prepare list_universes_for_user");
-        stmt.query_map(params![user_id], |row| {
-            Ok(crate::models::Universe {
-                key: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                owner_id: row.get(3)?,
-                created_at: parse_datetime(&row.get::<_, String>(4)?),
-                is_template: row.get::<_, i64>(5)? != 0,
-                is_public: row.get::<_, i64>(6)? != 0,
-                content_count: row.get::<_, i64>(7).unwrap_or(0),
-                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
-                visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
-                parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
+        // CO-98 hardening: same two-query split as get_universe — the bulk
+        // SELECT stays on the stable schema, then we opportunistically fetch
+        // parent_key per row. Slightly more SQL round-trips but resilient to
+        // a partially-applied migration.
+        let universes: Vec<crate::models::Universe> = stmt
+            .query_map(params![user_id], |row| {
+                Ok(crate::models::Universe {
+                    key: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    owner_id: row.get(3)?,
+                    created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    is_template: row.get::<_, i64>(5)? != 0,
+                    is_public: row.get::<_, i64>(6)? != 0,
+                    content_count: row.get::<_, i64>(7).unwrap_or(0),
+                    requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                    visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                    parent_key: None,
+                })
             })
-        })
-        .expect("Failed to list universes for user")
-        .filter_map(|r| r.ok())
-        .collect()
+            .expect("Failed to list universes for user")
+            .filter_map(|r| r.ok())
+            .collect();
+        universes
+            .into_iter()
+            .map(|mut u| {
+                u.parent_key = self
+                    .conn
+                    .query_row(
+                        "SELECT parent_key FROM universes WHERE key = ?1",
+                        params![u.key],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                u
+            })
+            .collect()
     }
 
     // --- Universe Members ---
@@ -2613,7 +2649,7 @@ impl Storage {
         let pattern = format!("%{}%", query.to_lowercase());
         let mut stmt = match self.conn.prepare(
             "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-             COALESCE(requires_login, 0), COALESCE(visibility, 'private'), parent_key \
+             COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
              FROM universes \
              WHERE visibility = 'public-subscribable' \
              AND (LOWER(name) LIKE ?1 OR LOWER(description) LIKE ?1 OR LOWER(key) LIKE ?1) \
@@ -2636,7 +2672,9 @@ impl Storage {
                 visibility: row
                     .get::<_, String>(9)
                     .unwrap_or_else(|_| "public-subscribable".into()),
-                parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
+                // CO-98: search results don't carry parent_key (not load-bearing
+                // for the search UX); leave as None for resilience.
+                parent_key: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())

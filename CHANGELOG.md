@@ -5,6 +5,27 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.4] — 2026-04-30
+
+### Fixed — `get_universe` resilient to partially-applied parent_key migration (prod hotfix)
+
+**Symptom on prod (1.22.3):** `GET /api/v1/universes/template`, `/api/v1/universes/tempo`, etc. returned 404 "not found" even though the universes were seeded (filesystem dirs present, startup logs confirmed `Timeline universe '<key>' seeded`). Sibling endpoints that didn't go through `get_universe` (`/theme.css`, `/config`) continued to work.
+
+**Root cause:** since 1.22.0, `Storage::get_universe` and `list_universes_for_user` selected `parent_key` (added by migration v22). When the column wasn't actually present on the DB at query time — for any reason (migration not yet applied, partial schema state, drift between machines) — the SELECT errored, `.ok()` swallowed the error, and the function returned `None`, indistinguishable from "universe doesn't exist". UAT was unaffected because its DB had the column; prod was not.
+
+**Fix:** split the SELECT into two queries.
+1. The stable schema (everything ≤ schema_v 17) — must succeed for any prod DB still in service.
+2. A separate `SELECT parent_key FROM universes WHERE key = ?` that opportunistically fetches `parent_key`. If the column doesn't exist or the row is missing, gracefully returns `None`.
+
+Applied to:
+- `get_universe`
+- `list_universes_for_user` (per-row second query — slight overhead, fine at our scale)
+- `search_public_universes` (parent_key set to `None` unconditionally — search results don't surface parent_key in any UX path)
+
+This is the right shape for any column added by a recent migration: the read-path should not assume the migration has landed, especially when the assumption is buried inside `.ok()` and silently maps to "not found."
+
+After this fix, even if migration v22 didn't run (or ran and was rolled back), the API behaves correctly — the trio still has `parent_key="template"` on UAT (DB has the column), and the trio is reachable on prod (degrades to `parent_key=None` if the column happens to be missing).
+
 ## [1.22.3] — 2026-04-30
 
 ### Fixed — `parent_key` now exposed by `GET /api/v1/universes/:slug` (CO-98 follow-up)
