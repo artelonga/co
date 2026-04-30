@@ -48,6 +48,7 @@ pub mod graph;
 pub mod index;
 pub mod language;
 pub mod mail;
+pub mod manifest;
 pub mod node;
 pub mod query;
 pub mod schema;
