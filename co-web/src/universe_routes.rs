@@ -46,6 +46,10 @@ pub struct UniverseInfo {
     pub requires_login: bool,
     /// CO-49: single visibility field replacing the boolean flags.
     pub visibility: String,
+    /// CO-98: optional parent universe key for hierarchical grouping in the
+    /// sidebar (e.g. timeline trio under `template`). `None` for top-level.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<String>,
 }
 
 /// Query params for universe search.
@@ -543,6 +547,7 @@ pub async fn get_universe_info(
         is_template: universe.is_template,
         requires_login: universe.requires_login,
         visibility: universe.visibility,
+        parent_key: universe.parent_key,
     }))
 }
 

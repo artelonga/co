@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 
 use crate::entry_index::{EntryRow, make_entry};
@@ -14,6 +14,7 @@ use crate::models::*;
 // compile time via `include_str!`. Frontmatter (slug/title/order/tags) becomes
 // the entry metadata; the body becomes the entry body.
 
+const SEED_TEMPLATE_INDEX_MD: &str = include_str!("../seed/template/index.md");
 const SEED_SOBRE_MD: &str = include_str!("../seed/template/sobre.md");
 const SEED_TERMOS_MD: &str = include_str!("../seed/template/termos.md");
 const SEED_PRIVACIDADE_MD: &str = include_str!("../seed/template/privacidade.md");
@@ -68,6 +69,35 @@ fn seed_page_frontmatter(md: &str, now_str: &str) -> serde_json::Value {
 fn seed_page_body(md: &str) -> &str {
     let (_, body) = split_frontmatter(md);
     body
+}
+
+/// Idempotent ALTER TABLE ADD COLUMN: checks `pragma_table_info` before issuing
+/// the DDL so repeated calls (and partially-applied migrations) are safe.
+/// Returns `true` if the column was added, `false` if it already existed.
+/// CO-137: replaces bare `ALTER TABLE … ADD COLUMN` in migrations v17–v22 to
+/// prevent "duplicate column name" panics on re-run after partial application.
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_def: &str,
+) -> rusqlite::Result<bool> {
+    let exists: bool = conn
+        .query_row(
+            &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+            params![column],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_def};"
+        ))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 pub struct Storage {
@@ -541,12 +571,14 @@ impl Storage {
 
         if current_version < 17 {
             // CO-44: password_hash column for UAT user (password-based login).
+            ensure_column(&self.conn, "users", "password_hash", "TEXT")
+                .expect("migration v17: password_hash");
             self.conn
-                .execute_batch(
-                    "ALTER TABLE users ADD COLUMN password_hash TEXT;
-                     INSERT INTO schema_version (version) VALUES (17);",
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (17)",
+                    [],
                 )
-                .expect("Failed to run migration v17");
+                .expect("migration v17: version insert");
         }
 
         let current_version: i64 = self
@@ -561,12 +593,19 @@ impl Storage {
         if current_version < 18 {
             // CO-38: requires_login flag on universes — gates Yggdrasil and future
             // login-only universes from anonymous access.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "requires_login",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v18: requires_login");
             self.conn
-                .execute_batch(
-                    "ALTER TABLE universes ADD COLUMN requires_login INTEGER NOT NULL DEFAULT 0;
-                     INSERT INTO schema_version (version) VALUES (18);",
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (18)",
+                    [],
                 )
-                .expect("Failed to run migration v18");
+                .expect("migration v18: version insert");
         }
 
         let current_version: i64 = self
@@ -614,10 +653,16 @@ impl Storage {
             // CO-49: deterministic access model.
             // Add visibility column + populate from existing flags.
             // Add subscriptions table for public-subscribable universes.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "visibility",
+                "TEXT NOT NULL DEFAULT 'private'",
+            )
+            .expect("migration v20: visibility");
             self.conn
                 .execute_batch(
                     "
-                ALTER TABLE universes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private';
                 UPDATE universes SET visibility = 'template' WHERE is_template = 1;
                 UPDATE universes SET visibility = 'requires_login'
                     WHERE is_template = 0 AND requires_login = 1;
@@ -633,30 +678,77 @@ impl Storage {
                 );
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_universe ON subscriptions(universe_key);
-
-                INSERT INTO schema_version (version) VALUES (20);
                 ",
                 )
-                .expect("Failed to run migration v20");
+                .expect("migration v20: subscriptions + UPDATE");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (20)",
+                    [],
+                )
+                .expect("migration v20: version insert");
         }
 
         if current_version < 21 {
             // CO-50: git-backed universes — each universe may be linked to a git repo.
+            for (col, def) in [
+                ("git_repo", "TEXT"),
+                ("git_path", "TEXT"),
+                ("git_branch", "TEXT NOT NULL DEFAULT 'main'"),
+                ("git_commit_hash", "TEXT"),
+                ("git_synced_at", "TEXT"),
+                ("git_sync_error", "TEXT"),
+            ] {
+                ensure_column(&self.conn, "universes", col, def)
+                    .expect("migration v21: git columns");
+            }
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (21)",
+                    [],
+                )
+                .expect("migration v21: version insert");
+        }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 22 {
+            // CO-98: hierarchical universes — parent_key links a universe to a parent
+            // (NULL = top-level). No FK so deletes don't cascade; orphaned children
+            // surface as top-level in the sidebar (acceptable degradation).
+            ensure_column(&self.conn, "universes", "parent_key", "TEXT")
+                .expect("migration v22: parent_key");
             self.conn
                 .execute_batch(
-                    "
-                ALTER TABLE universes ADD COLUMN git_repo TEXT;
-                ALTER TABLE universes ADD COLUMN git_path TEXT;
-                ALTER TABLE universes ADD COLUMN git_branch TEXT NOT NULL DEFAULT 'main';
-                ALTER TABLE universes ADD COLUMN git_commit_hash TEXT;
-                ALTER TABLE universes ADD COLUMN git_synced_at TEXT;
-                ALTER TABLE universes ADD COLUMN git_sync_error TEXT;
-
-                INSERT INTO schema_version (version) VALUES (21);
-                ",
+                    "CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);",
                 )
-                .expect("Failed to run migration v21");
+                .expect("migration v22: parent_key index");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (22)",
+                    [],
+                )
+                .expect("migration v22: version insert");
         }
+
+        // CO-137 unconditional backfill: ensure parent_key exists even when
+        // schema_version already shows 22 but the ALTER TABLE never ran (the
+        // exact prod failure mode this ticket investigates). ensure_column is a
+        // no-op if the column is already present, so this is always safe.
+        ensure_column(&self.conn, "universes", "parent_key", "TEXT")
+            .expect("CO-137 backfill: parent_key column");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);",
+            )
+            .expect("CO-137 backfill: parent_key index");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -2166,9 +2258,7 @@ impl Storage {
                  VALUES (?1, ?2, 'owner', ?3)",
                 params![key, admin_user_id, now],
             )?;
-            tracing::info!(
-                "rescue_orphan_universes: re-homed {key} to {admin_email}"
-            );
+            tracing::info!("rescue_orphan_universes: re-homed {key} to {admin_email}");
             rescued += 1;
         }
         Ok(rescued)
@@ -2339,11 +2429,19 @@ impl Storage {
             content_count: 1,
             requires_login: false,
             visibility: "private".into(),
+            parent_key: None,
         })
     }
 
     pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
-        self.conn
+        // CO-98 hardening: query the stable schema first (always present at
+        // schema_v ≥ 17), then opportunistically fetch `parent_key` in a
+        // second query. If migration v22 never landed on this DB (or the
+        // column is otherwise absent), the second query returns None and the
+        // function still produces a valid Universe — instead of returning
+        // 404 to the caller as if the universe didn't exist at all.
+        let mut universe = self
+            .conn
             .query_row(
                 "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
                  COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
@@ -2361,10 +2459,21 @@ impl Storage {
                         content_count: row.get::<_, i64>(7).unwrap_or(0),
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                        parent_key: None,
                     })
                 },
             )
+            .ok()?;
+        universe.parent_key = self
+            .conn
+            .query_row(
+                "SELECT parent_key FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
             .ok()
+            .flatten();
+        Some(universe)
     }
 
     pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
@@ -2389,23 +2498,44 @@ impl Storage {
                  ORDER BY u.created_at ASC",
             )
             .expect("Failed to prepare list_universes_for_user");
-        stmt.query_map(params![user_id], |row| {
-            Ok(crate::models::Universe {
-                key: row.get(0)?,
-                name: row.get(1)?,
-                description: row.get(2)?,
-                owner_id: row.get(3)?,
-                created_at: parse_datetime(&row.get::<_, String>(4)?),
-                is_template: row.get::<_, i64>(5)? != 0,
-                is_public: row.get::<_, i64>(6)? != 0,
-                content_count: row.get::<_, i64>(7).unwrap_or(0),
-                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
-                visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+        // CO-98 hardening: same two-query split as get_universe — the bulk
+        // SELECT stays on the stable schema, then we opportunistically fetch
+        // parent_key per row. Slightly more SQL round-trips but resilient to
+        // a partially-applied migration.
+        let universes: Vec<crate::models::Universe> = stmt
+            .query_map(params![user_id], |row| {
+                Ok(crate::models::Universe {
+                    key: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    owner_id: row.get(3)?,
+                    created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    is_template: row.get::<_, i64>(5)? != 0,
+                    is_public: row.get::<_, i64>(6)? != 0,
+                    content_count: row.get::<_, i64>(7).unwrap_or(0),
+                    requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                    visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                    parent_key: None,
+                })
             })
-        })
-        .expect("Failed to list universes for user")
-        .filter_map(|r| r.ok())
-        .collect()
+            .expect("Failed to list universes for user")
+            .filter_map(|r| r.ok())
+            .collect();
+        universes
+            .into_iter()
+            .map(|mut u| {
+                u.parent_key = self
+                    .conn
+                    .query_row(
+                        "SELECT parent_key FROM universes WHERE key = ?1",
+                        params![u.key],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                u
+            })
+            .collect()
     }
 
     // --- Universe Members ---
@@ -2608,6 +2738,9 @@ impl Storage {
                 visibility: row
                     .get::<_, String>(9)
                     .unwrap_or_else(|_| "public-subscribable".into()),
+                // CO-98: search results don't carry parent_key (not load-bearing
+                // for the search UX); leave as None for resilience.
+                parent_key: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
@@ -3260,6 +3393,7 @@ impl Storage {
         let universe_root = self.universe_root("template");
 
         for (path, md) in [
+            ("index.md", SEED_TEMPLATE_INDEX_MD),
             ("content/sobre.md", SEED_SOBRE_MD),
             ("content/termos.md", SEED_TERMOS_MD),
             ("content/privacidade.md", SEED_PRIVACIDADE_MD),
@@ -3552,10 +3686,7 @@ impl Storage {
             .get("key")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("timeline manifest missing universe.key"))?;
-        let name = universe
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(key);
+        let name = universe.get("name").and_then(|v| v.as_str()).unwrap_or(key);
         let description = universe
             .get("description")
             .and_then(|v| v.as_str())
@@ -3573,12 +3704,24 @@ impl Storage {
         let now_str = now.to_rfc3339();
 
         // Universe row — public read, no login required, system-owned.
+        // parent_key='template' (CO-98) so the timeline trio appears nested
+        // under the template universe in the SPA sidebar tree-build.
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              requires_login, visibility, theme_preset, layout, content_count) \
-             VALUES (?1, ?2, ?3, 'system', ?4, 0, 1, 0, 'public-static', ?5, ?6, 0)",
+              requires_login, visibility, theme_preset, layout, content_count, parent_key) \
+             VALUES (?1, ?2, ?3, 'system', ?4, 0, 1, 0, 'public-static', ?5, ?6, 0, 'template')",
             params![key, name, description, now_str, theme_preset, layout],
+        );
+        // Existing rows from before CO-98 may have NULL parent_key — backfill
+        // idempotently on every boot. Only updates rows that look like the
+        // timeline trio (system-owned, public-static), so unrelated existing
+        // rows are not touched.
+        let _ = self.conn.execute(
+            "UPDATE universes SET parent_key = 'template' \
+             WHERE key = ?1 AND parent_key IS NULL \
+             AND owner_id = 'system' AND visibility = 'public-static'",
+            params![key],
         );
 
         let universe_root = self.universe_root(key);
@@ -3615,10 +3758,7 @@ impl Storage {
                 .get("slug")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("event missing slug"))?;
-            let title = event
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or(slug);
+            let title = event.get("title").and_then(|v| v.as_str()).unwrap_or(slug);
             // `date_year` may exceed i64 range for far-future cosmic events
             // (e.g. heat death ~10^100). Read as f64 for storage; the SPA
             // parses it back as a number on the timeline.
@@ -3670,9 +3810,21 @@ impl Storage {
     /// Each is independent — failure of one doesn't stop the others.
     pub fn seed_all_timeline_universes(&mut self) {
         for (label, manifest, index) in [
-            ("tempo", SEED_TIMELINE_TEMPO_JSON, SEED_TIMELINE_TEMPO_INDEX_MD),
-            ("humanity", SEED_TIMELINE_HUMANITY_JSON, SEED_TIMELINE_HUMANITY_INDEX_MD),
-            ("universo", SEED_TIMELINE_UNIVERSO_JSON, SEED_TIMELINE_UNIVERSO_INDEX_MD),
+            (
+                "tempo",
+                SEED_TIMELINE_TEMPO_JSON,
+                SEED_TIMELINE_TEMPO_INDEX_MD,
+            ),
+            (
+                "humanity",
+                SEED_TIMELINE_HUMANITY_JSON,
+                SEED_TIMELINE_HUMANITY_INDEX_MD,
+            ),
+            (
+                "universo",
+                SEED_TIMELINE_UNIVERSO_JSON,
+                SEED_TIMELINE_UNIVERSO_INDEX_MD,
+            ),
         ] {
             if let Err(e) = self.seed_timeline_universe(manifest, index) {
                 tracing::warn!("seed_timeline_universe({label}): {e}");
@@ -4010,6 +4162,7 @@ impl Storage {
             content_count: cloned_entries,
             requires_login: false,
             visibility: "private".into(),
+            parent_key: None,
         })
     }
 
@@ -4810,6 +4963,7 @@ body";
     #[test]
     fn embedded_seed_md_files_parse() {
         for md in [
+            SEED_TEMPLATE_INDEX_MD,
             SEED_SOBRE_MD,
             SEED_TERMOS_MD,
             SEED_PRIVACIDADE_MD,
@@ -4833,5 +4987,90 @@ body";
                 &body[..40.min(body.len())]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod ensure_column_tests {
+    use rusqlite::Connection;
+
+    use super::ensure_column;
+
+    fn make_test_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY);")
+            .expect("create test table");
+        conn
+    }
+
+    #[test]
+    fn adds_missing_column() {
+        let conn = make_test_conn();
+        let added = ensure_column(&conn, "t", "foo", "TEXT").expect("ensure_column");
+        assert!(added, "should report column was added");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('t') WHERE name = 'foo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "column should exist after ensure_column");
+    }
+
+    #[test]
+    fn no_op_if_column_exists() {
+        let conn = make_test_conn();
+        ensure_column(&conn, "t", "foo", "TEXT").expect("first call");
+        let added = ensure_column(&conn, "t", "foo", "TEXT").expect("second call");
+        assert!(!added, "should report no-op when column already exists");
+    }
+
+    #[test]
+    fn idempotent_repeated_calls() {
+        let conn = make_test_conn();
+        for i in 0..5 {
+            let added =
+                ensure_column(&conn, "t", "bar", "INTEGER DEFAULT 0").expect("idempotent call");
+            assert_eq!(added, i == 0, "only first call should add the column");
+        }
+    }
+
+    #[test]
+    fn partial_migration_recovery() {
+        // Simulates the CO-137 scenario: schema_version shows v22 was applied
+        // but the ALTER TABLE never ran. ensure_column should recover cleanly.
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE universes (key TEXT PRIMARY KEY, name TEXT NOT NULL);
+             CREATE TABLE schema_version (version INTEGER NOT NULL);
+             INSERT INTO schema_version (version) VALUES (22);",
+        )
+        .expect("setup");
+
+        // Column doesn't exist yet (partial migration state)
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('universes') WHERE name = 'parent_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "precondition: parent_key should be missing");
+
+        // ensure_column adds it without panic
+        let added = ensure_column(&conn, "universes", "parent_key", "TEXT")
+            .expect("ensure_column on partial migration");
+        assert!(added, "should have added the missing column");
+
+        // Verify it's now present
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('universes') WHERE name = 'parent_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "parent_key should exist after recovery");
     }
 }
