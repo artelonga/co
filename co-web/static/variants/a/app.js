@@ -4424,18 +4424,59 @@
         const form = document.getElementById('criar-form');
         const nameInput = document.getElementById('criar-name');
         const slugInput = document.getElementById('criar-slug');
+        const descInput = document.getElementById('criar-description');
+        const copyToggle = document.getElementById('criar-copy-from-toggle');
+        const copySource = document.getElementById('criar-copy-from-source');
         const errorEl = document.getElementById('criar-error');
 
-        function open() {
+        // CO-96 P1: populate the copy-from source select from the user's universes.
+        // Always offers `template` as a stable fallback. Re-populated on every open
+        // so newly-added universes appear without a page reload.
+        function populateCopyFromSources() {
+            if (!copySource) return;
+            const universes = (state.userUniverses || [])
+                .filter(u => u.key && u.key !== 'template');
+            copySource.innerHTML = '<option value="template">Template (CO)</option>'
+                + universes.map(u =>
+                    `<option value="${u.key}">${esc(u.name || u.key)}</option>`
+                ).join('');
+        }
+
+        // CO-96 P1: open() accepts an optional `defaults` object to prefill the
+        // form. The banner CTA passes { copyFromTemplate: true } so the legacy
+        // "always clone template" flow still works; the sidebar CTA passes
+        // nothing for a fresh empty form (visibility=private, no copy-from).
+        function open(defaults) {
+            const d = defaults || {};
+            populateCopyFromSources();
             overlay.classList.remove('hidden');
             nameInput.value = '';
             slugInput.value = '';
+            if (descInput) descInput.value = '';
+            // Reset visibility radios to private (default for new universes).
+            const privacyRadio = form.querySelector('input[name="criar-visibility"][value="private"]');
+            if (privacyRadio) privacyRadio.checked = true;
+            // Copy-from toggle handling.
+            if (copyToggle) {
+                copyToggle.checked = !!d.copyFromTemplate;
+                if (copySource) {
+                    copySource.classList.toggle('hidden', !copyToggle.checked);
+                    if (d.copyFromTemplate) copySource.value = 'template';
+                }
+            }
             if (errorEl) errorEl.classList.add('hidden');
             nameInput.focus();
         }
 
         function close() {
             overlay.classList.add('hidden');
+        }
+
+        // Toggle visibility of the source-select when the checkbox flips.
+        if (copyToggle && copySource) {
+            copyToggle.addEventListener('change', () => {
+                copySource.classList.toggle('hidden', !copyToggle.checked);
+            });
         }
 
         const slugPreview = document.getElementById('criar-slug-preview');
@@ -4476,12 +4517,41 @@
             const name = nameInput.value.trim();
             const key = slugInput.value.trim();
             if (!name || !key) return;
+            const description = descInput ? descInput.value.trim() : '';
+            const visibilityEl = form.querySelector('input[name="criar-visibility"]:checked');
+            const visibility = visibilityEl ? visibilityEl.value : 'private';
+            const copyFrom = (copyToggle && copyToggle.checked && copySource)
+                ? copySource.value
+                : null;
 
             const submitBtn = document.getElementById('criar-submit');
             if (submitBtn) submitBtn.disabled = true;
             if (errorEl) errorEl.classList.add('hidden');
 
-            const result = await api.cloneUniverse('template', { name, key, description: '' });
+            // CO-96 P1: branch between empty-create and copy-from paths.
+            //  - Copy-from → POST /api/v1/universes/<source>/duplicate (CO-95).
+            //  - Empty     → POST /api/v1/universes (existing endpoint).
+            // Either way: visibility is set client-side; if the empty-create
+            // endpoint doesn't honor the field today, follow up with a PUT.
+            let result;
+            if (copyFrom) {
+                result = await api.cloneUniverse(copyFrom, { name, key, description });
+            } else {
+                result = await apiFetch('/api/v1/universes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key, name, description }),
+                }, true);
+                // Visibility cannot be set on POST today; follow up with PUT.
+                // No-op for the default `private` since that's the server default.
+                if (result && visibility !== 'private') {
+                    await apiFetch(`/api/v1/universes/${encodeURIComponent(key)}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ visibility }),
+                    }, true);
+                }
+            }
             if (submitBtn) submitBtn.disabled = false;
 
             if (!result) return; // apiFetch already showed error toast
@@ -4491,7 +4561,8 @@
             setUniverseSlugInUrl(result.key);
             state.currentUniverseSlug = result.key;
             state.isTemplate = false;
-            // Seed universe info from clone response (content_count already set)
+            // Seed universe info from response (content_count present on
+            // clone path; defaults to 0 on empty-create).
             state.universeInfo = {
                 key: result.key,
                 name: result.name,
@@ -4505,9 +4576,15 @@
             await bootAppForUniverse(result.key);
         });
 
-        // Wire the CTA button in the banner
+        // CO-96 P1: sidebar `+ Novo universo` button opens the modal with no
+        // defaults — fresh empty form, visibility=private, copy-from off.
+        const btnSidebarNew = document.getElementById('btn-sidebar-new-universe');
+        if (btnSidebarNew) btnSidebarNew.addEventListener('click', () => open());
+
+        // Wire the CTA button in the banner — anonymous-visitor flow always
+        // wants a clone of `template`, so prefill copy-from accordingly.
         const btnCriar = document.getElementById('btn-criar-universo');
-        if (btnCriar) btnCriar.addEventListener('click', open);
+        if (btnCriar) btnCriar.addEventListener('click', () => open({ copyFromTemplate: true }));
 
         // Wire "Entrar" in the banner to the login modal
         const btnEntrar = document.getElementById('btn-banner-entrar');

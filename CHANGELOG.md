@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.1] — 2026-04-30
+
+### Added — universe create modal Phase 1 (CO-96 P1)
+
+The existing "Criar universo" modal (previously banner-only and always cloned `template`) now supports the full Phase 1 surface from CO-96:
+
+- **`+ Novo universo` button in the sidebar header.** Always visible; opens the modal with a fresh empty form (visibility=private, copy-from off).
+- **Description field** — optional textarea (rows=2).
+- **Visibility radio group** — `Privado · Público assinável · Login obrigatório`. Default: `private` to match server semantics.
+- **Copy-from existing universe** — checkbox + dropdown. Source dropdown is populated from `state.userUniverses` (plus a stable `Template (CO)` fallback) on every open.
+- **Branched submit** — copy-from off → `POST /api/v1/universes` (empty); copy-from on → `POST /api/v1/universes/<source>/duplicate` (CO-95). Visibility ≠ private is applied via a follow-up `PUT /api/v1/universes/:slug` to keep the create endpoint shape unchanged.
+
+The legacy banner CTA (`btn-criar-universo`) keeps its old behavior — the click handler now passes `{ copyFromTemplate: true }` to prefill copy-from from `template`, preserving the anonymous-visitor flow.
+
+Out of scope for Phase 1 (per the ticket): debounced key-uniqueness check (server already rejects 409 on duplicate); rename/visibility-change context menu; soft-delete. Those land in Phase 2/3 of CO-96.
+
 ## [1.22.0] — 2026-04-30
 
 Wave 2 of the v1-launch sprint, partial: universe hierarchy (CO-98) and home-page Mermaid (CO-107). Create modal (CO-96 P1) and onboarding banner (CO-99) are open as separate work.

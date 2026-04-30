@@ -35,6 +35,11 @@
             <div class="sidebar-logo">
                 <span class="logo-mark">Co</span>
                 <span class="logo-text" data-i18n="projects">Projetos</span>
+                <button class="btn-icon sidebar-new-universe" id="btn-sidebar-new-universe" title="Novo universo" aria-label="Novo universo">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                    </svg>
+                </button>
             </div>
             <div class="sidebar-section">
                 <button class="sidebar-section-header" id="btn-toggle-projects" aria-expanded="true">
@@ -238,6 +243,36 @@
                     <input type="text" id="criar-slug" required autocomplete="off" placeholder="meu-projeto" pattern="[a-z0-9-]{2,40}">
                     <small data-i18n="form.slug_hint">Apenas letras minúsculas, números e hífens (2–40 caracteres)</small>
                     <small class="slug-preview" id="criar-slug-preview" aria-live="polite">artelonga.com.br/co/<span id="criar-slug-val"></span></small>
+                </div>
+                <div class="form-group">
+                    <label for="criar-description">Descrição</label>
+                    <textarea id="criar-description" autocomplete="off" rows="2" placeholder="(opcional)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Visibilidade</label>
+                    <div class="form-radio-group" role="radiogroup" aria-label="Visibilidade">
+                        <label class="form-radio">
+                            <input type="radio" name="criar-visibility" value="private" checked>
+                            <span>Privado — só você</span>
+                        </label>
+                        <label class="form-radio">
+                            <input type="radio" name="criar-visibility" value="public-subscribable">
+                            <span>Público — assinável</span>
+                        </label>
+                        <label class="form-radio">
+                            <input type="radio" name="criar-visibility" value="requires_login">
+                            <span>Login obrigatório</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-checkbox">
+                        <input type="checkbox" id="criar-copy-from-toggle">
+                        <span>Copiar de universo existente</span>
+                    </label>
+                    <select id="criar-copy-from-source" class="form-control hidden" aria-label="Universo de origem">
+                        <option value="template">Template (CO)</option>
+                    </select>
                 </div>
                 <p id="criar-error" class="form-error hidden"></p>
                 <div class="form-actions">
