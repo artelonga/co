@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.2] — 2026-04-30
+
+### Added — onboarding coach mark for first-time anonymous visitors (CO-99)
+
+Three-step floating banner (bottom-right, ~320×120px) introducing first-time anonymous visitors on the template universe to the platform's narrative. **Non-blocking** — does not capture clicks behind it. Cookie-gated for one year on dismissal/completion.
+
+Steps (PT-BR copy):
+1. **Visões** — names the four views (Quadro / Tabela / Conteúdo / Linha do tempo) and points to the header tabs.
+2. **Linha do tempo** — explains the log-scale and links to the multi-overlay at `/shared/timeline.html?u=tempo,universo,humanity` (opens in new tab).
+3. **Crie seu universo** — points users at the new `+ Novo universo` sidebar button (CO-96 P1) once they create an account.
+
+Show conditions (all must be true):
+- `state.isTemplate === true`
+- `await api.me()` returned null (anonymous)
+- `co_onboarded` cookie is **not** set
+- viewport width ≥ 720px (mobile UX deferred)
+
+Dismissal sets `co_onboarded=1; Path=/; Max-Age=31536000; SameSite=Lax`. Theme-aware via CSS custom properties (`--card-bg`, `--accent`, `--border`, `--shadow-md`, `--text-muted`); inline-styled for self-containment, no new CSS file needed.
+
+`setupOnboarding()` is invoked from `init()` on both the anonymous-template branch and the fallback-to-template branch. Internal gates re-check viewport + cookie + state defensively, so a future caller can't accidentally show the banner to the wrong audience.
+
+Telemetry (onboarding completion rate) is deferred to the admin-dashboard ticket (CO-105) per spec — banner today is purely client-side cookie-driven.
+
 ## [1.22.1] — 2026-04-30
 
 ### Added — universe create modal Phase 1 (CO-96 P1)

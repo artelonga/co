@@ -111,7 +111,23 @@
                 </div>
             </div>
         </main>
-        <!-- Activity Panel -->
+        <!-- CO-99: Onboarding banner — three-step coach mark for first-time anonymous
+         visitors on the template universe. Non-blocking floating card; suppressed
+         on viewports < 720px. Cookie `co_onboarded` gates re-display. -->
+    <div id="onboarding-banner" class="onboarding-banner hidden" role="dialog" aria-label="Boas-vindas ao Co" aria-live="polite"
+         style="position:fixed;bottom:24px;right:24px;z-index:50;width:320px;background:var(--card-bg,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;box-shadow:var(--shadow-md,0 4px 6px -1px rgba(0,0,0,0.1));padding:16px;font-size:13px;line-height:1.5">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+            <h3 id="onboarding-title" style="margin:0 0 6px 0;font-size:14px;font-weight:600">…</h3>
+            <span id="onboarding-step-indicator" style="color:var(--text-muted,#6b7280);font-size:11px;white-space:nowrap">1 / 3</span>
+        </div>
+        <div id="onboarding-body" style="color:var(--text,#111827)"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px">
+            <button type="button" id="onboarding-skip" class="btn-text-sm" style="background:none;border:none;color:var(--text-muted,#6b7280);cursor:pointer;font-size:12px;padding:0;text-decoration:underline">Pular</button>
+            <button type="button" id="onboarding-next" class="btn btn-primary" style="background:var(--accent,#6366f1);color:#fff;border:none;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px">Próximo</button>
+        </div>
+    </div>
+
+    <!-- Activity Panel -->
         <aside class="activity-panel hidden" id="activity-panel">
             <div class="activity-panel-header">
                 <h3 data-i18n="activity">Atividade</h3>

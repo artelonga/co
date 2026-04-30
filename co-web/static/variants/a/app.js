@@ -4413,6 +4413,87 @@
         // No-op: users always work on their own clone, never on read-only template
     }
 
+    // ===== Onboarding Banner (CO-99) =====
+    //
+    // Three-step coach mark for first-time anonymous visitors on the template
+    // universe. Non-blocking floating card. Visible only when:
+    //   - state.isTemplate === true
+    //   - api.me() returned null (anonymous)
+    //   - cookie `co_onboarded` is NOT set
+    //   - viewport width >= 720px
+    // Once dismissed (Pular) or completed (after step 3), sets the cookie for
+    // a year to avoid re-display on subsequent visits.
+
+    function setupOnboarding() {
+        const banner = document.getElementById('onboarding-banner');
+        if (!banner) return;
+
+        // Cookie gate. If already onboarded, never show.
+        if (/(?:^|;\s*)co_onboarded=1(?:;|$)/.test(document.cookie || '')) return;
+
+        // Viewport gate. Mobile UX is deferred per the ticket.
+        if (window.innerWidth < 720) return;
+
+        // Anonymous-on-template gate. setupOnboarding is invoked only from the
+        // anonymous-template branch in init(); we re-check state defensively
+        // so a future caller can't show the banner for the wrong audience.
+        if (!state.isTemplate) return;
+
+        const titleEl = document.getElementById('onboarding-title');
+        const bodyEl = document.getElementById('onboarding-body');
+        const stepEl = document.getElementById('onboarding-step-indicator');
+        const skipBtn = document.getElementById('onboarding-skip');
+        const nextBtn = document.getElementById('onboarding-next');
+        if (!titleEl || !bodyEl || !stepEl || !skipBtn || !nextBtn) return;
+
+        const steps = [
+            {
+                title: 'Visões',
+                bodyHtml: 'O Co tem várias visões do mesmo conteúdo: <strong>Quadro</strong>, <strong>Tabela</strong>, <strong>Conteúdo</strong>, <strong>Linha do tempo</strong>. Clique nas abas acima para alternar.',
+                cta: 'Próximo',
+            },
+            {
+                title: 'Linha do tempo',
+                bodyHtml: 'A linha do tempo mostra eventos numa escala log: do Big Bang ao agora. <a href="/shared/timeline.html?u=tempo,universo,humanity" target="_blank" rel="noopener">Abrir linha do tempo →</a>',
+                cta: 'Próximo',
+            },
+            {
+                title: 'Crie seu universo',
+                bodyHtml: 'Quando quiser organizar suas próprias coisas, faça login e clique em <strong>+ Novo universo</strong> na barra lateral.',
+                cta: 'Concluir',
+            },
+        ];
+
+        let current = 0; // 0-indexed step
+
+        function render() {
+            const s = steps[current];
+            titleEl.textContent = s.title;
+            bodyEl.innerHTML = s.bodyHtml;
+            stepEl.textContent = `${current + 1} / 3`;
+            nextBtn.textContent = s.cta;
+        }
+
+        function dismiss() {
+            // Year-long cookie. Path=/ so it applies across the whole SPA.
+            document.cookie = 'co_onboarded=1; Path=/; Max-Age=31536000; SameSite=Lax';
+            banner.classList.add('hidden');
+        }
+
+        nextBtn.addEventListener('click', () => {
+            if (current < steps.length - 1) {
+                current += 1;
+                render();
+            } else {
+                dismiss();
+            }
+        });
+        skipBtn.addEventListener('click', dismiss);
+
+        render();
+        banner.classList.remove('hidden');
+    }
+
     // ===== Criar Universo Modal =====
 
     function setupCriarModal() {
@@ -5361,6 +5442,9 @@
             }
             // Anonymous or logged-in with no community → show template
             showTemplateBanner();
+            // CO-99: onboarding coach mark for first-time anonymous visitors.
+            // Internally gated on cookie + viewport + state.isTemplate.
+            setupOnboarding();
             await bootAppForUniverse('template');
             return;
         }
@@ -5394,6 +5478,8 @@
         state.isTemplate = true;
         setUniverseSlugInUrl('template');
         showTemplateBanner();
+        // CO-99: onboarding for the fallback-to-template path too.
+        setupOnboarding();
         await bootAppForUniverse('template');
     }
 
