@@ -50,6 +50,7 @@ pub mod language;
 pub mod mail;
 pub mod manifest;
 pub mod node;
+pub mod payload;
 pub mod query;
 pub mod schema;
 pub mod space;
