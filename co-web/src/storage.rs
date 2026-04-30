@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{NaiveDate, Utc};
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::json;
 
 use crate::entry_index::{EntryRow, make_entry};
@@ -69,6 +69,35 @@ fn seed_page_frontmatter(md: &str, now_str: &str) -> serde_json::Value {
 fn seed_page_body(md: &str) -> &str {
     let (_, body) = split_frontmatter(md);
     body
+}
+
+/// Idempotent ALTER TABLE ADD COLUMN: checks `pragma_table_info` before issuing
+/// the DDL so repeated calls (and partially-applied migrations) are safe.
+/// Returns `true` if the column was added, `false` if it already existed.
+/// CO-137: replaces bare `ALTER TABLE … ADD COLUMN` in migrations v17–v22 to
+/// prevent "duplicate column name" panics on re-run after partial application.
+fn ensure_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    column_def: &str,
+) -> rusqlite::Result<bool> {
+    let exists: bool = conn
+        .query_row(
+            &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+            params![column],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {column_def};"
+        ))?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
 }
 
 pub struct Storage {
@@ -542,12 +571,14 @@ impl Storage {
 
         if current_version < 17 {
             // CO-44: password_hash column for UAT user (password-based login).
+            ensure_column(&self.conn, "users", "password_hash", "TEXT")
+                .expect("migration v17: password_hash");
             self.conn
-                .execute_batch(
-                    "ALTER TABLE users ADD COLUMN password_hash TEXT;
-                     INSERT INTO schema_version (version) VALUES (17);",
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (17)",
+                    [],
                 )
-                .expect("Failed to run migration v17");
+                .expect("migration v17: version insert");
         }
 
         let current_version: i64 = self
@@ -562,12 +593,19 @@ impl Storage {
         if current_version < 18 {
             // CO-38: requires_login flag on universes — gates Yggdrasil and future
             // login-only universes from anonymous access.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "requires_login",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v18: requires_login");
             self.conn
-                .execute_batch(
-                    "ALTER TABLE universes ADD COLUMN requires_login INTEGER NOT NULL DEFAULT 0;
-                     INSERT INTO schema_version (version) VALUES (18);",
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (18)",
+                    [],
                 )
-                .expect("Failed to run migration v18");
+                .expect("migration v18: version insert");
         }
 
         let current_version: i64 = self
@@ -615,10 +653,16 @@ impl Storage {
             // CO-49: deterministic access model.
             // Add visibility column + populate from existing flags.
             // Add subscriptions table for public-subscribable universes.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "visibility",
+                "TEXT NOT NULL DEFAULT 'private'",
+            )
+            .expect("migration v20: visibility");
             self.conn
                 .execute_batch(
                     "
-                ALTER TABLE universes ADD COLUMN visibility TEXT NOT NULL DEFAULT 'private';
                 UPDATE universes SET visibility = 'template' WHERE is_template = 1;
                 UPDATE universes SET visibility = 'requires_login'
                     WHERE is_template = 0 AND requires_login = 1;
@@ -634,29 +678,36 @@ impl Storage {
                 );
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
                 CREATE INDEX IF NOT EXISTS idx_subscriptions_universe ON subscriptions(universe_key);
-
-                INSERT INTO schema_version (version) VALUES (20);
                 ",
                 )
-                .expect("Failed to run migration v20");
+                .expect("migration v20: subscriptions + UPDATE");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (20)",
+                    [],
+                )
+                .expect("migration v20: version insert");
         }
 
         if current_version < 21 {
             // CO-50: git-backed universes — each universe may be linked to a git repo.
+            for (col, def) in [
+                ("git_repo", "TEXT"),
+                ("git_path", "TEXT"),
+                ("git_branch", "TEXT NOT NULL DEFAULT 'main'"),
+                ("git_commit_hash", "TEXT"),
+                ("git_synced_at", "TEXT"),
+                ("git_sync_error", "TEXT"),
+            ] {
+                ensure_column(&self.conn, "universes", col, def)
+                    .expect("migration v21: git columns");
+            }
             self.conn
-                .execute_batch(
-                    "
-                ALTER TABLE universes ADD COLUMN git_repo TEXT;
-                ALTER TABLE universes ADD COLUMN git_path TEXT;
-                ALTER TABLE universes ADD COLUMN git_branch TEXT NOT NULL DEFAULT 'main';
-                ALTER TABLE universes ADD COLUMN git_commit_hash TEXT;
-                ALTER TABLE universes ADD COLUMN git_synced_at TEXT;
-                ALTER TABLE universes ADD COLUMN git_sync_error TEXT;
-
-                INSERT INTO schema_version (version) VALUES (21);
-                ",
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (21)",
+                    [],
                 )
-                .expect("Failed to run migration v21");
+                .expect("migration v21: version insert");
         }
 
         let current_version: i64 = self
@@ -672,17 +723,32 @@ impl Storage {
             // CO-98: hierarchical universes — parent_key links a universe to a parent
             // (NULL = top-level). No FK so deletes don't cascade; orphaned children
             // surface as top-level in the sidebar (acceptable degradation).
+            ensure_column(&self.conn, "universes", "parent_key", "TEXT")
+                .expect("migration v22: parent_key");
             self.conn
                 .execute_batch(
-                    "
-                ALTER TABLE universes ADD COLUMN parent_key TEXT;
-                CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);
-
-                INSERT INTO schema_version (version) VALUES (22);
-                ",
+                    "CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);",
                 )
-                .expect("Failed to run migration v22");
+                .expect("migration v22: parent_key index");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (22)",
+                    [],
+                )
+                .expect("migration v22: version insert");
         }
+
+        // CO-137 unconditional backfill: ensure parent_key exists even when
+        // schema_version already shows 22 but the ALTER TABLE never ran (the
+        // exact prod failure mode this ticket investigates). ensure_column is a
+        // no-op if the column is already present, so this is always safe.
+        ensure_column(&self.conn, "universes", "parent_key", "TEXT")
+            .expect("CO-137 backfill: parent_key column");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);",
+            )
+            .expect("CO-137 backfill: parent_key index");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -4921,5 +4987,90 @@ body";
                 &body[..40.min(body.len())]
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod ensure_column_tests {
+    use rusqlite::Connection;
+
+    use super::ensure_column;
+
+    fn make_test_conn() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("CREATE TABLE t (id INTEGER PRIMARY KEY);")
+            .expect("create test table");
+        conn
+    }
+
+    #[test]
+    fn adds_missing_column() {
+        let conn = make_test_conn();
+        let added = ensure_column(&conn, "t", "foo", "TEXT").expect("ensure_column");
+        assert!(added, "should report column was added");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('t') WHERE name = 'foo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "column should exist after ensure_column");
+    }
+
+    #[test]
+    fn no_op_if_column_exists() {
+        let conn = make_test_conn();
+        ensure_column(&conn, "t", "foo", "TEXT").expect("first call");
+        let added = ensure_column(&conn, "t", "foo", "TEXT").expect("second call");
+        assert!(!added, "should report no-op when column already exists");
+    }
+
+    #[test]
+    fn idempotent_repeated_calls() {
+        let conn = make_test_conn();
+        for i in 0..5 {
+            let added =
+                ensure_column(&conn, "t", "bar", "INTEGER DEFAULT 0").expect("idempotent call");
+            assert_eq!(added, i == 0, "only first call should add the column");
+        }
+    }
+
+    #[test]
+    fn partial_migration_recovery() {
+        // Simulates the CO-137 scenario: schema_version shows v22 was applied
+        // but the ALTER TABLE never ran. ensure_column should recover cleanly.
+        let conn = Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE universes (key TEXT PRIMARY KEY, name TEXT NOT NULL);
+             CREATE TABLE schema_version (version INTEGER NOT NULL);
+             INSERT INTO schema_version (version) VALUES (22);",
+        )
+        .expect("setup");
+
+        // Column doesn't exist yet (partial migration state)
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('universes') WHERE name = 'parent_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "precondition: parent_key should be missing");
+
+        // ensure_column adds it without panic
+        let added = ensure_column(&conn, "universes", "parent_key", "TEXT")
+            .expect("ensure_column on partial migration");
+        assert!(added, "should have added the missing column");
+
+        // Verify it's now present
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('universes') WHERE name = 'parent_key'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "parent_key should exist after recovery");
     }
 }

@@ -466,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.22.3"
+version = "1.22.5"
 dependencies = [
  "anyhow",
  "bincode",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "co-cli"
-version = "0.30.3"
+version = "0.30.4"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -530,7 +530,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.22.3"
+version = "1.22.5"
 dependencies = [
  "anyhow",
  "chrono",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "1.22.3"
+version = "1.22.5"
 dependencies = [
  "anyhow",
  "argon2",

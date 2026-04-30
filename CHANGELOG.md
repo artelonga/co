@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.5] — 2026-04-30
+
+### Fixed — CO-137: harden ALTER ADD COLUMN migrations against partial-application + diagnostic endpoint
+
+**Root cause investigation (CO-137):** Migration v22 (`parent_key` on `universes`) was checked with `if current_version < 22` after a fresh `MAX(version)` read — mechanically correct. Code analysis suggests the most likely failure mode is a stale `schema_version=22` row recorded without the matching `ALTER TABLE` completing (volume snapshot edge case or a previous deploy that committed the version row but not the schema change). The diagnostic endpoint added in this release confirms prod schema state.
+
+**Structural fix:** Replaced bare `ALTER TABLE … ADD COLUMN` calls in migrations v17–v22 with `ensure_column` — a `pragma_table_info`-guarded helper that is a no-op when the column already exists. This makes every column-add migration idempotent: re-running a partially-applied migration recovers cleanly instead of panicking on "duplicate column name."
+
+Additionally, an **unconditional post-migration backfill** runs after all versioned blocks to ensure `parent_key` exists on the `universes` table regardless of what `schema_version` records, closing the exact failure mode from the 2026-04-30 prod incident.
+
+**Changes:**
+- `co-web/src/storage.rs`: `ensure_column` helper + unit tests (4 cases incl. partial-migration recovery simulation)
+- Migrations v17, v18, v20, v21, v22 updated to use `ensure_column` + `INSERT OR IGNORE` for version row
+- Unconditional `parent_key` backfill after all migrations
+- `co-web/src/gestao_routes.rs`: `GET /api/v1/gestao/_schema_check` (GitHub admin auth) returning `universes` column list + `schema_version` rows
+
 ## [1.22.4] — 2026-04-30
 
 ### Fixed — `get_universe` resilient to partially-applied parent_key migration (prod hotfix)
