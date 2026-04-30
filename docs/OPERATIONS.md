@@ -150,3 +150,39 @@ flyctl logs -a co-artelonga-uat      # UAT live
 flyctl status -a co-artelonga        # Machine state
 flyctl ssh console -a co-artelonga   # Shell access
 ```
+
+---
+
+## Backup & restore (CO-104 + CO-119)
+
+### Taking a backup
+
+```bash
+./scripts/backup.sh prod    # saves to backups/co-prod-YYYY-MM-DD_HHMMSS.db
+./scripts/backup.sh uat
+```
+
+### Running a restore drill
+
+```bash
+./tools/restore-drill.sh              # uses yesterday's backup
+./tools/restore-drill.sh 20260430     # specific date
+DRY_RUN=1 ./tools/restore-drill.sh   # verify backup availability without provisioning
+```
+
+Results are appended to `tools/restore-drill.log`. A passing run looks like:
+
+```
+OK  drill=co-drill-20260501-120000  date=20260430  restore=1  health=ok  univ=5  template=template  time=142s
+```
+
+### Quarterly cadence
+
+Run `./tools/restore-drill.sh` once per quarter (Jan / Apr / Jul / Oct).
+A scheduled agent handles this — see the `schedule` entry in `.claude/settings.local.json`.
+
+### S3 backups (future — CO-104 full impl)
+
+Set `CO_BACKUP_BUCKET=artelonga-co-backups` and ensure AWS credentials are
+available. `scripts/restore.sh` will pull from S3 automatically when the env
+var is set and the local `backups/` directory has no match.

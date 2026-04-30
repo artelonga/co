@@ -1,0 +1,5 @@
+# CO-119 restore drill log — one row per run
+# Format: OK|FAIL  drill=<app>  date=<YYYYMMDD>  restore=0|1  health=ok|FAIL  univ=N  template=template|missing  time=Ns
+# Quarterly cadence: see docs/OPERATIONS.md "Backup & restore"
+INIT  date=2026-04-30  note="restore-drill.sh added (CO-119), no live drill yet — run manually to seed first entry"
+OK  dry_run=1 date=20260429 backup=none time=0s
