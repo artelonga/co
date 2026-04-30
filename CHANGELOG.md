@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.3] — 2026-04-30
+
+### Fixed — `parent_key` now exposed by `GET /api/v1/universes/:slug` (CO-98 follow-up)
+
+Surfaced during UAT smoke verification of 1.22.2: the public universe-info endpoint returns a stripped `UniverseInfo` DTO, not the raw `Universe` struct. Adding `parent_key` to `models::Universe` (1.22.0) was therefore not enough — the field was silently dropped by the DTO before serialization.
+
+- `co-web/src/universe_routes.rs::UniverseInfo` — adds `parent_key: Option<String>` with `#[serde(skip_serializing_if = "Option::is_none")]` so top-level universes still emit no extra field.
+- `get_universe_info` — passes `universe.parent_key` through to the DTO.
+
+`GET /api/v1/universes` (the bulk list) was unaffected — that endpoint already returned raw `Universe` instances and emitted `parent_key` correctly.
+
+After this fix, `curl /api/v1/universes/tempo | jq .parent_key` returns `"template"` as the CO-98 spec required.
+
 ## [1.22.2] — 2026-04-30
 
 ### Added — onboarding coach mark for first-time anonymous visitors (CO-99)
