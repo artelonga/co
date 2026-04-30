@@ -13,6 +13,7 @@ use crate::auth::UserId;
 use crate::error::AppError;
 use crate::models::*;
 use crate::server::AppState;
+use rusqlite;
 
 // ---------------------------------------------------------------------------
 // Theme tier constants
@@ -875,7 +876,12 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/clone", post(clone_universe))
         // CO-95 preview: owner-controlled duplication. Auth resolved inline
         // (accepts JWT or API token) since this isn't behind require_auth.
-        .route("/{slug}/duplicate", post(duplicate_universe));
+        .route("/{slug}/duplicate", post(duplicate_universe))
+        // CO-72: doc-gen last error is readable by the owner (auth resolved inline)
+        .route(
+            "/{slug}/jobs/doc-gen/last-error",
+            get(get_doc_gen_last_error),
+        );
 
     // Protected routes (auth required)
     let protected_routes = Router::new()
@@ -891,9 +897,125 @@ pub fn router() -> Router<AppState> {
             post(subscribe_universe).delete(unsubscribe_universe),
         )
         .route("/{slug}/subscribers", get(list_subscribers))
+        // CO-72: doc-gen job submission (owner only, auth via require_auth layer)
+        .route("/{slug}/jobs/doc-gen", post(submit_doc_gen_job))
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)
+}
+
+// ---------------------------------------------------------------------------
+// CO-72: Doc-generator job submission and status
+// ---------------------------------------------------------------------------
+
+/// Request body for `POST /api/v1/universes/:slug/jobs/doc-gen`.
+#[derive(Debug, serde::Deserialize)]
+pub struct DocGenRequest {
+    /// One of: scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc.
+    pub format: String,
+    /// Relative or absolute path to the source directory (e.g. `src/main/scala`).
+    pub source_dir: String,
+    /// Entry type tag for generated entries (e.g. `doc.scala`). Defaults to
+    /// the adapter's built-in output type when empty.
+    #[serde(default)]
+    pub output_type: String,
+}
+
+/// POST /api/v1/universes/:slug/jobs/doc-gen — submit a doc-gen job (owner only).
+pub async fn submit_doc_gen_job(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+    Json(body): Json<DocGenRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    use std::str::FromStr as _;
+
+    // Validate format early.
+    let doc_format = crate::doc_gen::DocFormat::from_str(&body.format).map_err(|_| {
+        AppError::BadRequest(format!(
+            "Unknown doc format '{}'. Supported: scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc",
+            body.format
+        ))
+    })?;
+
+    if body.source_dir.trim().is_empty() {
+        return Err(AppError::BadRequest("source_dir cannot be empty".into()));
+    }
+
+    let storage = lock_storage(&state)?;
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+    if universe.owner_id != user_id.0 {
+        return Err(AppError::Forbidden(
+            "Only the owner can submit doc-gen jobs".into(),
+        ));
+    }
+
+    let output_type = if body.output_type.is_empty() {
+        format!("doc.{}", doc_format.as_str())
+    } else {
+        body.output_type.clone()
+    };
+
+    let payload = crate::job_queue::DocGenPayload {
+        format: body.format,
+        source_dir: body.source_dir,
+        output_type,
+        limits: crate::doc_gen::ResourceLimits::default(),
+    };
+
+    let job_id = crate::job_queue::enqueue_doc_gen(storage.conn(), &slug, &payload)?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "job_id": job_id })),
+    ))
+}
+
+/// Last doc-gen error info returned by the status endpoint.
+#[derive(Debug, serde::Serialize)]
+pub struct DocGenErrorInfo {
+    pub universe_key: String,
+    pub error: Option<String>,
+    pub error_at: Option<String>,
+}
+
+/// GET /api/v1/universes/:slug/jobs/doc-gen/last-error — last failure (owner only, auth inline).
+pub async fn get_doc_gen_last_error(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<DocGenErrorInfo>, AppError> {
+    let caller_id = extract_optional_user_id(&headers, &state)
+        .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
+
+    let storage = lock_storage(&state)?;
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+    if universe.owner_id != caller_id {
+        return Err(AppError::Forbidden(
+            "Only the owner can view doc-gen errors".into(),
+        ));
+    }
+
+    let (error, error_at): (Option<String>, Option<String>) = storage
+        .conn()
+        .query_row(
+            "SELECT doc_gen_error, doc_gen_error_at FROM universes WHERE key = ?1",
+            rusqlite::params![slug],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(DocGenErrorInfo {
+        universe_key: slug,
+        error,
+        error_at,
+    }))
 }
 
 /// Standalone router for the `/api/v1/themes` namespace (no auth layer).

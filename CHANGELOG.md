@@ -5,6 +5,34 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] — 2026-04-30
+
+### Added — CO-72: Doc-generator hooks + SQLite job queue
+
+**Doc-generator adapters (`co-web/src/doc_gen.rs`)**
+- `DocAdapter` trait: `fn run(source_dir, output_type, limits) -> Result<Vec<DocEntry>>`
+- Stub implementations for all v1 formats: scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc
+- `ResourceLimits`: wall-clock 5 min, 2 GB RAM, 1 GB output per job
+- `DocFormat::from_str` via `std::str::FromStr`; `run_adapter` dispatch function
+
+**SQLite job queue (`co-web/src/job_queue.rs`, migration v24)**
+- `jobs` table: `(id, universe_key, kind, payload, status, attempts, dedupe_key, created_at, run_at, started_at, completed_at, error)`
+- `enqueue_doc_gen`: idempotent submission — same `(universe, format, source_dir, adapter_version)` returns existing job ID
+- FIFO claim via `UPDATE … RETURNING` with `(run_at, created_at)` ordering; no universe starvation
+- Exponential backoff on failure (2^n min, capped 64 min); dead-letter after 5 attempts
+- In-process worker loop (`spawn_worker`) using `tokio::time::timeout` for wall-time enforcement
+- `doc_gen_error` / `doc_gen_error_at` columns on `universes` table for failure surfacing
+
+**API endpoints**
+- `POST /api/v1/universes/:slug/jobs/doc-gen` (owner-only): submit doc-gen job, returns `{ job_id }`
+- `GET /api/v1/universes/:slug/jobs/doc-gen/last-error` (owner-only): last failure message + timestamp
+
+**CO-77 compatibility fixes (co-web/src/storage.rs)**
+- `seed_template_universe`: writes entries to per-universe DB (universe pool) instead of meta.db
+- `reseed_template_content_pages`: same fix
+- `clone_universe_internal`: reads from source per-universe DB, writes to target per-universe DB + registers in `project_universe_index`
+- Migration v24 runs after v23; v25 (CO-77) follows
+
 ## [1.22.7] — 2026-04-30
 
 ### Removed — CO-64: git-sync dead code + migration v23 drops git_* columns
