@@ -46,6 +46,10 @@ path = "src/bin/migrate_quilombo.rs"
 name = "import_quilombo"
 path = "src/bin/import_quilombo.rs"
 
+[[bin]]
+name = "split_db"
+path = "src/bin/split_db.rs"
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

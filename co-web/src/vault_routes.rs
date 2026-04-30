@@ -316,8 +316,14 @@ fn write_vault_entry(
 
     let now = Utc::now().to_rfc3339();
     {
-        let storage = lock_storage(state)?;
-        let index = EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(state)?;
+            storage.universe_conn(universe_key)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&uc_guard);
         index
             .upsert(universe_key, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -352,12 +358,17 @@ pub async fn list_vault_files(
 ) -> Result<Json<Vec<VaultFileInfo>>, AppError> {
     vault_auth(&state, &headers)?;
 
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-
-    let mut stmt = storage.conn().prepare(
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let mut stmt = uc_guard.prepare(
         "SELECT path, created_at, updated_at, LENGTH(body) \
          FROM entries WHERE universe_key = ?1 ORDER BY path",
     )?;
@@ -390,11 +401,17 @@ pub async fn get_vault_file(
 ) -> Result<Json<VaultFile>, AppError> {
     vault_auth(&state, &headers)?;
 
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-    let index = EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = EntryIndex::new(&uc_guard);
     let row = index
         .get(&slug, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -472,11 +489,17 @@ pub async fn post_vault_file(
     vault_auth(&state, &headers)?;
 
     let (existing_fm, existing_body) = {
-        let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-        let index = EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&uc_guard);
         match index
             .get(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
@@ -526,11 +549,17 @@ pub async fn patch_vault_file(
         .to_string();
 
     let (existing_fm, existing_body) = {
-        let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-        let index = EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&uc_guard);
         let row = index
             .get(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
@@ -688,16 +717,26 @@ pub async fn delete_vault_file(
     vault_auth(&state, &headers)?;
 
     let (universe_root, entry_exists) = {
-        let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-        let index = EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&uc_guard);
         let exists = index
             .get(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
             .is_some();
-        (storage.universe_root(&slug), exists)
+        let universe_root = {
+            let storage = lock_storage(&state)?;
+            storage.universe_root(&slug)
+        };
+        (universe_root, exists)
     };
 
     if !entry_exists {
@@ -724,8 +763,14 @@ pub async fn delete_vault_file(
 
     // Remove from index
     {
-        let storage = lock_storage(&state)?;
-        let index = EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&uc_guard);
         index
             .remove(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -750,11 +795,17 @@ pub async fn search_vault(
 ) -> Result<Json<Vec<SearchResult>>, AppError> {
     vault_auth(&state, &headers)?;
 
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-    let index = EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = EntryIndex::new(&uc_guard);
     let rows = index
         .search(&slug, &req.query)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -817,11 +868,17 @@ pub async fn vault_tags(
 ) -> Result<Json<Vec<TagCount>>, AppError> {
     vault_auth(&state, &headers)?;
 
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-    let index = EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = EntryIndex::new(&uc_guard);
     let tags = index
         .tags(&slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -848,12 +905,17 @@ pub async fn vault_tree(
 ) -> Result<Json<Vec<VaultTreeNode>>, AppError> {
     vault_auth(&state, &headers)?;
 
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-
-    let mut stmt = storage.conn().prepare(
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let mut stmt = uc_guard.prepare(
         "SELECT path, created_at, updated_at, LENGTH(body) \
          FROM entries WHERE universe_key = ?1 ORDER BY path",
     )?;

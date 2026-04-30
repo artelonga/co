@@ -90,13 +90,17 @@ pub async fn list_entries(
     Query(q): Query<EntryListQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
-    // Ensure universe exists (will 404 here if missing)
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-
-    let index = crate::entry_index::EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
 
     let entries = if let Some(ref fts_query) = q.q {
         index
@@ -154,11 +158,17 @@ pub async fn list_entry_tags(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<Vec<TagCount>>, AppError> {
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-    let index = crate::entry_index::EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
     let tags = index
         .tags(&slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -171,11 +181,17 @@ pub async fn entry_tree(
     Path(slug): Path<String>,
     Query(q): Query<TreeQuery>,
 ) -> Result<Json<Vec<TreeNode>>, AppError> {
-    let storage = lock_storage(&state)?;
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-    let index = crate::entry_index::EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
     let entry_type = q.entry_type.as_deref().unwrap_or("page");
     let tree = index
         .tree(&slug, entry_type)
@@ -189,8 +205,14 @@ pub async fn get_entry(
     Path((slug, path)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
-    let index = crate::entry_index::EntryIndex::new(storage.conn());
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
     let entry = index
         .get(&slug, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
@@ -236,10 +258,16 @@ pub async fn create_entry(
     let entry = make_entry(&body.path, body.frontmatter.clone(), &body.body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
 
-    // Index
+    // Index into universe data.db
     {
-        let storage = lock_storage(&state)?;
-        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -302,10 +330,16 @@ pub async fn update_entry(
         storage.universe_root(&slug)
     };
 
-    // Read existing entry from index
+    // Read existing entry from universe data.db
     let existing = {
-        let storage = lock_storage(&state)?;
-        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
         index
             .get(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?
@@ -318,12 +352,21 @@ pub async fn update_entry(
     let entry = make_entry(&path, new_fm.clone(), &new_body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let storage = lock_storage(&state)?;
-    let index = crate::entry_index::EntryIndex::new(storage.conn());
-    index
-        .upsert(&slug, &entry)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    {
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
+        index
+            .upsert(&slug, &entry)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
 
+    let storage = lock_storage(&state)?;
     // CO-45: log mutation on UAT
     if state.config.is_uat() {
         let before_val = serde_json::to_string(&existing).unwrap_or_default();
@@ -370,8 +413,14 @@ pub async fn delete_entry(
 
     // CO-45: capture before_value on UAT before deletion
     let before_val = if state.config.is_uat() {
-        let storage = lock_storage(&state)?;
-        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
         index
             .get(&slug, &path)
             .ok()
@@ -384,8 +433,14 @@ pub async fn delete_entry(
     co::delete_entry(&universe_root, &path).map_err(|e| AppError::Internal(e.to_string()))?;
 
     {
-        let storage = lock_storage(&state)?;
-        let index = crate::entry_index::EntryIndex::new(storage.conn());
+        let uc = {
+            let storage = lock_storage(&state)?;
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
         index
             .remove(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?;
