@@ -3623,6 +3623,12 @@ impl Storage {
              'system', ?1, 0, 0, 1, 'requires_login', 'scholarly-dark', 'board', 0)",
             params![now],
         );
+        // Add every admin-tier user as owner-role member so co-dev appears
+        // in their sidebar without a separate ensure_admin_universe_memberships call.
+        let _ = self.conn.execute_batch(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+             SELECT 'co-dev', id, 'owner', datetime('now') FROM users WHERE tier = 'admin';",
+        );
     }
 
     /// Returns true if the given timeline universe already exists.
