@@ -872,17 +872,50 @@
     function renderSidebar() {
         const list = $('#project-list');
 
-        // Universe switcher (visible when logged in with multiple universes)
+        // Universe switcher (visible when logged in with multiple universes).
+        // CO-98: hierarchical rendering — universes with `parent_key` referring
+        // to another universe in the user's list are nested under that parent
+        // with a 16px indent + chevron. Orphan children (parent not in the
+        // user's universes) fall back to top-level rendering.
         let universeHtml = '';
         if (state.userUniverses && state.userUniverses.length > 1) {
+            const universes = state.userUniverses;
+            const seen = new Set(universes.map(u => u.key));
+            const childrenByParent = {};
+            const topLevel = [];
+            universes.forEach(u => {
+                if (u.parent_key && seen.has(u.parent_key)) {
+                    (childrenByParent[u.parent_key] = childrenByParent[u.parent_key] || []).push(u);
+                } else {
+                    topLevel.push(u);
+                }
+            });
+
+            const renderUniverseItem = (u, depth) => {
+                const active = u.key === state.currentUniverseSlug ? ' active' : '';
+                const kids = childrenByParent[u.key];
+                const hasKids = !!(kids && kids.length);
+                const expandKey = `co_universe_tree_${u.key}`;
+                const stored = localStorage.getItem(expandKey);
+                const containsActive = hasKids
+                    && kids.some(k => k.key === state.currentUniverseSlug);
+                const expanded = stored !== null ? (stored === '1') : containsActive;
+                const indent = 12 + depth * 16;
+                const chevron = hasKids
+                    ? `<span class="sidebar-universe-chevron" data-toggle="${u.key}" style="display:inline-block;width:14px;text-align:center;cursor:pointer;user-select:none">${expanded ? '▾' : '▸'}</span>`
+                    : '<span class="sidebar-universe-chevron-spacer" style="display:inline-block;width:14px"></span>';
+                let html = `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${u.key}" style="padding-left:${indent}px">
+                    ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}</span>
+                </div>`;
+                if (hasKids && expanded) {
+                    for (const k of kids) html += renderUniverseItem(k, depth + 1);
+                }
+                return html;
+            };
+
             universeHtml = `<div class="sidebar-universes">
                 <div class="sidebar-universe-label">${window.t ? window.t('universes') : 'Universos'}</div>
-                ${state.userUniverses.map(u => {
-                    const active = u.key === state.currentUniverseSlug ? ' active' : '';
-                    return `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${u.key}">
-                        <span class="sidebar-item-name">${esc(u.name || u.key)}</span>
-                    </div>`;
-                }).join('')}
+                ${topLevel.map(u => renderUniverseItem(u, 0)).join('')}
                 <hr class="sidebar-divider">
             </div>`;
         }
@@ -895,6 +928,23 @@
                     <span class="sidebar-item-name">${esc(p.name)}</span>
                 </div>`;
         }).join('');
+
+        // CO-98: chevron click toggles expansion without switching universes.
+        // Bind BEFORE the universe-item click handler so e.stopPropagation is
+        // honored (the universe-item handler does an async universe switch).
+        list.querySelectorAll('.sidebar-universe-chevron[data-toggle]').forEach(c => {
+            c.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const k = c.dataset.toggle;
+                const expandKey = `co_universe_tree_${k}`;
+                const stored = localStorage.getItem(expandKey);
+                const wasOpen = stored === null
+                    ? (state.userUniverses || []).some(u => u.parent_key === k && u.key === state.currentUniverseSlug)
+                    : stored === '1';
+                localStorage.setItem(expandKey, wasOpen ? '0' : '1');
+                renderSidebar();
+            });
+        });
 
         // Universe switching (click) + rename (double-click)
         list.querySelectorAll('.sidebar-universe-item').forEach(el => {
@@ -3925,6 +3975,12 @@
             const md = window.CoMarkdown;
             const html = md ? md.renderMarkdown(indexEntry.body) : esc(indexEntry.body);
             body.innerHTML = `<article class="universe-home-md md-body">${html}</article>`;
+            // Post-process Mermaid fenced blocks (CO-107). The helper lazy-loads
+            // the bundle only if a `mermaid` block is present, so this is a no-op
+            // when index.md has none.
+            if (md && typeof md.renderMermaidBlocks === 'function') {
+                md.renderMermaidBlocks(body);
+            }
             return;
         }
 

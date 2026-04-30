@@ -14,6 +14,7 @@ use crate::models::*;
 // compile time via `include_str!`. Frontmatter (slug/title/order/tags) becomes
 // the entry metadata; the body becomes the entry body.
 
+const SEED_TEMPLATE_INDEX_MD: &str = include_str!("../seed/template/index.md");
 const SEED_SOBRE_MD: &str = include_str!("../seed/template/sobre.md");
 const SEED_TERMOS_MD: &str = include_str!("../seed/template/termos.md");
 const SEED_PRIVACIDADE_MD: &str = include_str!("../seed/template/privacidade.md");
@@ -656,6 +657,31 @@ impl Storage {
                 ",
                 )
                 .expect("Failed to run migration v21");
+        }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 22 {
+            // CO-98: hierarchical universes — parent_key links a universe to a parent
+            // (NULL = top-level). No FK so deletes don't cascade; orphaned children
+            // surface as top-level in the sidebar (acceptable degradation).
+            self.conn
+                .execute_batch(
+                    "
+                ALTER TABLE universes ADD COLUMN parent_key TEXT;
+                CREATE INDEX IF NOT EXISTS idx_universes_parent_key ON universes(parent_key);
+
+                INSERT INTO schema_version (version) VALUES (22);
+                ",
+                )
+                .expect("Failed to run migration v22");
         }
     }
 
@@ -2166,9 +2192,7 @@ impl Storage {
                  VALUES (?1, ?2, 'owner', ?3)",
                 params![key, admin_user_id, now],
             )?;
-            tracing::info!(
-                "rescue_orphan_universes: re-homed {key} to {admin_email}"
-            );
+            tracing::info!("rescue_orphan_universes: re-homed {key} to {admin_email}");
             rescued += 1;
         }
         Ok(rescued)
@@ -2339,6 +2363,7 @@ impl Storage {
             content_count: 1,
             requires_login: false,
             visibility: "private".into(),
+            parent_key: None,
         })
     }
 
@@ -2346,7 +2371,7 @@ impl Storage {
         self.conn
             .query_row(
                 "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-                 COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
+                 COALESCE(requires_login, 0), COALESCE(visibility, 'private'), parent_key \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -2361,6 +2386,7 @@ impl Storage {
                         content_count: row.get::<_, i64>(7).unwrap_or(0),
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                        parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
                     })
                 },
             )
@@ -2378,7 +2404,8 @@ impl Storage {
             .prepare(
                 "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
                  u.is_template, u.is_public, u.content_count, \
-                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
+                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
+                 u.parent_key \
                  FROM universes u \
                  WHERE u.owner_id = ?1 \
                     OR u.key IN ( \
@@ -2401,6 +2428,7 @@ impl Storage {
                 content_count: row.get::<_, i64>(7).unwrap_or(0),
                 requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                 visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
             })
         })
         .expect("Failed to list universes for user")
@@ -2585,7 +2613,7 @@ impl Storage {
         let pattern = format!("%{}%", query.to_lowercase());
         let mut stmt = match self.conn.prepare(
             "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-             COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
+             COALESCE(requires_login, 0), COALESCE(visibility, 'private'), parent_key \
              FROM universes \
              WHERE visibility = 'public-subscribable' \
              AND (LOWER(name) LIKE ?1 OR LOWER(description) LIKE ?1 OR LOWER(key) LIKE ?1) \
@@ -2608,6 +2636,7 @@ impl Storage {
                 visibility: row
                     .get::<_, String>(9)
                     .unwrap_or_else(|_| "public-subscribable".into()),
+                parent_key: row.get::<_, Option<String>>(10).unwrap_or(None),
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())
@@ -3260,6 +3289,7 @@ impl Storage {
         let universe_root = self.universe_root("template");
 
         for (path, md) in [
+            ("index.md", SEED_TEMPLATE_INDEX_MD),
             ("content/sobre.md", SEED_SOBRE_MD),
             ("content/termos.md", SEED_TERMOS_MD),
             ("content/privacidade.md", SEED_PRIVACIDADE_MD),
@@ -3552,10 +3582,7 @@ impl Storage {
             .get("key")
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("timeline manifest missing universe.key"))?;
-        let name = universe
-            .get("name")
-            .and_then(|v| v.as_str())
-            .unwrap_or(key);
+        let name = universe.get("name").and_then(|v| v.as_str()).unwrap_or(key);
         let description = universe
             .get("description")
             .and_then(|v| v.as_str())
@@ -3573,12 +3600,24 @@ impl Storage {
         let now_str = now.to_rfc3339();
 
         // Universe row — public read, no login required, system-owned.
+        // parent_key='template' (CO-98) so the timeline trio appears nested
+        // under the template universe in the SPA sidebar tree-build.
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              requires_login, visibility, theme_preset, layout, content_count) \
-             VALUES (?1, ?2, ?3, 'system', ?4, 0, 1, 0, 'public-static', ?5, ?6, 0)",
+              requires_login, visibility, theme_preset, layout, content_count, parent_key) \
+             VALUES (?1, ?2, ?3, 'system', ?4, 0, 1, 0, 'public-static', ?5, ?6, 0, 'template')",
             params![key, name, description, now_str, theme_preset, layout],
+        );
+        // Existing rows from before CO-98 may have NULL parent_key — backfill
+        // idempotently on every boot. Only updates rows that look like the
+        // timeline trio (system-owned, public-static), so unrelated existing
+        // rows are not touched.
+        let _ = self.conn.execute(
+            "UPDATE universes SET parent_key = 'template' \
+             WHERE key = ?1 AND parent_key IS NULL \
+             AND owner_id = 'system' AND visibility = 'public-static'",
+            params![key],
         );
 
         let universe_root = self.universe_root(key);
@@ -3615,10 +3654,7 @@ impl Storage {
                 .get("slug")
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow::anyhow!("event missing slug"))?;
-            let title = event
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or(slug);
+            let title = event.get("title").and_then(|v| v.as_str()).unwrap_or(slug);
             // `date_year` may exceed i64 range for far-future cosmic events
             // (e.g. heat death ~10^100). Read as f64 for storage; the SPA
             // parses it back as a number on the timeline.
@@ -3670,9 +3706,21 @@ impl Storage {
     /// Each is independent — failure of one doesn't stop the others.
     pub fn seed_all_timeline_universes(&mut self) {
         for (label, manifest, index) in [
-            ("tempo", SEED_TIMELINE_TEMPO_JSON, SEED_TIMELINE_TEMPO_INDEX_MD),
-            ("humanity", SEED_TIMELINE_HUMANITY_JSON, SEED_TIMELINE_HUMANITY_INDEX_MD),
-            ("universo", SEED_TIMELINE_UNIVERSO_JSON, SEED_TIMELINE_UNIVERSO_INDEX_MD),
+            (
+                "tempo",
+                SEED_TIMELINE_TEMPO_JSON,
+                SEED_TIMELINE_TEMPO_INDEX_MD,
+            ),
+            (
+                "humanity",
+                SEED_TIMELINE_HUMANITY_JSON,
+                SEED_TIMELINE_HUMANITY_INDEX_MD,
+            ),
+            (
+                "universo",
+                SEED_TIMELINE_UNIVERSO_JSON,
+                SEED_TIMELINE_UNIVERSO_INDEX_MD,
+            ),
         ] {
             if let Err(e) = self.seed_timeline_universe(manifest, index) {
                 tracing::warn!("seed_timeline_universe({label}): {e}");
@@ -4010,6 +4058,7 @@ impl Storage {
             content_count: cloned_entries,
             requires_login: false,
             visibility: "private".into(),
+            parent_key: None,
         })
     }
 
@@ -4810,6 +4859,7 @@ body";
     #[test]
     fn embedded_seed_md_files_parse() {
         for md in [
+            SEED_TEMPLATE_INDEX_MD,
             SEED_SOBRE_MD,
             SEED_TERMOS_MD,
             SEED_PRIVACIDADE_MD,

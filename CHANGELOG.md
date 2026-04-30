@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] — 2026-04-30
+
+Wave 2 of the v1-launch sprint, partial: universe hierarchy (CO-98) and home-page Mermaid (CO-107). Create modal (CO-96 P1) and onboarding banner (CO-99) are open as separate work.
+
+### Added — hierarchical universes (CO-98)
+
+Each universe row now carries an optional `parent_key` pointer. Top-level universes have `parent_key = NULL`; children render nested under their parent in the SPA sidebar with a 16px indent and a chevron (`▸ / ▾`).
+
+- **Migration v22** — `ALTER TABLE universes ADD COLUMN parent_key TEXT; CREATE INDEX idx_universes_parent_key ON universes(parent_key);`. Nullable, no FK — orphan children (parent disappears) gracefully fall back to top-level rendering.
+- **Models** — `Universe.parent_key: Option<String>` added; serialized in API responses (`#[serde(skip_serializing_if = "Option::is_none")]`), so universes without a parent emit no extra field.
+- **Seed** — `seed_timeline_universe` now sets `parent_key = 'template'` on the trio (`tempo`, `humanity`, `universo`). An idempotent UPDATE backfills `parent_key` on existing rows from prior versions.
+- **SPA** — `renderSidebar` builds a tree from the flat `state.userUniverses` list and renders top-level → children with chevron toggles. Per-parent expansion state persists in `localStorage` (`co_universe_tree_<key>`); default expanded if a child is the active universe.
+- **Storage tests** — `SEED_TEMPLATE_INDEX_MD` added to the embedded-seed roundtrip suite; existing 143 tests pass unchanged.
+
+### Added — Mermaid diagrams in universe-home (CO-107)
+
+`renderUniverseHome` now post-processes Mermaid fenced blocks via the existing `CoMarkdown.renderMermaidBlocks` helper. Lazy-loaded; no overhead when an `index.md` has no Mermaid blocks.
+
+Template now ships a root-level `index.md` (in addition to the `content/` legal pages) showing the **Template → Tempo / Universo / Humanidade** trio as a directed graph, with palette tokens matching `timeline.html`. Visible on `co.artelonga.com.br/co` and any future template clone.
+
+- `co-web/seed/template/index.md` — new home-page seed (Mermaid + view explainer in PT-BR)
+- `co-web/src/storage.rs::reseed_template_content_pages` — adds `("index.md", SEED_TEMPLATE_INDEX_MD)` to the always-overwrite list (idempotent re-seed on every boot)
+- `co-web/static/variants/a/app.js::renderUniverseHome` — calls `renderMermaidBlocks(body)` after the markdown renders
+
+Constraint preserved: existing universes whose `index.md` has no Mermaid block trigger no extra network requests and no JS errors (helper short-circuits when no fence is present).
+
 ## [1.21.2] — 2026-04-30
 
 ### Added — per-deploy regression smoke scripts (CO-103)

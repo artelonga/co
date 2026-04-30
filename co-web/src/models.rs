@@ -389,6 +389,10 @@ pub struct Universe {
     /// Values: "template", "private", "public-subscribable", "requires_login"
     #[serde(default = "default_visibility")]
     pub visibility: String,
+    /// CO-98: optional parent universe key for hierarchical grouping in the
+    /// sidebar (e.g. timeline trio under `template`). `None` = top-level.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<String>,
 }
 
 fn default_visibility() -> String {
