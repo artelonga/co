@@ -90,9 +90,9 @@ Para bugs, inclua: navegador, sistema, passos para reproduzir, captura de tela, 
 
 ## 9. Privacidade e legal
 
-- [ ] [Política de Privacidade](https://co.artelonga.com.br/co/template?path=content/privacidade.md) acessível
-- [ ] [Termos de Uso](https://co.artelonga.com.br/co/template?path=content/termos.md) acessível
-- [ ] [Lista completa de dados rastreados](https://co.artelonga.com.br/co/template?path=content/dados-rastreados.md) acessível
+- [ ] [Política de Privacidade](https://co.artelonga.com.br/co?page=privacidade) acessível
+- [ ] [Termos de Uso](https://co.artelonga.com.br/co?page=termos) acessível
+- [ ] [Lista completa de dados rastreados](https://co.artelonga.com.br/co?page=dados-rastreados) acessível
 - [ ] DNT (Do Not Track) é respeitado: telemetria não envia eventos
 - [ ] Exportação de dados funciona (download Markdown)
 - [ ] Exclusão de conta funciona (e remove dados em 30d — verificar manual)

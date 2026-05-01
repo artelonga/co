@@ -5300,6 +5300,21 @@
         });
     }
 
+    // Open a page entry from the ?page=<slug> URL param (e.g. /co?page=privacidade).
+    // Maps to content/<slug>.md in the given universe.
+    function maybeOpenPageFromUrl(universeSlug) {
+        const params = new URLSearchParams(window.location.search);
+        const page = params.get('page');
+        if (!page) return;
+        const entryPath = `content/${page}.md`;
+        // Fetch and open in zoom modal — works even if the content view isn't rendered yet
+        openZoomModal({ path: entryPath, body: undefined }, false);
+        // Clean the param from the URL so refreshes don't re-open the modal
+        const clean = new URL(window.location.href);
+        clean.searchParams.delete('page');
+        window.history.replaceState({}, '', clean.toString());
+    }
+
     async function bootAppForUniverse(slug) {
         state.switchingUniverse = true;
         // Wipe per-universe collections so old cards never leak through.
@@ -5672,6 +5687,7 @@
             // Internally gated on cookie + viewport + state.isTemplate.
             setupOnboarding();
             await bootAppForUniverse('template');
+            maybeOpenPageFromUrl('template');
             return;
         }
 
@@ -5681,6 +5697,7 @@
             hideLoginModal();
             renderUserBadge(me);
             await bootAppForUniverse(slug);
+            maybeOpenPageFromUrl(slug);
             return;
         }
 
