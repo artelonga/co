@@ -22,9 +22,11 @@ COPY game-core/Cargo.toml game-core/Cargo.toml
 COPY dev/co-auto/Cargo.toml dev/co-auto/Cargo.toml
 COPY dev/co-pwhash/Cargo.toml dev/co-pwhash/Cargo.toml
 COPY dev/co-token/Cargo.toml dev/co-token/Cargo.toml
+# CO-120: co-agent is a workspace member; include manifest + stub so cargo resolves it.
+COPY co-agent/Cargo.toml co-agent/Cargo.toml
 
 # Dummy lib.rs for each crate so cargo can resolve the workspace
-RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src dev/co-pwhash/src dev/co-token/src && \
+RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src dev/co-pwhash/src dev/co-token/src co-agent/src && \
     echo "pub fn _dummy() {}" > core/src/lib.rs && \
     echo "fn main() {}" > co-cli/src/main.rs && \
     echo "pub fn _dummy() {}" > co-web/src/lib.rs && \
@@ -33,7 +35,8 @@ RUN mkdir -p core/src co-cli/src co-web/src co/src game-core/src dev/co-auto/src
     echo "pub fn _dummy() {}" > dev/co-auto/src/lib.rs && \
     echo "fn main() {}" > dev/co-auto/src/main.rs && \
     echo "fn main() {}" > dev/co-pwhash/src/main.rs && \
-    echo "fn main() {}" > dev/co-token/src/main.rs
+    echo "fn main() {}" > dev/co-token/src/main.rs && \
+    echo "fn main() {}" > co-agent/src/main.rs
 
 # Build deps only (cached unless Cargo.toml/lock change)
 RUN cargo build --release -p co-web 2>/dev/null || true
@@ -46,6 +49,7 @@ COPY co-web/ co-web/
 COPY co/ co/
 COPY game-core/ game-core/
 COPY dev/ dev/
+COPY co-agent/ co-agent/
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
