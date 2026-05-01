@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.1] — 2026-05-01
+
+### Fixed — A/B `feature_flags` table missing on prod (CO-121 partial-apply hotfix)
+
+**Symptom on prod (1.33.0):** every boot logs `ERROR co_web::server: CO-121: failed to seed feature flags: no such table: feature_flags`. Same partial-application failure mode as CO-137 / 1.22.4: `schema_version` row exists for v27 but the corresponding `CREATE TABLE feature_flags` never took effect on this DB. Boot proceeds but A/B endpoints would 500 on first use.
+
+**Fix:** unconditional post-migration backfill at the end of `Storage::run_migrations` — `CREATE TABLE IF NOT EXISTS feature_flags / ab_assignments / ab_exposures` plus the `idx_exposures_flag_time` index. Mirrors the existing CO-77 (`entries`) and CO-137 (`parent_key`) backfills. Idempotent; safe to re-run on every boot.
+
+This is the **third** instance of the same migration-drift class (CO-77 entries, CO-137 parent_key, CO-121 feature_flags). Pattern is now formalized in `feedback_migration_column_reads.md`: every CREATE TABLE + ALTER ADD COLUMN that ships should also have an unconditional backfill at the end of `run_migrations` for at least one release cycle, until prod has visibly converged.
+
+After this fix:
+- Prod boot logs no longer carry `no such table: feature_flags`
+- A/B exposure logging works without surfacing a 500 to anonymous template visitors
+
 ## [1.33.0] — 2026-05-01
 
 ### Added — CO-123: ClickHouse single-node + WAE export pipeline

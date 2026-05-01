@@ -1064,6 +1064,42 @@ impl Storage {
                 CREATE TABLE IF NOT EXISTS entries_fts (content TEXT);",
             )
             .ok();
+
+        // CO-121 unconditional backfill: ensure A/B testing tables exist on
+        // meta.db regardless of schema_version state. Surfaced on prod
+        // (1.33.0, 2026-05-01) as `no such table: feature_flags` on every
+        // boot — same partial-apply failure mode CO-137 documented.
+        // CREATE TABLE IF NOT EXISTS is idempotent; safe to re-run.
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS feature_flags (
+                    flag_key    TEXT PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    variants    TEXT NOT NULL,
+                    salt        TEXT NOT NULL,
+                    enabled     INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS ab_assignments (
+                    user_id     TEXT NOT NULL,
+                    flag_key    TEXT NOT NULL,
+                    variant     TEXT NOT NULL,
+                    assigned_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, flag_key)
+                );
+                CREATE TABLE IF NOT EXISTS ab_exposures (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id     TEXT NOT NULL,
+                    flag_key    TEXT NOT NULL,
+                    variant     TEXT NOT NULL,
+                    universe_id TEXT,
+                    exposed_at  TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_exposures_flag_time
+                    ON ab_exposures(flag_key, exposed_at);",
+            )
+            .expect("CO-121 backfill: A/B tables");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
