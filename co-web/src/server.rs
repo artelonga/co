@@ -349,9 +349,14 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
         .route("/co/yggdrasil/{game}", get(serve_co_index));
 
+    // --- CO-105: Admin dashboard API + static page ---
+    let admin_dashboard_api = crate::admin_routes::api_router();
+
     let mut router = Router::new()
         .merge(ws_route)
         .merge(co_routes)
+        // CO-105: /admin page — server-side auth, must precede the fallback
+        .route("/admin", get(crate::admin_routes::serve_admin_page))
         .nest("/api", board_public)
         .nest("/api", board_protected)
         .nest("/api", auth_api)
@@ -391,7 +396,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/admin", telemetry_admin)
         .nest("/api/v1/ab", ab_admin)
         // CO-79: cache hit/miss/eviction metrics
-        .nest("/api/v1/cache", cache_api);
+        .nest("/api/v1/cache", cache_api)
+        // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
+        .nest("/api/v1/admin", admin_dashboard_api);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {

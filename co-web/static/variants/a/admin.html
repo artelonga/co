@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO Admin</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--blue:#4fc3f7;--red:#e57373}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif;padding:20px;max-width:960px}
+h1{font-size:1.4rem;margin-bottom:4px;color:var(--accent)}
+h2{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.ts{font-size:.7rem;color:var(--dim);margin-bottom:16px}
+.strip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px 18px;min-width:120px;flex:1}
+.stat span{display:block;font-size:1.9rem;font-weight:700;color:var(--accent);line-height:1.1}
+.stat label{font-size:.7rem;color:var(--dim);margin-top:4px;display:block}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:5px 8px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:5px 8px;border-bottom:1px solid var(--border)}
+tr:last-child td{border:none}
+.auth-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.auth-item{text-align:center;padding:10px}
+.auth-num{font-size:1.7rem;font-weight:700;color:var(--accent)}
+.auth-lbl{font-size:.7rem;color:var(--dim);margin-top:3px}
+.legend{display:flex;gap:14px;margin-top:6px;font-size:.7rem;color:var(--dim)}
+.legend span{display:flex;align-items:center;gap:4px}
+.err{color:var(--red);margin-top:8px}
+svg text{font-size:9px;fill:var(--dim)}
+</style>
+</head>
+<body>
+<h1>CO Admin</h1>
+<div class="ts" id="as-of">Carregando…</div>
+
+<div class="strip">
+  <div class="stat"><span id="s-users">—</span><label>Usuários</label></div>
+  <div class="stat"><span id="s-universes">—</span><label>Universos</label></div>
+  <div class="stat"><span id="s-active">—</span><label>Ativos 7d</label></div>
+  <div class="stat"><span id="s-entries">—</span><label>Entradas</label></div>
+</div>
+
+<div class="card">
+  <h2>Tráfego — últimos 14 dias</h2>
+  <svg id="sparkline" width="100%" height="80" style="display:block"></svg>
+  <div class="legend">
+    <span><svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke="#7c6fcd" stroke-width="2"/></svg>Pageviews</span>
+    <span><svg width="12" height="2"><line x1="0" y1="1" x2="12" y2="1" stroke="#4fc3f7" stroke-width="1.5" stroke-dasharray="3,2"/></svg>Únicos</span>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Top universos — 7 dias</h2>
+  <table>
+    <thead><tr><th>Chave</th><th>Nome</th><th>Eventos</th></tr></thead>
+    <tbody id="top-body"></tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Autenticação hoje</h2>
+  <div class="auth-grid">
+    <div class="auth-item"><div class="auth-num" id="a-logins">—</div><div class="auth-lbl">Logins</div></div>
+    <div class="auth-item"><div class="auth-num" id="a-failed">—</div><div class="auth-lbl">Falhas</div></div>
+    <div class="auth-item"><div class="auth-num" id="a-sessions">—</div><div class="auth-lbl">Sessões ativas</div></div>
+  </div>
+</div>
+
+<div class="err" id="err-msg" style="display:none"></div>
+
+<script>
+var timer;
+
+function n(x){return x!=null?x.toLocaleString('pt-BR'):'—';}
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function load(){
+  try{
+    var r=await fetch('/api/v1/admin/dashboard');
+    if(r.status===401||r.status===403){location.href='/co';return;}
+    if(!r.ok){show_err('Erro '+r.status);return;}
+    var d=await r.json();
+    render(d);
+    hide_err();
+  }catch(e){show_err('Falha na requisição: '+e.message);}
+}
+
+function render(d){
+  document.getElementById('as-of').textContent='Atualizado: '+new Date(d.as_of).toLocaleString('pt-BR')+' · v'+d.version;
+  document.getElementById('s-users').textContent=n(d.totals.users);
+  document.getElementById('s-universes').textContent=n(d.totals.universes);
+  document.getElementById('s-active').textContent=n(d.totals.universes_active_7d);
+  document.getElementById('s-entries').textContent=n(d.totals.entries);
+  renderSparkline(d.daily||[]);
+  var tb=document.getElementById('top-body');
+  var rows=(d.top_universes||[]);
+  tb.innerHTML=rows.length?rows.map(function(u){
+    return'<tr><td>'+esc(u.key)+'</td><td>'+esc(u.name)+'</td><td>'+n(u.events_7d)+'</td></tr>';
+  }).join(''):'<tr><td colspan="3" style="color:var(--dim);text-align:center">Sem dados no período</td></tr>';
+  document.getElementById('a-logins').textContent=n(d.auth.logins_today);
+  document.getElementById('a-failed').textContent=n(d.auth.failed_logins_today);
+  document.getElementById('a-sessions').textContent=n(d.auth.active_sessions);
+}
+
+function renderSparkline(daily){
+  var svg=document.getElementById('sparkline');
+  var W=svg.clientWidth||700,H=80;
+  var len=daily.length;
+  if(!len){svg.innerHTML='<text x="50%" y="50%" text-anchor="middle">Sem dados</text>';return;}
+  var pvs=daily.map(function(d){return d.pageviews;});
+  var uqs=daily.map(function(d){return d.uniques;});
+  var maxPv=Math.max.apply(null,pvs.concat([1]));
+  var maxUq=Math.max.apply(null,uqs.concat([1]));
+  var pad=4,top=8,bot=18;
+  var avail=H-top-bot;
+  var stepX=len>1?(W-pad*2)/(len-1):W-pad*2;
+
+  function pts(vals,maxV){
+    return vals.map(function(v,i){
+      var x=(pad+i*stepX).toFixed(1);
+      var y=(top+avail-(v/maxV)*avail).toFixed(1);
+      return x+','+y;
+    }).join(' ');
+  }
+
+  var labels=daily.reduce(function(acc,day,i){
+    if(i===0||i===len-1||i===Math.floor(len/2)){
+      var x=(pad+i*stepX).toFixed(1);
+      acc+='<text x="'+x+'" y="'+(H-2)+'" text-anchor="middle">'+esc(day.date.slice(5))+'</text>';
+    }
+    return acc;
+  },'');
+
+  svg.setAttribute('viewBox','0 0 '+W+' '+H);
+  svg.innerHTML=
+    '<polyline points="'+pts(pvs,maxPv)+'" fill="none" stroke="#7c6fcd" stroke-width="2" stroke-linejoin="round"/>'+
+    '<polyline points="'+pts(uqs,maxUq)+'" fill="none" stroke="#4fc3f7" stroke-width="1.5" stroke-linejoin="round" stroke-dasharray="3,2"/>'+
+    labels;
+}
+
+function show_err(msg){var e=document.getElementById('err-msg');e.textContent=msg;e.style.display='';}
+function hide_err(){document.getElementById('err-msg').style.display='none';}
+
+load();
+if(timer)clearInterval(timer);
+timer=setInterval(load,60000);
+</script>
+</body>
+</html>

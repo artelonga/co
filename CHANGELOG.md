@@ -5,6 +5,34 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] — 2026-05-01
+
+### Added — CO-105: Admin telemetry dashboard
+
+Cherry-picked + integrated from the long-running `feat/CO-105` branch (1 commit, originally branched at 1.27.0). Resolves on top of current main; conflict markers in `Cargo.toml`, `co-web/src/lib.rs`, `co-web/src/server.rs`, `Cargo.lock`, and `CHANGELOG.md` were resolved by accepting HEAD's structure and adding the new admin module alongside (not replacing) the post-1.27.0 routes (`/api/v1/ab`, `/api/v1/cache`).
+
+**`GET /api/v1/admin/dashboard`** — single JSON endpoint with platform-wide aggregates:
+- JWT required; caller email must match `CO_SEED_ADMIN_EMAIL` (read fresh from env per request)
+- Returns 401 for invalid/missing JWT, 403 for email mismatch — never leaks admin email on invalid signature
+- Totals: users, universes, active universes (7d), entries
+- Daily rows (14 days): pageviews, unique visitors, signups, errors — sourced from `telemetry_events` + `users.created_at`
+- Top 10 universes by event count (7d) with name fallback
+- Auth stats: logins today, failed logins, active sessions (last 30 min)
+- 5-minute in-memory cache; no DB writes per request
+
+**`GET /admin`** — static admin page (cookie auth):
+- Server-side JWT + email gate: redirects to `/co` if unauthenticated, 403 if not seed admin
+- Plain HTML, no framework, no CDN — inline CSS + JS, `< 10 KB`
+- Top strip: users, universes, active-7d, entries as big numbers
+- Daily traffic sparkline (last 14 days): dual polyline SVG (pageviews + uniques)
+- Top universes table (key, name, events)
+- Auth panel: logins today / failed / active sessions
+- Auto-refreshes every 60 seconds
+
+**`co-web/static/variants/a/admin.html`** — embedded via `include_str!` at compile time.
+
+**`co-web/src/admin_routes.rs`** — new module with typed structs, aggregate query helpers, handlers, and 21 unit + integration tests.
+
 ## [1.33.2] — 2026-05-01
 
 ### Added — `ensure_table` helper to formalize the migration-drift safety pattern
