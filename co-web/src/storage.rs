@@ -9,6 +9,18 @@ use crate::entry_index::{EntryRow, make_entry};
 use crate::models::*;
 use crate::universe_pool::UniversePool;
 
+/// A single event received from a Vercel Log Drain.
+pub struct LogDrainEvent {
+    pub event_id: String,
+    pub universe_id: String,
+    pub received_at: String,
+    pub source: String,
+    pub level: String,
+    pub message: String,
+    pub host: String,
+    pub path: String,
+}
+
 // --- Seed content (template universe legal + intro pages) ---
 //
 // Content lives as plain `.md` files under `co-web/seed/template/` so it can be
@@ -993,6 +1005,47 @@ impl Storage {
                 .expect("Failed to run migration v27");
         }
 
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 28 {
+            // CO-124: Vercel Log Drain — per-universe drain secret + incoming event store.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "log_drain_secret",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            .expect("migration v28: universes.log_drain_secret column");
+
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS log_drain_events (
+                    event_id     TEXT PRIMARY KEY,
+                    universe_id  TEXT NOT NULL,
+                    received_at  TEXT NOT NULL,
+                    source       TEXT NOT NULL DEFAULT '',
+                    level        TEXT NOT NULL DEFAULT 'info',
+                    message      TEXT NOT NULL DEFAULT '',
+                    host         TEXT NOT NULL DEFAULT '',
+                    path         TEXT NOT NULL DEFAULT ''
+                );
+                CREATE INDEX IF NOT EXISTS idx_log_drain_events_universe
+                    ON log_drain_events(universe_id, received_at);
+
+                INSERT OR IGNORE INTO schema_version (version) VALUES (28);
+                ",
+                )
+                .expect("Failed to run migration v28");
+        }
+
         // CO-77: ensure entries table exists in meta.db for startup migration.
         self.conn
             .execute_batch(
@@ -1350,6 +1403,49 @@ impl Storage {
                 |row| row.get(0),
             )
             .unwrap_or(0)
+    }
+
+    // --- CO-124: Vercel Log Drain ---
+
+    /// Return the per-universe HMAC secret used to validate Vercel drain signatures.
+    /// Returns `None` when the universe does not exist.
+    pub fn get_log_drain_secret(&self, universe_id: &str) -> rusqlite::Result<Option<String>> {
+        self.conn
+            .query_row(
+                "SELECT log_drain_secret FROM universes WHERE key = ?1",
+                params![universe_id],
+                |row| row.get(0),
+            )
+            .optional()
+    }
+
+    /// Set the per-universe Vercel Log Drain secret.
+    pub fn set_log_drain_secret(&self, universe_id: &str, secret: &str) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "UPDATE universes SET log_drain_secret = ?1 WHERE key = ?2",
+            params![secret, universe_id],
+        )?;
+        Ok(())
+    }
+
+    /// Insert a single Vercel Log Drain event, ignoring duplicates (idempotent by event_id).
+    pub fn insert_log_drain_event(&self, ev: &LogDrainEvent) -> rusqlite::Result<()> {
+        self.conn.execute(
+            "INSERT OR IGNORE INTO log_drain_events \
+             (event_id, universe_id, received_at, source, level, message, host, path) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                ev.event_id,
+                ev.universe_id,
+                ev.received_at,
+                ev.source,
+                ev.level,
+                ev.message,
+                ev.host,
+                ev.path
+            ],
+        )?;
+        Ok(())
     }
 
     // --- CO-45: UAT mutation log ---

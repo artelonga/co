@@ -498,7 +498,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.30.0"
+version = "1.32.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "co-agent"
-version = "1.30.0"
+version = "1.32.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -589,7 +589,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.30.0"
+version = "1.32.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "1.30.0"
+version = "1.32.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -631,6 +631,7 @@ dependencies = [
  "flate2",
  "futures-util",
  "game-core",
+ "hmac",
  "http-body-util",
  "jsonwebtoken",
  "lru",
@@ -645,6 +646,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "sha1",
  "sha2",
  "tar",
  "tempfile",

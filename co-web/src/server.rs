@@ -322,6 +322,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Entry abstraction API (CO-36) ---
     let entry_api = crate::entry_routes::router();
 
+    // --- CO-124: Vercel Log Drain receiver ---
+    let log_drain_api = crate::log_drain_routes::router();
+
     // --- CO-45: UAT change promotion endpoints ---
     let uat_api = crate::uat_routes::router();
 
@@ -379,6 +382,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", entry_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)
+        // CO-124: Vercel Log Drain receiver
+        .nest("/v1/log-drains/vercel", log_drain_api)
         // CO-45: UAT change promotion
         .nest("/api/v1/uat", uat_api)
         // CO-46: public event ingestion + admin summary/export

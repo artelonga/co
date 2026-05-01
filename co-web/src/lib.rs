@@ -17,6 +17,7 @@ pub mod github_auth;
 pub mod iceberg;
 pub mod index_manager;
 pub mod job_queue;
+pub mod log_drain_routes;
 pub mod models;
 pub mod obsidian_tasks;
 pub mod plugin_loader;

@@ -1,0 +1,29 @@
+name = "co-tail"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# CO-124 — CO tail Worker
+#
+# This Worker subscribes to a target Worker's log stream, converts each log
+# event to a CO TelemetryEvent, and ships batches to the CO ingest endpoint.
+#
+# Deploy:
+#   wrangler secret put CO_HMAC_KEY
+#   wrangler deploy
+#
+# To attach to your target Worker, add this block to its wrangler.toml:
+#
+#   [[tail_consumers]]
+#   service = "co-tail"
+#
+# Tail consumers are zone-level; check CF dashboard for per-zone quota.
+
+[vars]
+# Override with your CO instance URL if self-hosting.
+CO_INGEST_URL  = "https://co.artelonga.com.br/v1/ingest/events"
+# Set to your universe slug (unique per deployment).
+CO_UNIVERSE_ID = "my-universe"
+
+# CO_HMAC_KEY is sensitive — never commit it.
+# Generate:  openssl rand -hex 32
+# Store:     wrangler secret put CO_HMAC_KEY

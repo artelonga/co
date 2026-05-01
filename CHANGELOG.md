@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] — 2026-05-01
+
+### Added — CO-124: Co-agent variants for CF Workers tail + Vercel Log Drains
+
+- **CF tail Worker** (`workers/co-tail/`) — Cloudflare-native tail Worker that subscribes to a
+  target Worker's log stream, converts events to CO `TelemetryEvent` JSON-Lines, gzip-compresses,
+  signs with HMAC-SHA256, and POSTs to the CO ingest endpoint; deployable via `wrangler deploy`
+- **Vercel Log Drain receiver** — `POST /v1/log-drains/vercel/{universe_id}` route on co-web:
+  validates Vercel `x-vercel-signature` (HMAC-SHA1), maps NDJSON log entries to CO events, and
+  stores them in `log_drain_events` with idempotent deduplication by `event_id`
+- **Schema migration v28** — `log_drain_secret TEXT` column on `universes`; new `log_drain_events`
+  table with `event_id` primary key and composite index on `(universe_id, received_at)`
+- **Documentation** — `docs/co-agent/cloudflare-workers.md` and `docs/co-agent/vercel.md`
+
 ## [1.31.0] — 2026-05-01
 
 ### Added — CO-97: Visitor token unification (Option A)
