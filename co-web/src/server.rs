@@ -741,10 +741,13 @@ pub async fn start_server(config: WebConfig) {
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
 
-    let app = build_router(state, plugin_routes);
+    let app = build_router(state.clone(), plugin_routes);
 
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);
+
+    // CO-72: spawn doc-gen worker loop.
+    crate::job_queue::spawn_worker(Arc::clone(&state));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.

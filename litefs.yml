@@ -1,0 +1,33 @@
+# LiteFS configuration — primary in gru, read replicas in other regions.
+#
+# meta.db and per-universe data.db files are all replicated by LiteFS.
+# The primary node handles all writes; replicas serve read traffic.
+# Writes on a replica are forwarded to the primary via HTTP proxy.
+#
+# Deploy: Dockerfile installs the LiteFS binary and this file is the entrypoint.
+# The `exec.cmd` starts co-web after LiteFS mounts the FUSE directory.
+
+fuse:
+  dir: "/data"
+
+data:
+  dir: "/var/lib/litefs"
+
+http:
+  addr: ":20202"
+
+proxy:
+  addr: ":3000"
+  target: "localhost:3001"
+  db: "meta.db"
+
+lease:
+  type: "consul"
+  advertise-url: "http://${HOSTNAME}.internal:20202"
+  consul:
+    url: "${FLY_CONSUL_URL}"
+    key: "co/litefs/${FLY_APP_NAME}"
+
+exec:
+  - cmd: "/app/co-web"
+    if-candidate: true

@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use chrono::{NaiveDate, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
@@ -6,6 +7,7 @@ use serde_json::json;
 
 use crate::entry_index::{EntryRow, make_entry};
 use crate::models::*;
+use crate::universe_pool::UniversePool;
 
 // --- Seed content (template universe legal + intro pages) ---
 //
@@ -102,14 +104,29 @@ fn ensure_column(
 
 pub struct Storage {
     conn: Connection,
+    pub universe_pool: Arc<UniversePool>,
     pub data_dir: PathBuf,
 }
 
 impl Storage {
     pub fn new(data_dir: impl AsRef<Path>) -> Self {
         std::fs::create_dir_all(data_dir.as_ref()).expect("Failed to create data directory");
-        let db_path = data_dir.as_ref().join("co.db");
-        let conn = Connection::open(&db_path).expect("Failed to open database");
+
+        // CO-77: rename co.db → meta.db on first boot after upgrade (atomic on POSIX)
+        let meta_path = data_dir.as_ref().join("meta.db");
+        let old_path = data_dir.as_ref().join("co.db");
+        if !meta_path.exists() && old_path.exists() {
+            std::fs::rename(&old_path, &meta_path).expect("rename co.db -> meta.db");
+            tracing::info!("CO-77: renamed co.db -> meta.db");
+        }
+
+        let db_path = if meta_path.exists() {
+            meta_path
+        } else {
+            // Fresh install — create meta.db directly
+            data_dir.as_ref().join("meta.db")
+        };
+        let conn = Connection::open(&db_path).expect("Failed to open meta.db");
 
         // Enable WAL mode for concurrent reads
         conn.execute_batch("PRAGMA journal_mode=WAL;")
@@ -117,11 +134,15 @@ impl Storage {
         conn.execute_batch("PRAGMA foreign_keys=ON;")
             .expect("Failed to enable foreign keys");
 
+        let universe_pool = Arc::new(UniversePool::new(data_dir.as_ref(), 1000));
+
         let mut storage = Self {
             conn,
+            universe_pool,
             data_dir: data_dir.as_ref().to_path_buf(),
         };
         storage.run_migrations();
+        storage.maybe_migrate_entries_to_universe_dbs();
         storage
     }
 
@@ -130,9 +151,14 @@ impl Storage {
         self.data_dir.join("universes").join(universe_key)
     }
 
-    /// Access the underlying SQLite connection (for quilombo storage functions).
+    /// Access the underlying meta.db connection (for auth, users, universes, quilombo).
     pub fn conn(&self) -> &Connection {
         &self.conn
+    }
+
+    /// Get or open a connection to a universe's data.db.
+    pub fn universe_conn(&self, universe_key: &str) -> Arc<std::sync::Mutex<Connection>> {
+        self.universe_pool.get_or_open(universe_key)
     }
 
     fn run_migrations(&mut self) {
@@ -828,8 +854,7 @@ impl Storage {
                 .expect("migration v24: version insert");
         }
 
-        // CO-71 unconditional backfill: ensure payload exists even on DBs that
-        // ran migration v24 but may have pre-payload rows added by older code.
+        // CO-71 unconditional backfill.
         ensure_column(
             &self.conn,
             "entries",
@@ -844,6 +869,99 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 0",
         )
         .expect("CO-71 backfill: manifest_version column");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 25 {
+            // CO-72: job queue table + universe doc-gen error columns.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS jobs (
+                         id           TEXT PRIMARY KEY,
+                         universe_key TEXT NOT NULL,
+                         kind         TEXT NOT NULL,
+                         payload      TEXT NOT NULL,
+                         status       TEXT NOT NULL DEFAULT 'pending',
+                         attempts     INTEGER NOT NULL DEFAULT 0,
+                         dedupe_key   TEXT,
+                         created_at   TEXT NOT NULL,
+                         run_at       TEXT NOT NULL,
+                         started_at   TEXT,
+                         completed_at TEXT,
+                         error        TEXT
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_jobs_status_run_at
+                         ON jobs(status, run_at);
+                     CREATE INDEX IF NOT EXISTS idx_jobs_universe_key
+                         ON jobs(universe_key);
+                     CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe
+                         ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL;",
+                )
+                .expect("migration v25: jobs table");
+            ensure_column(&self.conn, "universes", "doc_gen_error", "TEXT")
+                .expect("migration v25: doc_gen_error");
+            ensure_column(&self.conn, "universes", "doc_gen_error_at", "TEXT")
+                .expect("migration v25: doc_gen_error_at");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (25)",
+                    [],
+                )
+                .expect("migration v25: version insert");
+        }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 26 {
+            // CO-77: project→universe routing index for legacy routes.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS project_universe_index (
+                         project_key  TEXT PRIMARY KEY,
+                         universe_key TEXT NOT NULL
+                     );",
+                )
+                .expect("migration v26: project_universe_index");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (26)",
+                    [],
+                )
+                .expect("migration v26: version insert");
+        }
+
+        // CO-77: ensure entries table exists in meta.db for startup migration.
+        self.conn
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS entries (
+                    path              TEXT NOT NULL,
+                    universe_key      TEXT NOT NULL,
+                    entry_type        TEXT NOT NULL,
+                    title             TEXT,
+                    frontmatter_json  TEXT NOT NULL DEFAULT '{}',
+                    body              TEXT NOT NULL DEFAULT '',
+                    body_hash         TEXT NOT NULL DEFAULT '',
+                    created_at        TEXT,
+                    updated_at        TEXT,
+                    PRIMARY KEY (universe_key, path)
+                );
+                CREATE TABLE IF NOT EXISTS entries_fts (content TEXT);",
+            )
+            .ok();
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.
@@ -1023,6 +1141,158 @@ impl Storage {
         }
     }
 
+    // -------------------------------------------------------------------------
+    // CO-77: startup migration — move entries from meta.db to per-universe DBs
+    // -------------------------------------------------------------------------
+
+    /// On first boot after CO-77, migrate all rows in `entries` (meta.db) to
+    /// the appropriate per-universe `data.db`. This is a one-shot migration:
+    /// once `entries` in meta.db is empty it never runs again.
+    fn maybe_migrate_entries_to_universe_dbs(&self) {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))
+            .unwrap_or(0);
+        if count == 0 {
+            return;
+        }
+
+        tracing::info!(
+            "CO-77: migrating {} entries from meta.db to per-universe DBs",
+            count
+        );
+
+        // Collect distinct universe keys
+        let universe_keys: Vec<String> = {
+            let mut stmt = match self
+                .conn
+                .prepare("SELECT DISTINCT universe_key FROM entries")
+            {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            stmt.query_map([], |r| r.get(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        for uk in &universe_keys {
+            let uc = self.universe_pool.get_or_open(uk);
+            let uc_guard = uc.lock().expect("universe conn lock");
+
+            type EntryRow9 = (
+                String,
+                String,
+                String,
+                Option<String>,
+                String,
+                String,
+                String,
+                Option<String>,
+                Option<String>,
+            );
+            // Collect rows for this universe
+            let rows: Vec<EntryRow9> = {
+                let mut stmt = match self.conn.prepare(
+                    "SELECT path, universe_key, entry_type, title, \
+                     frontmatter_json, body, body_hash, created_at, updated_at \
+                     FROM entries WHERE universe_key = ?1",
+                ) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                stmt.query_map(params![uk], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                    ))
+                })
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+
+            for (path, uk2, entry_type, title, fm_json, body, body_hash, created_at, updated_at) in
+                &rows
+            {
+                let _ = uc_guard.execute(
+                    "INSERT OR IGNORE INTO entries \
+                     (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        path, uk2, entry_type, title, fm_json, body, body_hash,
+                        created_at, updated_at
+                    ],
+                );
+                // Populate project_universe_index for project entries
+                if entry_type == "project"
+                    && let Ok(fm) = serde_json::from_str::<serde_json::Value>(fm_json)
+                    && let Some(proj_key) = fm.get("key").and_then(|v| v.as_str())
+                {
+                    let _ = self.conn.execute(
+                        "INSERT OR IGNORE INTO project_universe_index \
+                         (project_key, universe_key) VALUES (?1, ?2)",
+                        params![proj_key, uk],
+                    );
+                }
+            }
+        }
+
+        // Clear entries from meta.db — now only in per-universe DBs
+        let _ = self.conn.execute_batch("DELETE FROM entries;");
+        tracing::info!("CO-77: entries migrated to per-universe DBs");
+    }
+
+    // -------------------------------------------------------------------------
+    // CO-77: new helper methods
+    // -------------------------------------------------------------------------
+
+    /// Backup a universe's data.db to the given path using SQLite's Backup API.
+    pub fn backup_universe(&self, universe_key: &str, dest_path: &Path) -> anyhow::Result<()> {
+        use rusqlite::backup::Backup;
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let src = uc.lock().expect("universe conn lock");
+        let mut dest = Connection::open(dest_path)?;
+        let backup = Backup::new(&src, &mut dest)?;
+        backup.run_to_completion(100, std::time::Duration::from_millis(10), None)?;
+        Ok(())
+    }
+
+    /// Return the size of a universe's data.db in bytes, or 0 if not yet created.
+    pub fn universe_db_size(&self, universe_key: &str) -> u64 {
+        std::fs::metadata(self.universe_pool.db_path(universe_key))
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// Search entries across multiple universes (cross-universe aggregator).
+    pub fn search_entries_across_universes(
+        &self,
+        universe_keys: &[&str],
+        query: &str,
+    ) -> Vec<crate::entry_index::EntryRow> {
+        let mut results = Vec::new();
+        for &key in universe_keys {
+            let uc = self.universe_pool.get_or_open(key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            let index = crate::entry_index::EntryIndex::new(&uc_guard);
+            if let Ok(entries) = index.search(key, query) {
+                results.extend(entries);
+            }
+        }
+        results
+    }
+
     pub fn schema_version(&self) -> i64 {
         self.conn
             .query_row(
@@ -1104,33 +1374,43 @@ impl Storage {
     // --- Projects ---
 
     pub fn list_projects(&self) -> Vec<Project> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
-                 created_at, updated_at FROM entries WHERE entry_type = 'project' ORDER BY path",
-            )
-            .expect("Failed to prepare list_projects");
-
-        stmt.query_map([], entry_row_from_sql)
-            .expect("Failed to list projects")
-            .filter_map(|r| r.ok())
-            .filter_map(|row| entry_row_to_project(&row))
-            .collect()
+        // CO-77: fan out to all universes listed in the project_universe_index
+        let universe_keys: Vec<String> = {
+            let mut stmt = match self
+                .conn
+                .prepare("SELECT DISTINCT universe_key FROM project_universe_index")
+            {
+                Ok(s) => s,
+                Err(_) => return vec![],
+            };
+            stmt.query_map([], |r| r.get(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let mut result = Vec::new();
+        for uk in &universe_keys {
+            result.extend(self.list_projects_for_universe(uk));
+        }
+        result.sort_by(|a, b| a.key.cmp(&b.key));
+        result
     }
 
     pub fn list_projects_for_universe(&self, universe_key: &str) -> Vec<Project> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
-                 created_at, updated_at FROM entries \
-                 WHERE universe_key = ?1 AND entry_type = 'project' ORDER BY path",
-            )
-            .expect("Failed to prepare list_projects_for_universe");
-
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+        let mut stmt = match uc_guard.prepare(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries \
+             WHERE universe_key = ?1 AND entry_type = 'project' ORDER BY path",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
         stmt.query_map(params![universe_key], entry_row_from_sql)
-            .expect("Failed to list projects for universe")
+            .into_iter()
+            .flatten()
             .filter_map(|r| r.ok())
             .filter_map(|row| entry_row_to_project(&row))
             .collect()
@@ -1139,7 +1419,12 @@ impl Storage {
     pub fn get_project(&self, key: &str) -> Option<Project> {
         let upper_key = key.to_uppercase();
         let path = format!("projects/{}/_project.md", upper_key);
-        let result = self.conn.query_row(
+
+        // CO-77: look up universe via index, then query per-universe DB
+        let universe_key = self.get_project_universe_key(&upper_key)?;
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+        let result = uc_guard.query_row(
             "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
              created_at, updated_at FROM entries \
              WHERE path = ?1 AND entry_type = 'project'",
@@ -1181,7 +1466,16 @@ impl Storage {
         let entry = make_entry(&path, fm, &create.description);
         let universe_root = self.universe_root(&universe_key);
         co::entry::write_entry(&universe_root, &entry)?;
-        upsert_entry_row(&self.conn, &universe_key, &entry)?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            upsert_entry_row(&uc_guard, &universe_key, &entry)?;
+        }
+        // Register in routing index
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES (?1, ?2)",
+            params![upper_key, universe_key],
+        );
 
         Ok(Project {
             name: create.name,
@@ -1208,8 +1502,9 @@ impl Storage {
         // Find all entries under this project
         let prefix = format!("projects/{}/", upper_key);
         let entry_paths: Vec<String> = {
-            let mut stmt = self
-                .conn
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            let mut stmt = uc_guard
                 .prepare("SELECT path FROM entries WHERE universe_key = ?1 AND path LIKE ?2")?;
             let like_pattern = format!("{}%", prefix);
             stmt.query_map(params![universe_key, like_pattern], |row| row.get(0))?
@@ -1217,13 +1512,23 @@ impl Storage {
                 .collect()
         };
 
-        for entry_path in &entry_paths {
-            let _ = co::entry::delete_entry(&universe_root, entry_path);
-            self.conn.execute(
-                "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
-                params![universe_key, entry_path],
-            )?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            for entry_path in &entry_paths {
+                let _ = co::entry::delete_entry(&universe_root, entry_path);
+                let _ = uc_guard.execute(
+                    "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
+                    params![universe_key, entry_path],
+                );
+            }
         }
+
+        // Remove from routing index
+        let _ = self.conn.execute(
+            "DELETE FROM project_universe_index WHERE project_key = ?1",
+            params![upper_key],
+        );
 
         Ok(())
     }
@@ -1248,6 +1553,14 @@ impl Storage {
         let upper_key = project_key.to_uppercase();
         let limit = limit.min(500);
 
+        // CO-77: look up universe, then query per-universe DB
+        let universe_key = match self.get_project_universe_key(&upper_key) {
+            Some(uk) => uk,
+            None => return vec![],
+        };
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+
         let sql: String;
         let rows: Vec<EntryRow>;
 
@@ -1264,16 +1577,17 @@ impl Storage {
                      LIMIT ?2 OFFSET ?3",
                     archived_int
                 );
-                let mut stmt = self
-                    .conn
-                    .prepare(&sql)
-                    .expect("Failed to prepare list_tasks");
+                let mut stmt = match uc_guard.prepare(&sql) {
+                    Ok(s) => s,
+                    Err(_) => return vec![],
+                };
                 rows = stmt
                     .query_map(
                         params![upper_key, limit as i64, offset as i64],
                         entry_row_from_sql,
                     )
-                    .expect("Failed to list tasks")
+                    .into_iter()
+                    .flatten()
                     .filter_map(|r| r.ok())
                     .collect();
             }
@@ -1285,16 +1599,17 @@ impl Storage {
                        ORDER BY CAST(json_extract(frontmatter_json, '$.id') AS INTEGER) \
                        LIMIT ?2 OFFSET ?3"
                     .to_string();
-                let mut stmt = self
-                    .conn
-                    .prepare(&sql)
-                    .expect("Failed to prepare list_tasks");
+                let mut stmt = match uc_guard.prepare(&sql) {
+                    Ok(s) => s,
+                    Err(_) => return vec![],
+                };
                 rows = stmt
                     .query_map(
                         params![upper_key, limit as i64, offset as i64],
                         entry_row_from_sql,
                     )
-                    .expect("Failed to list tasks")
+                    .into_iter()
+                    .flatten()
                     .filter_map(|r| r.ok())
                     .collect();
             }
@@ -1308,7 +1623,11 @@ impl Storage {
     pub fn get_task(&self, project_key: &str, id: u64) -> Option<Task> {
         let upper_key = project_key.to_uppercase();
         let path = format!("projects/{}/{}.md", upper_key, id);
-        let result = self.conn.query_row(
+        // CO-77: look up universe, then query per-universe DB
+        let universe_key = self.get_project_universe_key(&upper_key)?;
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+        let result = uc_guard.query_row(
             "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
              created_at, updated_at FROM entries WHERE path = ?1 AND entry_type = 'task'",
             params![path],
@@ -1357,7 +1676,11 @@ impl Storage {
         let entry = make_entry(&path, fm, &create.description);
         let universe_root = self.universe_root(&universe_key);
         co::entry::write_entry(&universe_root, &entry)?;
-        upsert_entry_row(&self.conn, &universe_key, &entry)?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            upsert_entry_row(&uc_guard, &universe_key, &entry)?;
+        }
 
         Ok(Task {
             id,
@@ -1441,7 +1764,11 @@ impl Storage {
         let entry = make_entry(&path, fm, &task.description);
         let universe_root = self.universe_root(&universe_key);
         co::entry::write_entry(&universe_root, &entry)?;
-        upsert_entry_row(&self.conn, &universe_key, &entry)?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            upsert_entry_row(&uc_guard, &universe_key, &entry)?;
+        }
 
         Ok(task)
     }
@@ -1458,10 +1785,14 @@ impl Storage {
         let path = format!("projects/{}/{}.md", upper_key, id);
 
         let _ = co::entry::delete_entry(&universe_root, &path);
-        self.conn.execute(
-            "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
-            params![universe_key, path],
-        )?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            let _ = uc_guard.execute(
+                "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
+                params![universe_key, path],
+            );
+        }
 
         Ok(())
     }
@@ -1515,19 +1846,28 @@ impl Storage {
     pub fn list_comments(&self, project_key: &str, task_id: u64) -> Vec<Comment> {
         let upper_key = project_key.to_uppercase();
         let path_prefix = format!("projects/{}/comments/{}-", upper_key, task_id);
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
-                 created_at, updated_at FROM entries \
-                 WHERE entry_type = 'comment' AND path LIKE ?1 \
-                 ORDER BY created_at ASC",
-            )
-            .expect("Failed to prepare list_comments");
+
+        // CO-77: look up universe, then query per-universe DB
+        let universe_key = match self.get_project_universe_key(&upper_key) {
+            Some(uk) => uk,
+            None => return vec![],
+        };
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+        let mut stmt = match uc_guard.prepare(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at FROM entries \
+             WHERE entry_type = 'comment' AND path LIKE ?1 \
+             ORDER BY created_at ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
 
         let like_pattern = format!("{}%", path_prefix);
         stmt.query_map(params![like_pattern], entry_row_from_sql)
-            .expect("Failed to list comments")
+            .into_iter()
+            .flatten()
             .filter_map(|r| r.ok())
             .filter_map(|row| entry_row_to_comment(&row, &upper_key, task_id))
             .collect()
@@ -1552,10 +1892,11 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        // Allocate id via COUNT
+        // Allocate id via COUNT in per-universe DB
         let id: u64 = {
-            let count: i64 = self
-                .conn
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            let count: i64 = uc_guard
                 .query_row(
                     "SELECT COUNT(*) FROM entries WHERE entry_type = 'comment' \
                      AND path LIKE ?1",
@@ -1581,7 +1922,11 @@ impl Storage {
         let entry = make_entry(&path, fm, &create.body);
         let universe_root = self.universe_root(&universe_key);
         co::entry::write_entry(&universe_root, &entry)?;
-        upsert_entry_row(&self.conn, &universe_key, &entry)?;
+        {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            upsert_entry_row(&uc_guard, &universe_key, &entry)?;
+        }
 
         Ok(Comment {
             id,
@@ -1630,24 +1975,32 @@ impl Storage {
 
         let status_counts = self.get_status_counts(&upper_key);
 
+        // CO-77: look up universe for per-universe queries
+        let universe_key = self
+            .get_project_universe_key(&upper_key)
+            .unwrap_or_else(|| "default".to_string());
+
         let today_str = chrono::Utc::now()
             .date_naive()
             .format("%Y-%m-%d")
             .to_string();
-        let overdue_count: i64 = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM entries \
-                 WHERE entry_type = 'task' \
-                 AND json_extract(frontmatter_json, '$.project') = ?1 \
-                 AND json_extract(frontmatter_json, '$.archived') = 0 \
-                 AND json_extract(frontmatter_json, '$.status') != 'done' \
-                 AND json_extract(frontmatter_json, '$.due') IS NOT NULL \
-                 AND json_extract(frontmatter_json, '$.due') < ?2",
-                params![upper_key, today_str],
-                |row| row.get(0),
-            )
-            .unwrap_or(0);
+        let overdue_count: i64 = {
+            let uc = self.universe_pool.get_or_open(&universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            uc_guard
+                .query_row(
+                    "SELECT COUNT(*) FROM entries \
+                     WHERE entry_type = 'task' \
+                     AND json_extract(frontmatter_json, '$.project') = ?1 \
+                     AND json_extract(frontmatter_json, '$.archived') = 0 \
+                     AND json_extract(frontmatter_json, '$.status') != 'done' \
+                     AND json_extract(frontmatter_json, '$.due') IS NOT NULL \
+                     AND json_extract(frontmatter_json, '$.due') < ?2",
+                    params![upper_key, today_str],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0)
+        };
 
         let upcoming_tasks =
             self.query_tasks_entries(&upper_key, Some(false), Some("!= 'done'"), true, Some(10));
@@ -1697,6 +2050,13 @@ impl Storage {
     }
 
     fn get_burndown(&self, project_key: &str) -> Vec<BurndownPoint> {
+        // CO-77: look up universe for per-universe queries
+        let universe_key = self
+            .get_project_universe_key(project_key)
+            .unwrap_or_else(|| "default".to_string());
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+
         let today = chrono::Utc::now().date_naive();
         let mut result = Vec::with_capacity(8);
 
@@ -1705,8 +2065,7 @@ impl Storage {
             let week_label = week_end.format("%Y-W%V").to_string();
             let week_end_str = week_end.to_string();
 
-            let total_created: i64 = self
-                .conn
+            let total_created: i64 = uc_guard
                 .query_row(
                     "SELECT COUNT(*) FROM entries \
                      WHERE entry_type = 'task' \
@@ -1825,8 +2184,15 @@ impl Storage {
     }
 
     fn get_status_counts(&self, project_key: &str) -> StatusCounts {
+        // CO-77: look up universe for per-universe queries
+        let universe_key = self
+            .get_project_universe_key(project_key)
+            .unwrap_or_else(|| "default".to_string());
+        let uc = self.universe_pool.get_or_open(&universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+
         let count = |status: &str| -> u64 {
-            self.conn
+            uc_guard
                 .query_row(
                     "SELECT COUNT(*) FROM entries \
                      WHERE entry_type = 'task' \
@@ -2917,8 +3283,22 @@ impl Storage {
     // --- Usage gate / content count ---
 
     /// Return the universe_key for a given project key, or None if not found.
+    ///
+    /// CO-77: primary lookup is `project_universe_index` in meta.db.
+    /// Falls back to scanning open universe connections if not indexed yet.
     pub fn get_project_universe_key(&self, project_key: &str) -> Option<String> {
         let upper = project_key.to_uppercase();
+
+        // Fast path: project_universe_index
+        if let Ok(uk) = self.conn.query_row(
+            "SELECT universe_key FROM project_universe_index WHERE project_key = ?1",
+            params![upper],
+            |row| row.get::<_, String>(0),
+        ) {
+            return Some(uk);
+        }
+
+        // Fallback: check meta.db entries (pre-CO-77 rows)
         let path = format!("projects/{}/_project.md", upper);
         self.conn
             .query_row(
@@ -3139,13 +3519,13 @@ impl Storage {
     // --- Check if data exists ---
 
     pub fn has_data(&self) -> bool {
+        // CO-77: project entries live in per-universe DBs, not meta.db.
+        // Check the routing index as a fast proxy for "has any project been created".
         let count: i64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM entries WHERE entry_type = 'project'",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM project_universe_index", [], |row| {
+                row.get(0)
+            })
             .unwrap_or(0);
         count > 0
     }
@@ -3186,17 +3566,20 @@ impl Storage {
             let _ = self.write_universo_yaml("template", &config);
         }
 
-        // Check if project entry already exists
+        // Check if project entry already exists (query per-universe DB — CO-77).
         let proj_path = "projects/CO/_project.md";
-        let already_seeded: bool = self
-            .conn
-            .query_row(
-                "SELECT COUNT(*) FROM entries WHERE universe_key = 'template' AND path = ?1",
-                params![proj_path],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0)
-            > 0;
+        let template_uc = self.universe_pool.get_or_open("template");
+        let already_seeded: bool = {
+            let uc_guard = template_uc.lock().expect("template universe conn lock");
+            uc_guard
+                .query_row(
+                    "SELECT COUNT(*) FROM entries WHERE universe_key = 'template' AND path = ?1",
+                    params![proj_path],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0
+        };
 
         if already_seeded {
             return;
@@ -3221,7 +3604,15 @@ impl Storage {
         );
         let universe_root = self.universe_root("template");
         let _ = co::entry::write_entry(&universe_root, &proj_entry);
-        let _ = upsert_entry_row(&self.conn, "template", &proj_entry);
+        {
+            let uc_guard = template_uc.lock().expect("template universe conn lock");
+            let _ = upsert_entry_row(&uc_guard, "template", &proj_entry);
+        }
+        // Register in project_universe_index so get_project() works
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES ('CO', 'template')",
+            [],
+        );
 
         // Onboarding tasks — game tutorial tone, curiosity-driven
         // Content always in Portuguese. UI labels translate via i18n.
@@ -3362,7 +3753,10 @@ impl Storage {
             });
             let task_entry = make_entry(&task_path, task_fm, t.description);
             let _ = co::entry::write_entry(&universe_root, &task_entry);
-            let _ = upsert_entry_row(&self.conn, "template", &task_entry);
+            {
+                let uc_guard = template_uc.lock().expect("template universe conn lock");
+                let _ = upsert_entry_row(&uc_guard, "template", &task_entry);
+            }
         }
 
         // Seed/refresh the template's content pages (intro + legal).
@@ -3416,7 +3810,9 @@ impl Storage {
             if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
                 tracing::warn!("Failed to write {path} file: {e}");
             }
-            if let Err(e) = upsert_entry_row(&self.conn, "template", &entry) {
+            let template_uc = self.universe_pool.get_or_open("template");
+            let uc_guard = template_uc.lock().expect("template universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "template", &entry) {
                 tracing::warn!("Failed to upsert {path} page: {e}");
             }
         }
@@ -3918,9 +4314,11 @@ impl Storage {
         let mut count: i64 = 0;
         let target_root = self.universe_root(target_key);
 
-        // Collect ALL entries from source
+        // Collect ALL entries from source per-universe DB (CO-77).
         let rows: Vec<EntryRow> = {
-            let mut stmt = self.conn.prepare(
+            let src_uc = self.universe_pool.get_or_open(source_key);
+            let src_guard = src_uc.lock().expect("source universe conn lock");
+            let mut stmt = src_guard.prepare(
                 "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
                  created_at, updated_at FROM entries WHERE universe_key = ?1",
             )?;
@@ -3928,6 +4326,8 @@ impl Storage {
                 .filter_map(|r| r.ok())
                 .collect()
         };
+
+        let tgt_uc = self.universe_pool.get_or_open(target_key);
 
         for row in &rows {
             // Derive new project key for project entries
@@ -3950,13 +4350,24 @@ impl Storage {
                 }
                 let entry = make_entry(&new_path, new_fm, &row.body);
                 let _ = co::entry::write_entry(&target_root, &entry);
-                let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                {
+                    let tgt_guard = tgt_uc.lock().expect("target universe conn lock");
+                    let _ = upsert_entry_row(&tgt_guard, target_key, &entry);
+                }
+                // Register in routing index so get_project() can find it
+                let _ = self.conn.execute(
+                    "INSERT OR IGNORE INTO project_universe_index \
+                     (project_key, universe_key) VALUES (?1, ?2)",
+                    params![new_key, target_key],
+                );
                 count += 1;
 
                 // Clone tasks for this project
                 let old_key2 = old_key.clone();
                 let task_rows: Vec<EntryRow> = {
-                    let mut stmt2 = self.conn.prepare(
+                    let src_uc2 = self.universe_pool.get_or_open(source_key);
+                    let src_guard2 = src_uc2.lock().expect("source universe conn lock");
+                    let mut stmt2 = src_guard2.prepare(
                         "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
                          created_at, updated_at FROM entries \
                          WHERE universe_key = ?1 AND entry_type = 'task' \
@@ -3982,7 +4393,10 @@ impl Storage {
                     }
                     let entry = make_entry(&task_path, task_fm, &task_row.body);
                     let _ = co::entry::write_entry(&target_root, &entry);
-                    let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                    {
+                        let tgt_guard = tgt_uc.lock().expect("target universe conn lock");
+                        let _ = upsert_entry_row(&tgt_guard, target_key, &entry);
+                    }
                     count += 1;
                 }
             } else if row.entry_type == "page" {
@@ -3992,7 +4406,10 @@ impl Storage {
                 }
                 let entry = make_entry(&new_path, new_fm, &row.body);
                 let _ = co::entry::write_entry(&target_root, &entry);
-                let _ = upsert_entry_row(&self.conn, target_key, &entry);
+                {
+                    let tgt_guard = tgt_uc.lock().expect("target universe conn lock");
+                    let _ = upsert_entry_row(&tgt_guard, target_key, &entry);
+                }
                 count += 1;
             }
         }
@@ -4049,9 +4466,14 @@ impl Storage {
 
         let mut cloned_entries: i64 = 0;
 
+        // CO-77: read from source per-universe DB, write to destination per-universe DB.
+        let src_uc = self.universe_pool.get_or_open(source_key);
+        let dst_uc = self.universe_pool.get_or_open(new_key);
+
         // Collect source project entries
         let source_project_rows: Vec<EntryRow> = {
-            let mut stmt = self.conn.prepare(
+            let src_guard = src_uc.lock().expect("src universe conn lock");
+            let mut stmt = src_guard.prepare(
                 "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
                  created_at, updated_at FROM entries \
                  WHERE universe_key = ?1 AND entry_type = 'project'",
@@ -4082,12 +4504,21 @@ impl Storage {
             }
             let new_proj_entry = make_entry(&new_proj_path, new_proj_fm, &proj_row.body);
             co::entry::write_entry(&new_universe_root, &new_proj_entry)?;
-            upsert_entry_row(&self.conn, new_key, &new_proj_entry)?;
+            {
+                let dst_guard = dst_uc.lock().expect("dst universe conn lock");
+                upsert_entry_row(&dst_guard, new_key, &new_proj_entry)?;
+            }
+            // Register project→universe mapping in routing index
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES (?1, ?2)",
+                params![new_pkey, new_key],
+            );
             cloned_entries += 1;
 
             // Collect source task entries
             let source_task_rows: Vec<EntryRow> = {
-                let mut stmt = self.conn.prepare(
+                let src_guard = src_uc.lock().expect("src universe conn lock");
+                let mut stmt = src_guard.prepare(
                     "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
                      created_at, updated_at FROM entries \
                      WHERE universe_key = ?1 AND entry_type = 'task' \
@@ -4114,7 +4545,10 @@ impl Storage {
                 }
                 let new_task_entry = make_entry(&new_task_path, new_task_fm, &task_row.body);
                 co::entry::write_entry(&new_universe_root, &new_task_entry)?;
-                upsert_entry_row(&self.conn, new_key, &new_task_entry)?;
+                {
+                    let dst_guard = dst_uc.lock().expect("dst universe conn lock");
+                    upsert_entry_row(&dst_guard, new_key, &new_task_entry)?;
+                }
                 cloned_entries += 1;
             }
         }
@@ -4122,7 +4556,8 @@ impl Storage {
         // Clone page entries (content/about, terms, privacy, etc.)
         {
             let source_pages: Vec<EntryRow> = {
-                let mut stmt = self.conn.prepare(
+                let src_guard = src_uc.lock().expect("src universe conn lock");
+                let mut stmt = src_guard.prepare(
                     "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
                      created_at, updated_at FROM entries \
                      WHERE universe_key = ?1 AND entry_type = 'page'",
@@ -4139,7 +4574,10 @@ impl Storage {
                 }
                 let new_page = make_entry(&page_row.path, new_fm, &page_row.body);
                 let _ = co::entry::write_entry(&new_universe_root, &new_page);
-                let _ = upsert_entry_row(&self.conn, new_key, &new_page);
+                {
+                    let dst_guard = dst_uc.lock().expect("dst universe conn lock");
+                    let _ = upsert_entry_row(&dst_guard, new_key, &new_page);
+                }
                 cloned_entries += 1;
             }
         }
@@ -4149,15 +4587,39 @@ impl Storage {
         // doc.* generated entries, etc.). Bulk-insert with the new
         // universe_key; preserves path/title/frontmatter/body verbatim so
         // the duplicate is a true snapshot.
-        let other_count: i64 = self.conn.execute(
-            "INSERT OR IGNORE INTO entries \
-             (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at) \
-             SELECT path, ?1, entry_type, title, frontmatter_json, body, body_hash, ?2, ?2 \
-             FROM entries \
-             WHERE universe_key = ?3 \
-               AND entry_type NOT IN ('project', 'task', 'page')",
-            params![new_key, now_str, source_key],
-        )? as i64;
+        let other_rows: Vec<EntryRow> = {
+            let src_guard = src_uc.lock().expect("src universe conn lock");
+            let mut stmt = src_guard.prepare(
+                "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+                 created_at, updated_at FROM entries \
+                 WHERE universe_key = ?1 AND entry_type NOT IN ('project', 'task', 'page')",
+            )?;
+            stmt.query_map(params![source_key], entry_row_from_sql)?
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let other_count = other_rows.len() as i64;
+        {
+            let dst_guard = dst_uc.lock().expect("dst universe conn lock");
+            for row in &other_rows {
+                let fm_json = serde_json::to_string(&row.frontmatter).unwrap_or_default();
+                let _ = dst_guard.execute(
+                    "INSERT OR IGNORE INTO entries \
+                     (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at) \
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+                    params![
+                        row.path,
+                        new_key,
+                        row.entry_type,
+                        row.title,
+                        fm_json,
+                        row.body,
+                        row.body_hash,
+                        now_str,
+                    ],
+                );
+            }
+        }
         cloned_entries += other_count;
 
         // Set content_count
@@ -4263,8 +4725,10 @@ impl Storage {
         new_next_id: u64,
     ) {
         let path = format!("projects/{}/_project.md", project_key);
-        // Read the project entry
-        let result = self.conn.query_row(
+        // CO-77: project entries live in the per-universe data.db, not meta.db.
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let uc_guard = uc.lock().expect("universe conn lock");
+        let result = uc_guard.query_row(
             "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
              created_at, updated_at FROM entries WHERE path = ?1",
             params![path],
@@ -4278,7 +4742,7 @@ impl Storage {
             let entry = make_entry(&path, fm, &row.body);
             let universe_root = self.universe_root(universe_key);
             let _ = co::entry::write_entry(&universe_root, &entry);
-            let _ = upsert_entry_row(&self.conn, universe_key, &entry);
+            let _ = upsert_entry_row(&uc_guard, universe_key, &entry);
         }
     }
 

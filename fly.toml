@@ -13,6 +13,8 @@ primary_region = "gru"
   CO_WEB_DATA = "/data"
   CO_WEB_PORT = "3000"
   RUST_LOG = "co_web=info,tower_http=info"
+  LITEFS_DIR = "/data"
+  LITEFS_URL = "http://localhost:20202"
 
 [http_service]
   internal_port = 3000

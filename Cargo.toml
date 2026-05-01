@@ -21,7 +21,8 @@ default-members = [
 ]
 
 [workspace.package]
-version = "1.24.0"
+
+version = "1.25.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/artelonga/co"
@@ -66,7 +67,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 petgraph = "0.6"
 
 # Database
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = ["bundled", "backup"] }
 
 # Logging
 tracing = "0.1"
@@ -76,6 +77,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 argon2 = "0.5"
 rand = "0.8"
 nanoid = "0.4"
+
+# Cache / collections
+lru = "0.12"
 
 # Testing
 tempfile = "3"

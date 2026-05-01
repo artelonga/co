@@ -5,6 +5,75 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] — 2026-04-30
+
+### Added — CO-77: Per-universe SQLite sharding + LiteFS read replicas
+
+**Storage architecture split**
+- Monolithic `co.db` renamed to `meta.db` at startup (atomic POSIX rename; backward-compatible)
+- Each universe gets its own `data.db` at a 2-level xxHash fanout path:
+  `{data_dir}/universes/{ab}/{cd}/{key}/data.db` — 256×256 = 65 536 directories, handles 10 M+ universes without `ls` degradation
+- `meta.db` retains: users, universes, universe_members, api_tokens, subscriptions, telemetry, uat_mutations, quilombo_* tables
+- Per-universe `data.db` holds: entries, entries_fts (WAL-mode, independent lock per universe)
+
+**Connection pool (`co-web/src/universe_pool.rs`)**
+- `UniversePool` with LRU eviction — default capacity 1 000 open connections
+- Per-universe migration runs on first open (entries + entries_fts schema)
+- `get_or_open(key)` returns `Arc<Mutex<Connection>>` so different universes lock independently
+
+**Parallel write throughput**
+- Writes to different universes now run concurrently — no shared SQLite write lock
+- `project_universe_index` in meta.db provides O(1) routing for legacy `/projects/{key}` routes
+
+**Startup migration (online, zero downtime)**
+- On first boot after upgrade, entries in meta.db are automatically migrated to per-universe DBs
+- `project_universe_index` populated from frontmatter of project entries during migration
+- meta.db entries table cleared after all universes confirmed copied
+
+**New Storage API**
+- `Storage::universe_conn(key)` — get per-universe connection
+- `Storage::backup_universe(key, dest)` — rusqlite Backup API, < 30s for any universe
+- `Storage::universe_db_size(key)` — file-size quota check
+- `Storage::search_entries_across_universes(keys, query)` — cross-universe aggregator
+
+**LiteFS configuration (`litefs.yml`)**
+- Primary in `gru`, replicas in other regions via Consul lease
+- Fly.io env vars `LITEFS_DIR` and `LITEFS_URL` added to `fly.toml` and `fly.uat.toml`
+- Proxy config for write-forwarding to primary
+
+**Offline migration tool (`co-web/src/bin/split_db.rs`)**
+- `split_db --data-dir /data [--dry-run]`
+- Idempotent: INSERT OR IGNORE, safe to re-run after interruption
+- Populates `project_universe_index` and clears meta.db entries table when complete
+
+**Entry routes updated**
+- `entry_routes.rs` and `vault_routes.rs`: all `EntryIndex` operations now use `universe_conn(slug)` instead of `meta.db` — entries are fetched from the correct per-universe DB
+
+### Added — CO-72: Doc-generator hooks + SQLite job queue
+
+**Doc-generator adapters (`co-web/src/doc_gen.rs`)**
+- `DocAdapter` trait: `fn run(source_dir, output_type, limits) -> Result<Vec<DocEntry>>`
+- Stub implementations for all v1 formats: scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc
+- `ResourceLimits`: wall-clock 5 min, 2 GB RAM, 1 GB output per job
+- `DocFormat::from_str` via `std::str::FromStr`; `run_adapter` dispatch function
+
+**SQLite job queue (`co-web/src/job_queue.rs`, migration v24)**
+- `jobs` table: `(id, universe_key, kind, payload, status, attempts, dedupe_key, created_at, run_at, started_at, completed_at, error)`
+- `enqueue_doc_gen`: idempotent submission — same `(universe, format, source_dir, adapter_version)` returns existing job ID
+- FIFO claim via `UPDATE … RETURNING` with `(run_at, created_at)` ordering; no universe starvation
+- Exponential backoff on failure (2^n min, capped 64 min); dead-letter after 5 attempts
+- In-process worker loop (`spawn_worker`) using `tokio::time::timeout` for wall-time enforcement
+- `doc_gen_error` / `doc_gen_error_at` columns on `universes` table for failure surfacing
+
+**API endpoints**
+- `POST /api/v1/universes/:slug/jobs/doc-gen` (owner-only): submit doc-gen job, returns `{ job_id }`
+- `GET /api/v1/universes/:slug/jobs/doc-gen/last-error` (owner-only): last failure message + timestamp
+
+**CO-77 compatibility fixes (co-web/src/storage.rs)**
+- `seed_template_universe`: writes entries to per-universe DB (universe pool) instead of meta.db
+- `reseed_template_content_pages`: same fix
+- `clone_universe_internal`: reads from source per-universe DB, writes to target per-universe DB + registers in `project_universe_index`
+- Migration v24 runs after v23; v25 (CO-77) follows
 ## [1.24.0] — 2026-04-30
 
 ### Added — CO-71: Per-universe schema validator + generic JSON entry storage
