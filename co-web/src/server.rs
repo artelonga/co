@@ -55,6 +55,8 @@ pub struct AppStateInner {
     pub plugin_registry: game_core::plugin::PluginRegistry,
     /// CRDT document rooms — keyed by `"slug:doc_path"`.
     pub doc_rooms: crate::ws::DocRoomManager,
+    /// CO-79: in-process LRU caching layer (manifest, theme CSS, query results).
+    pub cache: std::sync::Arc<crate::cache::CacheLayer>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -316,6 +318,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CO-43: Hidden dev board (admin only) ---
     let dev_board_api = crate::dev_board::router();
 
+    // --- CO-79: Cache metrics ---
+    let cache_api = Router::new().route("/stats", get(cache_stats_handler));
+
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
 
@@ -368,7 +373,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/uat", uat_api)
         // CO-46: public event ingestion + admin summary/export
         .nest("/api/v1/telemetry", telemetry_public)
-        .nest("/api/v1/admin", telemetry_admin);
+        .nest("/api/v1/admin", telemetry_admin)
+        // CO-79: cache hit/miss/eviction metrics
+        .nest("/api/v1/cache", cache_api);
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -737,6 +744,7 @@ pub async fn start_server(config: WebConfig) {
         game_storage,
         plugin_registry,
         doc_rooms: crate::ws::new_room_manager(),
+        cache: crate::cache::CacheLayer::new(),
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -852,6 +860,13 @@ async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
             disk: disk_status,
         }),
     )
+}
+
+// --- CO-79: Cache metrics ---
+
+/// GET /api/v1/cache/stats — hit rate, miss rate, eviction rate per cache layer.
+async fn cache_stats_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+    Json(state.cache.stats())
 }
 
 // --- Variant-aware static file serving ---
@@ -1822,6 +1837,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
         build_router(state, None)
     }

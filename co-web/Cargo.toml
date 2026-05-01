@@ -38,6 +38,7 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls", "cookies"], defa
 percent-encoding = "2"
 flate2 = "1.0"
 tar = "0.4"
+sha2 = "0.10"
 
 [[bin]]
 name = "migrate_quilombo"

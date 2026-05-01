@@ -5,6 +5,36 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-79: Caching layer — manifest, theme.css, hot queries + CDN strategy
+
+**`co-web/src/cache.rs`** — new in-process LRU caching layer:
+- `ManifestCache` — L1 LRU (10K entries) for parsed `_universe.yaml` manifests, with singleflight coalescing (N concurrent misses → 1 fill, all share the result)
+- `ThemeCssCache` — L1 LRU (10K entries) for generated CSS, keyed by ETag; natural invalidation when theme config changes
+- `QueryCache` — L1 LRU (10K entries) for query results, SHA-256 keyed by `{slug}:{hash(params+slug+manifest_hash)}`; universe-level invalidation via slug prefix
+- `CacheLayer` — combines all three; `invalidate_universe(slug)` clears manifest + query entries and broadcasts on in-process `tokio::sync::broadcast` channel
+- `CacheCounters` — lock-free atomic hit/miss/eviction counters per layer
+
+**Manifest cache integration** (`entry_routes.rs`, `vault_routes.rs`):
+- Manifest loaded once per request via `get_or_fill` (singleflight) instead of repeated disk reads
+- Invalidated when `_universe.yaml` is written via entry or vault API
+
+**Theme CSS Cache-Control** (`universe_routes.rs`):
+- `GET /:slug/theme.css`: changed from `no-cache` to `public, max-age=60, must-revalidate` (not immutable — no hashed filenames yet)
+- CSS served from L1 ThemeCssCache; generated once per ETag, served from memory on repeat requests
+
+**Cache invalidation** (`universe_routes.rs`):
+- `PUT /:slug` (universe name/description/visibility): invalidates manifest + query cache
+- `PUT /:slug/config` (theme preset/tokens): invalidates manifest + query cache
+
+**Metrics endpoint**: `GET /api/v1/cache/stats` — returns hit rate, miss rate, eviction rate per layer (manifest, theme_css, query)
+
+**Tests**: 8 new unit tests in `cache::tests`:
+- `manifest_repeat_read_under_1ms` — microbenchmark: 1000 LRU gets < 1ms total
+- `manifest_singleflight_one_fill` — stampede: 100 concurrent misses → exactly 1 fill call
+- `cache_layer_invalidation_broadcasts_slug` — pub/sub invalidation propagation
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3

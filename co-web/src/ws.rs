@@ -649,6 +649,7 @@ mod tests {
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
 
         let app = build_router(state, None);
@@ -721,6 +722,7 @@ mod tests {
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
 
         let app = build_router(state.clone(), None);

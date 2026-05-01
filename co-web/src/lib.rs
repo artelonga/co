@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod baseline;
+pub mod cache;
 pub mod config;
 pub mod dev_board;
 pub mod doc_gen;
