@@ -27,6 +27,7 @@ redb = "2"
 co = { path = "../core" }
 game-core = { path = "../game-core" }
 argon2 = { workspace = true }
+blake3 = { workspace = true }
 rand = { workspace = true }
 nanoid = { workspace = true }
 xxhash-rust = { workspace = true }

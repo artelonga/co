@@ -1,0 +1,5 @@
+- flag_key: home_v2_layout
+  description: "Home page layout redesign — control keeps current layout, treatment shows new v2 layout"
+  variants: '["control","treatment"]'
+  salt: "home_v2_layout_v1"
+  enabled: true

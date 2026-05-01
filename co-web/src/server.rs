@@ -294,6 +294,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     // --- Telemetry admin routes (CO-46) ---
     let telemetry_admin = crate::telemetry::admin_router()
+        .layer(axum::Extension(github_token_cache.clone()))
+        .layer(axum::Extension(allowed_admins.clone()));
+
+    // --- A/B flag admin routes (CO-121) ---
+    let ab_admin = crate::ab_routes::admin_router()
         .layer(axum::Extension(github_token_cache))
         .layer(axum::Extension(allowed_admins));
 
@@ -709,6 +714,16 @@ pub async fn start_server(config: WebConfig) {
         }
     }
 
+    // CO-121: seed A/B feature flags from embedded YAML (idempotent).
+    {
+        let seed_storage = Storage::new(&config.data_dir);
+        if let Err(e) = crate::ab::seed_flags(seed_storage.conn()) {
+            tracing::error!("CO-121: failed to seed feature flags: {e}");
+        } else {
+            tracing::info!("CO-121: feature flags seeded");
+        }
+    }
+
     let storage = Storage::new(&config.data_dir);
     let experiment = ExperimentStore::new(&config.data_dir);
     let auth_store = AuthStore::new(std::path::Path::new(&config.data_dir))
@@ -971,6 +986,32 @@ async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Re
     let variant = extract_variant(&headers, &state.config);
     let embed_path = format!("variants/{}/index.html", variant);
     let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
+
+    // CO-121: assign + expose home_v2_layout for each visitor (fire-and-forget).
+    let visitor_token = headers
+        .get(header::COOKIE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|part| {
+                part.trim()
+                    .strip_prefix("visitante_id=")
+                    .map(|v| v.to_string())
+            })
+        })
+        .unwrap_or_else(|| nanoid::nanoid!(24));
+    {
+        let state_clone = Arc::clone(&state);
+        let uid = visitor_token.clone();
+        tokio::spawn(async move {
+            if let Ok(storage) = state_clone.storage.lock()
+                && let Ok(Some(ab_variant)) =
+                    crate::ab::assign(storage.conn(), &uid, "home_v2_layout")
+            {
+                let _ =
+                    crate::ab::expose(storage.conn(), &uid, "home_v2_layout", &ab_variant, None);
+            }
+        });
+    }
 
     if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
         let mut response = (
