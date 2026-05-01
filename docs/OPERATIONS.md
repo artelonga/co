@@ -450,3 +450,164 @@ terraform init && terraform apply
 No changes needed to the Fly app. The origin continues to receive requests
 from Cloudflare IPs. Ensure `Cache-Control: private, no-store` is set on
 all auth responses (already the case in co-web auth handlers).
+
+---
+
+## ClickHouse analytics (CO-123)
+
+Single-node ClickHouse on Fly for ad-hoc analytics.  Bridges the gap between
+WAE (cheap, real-time, low-cardinality) and the Phase 3 Iceberg lake.
+
+### Architecture
+
+```
+Cloudflare WAE (co_telemetry dataset)
+    │
+    │  daily export at 04:07 UTC
+    │  (co-clickhouse-export cron app)
+    ▼
+co_analytics.wae_events   ← MergeTree, partitioned by day, TTL 90 days
+    │
+    │  ad-hoc queries (admin only via flyctl proxy)
+    ▼
+clickhouse-client / HTTP API
+
+Phase 3 (future): icebergS3('r2://co-lakehouse/...') reads directly
+```
+
+### Fly apps
+
+| App | Purpose |
+|-----|---------|
+| `co-clickhouse` | ClickHouse server — 4 vCPU / 8 GB / 50 GB Volume |
+| `co-clickhouse-export` | Daily WAE → ClickHouse export cron |
+
+### One-time setup
+
+```bash
+# 1. Create apps and volume
+flyctl apps create co-clickhouse --org personal
+flyctl volumes create co_clickhouse_data --size 50 --region gru -a co-clickhouse
+
+flyctl apps create co-clickhouse-export --org personal
+
+# 2. Set secrets
+flyctl secrets set CH_ADMIN_PASSWORD=$(openssl rand -base64 32) -a co-clickhouse
+
+flyctl secrets set -a co-clickhouse-export \
+  CF_ACCOUNT_ID=<cloudflare-account-id> \
+  CF_API_TOKEN=<cf-analytics-read-token> \
+  CH_PASSWORD=<same-password-as-above>
+
+# 3. Deploy
+flyctl deploy --config infra/clickhouse/fly.toml
+flyctl deploy --config infra/clickhouse-export-cron/fly.toml
+```
+
+### Running queries
+
+Open a proxy tunnel to ClickHouse (keep this terminal open):
+
+```bash
+flyctl proxy 8123:8123 -a co-clickhouse
+```
+
+Then query via `clickhouse-client` or plain HTTP:
+
+```bash
+# clickhouse-client (native protocol — open a second proxy on port 9000)
+flyctl proxy 9000:9000 -a co-clickhouse
+clickhouse-client --host 127.0.0.1 --port 9000 --user co_admin --password <pass>
+
+# HTTP interface
+curl -u co_admin:<pass> 'http://127.0.0.1:8123/?query=SELECT+count()+FROM+co_analytics.wae_events'
+```
+
+See `docs/analytics/sample-queries.sql` for ready-to-run queries:
+
+- Top-10 universes by activity (last 24 h)
+- Error rate by deploy / status code (last 7 days)
+- 7-day and 30-day visitor retention
+
+### Reading results
+
+Query results stream to stdout as TSV by default.  For JSON:
+
+```bash
+curl -u co_admin:<pass> \
+  'http://127.0.0.1:8123/?query=SELECT+...&default_format=JSONEachRow'
+```
+
+### WAE export job
+
+The `co-clickhouse-export` app runs `scripts/wae-to-clickhouse.sh` daily at
+04:07 UTC.  Check logs:
+
+```bash
+flyctl logs -a co-clickhouse-export --no-tail
+```
+
+Run manually for a specific date:
+
+```bash
+flyctl ssh console -a co-clickhouse-export \
+  -C "EXPORT_DATE=2026-05-01 /scripts/wae-to-clickhouse.sh"
+```
+
+### Volume backup
+
+ClickHouse's `BACKUP` command streams a consistent snapshot to any S3-
+compatible target.  Run from inside the proxy session:
+
+```bash
+# Back up to Cloudflare R2
+curl -u co_admin:<pass> 'http://127.0.0.1:8123/' --data \
+  "BACKUP DATABASE co_analytics TO S3(
+    'https://<ACCOUNT_ID>.r2.cloudflarestorage.com/co-clickhouse-backups/$(date +%Y%m%d)/',
+    '<R2_ACCESS_KEY>', '<R2_SECRET_KEY>'
+  )"
+
+# Restore
+curl -u co_admin:<pass> 'http://127.0.0.1:8123/' --data \
+  "RESTORE DATABASE co_analytics FROM S3(
+    'https://<ACCOUNT_ID>.r2.cloudflarestorage.com/co-clickhouse-backups/20260501/',
+    '<R2_ACCESS_KEY>', '<R2_SECRET_KEY>'
+  )"
+```
+
+For a full volume snapshot (all databases), replace `DATABASE co_analytics`
+with `ALL`.
+
+### Iceberg table function — Phase 3 smoke test
+
+The `icebergS3()` table function is enabled in ClickHouse 24.x.  Run the
+automated smoke test to verify end-to-end connectivity to R2:
+
+```bash
+# Step 1: create an empty Iceberg table on R2 (once)
+S3_ENDPOINT=https://<ACCOUNT_ID>.r2.cloudflarestorage.com \
+S3_BUCKET=co-lakehouse \
+AWS_ACCESS_KEY_ID=<R2_ACCESS_KEY> \
+AWS_SECRET_ACCESS_KEY=<R2_SECRET_KEY> \
+python3 scripts/co-export.py
+
+# Step 2: open proxy (separate terminal)
+flyctl proxy 8123:8123 -a co-clickhouse
+
+# Step 3: run smoke test
+CH_PASSWORD=<pass> \
+R2_ACCOUNT_ID=<id> \
+R2_ACCESS_KEY=<key> \
+R2_SECRET_KEY=<secret> \
+bash infra/clickhouse/iceberg-smoke-test.sh
+# → [iceberg-smoke] PASS — icebergS3() function is operational (Phase 3 ready)
+```
+
+### Logs and diagnostics
+
+```bash
+flyctl logs -a co-clickhouse              # ClickHouse live logs
+flyctl logs -a co-clickhouse-export       # Export cron live logs
+flyctl status -a co-clickhouse            # Machine state
+flyctl ssh console -a co-clickhouse       # Shell access
+```

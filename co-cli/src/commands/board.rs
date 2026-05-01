@@ -16,6 +16,8 @@ pub fn run(port: u16, data: String, static_dir: String, default_variant: String)
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
+        wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
+        wae_api_key: std::env::var("WAE_API_KEY").ok(),
     };
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");
