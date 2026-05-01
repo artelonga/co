@@ -6,6 +6,7 @@ members = [
     "co-web",
     "co",
     "game-core",
+    "co-agent",
     # Developer tooling — kept out of `default-members` so user `cargo install` of
     # co-cli does NOT pull these. Build explicitly: `cargo build -p co-auto`.
     "dev/co-auto",

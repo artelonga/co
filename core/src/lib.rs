@@ -36,6 +36,7 @@
 //! graph.define("my-project", "sprint", "A fixed time period for work");
 //! ```
 
+pub mod agent;
 pub mod archive;
 pub mod config;
 pub mod content;

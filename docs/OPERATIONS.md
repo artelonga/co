@@ -259,6 +259,152 @@ A scheduled agent handles this — see the `schedule` entry in `.claude/settings
 
 ---
 
+## Local-source backup — external HD (CO-108)
+
+Operator-driven, point-in-time cold-storage of all four content universe sources.
+Complements the S3 ops backup (CO-104) — protects the local source ground truth that
+Yuri authors against, not just the deployed state.
+
+| Script | Purpose |
+|--------|---------|
+| [`scripts/backup-to-disk.sh`](../scripts/backup-to-disk.sh) | Archive one or more universes to an external HD |
+| [`scripts/restore-from-disk.sh`](../scripts/restore-from-disk.sh) | Restore a `.tar.zst` archive into a local Co data dir |
+
+### Archive format
+
+Each universe is a self-contained `.tar.zst` bundle:
+
+```
+<universe_key>/
+├── manifest.json    — provenance: source path, commit, sha256, schema version
+├── co.db            — SQLite: universe row (+ entries for prod/uat mode)
+├── seed.sql         — one-shot universe registration (local mode only)
+├── entries/         — full markdown source tree
+└── README.md        — human-readable provenance
+```
+
+Bundles on the external HD are organized by run date:
+
+```
+/Volumes/<drive>/co-archive/
+├── README.md
+├── 2026-04-30/
+│   ├── manifest.json              — global manifest with sha256 of each bundle
+│   ├── quilomboaraucaria.tar.zst
+│   ├── qa.tar.zst
+│   ├── artelonga.tar.zst
+│   └── rfq.tar.zst
+└── 2026-05-07/
+    └── …
+```
+
+Compression: zstd level 19. Markdown-heavy content compresses ≈ 8-12×.
+
+### Taking a local-source backup
+
+Connect external HD, then:
+
+```bash
+# Archive all four universe sources to the HD (local mode — no server required)
+bash scripts/backup-to-disk.sh /Volumes/Backup --from local
+
+# Archive from deployed prod state (requires flyctl + prod access)
+bash scripts/backup-to-disk.sh /Volumes/Backup --from prod
+
+# Archive from UAT
+bash scripts/backup-to-disk.sh /Volumes/Backup --from uat
+```
+
+| Mode | What gets archived |
+|------|-------------------|
+| `--from local` | Local markdown files only; synthetic co.db; useful before first deploy |
+| `--from prod` | Prod's deployed SQLite + markdown files via `flyctl ssh` |
+| `--from uat` | UAT's deployed state |
+
+### Restoring from an HD archive
+
+```bash
+# Restore archive into a target data directory
+bash scripts/restore-from-disk.sh \
+    /Volumes/Backup/co-archive/2026-04-30/qa.tar.zst \
+    /tmp/restored-co
+
+# Boot co-web against the restored data
+DATA_DIR=/tmp/restored-co/data cargo run -p co-web
+# → universe accessible at http://localhost:3000/co/qa
+```
+
+The restore script:
+1. Verifies SHA256 against the sidecar manifest (bit-rot check)
+2. Checks `co_db_schema_version` compatibility (fails loud if too new)
+3. Places `co.db` and `seed.sql` in the target data dir
+4. Copies `entries/` to `data/universes/<key>/`
+
+On first boot after restore:
+- co-web renames `co.db → meta.db` (CO-77)
+- `seed.sql` registers the universe row, then is auto-deleted
+- For local-mode archives: board is empty until re-uploaded via vault API
+
+### Verifying archive integrity
+
+```bash
+# Re-hash all archives in a run and compare against stored sha256
+bash scripts/backup-to-disk.sh /Volumes/Backup --verify 2026-04-30
+# → [artelonga] OK — artelonga.tar.zst (41 KB)
+# → [qa] OK — qa.tar.zst (311 KB)
+# → Verify result: 4 OK, 0 FAILED
+```
+
+Exits non-zero on any hash mismatch — safe to run in a cron job.
+
+### Weekly cron (optional)
+
+Run at a cadence that matches your authoring frequency. Example launchd plist
+(`~/Library/LaunchAgents/com.artelonga.co-backup.plist`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.artelonga.co-backup</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>/Users/artelonga/projects/co/scripts/backup-to-disk.sh</string>
+    <string>/Volumes/Backup</string>
+    <string>--from</string>
+    <string>local</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key><integer>7</integer>  <!-- Sunday -->
+    <key>Hour</key><integer>11</integer>
+    <key>Minute</key><integer>0</integer>
+  </dict>
+  <key>StandardOutPath</key><string>/tmp/co-backup.log</string>
+  <key>StandardErrorPath</key><string>/tmp/co-backup.err</string>
+</dict>
+</plist>
+```
+
+Load: `launchctl load ~/Library/LaunchAgents/com.artelonga.co-backup.plist`
+
+### Storage budget
+
+| Universe | Raw .md | Compressed (zstd-19) |
+|---|---|---|
+| quilomboaraucaria | ~600 KB | ~50 KB |
+| qa | ~1.2 MB | ~100 KB |
+| artelonga | ~3 MB | ~250 KB |
+| rfq | ~280 KB | ~40 KB |
+| **Per run** | **~5 MB** | **~440 KB** |
+
+50 weekly runs/year ≈ 22 MB/year. Comfortably fits on any external HD for decades.
+
+---
+
 ## Edge / CDN (CO-117)
 
 `co.artelonga.com.br` runs behind Cloudflare CDN (proxied DNS, cache rules per spec).
