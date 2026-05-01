@@ -67,6 +67,8 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         plugin_registry: game_core::plugin::PluginRegistry::new(),
         doc_rooms: co_web::ws::new_room_manager(),
         cache: co_web::cache::CacheLayer::new(),
+        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+        wae: co_web::wae::WaeEmitter::new(None, None),
     });
 
     build_router(state, None)
@@ -1070,6 +1072,8 @@ fn build_blank_test_router(dir: &std::path::Path) -> (axum::Router, AppState) {
         plugin_registry: game_core::plugin::PluginRegistry::new(),
         doc_rooms: co_web::ws::new_room_manager(),
         cache: co_web::cache::CacheLayer::new(),
+        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+        wae: co_web::wae::WaeEmitter::new(None, None),
     });
     let router = build_router(state.clone(), None);
     (router, state)

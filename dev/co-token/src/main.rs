@@ -79,7 +79,10 @@ fn main() -> ExitCode {
             }
             match entry.set_password(&value) {
                 Ok(()) => {
-                    eprintln!("co-token: stored '{name}' (service='{SERVICE}', {} bytes)", value.len());
+                    eprintln!(
+                        "co-token: stored '{name}' (service='{SERVICE}', {} bytes)",
+                        value.len()
+                    );
                     ExitCode::SUCCESS
                 }
                 Err(e) => {

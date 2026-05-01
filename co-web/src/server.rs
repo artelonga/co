@@ -57,6 +57,10 @@ pub struct AppStateInner {
     pub doc_rooms: crate::ws::DocRoomManager,
     /// CO-79: in-process LRU caching layer (manifest, theme CSS, query results).
     pub cache: std::sync::Arc<crate::cache::CacheLayer>,
+    /// CO-80: token-bucket rate limiter shared across request handlers.
+    pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
+    /// CO-118: Workers Analytics Engine emitter (no-op when env vars absent).
+    pub wae: Arc<crate::wae::WaeEmitter>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -380,6 +384,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-46: public event ingestion + admin summary/export
         .nest("/api/v1/telemetry", telemetry_public)
         .nest("/api/v1/admin", telemetry_admin)
+        .nest("/api/v1/ab", ab_admin)
         // CO-79: cache hit/miss/eviction metrics
         .nest("/api/v1/cache", cache_api);
 
@@ -771,6 +776,8 @@ pub async fn start_server(config: WebConfig) {
         plugin_registry,
         doc_rooms: crate::ws::new_room_manager(),
         cache: crate::cache::CacheLayer::new(),
+        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+        wae,
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -1910,6 +1917,8 @@ mod tests {
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
             cache: crate::cache::CacheLayer::new(),
+            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
         build_router(state, None)
     }

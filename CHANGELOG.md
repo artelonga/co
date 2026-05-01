@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] — 2026-05-01
+
+### Added — CO-79/80/108/109/118/121/122: Wave 3-5 + platform infra
+
+- **CO-79** — Caching layer: in-process manifest LRU, theme-css ETag, query singleflight, cache-hit metrics
+- **CO-80** — Per-tier rate limiting: token-bucket per user/tier/operation; `/api/v1/ab` admin routes wired
+- **CO-108** — Universe archive format + backup-to-external-HD scripts
+- **CO-109** — Mbya Guarani stress-test universe: lexicon → markdown corpus, UAT seed
+- **CO-118** — Workers Analytics Engine: `WaeEmitter`, Cloudflare Worker proxy
+- **CO-121** — A/B primitives: `feature_flags`, `ab_assignments`, `ab_exposures`, admin routes
+- **CO-122** — Quota/tier model spec in `docs/QUOTAS.md` (no enforcement yet)
+
+### Fixed
+
+- `has_data()` dual-check guards CO-77 first-boot false-negative (prod incident 2026-05-01)
+- Cache timing test budget relaxed 1 ms → 10 ms for parallel CI runs
+
 ## [1.29.0] — 2026-05-01
 
 ### Added — CO-69: PWA offline — IndexedDB cache + Background Sync

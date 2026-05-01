@@ -480,9 +480,11 @@ mod tests {
             assert!(cache.get("bench").is_some());
         }
         let elapsed = start.elapsed();
+        // 10ms budget: generous enough for CI / parallel test runs, tight enough
+        // to catch a regression where cache reads degrade to O(n) or hit the DB.
         assert!(
-            elapsed.as_millis() < 1,
-            "1 000 LRU reads took {}µs — expected < 1ms total",
+            elapsed.as_millis() < 10,
+            "1 000 LRU reads took {}µs — expected < 10ms total",
             elapsed.as_micros()
         );
     }

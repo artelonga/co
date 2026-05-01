@@ -1,0 +1,21 @@
+services:
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # Web console  (http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: co-admin
+      MINIO_ROOT_PASSWORD: co-secret-local
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  minio-data:

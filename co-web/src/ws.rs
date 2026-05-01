@@ -652,6 +652,8 @@ mod tests {
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
             cache: crate::cache::CacheLayer::new(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
 
         let app = build_router(state, None);
@@ -727,6 +729,8 @@ mod tests {
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
             cache: crate::cache::CacheLayer::new(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
 
         let app = build_router(state.clone(), None);

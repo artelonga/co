@@ -1352,6 +1352,8 @@ mod tests {
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
             cache: crate::cache::CacheLayer::new(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
         let router = build_router(state, None);
         let tmp = tempdir().unwrap(); // keep alive
