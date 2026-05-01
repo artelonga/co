@@ -13,7 +13,7 @@
 //
 // Bump CACHE_NAME on every behaviour change so existing clients purge old
 // caches when the new SW activates.
-const CACHE_NAME = 'co-v4-offline';
+const CACHE_NAME = 'co-v5-offline';
 const STATIC_ASSETS = [
   '/shared/manifest.json',
   '/favicon.svg',
@@ -214,10 +214,14 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // HTML / JS / CSS: network-first so deploys are picked up on next request.
-  // Falls back to cache only if the network errors (offline).
+  // HTML / JS / CSS + SPA routes: network-first so deploys are picked up on
+  // next request. Falls back to cache only if the network errors (offline).
+  // /co and /co/* are SPA navigation routes — they return index.html and must
+  // be network-first so stale HTML doesn't block post-deploy updates.
   const isAppShell =
     url.pathname === '/' ||
+    url.pathname === '/co' ||
+    url.pathname.startsWith('/co/') ||
     url.pathname.endsWith('.html') ||
     url.pathname.endsWith('.js') ||
     url.pathname.endsWith('.css');

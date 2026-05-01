@@ -945,7 +945,7 @@
         // with a 16px indent + chevron. Orphan children (parent not in the
         // user's universes) fall back to top-level rendering.
         let universeHtml = '';
-        if (state.userUniverses && state.userUniverses.length > 1) {
+        if (state.userUniverses && state.userUniverses.length >= 1) {
             const universes = state.userUniverses;
             const seen = new Set(universes.map(u => u.key));
             const childrenByParent = {};
@@ -3118,11 +3118,14 @@
 
         try { await loadEditorBundle(); } catch (_) {}
 
-        // Fetch full entry if body is not yet available (e.g. called outside renderConteudo)
+        // Fetch full entry if body is not yet available (e.g. called outside renderConteudo).
+        // _universeSlug override lets callers pin the fetch to a specific universe
+        // (e.g. template legal pages opened from any user's context).
         let fullEntry = entry;
-        if (fullEntry.body === undefined && fullEntry.path && state.currentUniverseSlug) {
+        const fetchUniverse = entry._universeSlug || state.currentUniverseSlug;
+        if (fullEntry.body === undefined && fullEntry.path && fetchUniverse) {
             try {
-                const data = await apiFetch(`/api/v1/universes/${state.currentUniverseSlug}/entries/${encodeURIComponent(fullEntry.path)}`);
+                const data = await apiFetch(`/api/v1/universes/${fetchUniverse}/entries/${encodeURIComponent(fullEntry.path)}`);
                 if (data) fullEntry = data;
             } catch (_) {}
         }
@@ -5315,7 +5318,11 @@
             try { localStorage.setItem('co_cookie_consent', '1'); } catch (_) {}
         }
         const entryPath = `content/${page}.md`;
-        openZoomModal({ path: entryPath, body: undefined }, false);
+        // ?page= links always point at template universe content (legal pages,
+        // sobre, dados-rastreados). Fetch from template regardless of which
+        // universe the logged-in user landed on.
+        const fetchSlug = 'template';
+        openZoomModal({ path: entryPath, body: undefined, _universeSlug: fetchSlug }, false);
         const clean = new URL(window.location.href);
         clean.searchParams.delete('page');
         window.history.replaceState({}, '', clean.toString());

@@ -13,7 +13,7 @@
 //
 // Bump CACHE_NAME on every behaviour change so existing clients purge old
 // caches when the new SW activates.
-const CACHE_NAME = 'co-v4-offline';
+const CACHE_NAME = 'co-v5-offline';
 const STATIC_ASSETS = [
   '/shared/manifest.json',
   '/favicon.svg',
