@@ -104,6 +104,7 @@ pub async fn list_universes(
 pub async fn create_universe(
     State(state): State<AppState>,
     user_id: UserId,
+    headers: HeaderMap,
     Json(body): Json<CreateUniverse>,
 ) -> Result<impl IntoResponse, AppError> {
     validate_universe_key(&body.key)?;
@@ -115,13 +116,23 @@ pub async fn create_universe(
             "Universe name must be 100 characters or fewer".into(),
         ));
     }
-    let mut storage = lock_storage(&state)?;
+    let storage = lock_storage(&state)?;
     if storage.get_universe(&body.key).is_some() {
         return Err(AppError::Conflict(format!(
             "Universe key '{}' is already taken",
             body.key
         )));
     }
+
+    // CO-80: check universe count quota for this user's tier.
+    let tier = storage
+        .get_user_by_id(&user_id.0)
+        .map(|u| crate::rate_limit::Tier::parse(&u.tier))
+        .unwrap_or(crate::rate_limit::Tier::User);
+    crate::rate_limit::check_universe_quota(&storage, &user_id.0, tier, &headers)?;
+    drop(storage);
+
+    let mut storage = lock_storage(&state)?;
     let universe = storage.create_universe(body, &user_id.0)?;
     Ok((StatusCode::CREATED, Json(universe)))
 }
