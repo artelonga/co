@@ -9,7 +9,15 @@
 
 ---
 
-> Architecture overview: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+## Documentação
+
+| Documento | Quando ler |
+|-----------|-----------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Entender componentes, fluxo de dados, modelo de acesso e temas |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | Deploy, logs, backup, rotação de segredos e recovery |
+| [docs/ONBOARDING.md](docs/ONBOARDING.md) | Configurar e rodar o CO localmente a partir do código-fonte |
+
+---
 
 ## Quick Start
 
