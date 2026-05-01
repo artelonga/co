@@ -138,6 +138,12 @@ fn get_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
+/// CO-97 Option A: canonical visitor token — prefers `al_vid` (marketing apex
+/// cookie) so both surfaces share one token; falls back to `visitante_id`.
+fn get_visitor_token(headers: &HeaderMap) -> Option<String> {
+    get_cookie(headers, "al_vid").or_else(|| get_cookie(headers, "visitante_id"))
+}
+
 fn extract_ip_from_headers(headers: &HeaderMap) -> String {
     headers
         .get("x-forwarded-for")
@@ -404,7 +410,7 @@ pub async fn telemetry_middleware(
 
     let ip = extract_ip_from_headers(req.headers());
     let ip_hash = hash_ip_daily(&ip);
-    let visitor_token = get_cookie(req.headers(), "visitante_id");
+    let visitor_token = get_visitor_token(req.headers());
     let session_id = get_cookie(req.headers(), "co_session");
     let referrer = req
         .headers()
@@ -420,11 +426,24 @@ pub async fn telemetry_middleware(
         .map(String::from);
 
     let start = Instant::now();
-    let response = next.run(req).await;
+    let mut response = next.run(req).await;
     let duration_ms = start.elapsed().as_millis() as i64;
 
     let token = visitor_token.unwrap_or_else(|| nanoid::nanoid!(24));
     let props = referrer.map(|r| serde_json::json!({"referrer": r}));
+
+    // CO-97: set apex-scoped al_vid so marketing site JS reads the same token.
+    // HttpOnly intentionally omitted — analytics-only token, no auth role.
+    // See docs/decisions/001-visitor-token-unification.md.
+    if let Ok(cookie_val) = format!(
+        "al_vid={token}; Domain=.artelonga.com.br; Path=/; SameSite=Lax; Secure; Max-Age=31536000"
+    )
+    .parse()
+    {
+        response
+            .headers_mut()
+            .append(header::SET_COOKIE, cookie_val);
+    }
     // Snapshot universe_id for WAE before universe_key is moved into EventRow.
     let wae_universe_id = universe_key.as_deref().unwrap_or("global").to_string();
 
@@ -502,7 +521,7 @@ pub async fn track_event_handler(
         .unwrap_or("")
         .to_string();
 
-    let visitor_token = get_cookie(&headers, "visitante_id");
+    let visitor_token = get_visitor_token(&headers);
     let ip_hash = hash_ip_daily(&extract_ip_from_headers(&headers));
 
     let ev = EventRow {

@@ -50,8 +50,9 @@ Esta página lista **TODOS** os dados que o Co coleta na instância gerenciada p
 | `co_named_palette` | Tema visual escolhido | 1 ano |
 | `co_local_universe` | Universo anônimo local (slug) | Sessão |
 | `co_user_palette` | Override de tema do usuário | 1 ano |
+| `al_vid` | Token de visitante para analytics — sem papel de autenticação, sem PII; unifica atribuição entre o site de marketing e o Co (ADR-001). Escopo: `.artelonga.com.br`. Legível por JS. | 1 ano |
 
-**Não usamos:** cookies de terceiros, fingerprinting, supercookies, evercookies.
+**Não usamos:** fingerprinting, supercookies, evercookies, cookies de rastreamento de terceiros.
 
 ## 4. Logs técnicos
 
