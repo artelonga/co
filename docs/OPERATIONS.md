@@ -163,12 +163,71 @@ flyctl ssh console -a co-artelonga   # Shell access
 
 ## Backup & restore (CO-104 + CO-119)
 
-### Taking a backup
+Two scripts handle the full backup lifecycle:
+
+| Script | Purpose |
+|--------|---------|
+| [`scripts/backup-prod.sh`](../scripts/backup-prod.sh) | Daily S3 snapshot of SQLite + `universes/` |
+| [`scripts/restore.sh`](../scripts/restore.sh) | Restore from S3 date or local file into a Fly app |
+
+### S3 key layout
+
+```
+s3://artelonga-co-backups/
+  co.db/<YYYYMMDD-HHMMSS>.db
+  universes/<YYYYMMDD-HHMMSS>.tar.gz
+```
+
+Lifecycle: transition to S3-IA after 30 days, delete after 365 days
+(`infra/s3/lifecycle.json`).
+
+### Taking an on-demand backup
 
 ```bash
-./scripts/backup.sh prod    # saves to backups/co-prod-YYYY-MM-DD_HHMMSS.db
-./scripts/backup.sh uat
+APP=co-artelonga BUCKET=artelonga-co-backups ./scripts/backup-prod.sh
+# → [backup] uploaded to s3://artelonga-co-backups — done (date=20260501-031700)
 ```
+
+### Restoring a backup
+
+```bash
+# Restore from S3 into UAT (safe — no prod guard triggered).
+BUCKET=artelonga-co-backups ./scripts/restore.sh 20260501-031700 co-artelonga-uat
+
+# Restore from S3 into PROD (requires explicit confirmation flag).
+BUCKET=artelonga-co-backups ./scripts/restore.sh 20260501-031700 co-artelonga \
+  --yes-i-want-to-overwrite-prod
+
+# Restore a local .db file (used by restore-drill.sh).
+./scripts/restore.sh backups/co-prod-20260501_031700.db co-artelonga-uat
+```
+
+The script refuses to target `co-artelonga` (production) without the explicit
+`--yes-i-want-to-overwrite-prod` flag — protecting against accidental prod wipes.
+
+### Cron automation
+
+**Option A (primary) — Fly app `co-backup-cron`:**
+
+See `infra/backup-cron/`. One-time setup:
+
+```bash
+flyctl apps create co-backup-cron --org personal
+flyctl secrets set -a co-backup-cron \
+  FLY_API_TOKEN=<token> \
+  AWS_ACCESS_KEY_ID=<key> \
+  AWS_SECRET_ACCESS_KEY=<secret>
+flyctl deploy --config infra/backup-cron/fly.toml
+```
+
+The app runs `crond` in the foreground and fires `scripts/backup-prod.sh`
+daily at 03:17 UTC. Logs stream via `flyctl logs -a co-backup-cron`.
+
+**Option B (fallback) — GitHub Actions:**
+
+See `.github/workflows/backup.yml`. Requires repository secrets:
+`BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `FLY_API_TOKEN`.
+Trigger manually via `workflow_dispatch` or let the daily `cron:` schedule fire.
 
 ### Running a restore drill
 
@@ -189,11 +248,14 @@ OK  drill=co-drill-20260501-120000  date=20260430  restore=1  health=ok  univ=5 
 Run `./tools/restore-drill.sh` once per quarter (Jan / Apr / Jul / Oct).
 A scheduled agent handles this — see the `schedule` entry in `.claude/settings.local.json`.
 
-### S3 backups (future — CO-104 full impl)
+### First-run checklist
 
-Set `CO_BACKUP_BUCKET=artelonga-co-backups` and ensure AWS credentials are
-available. `scripts/restore.sh` will pull from S3 automatically when the env
-var is set and the local `backups/` directory has no match.
+1. Run `infra/s3/setup.sh` to create the bucket and apply the lifecycle policy.
+2. Generate a dedicated IAM user (PutObject + GetObject only); store creds in cron app secrets.
+3. Run `scripts/backup-prod.sh` manually; verify both artifacts appear in S3.
+4. Run `scripts/restore.sh <date> co-artelonga-uat`; smoke-test UAT.
+5. Deploy the cron app (Option A) or enable the GH Actions workflow (Option B).
+6. After the first automated run, confirm the new objects appear in S3.
 
 ---
 

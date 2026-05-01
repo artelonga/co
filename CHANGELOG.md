@@ -5,6 +5,25 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] — 2026-05-01
+
+### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
+
+**Scripts**
+- `scripts/backup-prod.sh` — atomic SQLite snapshot via `.backup` + `universes/` tarball, uploads both to S3 (`co.db/<date>.db`, `universes/<date>.tar.gz`); idempotent, no interactive prompts
+- `scripts/restore.sh` — restores from S3 (date mode) or local file; added **production safety guard**: fails loud if target is `co-artelonga` without `--yes-i-want-to-overwrite-prod`; restores both SQLite and `universes/` tarball when pulling from S3
+
+**Cron automation**
+- Option A: `infra/backup-cron/` — Alpine Fly app running `crond` at 03:17 UTC; self-contained image with `flyctl` + `aws-cli`; `fly.toml` + `Dockerfile` + `entrypoint.sh`
+- Option B: `.github/workflows/backup.yml` — GitHub Actions daily cron at 03:17 UTC; `workflow_dispatch` for on-demand runs; requires `BACKUP_AWS_ACCESS_KEY_ID`, `BACKUP_AWS_SECRET_ACCESS_KEY`, `FLY_API_TOKEN` secrets
+
+**Infrastructure**
+- `infra/s3/lifecycle.json` — S3 lifecycle: STANDARD_IA after 30 days, delete after 365 days
+- `infra/s3/setup.sh` — idempotent bucket setup: create, block public access, SSE-S3 encryption, lifecycle
+
+**Documentation**
+- `docs/OPERATIONS.md` — "Backup & restore" section rewritten with full runbook: S3 layout, on-demand backup, restore with prod guard, cron options, restore-drill, first-run checklist
+
 ## [1.27.0] — 2026-04-30
 
 ### Added — CO-73: Temporal model — first-class semantic dates (event_at, due_at, scheduled_at, …)
