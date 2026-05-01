@@ -22,29 +22,44 @@ use crate::server::AppState;
 // Manifest validation helpers
 // ---------------------------------------------------------------------------
 
-/// Load and parse `_universe.yaml` from `universe_root`.
-/// Returns `None` if the file does not exist or fails to parse.
+/// Load `_universe.yaml` from disk without caching.
 fn load_manifest(universe_root: &std::path::Path) -> Option<co::manifest::Manifest> {
-    let path = universe_root.join(co::manifest::MANIFEST_FILENAME);
-    let bytes = std::fs::read(&path).ok()?;
+    let bytes = std::fs::read(universe_root.join(co::manifest::MANIFEST_FILENAME)).ok()?;
     co::manifest::parse(&bytes).ok().map(|r| r.manifest)
+}
+
+/// CO-79: Load manifest from the L1 cache; fall back to disk on miss and insert into cache.
+///
+/// Uses singleflight coalescing via `ManifestCache::get_or_fill` so that N
+/// concurrent misses for the same slug result in exactly one disk read.
+async fn load_manifest_cached(
+    state: &AppState,
+    slug: &str,
+    universe_root: &std::path::Path,
+) -> Option<std::sync::Arc<co::manifest::Manifest>> {
+    let root = universe_root.to_path_buf();
+    state
+        .cache
+        .manifest
+        .get_or_fill(slug.to_string(), || async move { load_manifest(&root) })
+        .await
 }
 
 /// Validate `frontmatter` against the manifest's content type for `entry_type`.
 ///
 /// Returns `Ok(())` when:
-/// - No `_universe.yaml` is present (legacy universe).
+/// - `manifest` is `None` (no `_universe.yaml`).
 /// - The manifest has no schema for `entry_type`.
 /// - The payload passes all schema checks.
 ///
 /// Returns `Err(AppError::UnprocessableEntity)` with a field-path message
 /// when validation fails.
 fn validate_against_manifest(
-    universe_root: &std::path::Path,
+    manifest: Option<&co::manifest::Manifest>,
     entry_type: &str,
     frontmatter: &JsonValue,
 ) -> Result<(), AppError> {
-    let manifest = match load_manifest(universe_root) {
+    let manifest = match manifest {
         Some(m) => m,
         None => return Ok(()),
     };
@@ -328,17 +343,25 @@ pub async fn create_entry(
         storage.universe_root(&slug)
     };
 
+    // CO-79: load manifest once from L1 cache (singleflight stampede protection).
+    let manifest_arc = load_manifest_cached(&state, &slug, &universe_root).await;
+
     // CO-71: validate frontmatter against manifest schema before writing.
     let entry_type = body
         .frontmatter
         .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    validate_against_manifest(&universe_root, entry_type, &body.frontmatter)?;
+    validate_against_manifest(manifest_arc.as_deref(), entry_type, &body.frontmatter)?;
 
     // Write .md file
     let entry = make_entry(&body.path, body.frontmatter.clone(), &body.body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // If the manifest file itself was written, invalidate the L1 cache.
+    if body.path == co::manifest::MANIFEST_FILENAME {
+        state.cache.invalidate_universe(&slug);
+    }
 
     // Index into universe data.db
     {
@@ -353,13 +376,12 @@ pub async fn create_entry(
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-73: index semantic date fields
-        let manifest = load_manifest(&universe_root);
+        // CO-73: index semantic date fields (reuse cached manifest)
         index
-            .upsert_dates(&slug, &entry, manifest.as_ref())
+            .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: extract and store typed FK relations from manifest-declared ref/ref_list fields
-        if let Some(ref m) = manifest {
+        if let Some(ref m) = manifest_arc {
             let _ = crate::relation_index::sync_entry_relations(
                 &uc_guard,
                 &slug,
@@ -370,6 +392,8 @@ pub async fn create_entry(
             );
         }
     }
+    // CO-79: invalidate query cache entries for this universe after a write.
+    state.cache.query.invalidate_prefix(&format!("{slug}:"));
 
     // Update universe content_count
     let mut storage = lock_storage(&state)?;
@@ -447,15 +471,23 @@ pub async fn update_entry(
     let new_fm = body.frontmatter.unwrap_or(existing.frontmatter.clone());
     let new_body = body.body.unwrap_or(existing.body.clone());
 
+    // CO-79: load manifest once from L1 cache (singleflight stampede protection).
+    let manifest_arc = load_manifest_cached(&state, &slug, &universe_root).await;
+
     // CO-71: validate merged frontmatter against manifest schema before writing.
     let entry_type_for_validation = new_fm
         .get("type")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
-    validate_against_manifest(&universe_root, entry_type_for_validation, &new_fm)?;
+    validate_against_manifest(manifest_arc.as_deref(), entry_type_for_validation, &new_fm)?;
 
     let entry = make_entry(&path, new_fm.clone(), &new_body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // If the manifest file itself was written, invalidate the L1 cache.
+    if path == co::manifest::MANIFEST_FILENAME {
+        state.cache.invalidate_universe(&slug);
+    }
 
     {
         let uc = {
@@ -469,13 +501,12 @@ pub async fn update_entry(
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-73: index semantic date fields
-        let manifest = load_manifest(&universe_root);
+        // CO-73: index semantic date fields (reuse cached manifest)
         index
-            .upsert_dates(&slug, &entry, manifest.as_ref())
+            .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: re-sync typed FK relations
-        if let Some(ref m) = manifest {
+        if let Some(ref m) = manifest_arc {
             let _ = crate::relation_index::sync_entry_relations(
                 &uc_guard,
                 &slug,
@@ -486,6 +517,8 @@ pub async fn update_entry(
             );
         }
     }
+    // CO-79: invalidate query cache entries for this universe after a write.
+    state.cache.query.invalidate_prefix(&format!("{slug}:"));
 
     let storage = lock_storage(&state)?;
     // CO-45: log mutation on UAT
@@ -535,8 +568,12 @@ pub async fn get_manifest(
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_root(&slug)
     };
-    let manifest =
-        load_manifest(&universe_root).unwrap_or_else(|| co::manifest::default_manifest(&slug));
+    // CO-79: serve from L1 manifest cache (singleflight on miss).
+    let slug_clone = slug.clone();
+    let manifest = load_manifest_cached(&state, &slug, &universe_root)
+        .await
+        .map(|arc| arc.as_ref().clone())
+        .unwrap_or_else(|| co::manifest::default_manifest(&slug_clone));
     Ok(Json(manifest))
 }
 

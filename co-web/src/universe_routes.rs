@@ -298,6 +298,9 @@ pub async fn update_universe(
         .get_universe(&slug)
         .ok_or_else(|| AppError::Internal("Universe disappeared".into()))?;
 
+    // CO-79: invalidate manifest + query caches for this universe.
+    state.cache.invalidate_universe(&slug);
+
     Ok(Json(serde_json::json!({
         "key": updated.key,
         "name": updated.name,
@@ -711,6 +714,10 @@ pub async fn update_universe_config(
         .update_universe_form_config(&slug, body)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    // CO-79: invalidate manifest + query caches (theme preset may have changed).
+    // Theme CSS cache is keyed by ETag — invalidates naturally when ETag changes.
+    state.cache.invalidate_universe(&slug);
+
     Ok(Json(config))
 }
 
@@ -796,7 +803,9 @@ pub async fn get_preset_theme_css(
 ///
 /// Returns a generated CSS stylesheet with all design tokens for the universe's
 /// active theme preset, merged with any custom token overrides set by the owner.
-/// Responds with `Cache-Control: no-cache` and an ETag derived from the config.
+///
+/// CO-79: short Cache-Control (60s, NOT immutable) + ETag for conditional
+/// requests; generated CSS is served from an L1 in-process LRU cache.
 pub async fn get_universe_theme_css(
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -826,7 +835,7 @@ pub async fn get_universe_theme_css(
 
     let etag = config_etag(&config.theme_preset, config.custom_tokens.as_ref());
 
-    // Honour If-None-Match conditional request.
+    // Honour If-None-Match conditional request (client already has current CSS).
     if let Some(inm) = headers
         .get(header::IF_NONE_MATCH)
         .and_then(|v| v.to_str().ok())
@@ -835,10 +844,23 @@ pub async fn get_universe_theme_css(
         return StatusCode::NOT_MODIFIED.into_response();
     }
 
-    let preset = crate::theme_engine::ThemePreset::by_name(&config.theme_preset)
-        .unwrap_or_else(|| crate::theme_engine::ThemePreset::by_name("modern").unwrap());
-
-    let css = crate::theme_engine::generate_css(&preset, config.custom_tokens.as_ref());
+    // CO-79: serve CSS from L1 cache; generate and insert on miss.
+    let css = state
+        .cache
+        .theme_css
+        .get(&etag)
+        .map(|arc| arc.as_ref().clone())
+        .unwrap_or_else(|| {
+            let preset = crate::theme_engine::ThemePreset::by_name(&config.theme_preset)
+                .unwrap_or_else(|| crate::theme_engine::ThemePreset::by_name("modern").unwrap());
+            let generated =
+                crate::theme_engine::generate_css(&preset, config.custom_tokens.as_ref());
+            state
+                .cache
+                .theme_css
+                .insert(etag.clone(), generated.clone());
+            generated
+        });
 
     (
         StatusCode::OK,
@@ -847,9 +869,10 @@ pub async fn get_universe_theme_css(
                 header::CONTENT_TYPE,
                 axum::http::HeaderValue::from_static("text/css; charset=utf-8"),
             ),
+            // CO-79: 60s short cache, NOT immutable — no hashed filenames yet.
             (
                 header::CACHE_CONTROL,
-                axum::http::HeaderValue::from_static("no-cache"),
+                axum::http::HeaderValue::from_static("public, max-age=60, must-revalidate"),
             ),
             (
                 header::ETAG,
@@ -1315,6 +1338,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
         let router = build_router(state, None);
         let tmp = tempdir().unwrap(); // keep alive

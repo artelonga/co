@@ -294,14 +294,6 @@ fn parse_markdown_content(content: &str) -> (JsonValue, String) {
     }
 }
 
-/// Load and parse `_universe.yaml` from `universe_root`.  Returns `None` if
-/// the file does not exist or cannot be parsed.
-fn load_manifest(universe_root: &std::path::Path) -> Option<co::manifest::Manifest> {
-    let path = universe_root.join(co::manifest::MANIFEST_FILENAME);
-    let bytes = std::fs::read(&path).ok()?;
-    co::manifest::parse(&bytes).ok().map(|r| r.manifest)
-}
-
 /// Upsert an entry: write .md file + update SQLite index. Returns row data.
 fn write_vault_entry(
     state: &AppState,
@@ -322,6 +314,14 @@ fn write_vault_entry(
     co::entry::write_entry(&universe_root, &entry)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
+    // CO-79: load manifest from L1 cache (sync fast-path); fall back to disk on miss.
+    let manifest_arc = state.cache.manifest.get(universe_key).or_else(|| {
+        let bytes = std::fs::read(universe_root.join(co::manifest::MANIFEST_FILENAME)).ok()?;
+        let m = co::manifest::parse(&bytes).ok().map(|r| r.manifest)?;
+        state.cache.manifest.insert(universe_key.to_string(), m);
+        state.cache.manifest.get(universe_key)
+    });
+
     let now = Utc::now().to_rfc3339();
     {
         let uc = {
@@ -335,13 +335,12 @@ fn write_vault_entry(
         index
             .upsert(universe_key, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-73: index semantic date fields
-        let manifest = load_manifest(&universe_root);
+        // CO-73: index semantic date fields (reuse cached manifest)
         index
-            .upsert_dates(universe_key, &entry, manifest.as_ref())
+            .upsert_dates(universe_key, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: extract and store typed FK relations
-        if let Some(ref m) = manifest {
+        if let Some(ref m) = manifest_arc {
             let _ = crate::relation_index::sync_entry_relations(
                 &uc_guard,
                 universe_key,
@@ -478,9 +477,14 @@ pub async fn put_vault_file(
         crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
     let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
 
+    // CO-79: invalidate query cache entries for this universe after any vault write.
+    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+
     // CO-71 + CO-74: when `_universe.yaml` is updated, apply manifest indexes and
     // backfill typed FK relations for affected content types — both in background.
     if path == co::manifest::MANIFEST_FILENAME {
+        // CO-79: invalidate manifest cache so the next read picks up the new schema.
+        state.cache.invalidate_universe(&slug);
         let db_path = state.storage.lock().ok().map(|s| s.data_dir.join("co.db"));
         let universe_root = lock_storage(&state).ok().map(|s| s.universe_root(&slug));
         let universe_pool = state.storage.lock().ok().map(|s| s.universe_pool.clone());
@@ -1345,6 +1349,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
         build_router(state, None)
     }
