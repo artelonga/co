@@ -3519,15 +3519,25 @@ impl Storage {
     // --- Check if data exists ---
 
     pub fn has_data(&self) -> bool {
-        // CO-77: project entries live in per-universe DBs, not meta.db.
-        // Check the routing index as a fast proxy for "has any project been created".
-        let count: i64 = self
+        // Check universes table — prod always has at least the template universe,
+        // so this is a reliable proxy for "already initialised".
+        // project_universe_index is NOT used here: on the first CO-77 boot against
+        // a pre-CO-77 prod DB it is empty until maybe_migrate_entries_to_universe_dbs
+        // populates it, which causes a false-negative and triggers the seeder panic.
+        let universe_count: i64 = self
             .conn
-            .query_row("SELECT COUNT(*) FROM project_universe_index", [], |row| {
-                row.get(0)
-            })
+            .query_row("SELECT COUNT(*) FROM universes", [], |r| r.get(0))
             .unwrap_or(0);
-        count > 0
+        if universe_count > 0 {
+            return true;
+        }
+        // Fallback for completely fresh DBs: check routing index.
+        self.conn
+            .query_row("SELECT COUNT(*) FROM project_universe_index", [], |r| {
+                r.get(0)
+            })
+            .unwrap_or(0)
+            > 0
     }
 
     // --- Template universe ---
