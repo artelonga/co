@@ -94,6 +94,11 @@
                     </label>
                     <input type="search" class="search-input hide-mobile" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
                     <div id="palette-switcher" class="palette-switcher-slot"></div>
+                    <!-- CO-69: PWA install prompt button (hidden until beforeinstallprompt fires) -->
+                    <button id="btn-install-pwa" class="btn btn-ghost" style="display:none;font-size:12px;gap:4px;align-items:center" title="Instalar Co como app" aria-label="Instalar Co">
+                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle" aria-hidden="true">install_mobile</span>
+                        Instalar
+                    </button>
                     <button class="btn-text-sm lang-toggle" id="btn-header-lang" data-i18n="lang.switch">English</button>
                     <div id="header-user-area" class="header-user-area">
                         <button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">Entrar</button>
@@ -410,9 +415,25 @@
         </div>
     </div>
 
+    <!-- CO-69: Offline conflict banner — shown when there are queued offline writes.
+         Uses style.display rather than .hidden class to avoid specificity conflict. -->
+    <div id="offline-sync-banner" role="status" aria-live="polite"
+         style="position:fixed;top:0;left:0;right:0;z-index:300;display:none;
+                background:var(--card-bg,#fffbeb);border-bottom:2px solid #f59e0b;
+                padding:6px 16px;align-items:center;gap:10px;font-size:13px;line-height:1.4">
+        <span class="material-symbols-outlined" style="font-size:16px;color:#f59e0b;flex-shrink:0" aria-hidden="true">cloud_off</span>
+        <span id="offline-sync-msg" style="flex:1">Você tem alterações offline — revise e sincronize</span>
+        <button type="button" id="btn-sync-now" class="btn btn-primary"
+                style="font-size:12px;padding:4px 12px;white-space:nowrap">Sincronizar</button>
+        <button type="button" id="btn-sync-dismiss"
+                style="background:none;border:none;cursor:pointer;color:var(--text-muted,#6b7280);font-size:18px;line-height:1;padding:0 2px"
+                aria-label="Fechar">×</button>
+    </div>
+
     <script src="/shared/i18n.js?v=1"></script>
     <script src="/shared/markdown.js?v=2"></script>
     <script src="/app.js"></script>
+    <script src="/shared/offline.js?v=1"></script>
     <script src="/shared/clipper.js"></script>
     <script src="/shared/experiment.js?v=3"></script>
     <script src="/shared/telemetry.js?v=1" defer></script>
