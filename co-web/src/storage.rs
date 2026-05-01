@@ -944,6 +944,55 @@ impl Storage {
                 .expect("migration v26: version insert");
         }
 
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 27 {
+            // CO-121: A/B testing primitives — feature_flags, ab_assignments, ab_exposures.
+            self.conn
+                .execute_batch(
+                    "
+                CREATE TABLE IF NOT EXISTS feature_flags (
+                    flag_key    TEXT PRIMARY KEY,
+                    description TEXT NOT NULL,
+                    variants    TEXT NOT NULL,
+                    salt        TEXT NOT NULL,
+                    enabled     INTEGER NOT NULL DEFAULT 0,
+                    created_at  TEXT NOT NULL,
+                    updated_at  TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS ab_assignments (
+                    user_id     TEXT NOT NULL,
+                    flag_key    TEXT NOT NULL,
+                    variant     TEXT NOT NULL,
+                    assigned_at TEXT NOT NULL,
+                    PRIMARY KEY (user_id, flag_key)
+                );
+
+                CREATE TABLE IF NOT EXISTS ab_exposures (
+                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id     TEXT NOT NULL,
+                    flag_key    TEXT NOT NULL,
+                    variant     TEXT NOT NULL,
+                    universe_id TEXT,
+                    exposed_at  TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_exposures_flag_time
+                    ON ab_exposures(flag_key, exposed_at);
+
+                INSERT INTO schema_version (version) VALUES (27);
+                ",
+                )
+                .expect("Failed to run migration v27");
+        }
+
         // CO-77: ensure entries table exists in meta.db for startup migration.
         self.conn
             .execute_batch(

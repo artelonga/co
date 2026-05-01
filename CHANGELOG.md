@@ -5,6 +5,31 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-121: A/B primitives on OLTP (feature_flags, ab_assignments, ab_exposures)
+
+**Migration v27** — three new SQLite tables:
+- `feature_flags` — flag registry with JSON variant specs (simple or weighted), per-flag salt, and enabled toggle
+- `ab_assignments` — persistent stable assignments `(user_id, flag_key) → variant`; `INSERT OR IGNORE` ensures one row survives concurrent first-calls
+- `ab_exposures` — timestamped exposure log indexed by `(flag_key, exposed_at)` for batch analytics
+
+**`co-web/src/ab.rs`** — A/B module:
+- `compute_bucket(user_id, flag)` — blake3(salt :: flag_key :: user_id) → u64 bucket in [0, 100)
+- `variant_for_bucket(flag, bucket)` — supports even-split `["control","treatment"]` and weighted `[{"v":"a","w":50},…]`
+- `assign(conn, user_id, flag_key)` → `Option<String>` — stable: persists on first call, returns stored row on subsequent calls; returns `None` for disabled/missing flags
+- `expose(conn, user_id, flag_key, variant, universe_id)` — writes to `ab_exposures` OLTP + mirrors to `telemetry_events` with `event_type='ab_exposure'` for WAE pipeline (CO-118)
+- `seed_flags(conn)` — idempotent seed from `data/seed/feature_flags.yaml` embedded at compile time
+
+**`co-web/src/ab_routes.rs`** — admin endpoints (GitHub PAT auth required):
+- `POST /api/v1/admin/flags` — create flag; `409 Conflict` on duplicate key
+- `GET  /api/v1/admin/flags` — list all flags
+- `PUT  /api/v1/admin/flags/{key}` — toggle `enabled`
+
+**`data/seed/feature_flags.yaml`** — seed file with `home_v2_layout` flag (50/50 control/treatment, enabled)
+
+**End-to-end wire-up**: `serve_co_index` assigns + exposes `home_v2_layout` for every visitor on the landing page (fire-and-forget, uses `visitante_id` cookie as user_id); exposure events are visible in `telemetry_events` and `ab_exposures`.
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
