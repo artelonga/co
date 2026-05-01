@@ -995,15 +995,22 @@ async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Re
     let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
 
     // CO-121: assign + expose home_v2_layout for each visitor (fire-and-forget).
+    // CO-97: prefer al_vid (apex marketing cookie) for unified visitor identity.
     let visitor_token = headers
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
         .and_then(|cookies| {
-            cookies.split(';').find_map(|part| {
-                part.trim()
-                    .strip_prefix("visitante_id=")
-                    .map(|v| v.to_string())
-            })
+            let mut visitante = None;
+            for part in cookies.split(';') {
+                let part = part.trim();
+                if let Some(v) = part.strip_prefix("al_vid=") {
+                    return Some(v.to_string());
+                }
+                if let Some(v) = part.strip_prefix("visitante_id=") {
+                    visitante = Some(v.to_string());
+                }
+            }
+            visitante
         })
         .unwrap_or_else(|| nanoid::nanoid!(24));
     {

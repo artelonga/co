@@ -134,15 +134,22 @@ fn extract_ip(req: &Request<Body>) -> String {
     "unknown".to_string()
 }
 
+/// CO-97 Option A: read `al_vid` (marketing apex cookie) first so both
+/// surfaces share one canonical visitor token.  Falls back to `visitante_id`
+/// for visitors who hit Co before the marketing site.
 fn extract_visitor_token(req: &Request<Body>) -> Option<String> {
     let cookies = req.headers().get(header::COOKIE)?.to_str().ok()?;
+    let mut visitante_id = None;
     for cookie in cookies.split(';') {
         let cookie = cookie.trim();
+        if let Some(value) = cookie.strip_prefix("al_vid=") {
+            return Some(value.to_string()); // marketing token wins
+        }
         if let Some(value) = cookie.strip_prefix("visitante_id=") {
-            return Some(value.to_string());
+            visitante_id = Some(value.to_string());
         }
     }
-    None
+    visitante_id
 }
 
 /// Telemetry middleware — tracks page views, filters bots.
@@ -203,8 +210,13 @@ pub async fn telemetry_middleware(
     // Generate visitor token if not present
     let token = visitor_token.unwrap_or_else(|| nanoid::nanoid!(24));
 
-    // Set visitor cookie on response
-    let cookie = format!("visitante_id={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000");
+    // CO-97: emit al_vid at apex scope so marketing site JS can read the same
+    // token.  HttpOnly is intentionally dropped — this token is analytics-only
+    // (no auth role); XSS worst-case is skewed attribution, not account takeover.
+    // Documented in docs/decisions/001-visitor-token-unification.md.
+    let cookie = format!(
+        "al_vid={token}; Domain=.artelonga.com.br; Path=/; SameSite=Lax; Secure; Max-Age=31536000"
+    );
     if let Ok(cookie_val) = cookie.parse() {
         response
             .headers_mut()

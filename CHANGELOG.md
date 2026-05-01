@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] — 2026-05-01
+
+### Added — CO-97: Visitor token unification (Option A)
+
+- `telemetry_middleware` and `quilombo_telemetria` read `al_vid` first, fall back to `visitante_id`
+- Both middlewares emit `al_vid` scoped to `.artelonga.com.br` (JS-readable, `SameSite=Lax; Secure`)
+- `HttpOnly` intentionally dropped on visitor token — analytics-only, no auth role (see ADR-001)
+- `docs/decisions/001-visitor-token-unification.md` — decision record with trade-off sign-off
+- `dados-rastreados.md` updated to disclose `al_vid` cookie and scope
+
 ## [1.30.0] — 2026-05-01
 
 ### Added — CO-79/80/108/109/118/121/122: Wave 3-5 + platform infra
