@@ -10,6 +10,8 @@
 # (local-file mode; used by restore-drill.sh). If it looks like a backup date,
 # both co.db and universes/ are pulled from S3 (requires BUCKET + aws CLI).
 #
+# Works with any S3-compatible backend — set AWS_ENDPOINT_URL for Garage/MinIO/R2.
+#
 # The target must never default to production — pass the explicit flag to
 # override this protection.
 set -euo pipefail
@@ -62,8 +64,12 @@ fi
 
 # ── Restore SQLite ────────────────────────────────────────────────────────────
 
-flyctl ssh console -a "$TARGET" -C "sqlite3 /data/co.db 'PRAGMA wal_checkpoint(TRUNCATE);' || true"
-flyctl sftp put -a "$TARGET" "$DB_FILE" /data/co.db
+# flyctl -C runs exec (not a shell), so wrap compound commands in 'sh -c "..."'.
+# flyctl sftp put refuses to overwrite existing files, so upload to /tmp and move.
+# CO-77: database lives at meta.db (falls back to co.db for pre-CO-77 targets).
+flyctl sftp put -a "$TARGET" "$DB_FILE" /tmp/co-restore.db
+flyctl ssh console -a "$TARGET" \
+  -C "sh -c 'DB=/data/meta.db; [ -f /data/co.db ] && DB=/data/co.db; rm -f \"\$DB\" \"\$DB-wal\" \"\$DB-shm\" && mv /tmp/co-restore.db \"\$DB\"'"
 echo "[restore] db: ok"
 
 # ── Restore universes/ (S3 mode only) ────────────────────────────────────────
@@ -71,13 +77,21 @@ echo "[restore] db: ok"
 if [ -n "${UNIVERSES_FILE:-}" ] && [ -f "$UNIVERSES_FILE" ]; then
   flyctl sftp put -a "$TARGET" "$UNIVERSES_FILE" /tmp/universes.tar.gz
   flyctl ssh console -a "$TARGET" \
-    -C "rm -rf /data/universes && tar xzf /tmp/universes.tar.gz -C /data && rm /tmp/universes.tar.gz"
+    -C "sh -c 'rm -rf /data/universes && tar xzf /tmp/universes.tar.gz -C /data && rm /tmp/universes.tar.gz'"
   echo "[restore] universes/: ok"
 fi
 
 # ── Restart ───────────────────────────────────────────────────────────────────
 
-flyctl machine restart -a "$TARGET"
+# flyctl machine restart requires a machine ID in non-interactive mode.
+MACHINE_ID=$(flyctl machine list -a "$TARGET" --json 2>/dev/null \
+  | python3 -c "import sys,json; m=json.load(sys.stdin); print(m[0]['id'])" 2>/dev/null \
+  || echo "")
+if [ -n "$MACHINE_ID" ]; then
+  flyctl machine restart "$MACHINE_ID" -a "$TARGET"
+else
+  flyctl apps restart "$TARGET"
+fi
 
 echo "[restore] done. Allow ~30 s for restart, then verify:"
 echo "  curl -s https://${TARGET}.fly.dev/api/health"

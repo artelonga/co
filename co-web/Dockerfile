@@ -59,7 +59,7 @@ RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-*
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl git \
+    ca-certificates curl git sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

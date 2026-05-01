@@ -4,7 +4,12 @@
 #
 # Usage: APP=co-artelonga BUCKET=artelonga-co-backups ./scripts/backup-prod.sh
 #
-# Requires: flyctl, aws CLI, sqlite3 on the Fly machine
+# Works with any S3-compatible backend (AWS, Garage, MinIO, Cloudflare R2):
+#   AWS_ENDPOINT_URL=http://localhost:9000  # MinIO / Garage
+#   AWS_ENDPOINT_URL=https://...r2.cloudflarestorage.com  # Cloudflare R2
+#   (unset = AWS default)
+#
+# Requires: flyctl (authenticated), aws CLI
 # S3 key layout:
 #   co.db/<YYYYMMDD-HHMMSS>.db
 #   universes/<YYYYMMDD-HHMMSS>.tar.gz
@@ -16,22 +21,30 @@ DATE=$(date -u +%Y%m%d-%H%M%S)
 WORK=$(mktemp -d)
 trap "rm -rf $WORK" EXIT
 
-echo "[backup] app=$APP bucket=$BUCKET date=$DATE"
+# aws CLI honours AWS_ENDPOINT_URL automatically for S3-compatible backends.
+S3="aws s3"
 
-# 1. Snapshot SQLite via the official .backup command (atomic, no lock).
-flyctl ssh console -a "$APP" -C "sqlite3 /data/co.db '.backup /tmp/co.db.bak'"
-flyctl sftp get -a "$APP" /tmp/co.db.bak "$WORK/co-$DATE.db"
-flyctl ssh console -a "$APP" -C "rm /tmp/co.db.bak"
+echo "[backup] app=$APP bucket=$BUCKET date=$DATE endpoint=${AWS_ENDPOINT_URL:-aws}"
+
+# flyctl -C runs exec (not a shell), so wrap compound commands in 'sh -c "..."'.
+
+# 1. Snapshot the main database.
+# CO-77: renamed co.db → meta.db; falls back to co.db for pre-CO-77 targets.
+# sqlite3 .backup is the preferred atomic hot backup; falls back to cp.
+flyctl ssh console -a "$APP" -C \
+  "sh -c 'DB=/data/meta.db; [ -f \"\$DB\" ] || DB=/data/co.db; command -v sqlite3 >/dev/null 2>&1 && sqlite3 \"\$DB\" \".backup /tmp/meta.db.bak\" || cp \"\$DB\" /tmp/meta.db.bak'"
+flyctl sftp get -a "$APP" /tmp/meta.db.bak "$WORK/co-$DATE.db"
+flyctl ssh console -a "$APP" -C "sh -c 'rm -f /tmp/meta.db.bak'"
 echo "[backup] db snapshot: ok ($(du -sh "$WORK/co-$DATE.db" | cut -f1))"
 
-# 2. Tar the universes directory.
-flyctl ssh console -a "$APP" -C "tar czf /tmp/universes.tar.gz -C /data universes"
+# 2. Tar the universes directory (includes per-universe data.db files).
+flyctl ssh console -a "$APP" -C "sh -c 'tar czf /tmp/universes.tar.gz -C /data universes'"
 flyctl sftp get -a "$APP" /tmp/universes.tar.gz "$WORK/universes-$DATE.tar.gz"
-flyctl ssh console -a "$APP" -C "rm /tmp/universes.tar.gz"
+flyctl ssh console -a "$APP" -C "sh -c 'rm /tmp/universes.tar.gz'"
 echo "[backup] universes snapshot: ok ($(du -sh "$WORK/universes-$DATE.tar.gz" | cut -f1))"
 
 # 3. Upload both artifacts to S3. PUT is idempotent — re-running same date is safe.
-aws s3 cp "$WORK/co-$DATE.db" "s3://$BUCKET/co.db/$DATE.db"
-aws s3 cp "$WORK/universes-$DATE.tar.gz" "s3://$BUCKET/universes/$DATE.tar.gz"
+$S3 cp "$WORK/co-$DATE.db" "s3://$BUCKET/co.db/$DATE.db"
+$S3 cp "$WORK/universes-$DATE.tar.gz" "s3://$BUCKET/universes/$DATE.tar.gz"
 
 echo "[backup] uploaded to s3://$BUCKET — done (date=$DATE)"

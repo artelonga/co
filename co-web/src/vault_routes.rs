@@ -1345,6 +1345,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
         });
         build_router(state, None)
     }
