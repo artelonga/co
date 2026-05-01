@@ -2653,6 +2653,10 @@ impl Storage {
             "dados",
             "co-dev",
             "co-experience",
+            // Admin content universes (seeded by seed_admin_content_universes).
+            "artelonga",
+            "rfq",
+            "co",
         ];
         let now = Utc::now().to_rfc3339();
         let mut added = 0usize;
@@ -4288,11 +4292,7 @@ impl Storage {
                 rusqlite::params![key, name, desc, now, vis],
             );
             // Assign every admin user as owner of these universes.
-            let _ = self.conn.execute(
-                "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
-                 SELECT ?1, id, 'owner', datetime('now') FROM users WHERE tier = 'admin'",
-                rusqlite::params![key],
-            );
+            // membership is wired by ensure_admin_universe_memberships at startup.
         }
     }
 
@@ -4307,12 +4307,7 @@ impl Storage {
              'system', ?1, 0, 0, 1, 'requires_login', 'scholarly-dark', 'board', 0)",
             params![now],
         );
-        // Add every admin-tier user as owner-role member so co-dev appears
-        // in their sidebar without a separate ensure_admin_universe_memberships call.
-        let _ = self.conn.execute_batch(
-            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
-             SELECT 'co-dev', id, 'owner', datetime('now') FROM users WHERE tier = 'admin';",
-        );
+        // co-dev membership is handled by ensure_admin_universe_memberships at startup.
     }
 
     /// Returns true if the given timeline universe already exists.
