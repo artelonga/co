@@ -297,3 +297,41 @@ verify_counts_with_auth "$TOKEN_AUTH"
 echo
 echo "Changelog snippets stored under: $RUNS_DIR/"
 echo "Baselines stored under: $STATE_DIR/"
+
+
+# --- CO-141 / CO-109 universe registration ---
+# Run this section to register mbya and topologia in prod.
+# Usage: CO_ADMIN_TOKEN=<jwt> bash scripts/seed-prod-universes.sh register [prod|uat]
+
+if [ "${1:-}" = "register" ]; then
+  ENV="${2:-prod}"
+  case "$ENV" in
+    uat)  BASE="https://co-artelonga-uat.fly.dev" ;;
+    prod) BASE="https://co.artelonga.com.br" ;;
+  esac
+
+  if [ -z "${CO_ADMIN_TOKEN:-}" ]; then
+    echo "Set CO_ADMIN_TOKEN before running." >&2; exit 1
+  fi
+
+  create_universe() {
+    local key="$1" name="$2" desc="$3" vis="${4:-public-subscribable}"
+    local status
+    status=$(curl -s -o /tmp/co-seed-resp.json -w "%{http_code}" \
+      -X POST "$BASE/api/v1/universes" \
+      -H "Authorization: Bearer $CO_ADMIN_TOKEN" \
+      -H 'Content-Type: application/json' \
+      -d "{\"key\":\"$key\",\"name\":\"$name\",\"description\":\"$desc\",\"visibility\":\"$vis\"}")
+    case "$status" in
+      201) echo "$key: created" ;;
+      409) echo "$key: already exists (ok)" ;;
+      *)   echo "$key: ERROR $status: $(cat /tmp/co-seed-resp.json)" ;;
+    esac
+  }
+
+  echo "Registering universes on $BASE ..."
+  create_universe "mbya"      "Mbya Guarani"         "Léxico Mbya Guarani — universo de referência linguística"
+  create_universe "topologia" "Topologia do Sentido"  "Dicionário translinguístico — conceitos e relações entre línguas"
+  echo "Done."
+  exit 0
+fi

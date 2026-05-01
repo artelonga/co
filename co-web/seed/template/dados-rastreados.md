@@ -106,8 +106,8 @@ Coletada apenas se você não habilitou Do Not Track e aceitou o banner.
 
 | Campo | Como é gerado | Reverter? |
 |-------|---------------|-----------|
-| `visitor_token` | nanoid aleatório, salvo em cookie | Não, mas você pode apagar o cookie |
-| `session_id` | Aleatório, expira em 30 min | Não |
+| `al_vid` | nanoid aleatório, cookie apex `.artelonga.com.br`, legível por JS — unifica marketing + Co (ADR-001) | Apague o cookie `al_vid` |
+| `session_id` | Aleatório, expira ao fechar a aba | Não |
 | `ip_hash` | SHA256(IP + sal diário) | Não — sal rotaciona a cada 24h |
 
 ## 8. O que NÃO rastreamos

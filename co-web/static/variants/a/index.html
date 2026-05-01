@@ -94,11 +94,18 @@
                     </label>
                     <input type="search" class="search-input hide-mobile" id="search-input" data-i18n-placeholder="filter_tasks" placeholder="Filtrar tarefas... (/)">
                     <div id="palette-switcher" class="palette-switcher-slot"></div>
-                    <!-- CO-69: PWA install prompt button (hidden until beforeinstallprompt fires) -->
-                    <button id="btn-install-pwa" class="btn btn-ghost" style="display:none;font-size:12px;gap:4px;align-items:center" title="Instalar Co como app" aria-label="Instalar Co">
-                        <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle" aria-hidden="true">install_mobile</span>
-                        Instalar
-                    </button>
+                    <!-- CO-69: PWA install prompt — hidden until beforeinstallprompt fires -->
+                    <div id="pwa-install-wrap" style="position:relative;display:none">
+                        <button id="btn-install-pwa" class="btn btn-ghost" style="font-size:12px;gap:4px;align-items:center" aria-label="Instalar Co">
+                            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:middle" aria-hidden="true">install_mobile</span>
+                            Instalar
+                        </button>
+                        <div id="pwa-install-tip" style="display:none;position:absolute;right:0;top:calc(100% + 6px);background:var(--card-bg,#fff);border:1px solid var(--border,#e5e7eb);border-radius:8px;padding:10px 14px;width:220px;font-size:12px;line-height:1.5;color:var(--text,#111);z-index:200;box-shadow:0 4px 16px rgba(0,0,0,.12)">
+                            <strong style="display:block;margin-bottom:4px">Instalar Co</strong>
+                            Adiciona ao menu inicial e permite uso offline. Nenhum dado extra é coletado — o app é o mesmo site.
+                            <button id="pwa-install-confirm" class="btn btn-primary btn-sm" style="margin-top:8px;width:100%">Instalar agora</button>
+                        </div>
+                    </div>
                     <button class="btn-text-sm lang-toggle" id="btn-header-lang" data-i18n="lang.switch">English</button>
                     <div id="header-user-area" class="header-user-area">
                         <button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">Entrar</button>

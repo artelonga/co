@@ -196,14 +196,14 @@
   window.addEventListener('beforeinstallprompt', function (e) {
     e.preventDefault();
     _installPrompt = e;
-    var btn = document.getElementById('btn-install-pwa');
-    if (btn) btn.style.display = '';
+    var wrap = document.getElementById('pwa-install-wrap');
+    if (wrap) wrap.style.display = '';
   });
 
   window.addEventListener('appinstalled', function () {
     _installPrompt = null;
-    var btn = document.getElementById('btn-install-pwa');
-    if (btn) btn.style.display = 'none';
+    var wrap = document.getElementById('pwa-install-wrap');
+    if (wrap) wrap.style.display = 'none';
   });
 
   async function showInstallPrompt() {
@@ -212,8 +212,8 @@
       var result = await _installPrompt.prompt();
       if (result && result.outcome === 'accepted') {
         _installPrompt = null;
-        var btn = document.getElementById('btn-install-pwa');
-        if (btn) btn.style.display = 'none';
+        var wrap = document.getElementById('pwa-install-wrap');
+        if (wrap) wrap.style.display = 'none';
         return true;
       }
     } catch (_) {}
@@ -325,9 +325,21 @@
       });
     }
 
+    // Install button: toggle tip popover; confirm button fires native prompt.
     var installBtn = document.getElementById('btn-install-pwa');
-    if (installBtn) {
-      installBtn.addEventListener('click', function () { showInstallPrompt(); });
+    var installTip = document.getElementById('pwa-install-tip');
+    var installConfirm = document.getElementById('pwa-install-confirm');
+    if (installBtn && installTip) {
+      installBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        installTip.style.display = installTip.style.display === 'none' ? '' : 'none';
+      });
+      document.addEventListener('click', function () {
+        if (installTip) installTip.style.display = 'none';
+      });
+    }
+    if (installConfirm) {
+      installConfirm.addEventListener('click', function () { showInstallPrompt(); });
     }
   }
 

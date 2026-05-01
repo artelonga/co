@@ -4602,16 +4602,20 @@
         if (window.location.pathname.startsWith('/co')) {
             const newPath = slug === 'template' ? '/co' : `/co/${slug}`;
             window.history.pushState({}, '', newPath);
-            return;
-        }
-        // Legacy query param routing (root path)
-        const url = new URL(window.location.href);
-        if (slug === 'template') {
-            url.searchParams.delete('u');
         } else {
-            url.searchParams.set('u', slug);
+            // Legacy query param routing (root path)
+            const url = new URL(window.location.href);
+            if (slug === 'template') {
+                url.searchParams.delete('u');
+            } else {
+                url.searchParams.set('u', slug);
+            }
+            window.history.pushState({}, '', url.toString());
         }
-        window.history.pushState({}, '', url.toString());
+        // Persist preferred universe so login → correct board on next visit.
+        if (slug && slug !== 'template') {
+            try { localStorage.setItem('co_preferred_universe', slug); } catch (_) {}
+        }
     }
 
     function showTemplateBanner() {
@@ -5306,10 +5310,12 @@
         const params = new URLSearchParams(window.location.search);
         const page = params.get('page');
         if (!page) return;
+        // Reading the disclosure pages counts as informed consent.
+        if (page === 'dados-rastreados' || page === 'privacidade') {
+            try { localStorage.setItem('co_cookie_consent', '1'); } catch (_) {}
+        }
         const entryPath = `content/${page}.md`;
-        // Fetch and open in zoom modal — works even if the content view isn't rendered yet
         openZoomModal({ path: entryPath, body: undefined }, false);
-        // Clean the param from the URL so refreshes don't re-open the modal
         const clean = new URL(window.location.href);
         clean.searchParams.delete('page');
         window.history.replaceState({}, '', clean.toString());
@@ -5674,10 +5680,13 @@
                 const mine = (owned || []).filter(u => !u.is_template);
                 state.userUniverses = mine;
                 if (mine.length > 0) {
-                    state.currentUniverseSlug = mine[0].key;
+                    // Prefer last-used universe; fall back to first in list.
+                    const preferred = (() => { try { return localStorage.getItem('co_preferred_universe'); } catch (_) { return null; } })();
+                    const target = (preferred && mine.find(u => u.key === preferred)) ? preferred : mine[0].key;
+                    state.currentUniverseSlug = target;
                     state.isTemplate = false;
                     hideTemplateBanner();
-                    await bootAppForUniverse(mine[0].key);
+                    await bootAppForUniverse(target);
                     return;
                 }
             }
