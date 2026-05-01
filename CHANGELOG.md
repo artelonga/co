@@ -5,7 +5,7 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.23.0] — 2026-04-30
+## [1.25.0] — 2026-04-30
 
 ### Added — CO-77: Per-universe SQLite sharding + LiteFS read replicas
 
@@ -74,6 +74,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `reseed_template_content_pages`: same fix
 - `clone_universe_internal`: reads from source per-universe DB, writes to target per-universe DB + registers in `project_universe_index`
 - Migration v24 runs after v23; v25 (CO-77) follows
+## [1.24.0] — 2026-04-30
+
+### Added — CO-71: Per-universe schema validator + generic JSON entry storage
+
+- `core/src/payload.rs` — `validate_payload()` validates frontmatter JSON against a manifest `ContentType` schema with dot-notation field-path errors; `coerce_payload()` coerces fields to typed Rust values; `TypedEntry` with `fields: BTreeMap<String, TypedValue>` (Date → `DateTime<Utc>`, Number, Boolean, StringArray, String, Null)
+- `co-web/src/index_manager.rs` — `IndexManager::apply_indexes()` / `drop_stale_indexes()` / `sync_indexes()` diff and apply SQLite expression indexes (`idx_co71_<universe>_<field>`); `apply_manifest_indexes_background()` spawns a background thread so index creation never blocks HTTP writes
+- `co-web/src/entry_index.rs` — `upsert()` now writes `payload` column (mirrors `frontmatter_json`); `typed_view()` converts `EntryRow` → `TypedEntry` using the manifest; expression indexes target `json_extract(payload, '$.field')`
+- `co-web/src/entry_routes.rs` — POST and PUT entry handlers validate frontmatter against `_universe.yaml` manifest before write; invalid payloads return 422 with field-path error; legacy universes (no manifest) pass through unchanged
+- `co-web/src/vault_routes.rs` — PUT `_universe.yaml` triggers background index sync via `apply_manifest_indexes_background`
+- `co-web/src/error.rs` — `AppError::UnprocessableEntity` (HTTP 422) for manifest validation failures
+- Migration v24: `entries.payload TEXT NOT NULL DEFAULT '{}'` + backfill from `frontmatter_json`; `universes.manifest_version INTEGER NOT NULL DEFAULT 0` for future migration tracking
+
+## [1.23.0] — 2026-04-30
+
+### Added — CO-70: Manifest format spec — `_universe.yaml` at universe root
+
+- `core/src/manifest.rs` — typed `Manifest` struct hierarchy parsed from `_universe.yaml`
+- `parse()` / `parse_str()` — validates size cap (100 KB), content-type count cap (100), field-path errors, and forward-compat warnings for unknown top-level keys
+- `default_manifest(name)` — returns a board-of-tasks manifest matching pre-manifest behaviour (`task` type, `[todo, doing, done]` board columns)
+- `Manifest::triggers_migration_from(stored_version)` — CO-71 hook for entry-payload migration on schema version bump
+- `docs/schemas/_universe.v1.json` — JSON Schema (draft 2020-12) for `_universe.yaml` v1
 
 ## [1.22.7] — 2026-04-30
 

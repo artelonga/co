@@ -821,7 +821,66 @@ impl Storage {
             .unwrap_or(0);
 
         if current_version < 24 {
-            // CO-72: job queue table (CO-78 queue) + universe doc-gen error columns.
+            // CO-71: add generic JSON payload column (validated at write, indexed by manifest)
+            // and per-universe manifest_version for migration tracking.
+            ensure_column(
+                &self.conn,
+                "entries",
+                "payload",
+                "TEXT NOT NULL DEFAULT '{}'",
+            )
+            .expect("migration v24: entries.payload column");
+
+            // Backfill payload from frontmatter_json for existing rows.
+            self.conn
+                .execute_batch(
+                    "UPDATE entries SET payload = frontmatter_json WHERE payload = '{}';",
+                )
+                .expect("migration v24: payload backfill");
+
+            ensure_column(
+                &self.conn,
+                "universes",
+                "manifest_version",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v24: universes.manifest_version column");
+
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (24)",
+                    [],
+                )
+                .expect("migration v24: version insert");
+        }
+
+        // CO-71 unconditional backfill.
+        ensure_column(
+            &self.conn,
+            "entries",
+            "payload",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
+        .expect("CO-71 backfill: payload column");
+        ensure_column(
+            &self.conn,
+            "universes",
+            "manifest_version",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-71 backfill: manifest_version column");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 25 {
+            // CO-72: job queue table + universe doc-gen error columns.
             self.conn
                 .execute_batch(
                     "CREATE TABLE IF NOT EXISTS jobs (
@@ -843,15 +902,19 @@ impl Storage {
                      CREATE INDEX IF NOT EXISTS idx_jobs_universe_key
                          ON jobs(universe_key);
                      CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_dedupe
-                         ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL;
-                     INSERT OR IGNORE INTO schema_version (version) VALUES (24);",
+                         ON jobs(dedupe_key) WHERE dedupe_key IS NOT NULL;",
                 )
-                .expect("migration v24: jobs table");
-
+                .expect("migration v25: jobs table");
             ensure_column(&self.conn, "universes", "doc_gen_error", "TEXT")
-                .expect("migration v24: doc_gen_error");
+                .expect("migration v25: doc_gen_error");
             ensure_column(&self.conn, "universes", "doc_gen_error_at", "TEXT")
-                .expect("migration v24: doc_gen_error_at");
+                .expect("migration v25: doc_gen_error_at");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (25)",
+                    [],
+                )
+                .expect("migration v25: version insert");
         }
 
         let current_version: i64 = self
@@ -863,23 +926,25 @@ impl Storage {
             )
             .unwrap_or(0);
 
-        if current_version < 25 {
-            // CO-77: project→universe routing index for legacy routes that know
-            // only the project_key and need to find the right per-universe data.db.
+        if current_version < 26 {
+            // CO-77: project→universe routing index for legacy routes.
             self.conn
                 .execute_batch(
                     "CREATE TABLE IF NOT EXISTS project_universe_index (
                          project_key  TEXT PRIMARY KEY,
                          universe_key TEXT NOT NULL
-                     );
-                     INSERT OR IGNORE INTO schema_version (version) VALUES (25);",
+                     );",
                 )
-                .expect("migration v25: project_universe_index");
+                .expect("migration v26: project_universe_index");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (26)",
+                    [],
+                )
+                .expect("migration v26: version insert");
         }
 
-        // Ensure entries table still exists in meta.db so that old
-        // entries (before CO-77 migration) can be read during startup migration.
-        // After maybe_migrate_entries_to_universe_dbs() runs, this table will be empty.
+        // CO-77: ensure entries table exists in meta.db for startup migration.
         self.conn
             .execute_batch(
                 "CREATE TABLE IF NOT EXISTS entries (
@@ -896,7 +961,7 @@ impl Storage {
                 );
                 CREATE TABLE IF NOT EXISTS entries_fts (content TEXT);",
             )
-            .ok(); // Ignore errors — may already exist
+            .ok();
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.

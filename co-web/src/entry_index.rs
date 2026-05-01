@@ -82,6 +82,9 @@ impl<'a> EntryIndex<'a> {
     }
 
     /// Upsert a single entry into the index.
+    ///
+    /// Both `frontmatter_json` and `payload` are written; `payload` mirrors
+    /// `frontmatter_json` and is the column targeted by CO-71 expression indexes.
     pub fn upsert(&self, universe_key: &str, entry: &Entry) -> anyhow::Result<()> {
         let fm_json = serde_json::to_string(&entry.frontmatter)?;
         let title: Option<&str> = entry.frontmatter.get("title").and_then(|v| v.as_str());
@@ -98,12 +101,13 @@ impl<'a> EntryIndex<'a> {
             .or_else(|| created_at.clone());
 
         self.conn.execute(
-            "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, payload, body, body_hash, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(universe_key, path) DO UPDATE SET
                entry_type = excluded.entry_type,
                title = excluded.title,
                frontmatter_json = excluded.frontmatter_json,
+               payload = excluded.payload,
                body = excluded.body,
                body_hash = excluded.body_hash,
                created_at = excluded.created_at,
@@ -383,6 +387,50 @@ impl<'a> EntryIndex<'a> {
                     |row| row.get(0),
                 )
                 .unwrap_or(0),
+        }
+    }
+
+    /// Return a typed view of an [`EntryRow`] using the manifest content type.
+    ///
+    /// Fields declared in the schema are coerced to typed Rust values
+    /// (dates → `DateTime<Utc>`, enums → `String`, etc.).  Fields not in the
+    /// schema are coerced by their JSON type.
+    pub fn typed_view(
+        &self,
+        row: &EntryRow,
+        manifest: &co::manifest::Manifest,
+    ) -> co::payload::TypedEntry {
+        let ct = manifest
+            .content_types
+            .iter()
+            .find(|ct| ct.name == row.entry_type);
+
+        match ct {
+            Some(ct) => co::payload::typed_entry(
+                &row.path,
+                &row.universe_key,
+                &row.entry_type,
+                &row.frontmatter,
+                &row.body,
+                ct,
+            ),
+            None => {
+                // No schema declared for this type — coerce without manifest.
+                let default_ct = co::manifest::ContentType {
+                    name: row.entry_type.clone(),
+                    schema: std::collections::BTreeMap::new(),
+                    presentation: co::manifest::Presentation::default(),
+                    indexes: vec![],
+                };
+                co::payload::typed_entry(
+                    &row.path,
+                    &row.universe_key,
+                    &row.entry_type,
+                    &row.frontmatter,
+                    &row.body,
+                    &default_ct,
+                )
+            }
         }
     }
 }

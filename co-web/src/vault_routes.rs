@@ -454,6 +454,24 @@ pub async fn put_vault_file(
         crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
     let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
 
+    // CO-71: when `_universe.yaml` is updated, apply manifest indexes in background.
+    if path == co::manifest::MANIFEST_FILENAME {
+        let db_path = state.storage.lock().ok().map(|s| s.data_dir.join("co.db"));
+        let universe_root = lock_storage(&state).ok().map(|s| s.universe_root(&slug));
+        if let (Some(db_path), Some(universe_root)) = (db_path, universe_root) {
+            let manifest_path = universe_root.join(co::manifest::MANIFEST_FILENAME);
+            if let Ok(bytes) = std::fs::read(&manifest_path)
+                && let Ok(parsed) = co::manifest::parse(&bytes)
+            {
+                crate::index_manager::apply_manifest_indexes_background(
+                    db_path,
+                    slug.clone(),
+                    parsed.manifest.content_types,
+                );
+            }
+        }
+    }
+
     // Update content count
     let _ = lock_storage(&state).map(|mut s| s.increment_universe_content_count(&slug));
 

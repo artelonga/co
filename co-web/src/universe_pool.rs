@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS entries (
     entry_type        TEXT NOT NULL,
     title             TEXT,
     frontmatter_json  TEXT NOT NULL DEFAULT '{}',
+    payload           TEXT NOT NULL DEFAULT '{}',
     body              TEXT NOT NULL DEFAULT '',
     body_hash         TEXT NOT NULL DEFAULT '',
     created_at        TEXT,

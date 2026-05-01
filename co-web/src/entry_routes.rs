@@ -19,6 +19,48 @@ use crate::error::AppError;
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
+// Manifest validation helpers
+// ---------------------------------------------------------------------------
+
+/// Load and parse `_universe.yaml` from `universe_root`.
+/// Returns `None` if the file does not exist or fails to parse.
+fn load_manifest(universe_root: &std::path::Path) -> Option<co::manifest::Manifest> {
+    let path = universe_root.join(co::manifest::MANIFEST_FILENAME);
+    let bytes = std::fs::read(&path).ok()?;
+    co::manifest::parse(&bytes).ok().map(|r| r.manifest)
+}
+
+/// Validate `frontmatter` against the manifest's content type for `entry_type`.
+///
+/// Returns `Ok(())` when:
+/// - No `_universe.yaml` is present (legacy universe).
+/// - The manifest has no schema for `entry_type`.
+/// - The payload passes all schema checks.
+///
+/// Returns `Err(AppError::UnprocessableEntity)` with a field-path message
+/// when validation fails.
+fn validate_against_manifest(
+    universe_root: &std::path::Path,
+    entry_type: &str,
+    frontmatter: &JsonValue,
+) -> Result<(), AppError> {
+    let manifest = match load_manifest(universe_root) {
+        Some(m) => m,
+        None => return Ok(()),
+    };
+    let ct = match manifest
+        .content_types
+        .iter()
+        .find(|ct| ct.name == entry_type)
+    {
+        Some(ct) => ct,
+        None => return Ok(()),
+    };
+    co::payload::validate_payload(ct, frontmatter)
+        .map_err(|e| AppError::UnprocessableEntity(format!("payload validation failed: {e}")))
+}
+
+// ---------------------------------------------------------------------------
 // Request / Response types
 // ---------------------------------------------------------------------------
 
@@ -254,6 +296,14 @@ pub async fn create_entry(
         storage.universe_root(&slug)
     };
 
+    // CO-71: validate frontmatter against manifest schema before writing.
+    let entry_type = body
+        .frontmatter
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    validate_against_manifest(&universe_root, entry_type, &body.frontmatter)?;
+
     // Write .md file
     let entry = make_entry(&body.path, body.frontmatter.clone(), &body.body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -348,6 +398,13 @@ pub async fn update_entry(
 
     let new_fm = body.frontmatter.unwrap_or(existing.frontmatter.clone());
     let new_body = body.body.unwrap_or(existing.body.clone());
+
+    // CO-71: validate merged frontmatter against manifest schema before writing.
+    let entry_type_for_validation = new_fm
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    validate_against_manifest(&universe_root, entry_type_for_validation, &new_fm)?;
 
     let entry = make_entry(&path, new_fm.clone(), &new_body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;

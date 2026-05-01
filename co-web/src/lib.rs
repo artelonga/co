@@ -12,6 +12,7 @@ pub mod game_routes;
 pub mod gestao_routes;
 pub mod github_auth;
 pub mod iceberg;
+pub mod index_manager;
 pub mod job_queue;
 pub mod models;
 pub mod obsidian_tasks;
