@@ -305,7 +305,9 @@ mod tests {
         let ct = make_ct("tarefa", &["status"]);
 
         // Apply twice — should not fail
-        manager.apply_indexes("myuniverse", &[ct.clone()]).unwrap();
+        manager
+            .apply_indexes("myuniverse", std::slice::from_ref(&ct))
+            .unwrap();
         manager.apply_indexes("myuniverse", &[ct]).unwrap();
 
         let count: i64 = conn
@@ -465,7 +467,9 @@ mod tests {
         let manager = IndexManager::new(&conn);
 
         let ct = make_ct("tarefa", &["status"]);
-        manager.apply_indexes("universe_a", &[ct.clone()]).unwrap();
+        manager
+            .apply_indexes("universe_a", std::slice::from_ref(&ct))
+            .unwrap();
         manager.apply_indexes("universe_b", &[ct]).unwrap();
 
         // Drop for universe_a must not affect universe_b

@@ -1719,7 +1719,7 @@ mod tests {
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri(&format!("/api/v1/universes/clipper-test/vault/{path}"))
+                    .uri(format!("/api/v1/universes/clipper-test/vault/{path}"))
                     .header(header::AUTHORIZATION, &bearer)
                     .body(Body::empty())
                     .unwrap(),
@@ -1833,7 +1833,7 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .method("DELETE")
-                    .uri(&format!("/api/v1/auth/tokens/{token_id}"))
+                    .uri(format!("/api/v1/auth/tokens/{token_id}"))
                     .header(header::AUTHORIZATION, &bearer)
                     .body(Body::empty())
                     .unwrap(),

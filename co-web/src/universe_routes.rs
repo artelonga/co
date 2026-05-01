@@ -1565,7 +1565,7 @@ mod tests {
     /// 1. Template universe → READ for everyone (anonymous).
     #[test]
     fn test_access_template_anonymous() {
-        let (mut storage, _dir) = make_storage();
+        let (storage, _dir) = make_storage();
         set_visibility(&storage, "default", "template");
         let access = storage.check_universe_access(None, "default");
         assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
@@ -1574,7 +1574,7 @@ mod tests {
     /// 1. Template universe → READ for logged-in user too.
     #[test]
     fn test_access_template_logged_in() {
-        let (mut storage, _dir) = make_storage();
+        let (storage, _dir) = make_storage();
         set_visibility(&storage, "default", "template");
         let access = storage.check_universe_access(Some("some-user"), "default");
         assert_eq!(access, crate::models::UniverseAccess::ReadOnly);

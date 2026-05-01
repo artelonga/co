@@ -1952,7 +1952,7 @@ mod tests {
         let storage = Storage::new(dir.to_str().unwrap());
         let id = format!(
             "usr_test_{}",
-            uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+            &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
         );
         let now = chrono::Utc::now().to_rfc3339();
         storage
@@ -2192,7 +2192,7 @@ mod tests {
             let storage = Storage::new(dir.path().to_str().unwrap());
             let id = format!(
                 "usr_quota_{}",
-                uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+                &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
             );
             let now = chrono::Utc::now().to_rfc3339();
             storage

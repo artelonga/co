@@ -586,9 +586,9 @@ Content.
         let dir = TempDir::new().unwrap();
         let ctx = create_context_with_dirs(&dir, &["en", "private", "shared"]);
 
-        assert!(ctx.scope_exists("private"));
-        assert!(ctx.scope_exists("shared"));
-        assert!(!ctx.scope_exists("unknown"));
+        assert!(ctx.space_exists("private"));
+        assert!(ctx.space_exists("shared"));
+        assert!(!ctx.space_exists("unknown"));
     }
 
     // Task 5.1.4: Internal link validation tests
