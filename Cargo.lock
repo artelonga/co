@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -491,6 +491,33 @@ dependencies = [
  "uuid",
  "walkdir",
  "xxhash-rust",
+ "zstd",
+]
+
+[[package]]
+name = "co-agent"
+version = "1.30.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "bytes",
+ "chrono",
+ "clap",
+ "co",
+ "hex",
+ "hmac",
+ "http-body-util",
+ "rand 0.8.6",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tokio",
+ "tower",
+ "tracing",
+ "tracing-subscriber",
  "zstd",
 ]
 
@@ -536,7 +563,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -565,7 +592,7 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "1.29.0"
+version = "1.30.0"
 dependencies = [
  "anyhow",
  "argon2",
@@ -1257,6 +1284,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62b467343b94ba476dcb2500d242dadbb39557df889310ac77c5d99100aaac33"
 dependencies = [
  "libc",
+]
+
+[[package]]
+name = "hex"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+
+[[package]]
+name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest",
 ]
 
 [[package]]

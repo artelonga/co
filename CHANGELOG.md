@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] — 2026-05-01
+
+### Added — CO-120: Co-agent adapter trait + Fly sidecar reference impl
+
+**`co-agent` crate** — new workspace member providing a stable telemetry shipping abstraction:
+
+- `CoAgent` trait in `co-core` with three methods: `ship`, `heartbeat`, `flush` — the stable adapter contract for all future ingest variants (CF Worker tail, Vercel Log Drain, browser SDK)
+- `FlySidecarAgent` — Fly Machine sidecar implementation: reads log lines from stdin, batches into zstd-compressed JSON-Lines, signs each batch with HMAC-SHA256 over `(timestamp|universe_id|hex(SHA256(body)))`, POSTs to the CO ingest endpoint with exponential-backoff retry
+- Ring buffer (`VecDeque`, configurable cap, drop-oldest overflow policy) with `dropped_events_total` counter emitted on heartbeat
+- `co-agent` binary: CLI + env var configuration (`CO_INGEST_URL`, `CO_UNIVERSE_ID`, `CO_HMAC_KEY`, `CO_BATCH_SIZE`, `CO_FLUSH_INTERVAL`, `CO_MAX_RETRIES`); graceful shutdown flushes on SIGTERM/SIGINT
+- `co-agent/Dockerfile` — multi-stage `rust:1.88-slim` → `debian:bookworm-slim` image, non-root `co` user; published to `ghcr.io/artelonga/co/co-agent:0.1.0`
+- `.github/workflows/co-agent-publish.yml` — multi-arch (`linux/amd64` + `linux/arm64`) GHCR publish on tag push
+- `docs/co-agent/fly-sidecar.md` — operator reference: architecture diagram, `fly.toml` sidecar snippet, HMAC key generation, payload format, overflow policy, troubleshooting
+- 6 unit tests: size-threshold flush, time-threshold flush, retry-then-drop on persistent 5xx (paused-time), HMAC round-trip validation, E2E 100-event delivery (≥99 land), ring-buffer overflow drop-oldest
+
 ## [1.29.0] — 2026-05-01
 
 ### Added — CO-108: Universe archive format + backup-to-external-HD
