@@ -1,0 +1,37 @@
+{
+  "description": "UAT's update has prod's update in its pai list — causal ancestor means no conflict",
+  "input": {
+    "proposta_id": "11111111-1111-1111-1111-111111111111",
+    "base_hlc": "1000:0:00000000000000000000000000000000",
+    "ops_prod": [
+      {
+        "id": "00000000-0001-0000-0000-000000000001",
+        "hlc": "1500:0:aaaaaaaa000000000000000000000000",
+        "ator": { "node_id": "aaaaaaaa-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.atualizar",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": "titulo" },
+        "args": { "tipo": "relato", "slug": "r1", "meta_delta": { "titulo": "Prod Title" } },
+        "pai": [],
+        "assinatura": null
+      }
+    ],
+    "ops_uat": [
+      {
+        "id": "00000000-0002-0000-0000-000000000001",
+        "hlc": "2000:0:bbbbbbbb000000000000000000000000",
+        "ator": { "node_id": "bbbbbbbb-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.atualizar",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": "titulo" },
+        "args": { "tipo": "relato", "slug": "r1", "meta_delta": { "titulo": "UAT Title (based on prod)" } },
+        "pai": ["00000000-0001-0000-0000-000000000001"],
+        "assinatura": null
+      }
+    ]
+  },
+  "expected": {
+    "aplicadas": ["00000000-0002-0000-0000-000000000001"],
+    "conflitos": [],
+    "novas_ops_remotas_ids": ["00000000-0001-0000-0000-000000000001"],
+    "blobs_solicitados": []
+  }
+}

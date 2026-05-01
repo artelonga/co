@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/manifesto.json",
+  "title": "Manifesto",
+  "description": "Peer state summary — compare without transferring full op lists",
+  "type": "object",
+  "required": ["node_id", "hlc_atual", "ops_count", "ops_merkle_root", "blobs_count", "blobs_merkle_root", "schema_version", "protocol_version"],
+  "additionalProperties": false,
+  "properties": {
+    "node_id": { "type": "string", "format": "uuid" },
+    "hlc_atual": { "$ref": "hlc.json" },
+    "ops_count": { "type": "integer", "minimum": 0 },
+    "ops_merkle_root": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of op DAG root as 64 hex chars"
+    },
+    "blobs_count": { "type": "integer", "minimum": 0 },
+    "blobs_merkle_root": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "schema_version": { "type": "string" },
+    "protocol_version": { "type": "string", "const": "v1.0" }
+  }
+}

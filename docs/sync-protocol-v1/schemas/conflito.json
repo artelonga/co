@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/conflito.json",
+  "title": "Conflito",
+  "description": "A detected conflict between concurrent ops targeting the same entity/field",
+  "type": "object",
+  "required": ["id", "op_local", "op_remota", "alvo", "opcoes", "sugestao"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Deterministic: SHA-256 of sorted op IDs"
+    },
+    "op_local": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Target (prod) op"
+    },
+    "op_remota": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Sender (UAT) op"
+    },
+    "alvo": { "$ref": "alvo.json" },
+    "opcoes": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["prod", "uat", "copia", "manual"] },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "sugestao": {
+      "type": "string",
+      "enum": ["prod", "uat", "copia", "manual"],
+      "default": "prod"
+    }
+  }
+}

@@ -55,8 +55,10 @@ pub mod query;
 pub mod schema;
 pub mod space;
 pub mod storage;
+pub mod sync;
 pub mod types;
 pub mod validate;
+pub mod wikilink;
 
 /// Generated protobuf types for Entry wire format.
 pub mod proto {
