@@ -34,4 +34,5 @@ pub mod universe_pool;
 pub mod universe_routes;
 pub mod universo;
 pub mod vault_routes;
+pub mod wae;
 pub mod ws;

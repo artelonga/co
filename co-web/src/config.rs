@@ -50,6 +50,11 @@ pub struct WebConfig {
     /// Deployment environment: "prod" (default) or "uat".
     /// Set via the `CO_ENV` environment variable.
     pub co_env: String,
+    /// CO-118: WAE Worker proxy URL (e.g. https://wae.co.artelonga.com.br/api/internal/wae).
+    /// When absent, WAE emission is a no-op.
+    pub wae_endpoint: Option<String>,
+    /// CO-118: Bearer token sent to the WAE Worker proxy.
+    pub wae_api_key: Option<String>,
 }
 
 impl WebConfig {
@@ -79,6 +84,8 @@ impl From<Args> for WebConfig {
                 .collect(),
             universe_key: std::env::var("UNIVERSE_KEY").ok(),
             co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
+            wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
+            wae_api_key: std::env::var("WAE_API_KEY").ok(),
         }
     }
 }

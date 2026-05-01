@@ -425,6 +425,8 @@ pub async fn telemetry_middleware(
 
     let token = visitor_token.unwrap_or_else(|| nanoid::nanoid!(24));
     let props = referrer.map(|r| serde_json::json!({"referrer": r}));
+    // Snapshot universe_id for WAE before universe_key is moved into EventRow.
+    let wae_universe_id = universe_key.as_deref().unwrap_or("global").to_string();
 
     let ev = EventRow {
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -443,11 +445,23 @@ pub async fn telemetry_middleware(
         ua_os: Some(parse_ua_os(&ua).to_string()),
     };
 
+    // OLTP write (primary store — CO-46)
     let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
         if let Ok(storage) = state_clone.storage.lock() {
             insert_event(storage.conn(), &ev);
         }
+    });
+
+    // CO-118: parallel WAE write (fire-and-forget, no-op when not configured)
+    Arc::clone(&state.wae).emit(crate::wae::TelemetryEvent {
+        event_type: "page_view".into(),
+        universe_id: wae_universe_id,
+        user_kind: "anon".into(),
+        flag_key: None,
+        variant: None,
+        duration_ms: Some(duration_ms as u32),
+        status: None,
     });
 
     response

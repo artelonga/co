@@ -48,6 +48,8 @@ fn test_config(dir: &std::path::Path, is_uat: bool) -> WebConfig {
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: if is_uat { "uat".into() } else { "prod".into() },
+        wae_endpoint: None,
+        wae_api_key: None,
     }
 }
 
@@ -68,6 +70,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
         doc_rooms: co_web::ws::new_room_manager(),
+        wae: co_web::wae::WaeEmitter::new(None, None),
     });
     build_router(state, None)
 }
@@ -324,6 +327,8 @@ fn test_is_uat_config() {
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: "uat".into(),
+        wae_endpoint: None,
+        wae_api_key: None,
     };
     assert!(uat_config.is_uat());
 

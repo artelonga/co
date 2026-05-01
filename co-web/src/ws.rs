@@ -643,12 +643,15 @@ mod tests {
                 gestao_github_admins: vec![],
                 universe_key: None,
                 co_env: "prod".into(),
+                wae_endpoint: None,
+                wae_api_key: None,
             },
             auth_store: StdMutex::new(auth_store),
             mail,
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
 
         let app = build_router(state, None);
@@ -715,12 +718,15 @@ mod tests {
                 gestao_github_admins: vec![],
                 universe_key: None,
                 co_env: "prod".into(),
+                wae_endpoint: None,
+                wae_api_key: None,
             },
             auth_store: StdMutex::new(auth_store),
             mail,
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            wae: crate::wae::WaeEmitter::new(None, None),
         });
 
         let app = build_router(state.clone(), None);

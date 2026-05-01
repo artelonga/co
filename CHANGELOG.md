@@ -5,6 +5,25 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-118: Workers Analytics Engine ingest from co-web for exposure + telemetry events
+
+**co-web**
+- `co-web/src/wae.rs` — new `WaeEmitter` module: `TelemetryEvent` struct, `emit()` fire-and-forget helper, `check_privacy()` + `check_payload_field()` privacy filter enforced at the Rust layer
+- `AppStateInner.wae: Arc<WaeEmitter>` — WAE emitter wired into app state; configured via `WAE_ENDPOINT` + `WAE_API_KEY` env vars; no-op when absent (safe in dev/test)
+- `telemetry_middleware` now emits parallel `page_view` WAE event alongside every OLTP write (CO-46 OLTP path untouched)
+- `start_server` emits a `deploy` event to WAE at startup — satisfies "synthetic exposure visible in WAE SQL within 60s" acceptance criterion
+- Privacy filter is tested as a guarantee (11 unit tests): rejects fields named `content`, `body`, `text`, `markdown`, `prose` and values > 256 bytes with structured error
+
+**Cloudflare Worker proxy**
+- `workers/wae-proxy/src/index.ts` — Worker that accepts `POST /api/internal/wae` with Bearer auth, runs the same privacy filter, and calls `env.WAE.writeDataPoint()` mapping event fields to WAE blobs/doubles/indexes
+- `workers/wae-proxy/wrangler.toml` — routes to `wae.co.artelonga.com.br`, binds `co_telemetry` WAE dataset; API key set via `wrangler secret put WAE_API_KEY`
+
+**Config** (`config.rs`)
+- `WebConfig.wae_endpoint: Option<String>` — from `WAE_ENDPOINT` env var
+- `WebConfig.wae_api_key: Option<String>` — from `WAE_API_KEY` env var
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3

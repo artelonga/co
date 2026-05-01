@@ -1,0 +1,17 @@
+name = "co-wae-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-09-23"
+
+# Route: wae.co.artelonga.com.br/*
+# The WAE binding name must match what index.ts references as `env.WAE`.
+[[routes]]
+pattern = "wae.co.artelonga.com.br/*"
+zone_name = "co.artelonga.com.br"
+
+[[analytics_engine_datasets]]
+binding = "WAE"
+dataset = "co_telemetry"
+
+[vars]
+# Set via `wrangler secret put WAE_API_KEY` — never commit the value here.
+# WAE_API_KEY = ""
