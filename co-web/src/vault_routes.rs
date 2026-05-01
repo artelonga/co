@@ -1345,6 +1345,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
         });
         build_router(state, None)
     }

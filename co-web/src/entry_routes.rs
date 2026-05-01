@@ -314,6 +314,7 @@ pub async fn get_entry(
 pub async fn create_entry(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<CreateEntryBody>,
 ) -> Result<impl IntoResponse, AppError> {
     if body.path.is_empty() {
@@ -322,9 +323,19 @@ pub async fn create_entry(
 
     let universe_root = {
         let storage = lock_storage(&state)?;
-        storage
+        let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+        // CO-80: quota check — anonymous usage gate or tier-based storage quota.
+        if let Some((uid, tier)) = crate::rate_limit::extract_auth_identity(&headers) {
+            crate::rate_limit::check_storage_quota(&storage, &uid, tier, &headers)?;
+        } else if universe.owner_id.starts_with("anon-") && universe.content_count >= 100 {
+            return Err(AppError::UsageLimitExceeded {
+                current: universe.content_count,
+            });
+        }
+
         storage.universe_root(&slug)
     };
 

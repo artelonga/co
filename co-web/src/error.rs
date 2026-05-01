@@ -13,7 +13,19 @@ pub enum AppError {
     Forbidden(String),
     Gone(String),
     TooManyRequests(String),
-    UsageLimitExceeded { current: i64 },
+    UsageLimitExceeded {
+        current: i64,
+    },
+    /// CO-80: rate limit exceeded — returns 429 with Retry-After header.
+    RateLimited {
+        retry_after_secs: u64,
+    },
+    /// CO-80: tier storage or universe quota exceeded — returns 402 with usage details.
+    StorageQuotaExceeded {
+        used: i64,
+        limit: i64,
+        tier: String,
+    },
 }
 
 impl std::fmt::Display for AppError {
@@ -30,6 +42,12 @@ impl std::fmt::Display for AppError {
             AppError::TooManyRequests(msg) => write!(f, "Too many requests: {msg}"),
             AppError::UsageLimitExceeded { current } => {
                 write!(f, "Usage limit exceeded: {current}/100")
+            }
+            AppError::RateLimited { retry_after_secs } => {
+                write!(f, "Rate limited: retry after {retry_after_secs}s")
+            }
+            AppError::StorageQuotaExceeded { used, limit, tier } => {
+                write!(f, "Storage quota exceeded ({tier}): {used}/{limit}")
             }
         }
     }
@@ -63,6 +81,37 @@ impl IntoResponse for AppError {
             return (StatusCode::PAYMENT_REQUIRED, axum::Json(body)).into_response();
         }
 
+        if let AppError::StorageQuotaExceeded {
+            used,
+            limit,
+            ref tier,
+        } = self
+        {
+            let body = json!({
+                "error": "quota_exceeded",
+                "message": "Cota de armazenamento esgotada",
+                "message_en": "Storage quota exhausted",
+                "used": used,
+                "limit": limit,
+                "tier": tier,
+            });
+            return (StatusCode::PAYMENT_REQUIRED, axum::Json(body)).into_response();
+        }
+
+        if let AppError::RateLimited { retry_after_secs } = self {
+            let body = json!({
+                "error": "rate_limited",
+                "message": "Muitas requisições. Tente novamente em instantes.",
+                "message_en": "Too many requests. Please try again shortly.",
+                "retry_after": retry_after_secs,
+            });
+            let mut resp = (StatusCode::TOO_MANY_REQUESTS, axum::Json(body)).into_response();
+            if let Ok(v) = retry_after_secs.to_string().parse() {
+                resp.headers_mut().insert("retry-after", v);
+            }
+            return resp;
+        }
+
         let (status, error, message) = match self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", msg),
@@ -79,7 +128,9 @@ impl IntoResponse for AppError {
             AppError::TooManyRequests(msg) => {
                 (StatusCode::TOO_MANY_REQUESTS, "too_many_requests", msg)
             }
-            AppError::UsageLimitExceeded { .. } => unreachable!(),
+            AppError::UsageLimitExceeded { .. }
+            | AppError::RateLimited { .. }
+            | AppError::StorageQuotaExceeded { .. } => unreachable!(),
         };
 
         let message_pt = translate_error_pt(error);

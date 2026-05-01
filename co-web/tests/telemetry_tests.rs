@@ -53,6 +53,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
         doc_rooms: co_web::ws::new_room_manager(),
+        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
     });
     build_router(state, None)
 }

@@ -5,6 +5,42 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-80: Per-tier rate limiting + quota — token bucket per user/tier/operation
+
+**`co-web/src/rate_limit.rs`** (new module)
+- `Tier` enum: `Anonymous`, `User`, `Pro`, `Admin` — parsed from JWT `tier` claim
+- `TierLimits` struct: reads/min, writes/min, storage entries cap, max universes cap
+- `TokenBucket` + `RateLimiter`: in-process token bucket with per-second refill (`capacity / 60`), separate bucket per `(user_or_ip, op_class)`
+- `rate_limit_middleware`: Axum middleware applied after all routes; skips health endpoints, OPTIONS, and admin tier; returns **HTTP 429** with `Retry-After` header on exhaustion
+- `check_storage_quota` / `check_universe_quota`: storage + universe count enforcement for authenticated users; admin with `X-Admin-Override-Quota: true` bypasses and audit-logs
+
+**Tier limits**
+
+| Tier      | Reads/min | Writes/min | Storage cap | Universes |
+|-----------|-----------|------------|-------------|-----------|
+| Anonymous | 20        | 5          | 100 entries | 1         |
+| User      | 200       | 60         | 10 K        | 10        |
+| Pro       | 2 000     | 600        | 1 M         | unlimited |
+| Admin     | unlimited | unlimited  | unlimited   | unlimited |
+
+**`co-web/src/error.rs`**
+- `AppError::RateLimited { retry_after_secs }` → 429 with `Retry-After` header
+- `AppError::StorageQuotaExceeded { used, limit, tier }` → **HTTP 402** with usage JSON (`error: "quota_exceeded"`, `used`, `limit`, `tier`)
+
+**`co-web/src/universe_routes.rs`**
+- `create_universe`: checks universe count quota before creating; admin override respected
+
+**`co-web/src/entry_routes.rs`**
+- `create_entry`: checks storage quota (authenticated users) or anonymous 100-entry gate before writing
+
+**`co-web/src/storage.rs`**
+- `count_user_entries(user_id)` — SUM of content_count across owned non-template universes
+- `count_user_universes(user_id)` — COUNT of owned non-template universes
+
+**CORS**: `x-admin-override-quota` added to allowed headers
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3

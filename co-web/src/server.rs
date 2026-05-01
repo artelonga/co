@@ -55,6 +55,8 @@ pub struct AppStateInner {
     pub plugin_registry: game_core::plugin::PluginRegistry,
     /// CRDT document rooms — keyed by `"slug:doc_path"`.
     pub doc_rooms: crate::ws::DocRoomManager,
+    /// CO-80: per-tier in-process token bucket rate limiter.
+    pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -276,6 +278,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             HeaderName::from_static("target-type"),
             HeaderName::from_static("target"),
             HeaderName::from_static("operation"),
+            HeaderName::from_static("x-admin-override-quota"),
         ]);
 
     // --- Quilombo community routes ---
@@ -374,6 +377,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     if let Some(plugin_router) = plugin_routes {
         router = router.nest("/api/v1/plugins", plugin_router);
     }
+
+    // CO-80: rate limiting applied after ALL routes are registered so the layer
+    // covers every endpoint, including universe_api, entry_api, and vault_api.
+    router = router.layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::rate_limit::rate_limit_middleware,
+    ));
 
     router
         .fallback(serve_variant_file)
@@ -737,6 +747,7 @@ pub async fn start_server(config: WebConfig) {
         game_storage,
         plugin_registry,
         doc_rooms: crate::ws::new_room_manager(),
+        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -1822,6 +1833,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         });
         build_router(state, None)
     }
@@ -1998,6 +2010,201 @@ mod tests {
             stored_hash.as_deref(),
             Some(hash2.as_str()),
             "hash should be updated when drift detected"
+        );
+    }
+
+    // --- CO-80: rate limiting + quota integration tests ---
+
+    /// Anonymous user gets HTTP 429 after exhausting the 20-reads/min bucket.
+    #[tokio::test]
+    async fn test_rate_limit_anonymous_reads_returns_429() {
+        // SAFETY: single-threaded test setup, no concurrent set_var calls.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        let make_req = || {
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/universes/template")
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        // First 20 requests: rate limiter allows them (bucket starts full at 20).
+        for i in 0..20 {
+            let status = app.clone().oneshot(make_req()).await.unwrap().status();
+            assert_ne!(
+                status,
+                StatusCode::TOO_MANY_REQUESTS,
+                "request {i} should not be rate limited"
+            );
+        }
+
+        // 21st request: bucket is empty → 429.
+        let status = app.clone().oneshot(make_req()).await.unwrap().status();
+        assert_eq!(
+            status,
+            StatusCode::TOO_MANY_REQUESTS,
+            "21st request should be rate limited"
+        );
+    }
+
+    /// HTTP 429 response includes a Retry-After header.
+    #[tokio::test]
+    async fn test_rate_limit_429_has_retry_after_header() {
+        // SAFETY: single-threaded test setup, no concurrent set_var calls.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        let make_req = || {
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/universes/template")
+                .body(Body::empty())
+                .unwrap()
+        };
+
+        // Exhaust the anonymous read bucket (20 slots).
+        for _ in 0..20 {
+            let _ = app.clone().oneshot(make_req()).await.unwrap();
+        }
+
+        let resp = app.clone().oneshot(make_req()).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(
+            resp.headers().contains_key("retry-after"),
+            "429 response must include Retry-After header"
+        );
+    }
+
+    /// Storage quota exhaustion returns 402 with quota details.
+    #[tokio::test]
+    async fn test_storage_quota_exceeded_returns_402() {
+        // SAFETY: single-threaded test setup, no concurrent set_var calls.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        // Create a "user" tier user and a universe that is already at quota.
+        let user_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let id = format!(
+                "usr_quota_{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")[..8].to_string()
+            );
+            let now = chrono::Utc::now().to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO users (id, email, display_name, tier, created_at) \
+                     VALUES (?1, 'quota@test.local', 'Quota Test', 'user', ?2)",
+                    rusqlite::params![id, now],
+                )
+                .unwrap();
+            // Universe at 10001 entries — exceeds user tier (10000).
+            storage
+                .conn()
+                .execute(
+                    "INSERT OR IGNORE INTO universes \
+                     (key, name, description, owner_id, created_at, is_template, is_public, \
+                      content_count, visibility) \
+                     VALUES ('quota-u', 'Quota Universe', '', ?1, ?2, 0, 0, 10001, 'private')",
+                    rusqlite::params![id, now],
+                )
+                .unwrap();
+            id
+        };
+
+        let jwt = crate::auth::sign_jwt(&user_id, "quota@test.local", "user", "test-secret")
+            .unwrap()
+            .0;
+
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/universes/quota-u/entries")
+                    .header("Authorization", format!("Bearer {}", jwt))
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"path":"test.md","frontmatter":{"type":"page","title":"T"},"body":""}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp.status(),
+            StatusCode::PAYMENT_REQUIRED,
+            "storage quota exhaustion must return 402"
+        );
+        let body = body_str(resp.into_body()).await;
+        assert!(
+            body.contains("quota_exceeded"),
+            "body must contain quota_exceeded, got: {body}"
+        );
+        assert!(
+            body.contains("used"),
+            "body must include used count: {body}"
+        );
+        assert!(body.contains("limit"), "body must include limit: {body}");
+    }
+
+    /// Admin user with X-Admin-Override-Quota bypasses quota check (audit logged).
+    #[tokio::test]
+    async fn test_admin_override_quota_bypasses_universe_quota() {
+        // SAFETY: single-threaded test setup, no concurrent set_var calls.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        // Create an admin user who already has 1 universe (the "user" tier limit is 10,
+        // but admin has no limit — this tests the override header is accepted for admin).
+        let user_id = "usr_admin_override";
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let now = chrono::Utc::now().to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO users (id, email, display_name, tier, created_at) \
+                     VALUES (?1, 'admin@test.local', 'Admin', 'admin', ?2)",
+                    rusqlite::params![user_id, now],
+                )
+                .unwrap();
+        }
+
+        let jwt = crate::auth::sign_jwt(user_id, "admin@test.local", "admin", "test-secret")
+            .unwrap()
+            .0;
+
+        // Admin creating a universe with X-Admin-Override-Quota: true must not get 402.
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/universes")
+                    .header("Authorization", format!("Bearer {}", jwt))
+                    .header("X-Admin-Override-Quota", "true")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{"key":"admin-override-test","name":"Admin Override Test"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_ne!(
+            resp.status(),
+            StatusCode::PAYMENT_REQUIRED,
+            "admin with override header must not get 402, got: {}",
+            resp.status()
         );
     }
 }

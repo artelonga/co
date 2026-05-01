@@ -649,6 +649,7 @@ mod tests {
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
         });
 
         let app = build_router(state, None);
@@ -721,6 +722,7 @@ mod tests {
             game_storage,
             plugin_registry: Default::default(),
             doc_rooms: new_room_manager(),
+            rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
         });
 
         let app = build_router(state.clone(), None);

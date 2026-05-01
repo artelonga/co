@@ -3336,6 +3336,31 @@ impl Storage {
             .ok();
     }
 
+    /// CO-80: Sum of content_count across all universes owned by `user_id`.
+    /// Used for tier storage quota checks.
+    pub fn count_user_entries(&self, user_id: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(SUM(content_count), 0) FROM universes \
+                 WHERE owner_id = ?1 AND is_template = 0",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// CO-80: Count non-template universes owned by `user_id`.
+    /// Used for tier universe count quota checks.
+    pub fn count_user_universes(&self, user_id: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM universes WHERE owner_id = ?1 AND is_template = 0",
+                params![user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
     /// Count comments for a specific task.
     pub fn count_task_comments(&self, project_key: &str, task_id: u64) -> i64 {
         let upper = project_key.to_uppercase();
