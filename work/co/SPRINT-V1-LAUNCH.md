@@ -66,7 +66,7 @@ The **new V2 platform infrastructure** (Cloudflare CDN, WAE, ClickHouse, Redpand
 | C4 — admin dashboard | CO-105 | ⬜ |
 | **NEW: PLAT-4** — co-agent adapter trait | CO-120 | ⬜ Phase 1 platform infra |
 | **NEW: PLAT-5** — A/B primitives on OLTP | CO-121 | ⬜ Phase 1 platform infra |
-| **NEW: PLAT-6** — Quota/tier model spec | CO-122 | ⬜ Phase 1 platform infra (no enforcement yet) |
+| **NEW: PLAT-6** — Quota/tier model spec | CO-122 | ✅ done — [`docs/QUOTAS.md`](../../docs/QUOTAS.md) |
 
 ### Phase 2 (Sustained public test — Wave 3 + Wave 4 + Wave 5)
 
