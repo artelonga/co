@@ -294,6 +294,14 @@ fn parse_markdown_content(content: &str) -> (JsonValue, String) {
     }
 }
 
+/// Load and parse `_universe.yaml` from `universe_root`.  Returns `None` if
+/// the file does not exist or cannot be parsed.
+fn load_manifest(universe_root: &std::path::Path) -> Option<co::manifest::Manifest> {
+    let path = universe_root.join(co::manifest::MANIFEST_FILENAME);
+    let bytes = std::fs::read(&path).ok()?;
+    co::manifest::parse(&bytes).ok().map(|r| r.manifest)
+}
+
 /// Upsert an entry: write .md file + update SQLite index. Returns row data.
 fn write_vault_entry(
     state: &AppState,
@@ -327,6 +335,22 @@ fn write_vault_entry(
         index
             .upsert(universe_key, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-73: index semantic date fields
+        let manifest = load_manifest(&universe_root);
+        index
+            .upsert_dates(universe_key, &entry, manifest.as_ref())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-74: extract and store typed FK relations
+        if let Some(ref m) = manifest {
+            let _ = crate::relation_index::sync_entry_relations(
+                &uc_guard,
+                universe_key,
+                path,
+                &entry.entry_type,
+                &frontmatter,
+                m,
+            );
+        }
     }
 
     Ok(crate::entry_index::EntryRow {
@@ -454,10 +478,12 @@ pub async fn put_vault_file(
         crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
     let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
 
-    // CO-71: when `_universe.yaml` is updated, apply manifest indexes in background.
+    // CO-71 + CO-74: when `_universe.yaml` is updated, apply manifest indexes and
+    // backfill typed FK relations for affected content types — both in background.
     if path == co::manifest::MANIFEST_FILENAME {
         let db_path = state.storage.lock().ok().map(|s| s.data_dir.join("co.db"));
         let universe_root = lock_storage(&state).ok().map(|s| s.universe_root(&slug));
+        let universe_pool = state.storage.lock().ok().map(|s| s.universe_pool.clone());
         if let (Some(db_path), Some(universe_root)) = (db_path, universe_root) {
             let manifest_path = universe_root.join(co::manifest::MANIFEST_FILENAME);
             if let Ok(bytes) = std::fs::read(&manifest_path)
@@ -466,8 +492,16 @@ pub async fn put_vault_file(
                 crate::index_manager::apply_manifest_indexes_background(
                     db_path,
                     slug.clone(),
-                    parsed.manifest.content_types,
+                    parsed.manifest.content_types.clone(),
                 );
+                // CO-74: backfill relations for all ref/ref_list fields in the new manifest
+                if let Some(pool) = universe_pool {
+                    crate::relation_index::backfill_relations_background(
+                        pool,
+                        slug.clone(),
+                        parsed.manifest,
+                    );
+                }
             }
         }
     }
@@ -792,6 +826,8 @@ pub async fn delete_vault_file(
         index
             .remove(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-74: remove outbound FK relations
+        let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
     }
 
     let _ = lock_storage(&state).map(|mut s| s.decrement_universe_content_count(&slug, 1));

@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/hlc.json",
+  "title": "Hlc",
+  "description": "Hybrid Logical Clock serialized as wall_ms:counter:node_hex32",
+  "type": "string",
+  "pattern": "^[0-9]+:[0-9]+:[0-9a-f]{32}$",
+  "examples": [
+    "1714500000000:0:aaaaaaaa000000000000000000000000",
+    "1714500000001:3:bbbbbbbb000000000000000000000000"
+  ]
+}

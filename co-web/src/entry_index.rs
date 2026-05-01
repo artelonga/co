@@ -368,6 +368,138 @@ impl<'a> EntryIndex<'a> {
         Ok(roots)
     }
 
+    /// Upsert semantic date rows for an entry into `entry_dates`.
+    ///
+    /// Scans the manifest for `Date` fields with a declared `semantic`, reads
+    /// the corresponding value from `entry.frontmatter`, normalises it to UTC
+    /// ISO-8601, and replaces any existing rows for this entry.
+    ///
+    /// If no manifest is provided or no matching content type is found, this is
+    /// a no-op (dates simply won't be indexed for that entry).
+    pub fn upsert_dates(
+        &self,
+        universe_key: &str,
+        entry: &co::entry::Entry,
+        manifest: Option<&co::manifest::Manifest>,
+    ) -> anyhow::Result<()> {
+        // Clear stale rows for this entry regardless.
+        self.conn.execute(
+            "DELETE FROM entry_dates WHERE universe_key = ?1 AND entry_path = ?2",
+            params![universe_key, entry.path],
+        )?;
+
+        let manifest = match manifest {
+            Some(m) => m,
+            None => return Ok(()),
+        };
+        let ct = manifest
+            .content_types
+            .iter()
+            .find(|ct| ct.name == entry.entry_type);
+        let ct = match ct {
+            Some(ct) => ct,
+            None => return Ok(()),
+        };
+
+        for (field_name, field_def) in &ct.schema {
+            if !matches!(field_def.field_type, co::manifest::FieldType::Date) {
+                continue;
+            }
+            let semantic = match &field_def.semantic {
+                Some(s) => s.as_str(),
+                None => continue,
+            };
+            let raw = match entry.frontmatter.get(field_name).and_then(|v| v.as_str()) {
+                Some(s) if !s.is_empty() => s,
+                _ => continue,
+            };
+            let utc_val = match normalize_date_to_utc(raw) {
+                Some(v) => v,
+                None => continue,
+            };
+            self.conn.execute(
+                "INSERT OR REPLACE INTO entry_dates (universe_key, entry_path, semantic, value)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![universe_key, entry.path, semantic, utc_val],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Remove all semantic date rows for an entry from `entry_dates`.
+    pub fn remove_dates(&self, universe_key: &str, path: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "DELETE FROM entry_dates WHERE universe_key = ?1 AND entry_path = ?2",
+            params![universe_key, path],
+        )?;
+        Ok(())
+    }
+
+    /// Query entries by date semantic and optional UTC date range.
+    ///
+    /// `semantic` must be one of the `DateSemantic::as_str()` values (e.g. `"event_at"`).
+    /// `from` / `to` are inclusive ISO-8601 bounds (date or datetime).
+    /// Results are ordered by `entry_dates.value` ascending (chronological).
+    pub fn query_by_date(
+        &self,
+        universe_key: &str,
+        semantic: &str,
+        from: Option<&str>,
+        to: Option<&str>,
+    ) -> anyhow::Result<Vec<EntryRow>> {
+        let mut conditions = vec![
+            "e.universe_key = ?1".to_string(),
+            "ed.semantic = ?2".to_string(),
+        ];
+        let mut param_strings: Vec<String> = vec![universe_key.to_string(), semantic.to_string()];
+
+        if let Some(f) = from {
+            let utc = normalize_date_to_utc(f).unwrap_or_else(|| f.to_string());
+            conditions.push(format!("ed.value >= ?{}", param_strings.len() + 1));
+            param_strings.push(utc);
+        }
+        if let Some(t) = to {
+            let utc = normalize_date_to_utc(t).unwrap_or_else(|| t.to_string());
+            conditions.push(format!("ed.value <= ?{}", param_strings.len() + 1));
+            param_strings.push(utc);
+        }
+
+        let where_clause = conditions.join(" AND ");
+        let sql = format!(
+            "SELECT e.path, e.universe_key, e.entry_type, e.title, \
+                    e.frontmatter_json, e.body, e.body_hash, e.created_at, e.updated_at \
+             FROM entries e \
+             JOIN entry_dates ed \
+               ON ed.universe_key = e.universe_key AND ed.entry_path = e.path \
+             WHERE {where_clause} \
+             ORDER BY ed.value ASC \
+             LIMIT 500"
+        );
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_strings
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params_refs.as_slice(), row_to_entry_row)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// Execute a parameterized SQL query and return matching [`EntryRow`]s.
+    ///
+    /// Used by the CO-74 query DSL to run compiled graph queries.
+    /// `params` must align with the `?N` placeholders in `sql`.
+    pub fn query_raw(
+        &self,
+        sql: &str,
+        params: &[&dyn rusqlite::types::ToSql],
+    ) -> anyhow::Result<Vec<EntryRow>> {
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(params, row_to_entry_row)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     /// Count entries of a given type in a universe.
     pub fn count(&self, universe_key: &str, entry_type: Option<&str>) -> i64 {
         match entry_type {
@@ -472,6 +604,20 @@ fn value_to_sql_string(val: &JsonValue) -> String {
     }
 }
 
+/// Normalise a raw date string to a UTC ISO-8601 datetime string.
+///
+/// Accepts full RFC3339 datetimes and `YYYY-MM-DD` date-only strings.
+/// Returns `None` if the input cannot be parsed.
+pub fn normalize_date_to_utc(s: &str) -> Option<String> {
+    if let Ok(dt) = s.parse::<chrono::DateTime<chrono::Utc>>() {
+        return Some(dt.to_rfc3339());
+    }
+    if let Ok(dt) = format!("{s}T00:00:00Z").parse::<chrono::DateTime<chrono::Utc>>() {
+        return Some(dt.to_rfc3339());
+    }
+    None
+}
+
 /// Build an Entry from frontmatter JSON object + body string (for creating new entries).
 pub fn make_entry(path: &str, frontmatter: JsonValue, body: &str) -> co::entry::Entry {
     let entry_type = frontmatter
@@ -491,5 +637,228 @@ pub fn make_entry(path: &str, frontmatter: JsonValue, body: &str) -> co::entry::
             modified: now,
             size: 0,
         },
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tests — CO-73 temporal model
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use co::manifest::{ContentType, DateSemantic, FieldDef, FieldType, Manifest, Presentation};
+    use rusqlite::Connection;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    fn open_mem_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::universe_pool::UNIVERSE_SCHEMA_FOR_TEST)
+            .unwrap();
+        conn
+    }
+
+    fn manifest_with_event_at() -> Manifest {
+        let mut schema = BTreeMap::new();
+        schema.insert(
+            "event_at".to_string(),
+            FieldDef {
+                field_type: FieldType::Date,
+                required: false,
+                values: vec![],
+                semantic: Some(DateSemantic::EventAt),
+                target: None,
+            },
+        );
+        schema.insert(
+            "title".to_string(),
+            FieldDef {
+                field_type: FieldType::String,
+                required: false,
+                values: vec![],
+                semantic: None,
+                target: None,
+            },
+        );
+        Manifest {
+            schema_version: 1,
+            name: "Test".to_string(),
+            content_types: vec![ContentType {
+                name: "evento".to_string(),
+                schema,
+                presentation: Presentation::default(),
+                indexes: vec![],
+            }],
+            doc_generators: vec![],
+            relationships: vec![],
+            views: vec![],
+        }
+    }
+
+    fn insert_entry(conn: &Connection, universe_key: &str, path: &str, entry_type: &str, fm: &str) {
+        conn.execute(
+            "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, payload, body, body_hash)
+             VALUES (?1, ?2, ?3, '', ?4, ?4, '', '')",
+            rusqlite::params![path, universe_key, entry_type, fm],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_normalize_date_to_utc_datetime() {
+        let out = normalize_date_to_utc("2026-05-01T10:00:00Z").unwrap();
+        assert!(out.contains("2026-05-01"), "got: {out}");
+    }
+
+    #[test]
+    fn test_normalize_date_to_utc_date_only() {
+        let out = normalize_date_to_utc("2026-05-01").unwrap();
+        assert!(out.starts_with("2026-05-01"), "got: {out}");
+    }
+
+    #[test]
+    fn test_normalize_date_to_utc_invalid() {
+        assert!(normalize_date_to_utc("not-a-date").is_none());
+    }
+
+    #[test]
+    fn test_upsert_dates_inserts_semantic_row() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        insert_entry(
+            &conn,
+            "uni",
+            "events/1.md",
+            "evento",
+            r#"{"type":"evento","event_at":"2026-06-01"}"#,
+        );
+        let entry = make_entry(
+            "events/1.md",
+            json!({"type": "evento", "event_at": "2026-06-01"}),
+            "",
+        );
+
+        idx.upsert_dates("uni", &entry, Some(&manifest)).unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entry_dates WHERE universe_key='uni' AND entry_path='events/1.md' AND semantic='event_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "should have one entry_dates row");
+    }
+
+    #[test]
+    fn test_upsert_dates_replaces_on_update() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        let entry_v1 = make_entry(
+            "events/1.md",
+            json!({"type":"evento","event_at":"2026-06-01"}),
+            "",
+        );
+        idx.upsert_dates("uni", &entry_v1, Some(&manifest)).unwrap();
+
+        let entry_v2 = make_entry(
+            "events/1.md",
+            json!({"type":"evento","event_at":"2026-07-15"}),
+            "",
+        );
+        idx.upsert_dates("uni", &entry_v2, Some(&manifest)).unwrap();
+
+        let val: String = conn
+            .query_row(
+                "SELECT value FROM entry_dates WHERE universe_key='uni' AND entry_path='events/1.md' AND semantic='event_at'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert!(val.contains("2026-07-15"), "value should be updated: {val}");
+    }
+
+    #[test]
+    fn test_remove_dates_clears_rows() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        let entry = make_entry(
+            "events/1.md",
+            json!({"type":"evento","event_at":"2026-06-01"}),
+            "",
+        );
+        idx.upsert_dates("uni", &entry, Some(&manifest)).unwrap();
+        idx.remove_dates("uni", "events/1.md").unwrap();
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM entry_dates WHERE universe_key='uni'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_query_by_date_returns_matching_entries() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        // Insert entries
+        for (path, date) in [
+            ("events/1.md", "2026-06-10"),
+            ("events/2.md", "2026-06-20"),
+            ("events/3.md", "2026-07-05"),
+        ] {
+            let fm = json!({"type":"evento","event_at": date});
+            insert_entry(&conn, "uni", path, "evento", &fm.to_string());
+            let entry = make_entry(path, fm, "");
+            idx.upsert_dates("uni", &entry, Some(&manifest)).unwrap();
+        }
+
+        let results = idx
+            .query_by_date("uni", "event_at", Some("2026-06-01"), Some("2026-06-30"))
+            .unwrap();
+        assert_eq!(results.len(), 2, "should return June events only");
+        assert!(results.iter().all(|r| r.entry_type == "evento"));
+    }
+
+    #[test]
+    fn test_query_by_date_no_range_returns_all_with_semantic() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        for (path, date) in [("events/1.md", "2026-01-01"), ("events/2.md", "2026-12-31")] {
+            let fm = json!({"type":"evento","event_at": date});
+            insert_entry(&conn, "uni", path, "evento", &fm.to_string());
+            idx.upsert_dates("uni", &make_entry(path, fm, ""), Some(&manifest))
+                .unwrap();
+        }
+
+        let results = idx.query_by_date("uni", "event_at", None, None).unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_upsert_dates_no_manifest_is_noop() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let entry = make_entry("x.md", json!({"type":"evento","event_at":"2026-01-01"}), "");
+        idx.upsert_dates("uni", &entry, None).unwrap();
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM entry_dates", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0, "no manifest = no rows indexed");
     }
 }

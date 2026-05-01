@@ -5,6 +5,126 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] — 2026-04-30
+
+### Added — CO-73: Temporal model — first-class semantic dates (event_at, due_at, scheduled_at, …)
+
+**`DateSemantic` enum expansion (`core/src/manifest.rs`)**
+- Renamed `Due/Event/Created/Updated` → `DueAt/EventAt/CreatedAt/UpdatedAt` to match canonical `_at` names
+- Added four new semantics: `ScheduledAt`, `PublishedAt`, `ExpiresAt`, `EffectiveAt`
+- Added `DateSemantic::as_str()` returning the canonical query-param string (e.g. `"event_at"`)
+
+**`entry_dates` table (per-universe `data.db`, migration v2)**
+- Schema: `(universe_key, entry_path, semantic, value TEXT NOT NULL UTC ISO-8601)` with PK
+- Index `idx_entry_dates_range ON (universe_key, semantic, value)` for O(log N) range queries
+- Created idempotently on every DB open; version bumped to 2 on first migration
+
+**Write hook (`co-web/src/entry_index.rs`)**
+- `upsert_dates(universe_key, entry, manifest)` — extracts all `Date` fields with a declared semantic from the manifest, normalises values to UTC RFC3339, upserts into `entry_dates`
+- `remove_dates(universe_key, path)` — clears all `entry_dates` rows on DELETE
+- `normalize_date_to_utc(s)` — accepts full RFC3339 and `YYYY-MM-DD`; returns `None` on parse failure
+- Hook wired into `create_entry`, `update_entry`, `delete_entry` in `entry_routes.rs`
+
+**Date-semantic query API**
+- `GET /api/v1/universes/:slug/entries?date_semantic=event_at&from=2026-01-01&to=2026-12-31`
+- JOINs `entry_dates` on `(universe_key, semantic)` with optional `>= from` / `<= to` bounds
+- Results ordered by date ascending; hard cap 500
+
+**Manifest API endpoint**
+- `GET /api/v1/universes/:slug/manifest` — returns parsed `_universe.yaml` as JSON; falls back to `default_manifest` when no file exists
+
+**Calendar view upgrade (frontend)**
+- Detects manifest `presentation.calendar.date_field`; fetches entries via date-semantic API when declared
+- Renders entries (not just tasks) in calendar cells; normalises UTC to user's local timezone via `Intl.DateTimeFormat`
+- Legacy `due_date`-from-tasks rendering preserved as fallback
+
+**Gantt view (frontend)**
+- Manifest-declared `views: [{ type: gantt, date_start: X, date_end: Y }]` injects a tab automatically
+- `renderGantt(viewDef)` renders horizontal bars spanning `date_start` → `date_end` per entry
+- Today marker, month labels, responsive bar widths; no code changes needed for new Gantt views
+
+**Timezone support**
+- Server stores UTC; browser renders in user's timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone`
+
+### Added — CO-61: Sync Protocol v1 — op log + content-addressed blobs + 3-way merge + recursive resolution
+
+**Spec document (`docs/sync-protocol-v1.md`)**
+- 706-line canonical specification covering: op log shape, HLC semantics, content-addressed blob store, 3-way merge algorithm, recursive conflict resolution, idempotency/atomicity guarantees, REST transport, auth (v1.0 shared secret / v1.1 federation reserved), and reducer rules
+- Explains the PR analogy (Proposta ≅ pull request), prod-wins default policy, and copia semantics
+- Full compatibility mapping with CO-51/54/55/58/66/68 sync tracks
+
+**JSON Schemas (`docs/sync-protocol-v1/schemas/`)**
+- `hlc.json` — Hybrid Logical Clock serialized as `wall_ms:counter:node_hex32`
+- `ator.json` — Actor identity (node_id + optional user_id)
+- `alvo.json` — Addressed entity + optional field
+- `operacao.json` — Single immutable op with causal parents
+- `manifesto.json` — Peer state summary for divergence detection
+- `proposta.json` — Sync proposal (batch of ops from sender)
+- `conflito.json` — Detected conflict with resolution options
+- `relatorio_mesclagem.json` — Merge report returned to sender
+
+**Test vectors (`docs/sync-protocol-v1/fixtures/`)**
+- 10 fixture files covering: clean apply, independent advances, same-slot conflicts, resolver ops, delete-vs-update (copia), idempotent dedup, nested conflicts, causal ancestry, schema migration, and resolver reversibility
+
+**Rust skeleton (`core/src/sync/mod.rs`)**
+- Types: `Hlc`, `Ator`, `Alvo`, `Operacao`, `Manifesto`, `Proposta`, `Conflito`, `RelatorioMesclagem`
+- `SyncProtocol` trait for implementors
+- `mesclar()` / `mesclar_com_blobs()` — pure 3-way merge function with dedup, causality-aware conflict detection, and blob request list
+- `causal_ancestor()` — transitive parent-walk via op `pai` DAG
+- `conflito_id_de()` — deterministic conflict UUID from SHA-256 of sorted op IDs
+- Custom serde for `Hlc` (string format) and `[u8; 32]` (hex)
+
+**Fixture tests (`core/tests/sync_fixtures.rs`)**
+- Parameterized test runner loading all 10 fixtures
+- Compares `aplicadas`, `novas_ops_remotas`, `blobs_solicitados`, and `conflitos` (by op_local/op_remota/alvo, ignoring generated IDs)
+
+## [1.26.0] — 2026-04-30
+
+### Added — CO-74: Relationship graph — typed FK references + query DSL + wikilink promotion
+
+**`entry_relations` table (per-universe `data.db`, migration v3)**
+- Schema: `(universe_key, from_path, to_path, relation_type, created_at)` with PK + two directional indexes
+- Indexed on `(universe_key, from_path, relation_type)` and `(universe_key, to_path, relation_type)` — O(log N) lookups in both directions
+- Created idempotently on every DB open via `UNIVERSE_SCHEMA IF NOT EXISTS`
+
+**Wikilink parser (`core/src/wikilink.rs`)**
+- `resolve_ref_value(s)` — strips `[[target]]` or `[[target|alias]]` notation, returns bare path
+- `extract_wikilinks(text)` — scans free text for all wikilink targets
+- Used at entry write time to resolve typed ref field values
+
+**Relation index (`co-web/src/relation_index.rs`)**
+- `RelationIndex` with `replace_all`, `delete_for_entry`, `outbound`, `inbound`
+- `extract_relations(manifest, entry_type, frontmatter)` — derives `(relation_type, to_path)` pairs from manifest-declared `ref`/`ref_list` fields only; non-ref fields with wikilinks stay as plain text
+- `sync_entry_relations(conn, ...)` — called from all write paths
+- `backfill_for_manifest(conn, ...)` — re-derives relations for all entries of affected types
+- `backfill_relations_background(pool, slug, manifest)` — fire-and-forget thread spawned on manifest update
+
+**Manifest-driven typing**
+- On every entry create/update (via entry routes and vault routes), manifest is loaded and FK relations derived from `Ref`/`RefList` fields and stored atomically
+- On entry delete, outbound relations removed
+- Wikilinks in non-ref fields (plain `String`, `Enum`, etc.) never produce relation rows
+
+**Query DSL (`co-web/src/query_dsl.rs`)**
+- Syntax: `FROM <type> [WHERE <cond> [AND <cond>]*] [LIMIT <n>]`
+- Operators: `=` (exact frontmatter match), `LIKE` (frontmatter LIKE), `INCLUDES` (relation join)
+- `INCLUDES` compiles to a `JOIN entry_relations` with `DISTINCT` deduplication
+- Field names validated as safe identifiers before interpolation into `json_extract` paths (SQL-injection proof)
+- Result cap: 1 000 rows (explicit LIMIT clamped silently)
+- Max 10 filter conditions per query
+
+**API: `GET /api/v1/universes/:slug/query`**
+- `?q=<dsl>` — parses DSL, compiles to SQLite, returns `{ entries, total }`
+- Returns 400 on parse error with human-readable message
+
+**Board UI — relation-aware entry detail**
+- `GET /api/v1/universes/:slug/entries/*path` now returns `{ ...entry, relations: [...] }` in JSON (protobuf unchanged)
+- `relations` array lists outbound FK edges: `{ universe_key, from_path, to_path, relation_type, created_at }`
+- Board can render relationship-aware views without a separate API call
+
+**Backfill on manifest update**
+- When `_universe.yaml` is updated via vault PUT, `backfill_relations_background` is spawned alongside the existing index-rebuild job
+- Idempotent: can be re-run safely; `replace_all` clears stale rows before inserting
+
 ## [1.25.0] — 2026-04-30
 
 ### Added — CO-77: Per-universe SQLite sharding + LiteFS read replicas

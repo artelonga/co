@@ -72,6 +72,12 @@ pub struct EntryListQuery {
     pub filter: Option<String>,
     /// Full-text search query
     pub q: Option<String>,
+    /// CO-73: date semantic to filter by (e.g. `event_at`, `due_at`)
+    pub date_semantic: Option<String>,
+    /// CO-73: inclusive ISO-8601 start of date range
+    pub from: Option<String>,
+    /// CO-73: inclusive ISO-8601 end of date range
+    pub to: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -98,6 +104,21 @@ pub struct UpdateEntryBody {
 pub struct EntryListResponse {
     pub entries: Vec<EntryRow>,
     pub total: usize,
+}
+
+/// CO-74: query DSL parameters for `GET /:slug/query`.
+#[derive(Debug, Deserialize)]
+pub struct QueryDslParams {
+    pub q: String,
+}
+
+/// CO-74: entry detail with outbound relations for board relation-aware views.
+#[derive(Debug, Serialize)]
+pub struct EntryWithRelations {
+    #[serde(flatten)]
+    pub entry: EntryRow,
+    /// Outbound FK relations declared in manifest (relation_type → to_path).
+    pub relations: Vec<crate::relation_index::RelationRow>,
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +168,11 @@ pub async fn list_entries(
     let entries = if let Some(ref fts_query) = q.q {
         index
             .search(&slug, fts_query)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else if let Some(ref semantic) = q.date_semantic {
+        // CO-73: date-semantic range query
+        index
+            .query_by_date(&slug, semantic, q.from.as_deref(), q.to.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else {
         let entry_type = q.entry_type.as_deref().unwrap_or("");
@@ -274,7 +300,13 @@ pub async fn get_entry(
         )
             .into_response())
     } else {
-        Ok(Json(entry).into_response())
+        // CO-74: include outbound FK relations in entry detail for board relation-aware views.
+        let relations = {
+            crate::relation_index::RelationIndex::new(&uc_guard)
+                .outbound(&slug, &path)
+                .unwrap_or_default()
+        };
+        Ok(Json(EntryWithRelations { entry, relations }).into_response())
     }
 }
 
@@ -321,6 +353,22 @@ pub async fn create_entry(
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-73: index semantic date fields
+        let manifest = load_manifest(&universe_root);
+        index
+            .upsert_dates(&slug, &entry, manifest.as_ref())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-74: extract and store typed FK relations from manifest-declared ref/ref_list fields
+        if let Some(ref m) = manifest {
+            let _ = crate::relation_index::sync_entry_relations(
+                &uc_guard,
+                &slug,
+                &body.path,
+                &entry.entry_type,
+                &body.frontmatter,
+                m,
+            );
+        }
     }
 
     // Update universe content_count
@@ -421,6 +469,22 @@ pub async fn update_entry(
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-73: index semantic date fields
+        let manifest = load_manifest(&universe_root);
+        index
+            .upsert_dates(&slug, &entry, manifest.as_ref())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-74: re-sync typed FK relations
+        if let Some(ref m) = manifest {
+            let _ = crate::relation_index::sync_entry_relations(
+                &uc_guard,
+                &slug,
+                &path,
+                &entry.entry_type,
+                &new_fm,
+                m,
+            );
+        }
     }
 
     let storage = lock_storage(&state)?;
@@ -453,6 +517,27 @@ pub async fn update_entry(
         created_at: existing.created_at,
         updated_at: Some(entry.stat.modified.to_rfc3339()),
     }))
+}
+
+/// GET /api/v1/universes/:slug/manifest — return the universe manifest
+///
+/// Returns the parsed `_universe.yaml` manifest as JSON.  Falls back to
+/// the built-in default manifest (task board) when no `_universe.yaml` is
+/// present in the universe directory.
+pub async fn get_manifest(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<co::manifest::Manifest>, AppError> {
+    let universe_root = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        storage.universe_root(&slug)
+    };
+    let manifest =
+        load_manifest(&universe_root).unwrap_or_else(|| co::manifest::default_manifest(&slug));
+    Ok(Json(manifest))
 }
 
 /// DELETE /api/v1/universes/:slug/entries/*path — delete entry
@@ -501,6 +586,12 @@ pub async fn delete_entry(
         index
             .remove(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-73: remove semantic date rows
+        index
+            .remove_dates(&slug, &path)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        // CO-74: remove outbound FK relations
+        let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
     }
     let mut storage = lock_storage(&state)?;
     storage.decrement_universe_content_count(&slug, 1);
@@ -521,6 +612,54 @@ pub async fn delete_entry(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// GET /api/v1/universes/:slug/query — execute a CO-74 query DSL expression.
+///
+/// Accepts a `?q=<dsl>` query parameter and returns matching entries.
+/// The DSL is compiled to parameterized SQLite and executed against the
+/// per-universe `data.db`.  Results are capped at 1 000 rows.
+///
+/// # DSL examples
+///
+/// ```text
+/// FROM evento WHERE attendees INCLUDES "yuri"
+/// FROM tarefa WHERE status = "todo" LIMIT 50
+/// FROM evento WHERE attendees INCLUDES "yuri" AND status = "confirmed"
+/// ```
+pub async fn query_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(params): Query<QueryDslParams>,
+) -> Result<Json<EntryListResponse>, AppError> {
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let dsl_query = crate::query_dsl::parse(&params.q)
+        .map_err(|e| AppError::BadRequest(format!("query parse error: {e}")))?;
+
+    let (sql, sql_params) = crate::query_dsl::compile(&dsl_query, &slug);
+
+    let params_refs: Vec<&dyn rusqlite::types::ToSql> = sql_params
+        .iter()
+        .map(|s| s as &dyn rusqlite::types::ToSql)
+        .collect();
+
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let entries = index
+        .query_raw(&sql, params_refs.as_slice())
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let total = entries.len();
+    Ok(Json(EntryListResponse { entries, total }))
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -528,6 +667,9 @@ pub async fn delete_entry(
 pub fn router() -> Router<AppState> {
     Router::new()
         // Specific paths must come before wildcard
+        .route("/{slug}/manifest", get(get_manifest))
+        // CO-74: query DSL endpoint
+        .route("/{slug}/query", get(query_handler))
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))
         .route("/{slug}/entries", get(list_entries).post(create_entry))

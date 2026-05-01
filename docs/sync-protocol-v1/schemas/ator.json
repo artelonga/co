@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/ator.json",
+  "title": "Ator",
+  "description": "Actor identity: stable node_id + optional authenticated user_id",
+  "type": "object",
+  "required": ["node_id"],
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Stable UUID generated at node first boot"
+    },
+    "user_id": {
+      "oneOf": [{ "type": "string", "format": "uuid" }, { "type": "null" }],
+      "description": "Authenticated user; null for system-emitted ops"
+    }
+  }
+}

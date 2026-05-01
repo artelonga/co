@@ -1,0 +1,31 @@
+{
+  "description": "UAT adds foto; prod has no ops since base_hlc → applied cleanly, blob requested",
+  "input": {
+    "proposta_id": "11111111-1111-1111-1111-111111111111",
+    "base_hlc": "1000:0:00000000000000000000000000000000",
+    "ops_prod": [],
+    "ops_uat": [
+      {
+        "id": "00000000-0002-0000-0000-000000000001",
+        "hlc": "2000:0:bbbbbbbb000000000000000000000000",
+        "ator": { "node_id": "bbbbbbbb-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "foto.adicionar",
+        "alvo": { "tipo": "foto", "id": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111", "campo": null },
+        "args": {
+          "sha256": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111",
+          "mime": "image/jpeg",
+          "tamanho": 1024,
+          "dados_blob_ref": "aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"
+        },
+        "pai": [],
+        "assinatura": null
+      }
+    ]
+  },
+  "expected": {
+    "aplicadas": ["00000000-0002-0000-0000-000000000001"],
+    "conflitos": [],
+    "novas_ops_remotas_ids": [],
+    "blobs_solicitados": ["aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111aaaa1111"]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/alvo.json",
+  "title": "Alvo",
+  "description": "Addressed entity + optional field",
+  "type": "object",
+  "required": ["tipo", "id"],
+  "additionalProperties": false,
+  "properties": {
+    "tipo": {
+      "type": "string",
+      "description": "Entity type, e.g. foto, relato, conflito, schema"
+    },
+    "id": {
+      "type": "string",
+      "description": "Entity identifier (slug, SHA-256, conflict hash, etc.)"
+    },
+    "campo": {
+      "oneOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "Optional field name within the entity; null means whole entity"
+    }
+  }
+}

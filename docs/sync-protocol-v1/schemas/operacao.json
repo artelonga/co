@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/operacao.json",
+  "title": "Operacao",
+  "description": "A single immutable operation in the sync op log",
+  "type": "object",
+  "required": ["id", "hlc", "ator", "tipo", "alvo", "args", "pai"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "hlc": { "$ref": "hlc.json" },
+    "ator": { "$ref": "ator.json" },
+    "tipo": {
+      "type": "string",
+      "description": "Namespaced op type e.g. foto.adicionar, conteudo.atualizar"
+    },
+    "alvo": { "$ref": "alvo.json" },
+    "args": {
+      "type": "object",
+      "description": "Type-specific payload"
+    },
+    "pai": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "Causal parent op IDs"
+    },
+    "assinatura": {
+      "oneOf": [{ "type": "string" }, { "type": "null" }],
+      "description": "Base64 Ed25519 signature; null until federation is enabled (v1.1)"
+    }
+  }
+}

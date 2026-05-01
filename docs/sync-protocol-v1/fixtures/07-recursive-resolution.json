@@ -1,0 +1,75 @@
+{
+  "description": "UAT creates r1 and r1-copy (copia synthesized op); prod also created both → two nested conflicts",
+  "input": {
+    "proposta_id": "11111111-1111-1111-1111-111111111111",
+    "base_hlc": "1000:0:00000000000000000000000000000000",
+    "ops_prod": [
+      {
+        "id": "00000000-0001-0000-0000-000000000001",
+        "hlc": "1500:0:aaaaaaaa000000000000000000000000",
+        "ator": { "node_id": "aaaaaaaa-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.criar",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1", "meta": { "titulo": "Prod R1" }, "corpo": "" },
+        "pai": [],
+        "assinatura": null
+      },
+      {
+        "id": "00000000-0001-0000-0000-000000000002",
+        "hlc": "1600:0:aaaaaaaa000000000000000000000000",
+        "ator": { "node_id": "aaaaaaaa-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.criar",
+        "alvo": { "tipo": "relato", "id": "r1-copy", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1-copy", "meta": { "titulo": "Prod R1 Copy" }, "corpo": "" },
+        "pai": [],
+        "assinatura": null
+      }
+    ],
+    "ops_uat": [
+      {
+        "id": "00000000-0002-0000-0000-000000000001",
+        "hlc": "2000:0:bbbbbbbb000000000000000000000000",
+        "ator": { "node_id": "bbbbbbbb-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.criar",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1", "meta": { "titulo": "UAT R1" }, "corpo": "" },
+        "pai": [],
+        "assinatura": null
+      },
+      {
+        "id": "00000000-0002-0000-0000-000000000002",
+        "hlc": "2100:0:bbbbbbbb000000000000000000000000",
+        "ator": { "node_id": "bbbbbbbb-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.criar",
+        "alvo": { "tipo": "relato", "id": "r1-copy", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1-copy", "meta": { "titulo": "UAT R1 Copy (copia)" }, "corpo": "" },
+        "pai": ["00000000-0002-0000-0000-000000000001"],
+        "assinatura": null
+      }
+    ]
+  },
+  "expected": {
+    "aplicadas": [],
+    "conflitos": [
+      {
+        "op_local": "00000000-0001-0000-0000-000000000001",
+        "op_remota": "00000000-0002-0000-0000-000000000001",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "opcoes": ["prod", "uat", "copia", "manual"],
+        "sugestao": "prod"
+      },
+      {
+        "op_local": "00000000-0001-0000-0000-000000000002",
+        "op_remota": "00000000-0002-0000-0000-000000000002",
+        "alvo": { "tipo": "relato", "id": "r1-copy", "campo": null },
+        "opcoes": ["prod", "uat", "copia", "manual"],
+        "sugestao": "prod"
+      }
+    ],
+    "novas_ops_remotas_ids": [
+      "00000000-0001-0000-0000-000000000001",
+      "00000000-0001-0000-0000-000000000002"
+    ],
+    "blobs_solicitados": []
+  }
+}

@@ -22,6 +22,11 @@ use rusqlite::Connection;
 // Schema for per-universe data.db
 // ---------------------------------------------------------------------------
 
+/// Exposed for in-crate tests that need to open an in-memory database with the
+/// full per-universe schema applied.
+#[cfg(test)]
+pub(crate) const UNIVERSE_SCHEMA_FOR_TEST: &str = UNIVERSE_SCHEMA;
+
 const UNIVERSE_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS entries (
     path              TEXT NOT NULL,
@@ -46,7 +51,31 @@ CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     body
 );
 
+-- CO-73: temporal model — indexed semantic dates per entry
+CREATE TABLE IF NOT EXISTS entry_dates (
+    universe_key TEXT NOT NULL,
+    entry_path   TEXT NOT NULL,
+    semantic     TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    PRIMARY KEY (universe_key, entry_path, semantic)
+);
+CREATE INDEX IF NOT EXISTS idx_entry_dates_range ON entry_dates(universe_key, semantic, value);
+
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
+
+-- CO-74: typed FK relationship graph — one row per directed edge
+CREATE TABLE IF NOT EXISTS entry_relations (
+    universe_key  TEXT NOT NULL,
+    from_path     TEXT NOT NULL,
+    to_path       TEXT NOT NULL,
+    relation_type TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (universe_key, from_path, to_path, relation_type)
+);
+CREATE INDEX IF NOT EXISTS idx_er_from
+    ON entry_relations(universe_key, from_path, relation_type);
+CREATE INDEX IF NOT EXISTS idx_er_to
+    ON entry_relations(universe_key, to_path,   relation_type);
 ";
 
 // ---------------------------------------------------------------------------
@@ -169,5 +198,15 @@ fn run_universe_migrations(conn: &Connection) {
     if v < 1 {
         conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
             .expect("universe schema_version v1");
+    }
+    if v < 2 {
+        // CO-73: entry_dates table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
+            .expect("universe schema_version v2");
+    }
+    if v < 3 {
+        // CO-74: entry_relations table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
+            .expect("universe schema_version v3");
     }
 }

@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/relatorio_mesclagem.json",
+  "title": "RelatorioMesclagem",
+  "description": "Merge report returned after processing a Proposta",
+  "type": "object",
+  "required": ["proposta_id", "aplicadas", "conflitos", "novas_ops_remotas", "blobs_solicitados"],
+  "additionalProperties": false,
+  "properties": {
+    "proposta_id": { "type": "string", "format": "uuid" },
+    "aplicadas": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" },
+      "description": "Remote ops that merged cleanly"
+    },
+    "conflitos": {
+      "type": "array",
+      "items": { "$ref": "conflito.json" },
+      "description": "Remote ops in conflict with local post-base ops"
+    },
+    "novas_ops_remotas": {
+      "type": "array",
+      "items": { "$ref": "operacao.json" },
+      "description": "Local (target/prod) ops since base_hlc"
+    },
+    "blobs_solicitados": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+      "description": "Blobs referenced by applied ops that the target needs fetched"
+    }
+  }
+}

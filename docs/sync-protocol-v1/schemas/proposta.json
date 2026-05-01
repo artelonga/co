@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://co.artelonga.com.br/sync/v1/schemas/proposta.json",
+  "title": "Proposta",
+  "description": "Sync proposal from sender to target — a pull request for ops",
+  "type": "object",
+  "required": ["id", "peer_origem", "base_hlc", "ops", "blobs_disponiveis", "criado_em"],
+  "additionalProperties": false,
+  "properties": {
+    "id": { "type": "string", "format": "uuid" },
+    "peer_origem": { "type": "string", "format": "uuid" },
+    "base_hlc": { "$ref": "hlc.json" },
+    "ops": {
+      "type": "array",
+      "items": { "$ref": "operacao.json" }
+    },
+    "blobs_disponiveis": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+    },
+    "criado_em": { "type": "string", "format": "date-time" }
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "description": "UAT deletes relato r1; prod updates r1 concurrently → conflict detected (copia strategy needed)",
+  "input": {
+    "proposta_id": "11111111-1111-1111-1111-111111111111",
+    "base_hlc": "1000:0:00000000000000000000000000000000",
+    "ops_prod": [
+      {
+        "id": "00000000-0001-0000-0000-000000000001",
+        "hlc": "1500:0:aaaaaaaa000000000000000000000000",
+        "ator": { "node_id": "aaaaaaaa-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.atualizar",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1", "meta_delta": { "titulo": "Updated Title" } },
+        "pai": [],
+        "assinatura": null
+      }
+    ],
+    "ops_uat": [
+      {
+        "id": "00000000-0002-0000-0000-000000000001",
+        "hlc": "2000:0:bbbbbbbb000000000000000000000000",
+        "ator": { "node_id": "bbbbbbbb-0000-0000-0000-000000000000", "user_id": null },
+        "tipo": "conteudo.excluir",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "args": { "tipo": "relato", "slug": "r1" },
+        "pai": [],
+        "assinatura": null
+      }
+    ]
+  },
+  "expected": {
+    "aplicadas": [],
+    "conflitos": [
+      {
+        "op_local": "00000000-0001-0000-0000-000000000001",
+        "op_remota": "00000000-0002-0000-0000-000000000001",
+        "alvo": { "tipo": "relato", "id": "r1", "campo": null },
+        "opcoes": ["prod", "uat", "copia", "manual"],
+        "sugestao": "prod"
+      }
+    ],
+    "novas_ops_remotas_ids": ["00000000-0001-0000-0000-000000000001"],
+    "blobs_solicitados": []
+  }
+}
