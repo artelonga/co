@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] — 2026-05-01
+
+### Added — CO-123: ClickHouse single-node on Fly + Iceberg-table-function ready
+
+- `infra/clickhouse/fly.toml` — Fly app `co-clickhouse` (4 vCPU / 8 GB / 50 GB Volume, internal-only)
+- `infra/clickhouse/Dockerfile` — ClickHouse 24.8 image with custom config
+- `infra/clickhouse/config/config.xml` — server config: listen on all interfaces, `allow_experimental_database_iceberg=1`
+- `infra/clickhouse/config/users.xml` — `co_admin` user with password from `CH_ADMIN_PASSWORD` Fly secret
+- `infra/clickhouse/init/init.sql` — `co_analytics.wae_events` MergeTree table (TTL 90 days) + daily aggregate MV
+- `infra/clickhouse/iceberg-smoke-test.sh` — verifies `icebergS3()` table function against R2 (Phase 3 readiness)
+- `infra/clickhouse-export-cron/fly.toml` — Fly cron app `co-clickhouse-export` (daily 04:07 UTC)
+- `infra/clickhouse-export-cron/Dockerfile` — Alpine crond image for WAE export
+- `scripts/wae-to-clickhouse.sh` — queries CF Analytics Engine SQL API → bulk-inserts into ClickHouse
+- `docs/analytics/sample-queries.sql` — top-10 universes by activity, error rate by deploy, 7d/30d retention, Iceberg smoke query
+- `docs/OPERATIONS.md` — ClickHouse section: setup, running queries, volume backup, WAE export management
+- `co-cli/src/commands/board.rs` — fix: add missing `wae_endpoint`/`wae_api_key` fields to `WebConfig` initializer
+
 ## [1.31.0] — 2026-05-01
 
 ### Added — CO-97: Visitor token unification (Option A)

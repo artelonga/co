@@ -1,0 +1,37 @@
+# Fly.io deployment configuration for co-clickhouse (CO-123)
+# Purpose: single-node ClickHouse for ad-hoc analytics — WAE bridge to Phase 3 Iceberg lake
+#
+# One-time setup:
+#   flyctl apps create co-clickhouse --org personal
+#   flyctl volumes create co_clickhouse_data --size 50 --region gru -a co-clickhouse
+#   flyctl secrets set CH_ADMIN_PASSWORD=<strong-password> -a co-clickhouse
+#   flyctl deploy --config infra/clickhouse/fly.toml
+#
+# Running queries:
+#   flyctl proxy 8123:8123 -a co-clickhouse   (in a separate terminal)
+#   clickhouse-client --host 127.0.0.1 --port 9000 --user co_admin --password <pass>
+#   curl -u co_admin:<pass> 'http://127.0.0.1:8123/?query=SELECT+1'
+#
+# Inter-app access (Fly 6PN):
+#   co-clickhouse.internal:8123  (HTTP)
+#   co-clickhouse.internal:9000  (native protocol)
+
+app = "co-clickhouse"
+primary_region = "gru"
+
+[build]
+  dockerfile = "infra/clickhouse/Dockerfile"
+  # Build context must be the repo root — flyctl deploy handles this automatically
+  # when run from the repo root with --config infra/clickhouse/fly.toml.
+
+[mounts]
+  source = "co_clickhouse_data"
+  destination = "/var/lib/clickhouse"
+
+[[vm]]
+  memory = "8gb"
+  cpu_kind = "performance"
+  cpus = 4
+
+# No [http_service] — internal-only access via Fly private network (6PN).
+# Use `flyctl proxy` for local admin sessions (see OPERATIONS.md §ClickHouse).

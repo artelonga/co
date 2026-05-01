@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<clickhouse>
+    <!-- Listen on all interfaces for Fly 6PN (private network) access. -->
+    <listen_host>0.0.0.0</listen_host>
+
+    <!-- Enable Iceberg database engine (experimental flag required for CREATE DATABASE
+         ENGINE=IcebergS3; the icebergS3() table function itself is stable in 24.x). -->
+    <allow_experimental_database_iceberg>1</allow_experimental_database_iceberg>
+
+    <!-- All data goes to the 50 GB Fly Volume. -->
+    <path>/var/lib/clickhouse/</path>
+    <tmp_path>/var/lib/clickhouse/tmp/</tmp_path>
+
+    <logger>
+        <level>information</level>
+        <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+        <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+        <size>500M</size>
+        <count>3</count>
+    </logger>
+</clickhouse>

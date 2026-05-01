@@ -1,0 +1,31 @@
+# Fly.io deployment configuration for co-clickhouse-export (CO-123)
+# Purpose: daily WAE → ClickHouse export — queries the Cloudflare Analytics Engine
+#          SQL API for yesterday's co_telemetry events and inserts them into ClickHouse.
+#
+# One-time setup:
+#   flyctl apps create co-clickhouse-export --org personal
+#   flyctl secrets set -a co-clickhouse-export \
+#     CF_ACCOUNT_ID=<cloudflare-account-id> \
+#     CF_API_TOKEN=<cf-analytics-read-token> \
+#     CH_PASSWORD=<co-clickhouse-admin-password>
+#   flyctl deploy --config infra/clickhouse-export-cron/fly.toml
+#
+# Logs:
+#   flyctl logs -a co-clickhouse-export
+
+app = "co-clickhouse-export"
+primary_region = "gru"
+
+[build]
+  dockerfile = "infra/clickhouse-export-cron/Dockerfile"
+
+[env]
+  CH_HOST = "co-clickhouse.internal"
+  CH_PORT = "8123"
+  CH_USER = "co_admin"
+  # CF_ACCOUNT_ID, CF_API_TOKEN, CH_PASSWORD are set as Fly secrets.
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
