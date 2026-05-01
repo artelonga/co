@@ -637,6 +637,9 @@ pub async fn start_server(config: WebConfig) {
         }
         // CO-140: seed co-dev board universe — idempotent, always safe.
         storage.seed_co_dev_universe();
+        // Seed admin-owned content universes (artelonga, rfq, co) so they
+        // appear in the sidebar without manual creation after every deploy.
+        storage.seed_admin_content_universes();
         // Timeline trio (`tempo`, `humanity`, `universo`). Always re-seed —
         // the JSON manifests in the binary are the source of truth, and
         // `upsert_entry_row` makes overwriting safe.

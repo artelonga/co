@@ -4252,6 +4252,50 @@ impl Storage {
     /// Owned by 'system', private, scholarly-dark, board layout.
     /// `ensure_admin_universe_memberships` makes Yuri a member so it appears
     /// in his sidebar. Idempotent via INSERT OR IGNORE.
+    /// Ensure admin-owned content universes exist — idempotent, runs every boot.
+    ///
+    /// Creates artelonga, rfq, and co universes owned by any admin-tier user so
+    /// they appear in the sidebar without manual API calls.  Content is pushed
+    /// separately via the Vault API or `co push`; this only guarantees the DB row.
+    pub fn seed_admin_content_universes(&mut self) {
+        let now = Utc::now().to_rfc3339();
+
+        for (key, name, desc, vis) in [
+            (
+                "artelonga",
+                "ArteLonga",
+                "Arte Longa — conteúdo público, portfólio e presença digital",
+                "public-subscribable",
+            ),
+            (
+                "rfq",
+                "RFQ Gateway",
+                "Plataforma de cotações e registro de negociações",
+                "private",
+            ),
+            (
+                "co",
+                "Co Platform",
+                "Board público do Co — roadmap, releases e decisões",
+                "public-subscribable",
+            ),
+        ] {
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, \
+                  visibility, theme_preset, layout, content_count) \
+                 VALUES (?1, ?2, ?3, 'system', ?4, 0, 0, ?5, 'scholarly-light', 'board', 0)",
+                rusqlite::params![key, name, desc, now, vis],
+            );
+            // Assign every admin user as owner of these universes.
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+                 SELECT ?1, id, 'owner', datetime('now') FROM users WHERE tier = 'admin'",
+                rusqlite::params![key],
+            );
+        }
+    }
+
     pub fn seed_co_dev_universe(&mut self) {
         let now = Utc::now().to_rfc3339();
         let _ = self.conn.execute(
