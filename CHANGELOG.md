@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.27.0] — 2026-04-30
 
+### Added — CO-73: Temporal model — first-class semantic dates (event_at, due_at, scheduled_at, …)
+
+**`DateSemantic` enum expansion (`core/src/manifest.rs`)**
+- Renamed `Due/Event/Created/Updated` → `DueAt/EventAt/CreatedAt/UpdatedAt` to match canonical `_at` names
+- Added four new semantics: `ScheduledAt`, `PublishedAt`, `ExpiresAt`, `EffectiveAt`
+- Added `DateSemantic::as_str()` returning the canonical query-param string (e.g. `"event_at"`)
+
+**`entry_dates` table (per-universe `data.db`, migration v2)**
+- Schema: `(universe_key, entry_path, semantic, value TEXT NOT NULL UTC ISO-8601)` with PK
+- Index `idx_entry_dates_range ON (universe_key, semantic, value)` for O(log N) range queries
+- Created idempotently on every DB open; version bumped to 2 on first migration
+
+**Write hook (`co-web/src/entry_index.rs`)**
+- `upsert_dates(universe_key, entry, manifest)` — extracts all `Date` fields with a declared semantic from the manifest, normalises values to UTC RFC3339, upserts into `entry_dates`
+- `remove_dates(universe_key, path)` — clears all `entry_dates` rows on DELETE
+- `normalize_date_to_utc(s)` — accepts full RFC3339 and `YYYY-MM-DD`; returns `None` on parse failure
+- Hook wired into `create_entry`, `update_entry`, `delete_entry` in `entry_routes.rs`
+
+**Date-semantic query API**
+- `GET /api/v1/universes/:slug/entries?date_semantic=event_at&from=2026-01-01&to=2026-12-31`
+- JOINs `entry_dates` on `(universe_key, semantic)` with optional `>= from` / `<= to` bounds
+- Results ordered by date ascending; hard cap 500
+
+**Manifest API endpoint**
+- `GET /api/v1/universes/:slug/manifest` — returns parsed `_universe.yaml` as JSON; falls back to `default_manifest` when no file exists
+
+**Calendar view upgrade (frontend)**
+- Detects manifest `presentation.calendar.date_field`; fetches entries via date-semantic API when declared
+- Renders entries (not just tasks) in calendar cells; normalises UTC to user's local timezone via `Intl.DateTimeFormat`
+- Legacy `due_date`-from-tasks rendering preserved as fallback
+
+**Gantt view (frontend)**
+- Manifest-declared `views: [{ type: gantt, date_start: X, date_end: Y }]` injects a tab automatically
+- `renderGantt(viewDef)` renders horizontal bars spanning `date_start` → `date_end` per entry
+- Today marker, month labels, responsive bar widths; no code changes needed for new Gantt views
+
+**Timezone support**
+- Server stores UTC; browser renders in user's timezone via `Intl.DateTimeFormat().resolvedOptions().timeZone`
+
 ### Added — CO-61: Sync Protocol v1 — op log + content-addressed blobs + 3-way merge + recursive resolution
 
 **Spec document (`docs/sync-protocol-v1.md`)**

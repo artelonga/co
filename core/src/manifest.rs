@@ -125,10 +125,38 @@ pub enum FieldType {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DateSemantic {
-    Due,
-    Event,
-    Created,
-    Updated,
+    /// Deadline for action.
+    DueAt,
+    /// When something happens.
+    EventAt,
+    /// Auto, immutable.
+    CreatedAt,
+    /// Auto, mutable.
+    UpdatedAt,
+    /// Planned start.
+    ScheduledAt,
+    /// Public-facing publish date.
+    PublishedAt,
+    /// When content becomes invalid.
+    ExpiresAt,
+    /// When this version takes effect.
+    EffectiveAt,
+}
+
+impl DateSemantic {
+    /// Canonical string identifier (matches the query-param value).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DateSemantic::DueAt => "due_at",
+            DateSemantic::EventAt => "event_at",
+            DateSemantic::CreatedAt => "created_at",
+            DateSemantic::UpdatedAt => "updated_at",
+            DateSemantic::ScheduledAt => "scheduled_at",
+            DateSemantic::PublishedAt => "published_at",
+            DateSemantic::ExpiresAt => "expires_at",
+            DateSemantic::EffectiveAt => "effective_at",
+        }
+    }
 }
 
 /// Presentation hints for a content type.
@@ -414,7 +442,7 @@ content_types:
     schema:
       due_at:
         type: date
-        semantic: due
+        semantic: due_at
       status:
         type: enum
         values:
@@ -444,7 +472,7 @@ content_types:
         target: pessoa
       event_at:
         type: date
-        semantic: event
+        semantic: event_at
       title:
         type: string
         required: true
@@ -711,6 +739,34 @@ content_types:
             yaml.contains("many-to-one"),
             "cardinality must serialize as kebab-case: {yaml}"
         );
+    }
+
+    #[test]
+    fn test_date_semantic_as_str_all_variants() {
+        assert_eq!(DateSemantic::DueAt.as_str(), "due_at");
+        assert_eq!(DateSemantic::EventAt.as_str(), "event_at");
+        assert_eq!(DateSemantic::CreatedAt.as_str(), "created_at");
+        assert_eq!(DateSemantic::UpdatedAt.as_str(), "updated_at");
+        assert_eq!(DateSemantic::ScheduledAt.as_str(), "scheduled_at");
+        assert_eq!(DateSemantic::PublishedAt.as_str(), "published_at");
+        assert_eq!(DateSemantic::ExpiresAt.as_str(), "expires_at");
+        assert_eq!(DateSemantic::EffectiveAt.as_str(), "effective_at");
+    }
+
+    #[test]
+    fn test_date_semantic_serde_round_trip() {
+        let yaml = "schema_version: 1\nname: X\ncontent_types:\n  - name: ev\n    schema:\n      event_at:\n        type: date\n        semantic: event_at\n      due_at:\n        type: date\n        semantic: due_at\n      sched:\n        type: date\n        semantic: scheduled_at\n      pub_at:\n        type: date\n        semantic: published_at\n      exp:\n        type: date\n        semantic: expires_at\n      eff:\n        type: date\n        semantic: effective_at\n";
+        let result = parse_str(yaml).expect("should parse all semantics");
+        let ct = &result.manifest.content_types[0];
+        assert_eq!(ct.schema["event_at"].semantic, Some(DateSemantic::EventAt));
+        assert_eq!(ct.schema["due_at"].semantic, Some(DateSemantic::DueAt));
+        assert_eq!(ct.schema["sched"].semantic, Some(DateSemantic::ScheduledAt));
+        assert_eq!(
+            ct.schema["pub_at"].semantic,
+            Some(DateSemantic::PublishedAt)
+        );
+        assert_eq!(ct.schema["exp"].semantic, Some(DateSemantic::ExpiresAt));
+        assert_eq!(ct.schema["eff"].semantic, Some(DateSemantic::EffectiveAt));
     }
 
     #[test]

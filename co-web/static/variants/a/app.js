@@ -37,6 +37,10 @@
         // CO-38: Yggdrasil minigames hub
         isYggdrasil: false,
         gameView: null, // active game slug, e.g. 'tetris'
+        // CO-73: universe manifest (loaded from /api/v1/universes/:slug/manifest)
+        universeManifest: null,
+        // CO-73: entries fetched for calendar/gantt views
+        calendarEntries: [],
     };
 
     // ===== Obsidian Tasks compatibility (CO-37) =====
@@ -612,6 +616,18 @@
             const r = await apiFetch(url, {}, true);
             return (r && r.entries) || [];
         },
+        // CO-73: fetch the universe manifest (parsed _universe.yaml or default)
+        async getUniverseManifest(slug) {
+            return apiFetch(`/api/v1/universes/${slug}/manifest`, {}, true);
+        },
+        // CO-73: fetch entries by date semantic and optional UTC date range
+        async getEntriesByDate(slug, semantic, from, to) {
+            let url = `/api/v1/universes/${slug}/entries?date_semantic=${encodeURIComponent(semantic)}`;
+            if (from) url += `&from=${encodeURIComponent(from)}`;
+            if (to)   url += `&to=${encodeURIComponent(to)}`;
+            const r = await apiFetch(url, {}, true);
+            return (r && r.entries) || [];
+        },
     };
 
     // ===== Auto-clone on first interaction =====
@@ -828,6 +844,57 @@
             }
         }
         return groups;
+    }
+
+    // ===== CO-73: Timezone-aware date helpers =====
+
+    /** User's local IANA timezone (e.g. "America/Sao_Paulo"). */
+    function userTimezone() {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    }
+
+    /**
+     * Render a UTC ISO-8601 string (e.g. "2026-06-01T00:00:00Z") in the user's
+     * local timezone, returning a YYYY-MM-DD string for calendar cell matching.
+     */
+    function utcToLocalDate(utcStr) {
+        if (!utcStr) return '';
+        try {
+            const d = new Date(utcStr);
+            return d.toLocaleDateString('en-CA', { timeZone: userTimezone() }); // en-CA gives YYYY-MM-DD
+        } catch (_) {
+            return utcStr.slice(0, 10);
+        }
+    }
+
+    // ===== CO-73: Manifest-driven view tabs =====
+
+    const MANIFEST_TAB_CLASS = 'manifest-injected-tab';
+
+    /** Remove any view tabs injected from a previous manifest load. */
+    function removeManifestViewTabs() {
+        document.querySelectorAll(`.${MANIFEST_TAB_CLASS}`).forEach(el => el.remove());
+    }
+
+    /**
+     * Inject extra view tabs declared in the manifest (e.g. gantt views).
+     * Called once per universe boot after the manifest is fetched.
+     */
+    function injectManifestViewTabs(manifest) {
+        removeManifestViewTabs();
+        const viewTabs = document.getElementById('view-tabs');
+        if (!viewTabs) return;
+        const ganttViews = (manifest.views || []).filter(v => v.type === 'gantt');
+        for (const v of ganttViews) {
+            const btn = document.createElement('button');
+            btn.className = `view-tab ${MANIFEST_TAB_CLASS}`;
+            btn.dataset.view = `gantt:${v.name}`;
+            btn.dataset.ganttView = JSON.stringify(v);
+            btn.innerHTML = '<span class="view-tab-icon material-symbols-outlined">view_timeline</span>'
+                + `<span class="view-tab-label">${esc(v.name)}</span>`;
+            btn.addEventListener('click', () => switchView(btn.dataset.view));
+            viewTabs.appendChild(btn);
+        }
     }
 
     // ===== Timeline date range =====
@@ -1203,7 +1270,7 @@
     }
 
     // ===== Render: Calendar =====
-    function renderCalendar() {
+    async function renderCalendar() {
         const content = $('#content');
         content.className = 'content';
         const d = state.calendarDate;
@@ -1217,13 +1284,56 @@
 
         const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
-        // Build tasks by date
+        // CO-73: determine calendar date field from manifest
+        const manifest = state.universeManifest;
+        let calendarSemantic = null;
+        if (manifest) {
+            for (const ct of manifest.content_types || []) {
+                if (ct.presentation && ct.presentation.calendar && ct.presentation.calendar.date_field) {
+                    // Find the semantic for this date field
+                    const fieldDef = ct.schema && ct.schema[ct.presentation.calendar.date_field];
+                    if (fieldDef && fieldDef.semantic) {
+                        calendarSemantic = fieldDef.semantic;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Build entries/tasks by local date
         const tasksByDate = {};
-        const tasks = filteredTasks();
-        for (const t of tasks) {
-            if (t.due_date) {
-                if (!tasksByDate[t.due_date]) tasksByDate[t.due_date] = [];
-                tasksByDate[t.due_date].push(t);
+        if (calendarSemantic) {
+            // CO-73: fetch from date-semantic API for the current month
+            const fromDate = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+            const toDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(daysInMonth).padStart(2, '0')}`;
+            const slug = state.currentUniverseSlug;
+            try {
+                const entries = await api.getEntriesByDate(slug, calendarSemantic, fromDate, toDate);
+                state.calendarEntries = entries;
+                for (const e of entries) {
+                    // Get the date value from frontmatter using the calendar field name
+                    const calField = (manifest.content_types || []).find(ct =>
+                        ct.presentation && ct.presentation.calendar
+                    );
+                    const fieldName = calField && calField.presentation.calendar.date_field;
+                    const rawDate = fieldName && e.frontmatter && e.frontmatter[fieldName];
+                    const localDate = rawDate ? utcToLocalDate(rawDate) : '';
+                    if (localDate) {
+                        if (!tasksByDate[localDate]) tasksByDate[localDate] = [];
+                        tasksByDate[localDate].push({ ...e, _isEntry: true });
+                    }
+                }
+            } catch (err) {
+                console.warn('calendar: failed to fetch entries by date', err);
+            }
+        } else {
+            // Legacy: use due_date from tasks
+            const tasks = filteredTasks();
+            for (const t of tasks) {
+                if (t.due_date) {
+                    if (!tasksByDate[t.due_date]) tasksByDate[t.due_date] = [];
+                    tasksByDate[t.due_date].push(t);
+                }
             }
         }
 
@@ -1254,18 +1364,17 @@
                 today.getMonth() === month &&
                 today.getDate() === dayNum;
 
-            const dayTasks = tasksByDate[cellDate] || [];
+            const dayItems = tasksByDate[cellDate] || [];
             const maxShow = 3;
 
             cells += `
                 <div class="calendar-day${otherClass}${isToday ? ' today' : ''}">
                     <div class="calendar-day-num">${displayNum}</div>
-                    ${dayTasks.slice(0, maxShow).map(t => `
-                        <div class="calendar-task status-${t.status}" data-task-id="${t.id}" title="${esc(t.key)}: ${esc(t.title)}">
-                            ${esc(t.key)} ${esc(t.title)}
-                        </div>
-                    `).join('')}
-                    ${dayTasks.length > maxShow ? `<div class="calendar-more">+${dayTasks.length - maxShow} mais</div>` : ''}
+                    ${dayItems.slice(0, maxShow).map(item => item._isEntry
+                        ? `<div class="calendar-task" title="${esc(item.title || item.path)}">${esc(item.title || item.path)}</div>`
+                        : `<div class="calendar-task status-${item.status}" data-task-id="${item.id}" title="${esc(item.key)}: ${esc(item.title)}">${esc(item.key)} ${esc(item.title)}</div>`
+                    ).join('')}
+                    ${dayItems.length > maxShow ? `<div class="calendar-more">+${dayItems.length - maxShow} mais</div>` : ''}
                 </div>`;
         }
 
@@ -1306,6 +1415,107 @@
                 openTaskModal(parseInt(el.dataset.taskId));
             });
         });
+    }
+
+    // ===== CO-73: Render: Gantt =====
+    // Renders a Gantt chart for a manifest-declared gantt view.
+    // `viewDef` is a View object: { name, type: 'gantt', source, date_start, date_end }
+    async function renderGantt(viewDef) {
+        const content = $('#content');
+        content.className = 'content';
+        content.innerHTML = '<div class="loading-spinner"><div class="spinner"></div></div>';
+
+        const slug = state.currentUniverseSlug;
+        const startField = viewDef.date_start;
+        const endField = viewDef.date_end;
+
+        // Fetch entries with date_start semantic to get the date range
+        let entries = [];
+        try {
+            entries = await api.getEntriesByDate(slug, startField, null, null);
+        } catch (err) {
+            console.warn('gantt: failed to fetch entries', err);
+        }
+
+        // Sort by start date ascending
+        entries.sort((a, b) => {
+            const da = (a.frontmatter && a.frontmatter[startField]) || '';
+            const db = (b.frontmatter && b.frontmatter[startField]) || '';
+            return da.localeCompare(db);
+        });
+
+        // Determine chart date range
+        const today = new Date();
+        let minDate = today;
+        let maxDate = new Date(today.getFullYear(), today.getMonth() + 2, 1);
+        for (const e of entries) {
+            const start = e.frontmatter && e.frontmatter[startField];
+            const end   = e.frontmatter && e.frontmatter[endField];
+            if (start) {
+                const d = new Date(start);
+                if (d < minDate) minDate = d;
+            }
+            if (end) {
+                const d = new Date(end);
+                if (d > maxDate) maxDate = d;
+            }
+        }
+        // Pad by a week on each side
+        minDate = addDays(minDate, -7);
+        maxDate = addDays(maxDate, 7);
+
+        const totalDays = Math.max(1, Math.round((maxDate - minDate) / 86400000));
+        const colW = 28; // px per day
+
+        // Build header (month labels)
+        let headerHtml = '';
+        let cur = new Date(minDate);
+        while (cur <= maxDate) {
+            headerHtml += `<div class="gantt-month-label" style="left:${Math.round((cur - minDate) / 86400000) * colW}px">${MONTH_NAMES_FULL[cur.getMonth()]} ${cur.getFullYear()}</div>`;
+            cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+        }
+
+        // Today marker
+        const todayOffset = Math.round((today - minDate) / 86400000) * colW;
+        const todayMarker = `<div class="gantt-today-marker" style="left:${todayOffset}px"></div>`;
+
+        // Build rows
+        const rows = entries.map(e => {
+            const title = (e.frontmatter && e.frontmatter.title) || e.path;
+            const startStr = e.frontmatter && e.frontmatter[startField];
+            const endStr   = e.frontmatter && e.frontmatter[endField];
+            const startD = startStr ? new Date(startStr) : null;
+            const endD   = endStr   ? new Date(endStr)   : null;
+
+            let barHtml = '';
+            if (startD) {
+                const barLeft = Math.max(0, Math.round((startD - minDate) / 86400000)) * colW;
+                const barRight = endD ? Math.max(0, Math.round((maxDate - endD) / 86400000)) * colW : 0;
+                const barWidth = Math.max(colW, totalDays * colW - barLeft - barRight);
+                barHtml = `<div class="gantt-bar" style="left:${barLeft}px;width:${barWidth}px" title="${esc(startStr || '')} → ${esc(endStr || '')}"></div>`;
+            }
+
+            return `<div class="gantt-row">
+                <div class="gantt-row-label" title="${esc(title)}">${esc(title)}</div>
+                <div class="gantt-row-track" style="width:${totalDays * colW}px">
+                    ${barHtml}
+                </div>
+            </div>`;
+        }).join('');
+
+        content.innerHTML = `
+            <div class="gantt-view">
+                <div class="gantt-header">
+                    <div class="gantt-header-label">${esc(viewDef.name)}</div>
+                    <div class="gantt-header-dates" style="width:${totalDays * colW}px;position:relative">
+                        ${headerHtml}
+                        ${todayMarker}
+                    </div>
+                </div>
+                <div class="gantt-body">
+                    ${rows || '<div class="gantt-empty">Nenhum item com datas declaradas.</div>'}
+                </div>
+            </div>`;
     }
 
     // Build a depth-ordered list for a task group, respecting collapse state
@@ -3920,6 +4130,13 @@
     function renderContent() {
         if (state.loading) return;
         if (state.view === 'conteudo') { renderConteudo(); return; }
+        // CO-73: manifest-declared gantt views use a 'gantt:<name>' key
+        if (state.view.startsWith('gantt:')) {
+            const viewName = state.view.slice(6);
+            const manifest = state.universeManifest;
+            const viewDef = manifest && (manifest.views || []).find(v => v.type === 'gantt' && v.name === viewName);
+            if (viewDef) { renderGantt(viewDef); return; }
+        }
         if (!state.currentProject) {
             // No project in this universe (or fetch failed). Render an empty
             // state instead of returning silently — otherwise the loading
@@ -5091,6 +5308,9 @@
         state.currentProject = null;
         state.universeInfo = null;
         state.universeConfig = null;
+        state.universeManifest = null;
+        state.calendarEntries = [];
+        removeManifestViewTabs();
 
         showLoading();
 
@@ -5123,12 +5343,18 @@
         try {
             let info = null;
             let config = null;
+            state.universeManifest = null;
             try {
-                const [i, c] = await Promise.all([
+                const [i, c, m] = await Promise.all([
                     withTimeout(api.getUniverseInfo(slug), 8000, 'getUniverseInfo'),
                     withTimeout(api.getUniverseConfig(slug), 8000, 'getUniverseConfig'),
+                    withTimeout(api.getUniverseManifest(slug), 8000, 'getUniverseManifest'),
                 ]);
                 info = i; config = c;
+                if (m) {
+                    state.universeManifest = m;
+                    injectManifestViewTabs(m);
+                }
             } catch (e) {
                 console.warn('bootAppForUniverse: info/config fetch failed', e);
             }
