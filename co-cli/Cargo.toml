@@ -1,6 +1,6 @@
 [package]
 name = "co-cli"
-version = "0.32.1"
+version = "0.32.2"
 edition = "2024"
 description = "CLI for CO - graph-based content management"
 license = "MIT"

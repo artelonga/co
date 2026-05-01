@@ -114,6 +114,31 @@ fn ensure_column(
     }
 }
 
+/// Idempotent CREATE TABLE: queries `sqlite_master` before issuing the DDL.
+/// Returns `true` if the table was created, `false` if it already existed.
+///
+/// Sibling of `ensure_column`. Surfaced after the third partial-apply incident
+/// (CO-77 entries, CO-137 parent_key, CO-121 feature_flags). The standalone
+/// `CREATE TABLE IF NOT EXISTS` SQL is already idempotent, so this helper
+/// exists primarily to give callers a single, consistent surface for migrations
+/// and to make it trivial to add observability (e.g. tracing) at the call site.
+fn ensure_table(conn: &Connection, name: &str, body_sql: &str) -> rusqlite::Result<bool> {
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+            params![name],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch(body_sql)?;
+        Ok(true)
+    } else {
+        Ok(false)
+    }
+}
+
 pub struct Storage {
     conn: Connection,
     pub universe_pool: Arc<UniversePool>,
@@ -1046,60 +1071,84 @@ impl Storage {
                 .expect("Failed to run migration v28");
         }
 
-        // CO-77: ensure entries table exists in meta.db for startup migration.
-        self.conn
-            .execute_batch(
-                "CREATE TABLE IF NOT EXISTS entries (
-                    path              TEXT NOT NULL,
-                    universe_key      TEXT NOT NULL,
-                    entry_type        TEXT NOT NULL,
-                    title             TEXT,
-                    frontmatter_json  TEXT NOT NULL DEFAULT '{}',
-                    body              TEXT NOT NULL DEFAULT '',
-                    body_hash         TEXT NOT NULL DEFAULT '',
-                    created_at        TEXT,
-                    updated_at        TEXT,
-                    PRIMARY KEY (universe_key, path)
-                );
-                CREATE TABLE IF NOT EXISTS entries_fts (content TEXT);",
-            )
-            .ok();
+        // CO-77 unconditional backfill: entries + entries_fts on meta.db for
+        // the startup migration to per-universe DBs. Uses ensure_table so the
+        // call site is consistent with the migration-drift class fixes.
+        ensure_table(
+            &self.conn,
+            "entries",
+            "CREATE TABLE entries (
+                path              TEXT NOT NULL,
+                universe_key      TEXT NOT NULL,
+                entry_type        TEXT NOT NULL,
+                title             TEXT,
+                frontmatter_json  TEXT NOT NULL DEFAULT '{}',
+                body              TEXT NOT NULL DEFAULT '',
+                body_hash         TEXT NOT NULL DEFAULT '',
+                created_at        TEXT,
+                updated_at        TEXT,
+                PRIMARY KEY (universe_key, path)
+            );",
+        )
+        .ok();
+        ensure_table(
+            &self.conn,
+            "entries_fts",
+            "CREATE TABLE entries_fts (content TEXT);",
+        )
+        .ok();
 
         // CO-121 unconditional backfill: ensure A/B testing tables exist on
         // meta.db regardless of schema_version state. Surfaced on prod
         // (1.33.0, 2026-05-01) as `no such table: feature_flags` on every
         // boot — same partial-apply failure mode CO-137 documented.
-        // CREATE TABLE IF NOT EXISTS is idempotent; safe to re-run.
+        ensure_table(
+            &self.conn,
+            "feature_flags",
+            "CREATE TABLE feature_flags (
+                flag_key    TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                variants    TEXT NOT NULL,
+                salt        TEXT NOT NULL,
+                enabled     INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            );",
+        )
+        .expect("CO-121 backfill: feature_flags");
+        ensure_table(
+            &self.conn,
+            "ab_assignments",
+            "CREATE TABLE ab_assignments (
+                user_id     TEXT NOT NULL,
+                flag_key    TEXT NOT NULL,
+                variant     TEXT NOT NULL,
+                assigned_at TEXT NOT NULL,
+                PRIMARY KEY (user_id, flag_key)
+            );",
+        )
+        .expect("CO-121 backfill: ab_assignments");
+        ensure_table(
+            &self.conn,
+            "ab_exposures",
+            "CREATE TABLE ab_exposures (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     TEXT NOT NULL,
+                flag_key    TEXT NOT NULL,
+                variant     TEXT NOT NULL,
+                universe_id TEXT,
+                exposed_at  TEXT NOT NULL
+            );",
+        )
+        .expect("CO-121 backfill: ab_exposures");
+        // Index on ab_exposures (idempotent via IF NOT EXISTS — no helper
+        // needed since indexes don't carry a sqlite_master 'table' type).
         self.conn
             .execute_batch(
-                "CREATE TABLE IF NOT EXISTS feature_flags (
-                    flag_key    TEXT PRIMARY KEY,
-                    description TEXT NOT NULL,
-                    variants    TEXT NOT NULL,
-                    salt        TEXT NOT NULL,
-                    enabled     INTEGER NOT NULL DEFAULT 0,
-                    created_at  TEXT NOT NULL,
-                    updated_at  TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS ab_assignments (
-                    user_id     TEXT NOT NULL,
-                    flag_key    TEXT NOT NULL,
-                    variant     TEXT NOT NULL,
-                    assigned_at TEXT NOT NULL,
-                    PRIMARY KEY (user_id, flag_key)
-                );
-                CREATE TABLE IF NOT EXISTS ab_exposures (
-                    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id     TEXT NOT NULL,
-                    flag_key    TEXT NOT NULL,
-                    variant     TEXT NOT NULL,
-                    universe_id TEXT,
-                    exposed_at  TEXT NOT NULL
-                );
-                CREATE INDEX IF NOT EXISTS idx_exposures_flag_time
-                    ON ab_exposures(flag_key, exposed_at);",
+                "CREATE INDEX IF NOT EXISTS idx_exposures_flag_time \
+                 ON ab_exposures(flag_key, exposed_at);",
             )
-            .expect("CO-121 backfill: A/B tables");
+            .expect("CO-121 backfill: idx_exposures_flag_time");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.

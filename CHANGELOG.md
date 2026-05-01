@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.2] — 2026-05-01
+
+### Added — `ensure_table` helper to formalize the migration-drift safety pattern
+
+Sibling of `ensure_column` (CO-137). Queries `sqlite_master` before issuing the DDL; returns `true` if the table was created, `false` if it already existed. The standalone `CREATE TABLE IF NOT EXISTS` SQL is already idempotent, so the helper exists primarily to give callers a single, consistent surface for migrations and to make adding observability (tracing / metrics) trivial at the call site.
+
+Callers updated:
+- CO-77 `entries` + `entries_fts` backfill — now uses `ensure_table` per table
+- CO-121 `feature_flags` + `ab_assignments` + `ab_exposures` backfill — now uses `ensure_table` per table
+- The `idx_exposures_flag_time` index stays on `CREATE INDEX IF NOT EXISTS` (indexes aren't tracked as `sqlite_master.type='table'`).
+
+Closes the structural follow-up the 1.33.1 hotfix opened: every CREATE TABLE migration that ships now has a single, consistent helper to call. Combined with `ensure_column`, the framework is structurally robust against the partial-application failure mode that bit prod three times (CO-77, CO-137, CO-121).
+
 ## [1.33.1] — 2026-05-01
 
 ### Fixed — A/B `feature_flags` table missing on prod (CO-121 partial-apply hotfix)
