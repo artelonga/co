@@ -1,0 +1,37 @@
+name: Daily Backup
+
+on:
+  schedule:
+    # 03:17 UTC daily — off-minute to avoid thundering herd.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      app:
+        description: "Fly app to back up"
+        required: false
+        default: "co-artelonga"
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.BACKUP_AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.BACKUP_AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Run backup
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          APP: ${{ inputs.app || 'co-artelonga' }}
+          BUCKET: artelonga-co-backups
+        run: bash scripts/backup-prod.sh

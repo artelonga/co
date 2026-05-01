@@ -1,0 +1,30 @@
+# Fly app: co-backup-cron
+# Purpose: daily S3 snapshot of prod SQLite + universes/ (CO-104, Option A).
+# Deploy: flyctl deploy --config infra/backup-cron/fly.toml
+#
+# One-time setup:
+#   flyctl apps create co-backup-cron --org personal
+#   flyctl secrets set -a co-backup-cron \
+#     FLY_API_TOKEN=<token> \
+#     AWS_ACCESS_KEY_ID=<key> \
+#     AWS_SECRET_ACCESS_KEY=<secret>
+#   flyctl deploy --config infra/backup-cron/fly.toml
+
+app = "co-backup-cron"
+primary_region = "gru"
+
+[build]
+  dockerfile = "infra/backup-cron/Dockerfile"
+  # Build context is the repo root so COPY scripts/ resolves correctly.
+  # flyctl deploy --config infra/backup-cron/fly.toml handles this automatically
+  # when run from the repo root.
+
+[env]
+  APP = "co-artelonga"
+  BUCKET = "artelonga-co-backups"
+  AWS_DEFAULT_REGION = "us-east-1"
+
+[[vm]]
+  memory = "256mb"
+  cpu_kind = "shared"
+  cpus = 1
