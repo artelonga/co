@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] — 2026-05-01
+
+### Added — CO-123: ClickHouse single-node + WAE export pipeline
+
+- `infra/clickhouse/` — Fly app config, ClickHouse config/users XML, `init.sql` (wae_events MergeTree, 90-day TTL, Iceberg table function ready)
+- `scripts/wae-to-clickhouse.sh` — daily WAE SQL API → ClickHouse bulk insert; maps CF Analytics Engine columns to typed schema
+- `infra/clickhouse-export-cron/` — Alpine Fly cron app running export at 04:17 UTC
+- `infra/clickhouse/iceberg-smoke-test.sh` — validates Iceberg S3 integration via ClickHouseS3 table function
+- `docs/analytics/sample-queries.sql` — 8 ready-to-run queries (top universes, error rate, A/B funnel, p95 latency, retention)
+- `docs/OPERATIONS.md` §ClickHouse — full runbook: setup, proxy, querying, export schedule, smoke test
+
 ## [1.32.0] — 2026-05-01
 
 ### Added — CO-124: Co-agent variants for CF Workers tail + Vercel Log Drains
