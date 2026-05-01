@@ -5,6 +5,27 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-69: PWA offline — IndexedDB cache + Background Sync
+
+**offline.js** (`static/shared/offline.js` — new file)
+- IndexedDB schema `co-offline-v1` with `entries` store (keyed by `[universe_key, path]`, LRU-indexed) and `pending_writes` store (autoIncrement)
+- `window.fetch` intercept for PUT/POST to `/api/v1/universes/*/entries*` and `/vault/*`: writes to IDB immediately (optimistic cache), tries network, queues on failure and registers Background Sync tag `co-vault-writes`
+- `flushPendingWrites()` — replays pending queue; called on `online` event and manual sync button
+- `updateOfflineBanner()` — shows/hides the conflict banner with pending write count; i18n-aware (pt/en)
+- `beforeinstallprompt` capture + `showInstallPrompt()` for PWA home screen install
+- SW `CO_SYNC_COMPLETE` message listener → refreshes banner after background sync
+
+**Service worker** (`static/shared/sw.js`, `static/sw.js`)
+- CACHE_NAME bumped `co-v3-network-first` → `co-v4-offline` (triggers cache refresh on deploy)
+- `handleVaultGet` — GET `/api/v1/universes/*/vault/*`: checks IndexedDB first, falls back to network, populates cache on success
+- `sync` event handler (`co-vault-writes` tag): replays `pending_writes` from IDB with credentials, stops on first network failure to prevent thundering herd; notifies all clients via `CO_SYNC_COMPLETE`
+
+**index.html** (`static/variants/a/index.html`)
+- Offline conflict banner (`#offline-sync-banner`): fixed top bar with pending count, "Sincronizar" button, dismiss; hidden via `style.display`
+- Install button (`#btn-install-pwa`): shown in header when `beforeinstallprompt` fires; triggers native install prompt
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
