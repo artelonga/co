@@ -5,6 +5,41 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-05-01
+
+### Added — CO-108: Universe archive format + backup-to-external-HD
+
+**Format spec** — co-compatible `.tar.zst` bundles with deterministic internal layout:
+- `<key>/manifest.json` — provenance: source path, git/jj commit, SHA256 digest, schema version
+- `<key>/co.db` — SQLite extract with universe row (+ indexed entries for prod/uat mode)
+- `<key>/seed.sql` — one-shot universe registration consumed by co-web on startup (local mode)
+- `<key>/entries/` — full markdown source tree mirroring the local repo
+- `<key>/README.md` — human-readable restore instructions
+
+**Scripts**
+- `scripts/backup-to-disk.sh` — main orchestrator: `--from local|uat|prod`; iterates all four content universe sources; writes date-stamped archives to external HD; `--verify <date>` re-hashes and checks all archives in a run (bit-rot detection)
+- `scripts/_archive-one.sh` — per-universe archiver: collects `.md` files, generates synthetic co.db + seed.sql (local) or SSH-extracts deployed SQLite (prod/uat), packs with `zstd -19`, computes SHA256 into sidecar manifest
+- `scripts/_archive-manifest.py` — global manifest generator: aggregates per-universe sidecar manifests into a single `manifest.json` for the run
+- `scripts/_archive-verify.py` — SHA256 verifier: reads global manifest, re-hashes each `.tar.zst`, exits non-zero on any mismatch
+- `scripts/restore-from-disk.sh` — restore script: verifies SHA256, checks schema version compatibility, extracts archive, places `co.db` + `seed.sql` + `entries/` into a fresh `data_dir` ready for `co-web`
+
+**Bundle layout on external HD**
+```
+/Volumes/<drive>/co-archive/
+├── README.md
+├── YYYY-MM-DD/
+│   ├── manifest.json          — global manifest with sha256 of each bundle
+│   ├── quilomboaraucaria.tar.zst
+│   ├── qa.tar.zst
+│   ├── artelonga.tar.zst
+│   └── rfq.tar.zst
+```
+
+**Compression** — zstd level 19; ~440 KB per run at current corpus sizes; < 25 MB including mbya
+
+**Documentation**
+- `docs/OPERATIONS.md` — "Local-source backup" section: format spec, how-to, restore procedure, verify, optional launchd cron, storage budget
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
