@@ -48,6 +48,8 @@ fn test_config(dir: &std::path::Path, is_uat: bool) -> WebConfig {
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: if is_uat { "uat".into() } else { "prod".into() },
+        wae_endpoint: None,
+        wae_api_key: None,
     }
 }
 
@@ -325,6 +327,8 @@ fn test_is_uat_config() {
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: "uat".into(),
+        wae_endpoint: None,
+        wae_api_key: None,
     };
     assert!(uat_config.is_uat());
 

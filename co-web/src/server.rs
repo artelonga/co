@@ -743,6 +743,9 @@ pub async fn start_server(config: WebConfig) {
     let plugin_count = plugin_registry.len();
     tracing::info!("Loaded {} plugin(s)", plugin_count);
 
+    // CO-118: build WAE emitter (no-op when WAE_ENDPOINT / WAE_API_KEY are absent).
+    let wae = crate::wae::WaeEmitter::new(config.wae_endpoint.clone(), config.wae_api_key.clone());
+
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
         experiment: Mutex::new(experiment),
@@ -787,6 +790,24 @@ pub async fn start_server(config: WebConfig) {
                 "UAT_MIRROR_PROD set but UAT_PROD_URL or UAT_PROD_TOKEN missing — skipping mirror"
             );
         }
+    }
+
+    // CO-118: emit a deploy event to WAE so the dataset is immediately queryable
+    // after every startup — visible in WAE SQL within 60s per acceptance criteria.
+    {
+        let wae = Arc::clone(&state.wae);
+        let co_env = config.co_env.clone();
+        tokio::spawn(async move {
+            wae.emit(crate::wae::TelemetryEvent {
+                event_type: "deploy".into(),
+                universe_id: "system".into(),
+                user_kind: "admin".into(),
+                flag_key: Some(co_env),
+                variant: None,
+                duration_ms: None,
+                status: None,
+            });
+        });
     }
 
     let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
@@ -1822,6 +1843,8 @@ mod tests {
             gestao_github_admins: vec![],
             universe_key: None,
             co_env: "prod".into(),
+            wae_endpoint: None,
+            wae_api_key: None,
         }
     }
 

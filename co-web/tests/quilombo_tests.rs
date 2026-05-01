@@ -26,6 +26,8 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         gestao_github_admins: vec![],
         universe_key: None,
         co_env: "prod".into(),
+        wae_endpoint: None,
+        wae_api_key: None,
     }
 }
 
