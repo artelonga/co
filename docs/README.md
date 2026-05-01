@@ -13,6 +13,7 @@ Documentation for the **Co platform** (graph-based content management — CLI, w
 | [`../CLAUDE.md`](../CLAUDE.md) | You're a Claude agent (or ADHD developer using Claude) — project conventions live here. |
 | [`../work/co/SPRINT-V1-LAUNCH.md`](../work/co/SPRINT-V1-LAUNCH.md) | You want to know what's next on the road to v1.0. |
 | [`../work/co/ROADMAP-V1-LAUNCH.md`](../work/co/ROADMAP-V1-LAUNCH.md) | You want the long-arc roadmap (Tiers 0 → 5). |
+| [`QUOTAS.md`](./QUOTAS.md) | You want to understand the quota/tier model (entry limits, storage, deployments, tier behaviors). |
 
 ## Pending docs (planned in CO-100)
 

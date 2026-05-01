@@ -5,6 +5,13 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.1] — 2026-05-01
+
+### Added — CO-122: Quota/tier model spec (no enforcement yet)
+
+- `docs/QUOTAS.md` — tier matrix (Anônimo → Admin), per-dimension limits (entries, storage, universes, telemetry events/day, deployments), hard/soft-block behaviors, tier transition rules; all numeric values marked as v1 proposal for revisit at Tier 2 exit
+- Linked from `docs/README.md` and `work/co/SPRINT-V1-LAUNCH.md`
+
 ## [1.28.0] — 2026-05-01
 
 ### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
