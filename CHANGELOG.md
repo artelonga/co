@@ -5,6 +5,44 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] — 2026-05-02
+
+### Added — SPA lazy-load integration — img/video, asset browser, frontmatter excerpts (CO-150, Phase 5 of CO-145)
+
+**Markdown renderer (co-web/static/shared/markdown.js + editor.bundle.js)**
+
+- `![alt](sha256:abc…)` syntax now resolves to `/api/v1/universes/{key}/assets/{sha}` with `loading="lazy" decoding="async"` — sha256-addressed images are lazy-loaded out of the box.
+- All images (`<img>`) now render with `loading="lazy" decoding="async"` in both the fallback and full (marked) renderers, satisfying the Lighthouse lazy-load audit.
+- New ` ```video ` code block shortcode: renders `<video src="…" preload="none" controls>` — video never pre-buffers.
+- New ` ```iframe ` code block shortcode: renders `<iframe loading="lazy">` for embedded content.
+- `CoMarkdown.setUniverseKey(key)` — call this when navigating to a universe so all sha256: URLs resolve correctly. Mirrors `CoEditor.setUniverseKey(key)`.
+
+**Drag-and-drop / paste image upload (editor.bundle.js)**
+
+- Dropping an image or video file onto the CodeMirror editor uploads it to `POST /api/v1/universes/{key}/assets`, then inserts `![filename](sha256:…)` (image) or ` ```video\nsha256:…\n``` ` (video) at the cursor.
+- Pasting an image from the clipboard works the same way.
+- Universe key is resolved from the current URL (`/co/{slug}/…`) — no SPA changes required.
+
+**API — new endpoints**
+
+```
+GET  /api/v1/universes/{u}/assets              → { assets: [...], total }
+GET  /api/v1/universes/{u}/entries/{path}?excerpt=true  → { frontmatter, excerpt }
+```
+
+- `GET /assets` lists all assets for a universe with optional `?mime=image/` prefix filter and `?search=filename` substring search. Auth mirrors the existing GET-by-sha rule (public universes readable anonymously; private require owner/member).
+- `?excerpt=true` returns only `{ frontmatter, excerpt: first200chars }` for task-card rendering — eliminates full-body transfers on board load.
+
+**Asset browser — `/co/{u}/assets`**
+
+- Grid view of all assets with inline image previews (lazy-loaded) and MIME icons for non-image files.
+- Filter bar: MIME-type dropdown + filename search.
+- Click any asset → detail modal with sha256, size, MIME, creation date, refcount, ready-to-paste markdown syntax, and delete button (shown only when `refcount == 0`).
+
+**See also:** `docs/co-150-asset-browser.png` — demo screenshot.
+
+---
+
 ## [1.36.0] — 2026-04-30
 
 ### Added — binary asset upload + content-addressable storage (CO-146, Phase 1 of CO-145)

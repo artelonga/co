@@ -34,20 +34,69 @@ import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next';
 import * as encoding from 'lib0/encoding';
 import * as decoding from 'lib0/decoding';
 
+// ===== Universe key for sha256: asset URL rewriting =====
+
+let _universeKey = '';
+
+/** Set current universe key so sha256: image/video URLs resolve to asset API endpoints. */
+export function setUniverseKey(key) {
+  _universeKey = key || '';
+}
+
+function _assetUrl(sha256hex) {
+  if (!_universeKey) return '#asset-' + sha256hex;
+  return '/api/v1/universes/' + _universeKey + '/assets/' + sha256hex;
+}
+
 // ===== Marked =====
 
 const markedInstance = new Marked({ gfm: true, breaks: false });
 
-export function renderMarkdown(src) {
+markedInstance.use({
+  renderer: {
+    image({ href, title, text }) {
+      let src = href || '';
+      if (src.startsWith('sha256:')) {
+        src = _assetUrl(src.slice(7));
+      }
+      const titleAttr = title ? ` title="${title}"` : '';
+      return `<img src="${src}" alt="${text || ''}"${titleAttr} loading="lazy" decoding="async" class="md-img">`;
+    },
+    code({ text, lang }) {
+      if (lang === 'video') {
+        const raw = (text || '').trim();
+        const src = raw.startsWith('sha256:') ? _assetUrl(raw.slice(7)) : raw;
+        return `<video src="${src}" preload="none" controls style="max-width:100%;border-radius:4px"></video>`;
+      }
+      if (lang === 'iframe') {
+        const src = (text || '').trim();
+        return `<iframe src="${src}" loading="lazy" style="width:100%;min-height:300px;border:none;border-radius:4px"></iframe>`;
+      }
+      return false;
+    },
+  },
+});
+
+export function renderMarkdown(src, opts) {
+  const uk = (opts && opts.universeKey) || _universeKey;
+  const prev = _universeKey;
+  if (uk) _universeKey = uk;
   const html = markedInstance.parse(src || '');
+  _universeKey = prev;
   return DOMPurify.sanitize(html, {
     ALLOWED_TAGS: [
       'p', 'br', 'strong', 'em', 's', 'del', 'code', 'pre', 'blockquote',
       'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'th', 'td',
-      'a', 'img', 'hr', 'input', 'span', 'div',
+      'a', 'img', 'video', 'source', 'iframe', 'figure', 'figcaption',
+      'hr', 'input', 'span', 'div',
     ],
-    ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'type', 'checked', 'disabled', 'class', 'id', 'loading', 'data-zoom'],
+    ALLOWED_ATTR: [
+      'href', 'src', 'alt', 'title', 'type', 'checked', 'disabled',
+      'class', 'id', 'loading', 'decoding', 'preload', 'controls',
+      'data-zoom', 'style', 'width', 'height',
+    ],
+    ALLOW_DATA_ATTR: false,
   });
 }
 
@@ -709,6 +758,70 @@ export function initEditor(container, {
   });
 
   toolbar.appendChild(badge);
+
+  // --- CO-150: Drag-and-drop / paste image upload ---
+  // Extracts the universe key from the current URL (/co/{slug}/...) for uploads.
+  function _getEditorUniverseKey() {
+    if (_universeKey) return _universeKey;
+    const m = window.location.pathname.match(/^\/co\/([^\/]+)/);
+    return m ? m[1] : '';
+  }
+
+  async function _uploadAndInsert(file) {
+    const uKey = _getEditorUniverseKey();
+    if (!uKey) return;
+    const mime = file.type || 'application/octet-stream';
+    const filename = encodeURIComponent(file.name || 'upload');
+    try {
+      const resp = await fetch(
+        `/api/v1/universes/${uKey}/assets?filename=${filename}`,
+        { method: 'POST', headers: { 'Content-Type': mime }, body: file },
+      );
+      if (!resp.ok) return;
+      const { sha256 } = await resp.json();
+      const isVideo = mime.startsWith('video/');
+      const alt = file.name || 'media';
+      const syntax = isVideo
+        ? `\`\`\`video\nsha256:${sha256}\n\`\`\``
+        : `![${alt}](sha256:${sha256})`;
+      const cursor = view.state.selection.main.head;
+      const sep = cursor > 0 ? '\n' : '';
+      view.dispatch({
+        changes: { from: cursor, insert: sep + syntax + '\n' },
+        selection: { anchor: cursor + sep.length + syntax.length + 1 },
+      });
+      view.focus();
+    } catch (_) { /* silent — network errors shouldn't break the editor */ }
+  }
+
+  // Drag-over: accept files
+  wrap.addEventListener('dragover', e => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+      wrap.style.outline = '2px dashed var(--accent,#6366f1)';
+    }
+  });
+  wrap.addEventListener('dragleave', () => { wrap.style.outline = ''; });
+  wrap.addEventListener('drop', e => {
+    wrap.style.outline = '';
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    const file = e.dataTransfer.files[0];
+    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      _uploadAndInsert(file);
+    }
+  });
+
+  // Paste: handle image/video from clipboard
+  wrap.addEventListener('paste', e => {
+    const items = Array.from(e.clipboardData?.items || []);
+    const fileItem = items.find(i => i.kind === 'file' && (i.type.startsWith('image/') || i.type.startsWith('video/')));
+    if (!fileItem) return;
+    e.preventDefault();
+    const file = fileItem.getAsFile();
+    if (file) _uploadAndInsert(file);
+  });
 
   // --- Public interface ---
   return {

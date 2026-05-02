@@ -349,6 +349,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(crate::telemetry::serve_admin_dashboard),
         )
         .route("/co/{slug}", get(serve_co_index))
+        // CO-150: asset browser page for universe owners
+        .route("/co/{slug}/assets", get(serve_assets_page))
         // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
         .route("/co/yggdrasil/{game}", get(serve_co_index));
 
@@ -1142,6 +1144,27 @@ async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Re
     }
 
     (StatusCode::NOT_FOUND, "Not found").into_response()
+}
+
+/// CO-150: Serve the asset browser page at `/co/{slug}/assets`.
+async fn serve_assets_page(State(state): State<AppState>) -> Response {
+    let embed_path = "shared/assets.html";
+    let fs_path = std::path::Path::new(&state.config.static_dir).join(embed_path);
+    if let Some(contents) = resolve_asset(embed_path, Some(&fs_path)) {
+        return (
+            StatusCode::OK,
+            [
+                (
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                ),
+                (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            ],
+            contents,
+        )
+            .into_response();
+    }
+    (StatusCode::NOT_FOUND, "Asset browser page not found").into_response()
 }
 
 async fn serve_variant_file(

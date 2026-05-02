@@ -385,3 +385,145 @@ async fn delete_removes_blob_when_unreferenced() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 }
+
+// ---------------------------------------------------------------------------
+// CO-150: list assets endpoint
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn list_assets_returns_uploaded_assets() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    // Upload two assets with different MIME types
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets?filename=hello.txt")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "text/plain")
+                .body(Body::from("hello"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // sha256 of b"\x89PNG\r\n\x1A\n" prefix (minimal PNG-like bytes for testing)
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets?filename=img.png")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "image/png")
+                .body(Body::from(b"\x89PNG\r\n\x1A\nfakepng".to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // List all
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u1/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["total"].as_u64().unwrap(), 2);
+    assert_eq!(json["assets"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn list_assets_mime_filter() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    // Upload text + image
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets?filename=doc.txt")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "text/plain")
+                .body(Body::from("text content"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets?filename=photo.png")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "image/png")
+                .body(Body::from(b"\x89PNG\r\n\x1A\ndata".to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Filter by image/
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u1/assets?mime=image/")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["total"].as_u64().unwrap(), 1);
+    let mime = json["assets"][0]["mime"].as_str().unwrap();
+    assert!(
+        mime.starts_with("image/"),
+        "expected image mime, got {mime}"
+    );
+}
+
+#[tokio::test]
+async fn list_assets_empty_universe() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u-empty", "owner-1", false);
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u-empty/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["total"].as_u64().unwrap(), 0);
+    assert_eq!(json["assets"].as_array().unwrap().len(), 0);
+}

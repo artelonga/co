@@ -19,6 +19,21 @@
 (function (global) {
   'use strict';
 
+  // ===== Universe key (for sha256: asset URL rewriting) =====
+
+  let _universeKey = '';
+
+  /** Call this when navigating to a universe so sha256: image URLs resolve correctly. */
+  function setUniverseKey(key) {
+    _universeKey = key || '';
+  }
+
+  /** Build an asset URL: /api/v1/universes/{key}/assets/{sha256} */
+  function _assetUrl(sha256hex) {
+    if (!_universeKey) return '#asset-' + sha256hex;
+    return '/api/v1/universes/' + _universeKey + '/assets/' + sha256hex;
+  }
+
   // ===== Frontmatter =====
 
   function extractFrontmatter(text) {
@@ -128,9 +143,14 @@
    */
   function _inlineMd(s) {
     // Apply inline markdown to already-escaped HTML.
-    // Order matters: images before links (![]() vs []()).
+    // Order matters: sha256 images → plain images → links.
     return s
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" loading="lazy" class="md-img">')
+      // sha256: image → asset API URL with lazy load + async decode
+      .replace(/!\[([^\]]*)\]\(sha256:([a-f0-9]{64})\)/g, (_, alt, sha) =>
+        `<img src="${_assetUrl(sha)}" alt="${alt}" loading="lazy" decoding="async" class="md-img">`)
+      // plain image (non-sha256) with lazy load + async decode
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) =>
+        `<img src="${src}" alt="${alt}" loading="lazy" decoding="async" class="md-img">`)
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
@@ -144,9 +164,21 @@
       const t = p.trim();
       if (!t) return '';
 
-      // Code block
+      // Code block (including video/iframe shortcodes)
       if (t.startsWith('```')) {
-        const inner = t.replace(/^```[^\n]*\n?/, '').replace(/```$/, '');
+        const langMatch = t.match(/^```(\w+)?/);
+        const lang = langMatch && langMatch[1];
+        const inner = t.replace(/^```[^\n]*\n?/, '').replace(/```$/, '').trim();
+
+        if (lang === 'video') {
+          const src = inner.startsWith('sha256:')
+            ? _assetUrl(inner.slice(7))
+            : inner;
+          return `<video src="${_escHtml(src)}" preload="none" controls style="max-width:100%;border-radius:var(--radius-sm,4px)"></video>`;
+        }
+        if (lang === 'iframe') {
+          return `<iframe src="${_escHtml(inner)}" loading="lazy" style="width:100%;min-height:300px;border:none;border-radius:var(--radius-sm,4px)"></iframe>`;
+        }
         return `<pre><code>${_escHtml(inner)}</code></pre>`;
       }
 
@@ -411,5 +443,6 @@
     highlightCode,
     enableImageZoom,
     renderMermaidBlocks,
+    setUniverseKey,
   };
 })(window);

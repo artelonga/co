@@ -282,10 +282,25 @@ pub async fn entry_tree(
     Ok(Json(tree))
 }
 
+/// Query params for single-entry GET: `?excerpt=true` returns frontmatter + 200-char excerpt only.
+#[derive(Debug, Deserialize)]
+pub struct GetEntryQuery {
+    pub excerpt: Option<bool>,
+}
+
+/// Frontmatter + first-200-char excerpt — returned when `?excerpt=true`.
+/// Used by board view to render task cards without fetching full bodies.
+#[derive(Debug, Serialize)]
+pub struct EntryExcerpt {
+    pub frontmatter: JsonValue,
+    pub excerpt: String,
+}
+
 /// GET /api/v1/universes/:slug/entries/*path — read single entry
 pub async fn get_entry(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
+    Query(q): Query<GetEntryQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     let uc = {
@@ -300,6 +315,16 @@ pub async fn get_entry(
         .get(&slug, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", path)))?;
+
+    // CO-150: ?excerpt=true — fast path for board cards; returns frontmatter + 200-char excerpt only.
+    if q.excerpt.unwrap_or(false) {
+        let excerpt: String = entry.body.chars().take(200).collect();
+        return Ok(Json(EntryExcerpt {
+            frontmatter: entry.frontmatter,
+            excerpt,
+        })
+        .into_response());
+    }
 
     if accept_protobuf(&headers) {
         use prost::Message;

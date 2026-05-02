@@ -1291,3 +1291,144 @@ async fn test_update_universe_visibility_flip() {
         .unwrap();
     assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
 }
+
+// ---------------------------------------------------------------------------
+// CO-150: ?excerpt=true on GET /entries/{path}
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn excerpt_true_returns_frontmatter_and_truncated_body() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // Create a universe + entry first
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(
+                    r#"{"key":"exc-test","name":"Excerpt Test","description":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let long_body = "a".repeat(500);
+    let entry_payload = serde_json::json!({
+        "path": "page.md",
+        "frontmatter": { "title": "My Page", "type": "page" },
+        "body": long_body,
+    });
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/exc-test/entries")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(entry_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), StatusCode::CREATED);
+
+    // GET with ?excerpt=true
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/exc-test/entries/page.md?excerpt=true")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    // Must have frontmatter and excerpt, must NOT have full body
+    assert_eq!(json["frontmatter"]["title"].as_str().unwrap(), "My Page");
+    let excerpt = json["excerpt"].as_str().unwrap();
+    assert_eq!(excerpt.len(), 200, "excerpt must be exactly 200 chars");
+    assert!(
+        json.get("body").is_none(),
+        "full body should not be returned with ?excerpt=true"
+    );
+    assert!(
+        json.get("relations").is_none(),
+        "relations should not be in excerpt response"
+    );
+}
+
+#[tokio::test]
+async fn excerpt_false_returns_full_entry() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(
+                    r#"{"key":"full-test","name":"Full Test","description":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let entry_payload = serde_json::json!({
+        "path": "pg.md",
+        "frontmatter": { "title": "Full Page", "type": "page" },
+        "body": "short body",
+    });
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/full-test/entries")
+                .header(header::CONTENT_TYPE, "application/json")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::from(entry_payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // GET without excerpt — should return full EntryWithRelations
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/full-test/entries/pg.md")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["body"].as_str().unwrap(), "short body");
+    assert!(
+        json.get("relations").is_some(),
+        "relations should be present in full entry"
+    );
+}

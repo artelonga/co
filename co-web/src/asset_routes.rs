@@ -19,7 +19,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::Response,
-    routing::{get, post},
+    routing::get,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -465,13 +465,89 @@ pub async fn delete_asset(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Optional filters for the asset list endpoint.
+#[derive(Deserialize)]
+pub struct ListAssetsQuery {
+    /// MIME prefix filter, e.g. `image/` returns only image assets.
+    pub mime: Option<String>,
+    /// Filename substring search (case-insensitive contains).
+    pub search: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AssetListResponse {
+    pub assets: Vec<AssetMeta>,
+    pub total: usize,
+}
+
+/// `GET /api/v1/universes/:slug/assets`
+///
+/// List all assets in the universe. Supports optional `?mime=image/` prefix
+/// filter and `?search=filename` substring search.
+/// Auth: same read rules as `GET /assets/:sha256`.
+pub async fn list_assets(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+    Query(q): Query<ListAssetsQuery>,
+    headers: HeaderMap,
+) -> Result<Json<AssetListResponse>, AppError> {
+    check_reader(&state, &headers, &universe_key)?;
+
+    let conn = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let mut stmt = guard
+        .prepare(
+            "SELECT sha256, mime, size_bytes, filename, created_at_ns, created_by, refcount \
+             FROM assets \
+             ORDER BY created_at_ns DESC",
+        )
+        .map_err(|e| AppError::Internal(format!("list assets prepare: {e}")))?;
+
+    let assets: Vec<AssetMeta> = stmt
+        .query_map([], |row| {
+            Ok(AssetMeta {
+                sha256: row.get(0)?,
+                mime: row.get(1)?,
+                size: row.get(2)?,
+                filename: row.get(3)?,
+                created_at_ns: row.get(4)?,
+                created_by: row.get(5)?,
+                refcount: row.get(6)?,
+            })
+        })
+        .map_err(|e| AppError::Internal(format!("list assets query: {e}")))?
+        .filter_map(|r| r.ok())
+        .filter(|a| q.mime.as_deref().is_none_or(|m| a.mime.starts_with(m)))
+        .filter(|a| {
+            q.search.as_deref().is_none_or(|s| {
+                a.filename
+                    .as_deref()
+                    .is_some_and(|f| f.to_lowercase().contains(&s.to_lowercase()))
+                    || a.sha256.starts_with(s)
+            })
+        })
+        .collect();
+
+    let total = assets.len();
+    Ok(Json(AssetListResponse { assets, total }))
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
 pub fn asset_router() -> Router<AppState> {
     Router::new()
-        .route("/{slug}/assets", post(upload_asset))
+        .route("/{slug}/assets", get(list_assets).post(upload_asset))
         .route(
             "/{slug}/assets/{sha256}",
             get(get_asset).delete(delete_asset),

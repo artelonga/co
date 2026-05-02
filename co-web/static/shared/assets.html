@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Assets — CO</title>
+    <link rel="stylesheet" href="/shared/production.css">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font, system-ui, sans-serif);
+            background: var(--bg, #f5f5f5);
+            color: var(--text, #111);
+            min-height: 100vh;
+        }
+        .page-header {
+            background: var(--card-bg, #fff);
+            border-bottom: 1px solid var(--border, #e5e7eb);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .page-header a {
+            color: var(--accent, #6366f1);
+            text-decoration: none;
+            font-size: 14px;
+        }
+        .page-header h1 { font-size: 18px; font-weight: 600; }
+        .toolbar {
+            background: var(--card-bg, #fff);
+            border-bottom: 1px solid var(--border, #e5e7eb);
+            padding: 10px 24px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .toolbar input, .toolbar select {
+            border: 1px solid var(--border, #e5e7eb);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            background: var(--bg, #fff);
+            color: var(--text, #111);
+            outline: none;
+        }
+        .toolbar input:focus, .toolbar select:focus {
+            border-color: var(--accent, #6366f1);
+        }
+        .asset-count { font-size: 13px; color: var(--text-muted, #6b7280); margin-left: auto; }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 16px;
+            padding: 24px;
+        }
+        .asset-card {
+            background: var(--card-bg, #fff);
+            border: 1px solid var(--border, #e5e7eb);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: box-shadow 0.15s, border-color 0.15s;
+        }
+        .asset-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border-color: var(--accent, #6366f1);
+        }
+        .asset-thumb {
+            width: 100%;
+            aspect-ratio: 1;
+            object-fit: cover;
+            display: block;
+            background: var(--bg, #f5f5f5);
+        }
+        .asset-icon {
+            width: 100%;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg, #f0f2f5);
+            font-size: 36px;
+            color: var(--text-muted, #9ca3af);
+        }
+        .asset-info {
+            padding: 8px 10px;
+            font-size: 12px;
+            color: var(--text-muted, #6b7280);
+            border-top: 1px solid var(--border, #e5e7eb);
+        }
+        .asset-info .filename {
+            font-weight: 500;
+            color: var(--text, #111);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 24px;
+            color: var(--text-muted, #9ca3af);
+        }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        /* Detail modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal {
+            background: var(--card-bg, #fff);
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 540px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            position: relative;
+        }
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--text-muted, #9ca3af);
+        }
+        .modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
+        .detail-preview { text-align: center; margin-bottom: 16px; }
+        .detail-preview img {
+            max-width: 100%;
+            max-height: 240px;
+            border-radius: 6px;
+            object-fit: contain;
+        }
+        .detail-preview video {
+            max-width: 100%;
+            max-height: 240px;
+            border-radius: 6px;
+        }
+        .detail-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+        .detail-row .label {
+            color: var(--text-muted, #9ca3af);
+            min-width: 80px;
+            flex-shrink: 0;
+        }
+        .detail-row .value {
+            color: var(--text, #111);
+            word-break: break-all;
+            font-family: var(--font-mono, monospace);
+            font-size: 12px;
+        }
+        .copy-btn {
+            font-size: 11px;
+            padding: 3px 8px;
+            border: 1px solid var(--border, #e5e7eb);
+            border-radius: 4px;
+            background: var(--bg, #f5f5f5);
+            cursor: pointer;
+            color: var(--text-muted, #6b7280);
+            margin-left: 6px;
+        }
+        .copy-btn:hover { background: var(--bg-hover, #e8eaed); }
+        .btn-danger {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+            border-radius: 6px;
+            padding: 7px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            margin-top: 16px;
+        }
+        .btn-danger:hover { background: #fecaca; }
+        .loading { text-align: center; padding: 60px; color: var(--text-muted, #9ca3af); }
+        .error-banner {
+            background: #fee2e2;
+            color: #991b1b;
+            padding: 12px 24px;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-header">
+        <a id="back-link" href="/co/">← Universo</a>
+        <h1 id="page-title">Assets</h1>
+    </div>
+    <div class="toolbar">
+        <input type="search" id="search-input" placeholder="Buscar por nome..." style="min-width:180px">
+        <select id="mime-filter">
+            <option value="">Todos os tipos</option>
+            <option value="image/">Imagens</option>
+            <option value="video/">Vídeos</option>
+            <option value="application/pdf">PDF</option>
+            <option value="audio/">Áudio</option>
+        </select>
+        <span class="asset-count" id="asset-count"></span>
+    </div>
+    <div id="error-banner" class="error-banner" style="display:none"></div>
+    <div id="loading" class="loading">Carregando…</div>
+    <div id="grid" class="grid" style="display:none"></div>
+    <div id="empty" class="empty-state" style="display:none">
+        <div class="icon">📁</div>
+        <div>Nenhum asset encontrado</div>
+    </div>
+
+    <!-- Detail modal -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal">
+            <button class="modal-close" id="modal-close">×</button>
+            <h2 id="modal-filename">Asset</h2>
+            <div class="detail-preview" id="modal-preview"></div>
+            <div id="modal-details"></div>
+            <button class="btn-danger" id="btn-delete" style="display:none">Excluir asset</button>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        'use strict';
+
+        const m = window.location.pathname.match(/^\/co\/([^\/]+)/);
+        const universeKey = m ? m[1] : '';
+        if (!universeKey) {
+            document.getElementById('loading').textContent = 'Universo não encontrado.';
+            return;
+        }
+
+        document.getElementById('back-link').href = '/co/' + universeKey;
+        document.getElementById('page-title').textContent = 'Assets — ' + universeKey;
+        document.title = 'Assets — ' + universeKey + ' — CO';
+
+        let allAssets = [];
+        let currentAsset = null;
+
+        function mimeIcon(mime) {
+            if (mime.startsWith('image/')) return '🖼️';
+            if (mime.startsWith('video/')) return '🎬';
+            if (mime.startsWith('audio/')) return '🎵';
+            if (mime === 'application/pdf') return '📄';
+            if (mime.startsWith('text/')) return '📝';
+            return '📎';
+        }
+
+        function fmtSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function renderGrid(assets) {
+            const grid = document.getElementById('grid');
+            const empty = document.getElementById('empty');
+            if (!assets.length) {
+                grid.style.display = 'none';
+                empty.style.display = '';
+                return;
+            }
+            grid.style.display = '';
+            empty.style.display = 'none';
+            grid.innerHTML = '';
+            assets.forEach(a => {
+                const card = document.createElement('div');
+                card.className = 'asset-card';
+                card.dataset.sha = a.sha256;
+
+                const assetUrl = `/api/v1/universes/${universeKey}/assets/${a.sha256}`;
+                if (a.mime.startsWith('image/')) {
+                    const img = document.createElement('img');
+                    img.className = 'asset-thumb';
+                    img.src = assetUrl;
+                    img.alt = a.filename || a.sha256.slice(0, 8);
+                    img.loading = 'lazy';
+                    img.decoding = 'async';
+                    card.appendChild(img);
+                } else {
+                    const icon = document.createElement('div');
+                    icon.className = 'asset-icon';
+                    icon.textContent = mimeIcon(a.mime);
+                    card.appendChild(icon);
+                }
+
+                const info = document.createElement('div');
+                info.className = 'asset-info';
+                info.innerHTML = `<div class="filename">${a.filename || a.sha256.slice(0, 12) + '…'}</div>
+                    <div>${a.mime} · ${fmtSize(a.size)}</div>`;
+                card.appendChild(info);
+
+                card.addEventListener('click', () => openDetail(a));
+                grid.appendChild(card);
+            });
+            document.getElementById('asset-count').textContent = assets.length + ' asset' + (assets.length !== 1 ? 's' : '');
+        }
+
+        function applyFilters() {
+            const search = document.getElementById('search-input').value.toLowerCase();
+            const mime = document.getElementById('mime-filter').value;
+            const filtered = allAssets.filter(a => {
+                const nameMatch = !search || (a.filename || '').toLowerCase().includes(search) || a.sha256.includes(search);
+                const mimeMatch = !mime || a.mime.startsWith(mime);
+                return nameMatch && mimeMatch;
+            });
+            renderGrid(filtered);
+        }
+
+        document.getElementById('search-input').addEventListener('input', applyFilters);
+        document.getElementById('mime-filter').addEventListener('change', applyFilters);
+
+        function openDetail(asset) {
+            currentAsset = asset;
+            const assetUrl = `/api/v1/universes/${universeKey}/assets/${asset.sha256}`;
+            document.getElementById('modal-filename').textContent = asset.filename || asset.sha256.slice(0, 16) + '…';
+
+            const preview = document.getElementById('modal-preview');
+            preview.innerHTML = '';
+            if (asset.mime.startsWith('image/')) {
+                const img = document.createElement('img');
+                img.src = assetUrl;
+                img.alt = asset.filename || '';
+                img.loading = 'lazy';
+                preview.appendChild(img);
+            } else if (asset.mime.startsWith('video/')) {
+                const vid = document.createElement('video');
+                vid.src = assetUrl;
+                vid.preload = 'none';
+                vid.controls = true;
+                preview.appendChild(vid);
+            } else {
+                const icon = document.createElement('div');
+                icon.style.cssText = 'font-size:48px;padding:16px';
+                icon.textContent = mimeIcon(asset.mime);
+                preview.appendChild(icon);
+            }
+
+            const mdSyntax = asset.mime.startsWith('video/')
+                ? `\`\`\`video\nsha256:${asset.sha256}\n\`\`\``
+                : `![${asset.filename || 'imagem'}](sha256:${asset.sha256})`;
+
+            const createdDate = asset.created_at_ns
+                ? new Date(Math.floor(asset.created_at_ns / 1_000_000)).toLocaleString('pt-BR')
+                : '—';
+
+            document.getElementById('modal-details').innerHTML = `
+                <div class="detail-row">
+                    <span class="label">SHA256</span>
+                    <span class="value">${asset.sha256}</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('${asset.sha256}')">Copiar</button>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Tipo</span>
+                    <span class="value">${asset.mime}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Tamanho</span>
+                    <span class="value">${fmtSize(asset.size)}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Criado em</span>
+                    <span class="value">${createdDate}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Referências</span>
+                    <span class="value">${asset.refcount}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="label">Markdown</span>
+                    <span class="value">${mdSyntax}</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText(${JSON.stringify(mdSyntax)})">Copiar</button>
+                </div>
+            `;
+
+            const delBtn = document.getElementById('btn-delete');
+            delBtn.style.display = asset.refcount === 0 ? '' : 'none';
+
+            document.getElementById('modal-overlay').classList.add('visible');
+        }
+
+        document.getElementById('modal-close').addEventListener('click', () => {
+            document.getElementById('modal-overlay').classList.remove('visible');
+            currentAsset = null;
+        });
+        document.getElementById('modal-overlay').addEventListener('click', e => {
+            if (e.target === document.getElementById('modal-overlay')) {
+                document.getElementById('modal-overlay').classList.remove('visible');
+                currentAsset = null;
+            }
+        });
+
+        document.getElementById('btn-delete').addEventListener('click', async () => {
+            if (!currentAsset) return;
+            if (!confirm('Excluir este asset permanentemente?')) return;
+            try {
+                const resp = await fetch(
+                    `/api/v1/universes/${universeKey}/assets/${currentAsset.sha256}`,
+                    { method: 'DELETE' }
+                );
+                if (resp.ok || resp.status === 204) {
+                    allAssets = allAssets.filter(a => a.sha256 !== currentAsset.sha256);
+                    document.getElementById('modal-overlay').classList.remove('visible');
+                    currentAsset = null;
+                    applyFilters();
+                } else {
+                    alert('Erro ao excluir: ' + resp.status);
+                }
+            } catch (err) {
+                alert('Erro de rede: ' + err.message);
+            }
+        });
+
+        // Load assets
+        fetch(`/api/v1/universes/${universeKey}/assets`)
+            .then(r => r.ok ? r.json() : Promise.reject(r.status))
+            .then(data => {
+                allAssets = data.assets || [];
+                document.getElementById('loading').style.display = 'none';
+                renderGrid(allAssets);
+            })
+            .catch(err => {
+                document.getElementById('loading').style.display = 'none';
+                const banner = document.getElementById('error-banner');
+                banner.textContent = 'Erro ao carregar assets: ' + err;
+                banner.style.display = '';
+            });
+    })();
+    </script>
+</body>
+</html>
