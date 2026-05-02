@@ -5,6 +5,27 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.6] — 2026-05-02
+
+### Added — admin's `yuri` personal universe re-homed + username default
+
+User feedback 2026-05-02: "include the private yuri user (always use slug as user name by default)". The `yuri` universe and `dados` dashboard universe were misclassified as cruft in my earlier note — both are intentional and intact (correctly preserved by `prune_orphan_universe_dirs` since their DB rows exist). What was actually wrong:
+
+- `yuri@artelonga.com.br` (admin) had `users.username = ''` (empty)
+- The `yuri` universe was owned by `usr_-PFeKIctDZ` (legacy `yuri@co.local` test user that previously held the username slug)
+- New `Storage::ensure_admin_username(email)` derives the slug from the email prefix (`yuri@artelonga.com.br → yuri`), updates `users.username` if empty. Skips gracefully on unique-index conflict — does not break boot.
+- `PERSONAL_KEYS` (in server.rs admin-bootstrap path) now includes `yuri` alongside `artelonga` and `rfq`. Next boot re-homes the `yuri` universe to the admin's `user_id` via `ensure_admin_owns_personal_universes`.
+
+### Filed — CO-144: per-user dashboard universe + cross-universe activity feed
+
+3-phase ticket scoping the broader feature the user described: "it works like a dashboard, changing a file in other universes or adding a new universe populates that, obviously one (private) per user".
+
+- **Phase A** — every signup auto-creates a private universe with `key = users.username` (extends the admin-only pattern shipping in 1.34.6 to every user)
+- **Phase B** — `upsert_entry_row` emits cross-universe events that materialize into (i) the existing global `dados` universe and (ii) each user's slug-named universe, filtered by membership/subscription
+- **Phase C** — SPA Painel-style dashboard view that renders the activity feed with universe / actor / entry-type filters
+
+Decision recorded: `dados` stays system-owned (global aggregate). Per-user dashboards are the user's slug-named private universe.
+
 ## [1.34.5] — 2026-05-02
 
 ### Added — `prune_orphan_universe_dirs` filesystem cleanup on every boot

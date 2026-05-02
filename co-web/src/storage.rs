@@ -2787,6 +2787,63 @@ impl Storage {
     /// This function is targeted — it only touches the well-known personal
     /// universes named in the bootstrap script. Idempotent. Returns the number
     /// of universes re-homed.
+    /// Ensure the admin user has a username derived from their email prefix
+    /// (e.g. `yuri@artelonga.com.br` → `yuri`) when currently empty.
+    ///
+    /// 2026-05-02 — addresses user directive "always use slug as user name by
+    /// default". The unique index on `users.username` means we may collide
+    /// with an existing user (e.g. legacy `yuri@co.local`); on conflict we
+    /// log and skip rather than break the boot path.
+    pub fn ensure_admin_username(&mut self, admin_email: &str) -> anyhow::Result<bool> {
+        let email = admin_email.trim().to_lowercase();
+        let prefix: String = email
+            .split('@')
+            .next()
+            .unwrap_or("")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+            .collect();
+        if prefix.is_empty() {
+            return Ok(false);
+        }
+
+        let current: Option<Option<String>> = self
+            .conn
+            .query_row(
+                "SELECT username FROM users WHERE email = ?1",
+                params![email],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok();
+        let Some(current) = current else {
+            return Ok(false);
+        }; // user not seeded yet
+
+        if current.as_deref().is_some_and(|s| !s.is_empty()) {
+            return Ok(false); // already set, leave alone
+        }
+
+        // Try to claim the prefix as username. Unique index may collide with
+        // a legacy/UAT user holding the same slug.
+        match self.conn.execute(
+            "UPDATE users SET username = ?1 WHERE email = ?2",
+            params![prefix, email],
+        ) {
+            Ok(n) if n > 0 => {
+                tracing::info!("ensure_admin_username: set username='{prefix}' for {email}");
+                Ok(true)
+            }
+            Ok(_) => Ok(false),
+            Err(e) => {
+                tracing::warn!(
+                    "ensure_admin_username: could not set username='{prefix}' for {email} \
+                     (likely unique-index conflict with another user holding the same slug): {e}"
+                );
+                Ok(false)
+            }
+        }
+    }
+
     pub fn ensure_admin_owns_personal_universes(
         &mut self,
         admin_email: &str,

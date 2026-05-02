@@ -725,7 +725,17 @@ pub async fn start_server(config: WebConfig) {
             // scripts/seed-prod-universes.sh) to belong to the current admin
             // user, even when their prior owner_id is still a valid (stale)
             // user — not caught by rescue_orphan_universes.
-            const PERSONAL_KEYS: &[&str] = &["artelonga", "rfq"];
+            // 2026-05-02: ensure the admin's username is set (defaults to
+            // email-prefix). Skips on unique-index conflict with legacy users.
+            if let Err(e) = storage.ensure_admin_username(&email) {
+                tracing::warn!("ensure_admin_username failed: {e}");
+            }
+            // 2026-05-02: include `yuri` so the admin's slug-keyed personal
+            // universe is owned by them (not the legacy yuri@co.local test
+            // user that previously held it). Per user directive: "always use
+            // slug as user name by default" — admin's slug is `yuri`, the
+            // universe key matches.
+            const PERSONAL_KEYS: &[&str] = &["artelonga", "rfq", "yuri"];
             match storage.ensure_admin_owns_personal_universes(&email, PERSONAL_KEYS) {
                 Ok(0) => {}
                 Ok(n) => {
