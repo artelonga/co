@@ -1,6 +1,6 @@
 ---
 created: 2026-04-11T01:26:20.515990+00:00
-modified: 2026-04-26T00:00:00+00:00
+modified: 2026-05-02T00:00:00+00:00
 order: 12
 slug: dados-rastreados
 tags:
@@ -11,11 +11,11 @@ type: page
 
 # Lista completa de dados rastreados
 
-Última atualização: abril de 2026
+Última atualização: maio de 2026
 
 Esta página lista **TODOS** os dados que o Co coleta na instância gerenciada pela Arte Longa (`co.artelonga.com.br`). Nada além disto é armazenado. Para auto-hospedagem, você é o controlador e decide o que rastrear.
 
-> Versão verificável: <https://github.com/artelonga/co/blob/main/data/universes/template/content/dados-rastreados.md>
+> Versão verificável: <https://github.com/artelonga/co/blob/main/co-web/seed/template/dados-rastreados.md>
 
 ## 1. Conta (apenas usuários logados)
 
@@ -50,9 +50,23 @@ Esta página lista **TODOS** os dados que o Co coleta na instância gerenciada p
 | `co_named_palette` | Tema visual escolhido | 1 ano |
 | `co_local_universe` | Universo anônimo local (slug) | Sessão |
 | `co_user_palette` | Override de tema do usuário | 1 ano |
+| `co_onboarded` | Coach mark de boas-vindas já dispensado (CO-99) | 1 ano |
+| `co_cookie_consent` | Resposta ao banner de consentimento LGPD | 1 ano |
+| `co_preferred_universe` | Último universo aberto (auto-redirect ao logar) | 1 ano |
 | `al_vid` | Token de visitante para analytics — sem papel de autenticação, sem PII; unifica atribuição entre o site de marketing e o Co (ADR-001). Escopo: `.artelonga.com.br`. Legível por JS. | 1 ano |
 
 **Não usamos:** fingerprinting, supercookies, evercookies, cookies de rastreamento de terceiros.
+
+### 3.1 Apenas no seu dispositivo (localStorage / IndexedDB)
+
+Estes são guardados no **seu navegador**, nunca enviados ao servidor. Ficam até você limpar os dados do site.
+
+| Chave | Finalidade |
+|-------|-----------|
+| `co_universe_tree_<key>` | Estado de expansão (▾/▸) por universo na barra lateral (CO-98) |
+| `co_subtree_<id>`, `co_section_<id>`, `co_folder_<id>` | Estado de expansão de árvores e seções |
+| `co_draft_new_task`, `co_draft_task_<id>`, `co_draft_page_<id>` | Rascunhos automáticos enquanto você digita (recuperação ao fechar a aba) |
+| IndexedDB `co-vault` | Cache offline de notas + fila de escritas pendentes (PWA, CO-69) |
 
 ## 4. Logs técnicos
 

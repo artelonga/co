@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.1] — 2026-05-02
+
+### Fixed — `dados-rastreados` page refreshed for 2026-05 cookie surface
+
+Following user feedback ("Dados is not up to date"), updated the privacy disclosure to reflect cookies and localStorage state added since 1.21.x:
+
+- Date stamp: abril → maio de 2026
+- Added cookies: `co_onboarded` (CO-99 onboarding), `co_cookie_consent` (LGPD banner), `co_preferred_universe` (auto-redirect to last universe)
+- Added new section §3.1 enumerating localStorage / IndexedDB state (`co_universe_tree_*` from CO-98 hierarchy, `co_subtree_*`, `co_section_*`, `co_folder_*`, `co_draft_*` autosave drafts, `co-vault` IDB cache from CO-69 PWA offline)
+- Fixed the "verifiable source" link from `data/universes/template/content/dados-rastreados.md` (renamed years ago) to `co-web/seed/template/dados-rastreados.md` (current path)
+
+### Filed — CO-142: public-universe routing audit + co-dev/co-experience deprecation
+
+Five-phase ticket scoping the architecture-level cleanup the user named on 2026-05-02:
+
+- **Phase A** — disambiguate `/api/v1/universes/co-dev` shadow (dev_board admin middleware vs. public-subscribable universe)
+- **Phase B** — fix `content_count=0` on `template` (and likely other system universes) — recompute on boot or atomic via upsert
+- **Phase C** — deprecate `co-dev` / `co-experience` public universes; migrate to epic ↔ sub-universe via CO-98 `parent_key`
+- **Phase D** — reconcile quilombo* and qa-* universe sprawl into a documented set
+- **Phase E** — wire the dev board to read from `work/co/CO-*.md` so completed tickets actually show as done
+
+Each phase has explicit acceptance criteria and call-out of the underlying mechanism (route mounting order in `server.rs`, `upsert_entry_row` count maintenance, `parent_key` semantics, deploy-time path mounts). No code changes in this commit — ticket only.
+
 ## [1.34.0] — 2026-05-01
 
 ### Added — CO-105: Admin telemetry dashboard
