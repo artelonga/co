@@ -95,7 +95,7 @@ A responsabilidade total da Arte Longa, em qualquer hipótese, fica limitada ao 
 
 ## 11. Modificações
 
-Estes Termos podem ser atualizados. Mudanças significativas serão comunicadas via banner na Plataforma com **pelo menos 15 dias de antecedência**. Histórico em <https://github.com/artelonga/co/commits/main/data/universes/template/content/termos.md>.
+Estes Termos podem ser atualizados. Mudanças significativas serão comunicadas via banner na Plataforma com **pelo menos 15 dias de antecedência**. Histórico em <https://github.com/artelonga/co/commits/main/co-web/seed/template/termos.md>.
 
 ## 12. Lei aplicável e foro
 

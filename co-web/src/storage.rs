@@ -4375,6 +4375,22 @@ impl Storage {
                  VALUES (?1, ?2, ?3, 'system', ?4, 0, 0, ?5, 'scholarly-light', 'board', 0)",
                 rusqlite::params![key, name, desc, now, vis],
             );
+            // CO-143 follow-up (2026-05-02): reconcile visibility to declared
+            // intent on every boot. INSERT OR IGNORE above doesn't update
+            // existing rows, so a row created with an old default (e.g.
+            // 'private' before the public-subscribable convention) would
+            // silently stay wrong forever. Surfaced as: artelonga returning
+            // 404 to anonymous despite the seed declaring public-subscribable.
+            //
+            // Only updates when the stored visibility doesn't match.
+            // is_public bit kept in sync (0 for private, 1 otherwise) so
+            // legacy callers checking that flag also see the intended state.
+            let is_public_bit: i64 = if vis == "private" { 0 } else { 1 };
+            let _ = self.conn.execute(
+                "UPDATE universes SET visibility = ?2, is_public = ?3 \
+                 WHERE key = ?1 AND (visibility != ?2 OR is_public != ?3)",
+                rusqlite::params![key, vis, is_public_bit],
+            );
             // Assign every admin user as owner of these universes.
             // membership is wired by ensure_admin_universe_memberships at startup.
         }

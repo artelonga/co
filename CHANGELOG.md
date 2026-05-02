@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.4] — 2026-05-02
+
+### Fixed — `seed_admin_content_universes` reconciles visibility on every boot
+
+Discovered during 1.34.3 staleness audit: `artelonga` returned 404 to anonymous despite the seed declaring `public-subscribable`. Root cause: `INSERT OR IGNORE` doesn't update existing rows, so a row created with an old default (`private`) silently stays wrong forever. Same risk for any future visibility intent change on these admin-content universes.
+
+**Fix:** added a follow-up `UPDATE universes SET visibility = ?, is_public = ? WHERE key = ? AND (visibility != ? OR is_public != ?)` to `seed_admin_content_universes`. Only writes when the stored value doesn't match declared intent — idempotent on every boot. `is_public` bit kept in sync (0 for private, 1 otherwise) so legacy callers checking that flag also see the intended state.
+
+After this deploy:
+- `artelonga` → public-subscribable, reachable to anonymous (was 404)
+- `rfq` → private (unchanged)
+- `co` → public-subscribable (unchanged)
+
+### Fixed — Stale GitHub URL in `termos.md`
+
+`seed/template/termos.md:98` still pointed at the renamed `data/universes/template/content/termos.md` path (instead of `co-web/seed/template/termos.md`). Same class as the privacidade and dados-rastreados fixes from 1.34.3 — completes the audit of stale GitHub paths in the legal-pages corpus.
+
 ## [1.34.3] — 2026-05-02
 
 ### Fixed — `co` universe shows 0 entries despite 140 task markdown files
