@@ -1149,6 +1149,45 @@ impl Storage {
                  ON ab_exposures(flag_key, exposed_at);",
             )
             .expect("CO-121 backfill: idx_exposures_flag_time");
+
+        // CO-144 Phase C: per-universe semver content version. Bumped by the
+        // alterar-pagina-na-web process sink step. Default '0.0.0' for any
+        // pre-existing universe; processes apply patch/minor/major bumps.
+        ensure_column(
+            &self.conn,
+            "universes",
+            "content_version",
+            "TEXT NOT NULL DEFAULT '0.0.0'",
+        )
+        .expect("CO-144 backfill: universes.content_version column");
+
+        // CO-144 Phase C: process_runs — every preview/approval/revert run of
+        // a process (e.g. alterar-pagina-na-web) gets a row. State machine:
+        //   preview → approved → completed
+        //   preview → rejected (terminal)
+        //   completed → reverted (a different run with type=revert pointing back)
+        ensure_table(
+            &self.conn,
+            "process_runs",
+            "CREATE TABLE process_runs (
+                run_id        TEXT PRIMARY KEY,
+                process_name  TEXT NOT NULL,
+                universe_key  TEXT NOT NULL,
+                state         TEXT NOT NULL,
+                payload       TEXT NOT NULL,
+                created_at    TEXT NOT NULL,
+                completed_at  TEXT,
+                actor_id      TEXT,
+                parent_run_id TEXT
+            );",
+        )
+        .expect("CO-144 backfill: process_runs");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_process_runs_universe_time \
+                 ON process_runs(universe_key, created_at DESC);",
+            )
+            .expect("CO-144 backfill: idx_process_runs_universe_time");
     }
 
     /// Migrate data from old projects/tasks/comments tables into the entries table + .md files.

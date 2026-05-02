@@ -398,7 +398,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-79: cache hit/miss/eviction metrics
         .nest("/api/v1/cache", cache_api)
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
-        .nest("/api/v1/admin", admin_dashboard_api);
+        .nest("/api/v1/admin", admin_dashboard_api)
+        // CO-144 Phase C: process model — first process is alterar-pagina-na-web
+        .nest("/api/v1/processos", crate::processos::router());
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {

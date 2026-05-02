@@ -5,6 +5,47 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] — 2026-05-02
+
+### Added — `alterar-pagina-na-web` process implemented end-to-end (CO-144 Phase C)
+
+All 7 chain steps are now wired in the live binary, exercisable via REST:
+
+```
+POST   /api/v1/processos/alterar-pagina-na-web/preview
+POST   /api/v1/processos/alterar-pagina-na-web/approve/{run_id}
+POST   /api/v1/processos/alterar-pagina-na-web/revert
+GET    /api/v1/processos/alterar-pagina-na-web/runs?universe=<key>
+```
+
+- **Step 1 — Trigger:** `POST /preview` with `{universe, page_path, field, new_value, bump_level?}`
+- **Step 2 — Source:** server reads the current entry from filesystem via `co::entry::read_entry` (source of truth)
+- **Step 3 — Review:** preview row inserted into new `process_runs` table with state=preview, returns diff + run_id + computed `proposed_version`
+- **Step 4 — Approval:** `POST /approve/{run_id}` re-validates state, re-checks write access, then proceeds to sink
+- **Step 5 — Sink:**
+  - 5.1 Frontmatter field updated, `co::entry::write_entry` persists to FS
+  - 5.2 `universes.content_version` bumped (semver patch by default; `minor`/`major` via `bump_level`)
+  - 5.3 `<universe>/CHANGELOG.md` appended with the structured entry (creates with header if missing)
+  - 5.4 Deploy: simulated for now (real target adapters are CO-134 static-on-R2, CO-135 CF Pages, etc.)
+- **Step 6 — Telemetry:** `telemetry_events` row with `event_type='process'`, `event_name='alterar-pagina-na-web.completed'`; run state → completed
+- **Step 7 — Rollback:** `POST /revert` with `{universe, target_version}` (or `"prior"` to use the most recent prior). Restores frontmatter from the parent run's `from_value`, rolls back `content_version`, appends a "Reverted" CHANGELOG entry, marks parent run state='reverted', emits `alterar-pagina-na-web.reverted` event.
+
+Run history queryable via `GET /runs?universe=<key>` — returns ordered list with full payload, parent_run_id linkage, state.
+
+### Schema additions (auto-applied via `ensure_*` backfill)
+- `universes.content_version TEXT NOT NULL DEFAULT '0.0.0'` — per-universe semver
+- `process_runs` table — run_id, process_name, universe_key, state, payload (JSON), timestamps, actor_id, parent_run_id
+- Index `idx_process_runs_universe_time`
+
+### Acceptance for the worked example (Co/processos/alterar-pagina-na-web)
+- [x] All 7 steps execute against a real universe end-to-end
+- [x] CHANGELOG.md lands in the universe root with structured entries
+- [x] Revert restores prior frontmatter + version + emits inverse event
+- [x] State machine prevents double-approval and approval after revert
+- [x] Access-checked: write permission required for preview/approve/revert
+- [ ] SPA dashboard render of the run history (Phase D — separate ticket)
+- [ ] Real deploy target (current: simulated) — depends on CO-134/135 adapter completion
+
 ## [1.34.8] — 2026-05-02
 
 ### Added — `Co/processos/alterar-pagina-na-web` + recursive ingest of co universe
