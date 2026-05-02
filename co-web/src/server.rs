@@ -725,8 +725,12 @@ pub async fn start_server(config: WebConfig) {
             // scripts/seed-prod-universes.sh) to belong to the current admin
             // user, even when their prior owner_id is still a valid (stale)
             // user — not caught by rescue_orphan_universes.
-            // 2026-05-02: ensure the admin's username is set (defaults to
-            // email-prefix). Skips on unique-index conflict with legacy users.
+            // 2026-05-02: free up legacy `*@co.local` username slugs so the
+            // real admin can claim their email-prefix slug. Then derive the
+            // admin's username from the email prefix.
+            if let Err(e) = storage.free_legacy_co_local_usernames() {
+                tracing::warn!("free_legacy_co_local_usernames failed: {e}");
+            }
             if let Err(e) = storage.ensure_admin_username(&email) {
                 tracing::warn!("ensure_admin_username failed: {e}");
             }

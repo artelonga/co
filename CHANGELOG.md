@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.7] — 2026-05-02
+
+### Fixed — `*@co.local` legacy users blocked admin from claiming their slug
+
+1.34.6 surfaced the unique-index conflict on `users.username`: admin `yuri@artelonga.com.br` couldn't claim `yuri` because the legacy `yuri@co.local` test user held it.
+
+**Fix:** new `Storage::free_legacy_co_local_usernames()` runs before `ensure_admin_username` on every boot. Renames any `*@co.local` user's username to `legacy-<original>` (e.g. `yuri` → `legacy-yuri`). Idempotent — `WHERE username NOT LIKE 'legacy-%'` keeps re-runs as no-ops.
+
+After this deploy, the admin's username is set to `yuri` on next boot, completing the "always use slug as user name by default" directive.
+
 ## [1.34.6] — 2026-05-02
 
 ### Added — admin's `yuri` personal universe re-homed + username default

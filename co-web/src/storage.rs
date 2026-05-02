@@ -2787,13 +2787,41 @@ impl Storage {
     /// This function is targeted — it only touches the well-known personal
     /// universes named in the bootstrap script. Idempotent. Returns the number
     /// of universes re-homed.
+    /// Free up slug claims held by `*@co.local` legacy/test users so real
+    /// users can claim those slugs as their `username`. Renames any colliding
+    /// `*@co.local` user's username to `legacy-<original-slug>` (e.g.
+    /// `yuri` → `legacy-yuri`). Idempotent — already-renamed rows are no-ops.
+    ///
+    /// 2026-05-02 — closes the unique-index conflict that blocked
+    /// `ensure_admin_username` from claiming `yuri` for the admin while the
+    /// legacy `yuri@co.local` test user held it.
+    pub fn free_legacy_co_local_usernames(&mut self) -> anyhow::Result<usize> {
+        // Only touches usernames currently NOT prefixed with 'legacy-' to
+        // remain idempotent across re-runs.
+        let updated = self.conn.execute(
+            "UPDATE users SET username = 'legacy-' || username \
+             WHERE email LIKE '%@co.local' \
+               AND username IS NOT NULL \
+               AND username != '' \
+               AND username NOT LIKE 'legacy-%'",
+            [],
+        )?;
+        if updated > 0 {
+            tracing::info!(
+                "free_legacy_co_local_usernames: renamed {updated} legacy @co.local username(s)"
+            );
+        }
+        Ok(updated)
+    }
+
     /// Ensure the admin user has a username derived from their email prefix
     /// (e.g. `yuri@artelonga.com.br` → `yuri`) when currently empty.
     ///
     /// 2026-05-02 — addresses user directive "always use slug as user name by
     /// default". The unique index on `users.username` means we may collide
-    /// with an existing user (e.g. legacy `yuri@co.local`); on conflict we
-    /// log and skip rather than break the boot path.
+    /// with an existing user; on conflict we log and skip rather than break
+    /// the boot path. `free_legacy_co_local_usernames` runs first to clear
+    /// the common case of legacy `*@co.local` test users holding the slug.
     pub fn ensure_admin_username(&mut self, admin_email: &str) -> anyhow::Result<bool> {
         let email = admin_email.trim().to_lowercase();
         let prefix: String = email
