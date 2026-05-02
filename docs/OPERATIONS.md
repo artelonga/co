@@ -92,6 +92,39 @@ BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/wave-2/ --proj
 
 Covers: CO-98 sidebar tree nesting, CO-107 Mermaid SVG rendering, CO-99 onboarding banner lifecycle.
 
+### Smoke check table (CO-142 additions)
+
+| # | Endpoint | What is verified |
+|---|----------|-----------------|
+| 11 | `GET /api/v1/universes/{template,quilomboaraucaria,co,tempo,humanity,universo}` | Each public universe returns 200 to anonymous |
+| 12 | `GET /api/v1/universes/template` | `content_count >= 6` (CO-142 Phase B recompute) |
+
+---
+
+## Startup invariants (CO-142)
+
+On every boot, `co-web` runs the following cleanup/reconciliation steps before
+accepting traffic:
+
+1. **`delete_deprecated_universes()`** — hard-deletes `co-dev` and `co-experience`
+   rows (and their memberships). Idempotent no-ops once the rows are gone.
+
+2. **`delete_stale_quilombo_variants()`** — hard-deletes `quilombo-blog`,
+   `quilombo-blog-2`, `quilombo-blog-3`, and `qa-dev`. See `docs/UNIVERSES.md`.
+
+3. **`recompute_content_counts()`** — for every universe, counts rows in its
+   per-universe `entries` DB and writes the result to `universes.content_count`.
+   This corrects drift caused by seed paths that call `upsert_entry_row` without
+   calling `increment_universe_content_count`.
+
+4. **`copy_dir_all(/app/seed-co, data/co/)`** — refreshes the dev board's
+   source files from the image-bundled `work/co/` snapshot. Keeps completed
+   task statuses in sync without a write-back loop.
+
+The dev board API (`/api/v1/admin/co-dev`) is admin-only and reads from
+`data/co/` (refreshed above). The SPA route is `/co/co/telemetria` (renamed
+from the old `/co/co-dev/telemetria` in CO-142 Phase A).
+
 ---
 
 ## Deploy procedure

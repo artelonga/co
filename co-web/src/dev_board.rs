@@ -481,8 +481,9 @@ fn resolve_co_entry(data_dir: &str, path: &str) -> Result<EntryRow, AppError> {
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<AppState> {
-    // Note: `/co-dev/...` static segments take precedence over `/{slug}/...`
-    // in the combined router — Axum prefers literal over parameterised segments.
+    // CO-142: mounted at /api/v1/admin (was /api/v1/universes) so it no
+    // longer shadows the public-subscribable co-dev universe row.
+    // Routes: /api/v1/admin/co-dev, /api/v1/admin/co-dev/entries, etc.
     Router::new()
         .route("/co-dev", get(get_co_dev_info))
         .route("/co-dev/entries/tags", get(list_co_dev_tags))

@@ -157,11 +157,9 @@ async fn mirror_one_universe(
     local_session: &str,
     u: &UniverseInfo,
 ) -> Result<()> {
-    // Skip system-managed universes that have their own seed paths (template, yggdrasil, dados).
-    if matches!(
-        u.key.as_str(),
-        "template" | "yggdrasil" | "dados" | "co-experience" | "co-dev"
-    ) {
+    // Skip system-managed universes that have their own seed paths.
+    // co-dev and co-experience removed — they no longer exist (CO-142 Phase C).
+    if matches!(u.key.as_str(), "template" | "yggdrasil" | "dados") {
         tracing::debug!("UAT mirror: skipping system universe '{}'", u.key);
         return Ok(());
     }

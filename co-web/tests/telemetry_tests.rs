@@ -298,7 +298,7 @@ async fn test_track_event_endpoint_rejects_empty_name() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
-/// GET /co/co-dev/telemetria returns the admin dashboard HTML
+/// GET /co/co/telemetria returns the admin dashboard HTML (CO-142: route retargeted from /co/co-dev/telemetria)
 #[tokio::test]
 async fn test_admin_dashboard_page_served() {
     // SAFETY: single-threaded test setup, no concurrent env access
@@ -310,7 +310,7 @@ async fn test_admin_dashboard_page_served() {
 
     let req = Request::builder()
         .method("GET")
-        .uri("/co/co-dev/telemetria")
+        .uri("/co/co/telemetria")
         .body(Body::empty())
         .unwrap();
 

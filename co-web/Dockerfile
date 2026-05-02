@@ -70,6 +70,10 @@ WORKDIR /app
 
 COPY --from=builder /usr/src/co/target/release/co-web /app/co-web
 
+# CO-142 Phase E: bundle work/co/ so dev board always reflects repo task state.
+# On every boot the server copies /app/seed-co/ → /data/co/ (copy_dir_all).
+COPY work/co/ /app/seed-co/
+
 # Content repos are cloned at runtime (CO-50), NOT bundled in image.
 # The server clones from GitHub on first boot into /data/repos/.
 

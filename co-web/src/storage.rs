@@ -2731,13 +2731,12 @@ impl Storage {
 
         // System universes the seeded admin should see immediately.
         // Order is irrelevant; `INSERT OR IGNORE` handles repeats.
+        // co-dev and co-experience removed (CO-142 Phase C — deprecated).
         let system_keys = [
             "template",
             "quilomboaraucaria",
             "yggdrasil",
             "dados",
-            "co-dev",
-            "co-experience",
             // Admin content universes (seeded by seed_admin_content_universes).
             "artelonga",
             "rfq",
@@ -4393,6 +4392,79 @@ impl Storage {
             params![now],
         );
         // co-dev membership is handled by ensure_admin_universe_memberships at startup.
+    }
+
+    /// Phase C (CO-142): hard-delete the deprecated `co-dev` and `co-experience`
+    /// universe rows and their membership records. Idempotent — DELETE WHERE
+    /// is a no-op when the rows are already gone.
+    pub fn delete_deprecated_universes(&mut self) {
+        for key in ["co-dev", "co-experience"] {
+            let _ = self.conn.execute(
+                "DELETE FROM universe_members WHERE universe_key = ?1",
+                params![key],
+            );
+            let deleted = self
+                .conn
+                .execute("DELETE FROM universes WHERE key = ?1", params![key])
+                .unwrap_or(0);
+            if deleted > 0 {
+                tracing::info!("CO-142: deleted deprecated universe '{key}'");
+            }
+        }
+    }
+
+    /// Phase D (CO-142): hard-delete stale quilombo variant rows that have no
+    /// documented purpose and accumulated via manual experiments. Idempotent.
+    pub fn delete_stale_quilombo_variants(&mut self) {
+        for key in [
+            "quilombo-blog",
+            "quilombo-blog-2",
+            "quilombo-blog-3",
+            "qa-dev",
+        ] {
+            let _ = self.conn.execute(
+                "DELETE FROM universe_members WHERE universe_key = ?1",
+                params![key],
+            );
+            let deleted = self
+                .conn
+                .execute("DELETE FROM universes WHERE key = ?1", params![key])
+                .unwrap_or(0);
+            if deleted > 0 {
+                tracing::info!("CO-142: deleted stale quilombo variant '{key}'");
+            }
+        }
+    }
+
+    /// Phase B (CO-142): recompute `content_count` for every universe by counting
+    /// rows in each per-universe entries DB. Runs on every boot so the column stays
+    /// accurate even when seed paths bypass `increment_universe_content_count`.
+    pub fn recompute_content_counts(&mut self) {
+        let keys: Vec<String> = self
+            .conn
+            .prepare("SELECT key FROM universes")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get(0))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default();
+
+        for key in &keys {
+            let count: i64 = {
+                let uc = self.universe_pool.get_or_open(key);
+                let conn = uc.lock().expect("universe conn lock");
+                conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))
+                    .unwrap_or(0)
+            };
+            let _ = self.conn.execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                params![count, key],
+            );
+        }
+        tracing::info!(
+            "CO-142: recomputed content_count for {} universe(s)",
+            keys.len()
+        );
     }
 
     /// Returns true if the given timeline universe already exists.

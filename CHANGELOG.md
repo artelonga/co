@@ -5,6 +5,51 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.2] — 2026-05-02
+
+### Fixed — CO-142: public-universe routing audit + co-dev/co-experience deprecation
+
+Five-phase cleanup of the public-universe surface:
+
+**Phase A — Routing fix**
+- Moved `dev_board::router()` from `/api/v1/universes` to `/api/v1/admin` so it
+  no longer shadows the public-subscribable universe lookup via `universe_api`.
+  Dev board routes are now at `/api/v1/admin/co-dev/…`.
+- Retargeted the telemetry SPA route from `/co/co-dev/telemetria` to
+  `/co/co/telemetria` (reflects the `co` work universe replacing `co-dev`).
+- Added smoke-check [11]: every public universe (`template`, `quilomboaraucaria`,
+  `co`, timeline trio) must return 200 to anonymous.
+
+**Phase B — content_count reconciliation**
+- Added `recompute_content_counts()`: on every boot, counts entries in each
+  universe's per-universe DB and writes the result to `universes.content_count`.
+  Fixes `template.content_count = 0` caused by `reseed_template_content_pages`
+  calling `upsert_entry_row` without `increment_universe_content_count`.
+- Added smoke-check [12]: `template.content_count >= 6`.
+
+**Phase C — co-dev / co-experience deprecation**
+- Removed `seed_co_dev_universe()` call from startup.
+- Added `delete_deprecated_universes()`: hard-deletes `co-dev` and `co-experience`
+  rows (and memberships) on every boot. Idempotent.
+- Removed `co-dev` and `co-experience` from `ensure_admin_universe_memberships`
+  system_keys and from `uat_mirror` skip list.
+- **Decision**: epics stay as entries in the `co` universe (not promoted to
+  sub-universes). Documented in `docs/UNIVERSES.md`.
+
+**Phase D — Quilombo reconciliation**
+- Added `delete_stale_quilombo_variants()`: hard-deletes `quilombo-blog`,
+  `quilombo-blog-2`, `quilombo-blog-3`, and `qa-dev` on every boot.
+- Created `docs/UNIVERSES.md`: canonical inventory of all system universes,
+  with documented purpose and seed path for each.
+- Removed `qa-dev` from `PERSONAL_KEYS` in the admin bootstrap sequence.
+
+**Phase E — Dev board task display**
+- Added `COPY work/co/ /app/seed-co/` to the Docker runtime stage so the
+  repo's `work/co/CO-*.md` files are bundled in the image.
+- Added startup refresh: on every boot, `copy_dir_all(/app/seed-co, data/co/)`
+  keeps the dev board in sync with the repo's task statuses.
+- Documented all startup invariants in `docs/OPERATIONS.md`.
+
 ## [1.34.1] — 2026-05-02
 
 ### Fixed — `dados-rastreados` page refreshed for 2026-05 cookie surface

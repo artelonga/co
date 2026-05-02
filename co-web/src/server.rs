@@ -340,9 +340,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- /co landing + universe routes (serve index.html for SPA routing) ---
     let co_routes = Router::new()
         .route("/co", get(serve_co_index))
-        // CO-46: admin telemetry dashboard (specific route takes priority over /{slug})
+        // CO-142: retargeted from /co/co-dev/telemetria (co-dev deprecated in Phase C)
         .route(
-            "/co/co-dev/telemetria",
+            "/co/co/telemetria",
             get(crate::telemetry::serve_admin_dashboard),
         )
         .route("/co/{slug}", get(serve_co_index))
@@ -380,8 +380,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::quilombo_telemetria::canonical_host_middleware,
         ))
         .nest("/api/v1/gestao", gestao_api)
-        // CO-43: dev board routes use literal /co-dev prefix — take priority over /{slug} routes
-        .nest("/api/v1/universes", dev_board_api)
+        // CO-142 (Phase A): dev board moved to /api/v1/admin to un-shadow the public universe_api.
+        .nest("/api/v1/admin", dev_board_api)
         .nest("/api/v1/universes", universe_api)
         .nest("/api/v1/universes", vault_api)
         .nest("/api/v1/universes", entry_api)
@@ -642,8 +642,8 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("Seeding Yggdrasil universe...");
             storage.seed_yggdrasil_universe();
         }
-        // CO-140: seed co-dev board universe — idempotent, always safe.
-        storage.seed_co_dev_universe();
+        // CO-142 Phase C: hard-delete deprecated co-dev / co-experience rows on every boot.
+        storage.delete_deprecated_universes();
         // Seed admin-owned content universes (artelonga, rfq, co) so they
         // appear in the sidebar without manual creation after every deploy.
         storage.seed_admin_content_universes();
@@ -651,6 +651,27 @@ pub async fn start_server(config: WebConfig) {
         // the JSON manifests in the binary are the source of truth, and
         // `upsert_entry_row` makes overwriting safe.
         storage.seed_all_timeline_universes();
+        // CO-142 Phase D: remove stale quilombo variants that have no documented purpose.
+        storage.delete_stale_quilombo_variants();
+        // CO-142 Phase B: recompute content_count from each universe's entry DB.
+        // Seed paths (reseed_template_content_pages, seed_timeline_universe, etc.)
+        // call upsert_entry_row but not increment_universe_content_count; this
+        // corrects the drift on every boot.
+        storage.recompute_content_counts();
+    }
+
+    // CO-142 Phase E: refresh data/co/ from bundled /app/seed-co/ on every boot.
+    // The seed dir is injected at Docker build time (COPY work/co/ /app/seed-co/).
+    // This keeps the dev board in sync with repo state without writing back.
+    {
+        let co_dir = std::path::Path::new(&config.data_dir).join("co");
+        let seed_src = std::path::Path::new("/app/seed-co");
+        if seed_src.exists() {
+            match copy_dir_all(seed_src, &co_dir) {
+                Ok(()) => tracing::info!("CO-142: refreshed data/co/ from /app/seed-co/"),
+                Err(e) => tracing::warn!("CO-142: could not refresh data/co/: {e}"),
+            }
+        }
     }
 
     // CO-44: UAT-specific startup — runs only when CO_ENV=uat.
@@ -691,7 +712,7 @@ pub async fn start_server(config: WebConfig) {
             // scripts/seed-prod-universes.sh) to belong to the current admin
             // user, even when their prior owner_id is still a valid (stale)
             // user — not caught by rescue_orphan_universes.
-            const PERSONAL_KEYS: &[&str] = &["artelonga", "rfq", "qa-dev"];
+            const PERSONAL_KEYS: &[&str] = &["artelonga", "rfq"];
             match storage.ensure_admin_owns_personal_universes(&email, PERSONAL_KEYS) {
                 Ok(0) => {}
                 Ok(n) => {

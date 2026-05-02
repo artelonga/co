@@ -164,4 +164,13 @@ check_count_gte "09" "/api/v1/universes/template/entries" \
 # ── [10] Static favicon present ──────────────────────────────────────────────
 check_status "10" "/shared/favicon.svg" "200"
 
+# ── [11] Public universes reachable anonymously (CO-142 Phase A) ─────────────
+for pub_key in template quilomboaraucaria co tempo humanity universo; do
+    check_status "11" "/api/v1/universes/${pub_key}" "200" "${pub_key} public"
+done
+
+# ── [12] template content_count reflects actual entries (CO-142 Phase B) ─────
+check_count_gte "12" "/api/v1/universes/template" \
+    "d.get('content_count', d.get('contentCount', 0))" "6" "template content_count"
+
 smoke_summary
