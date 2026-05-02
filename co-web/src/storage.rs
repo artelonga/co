@@ -85,6 +85,25 @@ fn seed_page_body(md: &str) -> &str {
     body
 }
 
+/// Recursively collect file paths under `dir`. Returns absolute PathBufs in
+/// dir-order. Caller filters by extension. No symlink-following; ignores
+/// errors (skipped silently).
+fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in read.flatten() {
+        let p = entry.path();
+        if p.is_dir() {
+            out.extend(walkdir(&p));
+        } else {
+            out.push(p);
+        }
+    }
+    out
+}
+
 /// Idempotent ALTER TABLE ADD COLUMN: checks `pragma_table_info` before issuing
 /// the DDL so repeated calls (and partially-applied migrations) are safe.
 /// Returns `true` if the column was added, `false` if it already existed.
@@ -4661,23 +4680,46 @@ impl Storage {
     /// - Idempotent — deleting an already-deleted dir is a no-op
     /// - Does NOT touch /data/co/, /data/meta.db, or any other top-level state
     pub fn prune_orphan_universe_dirs(&self) {
-        let universes_root = self.data_dir.join("universes");
-        let dir_iter = match std::fs::read_dir(&universes_root) {
-            Ok(it) => it,
-            Err(_) => return, // dir doesn't exist yet → nothing to prune
-        };
+        // 2026-05-02 critical fix: the previous implementation iterated ALL
+        // top-level dirs under /data/universes/ and deleted any whose name
+        // didn't match a `universes.key` row. That was wrong — UniversePool
+        // (CO-77) shards per-universe data.db files at:
+        //
+        //     /data/universes/<2-hex>/<2-hex>/<key>/data.db
+        //
+        // The 2-hex shard-prefix dirs (e.g. `68`, `b5`, `0e`) are NOT universe
+        // keys — they're hash-prefix directories holding multiple per-universe
+        // DB files. Deleting them wipes real universe data.
+        //
+        // This replacement is narrow on purpose: only deletes dirs whose key
+        // matches the EXACT list of known-deprecated keys. Wider cleanup is
+        // a manual ops task, not an unattended boot-time pass.
+        const KNOWN_DEPRECATED_DIRS: &[&str] = &[
+            // CO-142 Phase C deletions
+            "co-dev",
+            "co-experience",
+            // CO-142 Phase D deletions
+            "qa-dev",
+            "quilombo-blog",
+            "quilombo-blog-2",
+            "quilombo-blog-3",
+            // Test/anon residue without DB rows
+            "prodtest1776629312",
+            "anon-test-1775647138",
+            "local-6zc952",
+            "local-myks0v",
+            "u-mruim7",
+            "u-wd4zk2",
+        ];
 
+        let universes_root = self.data_dir.join("universes");
         let mut pruned = 0usize;
-        for entry in dir_iter.flatten() {
-            let path = entry.path();
-            if !path.is_dir() {
+        for key in KNOWN_DEPRECATED_DIRS {
+            let path = universes_root.join(key);
+            if !path.exists() {
                 continue;
             }
-            let key = match path.file_name().and_then(|n| n.to_str()) {
-                Some(k) => k.to_string(),
-                None => continue,
-            };
-            // Skip if a universe row exists for this key.
+            // Defensive: only delete if NO `universes` row holds this key.
             let exists: i64 = self
                 .conn
                 .query_row(
@@ -4689,16 +4731,82 @@ impl Storage {
             if exists != 0 {
                 continue;
             }
-            // No DB row → orphan filesystem dir → safe to remove.
             if let Err(e) = std::fs::remove_dir_all(&path) {
                 tracing::warn!("prune_orphan_universe_dirs: failed to remove {}: {e}", key);
                 continue;
             }
             pruned += 1;
-            tracing::info!("prune_orphan_universe_dirs: removed orphan dir '{}'", key);
+            tracing::info!(
+                "prune_orphan_universe_dirs: removed deprecated dir '{}'",
+                key
+            );
         }
         if pruned > 0 {
-            tracing::info!("prune_orphan_universe_dirs: pruned {pruned} orphan dir(s)");
+            tracing::info!("prune_orphan_universe_dirs: pruned {pruned} known-deprecated dir(s)");
+        }
+    }
+
+    /// Re-ingest entries from filesystem .md files into per-universe `data.db`.
+    ///
+    /// 2026-05-02 recovery: the previous prune_orphan_universe_dirs deleted
+    /// shard-prefix dirs (e.g. /data/universes/68/), which contained per-
+    /// universe `data.db` files. The flat .md content survived (lives at
+    /// /data/universes/<key>/), but the SQLite shards got recreated empty.
+    /// This function walks /data/universes/<key>/**/*.md for every system
+    /// universe and upserts each entry into its per-universe DB.
+    ///
+    /// Idempotent — uses upsert. Safe to run on every boot. Skipped for
+    /// universes whose entry count is non-zero (already populated).
+    pub fn rebuild_entries_from_filesystem(&mut self, keys: &[&str]) {
+        let now_str = Utc::now().to_rfc3339();
+        for key in keys {
+            let universe_root = self.data_dir.join("universes").join(key);
+            if !universe_root.exists() {
+                continue;
+            }
+            // Skip if per-universe DB already has entries (avoids redundant work).
+            let already_has: i64 = {
+                let uc = self.universe_pool.get_or_open(key);
+                let conn = uc.lock().expect("universe conn lock");
+                conn.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))
+                    .unwrap_or(0)
+            };
+            if already_has > 0 {
+                continue;
+            }
+
+            let mut count = 0usize;
+            // Recursive walk of the universe's filesystem.
+            let walk = walkdir(&universe_root);
+            for fs_path in walk {
+                let rel = match fs_path.strip_prefix(&universe_root) {
+                    Ok(r) => r.to_path_buf(),
+                    Err(_) => continue,
+                };
+                if rel.extension().and_then(|s| s.to_str()) != Some("md") {
+                    continue;
+                }
+                let raw = match std::fs::read_to_string(&fs_path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let entry_path = rel.to_string_lossy().to_string();
+                let entry = make_entry(
+                    &entry_path,
+                    seed_page_frontmatter(&raw, &now_str),
+                    seed_page_body(&raw),
+                );
+                let uc = self.universe_pool.get_or_open(key);
+                let conn = uc.lock().expect("universe conn lock");
+                if upsert_entry_row(&conn, key, &entry).is_ok() {
+                    count += 1;
+                }
+            }
+            if count > 0 {
+                tracing::info!(
+                    "rebuild_entries_from_filesystem: re-ingested {count} entr(ies) for '{key}' from filesystem"
+                );
+            }
         }
     }
 

@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.2] — 2026-05-02
+
+### Fixed — recovery from buggy `prune_orphan_universe_dirs` (1.34.5 regression)
+
+**Critical regression introduced in 1.34.5:** the previous `prune_orphan_universe_dirs` iterated all top-level dirs under `/data/universes/` and deleted any whose name didn't match a `universes.key` row. That was wrong — `UniversePool` (CO-77) shards per-universe `data.db` files at:
+
+```
+/data/universes/<2-hex>/<2-hex>/<key>/data.db
+```
+
+The 2-hex shard-prefix dirs (e.g. `68`, `b5`, `0e`, `f0`) are NOT universe keys — they're hash-prefix dirs holding multiple per-universe DB files. Deleting them wiped the per-universe SQLite for affected universes (template, quilomboaraucaria, artelonga, humanity, universo). The flat `.md` content survived (`/data/universes/<key>/*.md`) — the SQLite shards got lazily recreated empty by `UniversePool::get_or_open` on first access, returning `entries.total=0` to the API.
+
+**Two fixes shipped in 1.35.2:**
+
+1. **`prune_orphan_universe_dirs` rewritten as narrow allowlist.** Now only deletes dirs whose name matches the explicit `KNOWN_DEPRECATED_DIRS` list (`co-dev`, `co-experience`, `qa-dev`, `quilombo-blog{,-2,-3}`, plus a few test/anon residues). Wider cleanup is now an explicit ops task, not unattended boot-time. Defensive double-check that no `universes.key` row holds the name before deleting.
+
+2. **`rebuild_entries_from_filesystem(keys: &[&str])`** — recovery pass for the affected universes. Walks `/data/universes/<key>/**/*.md`, parses frontmatter, upserts each entry into the per-universe `data.db` via `universe_pool`. Idempotent — skipped per-universe when entries table already has rows. Wired into `server.rs` startup for system universes: template, tempo, humanity, universo, quilomboaraucaria, artelonga, rfq, co, yuri, dados.
+
+After 1.35.2 boot:
+- `entries.total` for template/quilomboaraucaria/artelonga restored from the .md filesystem
+- `content_count` recomputed accurately
+- No data loss (filesystem was always the source of truth; only the SQLite mirror was wiped)
+
 ## [1.35.1] — 2026-05-02
 
 ### Fixed — `UniverseInfo` exposes `content_version` + smoke script Python compatibility

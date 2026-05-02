@@ -660,11 +660,30 @@ pub async fn start_server(config: WebConfig) {
         // call upsert_entry_row but not increment_universe_content_count; this
         // corrects the drift on every boot.
         storage.recompute_content_counts();
-        // Filesystem cruft cleanup: any /data/universes/<key>/ dir without a
-        // matching row gets removed. Surfaces post-deletion of deprecated
-        // co-dev / co-experience / quilombo-blog* / qa-dev (CO-142 Phase C+D).
-        // Safe — only deletes orphan dirs (no DB row), keeps anon clones.
+        // Filesystem cruft cleanup: deletes /data/universes/<key>/ dirs from
+        // a NARROW allowlist of known-deprecated keys (CO-142 Phase C+D).
+        // 2026-05-02 fix: previous version was generic "any orphan", which
+        // wiped UniversePool's hash-prefix shard dirs. Recovery handled in
+        // rebuild_entries_from_filesystem below.
         storage.prune_orphan_universe_dirs();
+        // 2026-05-02 recovery: re-ingest entries from filesystem for system
+        // universes whose per-universe data.db got wiped by the buggy prune.
+        // Idempotent — skipped per-universe when entries table already has rows.
+        storage.rebuild_entries_from_filesystem(&[
+            "template",
+            "tempo",
+            "humanity",
+            "universo",
+            "quilomboaraucaria",
+            "artelonga",
+            "rfq",
+            "co",
+            "yuri",
+            "dados",
+        ]);
+        // Re-run content_count recompute now that per-universe entries are
+        // populated; otherwise content_count stays at the pre-rebuild zero.
+        storage.recompute_content_counts();
     }
 
     // CO-142 Phase E: refresh data/co/ from bundled /app/seed-co/ on every boot.
