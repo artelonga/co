@@ -658,6 +658,11 @@ pub async fn start_server(config: WebConfig) {
         // call upsert_entry_row but not increment_universe_content_count; this
         // corrects the drift on every boot.
         storage.recompute_content_counts();
+        // Filesystem cruft cleanup: any /data/universes/<key>/ dir without a
+        // matching row gets removed. Surfaces post-deletion of deprecated
+        // co-dev / co-experience / quilombo-blog* / qa-dev (CO-142 Phase C+D).
+        // Safe — only deletes orphan dirs (no DB row), keeps anon clones.
+        storage.prune_orphan_universe_dirs();
     }
 
     // CO-142 Phase E: refresh data/co/ from bundled /app/seed-co/ on every boot.

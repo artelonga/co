@@ -4492,6 +4492,62 @@ impl Storage {
         );
     }
 
+    /// Prune filesystem dirs under `/data/universes/` that no longer have a
+    /// corresponding row in the `universes` table.
+    ///
+    /// Surfaces post-CO-142 cleanup: Phase C and Phase D hard-deleted DB rows
+    /// (co-dev, co-experience, qa-dev, quilombo-blog{,-2,-3}, prodtest*) but
+    /// the filesystem dirs persisted, accumulating cruft. This runs on every
+    /// boot, after any seed/delete passes, so any orphaned dir is collected.
+    ///
+    /// Safety:
+    /// - Only operates on dirs directly under `/data/universes/`
+    /// - Skips a dir only if a row with that exact key exists (so anonymous
+    ///   clones with hash-keys, plus all live system universes, are kept)
+    /// - Idempotent — deleting an already-deleted dir is a no-op
+    /// - Does NOT touch /data/co/, /data/meta.db, or any other top-level state
+    pub fn prune_orphan_universe_dirs(&self) {
+        let universes_root = self.data_dir.join("universes");
+        let dir_iter = match std::fs::read_dir(&universes_root) {
+            Ok(it) => it,
+            Err(_) => return, // dir doesn't exist yet → nothing to prune
+        };
+
+        let mut pruned = 0usize;
+        for entry in dir_iter.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let key = match path.file_name().and_then(|n| n.to_str()) {
+                Some(k) => k.to_string(),
+                None => continue,
+            };
+            // Skip if a universe row exists for this key.
+            let exists: i64 = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM universes WHERE key = ?1",
+                    params![key],
+                    |r| r.get(0),
+                )
+                .unwrap_or(0);
+            if exists != 0 {
+                continue;
+            }
+            // No DB row → orphan filesystem dir → safe to remove.
+            if let Err(e) = std::fs::remove_dir_all(&path) {
+                tracing::warn!("prune_orphan_universe_dirs: failed to remove {}: {e}", key);
+                continue;
+            }
+            pruned += 1;
+            tracing::info!("prune_orphan_universe_dirs: removed orphan dir '{}'", key);
+        }
+        if pruned > 0 {
+            tracing::info!("prune_orphan_universe_dirs: pruned {pruned} orphan dir(s)");
+        }
+    }
+
     /// Phase C (CO-142): hard-delete the deprecated `co-dev` and `co-experience`
     /// universe rows and their membership records. Idempotent — DELETE WHERE
     /// is a no-op when the rows are already gone.

@@ -5,6 +5,30 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.5] — 2026-05-02
+
+### Added — `prune_orphan_universe_dirs` filesystem cleanup on every boot
+
+Closes the filesystem-cruft gap surfaced after CO-142 Phases C+D hard-deleted DB rows for `co-dev`, `co-experience`, `qa-dev`, `quilombo-blog{,-2,-3}` (and various test/anon dirs) — the dirs at `/data/universes/<key>/` persisted, accumulating cruft.
+
+`Storage::prune_orphan_universe_dirs()` runs after the seed/delete/recompute passes on every boot. For each entry under `/data/universes/`, checks if a row exists in `universes` for that key; if not, removes the dir. Idempotent — already-removed dirs are no-ops. Safe — anonymous clones (hash-keyed dirs that have a corresponding `anon-*` row) are kept.
+
+### Done — CO-100 documentation pass for 1.34.x reality
+
+`docs/ARCHITECTURE.md` updated from 1.21.x snapshot to current state:
+- C4 component diagram now includes co-agent (CO-120), ClickHouse (CO-123), Cloudflare CDN+WAE (CO-117), admin surface (CO-105), and the per-universe SQLite split (CO-77)
+- New "Armazenamento (1.23+)" section documenting the meta.db / per-universe data.db topology, WAL-safe snapshot rules, idempotent migrations (`ensure_column` / `ensure_table`)
+- New "Endpoints novos (1.22 → 1.34)" table covering admin / A/B / log-drains / cache / themes / generic entries
+- New "Componentes opcionais" section on co-agent, ClickHouse, backup-cron, Cloudflare
+- New "Evolução desde 1.21.x" cross-reference table mapping each shipped feature to its commit/file location
+- Service worker updated `co-v3-network-first` → `co-v4-offline`
+
+CO-100 frontmatter: `in_progress` → `done`.
+
+### Repository
+
+`github.com/artelonga/co` flipped from PRIVATE → PUBLIC. Pre-publish audit: `.claude/` files (Claude Code session state, never repo-content) untracked + added to `.gitignore`. No actual prod secrets in git history; the only "secret-shaped" mention was `JWT_SECRET=dev-test-secret` as a Bash command-pattern allow-list value in `.claude/settings.local.json` — placeholder, not a real secret. Privacy-page links pointing at the source (`https://github.com/artelonga/co/...`) now resolve for anonymous browsers, fulfilling the "verifiable" promise in `dados-rastreados.md`.
+
 ## [1.34.4] — 2026-05-02
 
 ### Fixed — `seed_admin_content_universes` reconciles visibility on every boot
