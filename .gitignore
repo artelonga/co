@@ -34,3 +34,10 @@ co-web/seed-co/
 co-web/data/
 quilombo/
 data/
+
+# Local backup artifacts (scripts/backup-prod-local.sh).
+# Default destination is ~/co-backups/ (outside repo) but ignore in-tree
+# paths defensively — prod tarballs include private universes (rfq).
+backups/
+co-backups/
+*.tar.gz
