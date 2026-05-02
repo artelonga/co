@@ -4,6 +4,9 @@
 *.swo
 .co/
 
+# Claude Code local session state — should never be tracked
+.claude/
+
 # Runtime data directories
 data/
 
