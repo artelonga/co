@@ -131,7 +131,7 @@ O Co não é direcionado a menores de 13 anos. Não coletamos conscientemente da
 
 ## 11. Mudanças nesta política
 
-Alterações relevantes serão comunicadas via banner na Plataforma com pelo menos 15 dias de antecedência. O histórico de versões está em <https://github.com/artelonga/co/commits/main/data/universes/template/content/privacidade.md>.
+Alterações relevantes serão comunicadas via banner na Plataforma com pelo menos 15 dias de antecedência. O histórico de versões está em <https://github.com/artelonga/co/commits/main/co-web/seed/template/privacidade.md>.
 
 ## 12. Contato
 

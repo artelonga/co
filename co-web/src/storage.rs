@@ -4394,6 +4394,88 @@ impl Storage {
         // co-dev membership is handled by ensure_admin_universe_memberships at startup.
     }
 
+    /// Ingest CO-*.md ticket files from `/app/seed-co/` (or any source dir) into
+    /// the `co` universe's entries table at path `tasks/<filename>`.
+    ///
+    /// Mirrors `reseed_template_content_pages` shape: idempotent upsert, runs
+    /// on every boot. Closes the "co has 0 entries" gap user-reported on
+    /// 2026-05-02 — Phase E of CO-142 populated `/data/co/` for the dev_board
+    /// admin scan, but the SPA's `/co/co` board reads from the per-universe
+    /// `entries` table. This function bridges that.
+    pub fn seed_co_universe_tasks(&mut self, source_dir: &std::path::Path) {
+        if !source_dir.exists() {
+            tracing::warn!(
+                "seed_co_universe_tasks: source dir {} does not exist — skipped",
+                source_dir.display()
+            );
+            return;
+        }
+        if self.get_universe("co").is_none() {
+            tracing::warn!("seed_co_universe_tasks: 'co' universe row missing — skipped");
+            return;
+        }
+
+        let universe_root = self.universe_root("co");
+        let now_str = Utc::now().to_rfc3339();
+        let mut upserted = 0usize;
+        let mut skipped = 0usize;
+
+        let entries_iter = match std::fs::read_dir(source_dir) {
+            Ok(it) => it,
+            Err(e) => {
+                tracing::warn!("seed_co_universe_tasks: read_dir failed: {e}");
+                return;
+            }
+        };
+
+        for dir_entry in entries_iter.flatten() {
+            let path = dir_entry.path();
+            // Only ingest .md files; skip subdirs, project.yaml, etc.
+            if path.extension().and_then(|s| s.to_str()) != Some("md") {
+                continue;
+            }
+            let filename = match path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(s) => s,
+                Err(_) => {
+                    skipped += 1;
+                    continue;
+                }
+            };
+
+            let entry_path = format!("tasks/{}", filename);
+            let entry = make_entry(
+                &entry_path,
+                seed_page_frontmatter(&raw, &now_str),
+                seed_page_body(&raw),
+            );
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("seed_co_universe_tasks: write {filename}: {e}");
+                skipped += 1;
+                continue;
+            }
+            let co_uc = self.universe_pool.get_or_open("co");
+            let uc_guard = co_uc.lock().expect("co universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "co", &entry) {
+                tracing::warn!("seed_co_universe_tasks: upsert {filename}: {e}");
+                skipped += 1;
+                continue;
+            }
+            upserted += 1;
+        }
+
+        tracing::info!(
+            "seed_co_universe_tasks: upserted {upserted} task(s) from {} (skipped {skipped})",
+            source_dir.display()
+        );
+    }
+
     /// Phase C (CO-142): hard-delete the deprecated `co-dev` and `co-experience`
     /// universe rows and their membership records. Idempotent — DELETE WHERE
     /// is a no-op when the rows are already gone.

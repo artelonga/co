@@ -671,6 +671,14 @@ pub async fn start_server(config: WebConfig) {
                 Ok(()) => tracing::info!("CO-142: refreshed data/co/ from /app/seed-co/"),
                 Err(e) => tracing::warn!("CO-142: could not refresh data/co/: {e}"),
             }
+            // CO-142 follow-up (2026-05-02): Phase E populated /data/co/ for
+            // the dev_board admin scan, but the SPA's /co/co board reads from
+            // the per-universe `entries` table — which stayed empty, hence
+            // user report "co has 0 entries, we have 140 tasks". This pass
+            // bridges the gap by upserting each CO-*.md into the `co`
+            // universe's entries at path tasks/<filename>.
+            let mut storage = Storage::new(&config.data_dir);
+            storage.seed_co_universe_tasks(seed_src);
         }
     }
 

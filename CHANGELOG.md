@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.3] — 2026-05-02
+
+### Fixed — `co` universe shows 0 entries despite 140 task markdown files
+
+User report on 2026-05-02: "co has 0 entries, we have 140 tasks". CO-142 Phase E populated `/data/co/` from the bundled `/app/seed-co/` for the admin dev_board scan, but the SPA's `/co/co` board reads from the per-universe `entries` table (CO-77) — which stayed empty.
+
+**Fix:** new `Storage::seed_co_universe_tasks(source_dir)` runs on every boot after Phase E's `copy_dir_all`. Iterates `/app/seed-co/*.md`, builds an `Entry` via the existing `make_entry` + `seed_page_frontmatter` helpers, writes via `co::entry::write_entry`, upserts via `upsert_entry_row` against the per-universe pool's `co` connection. Path layout: `tasks/CO-NNN.md`. Idempotent.
+
+After this fix, `GET /api/v1/universes/co/entries` returns 140+ ticket entries.
+
+### Fixed — Política de Privacidade link broken from termos.md
+
+Internal markdown link in `seed/template/termos.md` was `/co/template?path=content/privacidade.md` but the SPA only recognizes `?page=<slug>` (handled by `maybeOpenPageFromUrl`). Anonymous users clicking the link landed on the template board with no modal opening.
+
+- `seed/template/termos.md` — link corrected to `/co?page=privacidade`
+- `seed/template/privacidade.md` — fixed the "histórico de versões" GitHub URL from the renamed `data/universes/template/content/privacidade.md` to the current `co-web/seed/template/privacidade.md`
+
 ## [1.34.2] — 2026-05-02
 
 ### Fixed — CO-142: public-universe routing audit + co-dev/co-experience deprecation
