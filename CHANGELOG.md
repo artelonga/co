@@ -5,6 +5,68 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] — 2026-04-30
+
+### Added — binary asset upload + content-addressable storage (CO-146, Phase 1 of CO-145)
+
+Every universe now has a binary-asset endpoint backed by sha256 content addressing. Phase 1 of the encrypted+indexable+lazy-load epic (CO-145); designed to unblock the 506 MB quilomboaraucaria upload that the markdown-only Vault API rejects today.
+
+**New endpoints:**
+
+```
+POST   /api/v1/universes/{u}/assets        body: raw bytes  → {sha256, mime, size, url}
+GET    /api/v1/universes/{u}/assets/{sha}  → bytes + ETag + immutable cache
+DELETE /api/v1/universes/{u}/assets/{sha}  → 204 if refcount == 0; 409 otherwise
+```
+
+**Storage layout:**
+
+```
+data/universes/<aa>/<bb>/<key>/
+  data.db                          (existing)
+  blobs/<aa>/<bb>/<sha256>         (new — raw bytes, sharded 2-level)
+```
+
+**Per-universe schema additions** (universe schema_v4):
+
+```sql
+CREATE TABLE assets (
+    sha256        TEXT PRIMARY KEY,
+    blob_path     TEXT NOT NULL,
+    mime          TEXT NOT NULL,
+    size_bytes    INTEGER NOT NULL,
+    filename      TEXT,
+    created_at_ns INTEGER NOT NULL,
+    created_by    TEXT,
+    refcount      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_assets_mime       ON assets(mime);
+CREATE INDEX idx_assets_created_at ON assets(created_at_ns);
+```
+
+**Properties:**
+- **Idempotent** — same bytes → same sha256 → single on-disk blob (re-upload is a no-op)
+- **Atomic write** — write-tmp + rename, no torn writes on crash
+- **Cache-friendly** — `Cache-Control: private, max-age=31536000, immutable` + ETag = sha256, with proper 304 short-circuit before disk read
+- **MIME sniffing** — header takes precedence; falls back to magic-byte detection for jpeg/png/gif/webp/pdf/mp4
+- **Auth** — write requires owner/member; read allows anon on public universes
+
+**What Phase 1 does NOT do** (deferred to subsequent CO-145 phases):
+- Encryption at rest — CO-148 wraps every blob in ChaCha20-Poly1305 with per-universe DEK + owner KEK derived via Argon2id
+- Indexable list/filter endpoint — CO-147 adds `GET /assets?type=image/*&tag=foo`
+- HTTP range support — CO-149 adds streaming for video and large images
+- SPA `<img loading="lazy">` integration — CO-150
+
+Phase 1 stays plaintext deliberately because the existing `entries.content` column is also plaintext — the privacy gap is not widened. Encryption ships in Phase 3 (CO-148) once the upload path itself is proven.
+
+**Hard cap:** 50 MB per blob (axum's default body limit aligns; oversize returns 400/413). CO-149 + CO-148 Phase 6 lift this with chunked-AEAD streaming.
+
+**Tests:** 7 integration tests (`co-web/tests/asset_tests.rs`) cover round-trip, dedupe, ETag/304, anon-on-private blocked, anon-on-public allowed, oversize rejection, delete-when-unreferenced. Plus 6 unit tests for hex encoding, MIME sniffing, and shard-path construction.
+
+**Design doc:** `docs/research/encrypted-indexable-assets.md` documents the full 5-phase plan including the index-plaintext / encrypt-body split, key hierarchy, and lazy-load wire contract.
+
+**Filed tickets:** CO-145 (epic), CO-146 (this), CO-147, CO-148, CO-149, CO-150.
+
 ## [1.35.2] — 2026-05-02
 
 ### Fixed — recovery from buggy `prune_orphan_universe_dirs` (1.34.5 regression)

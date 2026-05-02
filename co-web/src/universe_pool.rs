@@ -76,6 +76,22 @@ CREATE INDEX IF NOT EXISTS idx_er_from
     ON entry_relations(universe_key, from_path, relation_type);
 CREATE INDEX IF NOT EXISTS idx_er_to
     ON entry_relations(universe_key, to_path,   relation_type);
+
+-- CO-146: content-addressable binary assets (Phase 1 of CO-145).
+-- Bytes live on disk at universe_dir/blobs/<aa>/<bb>/<sha256>.
+-- Phase 1 stores plaintext; CO-148 will add ciphertext + nonce columns.
+CREATE TABLE IF NOT EXISTS assets (
+    sha256        TEXT PRIMARY KEY,
+    blob_path     TEXT NOT NULL,
+    mime          TEXT NOT NULL,
+    size_bytes    INTEGER NOT NULL,
+    filename      TEXT,
+    created_at_ns INTEGER NOT NULL,
+    created_by    TEXT,
+    refcount      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_assets_mime       ON assets(mime);
+CREATE INDEX IF NOT EXISTS idx_assets_created_at ON assets(created_at_ns);
 ";
 
 // ---------------------------------------------------------------------------
@@ -208,5 +224,10 @@ fn run_universe_migrations(conn: &Connection) {
         // CO-74: entry_relations table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
         conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
             .expect("universe schema_version v3");
+    }
+    if v < 4 {
+        // CO-146: assets table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
+            .expect("universe schema_version v4");
     }
 }

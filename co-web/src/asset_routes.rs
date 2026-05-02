@@ -1,0 +1,552 @@
+//! CO-146 — Phase 1 of CO-145.
+//!
+//! Content-addressable binary asset upload + GET endpoint.
+//!
+//! Storage layout (per universe):
+//! ```text
+//! data/universes/<aa>/<bb>/<key>/
+//!   data.db                      (assets table — see universe_pool.rs)
+//!   blobs/<aa>/<bb>/<sha256>     (raw bytes; plaintext in Phase 1)
+//! ```
+//!
+//! Phase 1 is plaintext to unblock the 506 MB quilomboaraucaria upload.
+//! CO-148 (Phase 3) wraps every blob in ChaCha20-Poly1305 with a per-universe
+//! DEK, and adds `nonce` + `cipher_size` columns to the `assets` table.
+
+use axum::{
+    Json, Router,
+    body::Bytes,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode, header},
+    response::Response,
+    routing::{get, post},
+};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::path::PathBuf;
+
+use crate::auth::resolve_user_id;
+use crate::error::AppError;
+use crate::server::AppState;
+
+/// Phase 1 hard cap. Larger files require chunked-AEAD streaming (deferred
+/// to CO-149 + CO-148 Phase 6). The cap also keeps memory bounded since we
+/// hold the whole body in RAM during sha256 + write.
+const MAX_ASSET_BYTES: usize = 50 * 1024 * 1024;
+
+#[derive(Serialize)]
+pub struct AssetUploadResponse {
+    pub sha256: String,
+    pub mime: String,
+    pub size: i64,
+    pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct UploadQuery {
+    /// Optional original filename. Stored only for display; sha256 is
+    /// the content identity.
+    pub filename: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AssetMeta {
+    pub sha256: String,
+    pub mime: String,
+    pub size: i64,
+    pub filename: Option<String>,
+    pub created_at_ns: i64,
+    pub created_by: Option<String>,
+    pub refcount: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Storage helpers
+// ---------------------------------------------------------------------------
+
+/// Build the on-disk path for a blob: `<universe-dir>/blobs/<aa>/<bb>/<sha256>`.
+fn blob_path(universe_dir: &std::path::Path, sha256: &str) -> PathBuf {
+    let aa = &sha256[0..2];
+    let bb = &sha256[2..4];
+    universe_dir.join("blobs").join(aa).join(bb).join(sha256)
+}
+
+fn now_ns() -> i64 {
+    chrono::Utc::now().timestamp_nanos_opt().unwrap_or_else(|| {
+        // 2262-04-11 overflow guard; keep seconds * 1e9 as a fallback.
+        chrono::Utc::now().timestamp() * 1_000_000_000
+    })
+}
+
+/// Sniff a mime from the bytes (best-effort) or fall back to the supplied
+/// `Content-Type` header / `application/octet-stream`.
+fn detect_mime(bytes: &[u8], content_type: Option<&str>) -> String {
+    // Cheap manual sniffing of the most common formats — we don't pull in
+    // a new dep for Phase 1. The `Content-Type` header takes precedence
+    // because the client knows best for cases like `text/markdown` and
+    // `application/json` that share leading bytes with random text.
+    if let Some(ct) = content_type
+        && !ct.is_empty()
+        && ct != "application/octet-stream"
+    {
+        // Trim parameters like "; charset=utf-8".
+        return ct.split(';').next().unwrap_or(ct).trim().to_string();
+    }
+    let prefix = bytes.iter().take(16).copied().collect::<Vec<_>>();
+    if prefix.starts_with(b"\xFF\xD8\xFF") {
+        return "image/jpeg".into();
+    }
+    if prefix.starts_with(b"\x89PNG\r\n\x1A\n") {
+        return "image/png".into();
+    }
+    if prefix.starts_with(b"GIF87a") || prefix.starts_with(b"GIF89a") {
+        return "image/gif".into();
+    }
+    if prefix.starts_with(b"RIFF") && prefix.len() >= 12 && &prefix[8..12] == b"WEBP" {
+        return "image/webp".into();
+    }
+    if prefix.starts_with(b"%PDF-") {
+        return "application/pdf".into();
+    }
+    if prefix.starts_with(b"\x00\x00\x00") && prefix.len() >= 8 && &prefix[4..8] == b"ftyp" {
+        return "video/mp4".into();
+    }
+    "application/octet-stream".into()
+}
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+/// Returns Ok(()) if the caller may upload to this universe.
+/// Phase 1 rule: must be logged in AND own the universe (or be a member).
+fn require_writer(
+    state: &AppState,
+    headers: &HeaderMap,
+    universe_key: &str,
+) -> Result<String, AppError> {
+    let user_id = resolve_user_id(state, headers)
+        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
+    let storage = state
+        .storage
+        .lock()
+        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.owner_id == user_id {
+        return Ok(user_id);
+    }
+    // Member check (universe_members table).
+    let is_member: bool = storage
+        .conn()
+        .query_row(
+            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            rusqlite::params![universe_key, &user_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if is_member {
+        Ok(user_id)
+    } else {
+        Err(AppError::Forbidden(
+            "Not authorized to upload to this universe".into(),
+        ))
+    }
+}
+
+/// Returns Ok(()) if the caller may read assets from this universe.
+/// Public/template universes are readable anonymously; private universes
+/// require ownership/membership.
+fn check_reader(state: &AppState, headers: &HeaderMap, universe_key: &str) -> Result<(), AppError> {
+    let storage = state
+        .storage
+        .lock()
+        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.is_public || universe.is_template {
+        return Ok(());
+    }
+    drop(storage);
+    let user_id = resolve_user_id(state, headers)
+        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
+    let storage = state
+        .storage
+        .lock()
+        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.owner_id == user_id {
+        return Ok(());
+    }
+    let is_member: bool = storage
+        .conn()
+        .query_row(
+            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            rusqlite::params![universe_key, &user_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if is_member {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden(
+            "Not authorized to read assets from this universe".into(),
+        ))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/// `POST /api/v1/universes/:slug/assets`
+///
+/// Body: raw bytes. Response: { sha256, mime, size, url }.
+/// Idempotent: same bytes → same sha256 → single on-disk blob (existing row reused).
+pub async fn upload_asset(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+    Query(q): Query<UploadQuery>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<AssetUploadResponse>, AppError> {
+    if body.len() > MAX_ASSET_BYTES {
+        return Err(AppError::BadRequest(format!(
+            "Asset too large ({} > {} bytes); CO-149 Phase 4 will lift this with streaming",
+            body.len(),
+            MAX_ASSET_BYTES
+        )));
+    }
+
+    let user_id = require_writer(&state, &headers, &universe_key)?;
+
+    // sha256 of the bytes — content identity.
+    let mut hasher = Sha256::new();
+    hasher.update(&body);
+    let sha256 = hex::encode_lower(hasher.finalize());
+
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    let mime = detect_mime(&body, content_type);
+
+    let (universe_dir, conn) = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        (
+            storage.universe_pool.universe_dir(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    let blob_path = blob_path(&universe_dir, &sha256);
+
+    // Idempotency: if the row exists we trust the on-disk blob too. If the
+    // row is missing but the file is present (rare; partial write) we'll
+    // overwrite both atomically below.
+    let existing: Option<(String, i64)> = {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .query_row(
+                "SELECT mime, size_bytes FROM assets WHERE sha256 = ?1",
+                rusqlite::params![&sha256],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .ok()
+    };
+
+    if let Some((existing_mime, existing_size)) = existing
+        && blob_path.exists()
+    {
+        return Ok(Json(AssetUploadResponse {
+            sha256: sha256.clone(),
+            mime: existing_mime,
+            size: existing_size,
+            url: format!("/api/v1/universes/{universe_key}/assets/{sha256}"),
+        }));
+    }
+
+    if let Some(parent) = blob_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AppError::Internal(format!("create blob dir: {e}")))?;
+    }
+
+    // Atomic write: write to temp then rename (POSIX atomic on the same FS).
+    let tmp_path = blob_path.with_extension("tmp");
+    std::fs::write(&tmp_path, &body).map_err(|e| AppError::Internal(format!("write blob: {e}")))?;
+    std::fs::rename(&tmp_path, &blob_path)
+        .map_err(|e| AppError::Internal(format!("rename blob: {e}")))?;
+
+    let rel_blob_path = format!("blobs/{}/{}/{}", &sha256[0..2], &sha256[2..4], &sha256);
+    let size = body.len() as i64;
+    let now = now_ns();
+
+    {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .execute(
+                "INSERT OR REPLACE INTO assets \
+                 (sha256, blob_path, mime, size_bytes, filename, created_at_ns, created_by, refcount) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(\
+                    (SELECT refcount FROM assets WHERE sha256 = ?1), 0))",
+                rusqlite::params![
+                    &sha256,
+                    &rel_blob_path,
+                    &mime,
+                    size,
+                    q.filename.as_deref(),
+                    now,
+                    &user_id,
+                ],
+            )
+            .map_err(|e| AppError::Internal(format!("insert asset row: {e}")))?;
+    }
+
+    Ok(Json(AssetUploadResponse {
+        sha256: sha256.clone(),
+        mime,
+        size,
+        url: format!("/api/v1/universes/{universe_key}/assets/{sha256}"),
+    }))
+}
+
+/// `GET /api/v1/universes/:slug/assets/:sha256`
+///
+/// Returns raw bytes with `Content-Type` from the index, immutable cache,
+/// and an ETag equal to the sha256. Honors `If-None-Match` for 304s.
+pub async fn get_asset(
+    State(state): State<AppState>,
+    Path((universe_key, sha256)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::BadRequest("Malformed sha256".into()));
+    }
+
+    check_reader(&state, &headers, &universe_key)?;
+
+    // 304 short-circuit before any disk read.
+    let etag = format!("\"{sha256}\"");
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        && inm == etag
+    {
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, &etag)
+            .header(
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            )
+            .body(axum::body::Body::empty())
+            .unwrap());
+    }
+
+    let (universe_dir, conn) = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        (
+            storage.universe_pool.universe_dir(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    let row: Option<(String, String, i64)> = {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .query_row(
+                "SELECT blob_path, mime, size_bytes FROM assets WHERE sha256 = ?1",
+                rusqlite::params![&sha256],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .ok()
+    };
+
+    let (blob_rel_path, mime, _size) = row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
+    let blob_path = universe_dir.join(&blob_rel_path);
+    let bytes = std::fs::read(&blob_path)
+        .map_err(|e| AppError::NotFound(format!("Asset bytes missing: {e}")))?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, &mime)
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .header(header::ETAG, etag)
+        .header(
+            header::CACHE_CONTROL,
+            "private, max-age=31536000, immutable",
+        )
+        .header(header::ACCEPT_RANGES, "bytes")
+        .body(axum::body::Body::from(bytes))
+        .unwrap())
+}
+
+/// `DELETE /api/v1/universes/:slug/assets/:sha256`
+///
+/// Removes the asset row and unlinks the blob if `refcount == 0`.
+/// Returns 409 if the asset is still referenced.
+pub async fn delete_asset(
+    State(state): State<AppState>,
+    Path((universe_key, sha256)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::BadRequest("Malformed sha256".into()));
+    }
+    require_writer(&state, &headers, &universe_key)?;
+
+    let (universe_dir, conn) = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        (
+            storage.universe_pool.universe_dir(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    let row: Option<(String, i64)> = {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .query_row(
+                "SELECT blob_path, refcount FROM assets WHERE sha256 = ?1",
+                rusqlite::params![&sha256],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .ok()
+    };
+
+    let (blob_rel_path, refcount) = row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
+    if refcount > 0 {
+        return Err(AppError::Conflict(format!(
+            "Asset still referenced ({refcount} entries); refcount must be 0 to delete"
+        )));
+    }
+
+    {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .execute(
+                "DELETE FROM assets WHERE sha256 = ?1",
+                rusqlite::params![&sha256],
+            )
+            .map_err(|e| AppError::Internal(format!("delete asset row: {e}")))?;
+    }
+
+    let blob_path = universe_dir.join(&blob_rel_path);
+    let _ = std::fs::remove_file(&blob_path); // best-effort
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+pub fn asset_router() -> Router<AppState> {
+    Router::new()
+        .route("/{slug}/assets", post(upload_asset))
+        .route(
+            "/{slug}/assets/{sha256}",
+            get(get_asset).delete(delete_asset),
+        )
+}
+
+// ---------------------------------------------------------------------------
+// Hex helper (avoids new dep)
+// ---------------------------------------------------------------------------
+
+mod hex {
+    pub fn encode_lower(bytes: impl AsRef<[u8]>) -> String {
+        const ALPH: &[u8; 16] = b"0123456789abcdef";
+        let bytes = bytes.as_ref();
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for b in bytes {
+            out.push(ALPH[(b >> 4) as usize] as char);
+            out.push(ALPH[(b & 0xf) as usize] as char);
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hex_round_trip() {
+        let bytes = [0x12u8, 0x34, 0xab, 0xcd, 0xef];
+        assert_eq!(hex::encode_lower(bytes), "1234abcdef");
+    }
+
+    #[test]
+    fn detect_mime_png() {
+        let png = b"\x89PNG\r\n\x1A\n\x00\x00\x00";
+        assert_eq!(detect_mime(png, None), "image/png");
+    }
+
+    #[test]
+    fn detect_mime_jpeg() {
+        let jpg = b"\xFF\xD8\xFF\xE0\x00\x10JFIF";
+        assert_eq!(detect_mime(jpg, None), "image/jpeg");
+    }
+
+    #[test]
+    fn detect_mime_header_wins() {
+        let bytes = b"hello world";
+        assert_eq!(detect_mime(bytes, Some("text/markdown")), "text/markdown");
+        assert_eq!(
+            detect_mime(bytes, Some("text/markdown; charset=utf-8")),
+            "text/markdown"
+        );
+    }
+
+    #[test]
+    fn detect_mime_octet_default() {
+        assert_eq!(
+            detect_mime(b"random binary", None),
+            "application/octet-stream"
+        );
+    }
+
+    #[test]
+    fn blob_path_shards_correctly() {
+        let dir = std::path::Path::new("/data/u/68/b5/foo");
+        let p = blob_path(
+            dir,
+            "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+        );
+        assert_eq!(
+            p,
+            std::path::Path::new(
+                "/data/u/68/b5/foo/blobs/ab/cd/abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+            )
+        );
+    }
+}

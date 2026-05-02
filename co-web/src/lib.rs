@@ -1,6 +1,7 @@
 pub mod ab;
 pub mod ab_routes;
 pub mod admin_routes;
+pub mod asset_routes;
 pub mod auth;
 pub mod baseline;
 pub mod cache;
