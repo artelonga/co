@@ -4521,20 +4521,51 @@ impl Storage {
         let mut upserted = 0usize;
         let mut skipped = 0usize;
 
-        let entries_iter = match std::fs::read_dir(source_dir) {
-            Ok(it) => it,
-            Err(e) => {
-                tracing::warn!("seed_co_universe_tasks: read_dir failed: {e}");
-                return;
+        // Recursively walk source_dir. Path layout in the `co` universe:
+        //   - top-level *.md  → tasks/<filename>   (legacy compat with 1.34.3)
+        //   - subdir/<f>.md   → <subdir>/<f>       (CO-144: e.g. processos/)
+        //
+        // Files >2 levels deep are flattened to <leaf-subdir>/<filename> for
+        // safety against pathological nesting; rare in practice.
+        fn walk(
+            dir: &std::path::Path,
+            base: &std::path::Path,
+        ) -> Vec<(std::path::PathBuf, String)> {
+            let mut out = Vec::new();
+            let Ok(read) = std::fs::read_dir(dir) else {
+                return out;
+            };
+            for entry in read.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    out.extend(walk(&p, base));
+                    continue;
+                }
+                if p.extension().and_then(|s| s.to_str()) != Some("md") {
+                    continue;
+                }
+                let rel = match p.strip_prefix(base) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                // Compute entry path: depth-0 → tasks/<filename>; deeper → relative.
+                let entry_path = if rel
+                    .parent()
+                    .map(|p| p.as_os_str().is_empty())
+                    .unwrap_or(true)
+                {
+                    format!("tasks/{}", rel.display())
+                } else {
+                    rel.display().to_string()
+                };
+                out.push((p, entry_path));
             }
-        };
+            out
+        }
 
-        for dir_entry in entries_iter.flatten() {
-            let path = dir_entry.path();
-            // Only ingest .md files; skip subdirs, project.yaml, etc.
-            if path.extension().and_then(|s| s.to_str()) != Some("md") {
-                continue;
-            }
+        let candidates = walk(source_dir, source_dir);
+
+        for (path, entry_path) in candidates {
             let filename = match path.file_name().and_then(|n| n.to_str()) {
                 Some(n) => n.to_string(),
                 None => {
@@ -4550,7 +4581,6 @@ impl Storage {
                 }
             };
 
-            let entry_path = format!("tasks/{}", filename);
             let entry = make_entry(
                 &entry_path,
                 seed_page_frontmatter(&raw, &now_str),

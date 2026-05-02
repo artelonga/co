@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.8] — 2026-05-02
+
+### Added — `Co/processos/alterar-pagina-na-web` + recursive ingest of co universe
+
+User clarification 2026-05-02: the per-user dashboard work (CO-144) needs to encompass a deterministic source→sink **process model**, with `Co/processos/alterar-pagina-na-web` as the worked example.
+
+- **CO-144 expanded** (`work/co/CO-144.md`): now 4 phases — A (auto-create personal universe + dados/ skeleton), B (cross-universe activity feed populating `<username>/dados/`), C (process model with `Co/processos/<process>` content type and reflexive editing pattern), D (SPA dashboard + process stepper rendering). Architecture diagram + decision log added.
+- **`work/co/processos/alterar-pagina-na-web.md` committed** (246 lines): documents the 7-step deterministic chain — Trigger → Source → Review (`co preview` localhost v+1) → Approval → Sink (manifest bump + CHANGELOG + deploy) → Telemetry (3 sinks) → Rollback. Includes a Mermaid source→sink flowchart, structured event schema, source-to-sink data sync table, edge cases. State-of-implementation table marks each step ❌/🟡/✅.
+- **`Storage::seed_co_universe_tasks` now recursive**: walks `/app/seed-co/` and preserves subdir structure. Top-level `*.md` keep the `tasks/<filename>` prefix for backwards compat with 1.34.3; deeper files use their relative path (e.g. `processos/alterar-pagina-na-web.md`).
+
+After deploy, the SPA's `/co/co/processos/alterar-pagina-na-web` resolves to the worked example.
+
 ## [1.34.7] — 2026-05-02
 
 ### Fixed — `*@co.local` legacy users blocked admin from claiming their slug
