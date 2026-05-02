@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.1] — 2026-05-02
+
+### Fixed — `UniverseInfo` exposes `content_version` + smoke script Python compatibility
+
+Two follow-ups during the 1.35.0 smoke pass:
+
+1. **`UniverseInfo` DTO missing `content_version`.** Same shape as the CO-137 parent_key bug — the column existed and the data was correct, but the public DTO didn't surface it. Added `content_version: String` (defaults to "0.0.0") and a defensive separate `SELECT` in `get_universe_info` that tolerates a missing column.
+
+2. **`scripts/smoke-processo-alterar-pagina.sh` Python f-string syntax.** Older Python (<3.12) doesn't allow `\"` escapes inside f-string expressions. Switched to `'  ...{} ...'.format(...)` form. Script now runs end-to-end against any Python 3.6+.
+
+After this deploy, `GET /api/v1/universes/<key>` returns `content_version` in the JSON body.
+
 ## [1.35.0] — 2026-05-02
 
 ### Added — `alterar-pagina-na-web` process implemented end-to-end (CO-144 Phase C)

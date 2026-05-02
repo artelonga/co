@@ -39,7 +39,7 @@ echo "[smoke] Step 0 — password-login as $ADMIN_EMAIL"
 curl -sc "$JAR" -X POST -H 'Content-Type: application/json' \
     -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASSWORD\"}" \
     "$BASE_URL/api/v1/auth/password-login" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(f"  user_id={d.get(\"user_id\",\"?\")}, expires_at={d.get(\"expires_at\",\"?\")}")'
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print('  user_id={} expires_at={}'.format(d.get('user_id','?'), d.get('expires_at','?')))"
 
 # Step 1+2+3: Trigger / Source / Review.
 echo
@@ -65,7 +65,7 @@ echo "[smoke] universe is now at v$COMPLETED_VERSION"
 echo
 echo "[smoke] Verify — GET universe content_version + entry frontmatter"
 curl -sb "$JAR" "$BASE_URL/api/v1/universes/$UNIVERSE" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(f"  universe content_version={d.get(\"content_version\",\"?\")}")'
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print('  universe content_version={}'.format(d.get('content_version','?')))"
 curl -sb "$JAR" "$BASE_URL/api/v1/universes/$UNIVERSE/entries/$PAGE" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); fm=d.get('frontmatter',{}); print(f'  entry $FIELD={fm.get(\"$FIELD\",\"?\")!r}')"
 
@@ -81,7 +81,7 @@ echo "$REVERT" | python3 -m json.tool
 echo
 echo "[smoke] Verify revert — universe content_version + entry frontmatter"
 curl -sb "$JAR" "$BASE_URL/api/v1/universes/$UNIVERSE" \
-    | python3 -c 'import sys,json; d=json.load(sys.stdin); print(f"  universe content_version={d.get(\"content_version\",\"?\")}")'
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print('  universe content_version={}'.format(d.get('content_version','?')))"
 curl -sb "$JAR" "$BASE_URL/api/v1/universes/$UNIVERSE/entries/$PAGE" \
     | python3 -c "import sys,json; d=json.load(sys.stdin); fm=d.get('frontmatter',{}); print(f'  entry $FIELD={fm.get(\"$FIELD\",\"?\")!r}')"
 

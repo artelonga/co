@@ -51,6 +51,10 @@ pub struct UniverseInfo {
     /// sidebar (e.g. timeline trio under `template`). `None` for top-level.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_key: Option<String>,
+    /// CO-144: per-universe semver content version. Bumped by deterministic
+    /// processes (e.g. alterar-pagina-na-web). Defaults to "0.0.0".
+    #[serde(default)]
+    pub content_version: String,
 }
 
 /// Query params for universe search.
@@ -553,6 +557,17 @@ pub async fn get_universe_info(
         }
     }
 
+    // CO-144: load content_version separately (defensive — column may not
+    // exist on a partially-applied DB; default to "0.0.0").
+    let content_version: String = storage
+        .conn()
+        .query_row(
+            "SELECT COALESCE(content_version, '0.0.0') FROM universes WHERE key = ?1",
+            rusqlite::params![&slug],
+            |r| r.get(0),
+        )
+        .unwrap_or_else(|_| "0.0.0".to_string());
+
     Ok(Json(UniverseInfo {
         key: universe.key,
         name: universe.name,
@@ -563,6 +578,7 @@ pub async fn get_universe_info(
         requires_login: universe.requires_login,
         visibility: universe.visibility,
         parent_key: universe.parent_key,
+        content_version,
     }))
 }
 
