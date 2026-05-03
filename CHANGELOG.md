@@ -33,6 +33,15 @@ Every state change now emits one `telemetry_events` row with `event_type = "crud
 - `GET /api/v1/admin/telemetry/crud-summary` returns the 24h CRUD breakdown.
 - `docs/telemetry-envelope.md` documents all event kinds and their `extra` shapes.
 
+### Added — PDF metadata extraction tool (CO-157)
+
+`scripts/extract-pdf-meta.py` auto-populates reference-card `.md` siblings from source PDFs. Extracts title (from `/Info.Title` or first-page heuristic), authors, year, page count, sha256, language (via `langdetect`), DOI (regex `10.\d{4,9}/...`), ISBN, abstract, and keywords. Writes YAML frontmatter + prose body matching the `reference` content type envelope from CO-156.
+
+- Diff mode (existing `.md`, no `--force`): shows unified diff on stderr, exits non-zero if stable fields differ
+- `--force`: rewrites auto-generated block (frontmatter + abstract section) while preserving `## Notes` and any human-authored content
+- Flags `extraction: text-only-failed` for image-only PDFs where `pypdf` yields no text
+- Test fixture at `tests/fixtures/stub.pdf` + 25 unit and integration tests in `tests/test_extract_pdf_meta.py`
+
 ## [1.38.11] — 2026-05-03
 
 ### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets
