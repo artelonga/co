@@ -693,6 +693,7 @@ mod tests {
             doc_generators: vec![],
             relationships: vec![],
             views: vec![],
+            properties_per_type: std::collections::BTreeMap::new(),
         }
     }
 

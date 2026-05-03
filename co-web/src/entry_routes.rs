@@ -400,7 +400,7 @@ pub async fn create_entry(
     }
 
     // Index into universe data.db
-    {
+    let relation_count = {
         let uc = {
             let storage = lock_storage(&state)?;
             storage.universe_conn(&slug)
@@ -417,19 +417,64 @@ pub async fn create_entry(
             .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: extract and store typed FK relations from manifest-declared ref/ref_list fields
-        if let Some(ref m) = manifest_arc {
-            let _ = crate::relation_index::sync_entry_relations(
+        let rc = if let Some(ref m) = manifest_arc {
+            crate::relation_index::sync_entry_relations(
                 &uc_guard,
                 &slug,
                 &body.path,
                 &entry.entry_type,
                 &body.frontmatter,
                 m,
-            );
-        }
-    }
+            )
+            .unwrap_or(0)
+        } else {
+            0
+        };
+        // CO-156: sync references_meta shadow table for reference cards
+        crate::reference_routes::maybe_sync_reference_meta(
+            &uc_guard,
+            &slug,
+            &body.path,
+            &entry.entry_type,
+            &body.frontmatter,
+            &body.body,
+            body.frontmatter.get("title").and_then(|v| v.as_str()),
+            &universe_root,
+        );
+        rc
+    };
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
+
+    // CO-156: emit entry.upsert telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.upsert",
+            universe: slug.clone(),
+            list: Some(entry.entry_type.clone()),
+            key: Some(body.path.clone()),
+            actor: crate::auth::resolve_user_id(&state, &headers),
+            session_id: crate::telemetry::extract_session_id(&headers),
+            extra: None,
+        },
+    );
+
+    // CO-156: emit relation.create if relations were written
+    if relation_count > 0 {
+        crate::telemetry::emit_crud_event(
+            &state,
+            crate::telemetry::CrudEvent {
+                kind: "relation.create",
+                universe: slug.clone(),
+                list: Some(entry.entry_type.clone()),
+                key: Some(body.path.clone()),
+                actor: crate::auth::resolve_user_id(&state, &headers),
+                session_id: crate::telemetry::extract_session_id(&headers),
+                extra: Some(serde_json::json!({ "count": relation_count })),
+            },
+        );
+    }
 
     // Update universe content_count
     let mut storage = lock_storage(&state)?;
@@ -542,19 +587,46 @@ pub async fn update_entry(
             .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: re-sync typed FK relations
-        if let Some(ref m) = manifest_arc {
-            let _ = crate::relation_index::sync_entry_relations(
+        let _ = if let Some(ref m) = manifest_arc {
+            crate::relation_index::sync_entry_relations(
                 &uc_guard,
                 &slug,
                 &path,
                 &entry.entry_type,
                 &new_fm,
                 m,
-            );
-        }
+            )
+        } else {
+            Ok(0)
+        };
+        // CO-156: sync references_meta for reference cards
+        crate::reference_routes::maybe_sync_reference_meta(
+            &uc_guard,
+            &slug,
+            &path,
+            &entry.entry_type,
+            &new_fm,
+            &new_body,
+            new_fm.get("title").and_then(|v| v.as_str()),
+            &universe_root,
+        );
     }
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
+
+    // CO-156: emit entry.upsert telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.upsert",
+            universe: slug.clone(),
+            list: Some(entry.entry_type.clone()),
+            key: Some(path.clone()),
+            actor: None,
+            session_id: None,
+            extra: None,
+        },
+    );
 
     let storage = lock_storage(&state)?;
     // CO-45: log mutation on UAT
@@ -665,6 +737,8 @@ pub async fn delete_entry(
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: remove outbound FK relations
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
+        // CO-156: remove references_meta + references_fts (idempotent)
+        crate::reference_routes::remove_reference_meta(&uc_guard, &slug, &path);
     }
     let mut storage = lock_storage(&state)?;
     storage.decrement_universe_content_count(&slug, 1);
@@ -681,6 +755,32 @@ pub async fn delete_entry(
             None,
         );
     }
+
+    // CO-156: emit relation.delete + entry.delete telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "relation.delete",
+            universe: slug.clone(),
+            list: None,
+            key: Some(path.clone()),
+            actor: None,
+            session_id: None,
+            extra: None,
+        },
+    );
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.delete",
+            universe: slug.clone(),
+            list: None,
+            key: Some(path),
+            actor: None,
+            session_id: None,
+            extra: None,
+        },
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }

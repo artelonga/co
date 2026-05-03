@@ -1,0 +1,968 @@
+//! CO-156: `reference` content type — metadata cards for PDF/image/video/audio/web assets.
+//!
+//! A reference card is a `.md` file with `type: reference` in its frontmatter.
+//! It carries metadata about a bound binary asset (sibling file) or external URL.
+//!
+//! Routes (nested under `/api/v1/universes/{u}`):
+//!   GET    /references                — list cards (filter: medium, seed_status, q=fts)
+//!   POST   /references                — create a new card
+//!   GET    /references/orphan-blobs   — assets with no card
+//!   GET    /references/broken-cards   — cards whose `file:` doesn't resolve
+//!   GET    /references/{*path}        — read one card
+//!   PUT    /references/{*path}        — update card
+//!   DELETE /references/{*path}        — delete card (blob unaffected)
+
+use std::path::Path as FsPath;
+
+use axum::{
+    Json, Router,
+    extract::{Path, Query, State},
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    routing::get,
+};
+use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+// Minimal hex encoder (avoids adding a dep; mirrors the one in asset_routes).
+fn hex_encode(bytes: impl AsRef<[u8]>) -> String {
+    const ALPH: &[u8; 16] = b"0123456789abcdef";
+    let bytes = bytes.as_ref();
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(ALPH[(b >> 4) as usize] as char);
+        out.push(ALPH[(b & 0xf) as usize] as char);
+    }
+    out
+}
+
+use crate::auth::resolve_user_id;
+use crate::entry_index::{EntryIndex, make_entry};
+use crate::error::AppError;
+use crate::server::AppState;
+use crate::telemetry::{CrudEvent, emit_crud_event, extract_session_id};
+
+// ---------------------------------------------------------------------------
+// API types
+// ---------------------------------------------------------------------------
+
+/// A row from `references_meta` joined with the entry title.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReferenceCard {
+    pub universe_key: String,
+    pub entry_path: String,
+    pub file: Option<String>,
+    pub blob_sha256: Option<String>,
+    pub url: Option<String>,
+    pub medium: String,
+    pub mime: Option<String>,
+    pub size_bytes: Option<i64>,
+    pub language: Option<String>,
+    pub seed_status: String,
+    pub indexed_at: String,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListRefsQuery {
+    pub medium: Option<String>,
+    pub seed_status: Option<String>,
+    /// Full-text search across title, body, transcription.
+    pub q: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRefBody {
+    pub path: String,
+    pub frontmatter: serde_json::Value,
+    #[serde(default)]
+    pub body: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateRefBody {
+    pub frontmatter: Option<serde_json::Value>,
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OrphanBlob {
+    pub sha256: String,
+    pub mime: String,
+    pub size_bytes: i64,
+    pub filename: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BrokenCard {
+    pub entry_path: String,
+    pub file: String,
+    pub expected_path: String,
+}
+
+// ---------------------------------------------------------------------------
+// Inner sync helpers — pub(crate) for use by entry_routes and vault_routes
+// ---------------------------------------------------------------------------
+
+/// Called after every entry write. Upserts `references_meta` iff `entry_type == "reference"`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn maybe_sync_reference_meta(
+    conn: &Connection,
+    universe_key: &str,
+    entry_path: &str,
+    entry_type: &str,
+    frontmatter: &serde_json::Value,
+    body: &str,
+    title: Option<&str>,
+    universe_root: &std::path::Path,
+) {
+    if entry_type != "reference" {
+        return;
+    }
+    upsert_reference_meta(
+        conn,
+        universe_key,
+        entry_path,
+        frontmatter,
+        body,
+        title,
+        universe_root,
+    );
+}
+
+/// Upsert `references_meta` + `references_fts` for a reference card.
+fn upsert_reference_meta(
+    conn: &Connection,
+    universe_key: &str,
+    entry_path: &str,
+    frontmatter: &serde_json::Value,
+    body: &str,
+    title: Option<&str>,
+    universe_root: &std::path::Path,
+) {
+    let medium = frontmatter
+        .get("medium")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let file = frontmatter
+        .get("file")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let url = frontmatter
+        .get("url")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let mime = frontmatter
+        .get("mime")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let size_bytes = frontmatter.get("size_bytes").and_then(|v| v.as_i64());
+    let language = frontmatter
+        .get("language")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let seed_status_raw = frontmatter
+        .get("seed_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("stub")
+        .to_string();
+    let transcription = frontmatter
+        .get("transcription")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // Compute sha256 of bound asset if the sibling file is present on disk.
+    let blob_sha256 = file.as_deref().and_then(|f| {
+        let entry_dir = std::path::Path::new(entry_path).parent()?;
+        let file_path = universe_root.join(entry_dir).join(f);
+        let bytes = std::fs::read(&file_path).ok()?;
+        let mut hasher = Sha256::new();
+        hasher.update(&bytes);
+        Some(hex_encode(hasher.finalize()))
+    });
+
+    // Enforce stub if file is declared but blob is absent on disk.
+    let seed_status = if file.is_some() && blob_sha256.is_none() {
+        "stub".to_string()
+    } else {
+        seed_status_raw
+    };
+
+    conn.execute(
+        "INSERT INTO references_meta \
+         (universe_key, entry_path, file, blob_sha256, url, medium, mime, size_bytes, language, seed_status, indexed_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) \
+         ON CONFLICT(universe_key, entry_path) DO UPDATE SET \
+           file = excluded.file, \
+           blob_sha256 = excluded.blob_sha256, \
+           url = excluded.url, \
+           medium = excluded.medium, \
+           mime = excluded.mime, \
+           size_bytes = excluded.size_bytes, \
+           language = excluded.language, \
+           seed_status = excluded.seed_status, \
+           indexed_at = excluded.indexed_at",
+        params![
+            universe_key,
+            entry_path,
+            file,
+            blob_sha256,
+            url,
+            medium,
+            mime,
+            size_bytes,
+            language,
+            seed_status,
+        ],
+    )
+    .ok();
+
+    // Sync FTS (delete + re-insert).
+    conn.execute(
+        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        params![universe_key, entry_path],
+    )
+    .ok();
+    conn.execute(
+        "INSERT INTO references_fts (universe_key, entry_path, title, body, transcription) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            universe_key,
+            entry_path,
+            title.unwrap_or(""),
+            body,
+            transcription,
+        ],
+    )
+    .ok();
+}
+
+/// Remove `references_meta` + `references_fts` for an entry (idempotent — safe even if no row).
+pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry_path: &str) {
+    conn.execute(
+        "DELETE FROM references_meta WHERE universe_key = ?1 AND entry_path = ?2",
+        params![universe_key, entry_path],
+    )
+    .ok();
+    conn.execute(
+        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        params![universe_key, entry_path],
+    )
+    .ok();
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn lock_storage(
+    state: &AppState,
+) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
+    state
+        .storage
+        .lock()
+        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+}
+
+fn require_writer(
+    state: &AppState,
+    headers: &HeaderMap,
+    universe_key: &str,
+) -> Result<String, AppError> {
+    let user_id = resolve_user_id(state, headers)
+        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
+    let storage = lock_storage(state)?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.owner_id == user_id {
+        return Ok(user_id);
+    }
+    let is_member: bool = storage
+        .conn()
+        .query_row(
+            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            params![universe_key, &user_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if is_member {
+        Ok(user_id)
+    } else {
+        Err(AppError::Forbidden(
+            "Not authorized to write to this universe".into(),
+        ))
+    }
+}
+
+fn row_to_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReferenceCard> {
+    Ok(ReferenceCard {
+        universe_key: row.get(0)?,
+        entry_path: row.get(1)?,
+        file: row.get(2)?,
+        blob_sha256: row.get(3)?,
+        url: row.get(4)?,
+        medium: row.get(5)?,
+        mime: row.get(6)?,
+        size_bytes: row.get(7)?,
+        language: row.get(8)?,
+        seed_status: row.get(9)?,
+        indexed_at: row.get(10)?,
+        title: row.get(11)?,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/universes/{u}/references
+///
+/// List reference cards with optional filters.
+/// `?medium=pdf` — filter by medium (pdf, image, video, audio, web, citation).
+/// `?seed_status=reviewed` — filter by seed status.
+/// `?q=<text>` — full-text search across title, body, transcription.
+pub async fn list_references(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+    Query(q): Query<ListRefsQuery>,
+) -> Result<Json<Vec<ReferenceCard>>, AppError> {
+    let conn = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let cards = if let Some(ref fts_query) = q.q {
+        // FTS path: join with references_fts
+        let mut stmt = guard
+            .prepare(
+                "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
+                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
+                    rm.indexed_at, e.title \
+             FROM references_meta rm \
+             JOIN references_fts fts \
+               ON fts.universe_key = rm.universe_key AND fts.entry_path = rm.entry_path \
+             LEFT JOIN entries e \
+               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
+             WHERE fts.universe_key = ?1 AND references_fts MATCH ?2 \
+             ORDER BY rm.entry_path LIMIT 200",
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        stmt.query_map(params![universe_key, fts_query], row_to_card)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect()
+    } else {
+        // Structured filter path
+        let mut sql = String::from(
+            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
+                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
+                    rm.indexed_at, e.title \
+             FROM references_meta rm \
+             LEFT JOIN entries e \
+               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
+             WHERE rm.universe_key = ?1",
+        );
+        let mut bind_vals: Vec<String> = vec![universe_key.clone()];
+
+        if let Some(ref m) = q.medium {
+            bind_vals.push(m.clone());
+            sql.push_str(&format!(" AND rm.medium = ?{}", bind_vals.len()));
+        }
+        if let Some(ref s) = q.seed_status {
+            bind_vals.push(s.clone());
+            sql.push_str(&format!(" AND rm.seed_status = ?{}", bind_vals.len()));
+        }
+        sql.push_str(" ORDER BY rm.entry_path LIMIT 500");
+
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> = bind_vals
+            .iter()
+            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .collect();
+        let mut stmt = guard
+            .prepare(&sql)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        stmt.query_map(params_refs.as_slice(), row_to_card)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+
+    Ok(Json(cards))
+}
+
+/// GET /api/v1/universes/{u}/references/orphan-blobs
+///
+/// List assets that have no corresponding reference card in `references_meta`.
+pub async fn orphan_blobs(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+) -> Result<Json<Vec<OrphanBlob>>, AppError> {
+    let conn = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let mut stmt = guard
+        .prepare(
+            "SELECT a.sha256, a.mime, a.size_bytes, a.filename \
+             FROM assets a \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM references_meta rm \
+               WHERE rm.universe_key = ?1 AND rm.blob_sha256 = a.sha256 \
+             ) \
+             ORDER BY a.sha256 LIMIT 500",
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let blobs: Vec<OrphanBlob> = stmt
+        .query_map(params![universe_key], |row| {
+            Ok(OrphanBlob {
+                sha256: row.get(0)?,
+                mime: row.get(1)?,
+                size_bytes: row.get(2)?,
+                filename: row.get(3)?,
+            })
+        })
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(blobs))
+}
+
+/// GET /api/v1/universes/{u}/references/broken-cards
+///
+/// List reference cards whose `file:` field doesn't resolve to an existing file on disk.
+pub async fn broken_cards(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+) -> Result<Json<Vec<BrokenCard>>, AppError> {
+    let (conn, universe_root) = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        (
+            storage.universe_conn(&universe_key),
+            storage.universe_root(&universe_key),
+        )
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let mut stmt = guard
+        .prepare(
+            "SELECT entry_path, file FROM references_meta \
+             WHERE universe_key = ?1 AND file IS NOT NULL",
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map(params![universe_key], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let broken: Vec<BrokenCard> = rows
+        .into_iter()
+        .filter_map(|(entry_path, file)| {
+            let entry_dir = FsPath::new(&entry_path).parent()?;
+            let file_path = universe_root.join(entry_dir).join(&file);
+            let expected = file_path.to_string_lossy().into_owned();
+            if !file_path.exists() {
+                Some(BrokenCard {
+                    entry_path,
+                    file,
+                    expected_path: expected,
+                })
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    Ok(Json(broken))
+}
+
+/// GET /api/v1/universes/{u}/references/{*path}
+///
+/// Read a single reference card by its entry path.
+pub async fn get_reference(
+    State(state): State<AppState>,
+    Path((universe_key, path)): Path<(String, String)>,
+) -> Result<Json<ReferenceCard>, AppError> {
+    let conn = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let card = guard
+        .query_row(
+            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
+                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
+                    rm.indexed_at, e.title \
+             FROM references_meta rm \
+             LEFT JOIN entries e \
+               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
+             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2",
+            params![universe_key, path],
+            row_to_card,
+        )
+        .map_err(|e| match e {
+            rusqlite::Error::QueryReturnedNoRows => {
+                AppError::NotFound(format!("Reference card '{path}' not found"))
+            }
+            other => AppError::Internal(other.to_string()),
+        })?;
+
+    Ok(Json(card))
+}
+
+/// POST /api/v1/universes/{u}/references
+///
+/// Create a new reference card entry. If `file:` is set in frontmatter, the
+/// sibling blob must already exist (uploaded via `/assets`); sha256 is resolved
+/// from disk and stored in `references_meta.blob_sha256`.
+pub async fn create_reference(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CreateRefBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = require_writer(&state, &headers, &universe_key)?;
+
+    let mut fm = body.frontmatter.clone();
+    // Force entry_type = reference
+    if let Some(obj) = fm.as_object_mut() {
+        obj.insert(
+            "type".to_string(),
+            serde_json::Value::String("reference".to_string()),
+        );
+    }
+
+    let (universe_root, universe_conn) = {
+        let storage = lock_storage(&state)?;
+        (
+            storage.universe_root(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    let entry = make_entry(&body.path, fm.clone(), &body.body);
+    co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let title = fm.get("title").and_then(|v| v.as_str());
+    {
+        let guard = universe_conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&guard);
+        index
+            .upsert(&universe_key, &entry)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        upsert_reference_meta(
+            &guard,
+            &universe_key,
+            &body.path,
+            &fm,
+            &body.body,
+            title,
+            &universe_root,
+        );
+    }
+
+    let session_id = extract_session_id(&headers);
+    emit_crud_event(
+        &state,
+        CrudEvent {
+            kind: "entry.upsert",
+            universe: universe_key.clone(),
+            list: Some("reference".to_string()),
+            key: Some(body.path.clone()),
+            actor: Some(user_id),
+            session_id,
+            extra: None,
+        },
+    );
+
+    // Update content count
+    lock_storage(&state)?.increment_universe_content_count(&universe_key);
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({
+            "path": body.path,
+            "universe_key": universe_key,
+            "entry_type": "reference",
+        })),
+    )
+        .into_response())
+}
+
+/// PUT /api/v1/universes/{u}/references/{*path}
+///
+/// Update an existing reference card.
+pub async fn update_reference(
+    State(state): State<AppState>,
+    Path((universe_key, path)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<UpdateRefBody>,
+) -> Result<Json<ReferenceCard>, AppError> {
+    let user_id = require_writer(&state, &headers, &universe_key)?;
+
+    let (universe_root, universe_conn) = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        (
+            storage.universe_root(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    // Read existing entry
+    let existing = {
+        let guard = universe_conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&guard);
+        index
+            .get(&universe_key, &path)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .ok_or_else(|| AppError::NotFound(format!("Reference card '{path}' not found")))?
+    };
+
+    let new_fm = body.frontmatter.unwrap_or(existing.frontmatter.clone());
+    let new_body = body.body.unwrap_or(existing.body.clone());
+
+    let entry = make_entry(&path, new_fm.clone(), &new_body);
+    co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    let title = new_fm.get("title").and_then(|v| v.as_str());
+    {
+        let guard = universe_conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&guard);
+        index
+            .upsert(&universe_key, &entry)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        upsert_reference_meta(
+            &guard,
+            &universe_key,
+            &path,
+            &new_fm,
+            &new_body,
+            title,
+            &universe_root,
+        );
+    }
+
+    let session_id = extract_session_id(&headers);
+    emit_crud_event(
+        &state,
+        CrudEvent {
+            kind: "entry.upsert",
+            universe: universe_key.clone(),
+            list: Some("reference".to_string()),
+            key: Some(path.clone()),
+            actor: Some(user_id),
+            session_id,
+            extra: None,
+        },
+    );
+
+    // Return the updated card
+    let conn = {
+        let storage = lock_storage(&state)?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let card = guard
+        .query_row(
+            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
+                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
+                    rm.indexed_at, e.title \
+             FROM references_meta rm \
+             LEFT JOIN entries e \
+               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
+             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2",
+            params![universe_key, path],
+            row_to_card,
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(Json(card))
+}
+
+/// DELETE /api/v1/universes/{u}/references/{*path}
+///
+/// Delete a reference card. The bound blob on disk is NOT deleted.
+pub async fn delete_reference(
+    State(state): State<AppState>,
+    Path((universe_key, path)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    let user_id = require_writer(&state, &headers, &universe_key)?;
+
+    let (universe_root, universe_conn) = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        (
+            storage.universe_root(&universe_key),
+            storage.universe_conn(&universe_key),
+        )
+    };
+
+    co::delete_entry(&universe_root, &path).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    {
+        let guard = universe_conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = EntryIndex::new(&guard);
+        index
+            .remove(&universe_key, &path)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        remove_reference_meta(&guard, &universe_key, &path);
+    }
+
+    lock_storage(&state)?.decrement_universe_content_count(&universe_key, 1);
+
+    let session_id = extract_session_id(&headers);
+    emit_crud_event(
+        &state,
+        CrudEvent {
+            kind: "entry.delete",
+            universe: universe_key.clone(),
+            list: Some("reference".to_string()),
+            key: Some(path),
+            actor: Some(user_id),
+            session_id,
+            extra: None,
+        },
+    );
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+pub fn reference_router() -> Router<AppState> {
+    Router::new()
+        // Specific paths must come before the wildcard {*path} route.
+        .route("/{u}/references/orphan-blobs", get(orphan_blobs))
+        .route("/{u}/references/broken-cards", get(broken_cards))
+        .route(
+            "/{u}/references",
+            get(list_references).post(create_reference),
+        )
+        .route(
+            "/{u}/references/{*path}",
+            get(get_reference)
+                .put(update_reference)
+                .delete(delete_reference),
+        )
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use serde_json::json;
+
+    fn open_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+            .unwrap();
+        conn.execute_batch(crate::universe_pool::UNIVERSE_SCHEMA_FOR_TEST)
+            .unwrap();
+        crate::universe_pool::run_universe_migrations_for_test(&conn);
+        conn
+    }
+
+    #[test]
+    fn test_upsert_reference_meta_basic() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "medium": "pdf",
+            "mime": "application/pdf",
+            "seed_status": "stub",
+        });
+        upsert_reference_meta(
+            &conn,
+            "mbya",
+            "refs/dooley.md",
+            &fm,
+            "some body text",
+            Some("Dooley 2006"),
+            std::path::Path::new("/nonexistent"),
+        );
+
+        let row: (String, String, String) = conn
+            .query_row(
+                "SELECT medium, mime, seed_status FROM references_meta \
+                 WHERE universe_key = 'mbya' AND entry_path = 'refs/dooley.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(row.0, "pdf");
+        assert_eq!(row.1, "application/pdf");
+        assert_eq!(row.2, "stub");
+    }
+
+    #[test]
+    fn test_upsert_enforces_stub_when_file_absent() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "medium": "pdf",
+            "file": "missing.pdf",
+            "seed_status": "reviewed",   // claimed reviewed, but file doesn't exist
+        });
+        upsert_reference_meta(
+            &conn,
+            "mbya",
+            "refs/missing.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+        let status: String = conn
+            .query_row(
+                "SELECT seed_status FROM references_meta WHERE entry_path = 'refs/missing.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            status, "stub",
+            "seed_status should be enforced to stub when blob absent"
+        );
+    }
+
+    #[test]
+    fn test_remove_reference_meta_is_idempotent() {
+        let conn = open_test_db();
+        // Remove from an empty table — must not panic or error.
+        remove_reference_meta(&conn, "mbya", "refs/nonexistent.md");
+
+        // Insert then remove.
+        let fm = json!({ "type": "reference", "medium": "pdf", "seed_status": "stub" });
+        upsert_reference_meta(
+            &conn,
+            "mbya",
+            "refs/a.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/x"),
+        );
+        remove_reference_meta(&conn, "mbya", "refs/a.md");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM references_meta WHERE entry_path = 'refs/a.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_upsert_is_idempotent() {
+        let conn = open_test_db();
+        let fm = json!({ "type": "reference", "medium": "video", "seed_status": "stub" });
+        // Two identical upserts must leave exactly one row.
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "r/a.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/x"),
+        );
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "r/a.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/x"),
+        );
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM references_meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_references_tables_exist_after_migration() {
+        let conn = open_test_db();
+        let has_meta: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='references_meta'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        assert!(has_meta, "references_meta table should exist");
+
+        let has_fts: bool = conn
+            .query_row(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='references_fts'",
+                [],
+                |_| Ok(true),
+            )
+            .unwrap_or(false);
+        assert!(has_fts, "references_fts table should exist");
+    }
+
+    #[test]
+    fn test_schema_version_reaches_7() {
+        let conn = open_test_db();
+        let v: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap_or(0);
+        assert!(v >= 7, "schema_version should be at least 7, got {v}");
+    }
+}

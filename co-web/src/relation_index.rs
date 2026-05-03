@@ -180,6 +180,7 @@ pub fn extract_relations(
 ///
 /// Called from entry write paths (create, update) and from vault writes.
 /// Silently skips if the manifest has no schema for `entry_type`.
+/// Sync relations and return the number of relations upserted (0 = all cleared).
 pub fn sync_entry_relations(
     conn: &Connection,
     universe_key: &str,
@@ -187,9 +188,11 @@ pub fn sync_entry_relations(
     entry_type: &str,
     frontmatter: &serde_json::Value,
     manifest: &co::manifest::Manifest,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<usize> {
     let relations = extract_relations(manifest, entry_type, frontmatter);
-    RelationIndex::new(conn).replace_all(universe_key, path, &relations)
+    let count = relations.len();
+    RelationIndex::new(conn).replace_all(universe_key, path, &relations)?;
+    Ok(count)
 }
 
 // ---------------------------------------------------------------------------
@@ -365,6 +368,7 @@ mod tests {
                 cardinality: Cardinality::ManyToMany,
             }],
             views: vec![],
+            properties_per_type: std::collections::BTreeMap::new(),
         }
     }
 
@@ -549,6 +553,7 @@ mod tests {
             doc_generators: vec![],
             relationships: vec![],
             views: vec![],
+            properties_per_type: std::collections::BTreeMap::new(),
         };
         let n = backfill_for_manifest(&conn, "u1", &manifest).unwrap();
         assert_eq!(n, 0);

@@ -117,6 +117,37 @@ CREATE TABLE IF NOT EXISTS frontmatter_index (
 );
 CREATE INDEX IF NOT EXISTS idx_fm_type   ON frontmatter_index(entry_type);
 CREATE INDEX IF NOT EXISTS idx_fm_status ON frontmatter_index(status);
+
+-- CO-156: `reference` content type shadow table.
+-- One row per `.md` card with entry_type = 'reference'.
+-- Populated on every reference-card write; blob_sha256 is resolved on index.
+CREATE TABLE IF NOT EXISTS references_meta (
+    universe_key  TEXT NOT NULL,
+    entry_path    TEXT NOT NULL,
+    file          TEXT,
+    blob_sha256   TEXT,
+    url           TEXT,
+    medium        TEXT NOT NULL DEFAULT 'unknown',
+    mime          TEXT,
+    size_bytes    INTEGER,
+    language      TEXT,
+    seed_status   TEXT NOT NULL DEFAULT 'stub',
+    indexed_at    TEXT NOT NULL,
+    PRIMARY KEY (universe_key, entry_path)
+);
+CREATE INDEX IF NOT EXISTS idx_refs_medium      ON references_meta(medium);
+CREATE INDEX IF NOT EXISTS idx_refs_seed_status ON references_meta(seed_status);
+CREATE INDEX IF NOT EXISTS idx_refs_blob
+    ON references_meta(blob_sha256) WHERE blob_sha256 IS NOT NULL;
+
+-- CO-156: FTS index over reference cards — title, body, and transcription.
+CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
+    universe_key UNINDEXED,
+    entry_path   UNINDEXED,
+    title,
+    body,
+    transcription
+);
 ";
 
 // ---------------------------------------------------------------------------
@@ -272,6 +303,16 @@ fn run_universe_migrations(conn: &Connection) {
         conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
             .expect("universe schema_version v6");
     }
+    if v < 7 {
+        // CO-156: references_meta + references_fts already created via UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
+            .expect("universe schema_version v7");
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn run_universe_migrations_for_test(conn: &Connection) {
+    run_universe_migrations(conn);
 }
 
 /// Per-universe DB version of the storage.rs `ensure_column` helper. Mirrors

@@ -350,6 +350,17 @@ fn write_vault_entry(
                 m,
             );
         }
+        // CO-156: sync references_meta for reference cards
+        crate::reference_routes::maybe_sync_reference_meta(
+            &uc_guard,
+            universe_key,
+            path,
+            &entry.entry_type,
+            &frontmatter,
+            body,
+            frontmatter.get("title").and_then(|v| v.as_str()),
+            &universe_root,
+        );
     }
 
     Ok(crate::entry_index::EntryRow {
@@ -476,6 +487,20 @@ pub async fn put_vault_file(
     let (frontmatter, body_text) =
         crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
     let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
+
+    // CO-156: emit entry.upsert telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.upsert",
+            universe: slug.clone(),
+            list: Some(row.entry_type.clone()),
+            key: Some(path.clone()),
+            actor: crate::auth::resolve_user_id(&state, &headers),
+            session_id: crate::telemetry::extract_session_id(&headers),
+            extra: None,
+        },
+    );
 
     // CO-79: invalidate query cache entries for this universe after any vault write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
@@ -836,9 +861,25 @@ pub async fn delete_vault_file(
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: remove outbound FK relations
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
+        // CO-156: remove references_meta (idempotent)
+        crate::reference_routes::remove_reference_meta(&uc_guard, &slug, &path);
     }
 
     let _ = lock_storage(&state).map(|mut s| s.decrement_universe_content_count(&slug, 1));
+
+    // CO-156: emit entry.delete telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.delete",
+            universe: slug.clone(),
+            list: None,
+            key: Some(path.clone()),
+            actor: crate::auth::resolve_user_id(&state, &headers),
+            session_id: crate::telemetry::extract_session_id(&headers),
+            extra: None,
+        },
+    );
 
     // CO-151 web→local: tell connected watchers to remove the file locally.
     crate::sync_ws::emit_rest_delete(&state, &slug, &path).await;
