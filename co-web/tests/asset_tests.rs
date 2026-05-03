@@ -235,6 +235,33 @@ async fn if_none_match_returns_304() {
 }
 
 #[tokio::test]
+async fn if_none_match_on_nonexistent_returns_404_not_304() {
+    // CO-145 regression: a probe with If-None-Match echoing the URL sha
+    // must return 404 when the row doesn't exist — not 304. Earlier
+    // ordering short-circuited to 304 before the existence check, breaking
+    // client-side idempotency probes (a missing blob looked "already there").
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    let fake_sha = "0000000000000000000000000000000000000000000000000000000000000000";
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/u1/assets/{fake_sha}"))
+                .header("authorization", user_bearer("owner-1"))
+                .header("if-none-match", format!("\"{fake_sha}\""))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn anonymous_blocked_on_private_universe() {
     unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
     let dir = tempdir().unwrap();

@@ -346,23 +346,7 @@ pub async fn get_asset(
 
     check_reader(&state, &headers, &universe_key)?;
 
-    // 304 short-circuit before any disk read.
     let etag = format!("\"{sha256}\"");
-    if let Some(inm) = headers
-        .get(header::IF_NONE_MATCH)
-        .and_then(|v| v.to_str().ok())
-        && inm == etag
-    {
-        return Ok(Response::builder()
-            .status(StatusCode::NOT_MODIFIED)
-            .header(header::ETAG, &etag)
-            .header(
-                header::CACHE_CONTROL,
-                "private, max-age=31536000, immutable",
-            )
-            .body(axum::body::Body::empty())
-            .unwrap());
-    }
 
     let (universe_dir, conn) = {
         let storage = state
@@ -402,6 +386,27 @@ pub async fn get_asset(
 
     let (blob_rel_path, mime, _size, nonce_blob, encrypted) =
         row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
+
+    // CO-145 fix: 304 short-circuit must run AFTER row existence check, not
+    // before. Earlier ordering let any valid 64-char hex sha return 304
+    // even when the row didn't exist, which broke client-side idempotency
+    // probes that GET-with-If-None-Match to test "do you have this blob".
+    if let Some(inm) = headers
+        .get(header::IF_NONE_MATCH)
+        .and_then(|v| v.to_str().ok())
+        && inm == etag
+    {
+        return Ok(Response::builder()
+            .status(StatusCode::NOT_MODIFIED)
+            .header(header::ETAG, &etag)
+            .header(
+                header::CACHE_CONTROL,
+                "private, max-age=31536000, immutable",
+            )
+            .body(axum::body::Body::empty())
+            .unwrap());
+    }
+
     let blob_path = universe_dir.join(&blob_rel_path);
     let raw = std::fs::read(&blob_path)
         .map_err(|e| AppError::NotFound(format!("Asset bytes missing: {e}")))?;

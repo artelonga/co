@@ -3,8 +3,9 @@
 
 Two-pass:
   1. Walk tree, POST every binary (image/video/audio/pdf/etc) to /assets, build
-     local-path → sha256 map. Hashes locally first to skip already-uploaded
-     blobs. Runs with ThreadPoolExecutor (8 workers) + retry-on-429/timeout.
+     local-path → sha256 map. Server dedupes by sha256, so re-runs are idempotent
+     (already-uploaded bytes return the same sha without rewriting). Runs with
+     ThreadPoolExecutor (8 workers) + retry-on-429/timeout.
   2. Walk tree, PUT every .md to vault — rewriting any markdown image refs
      `![alt](relative/path.jpg)` whose target is in the map to `![alt](sha256:<hex>)`.
 
@@ -19,7 +20,7 @@ Reads session cookie from /tmp/c.txt — get one first via:
 Sends `X-Admin-Override-Quota: true` so authenticated callers bypass the
 per-min rate cap (CO-145 / 1.37.1). Anonymous requests are still throttled.
 """
-import os, sys, json, re, hashlib, mimetypes, urllib.parse, urllib.request, time
+import os, sys, json, re, mimetypes, urllib.parse, urllib.request, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
@@ -96,36 +97,10 @@ def http(method, url, body=None, content_type="application/octet-stream", retry=
     code, payload = last_err if last_err else (0, b"unknown")
     return code, payload
 
-def sha256_of(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        while chunk := fh.read(1024 * 1024):
-            h.update(chunk)
-    return h.hexdigest()
-
-def asset_exists(sha):
-    """HEAD-equivalent via GET — server short-circuits on If-None-Match=etag.
-    Returns True if already in the universe's assets index."""
-    url = f"{BASE}/api/v1/universes/{SLUG}/assets/{sha}"
-    req = urllib.request.Request(
-        url, method="GET",
-        headers={"Cookie": f"session={session}", "If-None-Match": f"\"{sha}\""},
-    )
-    try:
-        resp = opener.open(req, timeout=20)
-        return resp.status in (200, 304)
-    except urllib.error.HTTPError as e:
-        return e.code in (200, 304)
-    except Exception:
-        return False
-
 def upload_binary(path):
-    sha = sha256_of(path)
+    """POST the binary; server is idempotent (same bytes → same sha → row reused).
+    No client-side probe needed — the server short-circuits dedup on its end."""
     rel = os.path.relpath(path, ROOT)
-
-    if asset_exists(sha):
-        return rel, sha, None, "skipped"
-
     encoded_q = urllib.parse.urlencode({"filename": os.path.basename(path)})
     url = f"{BASE}/api/v1/universes/{SLUG}/assets?{encoded_q}"
     mime, _ = mimetypes.guess_type(path)
@@ -172,7 +147,7 @@ safe_print(f"        target: {BASE}  workers: {WORKERS}")
 
 # ---------- pass 1: upload binaries (parallel) ----------
 sha_by_relpath = {}
-ok = fail = skipped = 0
+ok = fail = 0
 counter = {"n": 0}
 counter_lock = Lock()
 total = len(binaries)
@@ -192,19 +167,16 @@ with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         if sha:
             sha_by_relpath[rel] = sha
             sha_by_relpath[os.path.basename(rel)] = sha
-            if status == "skipped":
-                skipped += 1
-            else:
-                ok += 1
+            ok += 1
         else:
             fail += 1
             safe_print(f"  BIN-FAIL {rel}: {err}")
         if n % 50 == 0 or n == total:
             elapsed = time.time() - t0
             rate = n / elapsed if elapsed else 0
-            safe_print(f"  [bin] {n}/{total}  uploaded={ok} skipped={skipped} fail={fail}  ({rate:.1f}/s)")
+            safe_print(f"  [bin] {n}/{total}  ok={ok} fail={fail}  ({rate:.1f}/s)")
 
-safe_print(f"[{SLUG}] binaries: {ok} uploaded, {skipped} skipped, {fail} fail in {time.time()-t0:.1f}s")
+safe_print(f"[{SLUG}] binaries: {ok} ok, {fail} fail in {time.time()-t0:.1f}s")
 
 # ---------- pass 2: upload markdown (parallel) ----------
 img_ref_re = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")

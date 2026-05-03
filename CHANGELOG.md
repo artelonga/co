@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.3] — 2026-05-03
+
+### Fixed — `If-None-Match` short-circuit ran before existence check on `GET /assets/:sha`
+
+The 304 fast path compared the URL sha against the `If-None-Match` header *before* looking up the row, so a probe like `curl -H 'If-None-Match: "X"' /assets/X` returned 304 for any valid 64-char hex sha — even when the row didn't exist. That broke client-side idempotency probes (a missing blob looked "already there" to the bulk uploader, which then mis-counted the run).
+
+Reordered: row lookup first, then 304 short-circuit only if the row actually exists. Also simplified `scripts/bulk-upload-binary.py` to skip the probe entirely — the server is already idempotent on POST (same bytes → same sha → existing row reused), so the second `GET` was redundant.
+
+Added regression test `if_none_match_on_nonexistent_returns_404_not_304` (14 asset integration tests total now).
+
 ## [1.37.2] — 2026-05-03
 
 ### Changed — home rewritten around the **Co**nsciência **Co**letiva philosophy
