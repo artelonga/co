@@ -1,41 +1,40 @@
 ---
 created: 2026-04-11T01:26:20.515990+00:00
-modified: 2026-04-11T01:26:20.515990+00:00
+modified: 2026-05-03T00:00:00+00:00
 order: 1
 slug: sobre
 tags:
 - sobre
 - manifesto
-title: Co — Consciência Coletiva
+title: Sobre o Co
 type: page
 ---
 
-# **Co**nsciência **Co**letiva
+# Sobre o Co
 
-Co é uma plataforma para organizar ideias, projetos e pessoas.
+A história curta está em [home](/co/template?page=index) — **Co**nsciência **Co**letiva, três verbos: **Co**criar, **Co**laborar, **Co**nectar.
 
-Três verbos definem o que fazemos:
+Esta página guarda os detalhes técnicos e de governança.
 
-- **Co**criar — cada cartão é uma ideia. Escreva, arraste, conecte.
-- **Co**laborar — convide pessoas para seu universo. Editem juntos, em tempo real.
-- **Co**nectar os pontos — seus universos formam uma rede. Cada perfil é uma presença online.
+## Princípios
 
-## O que é um universo?
+1. **Markdown é o formato canônico.** Frontmatter YAML para metadados, corpo em Markdown. Portabilidade antes de tudo.
+2. **Universos são unidades de identidade.** Privados = perfis. Públicos = vitrines. Cada universo tem dono, regras de visibilidade e um histórico próprio.
+3. **A rede é o produto.** Universos se conectam por links, subscrições, relações tipadas. O grafo emerge sem coordenação central.
+4. **Software livre, conteúdo seu.** Licença MIT no código; donos detêm seus próprios universos.
 
-Um universo é seu espaço. Pode ser um projeto pessoal, um portfólio, um blog, ou o painel de uma equipe. Você decide o que entra e como aparece.
+## Stack
 
-Universos privados são como perfis — sua identidade digital. Universos públicos são vitrines para o mundo.
+- **Backend:** Rust (Axum), SQLite por universo, ChaCha20-Poly1305 para criptografia em repouso.
+- **Frontend:** SPA leve, Markdown renderizado client-side com `marked` + DOMPurify, CRDTs (Yjs) para edição colaborativa.
+- **Deploy:** Fly.io para a instância oficial; qualquer pessoa pode rodar a sua.
 
-## Tudo é Markdown
+## Comunidade
 
-Cada tarefa, cada página, cada nota é um arquivo `.md` com metadados YAML. Isso significa que seu conteúdo é portátil: sincronize com o Obsidian, edite no VS Code, versione no Git.
-
-Você nunca fica preso. O conteúdo é seu.
-
-## Código aberto
-
-Co é software livre, licenciado sob MIT. O código está no [GitHub](https://github.com/artelonga/co). Contribuições são bem-vindas.
+- Código: [github.com/artelonga/co](https://github.com/artelonga/co)
+- Issues e roadmap: board público em [/co/co](/co/co)
+- Licença: MIT
 
 ---
 
-*Co — conectando os pontos.*
+*A consciência coletiva não é uma tecnologia — é uma prática. O Co é a infraestrutura.*

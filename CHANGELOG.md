@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.2] — 2026-05-03
+
+### Changed — home rewritten around the **Co**nsciência **Co**letiva philosophy
+
+The previous home (`template/index.md`) opened with "uma plataforma para organizar ideias, projetos e pessoas em universos" — accurate but generic. The manifesto on `template/sobre.md` had the actual philosophy (Cocriar / Colaborar / Conectar) but lived a click away.
+
+Merged both: the home now leads with **conectar pessoas** and the three verbs, defines what a universe is, then shows the curated trio diagram and the navigation primer. `sobre.md` is now a technical/governance page that points back to home for the philosophy.
+
+`template/sobre.md` rewritten as a stack + community + license page, no philosophy duplication.
+
 ## [1.37.1] — 2026-05-03
 
 ### Fixed — bulk-upload usability: 413 on >2 MB assets, 429 saturating burst writes
