@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] — 2026-05-03
+
+### Added — CO-154: References as a first-class content type
+
+`references_index` + `references_fts` tables in every per-universe SQLite DB (v7 migration). On every entry write, `{url, source, retrieved}` items from `frontmatter.references[]` are extracted and upserted; body sections under `## Referência: <source>` headings are matched and stored as `excerpt_body`. FTS5 virtual table enables full-text search across source + excerpt. Backfill runs once per universe on first open after this deploy.
+
+New API endpoints:
+- `GET /api/v1/universes/{u}/references?source=&url_contains=&q=` — filter/search references
+- `GET /api/v1/universes/{u}/references/orphan-wikilinks` — candidate-entry backlog
+
+All three entry write paths (entry create, entry update, vault write) sync the references index.
+
 ## [1.38.11] — 2026-05-03
 
 ### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets

@@ -427,6 +427,14 @@ pub async fn create_entry(
                 m,
             );
         }
+        // CO-154: index references from frontmatter + body
+        let _ = crate::reference_index::sync_entry_references(
+            &uc_guard,
+            &slug,
+            &body.path,
+            &body.frontmatter,
+            &body.body,
+        );
     }
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
@@ -552,6 +560,10 @@ pub async fn update_entry(
                 m,
             );
         }
+        // CO-154: re-index references from frontmatter + body
+        let _ = crate::reference_index::sync_entry_references(
+            &uc_guard, &slug, &path, &new_fm, &new_body,
+        );
     }
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
@@ -734,6 +746,81 @@ pub async fn query_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-154: References API
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ReferencesQuery {
+    source: Option<String>,
+    url_contains: Option<String>,
+    q: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct ReferencesResponse {
+    references: Vec<crate::reference_index::ReferenceRow>,
+    total: usize,
+}
+
+/// GET /api/v1/universes/:slug/references
+///
+/// Query `references_index` with optional filters:
+/// - `?source=<substring>` — filter by source name
+/// - `?url_contains=<substring>` — filter by URL
+/// - `?q=<fts-query>` — full-text search over source + excerpt_body
+pub(crate) async fn list_references(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(params): Query<ReferencesQuery>,
+) -> Result<Json<ReferencesResponse>, AppError> {
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let conn = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let references = crate::reference_index::ReferenceIndex::new(&conn)
+        .query(
+            &slug,
+            params.source.as_deref(),
+            params.url_contains.as_deref(),
+            params.q.as_deref(),
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let total = references.len();
+    Ok(Json(ReferencesResponse { references, total }))
+}
+
+/// GET /api/v1/universes/:slug/references/orphan-wikilinks
+///
+/// Return all `[[wikilink]]` targets found inside `## Referência:` excerpts
+/// that do not have a corresponding entry in this universe — the candidate-entry
+/// backlog.
+pub(crate) async fn list_orphan_wikilinks(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_conn(&slug)
+    };
+    let conn = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let orphans = crate::reference_index::ReferenceIndex::new(&conn)
+        .orphan_wikilinks(&slug)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(orphans))
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -750,6 +837,12 @@ pub fn router() -> Router<AppState> {
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),
         )
+        // CO-154: references endpoints
+        .route(
+            "/{slug}/references/orphan-wikilinks",
+            get(list_orphan_wikilinks),
+        )
+        .route("/{slug}/references", get(list_references))
 }
 
 // ---------------------------------------------------------------------------
