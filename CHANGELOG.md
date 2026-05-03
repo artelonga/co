@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.3] — 2026-05-03
+
+### Fixed — v2 watcher: deletes propagate (macOS FSEvents quirk) + multi-universe supervisor
+
+`encode_event` now checks `abs_path.exists()` at flush time. macOS FSEvents sometimes reports `rm` as a `Modify` event rather than `Remove`, which the watcher was classifying as Upserted → tried to read the (now-missing) file → encode returned None → no delta sent → server still had the entry. Fixed: regardless of how notify classified the event, if the file no longer exists at flush time we emit a Deleted delta.
+
+`scripts/co-watch-v2.sh` is the new launchd `ProgramArguments` — supervises one `co-agent-watch` per universe (4 sub-processes), refreshes the session cookie from keychain on 401. Replaces `scripts/co-watch.py` (v1 JSON/REST poll) in `~/Library/LaunchAgents/com.artelonga.co-sync.plist`.
+
+**Verified end-to-end on prod (1.38.3):**
+- Touch a file in `~/projects/co/` → on prod via `GET /entries/<path>` in ~2s
+- Delete the file → 404 on prod in ~4s
+- Zero feedback loop (broadcast filtered by `origin_conn_id`)
+- 4 watchers connected to `wss://co-artelonga.fly.dev/api/v1/sync/ws` (one per universe), supervised by single launchd job
+
 ## [1.38.2] — 2026-05-03
 
 ### Fixed — CO-151 v2 watcher: relativized paths + broke broadcast feedback loop

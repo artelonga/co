@@ -345,6 +345,16 @@ fn encode_event(ev: &WatchEvent, universe_key: &str, ts_ns: i64) -> Option<SyncD
     // entry_path on the wire is the universe-rooted relative path; reads on
     // disk use the absolute path the watcher captured.
     let rel = ev.rel_path.to_string_lossy();
+
+    // macOS FSEvents sometimes reports a `rm` as a Modify event instead of
+    // Remove, so trust the filesystem state at flush time: if the absolute
+    // path no longer exists, emit a Deleted regardless of how notify
+    // classified the event.
+    if !ev.abs_path.exists() {
+        debug!(rel = %rel, kind = "auto-Deleted", "encoding sync delta (path missing)");
+        return Some(codec::deleted_delta(universe_key, &*rel, ts_ns));
+    }
+
     debug!(rel = %rel, abs = %ev.abs_path.display(), kind = ?ev.kind, "encoding sync delta");
 
     match ev.kind {
