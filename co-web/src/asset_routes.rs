@@ -155,49 +155,8 @@ fn require_writer(
     }
 }
 
-/// Returns Ok(()) if the caller may read assets from this universe.
-/// Public/template universes are readable anonymously; private universes
-/// require ownership/membership.
-fn check_reader(state: &AppState, headers: &HeaderMap, universe_key: &str) -> Result<(), AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
-    let universe = storage
-        .get_universe(universe_key)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
-    if universe.is_public || universe.is_template {
-        return Ok(());
-    }
-    drop(storage);
-    let user_id = resolve_user_id(state, headers)
-        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
-    let universe = storage
-        .get_universe(universe_key)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
-    if universe.owner_id == user_id {
-        return Ok(());
-    }
-    let is_member: bool = storage
-        .conn()
-        .query_row(
-            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
-            rusqlite::params![universe_key, &user_id],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-    if is_member {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden(
-            "Not authorized to read assets from this universe".into(),
-        ))
-    }
-}
+// check_reader removed — universe read visibility is enforced by
+// universe_visibility_gate middleware applied in server::build_router (CO-161).
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -358,7 +317,7 @@ pub async fn get_asset(
         return Err(AppError::BadRequest("Malformed sha256".into()));
     }
 
-    check_reader(&state, &headers, &universe_key)?;
+    // Visibility gate enforced by universe_visibility_gate middleware (CO-161).
 
     let etag = format!("\"{sha256}\"");
 
@@ -640,9 +599,8 @@ pub async fn list_assets(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
     Query(q): Query<ListAssetsQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<AssetListResponse>, AppError> {
-    check_reader(&state, &headers, &universe_key)?;
+    // Visibility gate enforced by universe_visibility_gate middleware (CO-161).
 
     let conn = {
         let storage = state
@@ -722,9 +680,8 @@ pub struct TagCount {
 pub async fn list_tags(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<TagCount>>, AppError> {
-    check_reader(&state, &headers, &universe_key)?;
+    // Visibility gate enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
         let storage = state
             .storage

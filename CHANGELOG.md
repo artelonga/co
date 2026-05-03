@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.2] — 2026-05-03
+
+### Refactored — CO-161: visibility gate consolidated into a single tower middleware
+
+Replaced 13 per-handler `check_reader_for_entries` calls (across `entry_routes`, `relation_routes`, `reference_routes`) and the duplicate `asset_routes::check_reader` with a single `universe_visibility_gate` middleware applied once to the combined universe-content router in `server::build_router`. A companion `universe_writer_gate` enforces ownership/membership on all mutating methods (POST/PUT/PATCH/DELETE), closing the latent gap where vault and reference write handlers only checked authentication but not universe membership. New sub-handlers automatically inherit both gates; no per-endpoint boilerplate needed.
+
+Four integration tests added: anon/public → 200, anon/private → 401, owner/private → 200, non-member/private → 403.
+
 ## [1.41.1] — 2026-05-03
 
 ### Fixed — privacy: anonymous reads on private universes were leaking entries

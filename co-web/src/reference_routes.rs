@@ -489,9 +489,8 @@ pub async fn list_references(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
     Query(q): Query<ListRefsQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<ReferenceCard>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &universe_key)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&universe_key)
@@ -569,9 +568,8 @@ pub async fn list_references(
 pub async fn orphan_blobs(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<OrphanBlob>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &universe_key)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
         let storage = lock_storage(&state)?;
         storage
@@ -616,9 +614,8 @@ pub async fn orphan_blobs(
 pub async fn broken_cards(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<BrokenCard>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &universe_key)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let (conn, universe_root) = {
         let storage = lock_storage(&state)?;
         storage
@@ -674,9 +671,8 @@ pub async fn broken_cards(
 pub async fn get_reference(
     State(state): State<AppState>,
     Path((universe_key, path)): Path<(String, String)>,
-    headers: HeaderMap,
 ) -> Result<Json<ReferenceCard>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &universe_key)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
         let storage = lock_storage(&state)?;
         storage
@@ -954,9 +950,8 @@ pub async fn delete_reference(
 pub async fn list_works(
     State(state): State<AppState>,
     Path(universe_key): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<String>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &universe_key)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
         let storage = lock_storage(&state)?;
         storage

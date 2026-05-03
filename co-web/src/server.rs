@@ -333,6 +333,25 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CO-156: Reference content type CRUD ---
     let reference_api = crate::reference_routes::reference_router();
 
+    // --- CO-161: Combine all universe-content sub-routers under a single
+    // visibility gate + writer gate. Every route nested here automatically
+    // inherits the access-control check — no per-handler boilerplate needed.
+    // visibility_gate runs first (outer), writer_gate is inner (write-methods only).
+    let universe_content_api = Router::new()
+        .merge(vault_api)
+        .merge(entry_api)
+        .merge(relation_api)
+        .merge(asset_api)
+        .merge(reference_api)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::universe_writer_gate,
+        ))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::universe_visibility_gate,
+        ));
+
     // --- CO-124: Vercel Log Drain receiver ---
     let log_drain_api = crate::log_drain_routes::router();
 
@@ -407,12 +426,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-142 (Phase A): dev board moved to /api/v1/admin to un-shadow the public universe_api.
         .nest("/api/v1/admin", dev_board_api)
         .nest("/api/v1/universes", universe_api)
-        .nest("/api/v1/universes", vault_api)
-        .nest("/api/v1/universes", entry_api)
-        // CO-153: cross-universe relation queries
-        .nest("/api/v1/universes", relation_api)
-        .nest("/api/v1/universes", asset_api)
-        .nest("/api/v1/universes", reference_api)
+        // CO-161: all universe-content routes under a single visibility + writer gate.
+        .nest("/api/v1/universes", universe_content_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)
         // CO-124: Vercel Log Drain receiver
