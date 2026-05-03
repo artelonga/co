@@ -33,6 +33,7 @@ pub mod quilombo_storage;
 pub mod quilombo_telemetria;
 pub mod rate_limit;
 pub mod relation_index;
+pub mod relation_routes;
 pub mod server;
 pub mod storage;
 pub mod sync_ws;

@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] — 2026-05-03
+
+### Added — CO-153: cross-universe `entry_relations` + `co://` URI resolver
+
+`entry_relations` now carries a `to_universe TEXT` column (NULL = same universe, back-compat). `co://<universe>/<path>` URIs in frontmatter `ref`/`ref_list` fields are parsed by the new `parse_co_uri` resolver and stored with the target universe split out. A `parse_co_uri` backfill runs as per-universe DB migration v7, converting any existing raw `co://` strings stored in `to_path` to the proper `(to_universe, to_path)` split.
+
+Two new relation query endpoints:
+- `GET /api/v1/universes/:slug/relations/inbound?path=<p>` — returns all inbound edges from same-universe AND cross-universe (scans every other universe's DB for `to_universe = slug`).
+- `GET /api/v1/universes/:slug/relations/outbound?path=<p>` — returns outbound edges from `<p>`, including cross-universe edges (`to_universe` non-null).
+
 ## [1.38.11] — 2026-05-03
 
 ### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets
