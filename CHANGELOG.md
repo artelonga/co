@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.1] — 2026-05-03
+
+### Fixed — privacy: anonymous reads on private universes were leaking entries
+
+Surfaced during the readiness review. `/api/v1/universes/<u>/entries` (and sibling read paths `/entries/{path}`, `/entries/tags`, `/entries/tree`, `/manifest`, `/query`, `/citations`, `/citations/orphan-wikilinks`, `/relations/inbound`, `/relations/outbound`, `/references`, `/references/orphan-blobs`, `/references/broken-cards`, `/references/{path}`, `/references/works`) returned 200 with full content when called anonymously, regardless of the universe's `visibility`.
+
+Symptoms confirmed before the fix:
+- `concepts` (private, content_count=8) → 200 + 8 entries to anonymous
+- `languages` (private, content_count=5) → 200 + 5 entries to anonymous
+- `time` (private, content_count=56) → 200 + 56 entries to anonymous
+- `rfq` (private, content_count=206) → 200 + 206 entries to anonymous
+
+Added `entry_routes::check_reader_for_entries(state, headers, universe_key)` mirroring the gate already used by `asset_routes::check_reader`: public/template universes pass through; private universes require an authenticated user who is the owner or has a `universe_members` row. Wired the gate into 13 read handlers across `entry_routes`, `relation_routes`, and `reference_routes`.
+
+After this deploy: anonymous requests on the new topologia universes (`concepts`, `guarani-mbya`, `portuguese`, `yoruba`, `languages`) and `time` and `rfq` return 401; public-subscribable universes (`mbya`, `co`, `artelonga`, `quilomboaraucaria`, `template`) keep returning 200.
+
+A follow-up would be to consolidate the gate into a tower middleware applied once on the `/api/v1/universes/{slug}/...` prefix instead of 13 per-handler calls — files as a future ticket; this fix closes the immediate leak.
+
 ## [1.41.0] — 2026-05-03
 
 ### Added — CO-160: Inline PDF renderer in the SPA (PDF.js)

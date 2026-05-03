@@ -157,6 +157,51 @@ fn accept_protobuf(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
+/// Returns Ok(()) if the caller may read entries from this universe.
+///
+/// Public/template universes are readable anonymously. Private universes
+/// require an authenticated user who is the owner or a `universe_members`
+/// row. Mirrors `asset_routes::check_reader` so `/entries`, `/citations`,
+/// `/references`, and `/assets` all use the same visibility gate.
+pub(crate) fn check_reader_for_entries(
+    state: &AppState,
+    headers: &HeaderMap,
+    universe_key: &str,
+) -> Result<(), AppError> {
+    let storage = lock_storage(state)?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.is_public || universe.is_template {
+        return Ok(());
+    }
+    drop(storage);
+    let user_id = crate::auth::resolve_user_id(state, headers)
+        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
+    let storage = lock_storage(state)?;
+    let universe = storage
+        .get_universe(universe_key)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+    if universe.owner_id == user_id {
+        return Ok(());
+    }
+    let is_member: bool = storage
+        .conn()
+        .query_row(
+            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            rusqlite::params![universe_key, &user_id],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if is_member {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden(
+            "Not authorized to read entries from this universe".into(),
+        ))
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -168,11 +213,9 @@ pub async fn list_entries(
     Query(q): Query<EntryListQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -240,12 +283,11 @@ pub async fn list_entries(
 pub async fn list_entry_tags(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<TagCount>>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -263,12 +305,11 @@ pub async fn entry_tree(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<TreeQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<TreeNode>>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -303,6 +344,7 @@ pub async fn get_entry(
     Query(q): Query<GetEntryQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -668,12 +710,11 @@ pub async fn update_entry(
 pub async fn get_manifest(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<co::manifest::Manifest>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let universe_root = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_root(&slug)
     };
     // CO-79: serve from L1 manifest cache (singleflight on miss).
@@ -802,12 +843,11 @@ pub async fn query_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<QueryDslParams>,
+    headers: HeaderMap,
 ) -> Result<Json<EntryListResponse>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -860,12 +900,11 @@ pub(crate) async fn list_references(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<ReferencesQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<ReferencesResponse>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
         storage.universe_conn(&slug)
     };
     let conn = uc
@@ -891,12 +930,11 @@ pub(crate) async fn list_references(
 pub(crate) async fn list_orphan_wikilinks(
     State(state): State<AppState>,
     Path(slug): Path<String>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<String>>, AppError> {
+    check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
         storage.universe_conn(&slug)
     };
     let conn = uc

@@ -10,6 +10,7 @@
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
+    http::HeaderMap,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
@@ -71,12 +72,11 @@ pub async fn get_inbound_relations(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<RelationQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<InboundRelation>>, AppError> {
+    crate::entry_routes::check_reader_for_entries(&state, &headers, &slug)?;
     let (all_keys, pool): (Vec<String>, Arc<UniversePool>) = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         let keys = storage.all_universe_keys();
         let pool = Arc::clone(&storage.universe_pool);
         (keys, pool)
@@ -144,12 +144,11 @@ pub async fn get_outbound_relations(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<RelationQuery>,
+    headers: HeaderMap,
 ) -> Result<Json<Vec<OutboundRelation>>, AppError> {
+    crate::entry_routes::check_reader_for_entries(&state, &headers, &slug)?;
     let uc = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         storage.universe_conn(&slug)
     };
     let conn = uc
