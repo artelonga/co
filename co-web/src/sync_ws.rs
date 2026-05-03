@@ -55,13 +55,25 @@ struct LoggedFrame {
     encoded: Vec<u8>,
 }
 
+/// Broadcast payload — encoded SyncBatch tagged with its originator so
+/// receivers can skip echo-to-self (CO-151 fix: prevents the watcher feedback
+/// loop where a client wrote a file → sent SyncDelta → received the broadcast
+/// back → applied it → notify fired again → loop forever).
+#[derive(Clone)]
+pub struct BroadcastFrame {
+    pub origin_conn_id: u64,
+    pub encoded: Vec<u8>,
+}
+
 pub struct SyncRoom {
     /// Broadcast channel for downlink frames.
-    pub tx: broadcast::Sender<Vec<u8>>,
+    pub tx: broadcast::Sender<BroadcastFrame>,
     /// Monotonically increasing resume token.
     pub next_token: AtomicU64,
     /// Ordered log of encoded frames (oldest first).
     delta_log: RwLock<VecDeque<LoggedFrame>>,
+    /// Monotonically increasing per-room connection id (assigned at handshake).
+    next_conn_id: AtomicU64,
 }
 
 impl SyncRoom {
@@ -71,7 +83,13 @@ impl SyncRoom {
             tx,
             next_token: AtomicU64::new(1),
             delta_log: RwLock::new(VecDeque::new()),
+            next_conn_id: AtomicU64::new(1),
         }
+    }
+
+    /// Assign a fresh connection id; used to filter echo-to-self in broadcast.
+    fn next_connection_id(&self) -> u64 {
+        self.next_conn_id.fetch_add(1, Ordering::AcqRel)
     }
 
     async fn append_frame(&self, encoded: Vec<u8>) -> u64 {
@@ -182,6 +200,7 @@ async fn handle_sync_socket(
 ) {
     let room = get_or_create_room(&state, &universe_key).await;
     let mut broadcast_rx = room.tx.subscribe();
+    let conn_id = room.next_connection_id();
 
     let (mut sink, mut stream) = socket.split();
     let (send_tx, mut send_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
@@ -232,7 +251,7 @@ async fn handle_sync_socket(
                 match msg {
                     Some(Ok(Message::Binary(data))) => {
                         last_heard_from = Instant::now();
-                        handle_uplink(&data, &room, &state, &universe_key).await;
+                        handle_uplink(&data, &room, &state, &universe_key, conn_id).await;
                     }
                     Some(Ok(Message::Pong(_))) => {
                         last_heard_from = Instant::now();
@@ -249,7 +268,13 @@ async fn handle_sync_socket(
             result = broadcast_rx.recv() => {
                 match result {
                     Ok(frame) => {
-                        let _ = send_tx.send(Message::Binary(frame.into()));
+                        // Skip echo-to-self: the originating client already
+                        // has the change applied locally; broadcasting it
+                        // back triggers a feedback loop in fs-watching clients.
+                        if frame.origin_conn_id == conn_id {
+                            continue;
+                        }
+                        let _ = send_tx.send(Message::Binary(frame.encoded.into()));
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("sync-ws lagged {n} messages: user={user_id}");
@@ -276,7 +301,13 @@ async fn handle_sync_socket(
 // Uplink processing
 // ---------------------------------------------------------------------------
 
-async fn handle_uplink(data: &[u8], room: &Arc<SyncRoom>, state: &AppState, universe_key: &str) {
+async fn handle_uplink(
+    data: &[u8],
+    room: &Arc<SyncRoom>,
+    state: &AppState,
+    universe_key: &str,
+    origin_conn_id: u64,
+) {
     let batch = match delta::decode_batch(data) {
         Ok(b) => b,
         Err(e) => {
@@ -287,7 +318,9 @@ async fn handle_uplink(data: &[u8], room: &Arc<SyncRoom>, state: &AppState, univ
 
     apply_deltas_to_storage(&batch, state, universe_key);
 
-    // Log + broadcast with updated resume_token.
+    // Log + broadcast with updated resume_token. Tag with the originator's
+    // conn_id so other receivers can ignore (CO-151 fix for the watcher
+    // feedback loop).
     let token = room.append_frame(data.to_vec()).await;
 
     let mut downlink = batch.clone();
@@ -295,7 +328,10 @@ async fn handle_uplink(data: &[u8], room: &Arc<SyncRoom>, state: &AppState, univ
 
     match delta::encode_batch(&downlink) {
         Ok(encoded) => {
-            let _ = room.tx.send(encoded);
+            let _ = room.tx.send(BroadcastFrame {
+                origin_conn_id,
+                encoded,
+            });
         }
         Err(e) => warn!("sync-ws encode downlink failed: {e}"),
     }

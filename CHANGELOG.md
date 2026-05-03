@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.2] — 2026-05-03
+
+### Fixed — CO-151 v2 watcher: relativized paths + broke broadcast feedback loop
+
+Three bugs surfaced when running the v2 watcher end-to-end against prod:
+
+1. **`tokio::task::spawn_blocking` killed `notify` on macOS.** FSEvents needs a thread with a CFRunLoop that lives for the whole stream; tokio's blocking pool tears those down. Switched to `std::thread::spawn`.
+2. **Watcher sent absolute paths in `entry_path`** (e.g. `/Users/artelonga/co-watch-test/foo.md`). Server's `universe_root.join(absolute)` → still absolute, so writes landed outside the universe dir and `GET /entries/{rel}` returned 404. Reshaped `WatchEvent` into `{abs_path, rel_path, kind}` so the wire carries the relative path while disk reads still resolve via the absolute one. Added `relativize()` + `is_syncable()` filters.
+3. **Server broadcast back to the originating client.** The watcher then ran `apply_batch` → wrote the file locally → `notify` fired → another upload → infinite loop. Added `BroadcastFrame { origin_conn_id, encoded }` and a per-room monotonic `next_conn_id`; the broadcast receiver loop skips frames where `origin_conn_id == self`. End-to-end loop count now bounded at 1.
+
+Watcher tests updated for the new `WatchEvent` fields (7 pass). Server `sync_ws` tests still green (8 pass). Verified end-to-end on prod: write file → on prod via `GET /entries/<rel>` in <1s; no feedback loop in `~/.co/watch.log` after fix.
+
 ## [1.38.1] — 2026-05-03
 
 ### Fixed — CO-151 sync server now actually persists deltas

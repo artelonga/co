@@ -120,12 +120,21 @@ impl SyncWatcher {
         // Channel: notify → uplink sender
         let (event_tx, mut event_rx) = mpsc::unbounded_channel::<Vec<WatchEvent>>();
 
-        // Spawn the filesystem watcher in a blocking thread.
+        // Spawn the filesystem watcher on a dedicated OS thread, NOT tokio's
+        // blocking pool. notify's macOS backend (FSEvents) needs a thread with
+        // a CFRunLoop that lives for the whole stream — tokio::task::spawn_
+        // blocking pool threads can be torn down between blocking calls and
+        // FSEvents stops delivering events. Empirically, with spawn_blocking
+        // the same notify config that works in a `cargo run` standalone
+        // delivers zero events when wrapped in tokio.
         let dirs = self.config.watch_dirs.clone();
         let universe_key = self.config.universe_key.clone();
         let tx = event_tx.clone();
-        let _watcher_handle =
-            tokio::task::spawn_blocking(move || watch_dirs_blocking(dirs, universe_key, tx));
+        let _watcher_handle = std::thread::spawn(move || {
+            if let Err(e) = watch_dirs_blocking(dirs, universe_key, tx) {
+                warn!("filesystem watcher thread exited: {e:#}");
+            }
+        });
 
         let universe_key = self.config.universe_key.clone();
         loop {
@@ -182,7 +191,11 @@ impl SyncWatcher {
 
 #[derive(Debug)]
 pub struct WatchEvent {
-    pub path: PathBuf,
+    /// Absolute path on the local filesystem (used for std::fs::read).
+    pub abs_path: PathBuf,
+    /// Path relative to the universe root that this watch is rooted at
+    /// (used as `entry_path` on the wire so the server can resolve it).
+    pub rel_path: PathBuf,
     pub kind: WatchEventKind,
 }
 
@@ -196,6 +209,44 @@ pub enum WatchEventKind {
 // Blocking watcher (runs in its own thread)
 // ---------------------------------------------------------------------------
 
+/// Convert an absolute path emitted by `notify` to a path relative to the
+/// first watch root that contains it.
+fn relativize(absolute: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
+    let canon = absolute.canonicalize().ok();
+    let target = canon.as_deref().unwrap_or(absolute);
+    for root in roots {
+        let canon_root = root.canonicalize().ok();
+        let r = canon_root.as_deref().unwrap_or(root);
+        if let Ok(rel) = target.strip_prefix(r) {
+            return Some(rel.to_path_buf());
+        }
+    }
+    None
+}
+
+/// True if the file's extension marks it as content we sync. Cuts down on
+/// notify spam from .DS_Store, .swp, .git/index, etc.
+fn is_syncable(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    if name.starts_with('.') {
+        return false;
+    }
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    matches!(
+        ext.as_deref(),
+        Some("md")
+            | Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg")
+            | Some("mp4" | "mov" | "webm")
+            | Some("mp3" | "wav" | "ogg" | "m4a")
+            | Some("pdf"),
+    )
+}
+
 fn watch_dirs_blocking(
     dirs: Vec<PathBuf>,
     universe_key: String,
@@ -203,17 +254,21 @@ fn watch_dirs_blocking(
 ) -> Result<()> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel();
 
-    let mut watcher =
-        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| {
-            if let Ok(ev) = res {
+    let mut watcher = notify::recommended_watcher(
+        move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(ev) => {
+                debug!(?ev, "raw notify event");
                 let _ = raw_tx.send(ev);
             }
-        })?;
+            Err(e) => warn!("notify error: {e}"),
+        },
+    )?;
 
     for dir in &dirs {
         watcher.watch(dir, RecursiveMode::Recursive)?;
         info!(dir = %dir.display(), universe = %universe_key, "watching");
     }
+    info!("filesystem watcher loop entered");
 
     // Debounce loop: collect events over DEBOUNCE_MS windows.
     let debounce = Duration::from_millis(DEBOUNCE_MS);
@@ -223,6 +278,9 @@ fn watch_dirs_blocking(
         match raw_rx.recv_timeout(debounce) {
             Ok(ev) => {
                 for path in ev.paths {
+                    if !is_syncable(&path) {
+                        continue;
+                    }
                     use notify::EventKind;
                     let kind = match ev.kind {
                         EventKind::Remove(_) => WatchEventKind::Deleted,
@@ -233,11 +291,22 @@ fn watch_dirs_blocking(
             }
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
                 if !pending.is_empty() {
+                    // CO-151 fix: server expects entry_path relative to the
+                    // universe root (e.g. "notes/hello.md"), not the absolute
+                    // path notify emits. Carry both: rel_path for the wire,
+                    // abs_path so encode_event can still read the file.
                     let batch: Vec<WatchEvent> = pending
                         .drain()
-                        .map(|(path, kind)| WatchEvent { path, kind })
+                        .filter_map(|(abs, kind)| {
+                            let rel = relativize(&abs, &dirs)?;
+                            Some(WatchEvent {
+                                abs_path: abs,
+                                rel_path: rel,
+                                kind,
+                            })
+                        })
                         .collect();
-                    if tx.send(batch).is_err() {
+                    if !batch.is_empty() && tx.send(batch).is_err() {
                         break; // receiver dropped — exit watcher
                     }
                 }
@@ -273,16 +342,19 @@ fn build_batch(events: &[WatchEvent], universe_key: &str) -> SyncBatch {
 }
 
 fn encode_event(ev: &WatchEvent, universe_key: &str, ts_ns: i64) -> Option<SyncDelta> {
-    let path_str = ev.path.to_string_lossy();
+    // entry_path on the wire is the universe-rooted relative path; reads on
+    // disk use the absolute path the watcher captured.
+    let rel = ev.rel_path.to_string_lossy();
+    debug!(rel = %rel, abs = %ev.abs_path.display(), kind = ?ev.kind, "encoding sync delta");
 
     match ev.kind {
-        WatchEventKind::Deleted => Some(codec::deleted_delta(universe_key, &*path_str, ts_ns)),
+        WatchEventKind::Deleted => Some(codec::deleted_delta(universe_key, &*rel, ts_ns)),
         WatchEventKind::Upserted => {
-            let content = std::fs::read(&ev.path).ok()?;
+            let content = std::fs::read(&ev.abs_path).ok()?;
             let sha256 = hex::encode(Sha256::digest(&content));
             Some(codec::upserted_delta(
                 universe_key,
-                &*path_str,
+                &*rel,
                 content,
                 sha256,
                 ts_ns,
@@ -353,7 +425,8 @@ mod tests {
         std::fs::write(&path, b"# Hello world").unwrap();
 
         let ev = WatchEvent {
-            path: path.clone(),
+            abs_path: path.clone(),
+            rel_path: path.clone(),
             kind: WatchEventKind::Upserted,
         };
         let delta = encode_event(&ev, "my-universe", 1_000_000).unwrap();
@@ -379,7 +452,8 @@ mod tests {
         let path = tmp.path().join("gone.md");
 
         let ev = WatchEvent {
-            path: path.clone(),
+            abs_path: path.clone(),
+            rel_path: path.clone(),
             kind: WatchEventKind::Deleted,
         };
         let delta = encode_event(&ev, "u", 999).unwrap();
@@ -400,11 +474,13 @@ mod tests {
 
         let events = vec![
             WatchEvent {
-                path: p1,
+                abs_path: p1.clone(),
+                rel_path: p1,
                 kind: WatchEventKind::Upserted,
             },
             WatchEvent {
-                path: p2,
+                abs_path: p2.clone(),
+                rel_path: p2,
                 kind: WatchEventKind::Upserted,
             },
         ];
@@ -496,7 +572,8 @@ mod tests {
         std::fs::write(&path, b"content").unwrap();
 
         let ev = WatchEvent {
-            path,
+            abs_path: path.clone(),
+            rel_path: path,
             kind: WatchEventKind::Upserted,
         };
         let batch = build_batch(&[ev], "u");
