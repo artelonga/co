@@ -16,11 +16,21 @@ LOG="$HOME/.co/watch-v2.log"
 WATCH_BIN="$HOME/.cargo/bin/co-agent-watch"
 
 # (slug, watch_dir) — single watcher per universe.
+#
+# Topologia is split into 4 universes (concepts + 3 language planes) per
+# its README — each is its own CO universe key matching a sub-directory.
+# mbya is the Arandu Mbyá Guarani lexicon project (separate from topologia/
+# guarani-mbya/ which is a shallow cross-language anchor layer above it).
 REPOS=(
     "quilomboaraucaria|$HOME/projects/quilomboaraucaria"
     "artelonga|$HOME/projects/ArteLonga"
     "rfq|$HOME/projects/rfq-gateway"
     "co|$HOME/projects/co"
+    "mbya|$HOME/projects/mbya"
+    "concepts|$HOME/projects/topologia/concepts"
+    "guarani-mbya|$HOME/projects/topologia/guarani-mbya"
+    "portuguese|$HOME/projects/topologia/portuguese"
+    "yoruba|$HOME/projects/topologia/yoruba"
 )
 
 mkdir -p "$HOME/.co"

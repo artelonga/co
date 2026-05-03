@@ -5,6 +5,33 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.7] — 2026-05-03
+
+### Added — meaning-topology universes (mbya + topologia 4-plane) into sync
+
+`seed_admin_content_universes` now creates 5 new public-subscribable universes on every prod boot:
+
+| Key | Source | Purpose |
+|---|---|---|
+| `mbya` | `~/projects/mbya/` | Arandu Mbyá Guarani lexicon (Rust workspace + content) |
+| `concepts` | `~/projects/topologia/concepts/` | Language-agnostic meaning anchors |
+| `guarani-mbya` | `~/projects/topologia/guarani-mbya/` | Mbyá Guarani term plane (cross-language layer above Arandu) |
+| `portuguese` | `~/projects/topologia/portuguese/` | Portuguese term plane |
+| `yoruba` | `~/projects/topologia/yoruba/` | Yoruba term plane |
+
+`scripts/co-watch-v2.sh` REPOS array now spawns one watcher per universe (9 total). Local edits to any of the 5 new repos sync to prod via the CO-151 protobuf+WS path.
+
+### Added — `topologia/` becomes a Rust workspace
+
+Created `topologia/Cargo.toml` + `topologia/crates/topologia-core/` — a no-I/O crate of shared types (`Term`, `Concept`, `LanguagePlane` trait, `ConceptPlane` trait, `TranslationLink`) that **mbya** (Arandu) and **co** can both add as a path dependency. The crate documents the two distinct i18n patterns:
+
+1. **Language as universe** (lexicon model) — each language is a CO universe, every entry is a `term`, cross-language linking via `co://concepts/<key>.md` URIs.
+2. **Language as frontmatter field** (translation model) — any user's entry can carry `language: <code>` plus a `translation_of: { universe, path, canonical_language }` link to the canonical.
+
+Adapter crates (`topologia-co-adapter`, `topologia-mbya-adapter`) are filed as future work — `topologia-core` is content-shape-only and ships first so consumers can settle on the canonical types.
+
+`topologia/_template-language/` is a copy-and-rename template (`{{LANG_NAME}}` / `{{LANG_CODE}}` placeholders) for adding new language planes; `topologia/docs/i18n-patterns.md` walks through both patterns and when to use each.
+
 ## [1.38.6] — 2026-05-03
 
 ### Added — web→local sync direction (CO-151 second leg)

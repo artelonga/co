@@ -4510,6 +4510,40 @@ impl Storage {
                 "Board público do Co — roadmap, releases e decisões",
                 "public-subscribable",
             ),
+            // CO-141: meaning-topology universes. Each language plane is its
+            // own universe key; `concepts` is the language-agnostic anchor
+            // plane; `mbya` is the Arandu Mbyá Guarani lexicon (separate from
+            // the shallow `guarani-mbya` cross-language plane).
+            (
+                "mbya",
+                "Arandu — Mbyá Guarani",
+                "Lexicon and learning content for Mbyá Guarani (Arandu project)",
+                "public-subscribable",
+            ),
+            (
+                "concepts",
+                "Concepts (topologia)",
+                "Language-agnostic meaning anchors — the meta plane onto which language-specific terms project",
+                "public-subscribable",
+            ),
+            (
+                "guarani-mbya",
+                "Guarani Mbyá (topologia)",
+                "Mbyá Guarani term plane — shallow cross-language anchor layer above the Arandu lexicon",
+                "public-subscribable",
+            ),
+            (
+                "portuguese",
+                "Portuguese (topologia)",
+                "Portuguese term plane in the meaning-topology",
+                "public-subscribable",
+            ),
+            (
+                "yoruba",
+                "Yoruba (topologia)",
+                "Yoruba term plane in the meaning-topology",
+                "public-subscribable",
+            ),
         ] {
             let _ = self.conn.execute(
                 "INSERT OR IGNORE INTO universes \
