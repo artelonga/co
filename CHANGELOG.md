@@ -5,6 +5,36 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.11] — 2026-05-03
+
+### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets
+
+A 7th private universe `time` for every time-stamped event the system knows about — astronomical (`moon-phase`, `eclipse`, `equinox`, `solstice`), generic (`event`), and internal (`telemetry-event`). One queryable timeline; `at_iso` is the canonical sort key. Lives at `~/projects/time/`.
+
+Manifest declares 6 content_types and the supporting properties: `at_iso` (UTC instant), `at_local` (wall-clock), `duration_seconds` (for events with extent), `geo` (lat/lon/region/timezone), `source` + `source_url`, `kind` (sub-type tag for SPA rendering), and the telemetry-specific `related_universe` / `related_entry_path` / `actor_id` / `deployment_version` / `extra` fields.
+
+Scaffolded skeleton:
+
+- `time/_universe.yaml` — manifest with the 6 content types
+- `time/index.md` — universe home explaining "why one universe, not many"
+- `time/README.md` — directory layout and source-of-truth policy
+- `time/templates/{event, moon-phase, telemetry-event}.md` — copy-and-edit templates
+- `time/moon-phases/2026/2026-01-13-new.md` — first hand-authored INMET phase (will be replaced by CO-159's importer)
+
+### Added — Cadogan / ayvu-rapyta reference card
+
+`mbya/refs/ayvu-rapyta-cadogan.md` — reference card for León Cadogan's *Ayvu Rapyta: Textos míticos de los Mbyá Guaraní del Guairá* (1959). Demonstrates the `secondary_source: true` + `canonical_source: indigenous-mbya-knowledge-keepers` distinction that CO-158 will turn into a first-class chain-of-custody schema. Identifies 7 Mbyá terms likely to be cross-referenced once the body is read (ayvu, ayvu-rapyta, ñe'ẽ, ñamandu, tenondé, jaryi, kuaray).
+
+### Filed — CO-157, CO-158, CO-159
+
+Three follow-up tickets for the patterns this work surfaces:
+
+- **CO-157** — PDF metadata extraction tool (`scripts/extract-pdf-meta.py`); read the PDF's /Info dict + first-page heuristics + DOI regex + sha256 to auto-populate the reference card. Reduces "drop a PDF, run, review and commit" friction.
+- **CO-158** — Reference versioning. Same conceptual work (`work_id`) → multiple concrete artifacts (`editions[]`); each edition has its own sha256, pages, language, editor_notes, seed_status. Plus `primary_source_chain` documenting layers of mediation between original phenomenon and cited document — the schema honestly captures "this is a digital scan of a 1992 reprint of a 1959 transcription of 1940s field recordings."
+- **CO-159** — INMET moon-phase importer; scrapes `portal.inmet.gov.br/paginas/luas` and emits one `.md` per phase into `time/moon-phases/<year>/`. Idempotent re-runs. Cross-year support out of the box.
+
+`time` is `visibility: private`; admin gets membership via the same `system_keys` list as the topologia universes.
+
 ## [1.38.10] — 2026-05-03
 
 ### Fixed — admin gets membership in mbya + topologia universes

@@ -32,6 +32,7 @@ REPOS=(
     "portuguese|$HOME/projects/topologia/portuguese"
     "yoruba|$HOME/projects/topologia/yoruba"
     "languages|$HOME/projects/topologia/languages"
+    "time|$HOME/projects/time"
 )
 
 mkdir -p "$HOME/.co"

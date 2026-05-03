@@ -2808,6 +2808,7 @@ impl Storage {
             "portuguese",
             "yoruba",
             "languages",
+            "time",
         ];
         let now = Utc::now().to_rfc3339();
         let mut added = 0usize;
@@ -4561,6 +4562,12 @@ impl Storage {
                 "languages",
                 "Languages catalog (topologia)",
                 "Centralized queryable index of every language plane — code, family, Glottolog/SAPhon authority links, geographic centroid, speaker estimate, and cross-ref to the term plane",
+                "private",
+            ),
+            (
+                "time",
+                "Time — earth, sky, and system events",
+                "Time-stamped events: astronomical phenomena (moon phases, eclipses, equinoxes), earth-time milestones, AND internal CRUD/telemetry events from the universal envelope (CO-156). One queryable timeline.",
                 "private",
             ),
         ] {
