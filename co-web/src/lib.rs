@@ -35,6 +35,7 @@ pub mod rate_limit;
 pub mod relation_index;
 pub mod server;
 pub mod storage;
+pub mod sync_ws;
 pub mod telemetry;
 pub mod theme_engine;
 pub mod uat_mirror;

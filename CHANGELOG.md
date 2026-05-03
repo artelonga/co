@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] — 2026-05-03
+
+### Added — CO-151: real-time delta sync — protobuf SyncDelta over WebSocket with zstd
+
+Bidirectional file-sync channel that streams deltas in a compact binary format, replacing the v1 JSON/REST poll approach in `scripts/co-watch.py`.
+
+**Wire format** (`core/proto/sync.proto`):
+- `SyncDelta` — one change (upserted / deleted / renamed) with a `CoFile` content envelope
+- `SyncBatch` — batched deltas with resume token for reconnect replay
+
+**Server** (`co-web/src/sync_ws.rs`):
+- Route: `GET /api/v1/sync/ws?universe=<key>` (JWT or session cookie auth)
+- Per-universe `SyncRoom` with 24h in-memory delta log for `X-Sync-Resume` replay
+- Broadcast fan-out to all connected clients in the same universe
+
+**Client** (`co-agent/src/watcher.rs`):
+- FSEvents (macOS) / inotify (Linux) via `notify` crate with 200ms debounce
+- Encodes local changes as `SyncDelta` and ships over the WS uplink
+- Applies server-pushed downlinks to local files (last-write-wins)
+
+**Compression** (`core/src/sync/delta.rs`):
+- zstd level 3; placeholder for a ~32 KB training dictionary (CO-151 follow-up)
+- proto+zstd wire bytes < JSON equivalent in all tests
+
+**Migration**: `scripts/co-watch.py` (v1) stays operational; `scripts/co-sync-v2.plist` provides the replacement launchd configuration once `co-agent-watch` is deployed.
+
 ## [1.37.3] — 2026-05-03
 
 ### Fixed — `If-None-Match` short-circuit ran before existence check on `GET /assets/:sha`

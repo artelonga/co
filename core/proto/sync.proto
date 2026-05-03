@@ -1,0 +1,36 @@
+syntax = "proto3";
+package co.v1;
+
+import "co.proto";
+
+// One delta = one logical change to one logical file.
+message SyncDelta {
+    string universe_key = 1;
+    string entry_path   = 2;
+    int64  client_ts_ns = 3;  // when the client observed the change
+
+    enum Kind {
+        UNSPECIFIED = 0;
+        UPSERTED    = 1;  // new or modified
+        DELETED     = 2;
+        RENAMED     = 3;  // path changed; sha256 same
+    }
+    Kind kind = 4;
+
+    oneof body {
+        co.v1.CoFile cofile   = 10;  // full content (CO-86 envelope)
+        string       blob_ref = 11;  // sha256 — for content-addressed dedup
+        bytes        patch    = 12;  // diff against last_known_sha256 (future)
+    }
+
+    string last_known_sha256 = 20;
+    string new_sha256        = 21;
+}
+
+// Client→server batch (uplink) and server→client batch (downlink).
+message SyncBatch {
+    repeated SyncDelta deltas      = 1;
+    string             client_id   = 2;
+    int64              batch_ts_ns = 3;
+    int64              resume_token = 4;  // server tells client where to resume on reconnect
+}

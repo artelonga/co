@@ -55,6 +55,8 @@ pub struct AppStateInner {
     pub plugin_registry: game_core::plugin::PluginRegistry,
     /// CRDT document rooms — keyed by `"slug:doc_path"`.
     pub doc_rooms: crate::ws::DocRoomManager,
+    /// CO-151: protobuf SyncDelta rooms — keyed by universe_key.
+    pub sync_rooms: crate::sync_ws::SyncRoomManager,
     /// CO-79: in-process LRU caching layer (manifest, theme CSS, query results).
     pub cache: std::sync::Arc<crate::cache::CacheLayer>,
     /// CO-80: token-bucket rate limiter shared across request handlers.
@@ -340,6 +342,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CRDT WebSocket route (no body limit, no auth middleware — auth done inside) ---
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
 
+    // --- CO-151: SyncDelta WebSocket route ---
+    let sync_ws_route =
+        Router::new().route("/api/v1/sync/ws", get(crate::sync_ws::sync_ws_handler));
+
     // --- /co landing + universe routes (serve index.html for SPA routing) ---
     let co_routes = Router::new()
         .route("/co", get(serve_co_index))
@@ -359,6 +365,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     let mut router = Router::new()
         .merge(ws_route)
+        .merge(sync_ws_route)
         .merge(co_routes)
         // CO-105: /admin page — server-side auth, must precede the fallback
         .route("/admin", get(crate::admin_routes::serve_admin_page))
@@ -865,6 +872,7 @@ pub async fn start_server(config: WebConfig) {
         game_storage,
         plugin_registry,
         doc_rooms: crate::ws::new_room_manager(),
+        sync_rooms: crate::sync_ws::new_sync_room_manager(),
         cache: crate::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         wae,
@@ -2034,6 +2042,7 @@ mod tests {
             game_storage,
             plugin_registry: game_core::plugin::PluginRegistry::new(),
             doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: crate::sync_ws::new_sync_room_manager(),
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),

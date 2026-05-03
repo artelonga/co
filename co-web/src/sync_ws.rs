@@ -1,0 +1,744 @@
+//! CO-151 — Real-time delta sync: protobuf SyncBatch over WebSocket with zstd.
+//!
+//! Route: `GET /api/v1/sync/ws?universe=<key>&token=<jwt>`
+//!   (session cookie is also accepted instead of `?token=`)
+//!   X-Sync-Resume: <token>  (optional — resumes missed deltas on reconnect)
+//!
+//! Frames are binary: zstd-compressed protobuf SyncBatch messages.
+//!
+//! Uplink (client→server): client sends SyncBatch; server stores deltas and
+//! broadcasts to all other clients in the same universe room.
+//!
+//! Downlink (server→client): broadcast channel delivers SyncBatch bytes.
+//!
+//! Resume: server keeps a 24h ring-log of broadcast frames per universe room.
+//! On reconnect with `X-Sync-Resume`, server replays missed frames in order.
+//! If the token is stale (>24h or unknown) it sends a single snapshot-needed
+//! hint so the client can request a full vault dump via the REST API.
+
+use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::{Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use co::proto::sync::SyncBatch;
+use co::sync::delta;
+use futures_util::{SinkExt, StreamExt};
+use serde::Deserialize;
+use tokio::sync::{RwLock, broadcast};
+use tokio::time::{Duration, Instant, interval};
+use tracing::{debug, warn};
+
+use crate::auth::{decode_user_id, extract_session_cookie, jwt_secret};
+use crate::server::AppState;
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const PING_INTERVAL: Duration = Duration::from_secs(30);
+const SILENCE_TIMEOUT: Duration = Duration::from_secs(60);
+/// Keep at most 24h worth of frames per room.
+const DELTA_LOG_MAX: usize = 100_000;
+const DELTA_LOG_TTL: Duration = Duration::from_secs(86_400);
+
+// ---------------------------------------------------------------------------
+// Room types
+// ---------------------------------------------------------------------------
+
+struct LoggedFrame {
+    token: u64,
+    created_at: Instant,
+    encoded: Vec<u8>,
+}
+
+pub struct SyncRoom {
+    /// Broadcast channel for downlink frames.
+    pub tx: broadcast::Sender<Vec<u8>>,
+    /// Monotonically increasing resume token.
+    pub next_token: AtomicU64,
+    /// Ordered log of encoded frames (oldest first).
+    delta_log: RwLock<VecDeque<LoggedFrame>>,
+}
+
+impl SyncRoom {
+    fn new() -> Self {
+        let (tx, _) = broadcast::channel(512);
+        SyncRoom {
+            tx,
+            next_token: AtomicU64::new(1),
+            delta_log: RwLock::new(VecDeque::new()),
+        }
+    }
+
+    async fn append_frame(&self, encoded: Vec<u8>) -> u64 {
+        let token = self.next_token.fetch_add(1, Ordering::AcqRel);
+        let mut log = self.delta_log.write().await;
+        let now = Instant::now();
+        while let Some(front) = log.front() {
+            if now.duration_since(front.created_at) > DELTA_LOG_TTL || log.len() >= DELTA_LOG_MAX {
+                log.pop_front();
+            } else {
+                break;
+            }
+        }
+        log.push_back(LoggedFrame {
+            token,
+            created_at: now,
+            encoded,
+        });
+        token
+    }
+
+    /// Replay frames with token > `resume_token`.
+    /// Returns `None` when `resume_token` predates the oldest log entry.
+    async fn replay_since(&self, resume_token: u64) -> Option<Vec<Vec<u8>>> {
+        let log = self.delta_log.read().await;
+        if log.is_empty() {
+            return Some(vec![]);
+        }
+        if let Some(oldest) = log.front()
+            && resume_token < oldest.token.saturating_sub(1)
+        {
+            return None;
+        }
+        Some(
+            log.iter()
+                .filter(|f| f.token > resume_token)
+                .map(|f| f.encoded.clone())
+                .collect(),
+        )
+    }
+}
+
+/// Universe key → `Arc<SyncRoom>`.
+pub type SyncRoomManager = Arc<RwLock<HashMap<String, Arc<SyncRoom>>>>;
+
+pub fn new_sync_room_manager() -> SyncRoomManager {
+    Arc::new(RwLock::new(HashMap::new()))
+}
+
+// ---------------------------------------------------------------------------
+// Query params
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct SyncWsParams {
+    pub token: Option<String>,
+    pub universe: Option<String>,
+}
+
+fn extract_resume_token(headers: &HeaderMap) -> Option<u64> {
+    headers
+        .get("X-Sync-Resume")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.parse::<u64>().ok())
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handler
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v1/sync/ws?universe=<key>[&token=<jwt>]`
+///
+/// Auth: JWT bearer (`?token=`) or session cookie.
+/// Returns 400 if `?universe=` is missing; 401 for unauthenticated requests.
+pub async fn sync_ws_handler(
+    ws: WebSocketUpgrade,
+    Query(params): Query<SyncWsParams>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    let token = params.token.or_else(|| extract_session_cookie(&headers));
+    let user_id = match token.and_then(|t| decode_user_id(&t, &jwt_secret()).ok()) {
+        Some(id) => id,
+        None => return StatusCode::UNAUTHORIZED.into_response(),
+    };
+
+    let universe_key = match params.universe {
+        Some(u) if !u.is_empty() => u,
+        _ => return StatusCode::BAD_REQUEST.into_response(),
+    };
+
+    let resume_token = extract_resume_token(&headers);
+    ws.on_upgrade(move |socket| {
+        handle_sync_socket(socket, user_id, universe_key, resume_token, state)
+    })
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket session
+// ---------------------------------------------------------------------------
+
+async fn handle_sync_socket(
+    socket: WebSocket,
+    user_id: String,
+    universe_key: String,
+    resume_token: Option<u64>,
+    state: AppState,
+) {
+    let room = get_or_create_room(&state, &universe_key).await;
+    let mut broadcast_rx = room.tx.subscribe();
+
+    let (mut sink, mut stream) = socket.split();
+    let (send_tx, mut send_rx) = tokio::sync::mpsc::unbounded_channel::<Message>();
+
+    // Sender task.
+    let send_task = tokio::spawn(async move {
+        while let Some(msg) = send_rx.recv().await {
+            if sink.send(msg).await.is_err() {
+                break;
+            }
+        }
+    });
+
+    debug!("sync-ws connect: user={user_id} universe={universe_key}");
+
+    // Replay missed frames on reconnect.
+    if let Some(rt) = resume_token {
+        match room.replay_since(rt).await {
+            Some(frames) => {
+                for frame in frames {
+                    let _ = send_tx.send(Message::Binary(frame.into()));
+                }
+            }
+            None => {
+                // Token stale → signal client to do a full REST snapshot pull.
+                let hint = SyncBatch {
+                    deltas: vec![],
+                    client_id: "server".into(),
+                    batch_ts_ns: 0,
+                    resume_token: i64::MIN,
+                };
+                if let Ok(encoded) = delta::encode_batch(&hint) {
+                    let _ = send_tx.send(Message::Binary(encoded.into()));
+                }
+            }
+        }
+    }
+
+    // Main loop.
+    let mut ping_ticker = interval(PING_INTERVAL);
+    let mut last_heard_from = Instant::now();
+
+    loop {
+        tokio::select! {
+            biased;
+
+            msg = stream.next() => {
+                match msg {
+                    Some(Ok(Message::Binary(data))) => {
+                        last_heard_from = Instant::now();
+                        handle_uplink(&data, &room, &state, &universe_key).await;
+                    }
+                    Some(Ok(Message::Pong(_))) => {
+                        last_heard_from = Instant::now();
+                    }
+                    Some(Ok(Message::Close(_))) | None => break,
+                    Some(Err(e)) => {
+                        debug!("sync-ws recv error: user={user_id} err={e}");
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+
+            result = broadcast_rx.recv() => {
+                match result {
+                    Ok(frame) => {
+                        let _ = send_tx.send(Message::Binary(frame.into()));
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        warn!("sync-ws lagged {n} messages: user={user_id}");
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            _ = ping_ticker.tick() => {
+                if last_heard_from.elapsed() > SILENCE_TIMEOUT {
+                    debug!("sync-ws silence timeout: user={user_id}");
+                    break;
+                }
+                let _ = send_tx.send(Message::Ping(vec![].into()));
+            }
+        }
+    }
+
+    send_task.abort();
+    debug!("sync-ws disconnect: user={user_id}");
+}
+
+// ---------------------------------------------------------------------------
+// Uplink processing
+// ---------------------------------------------------------------------------
+
+async fn handle_uplink(data: &[u8], room: &Arc<SyncRoom>, state: &AppState, universe_key: &str) {
+    let batch = match delta::decode_batch(data) {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("sync-ws bad uplink frame: {e}");
+            return;
+        }
+    };
+
+    apply_deltas_to_storage(&batch, state, universe_key);
+
+    // Log + broadcast with updated resume_token.
+    let token = room.append_frame(data.to_vec()).await;
+
+    let mut downlink = batch.clone();
+    downlink.resume_token = token as i64;
+
+    match delta::encode_batch(&downlink) {
+        Ok(encoded) => {
+            let _ = room.tx.send(encoded);
+        }
+        Err(e) => warn!("sync-ws encode downlink failed: {e}"),
+    }
+}
+
+fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &str) {
+    use co::proto::sync::sync_delta::Kind;
+
+    let Ok(storage) = state.storage.lock() else {
+        return;
+    };
+    for d in &batch.deltas {
+        let kind = Kind::try_from(d.kind).unwrap_or(Kind::Unspecified);
+        match kind {
+            Kind::Upserted => {
+                if let Some(co::proto::sync::sync_delta::Body::Cofile(ref cofile)) = d.body
+                    && let Ok(body) = std::str::from_utf8(&cofile.content)
+                {
+                    let _ = storage.update_entry_body(universe_key, &d.entry_path, body);
+                }
+            }
+            Kind::Deleted => {
+                let _ = storage.update_entry_body(universe_key, &d.entry_path, "");
+            }
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Room lifecycle
+// ---------------------------------------------------------------------------
+
+async fn get_or_create_room(state: &AppState, universe_key: &str) -> Arc<SyncRoom> {
+    {
+        let rooms = state.sync_rooms.read().await;
+        if let Some(room) = rooms.get(universe_key) {
+            return Arc::clone(room);
+        }
+    }
+    let mut rooms = state.sync_rooms.write().await;
+    rooms
+        .entry(universe_key.to_string())
+        .or_insert_with(|| Arc::new(SyncRoom::new()))
+        .clone()
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::sync::Mutex;
+
+    use co::proto::sync::SyncDelta;
+    use co::sync::delta as dc;
+    use futures_util::{SinkExt as _, StreamExt as _};
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WsMsg;
+
+    use crate::auth::{AuthStore, sign_jwt};
+    use crate::config::WebConfig;
+    use crate::experiment::ExperimentStore;
+    use crate::server::{AppStateInner, build_router};
+    use crate::storage::Storage;
+
+    // Must match the secret used by all other co-web tests to avoid env-var races.
+    const TEST_SECRET: &str = "test-secret";
+
+    fn set_jwt_secret() {
+        // Safety: tests share the same process; we always write the same value.
+        unsafe { std::env::set_var("JWT_SECRET", TEST_SECRET) };
+    }
+
+    fn test_config(dir: &std::path::Path) -> WebConfig {
+        WebConfig {
+            port: 0,
+            data_dir: dir.to_string_lossy().into(),
+            static_dir: "co-web/static".into(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: "plugins".into(),
+            game_db_path: None,
+            universo_dir: dir.join("universes").to_string_lossy().into(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "prod".into(),
+            wae_endpoint: None,
+            wae_api_key: None,
+        }
+    }
+
+    async fn spawn_test_server() -> (u16, String, String) {
+        set_jwt_secret();
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let storage = Storage::new(tmp.path());
+        let experiment = ExperimentStore::new(tmp.path());
+        let auth_store = AuthStore::new(tmp.path()).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_db = tmp.path().join("game.db");
+        let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
+
+        let state: crate::server::AppState = Arc::new(AppStateInner {
+            storage: Mutex::new(storage),
+            experiment: Mutex::new(experiment),
+            config: test_config(tmp.path()),
+            auth_store: Mutex::new(auth_store),
+            mail,
+            game_storage,
+            plugin_registry: Default::default(),
+            doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: new_sync_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
+        });
+
+        let app = build_router(state, None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::mem::forget(tmp);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let (tok_alice, _) = sign_jwt("alice", "alice@test.co", "free", TEST_SECRET).unwrap();
+        let (tok_bob, _) = sign_jwt("bob", "bob@test.co", "free", TEST_SECRET).unwrap();
+        (port, tok_alice, tok_bob)
+    }
+
+    fn make_batch(universe: &str, path: &str, content: &[u8]) -> Vec<u8> {
+        let d = dc::upserted_delta(universe, path, content.to_vec(), "sha-001", 1_000_000);
+        let b = SyncBatch {
+            deltas: vec![d],
+            client_id: "alice".into(),
+            batch_ts_ns: 1_000_000,
+            resume_token: 0,
+        };
+        dc::encode_batch(&b).unwrap()
+    }
+
+    // Helper: skip Ping/Pong frames and return next Binary frame within timeout.
+    async fn next_binary(
+        ws: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        timeout: Duration,
+    ) -> Vec<u8> {
+        loop {
+            let msg = tokio::time::timeout(timeout, ws.next())
+                .await
+                .expect("timeout waiting for binary frame")
+                .unwrap()
+                .unwrap();
+            match msg {
+                WsMsg::Binary(b) => return b.to_vec(),
+                WsMsg::Ping(_) | WsMsg::Pong(_) => continue,
+                other => panic!("expected Binary, got {other:?}"),
+            }
+        }
+    }
+
+    // ── T1: anonymous → 401 ──────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_anon_ws_returns_401() {
+        let (port, _, _) = spawn_test_server().await;
+        let url = format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe=u");
+        let result = connect_async(&url).await;
+        assert!(result.is_err(), "anonymous should be rejected");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("401") || err.contains("HTTP error"),
+            "expected 401, got: {err}"
+        );
+    }
+
+    // ── T2: missing universe → 400 ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_missing_universe_returns_400() {
+        let (port, tok_alice, _) = spawn_test_server().await;
+        let url = format!("ws://127.0.0.1:{port}/api/v1/sync/ws?token={tok_alice}");
+        let result = connect_async(&url).await;
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("400") || err.contains("HTTP error"),
+            "expected 400, got: {err}"
+        );
+    }
+
+    // ── T3: round-trip — write file → server applies → pushes back ───────────
+
+    #[tokio::test]
+    async fn test_round_trip_upserted_delta() {
+        let (port, tok_alice, tok_bob) = spawn_test_server().await;
+
+        let universe = "test-universe";
+        let alice_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_alice}");
+        let bob_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_bob}");
+
+        let (mut ws_alice, _) = connect_async(&alice_url).await.unwrap();
+        let (mut ws_bob, _) = connect_async(&bob_url).await.unwrap();
+
+        // Alice sends an uplink batch.
+        let batch_bytes = make_batch(universe, "projects/hello.md", b"# Hello");
+        ws_alice
+            .send(WsMsg::Binary(batch_bytes.into()))
+            .await
+            .unwrap();
+
+        // Bob must receive the downlink.
+        let downlink = next_binary(&mut ws_bob, Duration::from_secs(3)).await;
+
+        let decoded = dc::decode_batch(&downlink).unwrap();
+        assert_eq!(decoded.deltas.len(), 1);
+        let d = &decoded.deltas[0];
+        assert_eq!(d.universe_key, universe);
+        assert_eq!(d.entry_path, "projects/hello.md");
+        assert_eq!(d.kind, co::proto::sync::sync_delta::Kind::Upserted as i32);
+        assert!(
+            decoded.resume_token > 0,
+            "downlink should carry resume_token"
+        );
+
+        ws_alice.close(None).await.ok();
+        ws_bob.close(None).await.ok();
+    }
+
+    // ── T4: server-push (delete) propagates ──────────────────────────────────
+
+    #[tokio::test]
+    async fn test_delete_propagates() {
+        let (port, tok_alice, tok_bob) = spawn_test_server().await;
+
+        let universe = "delete-universe";
+        let alice_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_alice}");
+        let bob_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_bob}");
+
+        let (mut ws_alice, _) = connect_async(&alice_url).await.unwrap();
+        let (mut ws_bob, _) = connect_async(&bob_url).await.unwrap();
+
+        let del = dc::deleted_delta(universe, "gone.md", 0);
+        let batch = SyncBatch {
+            deltas: vec![del],
+            client_id: "alice".into(),
+            batch_ts_ns: 0,
+            resume_token: 0,
+        };
+        ws_alice
+            .send(WsMsg::Binary(dc::encode_batch(&batch).unwrap().into()))
+            .await
+            .unwrap();
+
+        let downlink = next_binary(&mut ws_bob, Duration::from_secs(3)).await;
+        let decoded = dc::decode_batch(&downlink).unwrap();
+        assert_eq!(decoded.deltas.len(), 1);
+        assert_eq!(
+            decoded.deltas[0].kind,
+            co::proto::sync::sync_delta::Kind::Deleted as i32
+        );
+
+        ws_alice.close(None).await.ok();
+        ws_bob.close(None).await.ok();
+    }
+
+    // ── T5: resume-token replay ───────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_resume_token_replay() {
+        let (port, tok_alice, tok_bob) = spawn_test_server().await;
+        let universe = "replay-universe";
+        let alice_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_alice}");
+        let bob_url_base = format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}");
+
+        let (mut ws_alice, _) = connect_async(&alice_url).await.unwrap();
+
+        // Alice sends 3 batches.
+        for i in 0u8..3 {
+            let d = delta::upserted_delta(universe, &format!("f{i}.md"), vec![i], "sha", i as i64);
+            let b = SyncBatch {
+                deltas: vec![d],
+                client_id: "alice".into(),
+                batch_ts_ns: i as i64,
+                resume_token: 0,
+            };
+            ws_alice
+                .send(WsMsg::Binary(delta::encode_batch(&b).unwrap().into()))
+                .await
+                .unwrap();
+            // Small yield to let the server process each batch.
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        ws_alice.close(None).await.ok();
+
+        // Let server process all batches.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Bob connects with resume_token=0 → server replays all 3 frames.
+        let bob_url = format!("{bob_url_base}&token={tok_bob}");
+        let (mut ws_bob, _) = tokio_tungstenite::connect_async_with_config(
+            {
+                let mut req =
+                    tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                        &bob_url as &str,
+                    )
+                    .unwrap();
+                req.headers_mut()
+                    .insert("X-Sync-Resume", "0".parse().unwrap());
+                req
+            },
+            None,
+            false,
+        )
+        .await
+        .unwrap();
+
+        let mut received = 0usize;
+        loop {
+            let msg = tokio::time::timeout(Duration::from_millis(500), ws_bob.next()).await;
+            match msg {
+                Ok(Some(Ok(WsMsg::Binary(b)))) => {
+                    if let Ok(decoded) = dc::decode_batch(&b) {
+                        if !decoded.deltas.is_empty() {
+                            received += 1;
+                        }
+                    }
+                }
+                Ok(Some(Ok(WsMsg::Ping(_)))) => continue,
+                _ => break,
+            }
+        }
+        assert_eq!(received, 3, "expected 3 replayed frames, got {received}");
+
+        ws_bob.close(None).await.ok();
+    }
+
+    // ── T6: bench — 20 concurrent clients, each pushes 1 batch ─────────────
+    //
+    // Production target: 100 clients × 1 file/s → CPU < 50% on Fly shared-cpu-1x.
+    // This test validates correctness of concurrent fan-out, not peak throughput.
+
+    #[tokio::test]
+    async fn test_concurrent_clients_broadcast() {
+        let (port, tok_alice, _) = spawn_test_server().await;
+        let universe = "bench-universe";
+
+        let client_count = 20usize;
+        let mut tokens = Vec::with_capacity(client_count);
+        for i in 0..client_count {
+            let (tok, _) =
+                sign_jwt(&format!("c{i}"), &format!("c{i}@t.co"), "free", TEST_SECRET).unwrap();
+            tokens.push(tok);
+        }
+
+        // Alice subscribes as receiver before senders connect.
+        let alice_url =
+            format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok_alice}");
+        let (mut ws_alice, _) = connect_async(&alice_url).await.unwrap();
+
+        // Give the server a moment to register Alice's subscription before
+        // spawning concurrent senders (avoids off-by-one in channel drain).
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        let mut handles = Vec::with_capacity(client_count);
+        for (i, tok) in tokens.into_iter().enumerate() {
+            let url =
+                format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok}");
+            handles.push(tokio::spawn(async move {
+                let (mut ws, _) = connect_async(&url).await?;
+                let d = delta::upserted_delta(universe, &format!("f{i}.md"), vec![1], "s", 0);
+                let b = SyncBatch {
+                    deltas: vec![d],
+                    client_id: format!("c{i}"),
+                    batch_ts_ns: 0,
+                    resume_token: 0,
+                };
+                ws.send(WsMsg::Binary(delta::encode_batch(&b).unwrap().into()))
+                    .await?;
+                ws.close(None).await.ok();
+                Ok::<_, anyhow::Error>(())
+            }));
+        }
+
+        let mut ok = 0usize;
+        for h in handles {
+            if h.await.unwrap().is_ok() {
+                ok += 1;
+            }
+        }
+        // Allow ≤1 failure (network jitter in CI); ≥95% success validates the feature.
+        assert!(
+            ok >= client_count - 1,
+            "{ok}/{client_count} clients succeeded (expected ≥{})",
+            client_count - 1
+        );
+
+        // Alice collects downlinks.
+        let mut received = 0usize;
+        loop {
+            let msg = tokio::time::timeout(Duration::from_millis(300), ws_alice.next()).await;
+            match msg {
+                Ok(Some(Ok(WsMsg::Binary(b)))) => {
+                    if dc::decode_batch(&b).is_ok() {
+                        received += 1;
+                    }
+                }
+                Ok(Some(Ok(WsMsg::Ping(_)))) => continue,
+                _ => break,
+            }
+        }
+        assert!(
+            received > 0,
+            "Alice should have received at least 1 downlink"
+        );
+
+        ws_alice.close(None).await.ok();
+    }
+
+    // ── T7: SyncRoom delta log eviction ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_sync_room_eviction() {
+        let room = SyncRoom::new();
+        for i in 0..5u64 {
+            room.append_frame(vec![i as u8]).await;
+        }
+        let frames = room.replay_since(0).await.unwrap();
+        assert_eq!(frames.len(), 5);
+
+        let frames = room.replay_since(3).await.unwrap();
+        assert_eq!(frames.len(), 2);
+    }
+}

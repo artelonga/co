@@ -1,0 +1,11 @@
+syntax = "proto3";
+package co.v1;
+
+// CO-86 content envelope — the canonical wire representation of a CO file.
+message CoFile {
+    string path       = 1;  // vault-relative path (e.g. "projects/MP/1.md")
+    bytes  content    = 2;  // raw file bytes (UTF-8 markdown or binary asset)
+    string sha256     = 3;  // hex SHA-256 of content
+    string mime_type  = 4;  // "text/markdown", "image/png", etc.
+    int64  modified_ns = 5; // file mtime, Unix nanoseconds
+}

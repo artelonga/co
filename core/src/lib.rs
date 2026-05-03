@@ -61,10 +61,14 @@ pub mod types;
 pub mod validate;
 pub mod wikilink;
 
-/// Generated protobuf types for Entry wire format.
+/// Generated protobuf types for Entry and Sync wire formats.
 pub mod proto {
     pub mod entry {
         include!(concat!(env!("OUT_DIR"), "/co.entry.rs"));
+    }
+    /// CO-151: SyncDelta, SyncBatch, CoFile — protobuf wire types for delta sync.
+    pub mod sync {
+        include!(concat!(env!("OUT_DIR"), "/co.v1.rs"));
     }
 }
 

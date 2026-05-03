@@ -1,6 +1,8 @@
-//! Sync Protocol v1 — op log + content-addressed blobs + 3-way merge.
-//!
-//! See `docs/sync-protocol-v1.md` for the full specification.
+//! Sync Protocol — op log + content-addressed blobs + 3-way merge,
+//! and CO-151 protobuf SyncDelta/SyncBatch wire format.
+
+/// CO-151: protobuf delta encode/decode + zstd compression.
+pub mod delta;
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sha2::{Digest, Sha256 as Sha256Hasher};

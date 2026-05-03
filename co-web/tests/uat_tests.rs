@@ -70,6 +70,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
         game_storage,
         plugin_registry: game_core::plugin::PluginRegistry::new(),
         doc_rooms: co_web::ws::new_room_manager(),
+        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),

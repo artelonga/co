@@ -1,3 +1,6 @@
+/// CO-151: filesystem watcher + sync WebSocket client.
+pub mod watcher;
+
 use std::collections::VecDeque;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};

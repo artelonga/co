@@ -24,6 +24,13 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+prost = "0.13"
+# CO-151: filesystem watcher (FSEvents on macOS, inotify on Linux)
+notify = "6"
+notify-debouncer-mini = "0.4"
+# CO-151: WebSocket client for sync channel
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
+futures-util = "0.3"
 
 [[bin]]
 name = "co-agent"
