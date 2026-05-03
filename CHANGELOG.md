@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.4] — 2026-05-03
+
+### Fixed — SPA route fallback for nested universe paths + content_count reconcile
+
+Two follow-ups from the post-CO-151 prod checklist:
+
+1. **`/co/{slug}/{*subpath}` now serves the SPA shell.** The router only registered `/co/{slug}` and `/co/{slug}/assets`, so anything deeper (e.g. `/co/yuri/dados`, `/co/co/processos/alterar-pagina-na-web`) fell through to a 404. Added a catch-all `*subpath` route that serves the SPA shell so the client-side router can resolve those paths. Placed AFTER `/co/{slug}/assets` and `/co/yggdrasil/{game}` so axum's matcher prefers the more specific routes.
+
+2. **`content_count` reconcile already runs on boot** (`recompute_content_counts` from CO-142 Phase B), so the small drift seen on prod (`co`: 510 cached vs 500 actual rows) auto-corrects on this deploy. No code change.
+
+This deploy also re-aligns `/api/health` to report the workspace version (was reporting 1.38.2 because 1.38.3 was a watcher-only fix that didn't go through `flyctl deploy`).
+
 ## [1.38.3] — 2026-05-03
 
 ### Fixed — v2 watcher: deletes propagate (macOS FSEvents quirk) + multi-universe supervisor

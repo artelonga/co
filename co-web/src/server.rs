@@ -358,7 +358,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-150: asset browser page for universe owners
         .route("/co/{slug}/assets", get(serve_assets_page))
         // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
-        .route("/co/yggdrasil/{game}", get(serve_co_index));
+        .route("/co/yggdrasil/{game}", get(serve_co_index))
+        // CO-144 fix: any deeper SPA path under a universe (e.g.
+        // `/co/yuri/dados`, `/co/co/processos/alterar-pagina-na-web`)
+        // also serves the SPA shell so the client-side router can resolve it.
+        // Must come AFTER the more specific `/co/{slug}/assets` and
+        // `/co/yggdrasil/{game}` routes so axum's matcher prefers them.
+        .route("/co/{slug}/{*subpath}", get(serve_co_index));
 
     // --- CO-105: Admin dashboard API + static page ---
     let admin_dashboard_api = crate::admin_routes::api_router();
