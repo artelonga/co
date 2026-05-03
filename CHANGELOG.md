@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.10] — 2026-05-03
+
+### Fixed — admin gets membership in mbya + topologia universes
+
+`ensure_admin_universe_memberships` only granted yuri membership for `template`, `quilomboaraucaria`, `yggdrasil`, `dados`, `artelonga`, `rfq`, `co` — the 5 mbya/topologia universes were missing. Symptoms: `GET /api/v1/universes/languages` returned 404 to yuri (private universe + non-member = pretend it doesn't exist), and `POST /api/v1/universes/mbya/assets` returned 403 (PDF uploads silently failing — observed: 8/8 binaries failed at `bulk-upload-binary.py mbya`).
+
+Added the 6 keys (`mbya`, `concepts`, `guarani-mbya`, `portuguese`, `yoruba`, `languages`) to the system_keys list. Idempotent on every boot via `INSERT OR IGNORE`. After deploy, yuri sees these universes in the sidebar + can upload binaries to them.
+
 ## [1.38.9] — 2026-05-03
 
 ### Added — `languages/` catalog universe with authoritative metadata

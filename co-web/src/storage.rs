@@ -2799,6 +2799,15 @@ impl Storage {
             "artelonga",
             "rfq",
             "co",
+            // CO-141 meaning-topology universes (seeded by
+            // seed_admin_content_universes). Admin needs membership so
+            // POST /assets and the asset browser work for these.
+            "mbya",
+            "concepts",
+            "guarani-mbya",
+            "portuguese",
+            "yoruba",
+            "languages",
         ];
         let now = Utc::now().to_rfc3339();
         let mut added = 0usize;
