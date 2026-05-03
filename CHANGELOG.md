@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.39.0] — 2026-05-03
 
+<<<<<<< HEAD
 ### Added — CO-153: cross-universe `entry_relations` + `co://` URI resolver
 
 `entry_relations` now carries a `to_universe TEXT` column (NULL = same universe, back-compat). `co://<universe>/<path>` URIs in frontmatter `ref`/`ref_list` fields are parsed by the new `parse_co_uri` resolver and stored with the target universe split out. A `parse_co_uri` backfill runs as per-universe DB migration v7, converting any existing raw `co://` strings stored in `to_path` to the proper `(to_universe, to_path)` split.
@@ -52,6 +53,15 @@ Every state change now emits one `telemetry_events` row with `event_type = "crud
 - `/co/co/telemetria` admin dashboard now shows CRUD events by kind with 24-hour window.
 - `GET /api/v1/admin/telemetry/crud-summary` returns the 24h CRUD breakdown.
 - `docs/telemetry-envelope.md` documents all event kinds and their `extra` shapes.
+
+### Added — CO-157: PDF metadata extraction tool
+
+`scripts/extract-pdf-meta.py` auto-populates reference-card `.md` siblings from source PDFs. Extracts title (from `/Info.Title` or first-page heuristic), authors, year, page count, sha256, language (via `langdetect`), DOI (regex `10.\d{4,9}/...`), ISBN, abstract, and keywords. Writes YAML frontmatter + prose body matching the `reference` content type envelope from CO-156.
+
+- Diff mode (existing `.md`, no `--force`): shows unified diff on stderr, exits non-zero if stable fields differ
+- `--force`: rewrites auto-generated block (frontmatter + abstract section) while preserving `## Notes` and any human-authored content
+- Flags `extraction: text-only-failed` for image-only PDFs where `pypdf` yields no text
+- Test fixture at `tests/fixtures/stub.pdf` + 25 unit and integration tests in `tests/test_extract_pdf_meta.py`
 
 ## [1.38.11] — 2026-05-03
 
