@@ -302,23 +302,61 @@ async fn handle_uplink(data: &[u8], room: &Arc<SyncRoom>, state: &AppState, univ
 }
 
 fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &str) {
-    use co::proto::sync::sync_delta::Kind;
+    use co::proto::sync::sync_delta::{Body, Kind};
+    use crate::entry_index::{EntryIndex, make_entry};
 
     let Ok(storage) = state.storage.lock() else {
         return;
     };
+    let universe_root = storage.universe_root(universe_key);
+    let conn_arc = storage.universe_conn(universe_key);
+    drop(storage); // free the meta lock before per-universe work
+
     for d in &batch.deltas {
         let kind = Kind::try_from(d.kind).unwrap_or(Kind::Unspecified);
         match kind {
             Kind::Upserted => {
-                if let Some(co::proto::sync::sync_delta::Body::Cofile(ref cofile)) = d.body
-                    && let Ok(body) = std::str::from_utf8(&cofile.content)
-                {
-                    let _ = storage.update_entry_body(universe_key, &d.entry_path, body);
+                let Some(Body::Cofile(ref cofile)) = d.body else { continue };
+                let Ok(content) = std::str::from_utf8(&cofile.content) else {
+                    warn!("sync-ws: upsert with non-utf8 cofile body, skipping {path}", path = d.entry_path);
+                    continue;
+                };
+
+                // Split frontmatter; tolerate missing/invalid YAML.
+                let (fm, body) = match co::entry::split_frontmatter(content) {
+                    Ok((fm_str, body)) if !fm_str.is_empty() => {
+                        let fm = serde_yaml::from_str::<serde_yaml::Value>(&fm_str)
+                            .map(co::entry::yaml_to_json)
+                            .unwrap_or(serde_json::Value::Object(Default::default()));
+                        (fm, body)
+                    }
+                    Ok((_, body)) => (serde_json::Value::Object(Default::default()), body),
+                    Err(_) => (serde_json::Value::Object(Default::default()), content.to_string()),
+                };
+
+                let entry = make_entry(&d.entry_path, fm, &body);
+
+                if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                    warn!("sync-ws write_entry failed for {path}: {e}", path = d.entry_path);
+                    continue;
+                }
+
+                if let Ok(guard) = conn_arc.lock() {
+                    let idx = EntryIndex::new(&guard);
+                    if let Err(e) = idx.upsert(universe_key, &entry) {
+                        warn!("sync-ws index upsert failed for {path}: {e}", path = d.entry_path);
+                    }
                 }
             }
             Kind::Deleted => {
-                let _ = storage.update_entry_body(universe_key, &d.entry_path, "");
+                let path = universe_root.join(&d.entry_path);
+                let _ = std::fs::remove_file(&path);
+                if let Ok(guard) = conn_arc.lock() {
+                    let _ = guard.execute(
+                        "DELETE FROM entries WHERE universe_key = ?1 AND path = ?2",
+                        rusqlite::params![universe_key, &d.entry_path],
+                    );
+                }
             }
             _ => {}
         }
@@ -530,6 +568,86 @@ mod tests {
 
         ws_alice.close(None).await.ok();
         ws_bob.close(None).await.ok();
+    }
+
+    // ── T3b: upsert persists to disk + per-universe DB (CO-151 server fix) ──
+
+    #[tokio::test]
+    async fn test_upserted_delta_writes_to_disk_and_db() {
+        // Spin a server, but capture state so we can probe storage post-upload.
+        set_jwt_secret();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let data_dir = tmp.path().to_path_buf();
+        let storage = Storage::new(&data_dir);
+        let experiment = ExperimentStore::new(&data_dir);
+        let auth_store = AuthStore::new(&data_dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_db = data_dir.join("game.db");
+        let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
+
+        let state: crate::server::AppState = Arc::new(AppStateInner {
+            storage: Mutex::new(storage),
+            experiment: Mutex::new(experiment),
+            config: test_config(&data_dir),
+            auth_store: Mutex::new(auth_store),
+            mail,
+            game_storage,
+            plugin_registry: Default::default(),
+            doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: new_sync_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
+        });
+        let app = build_router(state.clone(), None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::mem::forget(tmp);
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let (tok, _) = sign_jwt("alice", "alice@test.co", "free", TEST_SECRET).unwrap();
+
+        let universe = "persist-test";
+        let url = format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok}");
+        let (mut ws, _) = connect_async(&url).await.unwrap();
+
+        let body = b"---\ntitle: Hello\n---\n\n# Hello, world!\n";
+        let bytes = make_batch(universe, "notes/hello.md", body);
+        ws.send(WsMsg::Binary(bytes.into())).await.unwrap();
+
+        // Allow the server a moment to apply the delta.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+
+        // 1. Disk: file should exist.
+        let universe_root = {
+            let s = state.storage.lock().unwrap();
+            s.universe_root(universe)
+        };
+        let on_disk = universe_root.join("notes/hello.md");
+        assert!(
+            on_disk.exists(),
+            "expected .md on disk at {}",
+            on_disk.display()
+        );
+        let raw = std::fs::read_to_string(&on_disk).unwrap();
+        assert!(raw.contains("# Hello, world!"));
+
+        // 2. Per-universe DB: row should be indexed.
+        let conn_arc = {
+            let s = state.storage.lock().unwrap();
+            s.universe_conn(universe)
+        };
+        let count: i64 = {
+            let g = conn_arc.lock().unwrap();
+            g.query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1 AND path = ?2",
+                rusqlite::params![universe, "notes/hello.md"],
+                |row| row.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(count, 1, "expected 1 entries row for the upserted delta");
+
+        ws.close(None).await.ok();
     }
 
     // ── T4: server-push (delete) propagates ──────────────────────────────────

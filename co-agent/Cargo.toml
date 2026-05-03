@@ -36,6 +36,10 @@ futures-util = "0.3"
 name = "co-agent"
 path = "src/main.rs"
 
+[[bin]]
+name = "co-agent-watch"
+path = "src/bin/watch.rs"
+
 [dev-dependencies]
 axum = { version = "0.8" }
 tower = { version = "0.5", features = ["util"] }

@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.1] — 2026-05-03
+
+### Fixed — CO-151 sync server now actually persists deltas
+
+The 1.38.0 `apply_deltas_to_storage` called `Storage::update_entry_body`, which:
+1. issues `UPDATE entries SET body=...` against `meta.db.entries` (a no-op since CO-77 moved entries to per-universe DBs), and
+2. is UPDATE-only, so a delta for a *new* path silently did nothing.
+
+Result: a v2 watcher could write `notes/hello.md`, watch the SyncDelta land on the broadcast log, and still see HTTP 404 from `GET /entries/notes/hello.md` because nothing actually persisted.
+
+**Rewrote `apply_deltas_to_storage`** to use the same write path the Vault REST handler uses:
+- `Kind::Upserted`: parse YAML frontmatter from the `CoFile` content, build an `Entry`, call `co::entry::write_entry` (writes the .md to disk under `data/universes/<aa>/<bb>/<key>/`), then `EntryIndex::upsert` against the per-universe `data.db`.
+- `Kind::Deleted`: `std::fs::remove_file` the .md and `DELETE FROM entries` in the per-universe DB.
+
+**Added `co-agent-watch` binary** (`co-agent/src/bin/watch.rs`) — wraps `SyncWatcher` in a CLI so the v2 launchd plist has something to actually run. The 1.38.0 plist referenced `~/.cargo/bin/co-agent-watch` which didn't exist.
+
+**Fixed v2 watcher URL** (`co-agent/src/watcher.rs`) — was building `?token=...` only; server requires `?universe=<key>&token=<jwt>` and returned HTTP 400 otherwise.
+
+**Regression test** `test_upserted_delta_writes_to_disk_and_db` proves the v2 write goes all the way through: WS upload → file on disk + per-universe row indexed + reachable via `/entries/{path}`.
+
 ## [1.38.0] — 2026-05-03
 
 ### Added — CO-151: real-time delta sync — protobuf SyncDelta over WebSocket with zstd

@@ -87,9 +87,12 @@ impl SyncWatcher {
     /// This function is async and runs until the WS connection is closed or
     /// an unrecoverable error occurs.
     pub async fn run(&self) -> Result<()> {
+        // Server expects ?universe=<key>&token=<jwt>; missing universe → HTTP 400.
+        // Universe keys are slugs ([a-z0-9-]) and JWTs are url-safe base64
+        // ([A-Za-z0-9._-]) — both safe to inline without percent-encoding.
         let url = format!(
-            "{}?token={}",
-            self.config.server_url, self.config.auth_token
+            "{}?universe={}&token={}",
+            self.config.server_url, self.config.universe_key, self.config.auth_token,
         );
         let resume = self.config.resume_token;
 
