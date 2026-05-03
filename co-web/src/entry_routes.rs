@@ -925,12 +925,14 @@ pub fn router() -> Router<AppState> {
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),
         )
-        // CO-154: references endpoints
+        // CO-154: citations endpoints (per-citation index, distinct from
+        // CO-156's /references which lists reference cards). Renamed from
+        // `/references` to `/citations` to disambiguate at the route layer.
         .route(
-            "/{slug}/references/orphan-wikilinks",
+            "/{slug}/citations/orphan-wikilinks",
             get(list_orphan_wikilinks),
         )
-        .route("/{slug}/references", get(list_references))
+        .route("/{slug}/citations", get(list_references))
 }
 
 // ---------------------------------------------------------------------------

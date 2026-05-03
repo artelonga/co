@@ -476,6 +476,7 @@ mod tests {
                 presentation: Presentation::default(),
                 indexes: vec![],
             }],
+            properties_per_type: Default::default(),
             doc_generators: vec![],
             relationships: vec![],
             views: vec![],

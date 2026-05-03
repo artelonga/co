@@ -368,7 +368,7 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
 
 #[cfg(test)]
 pub(crate) fn run_universe_migrations_for_test(conn: &Connection) {
-    run_universe_migrations(conn);
+    run_universe_migrations(conn, "test-universe");
 }
 
 fn universe_column_exists(conn: &Connection, table: &str, column: &str) -> bool {
