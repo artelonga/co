@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] — 2026-05-03
+
+### Added — CO-159: INMET moon-phase importer
+
+`scripts/import-moon-phases.py <year>` — fetches the lunar phase table from
+`portal.inmet.gov.br/paginas/luas` and writes one `.md` per phase into
+`time/moon-phases/<year>/` using the `moon-phase.md` template frontmatter.
+
+- Parses four columns (LUA NOVA → `moon.new`, LUA CRESCENTE → `moon.first-quarter`,
+  LUA CHEIA → `moon.full`, LUA MINGUANTE → `moon.last-quarter`)
+- Times in BRT (UTC-3); `at_iso` = BRT + 3 h, `at_local` carries the wall-clock
+- Idempotent: skip if `at_iso` matches the existing file; update if INMET revised the table
+- Fails loudly on any unexpected HTML structure so silent data corruption is impossible
+- Cross-year: `--time-dir` and `?ano=<year>` URL parameter work for any year
+- `tests/fixtures/inmet-luas-2026.html` — offline HTML snapshot for CI (2026: 50 phases)
+- Ran against `~/projects/time` to populate all 50 phases for 2026
+
 ## [1.38.11] — 2026-05-03
 
 ### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets
