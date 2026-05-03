@@ -118,12 +118,17 @@ CREATE TABLE IF NOT EXISTS frontmatter_index (
 CREATE INDEX IF NOT EXISTS idx_fm_type   ON frontmatter_index(entry_type);
 CREATE INDEX IF NOT EXISTS idx_fm_status ON frontmatter_index(status);
 
--- CO-156: `reference` content type shadow table.
--- One row per `.md` card with entry_type = 'reference'.
--- Populated on every reference-card write; blob_sha256 is resolved on index.
+-- CO-156 + CO-158: reference content type shadow table.
+-- One row per edition of a .md card with entry_type = reference.
+-- work_id groups all editions of the same conceptual work.
+-- edition_id identifies a concrete artifact (e.g. usp-1959, default).
+-- primary_layer = min(layer) in primary_source_chain; null if not authored.
 CREATE TABLE IF NOT EXISTS references_meta (
     universe_key  TEXT NOT NULL,
     entry_path    TEXT NOT NULL,
+    edition_id    TEXT NOT NULL DEFAULT 'default',
+    work_id       TEXT NOT NULL DEFAULT '',
+    primary_layer INTEGER,
     file          TEXT,
     blob_sha256   TEXT,
     url           TEXT,
@@ -133,12 +138,15 @@ CREATE TABLE IF NOT EXISTS references_meta (
     language      TEXT,
     seed_status   TEXT NOT NULL DEFAULT 'stub',
     indexed_at    TEXT NOT NULL,
-    PRIMARY KEY (universe_key, entry_path)
+    PRIMARY KEY (universe_key, entry_path, edition_id)
 );
-CREATE INDEX IF NOT EXISTS idx_refs_medium      ON references_meta(medium);
-CREATE INDEX IF NOT EXISTS idx_refs_seed_status ON references_meta(seed_status);
+CREATE INDEX IF NOT EXISTS idx_refs_medium        ON references_meta(medium);
+CREATE INDEX IF NOT EXISTS idx_refs_seed_status   ON references_meta(seed_status);
 CREATE INDEX IF NOT EXISTS idx_refs_blob
     ON references_meta(blob_sha256) WHERE blob_sha256 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_refs_work_id       ON references_meta(work_id);
+CREATE INDEX IF NOT EXISTS idx_refs_primary_layer
+    ON references_meta(primary_layer) WHERE primary_layer IS NOT NULL;
 
 -- CO-156: FTS index over reference cards — title, body, and transcription.
 CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
@@ -308,11 +316,149 @@ fn run_universe_migrations(conn: &Connection) {
         conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
             .expect("universe schema_version v7");
     }
+    if v < 8 {
+        // CO-158: add work_id, edition_id, primary_layer; change PK to
+        // (universe_key, entry_path, edition_id).
+        // If edition_id column is absent, the table has the old v7 schema and
+        // must be recreated. New databases already have the v8 schema from
+        // UNIVERSE_SCHEMA, so the check is a no-op for them.
+        if !universe_column_exists(conn, "references_meta", "edition_id") {
+            recreate_references_meta_v8(conn);
+        }
+        conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
+            .expect("universe schema_version v8");
+    }
 }
 
 #[cfg(test)]
 pub(crate) fn run_universe_migrations_for_test(conn: &Connection) {
     run_universe_migrations(conn);
+}
+
+fn universe_column_exists(conn: &Connection, table: &str, column: &str) -> bool {
+    conn.query_row(
+        &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+        rusqlite::params![column],
+        |_| Ok(true),
+    )
+    .ok()
+    .unwrap_or(false)
+}
+
+/// Recreate `references_meta` with the CO-158 schema (3-part PK, work_id, edition_id,
+/// primary_layer), backfilling `work_id` from the entry_path stem and `edition_id =
+/// 'default'` for all existing rows.
+fn recreate_references_meta_v8(conn: &Connection) {
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS references_meta_v8 (
+            universe_key  TEXT NOT NULL,
+            entry_path    TEXT NOT NULL,
+            edition_id    TEXT NOT NULL DEFAULT 'default',
+            work_id       TEXT NOT NULL DEFAULT '',
+            primary_layer INTEGER,
+            file          TEXT,
+            blob_sha256   TEXT,
+            url           TEXT,
+            medium        TEXT NOT NULL DEFAULT 'unknown',
+            mime          TEXT,
+            size_bytes    INTEGER,
+            language      TEXT,
+            seed_status   TEXT NOT NULL DEFAULT 'stub',
+            indexed_at    TEXT NOT NULL,
+            PRIMARY KEY (universe_key, entry_path, edition_id)
+        );",
+    )
+    .expect("v8 create temp table");
+
+    struct RefRow {
+        universe_key: String,
+        entry_path: String,
+        file: Option<String>,
+        blob_sha256: Option<String>,
+        url: Option<String>,
+        medium: String,
+        mime: Option<String>,
+        size_bytes: Option<i64>,
+        language: Option<String>,
+        seed_status: String,
+        indexed_at: String,
+    }
+
+    let rows: Vec<RefRow> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT universe_key, entry_path, file, blob_sha256, url, \
+                 medium, mime, size_bytes, language, seed_status, indexed_at \
+                 FROM references_meta",
+            )
+            .expect("v8 select");
+        stmt.query_map([], |row| {
+            Ok(RefRow {
+                universe_key: row.get(0)?,
+                entry_path: row.get(1)?,
+                file: row.get(2)?,
+                blob_sha256: row.get(3)?,
+                url: row.get(4)?,
+                medium: row.get(5)?,
+                mime: row.get(6)?,
+                size_bytes: row.get(7)?,
+                language: row.get(8)?,
+                seed_status: row.get(9)?,
+                indexed_at: row.get(10)?,
+            })
+        })
+        .expect("v8 query_map")
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    for row in rows {
+        let work_id = ref_work_id_from_path(&row.entry_path);
+        conn.execute(
+            "INSERT OR IGNORE INTO references_meta_v8 \
+             (universe_key, entry_path, edition_id, work_id, primary_layer, \
+              file, blob_sha256, url, medium, mime, size_bytes, language, seed_status, indexed_at) \
+             VALUES (?1, ?2, 'default', ?3, NULL, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            rusqlite::params![
+                row.universe_key,
+                row.entry_path,
+                work_id,
+                row.file,
+                row.blob_sha256,
+                row.url,
+                row.medium,
+                row.mime,
+                row.size_bytes,
+                row.language,
+                row.seed_status,
+                row.indexed_at,
+            ],
+        )
+        .expect("v8 insert row");
+    }
+
+    conn.execute_batch(
+        "DROP TABLE references_meta;
+         ALTER TABLE references_meta_v8 RENAME TO references_meta;
+         CREATE INDEX IF NOT EXISTS idx_refs_medium      ON references_meta(medium);
+         CREATE INDEX IF NOT EXISTS idx_refs_seed_status ON references_meta(seed_status);
+         CREATE INDEX IF NOT EXISTS idx_refs_blob
+             ON references_meta(blob_sha256) WHERE blob_sha256 IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS idx_refs_work_id     ON references_meta(work_id);
+         CREATE INDEX IF NOT EXISTS idx_refs_primary_layer
+             ON references_meta(primary_layer) WHERE primary_layer IS NOT NULL;",
+    )
+    .expect("v8 finalize");
+}
+
+/// Derive a work_id slug from an entry path: take the filename stem.
+/// e.g. "refs/GNDicLex.md" → "GNDicLex"
+fn ref_work_id_from_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
 }
 
 /// Per-universe DB version of the storage.rs `ensure_column` helper. Mirrors

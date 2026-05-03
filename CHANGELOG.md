@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] — 2026-05-03
+
+### Added — CO-158: Reference versioning — work_id + editions[] + primary/secondary source chain
+
+- `references_meta` table gains `work_id`, `edition_id`, `primary_layer` columns; PK changed to `(universe_key, entry_path, edition_id)`.
+- Per-universe DB migration v8: existing rows backfilled with `edition_id = 'default'`, `work_id` derived from filename stem, `primary_layer = NULL`.
+- Reference cards may now carry an `editions:` array — one `references_meta` row is written per edition, so a single card can represent multiple concrete artifacts (scans, reprints, OCR'd versions).
+- `work_id` groups all editions of the same conceptual work; auto-derived from the card's filename stem when not explicitly authored.
+- `primary_layer` stores the minimum layer value from `primary_source_chain` (0 = phenomenon, 1 = transcription, 2 = publication, 3+ = re-print / scan / OCR); `null` when no chain is authored.
+- Duplicate sha256 detection: re-uploading a PDF that already exists in `references_meta` under the same `work_id` skips creating a second edition row.
+- New REST endpoints:
+  - `GET /references?work_id=<id>` — return every edition row for a given work
+  - `GET /references?primary_layer=<n>` — return references with that source-chain layer
+  - `GET /references/works` — list all distinct `work_id` values in the universe
+- 5 new CO-158 unit tests; existing CO-156 tests updated to pass with the new schema.
+
 ## [1.39.0] — 2026-05-03
 
 ### Added — CO-156: Universal envelope — `reference` content type + uniform CRUD telemetry
