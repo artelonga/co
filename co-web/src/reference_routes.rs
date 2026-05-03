@@ -52,6 +52,9 @@ use crate::telemetry::{CrudEvent, emit_crud_event, extract_session_id};
 pub struct ReferenceCard {
     pub universe_key: String,
     pub entry_path: String,
+    pub edition_id: String,
+    pub work_id: String,
+    pub primary_layer: Option<i64>,
     pub file: Option<String>,
     pub blob_sha256: Option<String>,
     pub url: Option<String>,
@@ -68,6 +71,10 @@ pub struct ReferenceCard {
 pub struct ListRefsQuery {
     pub medium: Option<String>,
     pub seed_status: Option<String>,
+    /// Filter by conceptual work identity (returns all editions of that work).
+    pub work_id: Option<String>,
+    /// Filter by minimum source-chain layer (0=phenomenon, 1=transcription, …).
+    pub primary_layer: Option<i64>,
     /// Full-text search across title, body, transcription.
     pub q: Option<String>,
 }
@@ -131,7 +138,15 @@ pub(crate) fn maybe_sync_reference_meta(
     );
 }
 
-/// Upsert `references_meta` + `reference_cards_fts` for a reference card.
+/// Upsert `references_meta` + `references_fts` for a reference card.
+///
+/// If the frontmatter carries an `editions:` array, one row per edition is
+/// written (replacing any previous set for this entry_path). Otherwise a
+/// single row with `edition_id = "default"` is written.
+///
+/// Duplicate sha256 detection: if an edition's blob_sha256 already exists for
+/// the same `work_id` under a *different* entry_path, the duplicate edition
+/// row is skipped (the existing row already represents that artifact).
 fn upsert_reference_meta(
     conn: &Connection,
     universe_key: &str,
@@ -141,93 +156,210 @@ fn upsert_reference_meta(
     title: Option<&str>,
     universe_root: &std::path::Path,
 ) {
-    let medium = frontmatter
+    let work_id = frontmatter
+        .get("work_id")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| work_id_from_path(entry_path));
+
+    let primary_layer: Option<i64> = frontmatter
+        .get("primary_source_chain")
+        .and_then(|v| v.as_array())
+        .and_then(|arr| {
+            arr.iter()
+                .filter_map(|item| item.get("layer").and_then(|l| l.as_i64()))
+                .min()
+        });
+
+    let top_medium = frontmatter
         .get("medium")
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
-    let file = frontmatter
-        .get("file")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let url = frontmatter
-        .get("url")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let mime = frontmatter
+    let top_mime = frontmatter
         .get("mime")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let size_bytes = frontmatter.get("size_bytes").and_then(|v| v.as_i64());
-    let language = frontmatter
+    let top_size_bytes = frontmatter.get("size_bytes").and_then(|v| v.as_i64());
+    let top_language = frontmatter
         .get("language")
         .and_then(|v| v.as_str())
         .map(String::from);
-    let seed_status_raw = frontmatter
-        .get("seed_status")
-        .and_then(|v| v.as_str())
-        .unwrap_or("stub")
-        .to_string();
     let transcription = frontmatter
         .get("transcription")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
 
-    // Compute sha256 of bound asset if the sibling file is present on disk.
-    let blob_sha256 = file.as_deref().and_then(|f| {
-        let entry_dir = std::path::Path::new(entry_path).parent()?;
-        let file_path = universe_root.join(entry_dir).join(f);
-        let bytes = std::fs::read(&file_path).ok()?;
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        Some(hex_encode(hasher.finalize()))
-    });
-
-    // Enforce stub if file is declared but blob is absent on disk.
-    let seed_status = if file.is_some() && blob_sha256.is_none() {
-        "stub".to_string()
-    } else {
-        seed_status_raw
-    };
-
+    // Delete all existing edition rows for this (universe_key, entry_path).
+    // This cleanly handles edition additions, removals, and renames on update.
     conn.execute(
-        "INSERT INTO references_meta \
-         (universe_key, entry_path, file, blob_sha256, url, medium, mime, size_bytes, language, seed_status, indexed_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, datetime('now')) \
-         ON CONFLICT(universe_key, entry_path) DO UPDATE SET \
-           file = excluded.file, \
-           blob_sha256 = excluded.blob_sha256, \
-           url = excluded.url, \
-           medium = excluded.medium, \
-           mime = excluded.mime, \
-           size_bytes = excluded.size_bytes, \
-           language = excluded.language, \
-           seed_status = excluded.seed_status, \
-           indexed_at = excluded.indexed_at",
-        params![
-            universe_key,
-            entry_path,
-            file,
-            blob_sha256,
-            url,
-            medium,
-            mime,
-            size_bytes,
-            language,
-            seed_status,
-        ],
+        "DELETE FROM references_meta WHERE universe_key = ?1 AND entry_path = ?2",
+        params![universe_key, entry_path],
     )
     .ok();
 
-    // Sync FTS (delete + re-insert).
+    if let Some(serde_json::Value::Array(editions)) = frontmatter.get("editions") {
+        // Multi-edition card: one row per edition entry.
+        for edition in editions {
+            let edition_id = edition
+                .get("edition_id")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default")
+                .to_string();
+            let file = edition
+                .get("file")
+                .and_then(|v| if v.is_null() { None } else { v.as_str() })
+                .map(String::from);
+            let url = edition
+                .get("url")
+                .and_then(|v| if v.is_null() { None } else { v.as_str() })
+                .map(String::from);
+            let language = edition
+                .get("language")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| top_language.clone());
+            let mime = edition
+                .get("mime")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| top_mime.clone());
+            let size_bytes = edition
+                .get("size_bytes")
+                .or_else(|| edition.get("pages"))
+                .and_then(|v| v.as_i64())
+                .or(top_size_bytes);
+            let seed_status_raw = edition
+                .get("seed_status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("stub")
+                .to_string();
+
+            // sha256: prefer explicit field, then compute from disk.
+            let blob_sha256 = edition
+                .get("sha256")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .or_else(|| compute_blob_sha256(entry_path, file.as_deref(), universe_root));
+
+            // Duplicate detection: skip if same sha256 already exists for
+            // this work_id under a different entry_path.
+            if let Some(ref sha) = blob_sha256 {
+                let dup: Option<String> = conn
+                    .query_row(
+                        "SELECT entry_path FROM references_meta \
+                         WHERE universe_key = ?1 AND work_id = ?2 \
+                           AND blob_sha256 = ?3 AND entry_path != ?4 LIMIT 1",
+                        params![universe_key, work_id, sha, entry_path],
+                        |r| r.get(0),
+                    )
+                    .ok();
+                if dup.is_some() {
+                    continue;
+                }
+            }
+
+            let seed_status = if file.is_some() && blob_sha256.is_none() {
+                "stub".to_string()
+            } else {
+                seed_status_raw
+            };
+
+            conn.execute(
+                "INSERT OR REPLACE INTO references_meta \
+                 (universe_key, entry_path, edition_id, work_id, primary_layer, \
+                  file, blob_sha256, url, medium, mime, size_bytes, language, \
+                  seed_status, indexed_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, datetime('now'))",
+                params![
+                    universe_key,
+                    entry_path,
+                    edition_id,
+                    work_id,
+                    primary_layer,
+                    file,
+                    blob_sha256,
+                    url,
+                    top_medium,
+                    mime,
+                    size_bytes,
+                    language,
+                    seed_status,
+                ],
+            )
+            .ok();
+        }
+    } else {
+        // Single-edition card: one row with edition_id = "default".
+        let file = frontmatter
+            .get("file")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let url = frontmatter
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let seed_status_raw = frontmatter
+            .get("seed_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("stub")
+            .to_string();
+
+        let blob_sha256 = compute_blob_sha256(entry_path, file.as_deref(), universe_root);
+
+        // Duplicate detection.
+        let is_dup = blob_sha256.as_deref().is_some_and(|sha| {
+            conn.query_row(
+                "SELECT 1 FROM references_meta \
+                 WHERE universe_key = ?1 AND work_id = ?2 \
+                   AND blob_sha256 = ?3 AND entry_path != ?4 LIMIT 1",
+                params![universe_key, work_id, sha, entry_path],
+                |_| Ok(true),
+            )
+            .unwrap_or(false)
+        });
+
+        if !is_dup {
+            let seed_status = if file.is_some() && blob_sha256.is_none() {
+                "stub".to_string()
+            } else {
+                seed_status_raw
+            };
+
+            conn.execute(
+                "INSERT OR REPLACE INTO references_meta \
+                 (universe_key, entry_path, edition_id, work_id, primary_layer, \
+                  file, blob_sha256, url, medium, mime, size_bytes, language, \
+                  seed_status, indexed_at) \
+                 VALUES (?1, ?2, 'default', ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'))",
+                params![
+                    universe_key,
+                    entry_path,
+                    work_id,
+                    primary_layer,
+                    file,
+                    blob_sha256,
+                    url,
+                    top_medium,
+                    top_mime,
+                    top_size_bytes,
+                    top_language,
+                    seed_status,
+                ],
+            )
+            .ok();
+        }
+    }
+
+    // FTS: one row per card (not per edition) — delete + reinsert.
     conn.execute(
-        "DELETE FROM reference_cards_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
         params![universe_key, entry_path],
     )
     .ok();
     conn.execute(
-        "INSERT INTO reference_cards_fts (universe_key, entry_path, title, body, transcription) \
+        "INSERT INTO references_fts (universe_key, entry_path, title, body, transcription) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             universe_key,
@@ -240,7 +372,7 @@ fn upsert_reference_meta(
     .ok();
 }
 
-/// Remove `references_meta` + `reference_cards_fts` for an entry (idempotent — safe even if no row).
+/// Remove `references_meta` + `references_fts` for an entry (idempotent — safe even if no row).
 pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry_path: &str) {
     conn.execute(
         "DELETE FROM references_meta WHERE universe_key = ?1 AND entry_path = ?2",
@@ -248,7 +380,7 @@ pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry
     )
     .ok();
     conn.execute(
-        "DELETE FROM reference_cards_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
         params![universe_key, entry_path],
     )
     .ok();
@@ -302,17 +434,45 @@ fn row_to_card(row: &rusqlite::Row<'_>) -> rusqlite::Result<ReferenceCard> {
     Ok(ReferenceCard {
         universe_key: row.get(0)?,
         entry_path: row.get(1)?,
-        file: row.get(2)?,
-        blob_sha256: row.get(3)?,
-        url: row.get(4)?,
-        medium: row.get(5)?,
-        mime: row.get(6)?,
-        size_bytes: row.get(7)?,
-        language: row.get(8)?,
-        seed_status: row.get(9)?,
-        indexed_at: row.get(10)?,
-        title: row.get(11)?,
+        edition_id: row.get(2)?,
+        work_id: row.get(3)?,
+        primary_layer: row.get(4)?,
+        file: row.get(5)?,
+        blob_sha256: row.get(6)?,
+        url: row.get(7)?,
+        medium: row.get(8)?,
+        mime: row.get(9)?,
+        size_bytes: row.get(10)?,
+        language: row.get(11)?,
+        seed_status: row.get(12)?,
+        indexed_at: row.get(13)?,
+        title: row.get(14)?,
     })
+}
+
+/// Derive a work_id slug from an entry path: take the filename stem.
+/// e.g. "refs/GNDicLex.md" → "GNDicLex"
+fn work_id_from_path(path: &str) -> String {
+    std::path::Path::new(path)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(path)
+        .to_string()
+}
+
+/// Compute sha256 of a sibling asset file given the card's entry_path and file name.
+fn compute_blob_sha256(
+    entry_path: &str,
+    file: Option<&str>,
+    universe_root: &std::path::Path,
+) -> Option<String> {
+    let f = file?;
+    let entry_dir = std::path::Path::new(entry_path).parent()?;
+    let file_path = universe_root.join(entry_dir).join(f);
+    let bytes = std::fs::read(&file_path).ok()?;
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    Some(hex_encode(hasher.finalize()))
 }
 
 // ---------------------------------------------------------------------------
@@ -341,21 +501,24 @@ pub async fn list_references(
         .lock()
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
 
+    const REFS_SELECT: &str = "SELECT rm.universe_key, rm.entry_path, rm.edition_id, rm.work_id, rm.primary_layer, \
+                rm.file, rm.blob_sha256, rm.url, rm.medium, rm.mime, rm.size_bytes, \
+                rm.language, rm.seed_status, rm.indexed_at, e.title \
+         FROM references_meta rm \
+         LEFT JOIN entries e \
+           ON e.universe_key = rm.universe_key AND e.path = rm.entry_path";
+
     let cards = if let Some(ref fts_query) = q.q {
-        // FTS path: join with reference_cards_fts
-        let mut stmt = guard
-            .prepare(
-                "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
-                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
-                    rm.indexed_at, e.title \
-             FROM references_meta rm \
-             JOIN reference_cards_fts fts \
+        // FTS path: join with references_fts
+        let fts_sql = format!(
+            "{REFS_SELECT} \
+             JOIN references_fts fts \
                ON fts.universe_key = rm.universe_key AND fts.entry_path = rm.entry_path \
-             LEFT JOIN entries e \
-               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
-             WHERE fts.universe_key = ?1 AND reference_cards_fts MATCH ?2 \
-             ORDER BY rm.entry_path LIMIT 200",
-            )
+             WHERE fts.universe_key = ?1 AND references_fts MATCH ?2 \
+             ORDER BY rm.entry_path, rm.edition_id LIMIT 200"
+        );
+        let mut stmt = guard
+            .prepare(&fts_sql)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         stmt.query_map(params![universe_key, fts_query], row_to_card)
             .map_err(|e| AppError::Internal(e.to_string()))?
@@ -363,30 +526,31 @@ pub async fn list_references(
             .collect()
     } else {
         // Structured filter path
-        let mut sql = String::from(
-            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
-                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
-                    rm.indexed_at, e.title \
-             FROM references_meta rm \
-             LEFT JOIN entries e \
-               ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
-             WHERE rm.universe_key = ?1",
-        );
-        let mut bind_vals: Vec<String> = vec![universe_key.clone()];
+        let mut sql = format!("{REFS_SELECT} WHERE rm.universe_key = ?1");
+        let mut bind_vals: Vec<Box<dyn rusqlite::types::ToSql>> =
+            vec![Box::new(universe_key.clone())];
 
         if let Some(ref m) = q.medium {
-            bind_vals.push(m.clone());
+            bind_vals.push(Box::new(m.clone()));
             sql.push_str(&format!(" AND rm.medium = ?{}", bind_vals.len()));
         }
         if let Some(ref s) = q.seed_status {
-            bind_vals.push(s.clone());
+            bind_vals.push(Box::new(s.clone()));
             sql.push_str(&format!(" AND rm.seed_status = ?{}", bind_vals.len()));
         }
-        sql.push_str(" ORDER BY rm.entry_path LIMIT 500");
+        if let Some(ref w) = q.work_id {
+            bind_vals.push(Box::new(w.clone()));
+            sql.push_str(&format!(" AND rm.work_id = ?{}", bind_vals.len()));
+        }
+        if let Some(pl) = q.primary_layer {
+            bind_vals.push(Box::new(pl));
+            sql.push_str(&format!(" AND rm.primary_layer = ?{}", bind_vals.len()));
+        }
+        sql.push_str(" ORDER BY rm.entry_path, rm.edition_id LIMIT 500");
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> = bind_vals
             .iter()
-            .map(|s| s as &dyn rusqlite::types::ToSql)
+            .map(|b| b.as_ref() as &dyn rusqlite::types::ToSql)
             .collect();
         let mut stmt = guard
             .prepare(&sql)
@@ -519,15 +683,18 @@ pub async fn get_reference(
         .lock()
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
 
+    // Returns the canonical edition (or the first one if no canonical_edition set).
     let card = guard
         .query_row(
-            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
-                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
-                    rm.indexed_at, e.title \
+            "SELECT rm.universe_key, rm.entry_path, rm.edition_id, rm.work_id, rm.primary_layer, \
+                    rm.file, rm.blob_sha256, rm.url, rm.medium, rm.mime, rm.size_bytes, \
+                    rm.language, rm.seed_status, rm.indexed_at, e.title \
              FROM references_meta rm \
              LEFT JOIN entries e \
                ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
-             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2",
+             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2 \
+             ORDER BY CASE rm.edition_id WHEN 'default' THEN 0 ELSE 1 END, rm.edition_id \
+             LIMIT 1",
             params![universe_key, path],
             row_to_card,
         )
@@ -696,7 +863,7 @@ pub async fn update_reference(
         },
     );
 
-    // Return the updated card
+    // Return the canonical (first) edition of the updated card.
     let conn = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&universe_key)
@@ -706,13 +873,15 @@ pub async fn update_reference(
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
     let card = guard
         .query_row(
-            "SELECT rm.universe_key, rm.entry_path, rm.file, rm.blob_sha256, rm.url, \
-                    rm.medium, rm.mime, rm.size_bytes, rm.language, rm.seed_status, \
-                    rm.indexed_at, e.title \
+            "SELECT rm.universe_key, rm.entry_path, rm.edition_id, rm.work_id, rm.primary_layer, \
+                    rm.file, rm.blob_sha256, rm.url, rm.medium, rm.mime, rm.size_bytes, \
+                    rm.language, rm.seed_status, rm.indexed_at, e.title \
              FROM references_meta rm \
              LEFT JOIN entries e \
                ON e.universe_key = rm.universe_key AND e.path = rm.entry_path \
-             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2",
+             WHERE rm.universe_key = ?1 AND rm.entry_path = ?2 \
+             ORDER BY CASE rm.edition_id WHEN 'default' THEN 0 ELSE 1 END, rm.edition_id \
+             LIMIT 1",
             params![universe_key, path],
             row_to_card,
         )
@@ -774,6 +943,40 @@ pub async fn delete_reference(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// GET /api/v1/universes/{u}/references/works
+///
+/// Return the distinct `work_id` values present in the universe.
+pub async fn list_works(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+) -> Result<Json<Vec<String>>, AppError> {
+    let conn = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let mut stmt = guard
+        .prepare(
+            "SELECT DISTINCT work_id FROM references_meta \
+             WHERE universe_key = ?1 AND work_id != '' \
+             ORDER BY work_id",
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let works: Vec<String> = stmt
+        .query_map(params![universe_key], |row| row.get(0))
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    Ok(Json(works))
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -783,6 +986,7 @@ pub fn reference_router() -> Router<AppState> {
         // Specific paths must come before the wildcard {*path} route.
         .route("/{u}/references/orphan-blobs", get(orphan_blobs))
         .route("/{u}/references/broken-cards", get(broken_cards))
+        .route("/{u}/references/works", get(list_works))
         .route(
             "/{u}/references",
             get(list_references).post(create_reference),
@@ -949,20 +1153,320 @@ mod tests {
 
         let has_fts: bool = conn
             .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_cards_fts'",
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='references_fts'",
                 [],
                 |_| Ok(true),
             )
             .unwrap_or(false);
-        assert!(has_fts, "reference_cards_fts table should exist");
+        assert!(has_fts, "references_fts table should exist");
     }
 
     #[test]
-    fn test_schema_version_reaches_7() {
+    fn test_schema_version_reaches_8() {
         let conn = open_test_db();
         let v: i64 = conn
             .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
             .unwrap_or(0);
-        assert!(v >= 7, "schema_version should be at least 7, got {v}");
+        assert!(
+            v >= 8,
+            "schema_version should be at least 8 (CO-158), got {v}"
+        );
+    }
+
+    // --- CO-158 tests ---
+
+    #[test]
+    fn test_three_editions_round_trip() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "work_id": "ayvu-rapyta-cadogan-1959",
+            "medium": "pdf",
+            "seed_status": "stub",
+            "primary_source_chain": [
+                {"layer": 0, "role": "phenomenon"},
+                {"layer": 1, "role": "transcription"},
+                {"layer": 2, "role": "publication"},
+            ],
+            "editions": [
+                {"edition_id": "usp-1959",    "seed_status": "native-confirmed"},
+                {"edition_id": "ucsa-1992",   "seed_status": "reviewed"},
+                {"edition_id": "ocr-2010",    "seed_status": "stub", "url": "https://example.com"},
+            ],
+        });
+
+        upsert_reference_meta(
+            &conn,
+            "mbya",
+            "refs/ayvu-rapyta.md",
+            &fm,
+            "body text",
+            Some("Ayvu Rapyta"),
+            std::path::Path::new("/nonexistent"),
+        );
+
+        // All 3 editions must be present.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM references_meta \
+                 WHERE universe_key = 'mbya' AND entry_path = 'refs/ayvu-rapyta.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 3, "expected 3 edition rows in references_meta");
+
+        // All share the same work_id.
+        let work_id_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(DISTINCT work_id) FROM references_meta \
+                 WHERE entry_path = 'refs/ayvu-rapyta.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            work_id_count, 1,
+            "all editions should share the same work_id"
+        );
+
+        let work_id: String = conn
+            .query_row(
+                "SELECT work_id FROM references_meta WHERE entry_path = 'refs/ayvu-rapyta.md' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(work_id, "ayvu-rapyta-cadogan-1959");
+
+        // primary_layer = min layer in primary_source_chain = 0.
+        let layer: Option<i64> = conn
+            .query_row(
+                "SELECT primary_layer FROM references_meta \
+                 WHERE entry_path = 'refs/ayvu-rapyta.md' LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            layer,
+            Some(0),
+            "primary_layer should be min chain layer = 0"
+        );
+    }
+
+    #[test]
+    fn test_work_id_derived_from_path_when_absent() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "medium": "pdf",
+            "seed_status": "stub",
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/GNDicLex.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+
+        let work_id: String = conn
+            .query_row(
+                "SELECT work_id FROM references_meta WHERE entry_path = 'refs/GNDicLex.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(work_id, "GNDicLex", "work_id should be the filename stem");
+    }
+
+    #[test]
+    fn test_sha256_duplicate_skips_second_edition() {
+        let conn = open_test_db();
+
+        // Card A: explicit sha256 in editions (simulates computed from disk).
+        let fm_a = json!({
+            "type": "reference",
+            "work_id": "shared-work",
+            "medium": "pdf",
+            "editions": [
+                {"edition_id": "first", "sha256": "deadbeef01", "seed_status": "stub"},
+            ],
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/a.md",
+            &fm_a,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+
+        // Card B: same sha256, same work_id, different entry_path.
+        let fm_b = json!({
+            "type": "reference",
+            "work_id": "shared-work",
+            "medium": "pdf",
+            "editions": [
+                {"edition_id": "dup", "sha256": "deadbeef01", "seed_status": "stub"},
+            ],
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/b.md",
+            &fm_b,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+
+        // Only one row with that sha256 should exist.
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM references_meta WHERE blob_sha256 = 'deadbeef01'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 1,
+            "duplicate sha256 must not create a second edition row"
+        );
+    }
+
+    #[test]
+    fn test_work_id_filter_returns_all_editions() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "work_id": "my-work",
+            "medium": "pdf",
+            "editions": [
+                {"edition_id": "ed1", "seed_status": "stub"},
+                {"edition_id": "ed2", "seed_status": "reviewed"},
+            ],
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/card.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+
+        let edition_ids: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT edition_id FROM references_meta \
+                     WHERE work_id = 'my-work' ORDER BY edition_id",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert_eq!(edition_ids, ["ed1", "ed2"]);
+    }
+
+    #[test]
+    fn test_primary_layer_null_when_no_chain() {
+        let conn = open_test_db();
+        let fm = json!({
+            "type": "reference",
+            "medium": "web",
+            "seed_status": "stub",
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/nochain.md",
+            &fm,
+            "",
+            None,
+            std::path::Path::new("/nonexistent"),
+        );
+
+        let layer: Option<i64> = conn
+            .query_row(
+                "SELECT primary_layer FROM references_meta WHERE entry_path = 'refs/nochain.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            layer, None,
+            "primary_layer should be null when no primary_source_chain"
+        );
+    }
+
+    #[test]
+    fn test_editions_replaced_on_update() {
+        let conn = open_test_db();
+
+        // Initial write: 2 editions.
+        let fm1 = json!({
+            "type": "reference",
+            "work_id": "w",
+            "medium": "pdf",
+            "editions": [
+                {"edition_id": "a", "seed_status": "stub"},
+                {"edition_id": "b", "seed_status": "stub"},
+            ],
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/r.md",
+            &fm1,
+            "",
+            None,
+            std::path::Path::new("/x"),
+        );
+
+        // Update: remove edition "a", add edition "c".
+        let fm2 = json!({
+            "type": "reference",
+            "work_id": "w",
+            "medium": "pdf",
+            "editions": [
+                {"edition_id": "b", "seed_status": "reviewed"},
+                {"edition_id": "c", "seed_status": "stub"},
+            ],
+        });
+        upsert_reference_meta(
+            &conn,
+            "u",
+            "refs/r.md",
+            &fm2,
+            "",
+            None,
+            std::path::Path::new("/x"),
+        );
+
+        let edition_ids: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT edition_id FROM references_meta \
+                     WHERE entry_path = 'refs/r.md' ORDER BY edition_id",
+                )
+                .unwrap();
+            stmt.query_map([], |r| r.get(0))
+                .unwrap()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        assert_eq!(
+            edition_ids,
+            ["b", "c"],
+            "removed edition 'a' must be gone; 'c' must appear"
+        );
     }
 }

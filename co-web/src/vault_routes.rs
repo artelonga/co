@@ -350,14 +350,6 @@ fn write_vault_entry(
                 m,
             );
         }
-        // CO-154: index citations from frontmatter.references[] + body excerpts
-        let _ = crate::reference_index::sync_entry_references(
-            &uc_guard,
-            universe_key,
-            path,
-            &frontmatter,
-            body,
-        );
         // CO-156: sync references_meta for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,

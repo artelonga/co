@@ -276,15 +276,14 @@ fn watch_dirs_blocking(
 ) -> Result<()> {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel();
 
-    let mut watcher = notify::recommended_watcher(
-        move |res: Result<notify::Event, notify::Error>| match res {
+    let mut watcher =
+        notify::recommended_watcher(move |res: Result<notify::Event, notify::Error>| match res {
             Ok(ev) => {
                 debug!(?ev, "raw notify event");
                 let _ = raw_tx.send(ev);
             }
             Err(e) => warn!("notify error: {e}"),
-        },
-    )?;
+        })?;
 
     for dir in &dirs {
         watcher.watch(dir, RecursiveMode::Recursive)?;
@@ -448,7 +447,10 @@ fn apply_batch(
         // universe-rooted relative paths post-1.38.2.
         let rel = Path::new(&delta.entry_path);
         if rel.is_absolute() {
-            warn!("sync-watcher apply_batch: rejecting absolute path {:?}", rel);
+            warn!(
+                "sync-watcher apply_batch: rejecting absolute path {:?}",
+                rel
+            );
             continue;
         }
         let abs = root.join(rel);
@@ -465,9 +467,7 @@ fn apply_batch(
                     let already_match = std::fs::read(&abs)
                         .ok()
                         .is_some_and(|cur| cur == cofile.content);
-                    if !already_match
-                        && let Err(e) = std::fs::write(&abs, &cofile.content)
-                    {
+                    if !already_match && let Err(e) = std::fs::write(&abs, &cofile.content) {
                         warn!("sync-watcher apply write failed: {abs:?}: {e}");
                         continue;
                     }
@@ -485,10 +485,7 @@ fn apply_batch(
                         // can skip the corresponding fs-notify Remove echo.
                         if let Ok(mut g) = applied.lock() {
                             // Use a path-derived key so deletes also dedup.
-                            g.insert(
-                                format!("DEL:{}", delta.entry_path),
-                                Instant::now(),
-                            );
+                            g.insert(format!("DEL:{}", delta.entry_path), Instant::now());
                         }
                         debug!("sync-watcher applied delete: {abs:?}");
                     }

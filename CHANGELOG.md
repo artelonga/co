@@ -5,35 +5,30 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] — 2026-05-03
+
+### Added — CO-158: Reference versioning — work_id + editions[] + primary/secondary source chain
+
+- `references_meta` table gains `work_id`, `edition_id`, `primary_layer` columns; PK changed to `(universe_key, entry_path, edition_id)`.
+- Per-universe DB migration v8: existing rows backfilled with `edition_id = 'default'`, `work_id` derived from filename stem, `primary_layer = NULL`.
+- Reference cards may now carry an `editions:` array — one `references_meta` row is written per edition, so a single card can represent multiple concrete artifacts (scans, reprints, OCR'd versions).
+- `work_id` groups all editions of the same conceptual work; auto-derived from the card's filename stem when not explicitly authored.
+- `primary_layer` stores the minimum layer value from `primary_source_chain` (0 = phenomenon, 1 = transcription, 2 = publication, 3+ = re-print / scan / OCR); `null` when no chain is authored.
+- Duplicate sha256 detection: re-uploading a PDF that already exists in `references_meta` under the same `work_id` skips creating a second edition row.
+- New REST endpoints:
+  - `GET /references?work_id=<id>` — return every edition row for a given work
+  - `GET /references?primary_layer=<n>` — return references with that source-chain layer
+  - `GET /references/works` — list all distinct `work_id` values in the universe
+- 5 new CO-158 unit tests; existing CO-156 tests updated to pass with the new schema.
+
 ## [1.39.0] — 2026-05-03
 
-<<<<<<< HEAD
-### Added — CO-153: cross-universe `entry_relations` + `co://` URI resolver
-
-`entry_relations` now carries a `to_universe TEXT` column (NULL = same universe, back-compat). `co://<universe>/<path>` URIs in frontmatter `ref`/`ref_list` fields are parsed by the new `parse_co_uri` resolver and stored with the target universe split out. A `parse_co_uri` backfill runs as per-universe DB migration v7, converting any existing raw `co://` strings stored in `to_path` to the proper `(to_universe, to_path)` split.
-
-Two new relation query endpoints:
-- `GET /api/v1/universes/:slug/relations/inbound?path=<p>` — returns all inbound edges from same-universe AND cross-universe (scans every other universe's DB for `to_universe = slug`).
-- `GET /api/v1/universes/:slug/relations/outbound?path=<p>` — returns outbound edges from `<p>`, including cross-universe edges (`to_universe` non-null).
-
-### Added — CO-154: References as a first-class content type (per-citation index)
-
-`references_index` + `references_fts` tables in every per-universe SQLite DB (v8 migration). On every entry write, `{url, source, retrieved}` items from `frontmatter.references[]` are extracted and upserted; body sections under `## Referência: <source>` headings are matched and stored as `excerpt_body`. FTS5 virtual table enables full-text search across source + excerpt. Backfill runs once per universe on first open after this deploy.
-
-New API endpoints:
-- `GET /api/v1/universes/{u}/references?source=&url_contains=&q=` — filter/search references
-- `GET /api/v1/universes/{u}/references/orphan-wikilinks` — candidate-entry backlog
-
-All three entry write paths (entry create, entry update, vault write) sync the citations index.
-
 ### Added — CO-156: Universal envelope — `reference` content type + uniform CRUD telemetry
-
-Complementary to CO-154 (which indexes citation *items* inside any entry's frontmatter): CO-156 indexes the reference *card* itself (its bound blob, mime, seed_status, language, medium). Both tables coexist; they answer different questions.
 
 #### Part A — `reference` as a first-class content type
 
 - `_universe.yaml` parser now accepts `properties_per_type` with the per-content-type property map using `kind: text|int|enum|list` vocabulary; content types may be declared as bare strings (`- reference`) or full objects.
-- Per-universe DB v8 migration creates `references_meta` (structured shadow table) + `reference_cards_fts` (FTS5 index over title, body, transcription).
+- Per-universe DB v7 migration creates `references_meta` (structured shadow table) + `references_fts` (FTS5 index over title, body, transcription).
 - Every reference-card write (via entry_routes, vault_routes, or the new reference_routes) upserts `references_meta`; sha256 of the bound sibling asset is resolved and stored.
 - New REST API under `/api/v1/universes/{u}/references`:
   - `GET /references?medium=pdf` — list cards with medium/seed_status/FTS filters
@@ -54,7 +49,7 @@ Every state change now emits one `telemetry_events` row with `event_type = "crud
 - `GET /api/v1/admin/telemetry/crud-summary` returns the 24h CRUD breakdown.
 - `docs/telemetry-envelope.md` documents all event kinds and their `extra` shapes.
 
-### Added — CO-157: PDF metadata extraction tool
+### Added — PDF metadata extraction tool (CO-157)
 
 `scripts/extract-pdf-meta.py` auto-populates reference-card `.md` siblings from source PDFs. Extracts title (from `/Info.Title` or first-page heuristic), authors, year, page count, sha256, language (via `langdetect`), DOI (regex `10.\d{4,9}/...`), ISBN, abstract, and keywords. Writes YAML frontmatter + prose body matching the `reference` content type envelope from CO-156.
 

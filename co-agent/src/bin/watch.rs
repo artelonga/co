@@ -27,7 +27,10 @@ use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Debug)]
-#[command(name = "co-agent-watch", about = "CO-151 sync watcher (protobuf+zstd+WS)")]
+#[command(
+    name = "co-agent-watch",
+    about = "CO-151 sync watcher (protobuf+zstd+WS)"
+)]
 struct Cli {
     /// Universe key the watcher belongs to (e.g. `co`, `quilomboaraucaria`).
     #[arg(long, env = "CO_UNIVERSE_KEY")]
@@ -62,7 +65,10 @@ struct Cli {
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("co_agent=info,co_agent_watch=info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| EnvFilter::new("co_agent=info,co_agent_watch=info")),
+        )
         .init();
 
     let cli = Cli::parse();

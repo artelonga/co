@@ -430,14 +430,6 @@ pub async fn create_entry(
         } else {
             0
         };
-        // CO-154: index citations from frontmatter.references[] + body excerpts
-        let _ = crate::reference_index::sync_entry_references(
-            &uc_guard,
-            &slug,
-            &body.path,
-            &body.frontmatter,
-            &body.body,
-        );
         // CO-156: sync references_meta shadow table for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,
@@ -607,10 +599,6 @@ pub async fn update_entry(
         } else {
             Ok(0)
         };
-        // CO-154: re-index citations from frontmatter.references[] + body
-        let _ = crate::reference_index::sync_entry_references(
-            &uc_guard, &slug, &path, &new_fm, &new_body,
-        );
         // CO-156: sync references_meta for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,
@@ -749,7 +737,7 @@ pub async fn delete_entry(
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // CO-74: remove outbound FK relations
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
-        // CO-156: remove references_meta + reference_cards_fts (idempotent)
+        // CO-156: remove references_meta + references_fts (idempotent)
         crate::reference_routes::remove_reference_meta(&uc_guard, &slug, &path);
     }
     let mut storage = lock_storage(&state)?;
