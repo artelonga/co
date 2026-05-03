@@ -4548,6 +4548,12 @@ impl Storage {
                 "Yoruba term plane in the meaning-topology",
                 "private",
             ),
+            (
+                "languages",
+                "Languages catalog (topologia)",
+                "Centralized queryable index of every language plane — code, family, Glottolog/SAPhon authority links, geographic centroid, speaker estimate, and cross-ref to the term plane",
+                "private",
+            ),
         ] {
             let _ = self.conn.execute(
                 "INSERT OR IGNORE INTO universes \

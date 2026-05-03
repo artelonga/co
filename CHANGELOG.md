@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.9] — 2026-05-03
+
+### Added — `languages/` catalog universe with authoritative metadata
+
+A 6th topologia universe — `languages` — that holds one `.md` per language with structured metadata: BCP-47 code, native/EN/PT names, ISO 639-1/3, Glottolog code + URL, SAPhon URL (for South American indigenous), language family, geographic centroid (lat/lon), speaker estimate, cross-ref to the term plane (when one exists).
+
+```
+GET /api/v1/universes/languages/entries
+GET /api/v1/universes/languages/entries/gn-mbya.md
+GET /api/v1/universes/languages/entries?q=tupi
+```
+
+Initial 4 entries: `gn-mbya` (SAPhon + Glottolog `mbya1239` + Dooley reference), `pt-BR` (Glottolog `braz1246`), `en` (Glottolog `stan1293`; meta-language for concept anchors, no term plane), `yo` (Glottolog `yoru1245`; Afro-Brazilian liturgical scope).
+
+Source-of-truth policy when authorities disagree (documented in `topologia/languages/index.md`):
+- Identity: Glottolog wins.
+- SA indigenous phonology / coordinates: SAPhon wins.
+- Geography otherwise: SAPhon for SA indigenous → community/state stats → Wikipedia infobox.
+
+This catalog is the foundation for CO-153 (cross-universe `entry_relations.to_universe`) — term entries currently carry `language_code: gn-mbya` as a string; once cross-universe relations land, they upgrade to `co://languages/gn-mbya.md` refs that resolve through the relation graph.
+
+`languages` is `visibility: private` (same status as the other 4 topologia universes — under active authoring).
+
 ## [1.38.8] — 2026-05-03
 
 ### Changed — topologia universes private; watcher narrows to `.md`-only

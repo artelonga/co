@@ -31,6 +31,7 @@ REPOS=(
     "guarani-mbya|$HOME/projects/topologia/guarani-mbya"
     "portuguese|$HOME/projects/topologia/portuguese"
     "yoruba|$HOME/projects/topologia/yoruba"
+    "languages|$HOME/projects/topologia/languages"
 )
 
 mkdir -p "$HOME/.co"
