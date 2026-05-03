@@ -422,6 +422,81 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
 }
 
 // ---------------------------------------------------------------------------
+// REST-originated emits (CO-151 web→local sync)
+// ---------------------------------------------------------------------------
+
+/// Emit an upserted SyncDelta into the room from a REST-side write.
+///
+/// Called by `vault_routes::put_vault_file` (and any other write path) after
+/// the entry is persisted. Connected watchers receive the broadcast and
+/// apply the change to their local filesystems — closing the web→local gap.
+///
+/// `origin_conn_id = 0` because REST has no WS connection; broadcast loop
+/// assigns conn_ids starting at 1, so 0 never matches an active client and
+/// every subscriber gets the frame.
+pub async fn emit_rest_upsert(
+    state: &AppState,
+    universe_key: &str,
+    entry_path: &str,
+    rendered_markdown: &str,
+) {
+    let room = get_or_create_room(state, universe_key).await;
+    let ts_ns = chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000);
+    let bytes = rendered_markdown.as_bytes().to_vec();
+    let sha = blake3::hash(&bytes).to_hex().to_string(); // cheap content fingerprint
+    let d = delta::upserted_delta(universe_key, entry_path, bytes, &sha, ts_ns);
+    let batch = SyncBatch {
+        deltas: vec![d],
+        client_id: "rest".into(),
+        batch_ts_ns: ts_ns,
+        resume_token: 0,
+    };
+    let Ok(encoded) = delta::encode_batch(&batch) else {
+        return;
+    };
+    let token = room.append_frame(encoded.clone()).await;
+    // Re-encode with the resume token populated so reconnecting watchers can
+    // resume from this frame.
+    let mut with_token = batch;
+    with_token.resume_token = token as i64;
+    if let Ok(re_encoded) = delta::encode_batch(&with_token) {
+        let _ = room.tx.send(BroadcastFrame {
+            origin_conn_id: 0,
+            encoded: re_encoded,
+        });
+    }
+}
+
+/// Emit a deleted SyncDelta into the room from a REST-side delete.
+pub async fn emit_rest_delete(state: &AppState, universe_key: &str, entry_path: &str) {
+    let room = get_or_create_room(state, universe_key).await;
+    let ts_ns = chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000);
+    let d = delta::deleted_delta(universe_key, entry_path, ts_ns);
+    let batch = SyncBatch {
+        deltas: vec![d],
+        client_id: "rest".into(),
+        batch_ts_ns: ts_ns,
+        resume_token: 0,
+    };
+    let Ok(encoded) = delta::encode_batch(&batch) else {
+        return;
+    };
+    let token = room.append_frame(encoded.clone()).await;
+    let mut with_token = batch;
+    with_token.resume_token = token as i64;
+    if let Ok(re_encoded) = delta::encode_batch(&with_token) {
+        let _ = room.tx.send(BroadcastFrame {
+            origin_conn_id: 0,
+            encoded: re_encoded,
+        });
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Room lifecycle
 // ---------------------------------------------------------------------------
 

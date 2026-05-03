@@ -31,8 +31,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use co::proto::sync::{SyncBatch, SyncDelta};
@@ -52,6 +52,12 @@ use tracing::{debug, info, warn};
 
 /// How long to collect events before sending a batch.
 const DEBOUNCE_MS: u64 = 200;
+
+/// Window during which a recently-applied (web→local) sha256 will suppress
+/// our own outbound notify event for that path. Long enough to cover the
+/// FSEvents → debouncer → encode round trip, short enough that legitimate
+/// fast-edit sequences still get through.
+const APPLIED_DEDUP_WINDOW: Duration = Duration::from_secs(5);
 
 /// Configuration for the sync watcher.
 pub struct WatcherConfig {
@@ -87,6 +93,11 @@ impl SyncWatcher {
     /// This function is async and runs until the WS connection is closed or
     /// an unrecoverable error occurs.
     pub async fn run(&self) -> Result<()> {
+        // Shared dedup map: sha256 → instant the watcher last applied that
+        // content from a downlink. encode_event consults this and skips
+        // sending a delta when the on-disk content matches what we just
+        // wrote — closing the web→local→web echo loop.
+        let applied: Arc<Mutex<HashMap<String, Instant>>> = Arc::new(Mutex::new(HashMap::new()));
         // Server expects ?universe=<key>&token=<jwt>; missing universe → HTTP 400.
         // Universe keys are slugs ([a-z0-9-]) and JWTs are url-safe base64
         // ([A-Za-z0-9._-]) — both safe to inline without percent-encoding.
@@ -143,7 +154,13 @@ impl SyncWatcher {
 
                 // Filesystem events → uplink.
                 Some(events) = event_rx.recv() => {
-                    let batch = build_batch(&events, &universe_key);
+                    let batch = build_batch(&events, &universe_key, &applied);
+                    if batch.deltas.is_empty() {
+                        // Nothing left after dedup — likely an echo of a
+                        // change we just applied locally. Don't bother the
+                        // server.
+                        continue;
+                    }
                     match codec::encode_batch(&batch) {
                         Ok(encoded) => {
                             if ws.send(WsMsg::Binary(encoded.into())).await.is_err() {
@@ -160,7 +177,11 @@ impl SyncWatcher {
                     match msg {
                         Some(Ok(WsMsg::Binary(data))) => {
                             match codec::decode_batch(&data) {
-                                Ok(batch) => apply_batch(&batch),
+                                Ok(batch) => apply_batch(
+                                    &batch,
+                                    &self.config.watch_dirs,
+                                    &applied,
+                                ),
                                 Err(e) => warn!("sync-watcher decode error: {e}"),
                             }
                         }
@@ -322,7 +343,11 @@ fn watch_dirs_blocking(
 // Batch building
 // ---------------------------------------------------------------------------
 
-fn build_batch(events: &[WatchEvent], universe_key: &str) -> SyncBatch {
+fn build_batch(
+    events: &[WatchEvent],
+    universe_key: &str,
+    applied: &Arc<Mutex<HashMap<String, Instant>>>,
+) -> SyncBatch {
     let now_ns = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -330,7 +355,7 @@ fn build_batch(events: &[WatchEvent], universe_key: &str) -> SyncBatch {
 
     let deltas: Vec<SyncDelta> = events
         .iter()
-        .filter_map(|ev| encode_event(ev, universe_key, now_ns))
+        .filter_map(|ev| encode_event(ev, universe_key, now_ns, applied))
         .collect();
 
     SyncBatch {
@@ -341,7 +366,12 @@ fn build_batch(events: &[WatchEvent], universe_key: &str) -> SyncBatch {
     }
 }
 
-fn encode_event(ev: &WatchEvent, universe_key: &str, ts_ns: i64) -> Option<SyncDelta> {
+fn encode_event(
+    ev: &WatchEvent,
+    universe_key: &str,
+    ts_ns: i64,
+    applied: &Arc<Mutex<HashMap<String, Instant>>>,
+) -> Option<SyncDelta> {
     // entry_path on the wire is the universe-rooted relative path; reads on
     // disk use the absolute path the watcher captured.
     let rel = ev.rel_path.to_string_lossy();
@@ -355,13 +385,26 @@ fn encode_event(ev: &WatchEvent, universe_key: &str, ts_ns: i64) -> Option<SyncD
         return Some(codec::deleted_delta(universe_key, &*rel, ts_ns));
     }
 
-    debug!(rel = %rel, abs = %ev.abs_path.display(), kind = ?ev.kind, "encoding sync delta");
-
     match ev.kind {
         WatchEventKind::Deleted => Some(codec::deleted_delta(universe_key, &*rel, ts_ns)),
         WatchEventKind::Upserted => {
             let content = std::fs::read(&ev.abs_path).ok()?;
             let sha256 = hex::encode(Sha256::digest(&content));
+
+            // Dedup: if we just applied this exact content from a downlink,
+            // notify is firing because OUR write triggered FSEvents. Skip
+            // sending it back — server already has it. Cleans up the map
+            // opportunistically while we're holding the lock.
+            if let Ok(mut guard) = applied.lock() {
+                let now = Instant::now();
+                guard.retain(|_, t| now.duration_since(*t) < APPLIED_DEDUP_WINDOW);
+                if guard.contains_key(&sha256) {
+                    debug!(rel = %rel, sha = %&sha256[..12], "suppressing fs-notify echo (recently applied)");
+                    return None;
+                }
+            }
+
+            debug!(rel = %rel, abs = %ev.abs_path.display(), kind = ?ev.kind, "encoding sync delta");
             Some(codec::upserted_delta(
                 universe_key,
                 &*rel,
@@ -378,37 +421,83 @@ fn encode_event(ev: &WatchEvent, universe_key: &str, ts_ns: i64) -> Option<SyncD
 // ---------------------------------------------------------------------------
 
 /// Apply a server-pushed SyncBatch to local files (last-write-wins).
-fn apply_batch(batch: &SyncBatch) {
+///
+/// `delta.entry_path` is the universe-rooted relative path (e.g.
+/// `notes/hello.md`). Each delta is resolved against the first watch root
+/// in `roots` — a v2 watcher process is single-universe so there's exactly
+/// one root, and any path outside it is invalid.
+///
+/// Records each applied content's sha256 in `applied` so the uplink path
+/// can suppress notify-driven echo of the change we just made.
+fn apply_batch(
+    batch: &SyncBatch,
+    roots: &[PathBuf],
+    applied: &Arc<Mutex<HashMap<String, Instant>>>,
+) {
     use co::proto::sync::sync_delta::{Body, Kind};
+
+    let Some(root) = roots.first() else {
+        warn!("sync-watcher apply_batch: no watch roots configured");
+        return;
+    };
 
     for delta in &batch.deltas {
         let kind = Kind::try_from(delta.kind).unwrap_or(Kind::Unspecified);
-        let path = Path::new(&delta.entry_path);
+        // Reject absolute paths defensively — server should always send
+        // universe-rooted relative paths post-1.38.2.
+        let rel = Path::new(&delta.entry_path);
+        if rel.is_absolute() {
+            warn!("sync-watcher apply_batch: rejecting absolute path {:?}", rel);
+            continue;
+        }
+        let abs = root.join(rel);
 
         match kind {
             Kind::Upserted => {
                 if let Some(Body::Cofile(ref cofile)) = delta.body {
-                    if let Some(parent) = path.parent() {
+                    if let Some(parent) = abs.parent() {
                         std::fs::create_dir_all(parent).ok();
                     }
-                    if let Err(e) = std::fs::write(path, &cofile.content) {
-                        warn!("sync-watcher apply write failed: {path:?}: {e}");
-                    } else {
-                        debug!("sync-watcher applied upsert: {path:?}");
+                    // Skip the write if local content is already byte-identical.
+                    // notify might still fire on metadata, but the dedup map
+                    // suppresses the echo at encode time.
+                    let already_match = std::fs::read(&abs)
+                        .ok()
+                        .is_some_and(|cur| cur == cofile.content);
+                    if !already_match
+                        && let Err(e) = std::fs::write(&abs, &cofile.content)
+                    {
+                        warn!("sync-watcher apply write failed: {abs:?}: {e}");
+                        continue;
                     }
+                    let sha = hex::encode(Sha256::digest(&cofile.content));
+                    if let Ok(mut g) = applied.lock() {
+                        g.insert(sha, Instant::now());
+                    }
+                    debug!("sync-watcher applied upsert: {abs:?}");
                 }
             }
             Kind::Deleted => {
-                if let Err(e) = std::fs::remove_file(path) {
-                    if e.kind() != std::io::ErrorKind::NotFound {
-                        warn!("sync-watcher apply delete failed: {path:?}: {e}");
+                match std::fs::remove_file(&abs) {
+                    Ok(()) => {
+                        // Mark a sentinel "deleted" entry so encode_event
+                        // can skip the corresponding fs-notify Remove echo.
+                        if let Ok(mut g) = applied.lock() {
+                            // Use a path-derived key so deletes also dedup.
+                            g.insert(
+                                format!("DEL:{}", delta.entry_path),
+                                Instant::now(),
+                            );
+                        }
+                        debug!("sync-watcher applied delete: {abs:?}");
                     }
-                } else {
-                    debug!("sync-watcher applied delete: {path:?}");
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        // already gone
+                    }
+                    Err(e) => warn!("sync-watcher apply delete failed: {abs:?}: {e}"),
                 }
             }
             Kind::Renamed => {
-                // Handled by upsert of the new path + delete of the old.
                 debug!("sync-watcher skipping rename delta (handled as upsert+delete)");
             }
             Kind::Unspecified => {}
@@ -426,6 +515,11 @@ mod tests {
     use co::proto::sync::sync_delta;
     use tempfile::TempDir;
 
+    /// Test helper: empty applied-dedup map for tests that don't care about it.
+    fn empty_applied() -> Arc<Mutex<HashMap<String, Instant>>> {
+        Arc::new(Mutex::new(HashMap::new()))
+    }
+
     // ── T1: encode_event for upserted file ───────────────────────────────────
 
     #[test]
@@ -439,7 +533,7 @@ mod tests {
             rel_path: path.clone(),
             kind: WatchEventKind::Upserted,
         };
-        let delta = encode_event(&ev, "my-universe", 1_000_000).unwrap();
+        let delta = encode_event(&ev, "my-universe", 1_000_000, &empty_applied()).unwrap();
 
         assert_eq!(delta.universe_key, "my-universe");
         assert_eq!(delta.entry_path, path.to_string_lossy().as_ref());
@@ -466,7 +560,7 @@ mod tests {
             rel_path: path.clone(),
             kind: WatchEventKind::Deleted,
         };
-        let delta = encode_event(&ev, "u", 999).unwrap();
+        let delta = encode_event(&ev, "u", 999, &empty_applied()).unwrap();
 
         assert_eq!(delta.kind, sync_delta::Kind::Deleted as i32);
         assert!(delta.body.is_none());
@@ -494,7 +588,7 @@ mod tests {
                 kind: WatchEventKind::Upserted,
             },
         ];
-        let batch = build_batch(&events, "test-universe");
+        let batch = build_batch(&events, "test-universe", &empty_applied());
 
         assert_eq!(batch.deltas.len(), 2);
         assert!(batch.client_id.starts_with("co-watcher-"));
@@ -506,16 +600,11 @@ mod tests {
     #[test]
     fn test_apply_batch_writes_file() {
         let tmp = TempDir::new().unwrap();
-        let target = tmp.path().join("sub").join("file.md");
+        let root = tmp.path().to_path_buf();
 
         use co::sync::delta as dc;
-        let delta = dc::upserted_delta(
-            "u",
-            target.to_str().unwrap(),
-            b"# Applied".to_vec(),
-            "sha",
-            0,
-        );
+        // Universe-rooted relative path; apply_batch joins against `root`.
+        let delta = dc::upserted_delta("u", "sub/file.md", b"# Applied".to_vec(), "sha", 0);
         let batch = SyncBatch {
             deltas: vec![delta],
             client_id: "server".into(),
@@ -523,8 +612,9 @@ mod tests {
             resume_token: 1,
         };
 
-        apply_batch(&batch);
+        apply_batch(&batch, std::slice::from_ref(&root), &empty_applied());
 
+        let target = root.join("sub").join("file.md");
         assert!(target.exists(), "file should have been written");
         let content = std::fs::read_to_string(&target).unwrap();
         assert_eq!(content, "# Applied");
@@ -535,12 +625,13 @@ mod tests {
     #[test]
     fn test_apply_batch_deletes_file() {
         let tmp = TempDir::new().unwrap();
-        let target = tmp.path().join("to-delete.md");
+        let root = tmp.path().to_path_buf();
+        let target = root.join("to-delete.md");
         std::fs::write(&target, b"bye").unwrap();
         assert!(target.exists());
 
         use co::sync::delta as dc;
-        let delta = dc::deleted_delta("u", target.to_str().unwrap(), 0);
+        let delta = dc::deleted_delta("u", "to-delete.md", 0);
         let batch = SyncBatch {
             deltas: vec![delta],
             client_id: "server".into(),
@@ -548,7 +639,7 @@ mod tests {
             resume_token: 1,
         };
 
-        apply_batch(&batch);
+        apply_batch(&batch, &[root], &empty_applied());
 
         assert!(!target.exists(), "file should have been deleted");
     }
@@ -558,10 +649,10 @@ mod tests {
     #[test]
     fn test_apply_batch_delete_not_found_is_ok() {
         let tmp = TempDir::new().unwrap();
-        let target = tmp.path().join("nonexistent.md");
+        let root = tmp.path().to_path_buf();
 
         use co::sync::delta as dc;
-        let delta = dc::deleted_delta("u", target.to_str().unwrap(), 0);
+        let delta = dc::deleted_delta("u", "nonexistent.md", 0);
         let batch = SyncBatch {
             deltas: vec![delta],
             client_id: "server".into(),
@@ -570,10 +661,42 @@ mod tests {
         };
 
         // Should not panic.
-        apply_batch(&batch);
+        apply_batch(&batch, &[root], &empty_applied());
     }
 
-    // ── T7: round-trip encode_batch → decode_batch ───────────────────────────
+    // ── T7: applied-dedup suppresses fs-notify echo ──────────────────────────
+
+    #[test]
+    fn test_encode_event_skips_recently_applied_content() {
+        // Simulates the web→local→web echo path: server pushes a change,
+        // watcher applies it, FSEvents fires Modify. encode_event should
+        // skip emitting a delta for a sha256 that's in the applied map.
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("echo.md");
+        std::fs::write(&path, b"server content").unwrap();
+
+        let applied = empty_applied();
+        let sha = hex::encode(Sha256::digest(b"server content"));
+        applied.lock().unwrap().insert(sha, Instant::now());
+
+        let ev = WatchEvent {
+            abs_path: path.clone(),
+            rel_path: path.clone(),
+            kind: WatchEventKind::Upserted,
+        };
+        let result = encode_event(&ev, "u", 0, &applied);
+        assert!(
+            result.is_none(),
+            "encode_event should skip when sha256 was just applied",
+        );
+
+        // After the dedup window expires, the same content emits normally.
+        applied.lock().unwrap().clear();
+        let result = encode_event(&ev, "u", 0, &applied);
+        assert!(result.is_some(), "fresh applied map → delta emitted");
+    }
+
+    // ── T8: round-trip encode_batch → decode_batch ───────────────────────────
 
     #[test]
     fn test_watcher_batch_codec_roundtrip() {
@@ -586,7 +709,7 @@ mod tests {
             rel_path: path,
             kind: WatchEventKind::Upserted,
         };
-        let batch = build_batch(&[ev], "u");
+        let batch = build_batch(&[ev], "u", &empty_applied());
         let encoded = codec::encode_batch(&batch).unwrap();
         let decoded = codec::decode_batch(&encoded).unwrap();
 

@@ -521,6 +521,10 @@ pub async fn put_vault_file(
     let tags = extract_tags(&row.frontmatter);
     let content = entry_to_content(&row.frontmatter, &row.body);
 
+    // CO-151 web→local: notify any connected watchers about this REST-side
+    // write so they can apply the change to their local filesystems.
+    crate::sync_ws::emit_rest_upsert(&state, &slug, &path, &content).await;
+
     Ok((
         StatusCode::CREATED,
         Json(VaultFile {
@@ -835,6 +839,9 @@ pub async fn delete_vault_file(
     }
 
     let _ = lock_storage(&state).map(|mut s| s.decrement_universe_content_count(&slug, 1));
+
+    // CO-151 web→local: tell connected watchers to remove the file locally.
+    crate::sync_ws::emit_rest_delete(&state, &slug, &path).await;
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }

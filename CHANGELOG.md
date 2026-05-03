@@ -5,6 +5,28 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.6] — 2026-05-03
+
+### Added — web→local sync direction (CO-151 second leg)
+
+The v2 watcher's downlink path was already wired (server broadcasts → `apply_batch`), but **only client-originated changes** ever reached the broadcast. REST writes via `/vault/*` and `/entries/*` bypassed the SyncRoom entirely, so a SPA edit on prod was invisible to connected watchers.
+
+**Server side (`co-web/src/sync_ws.rs`):** added `emit_rest_upsert` and `emit_rest_delete` helpers that build a `SyncDelta`, append it to the room's delta-log (so reconnecting clients can resume), and broadcast it with `origin_conn_id = 0` (REST has no WS connection, so the per-connection echo filter never matches and every connected watcher gets the frame). `vault_routes::put_vault_file` and `delete_vault_file` now call these after the entry write completes.
+
+**Client side (`co-agent/src/watcher.rs`):**
+
+1. **Path resolution.** `apply_batch` now joins `delta.entry_path` against the watch root (`config.watch_dirs.first()`) instead of using it CWD-relative. Defensively rejects absolute paths.
+2. **Echo dedup.** A shared `Arc<Mutex<HashMap<sha256, Instant>>>` tracks recently-applied content; `encode_event` skips emitting a delta when the on-disk sha256 matches a recently-applied one (5s window). Closes the web→local→fs-notify→web echo loop.
+3. **Idempotent local write.** `apply_batch` reads the file before writing — if the bytes already match, the write is skipped (avoids triggering fs-notify at all).
+4. **Delete-side dedup.** Successful local deletes record a `DEL:<path>` sentinel in the same map.
+
+**Tests:** new `test_encode_event_skips_recently_applied_content` covers the dedup behavior end-to-end. Watcher suite is now 8 tests; co-web suite still 281 tests; clippy clean.
+
+End-to-end verification (after deploy + watcher restart):
+- `curl -X PUT /api/v1/universes/co/vault/notes/test.md` → file appears at `~/projects/co/notes/test.md` within ~1s
+- `curl -X DELETE …` → file removed locally within ~1s
+- No echo loop in `~/.co/watch-v2.log`
+
 ## [1.38.5] — 2026-05-03
 
 ### Fixed — sync-driven writes now reconcile `content_count` per batch
