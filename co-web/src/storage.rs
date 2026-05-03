@@ -4943,6 +4943,20 @@ impl Storage {
         );
     }
 
+    /// CO-153: all universe keys from the global metadata DB.
+    ///
+    /// Used by the cross-universe inbound relation query to know which per-universe
+    /// DBs to scan.
+    pub fn all_universe_keys(&self) -> Vec<String> {
+        self.conn
+            .prepare("SELECT key FROM universes")
+            .and_then(|mut stmt| {
+                stmt.query_map([], |row| row.get(0))
+                    .map(|rows| rows.flatten().collect())
+            })
+            .unwrap_or_default()
+    }
+
     /// Returns true if the given timeline universe already exists.
     pub fn timeline_universe_exists(&self, key: &str) -> bool {
         self.get_universe(key).is_some()

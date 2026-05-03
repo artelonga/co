@@ -324,6 +324,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Entry abstraction API (CO-36) ---
     let entry_api = crate::entry_routes::router();
 
+    // --- CO-153: cross-universe relation query endpoints ---
+    let relation_api = crate::relation_routes::router();
+
     // --- CO-146: Binary asset upload + content-addressable storage ---
     let asset_api = crate::asset_routes::asset_router();
 
@@ -403,6 +406,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", universe_api)
         .nest("/api/v1/universes", vault_api)
         .nest("/api/v1/universes", entry_api)
+        // CO-153: cross-universe relation queries
+        .nest("/api/v1/universes", relation_api)
         .nest("/api/v1/universes", asset_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)

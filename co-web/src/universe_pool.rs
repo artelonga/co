@@ -64,18 +64,23 @@ CREATE INDEX IF NOT EXISTS idx_entry_dates_range ON entry_dates(universe_key, se
 CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
 -- CO-74: typed FK relationship graph — one row per directed edge
+-- CO-153: to_universe added for cross-universe refs (NULL = same universe)
 CREATE TABLE IF NOT EXISTS entry_relations (
     universe_key  TEXT NOT NULL,
     from_path     TEXT NOT NULL,
     to_path       TEXT NOT NULL,
     relation_type TEXT NOT NULL,
     created_at    TEXT NOT NULL,
+    to_universe   TEXT,
     PRIMARY KEY (universe_key, from_path, to_path, relation_type)
 );
 CREATE INDEX IF NOT EXISTS idx_er_from
     ON entry_relations(universe_key, from_path, relation_type);
 CREATE INDEX IF NOT EXISTS idx_er_to
     ON entry_relations(universe_key, to_path,   relation_type);
+CREATE INDEX IF NOT EXISTS idx_er_to_universe
+    ON entry_relations(to_universe, to_path)
+    WHERE to_universe IS NOT NULL;
 
 -- CO-146: content-addressable binary assets (Phase 1 of CO-145).
 -- Bytes live on disk at universe_dir/blobs/<aa>/<bb>/<sha256>.
@@ -271,6 +276,30 @@ fn run_universe_migrations(conn: &Connection) {
         ensure_universe_column(conn, "assets", "encrypted", "INTEGER NOT NULL DEFAULT 0");
         conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
             .expect("universe schema_version v6");
+    }
+    if v < 7 {
+        // CO-153: cross-universe relation support.
+        // Add to_universe column (NULL = same universe as from-side, back-compat).
+        ensure_universe_column(conn, "entry_relations", "to_universe", "TEXT");
+        // Partial index for cross-universe lookups (inbound query).
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_er_to_universe \
+             ON entry_relations(to_universe, to_path) \
+             WHERE to_universe IS NOT NULL;",
+        )
+        .expect("universe idx_er_to_universe");
+        // Backfill: rows where to_path was stored as a raw co:// URI.
+        // Parse out the target universe and path, update in place.
+        conn.execute_batch(
+            "UPDATE entry_relations
+             SET to_universe = SUBSTR(to_path, 6, INSTR(SUBSTR(to_path, 6), '/') - 1),
+                 to_path     = SUBSTR(to_path, 6 + INSTR(SUBSTR(to_path, 6), '/'))
+             WHERE to_path LIKE 'co://%'
+               AND INSTR(SUBSTR(to_path, 6), '/') > 0;",
+        )
+        .expect("universe CO-153 co:// backfill");
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
+            .expect("universe schema_version v7");
     }
 }
 
