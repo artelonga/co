@@ -122,6 +122,33 @@ CREATE TABLE IF NOT EXISTS frontmatter_index (
 );
 CREATE INDEX IF NOT EXISTS idx_fm_type   ON frontmatter_index(entry_type);
 CREATE INDEX IF NOT EXISTS idx_fm_status ON frontmatter_index(status);
+
+-- CO-154: references as a first-class content type.
+-- One row per item in frontmatter.references[]; excerpt_body holds the
+-- matching ## Referência: section from the entry body.
+CREATE TABLE IF NOT EXISTS references_index (
+    universe_key  TEXT NOT NULL,
+    entry_path    TEXT NOT NULL,
+    ref_index     INTEGER NOT NULL,
+    url           TEXT,
+    source        TEXT NOT NULL,
+    retrieved     TEXT,
+    excerpt_body  TEXT,
+    PRIMARY KEY (universe_key, entry_path, ref_index)
+);
+CREATE INDEX IF NOT EXISTS idx_refs_source
+    ON references_index(source);
+CREATE INDEX IF NOT EXISTS idx_refs_url
+    ON references_index(url) WHERE url IS NOT NULL;
+
+-- FTS over source + excerpt for full-text search across reference excerpts.
+CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
+    universe_key UNINDEXED,
+    entry_path   UNINDEXED,
+    ref_index    UNINDEXED,
+    source,
+    excerpt_body
+);
 ";
 
 // ---------------------------------------------------------------------------
@@ -205,7 +232,7 @@ impl UniversePool {
         let conn = Connection::open(&db_path).expect("open universe data.db");
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
             .expect("universe db pragmas");
-        run_universe_migrations(&conn);
+        run_universe_migrations(&conn, key);
 
         let arc = Arc::new(Mutex::new(conn));
         inner.cache.put(key.to_string(), arc.clone());
@@ -229,7 +256,7 @@ impl UniversePool {
 // Universe-level migrations
 // ---------------------------------------------------------------------------
 
-fn run_universe_migrations(conn: &Connection) {
+fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     conn.execute_batch(UNIVERSE_SCHEMA)
         .expect("universe schema migration");
 
@@ -300,6 +327,14 @@ fn run_universe_migrations(conn: &Connection) {
         .expect("universe CO-153 co:// backfill");
         conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
             .expect("universe schema_version v7");
+    }
+    if v < 8 {
+        // CO-154: references_index + references_fts already created via
+        // UNIVERSE_SCHEMA IF NOT EXISTS. One-shot backfill: walk existing
+        // entries and populate references tables.
+        let _ = crate::reference_index::backfill_references(conn, universe_key);
+        conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
+            .expect("universe schema_version v8");
     }
 }
 

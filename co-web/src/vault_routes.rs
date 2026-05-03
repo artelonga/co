@@ -350,6 +350,14 @@ fn write_vault_entry(
                 m,
             );
         }
+        // CO-154: index references from frontmatter + body
+        let _ = crate::reference_index::sync_entry_references(
+            &uc_guard,
+            universe_key,
+            path,
+            &frontmatter,
+            body,
+        );
     }
 
     Ok(crate::entry_index::EntryRow {

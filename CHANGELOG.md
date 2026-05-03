@@ -15,6 +15,16 @@ Two new relation query endpoints:
 - `GET /api/v1/universes/:slug/relations/inbound?path=<p>` — returns all inbound edges from same-universe AND cross-universe (scans every other universe's DB for `to_universe = slug`).
 - `GET /api/v1/universes/:slug/relations/outbound?path=<p>` — returns outbound edges from `<p>`, including cross-universe edges (`to_universe` non-null).
 
+### Added — CO-154: References as a first-class content type
+
+`references_index` + `references_fts` tables in every per-universe SQLite DB (v8 migration). On every entry write, `{url, source, retrieved}` items from `frontmatter.references[]` are extracted and upserted; body sections under `## Referência: <source>` headings are matched and stored as `excerpt_body`. FTS5 virtual table enables full-text search across source + excerpt. Backfill runs once per universe on first open after this deploy.
+
+New API endpoints:
+- `GET /api/v1/universes/{u}/references?source=&url_contains=&q=` — filter/search references
+- `GET /api/v1/universes/{u}/references/orphan-wikilinks` — candidate-entry backlog
+
+All three entry write paths (entry create, entry update, vault write) sync the references index.
+
 ## [1.38.11] — 2026-05-03
 
 ### Added — `time` universe + Cadogan/ayvu-rapyta reference + 3 follow-up tickets
