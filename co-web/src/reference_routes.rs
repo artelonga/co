@@ -138,7 +138,7 @@ pub(crate) fn maybe_sync_reference_meta(
     );
 }
 
-/// Upsert `references_meta` + `references_fts` for a reference card.
+/// Upsert `references_meta` + `reference_cards_fts` for a reference card.
 ///
 /// If the frontmatter carries an `editions:` array, one row per edition is
 /// written (replacing any previous set for this entry_path). Otherwise a
@@ -354,12 +354,12 @@ fn upsert_reference_meta(
 
     // FTS: one row per card (not per edition) — delete + reinsert.
     conn.execute(
-        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        "DELETE FROM reference_cards_fts WHERE universe_key = ?1 AND entry_path = ?2",
         params![universe_key, entry_path],
     )
     .ok();
     conn.execute(
-        "INSERT INTO references_fts (universe_key, entry_path, title, body, transcription) \
+        "INSERT INTO reference_cards_fts (universe_key, entry_path, title, body, transcription) \
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![
             universe_key,
@@ -372,7 +372,7 @@ fn upsert_reference_meta(
     .ok();
 }
 
-/// Remove `references_meta` + `references_fts` for an entry (idempotent — safe even if no row).
+/// Remove `references_meta` + `reference_cards_fts` for an entry (idempotent — safe even if no row).
 pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry_path: &str) {
     conn.execute(
         "DELETE FROM references_meta WHERE universe_key = ?1 AND entry_path = ?2",
@@ -380,7 +380,7 @@ pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry
     )
     .ok();
     conn.execute(
-        "DELETE FROM references_fts WHERE universe_key = ?1 AND entry_path = ?2",
+        "DELETE FROM reference_cards_fts WHERE universe_key = ?1 AND entry_path = ?2",
         params![universe_key, entry_path],
     )
     .ok();
@@ -509,12 +509,12 @@ pub async fn list_references(
            ON e.universe_key = rm.universe_key AND e.path = rm.entry_path";
 
     let cards = if let Some(ref fts_query) = q.q {
-        // FTS path: join with references_fts
+        // FTS path: join with reference_cards_fts
         let fts_sql = format!(
             "{REFS_SELECT} \
-             JOIN references_fts fts \
+             JOIN reference_cards_fts fts \
                ON fts.universe_key = rm.universe_key AND fts.entry_path = rm.entry_path \
-             WHERE fts.universe_key = ?1 AND references_fts MATCH ?2 \
+             WHERE fts.universe_key = ?1 AND reference_cards_fts MATCH ?2 \
              ORDER BY rm.entry_path, rm.edition_id LIMIT 200"
         );
         let mut stmt = guard
@@ -1153,12 +1153,12 @@ mod tests {
 
         let has_fts: bool = conn
             .query_row(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='references_fts'",
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_cards_fts'",
                 [],
                 |_| Ok(true),
             )
             .unwrap_or(false);
-        assert!(has_fts, "references_fts table should exist");
+        assert!(has_fts, "reference_cards_fts table should exist");
     }
 
     #[test]

@@ -123,6 +123,35 @@ CREATE TABLE IF NOT EXISTS frontmatter_index (
 CREATE INDEX IF NOT EXISTS idx_fm_type   ON frontmatter_index(entry_type);
 CREATE INDEX IF NOT EXISTS idx_fm_status ON frontmatter_index(status);
 
+-- CO-154: per-citation index. One row per item in frontmatter.references[]
+-- of any entry; excerpt_body is the matching ## Referência: section from
+-- the entry body. Distinct from references_meta (CO-156) which indexes
+-- the reference *card* itself: this indexes citations *within* any entry.
+CREATE TABLE IF NOT EXISTS references_index (
+    universe_key  TEXT NOT NULL,
+    entry_path    TEXT NOT NULL,
+    ref_index     INTEGER NOT NULL,
+    url           TEXT,
+    source        TEXT NOT NULL,
+    retrieved     TEXT,
+    excerpt_body  TEXT,
+    PRIMARY KEY (universe_key, entry_path, ref_index)
+);
+CREATE INDEX IF NOT EXISTS idx_refs_source
+    ON references_index(source);
+CREATE INDEX IF NOT EXISTS idx_refs_url
+    ON references_index(url) WHERE url IS NOT NULL;
+
+-- CO-154: FTS over source + excerpt for full-text search across reference
+-- excerpts (per-citation index).
+CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
+    universe_key UNINDEXED,
+    entry_path   UNINDEXED,
+    ref_index    UNINDEXED,
+    source,
+    excerpt_body
+);
+
 -- CO-156 + CO-158: reference content type shadow table.
 -- One row per edition of a .md card with entry_type = reference.
 -- work_id groups all editions of the same conceptual work.
@@ -154,7 +183,9 @@ CREATE INDEX IF NOT EXISTS idx_refs_primary_layer
     ON references_meta(primary_layer) WHERE primary_layer IS NOT NULL;
 
 -- CO-156: FTS index over reference cards — title, body, and transcription.
-CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
+-- Renamed from `references_fts` to avoid collision with CO-154's per-citation
+-- FTS above (different content, different shape, both legitimately needed).
+CREATE VIRTUAL TABLE IF NOT EXISTS reference_cards_fts USING fts5(
     universe_key UNINDEXED,
     entry_path   UNINDEXED,
     title,
@@ -268,7 +299,7 @@ impl UniversePool {
 // Universe-level migrations
 // ---------------------------------------------------------------------------
 
-fn run_universe_migrations(conn: &Connection, universe_key: &str) {
+fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
     conn.execute_batch(UNIVERSE_SCHEMA)
         .expect("universe schema migration");
 
