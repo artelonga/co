@@ -7,22 +7,17 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/bin/bash</string>
-        <string>/Users/artelonga/projects/co/scripts/sync-all.sh</string>
+        <string>/usr/bin/python3</string>
+        <string>/Users/artelonga/projects/co/scripts/co-watch.py</string>
     </array>
 
-    <key>StartCalendarInterval</key>
-    <dict>
-        <key>Weekday</key>
-        <integer>0</integer>
-        <key>Hour</key>
-        <integer>9</integer>
-        <key>Minute</key>
-        <integer>0</integer>
-    </dict>
-
+    <!-- Run continuously: launchd starts it at login and restarts on crash. -->
     <key>RunAtLoad</key>
-    <false/>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
 
     <key>StandardOutPath</key>
     <string>/Users/artelonga/.co/launchd-stdout.log</string>
@@ -37,6 +32,10 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>CO_BASE</key>
+        <string>https://co-artelonga.fly.dev</string>
+        <key>CO_EMAIL</key>
+        <string>yuri@artelonga.com.br</string>
     </dict>
 </dict>
 </plist>

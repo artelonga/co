@@ -1,60 +1,89 @@
 ---
-title: Auto-sync — weekly upload of admin repos to prod
+title: Auto-sync — continuous delta sync to prod (every 5s)
 created: 2026-05-03
-related: CO-145
+updated: 2026-05-03
+related: CO-145, CO-151
 ---
 
-# Weekly auto-sync
+# Continuous auto-sync
 
-Every Sunday at 09:00, your local Mac runs `scripts/sync-all.sh`, which:
+A long-running daemon (`co-watch.py`) polls the 4 admin repos every 5 seconds, computes a delta against the previous snapshot, and propagates changes to prod:
 
-1. Pulls fresh credentials from the macOS keychain.
-2. POSTs to `/api/v1/auth/password-login` to refresh the session cookie.
-3. For each of `quilomboaraucaria` / `artelonga` / `rfq` / `co`: `git pull --ff-only`, then runs `scripts/bulk-upload-binary.py` against `co-artelonga.fly.dev`.
-4. Logs to `~/.co/sync.log`.
+- **New / modified `.md`** → `PUT /api/v1/universes/{slug}/vault/{path}` (with `![](relative.jpg)` → `![](sha256:…)` rewriting)
+- **New / modified binary** (image, video, pdf, audio, svg) → `POST /api/v1/universes/{slug}/assets` (idempotent by sha256)
+- **Deleted file** → `DELETE /api/v1/universes/{slug}/vault/{path}`
 
-The bulk uploader is idempotent (sha256 content addressing for binaries; INSERT OR REPLACE for vault entries), so re-running is a no-op when nothing changed.
+The daemon is managed by **launchd** (`com.artelonga.co-sync`) with `KeepAlive=true` and `RunAtLoad=true` — it starts at login and auto-restarts on crash (30s throttle).
+
+## Latency
+
+| Operation | Observed end-to-end |
+|---|---|
+| Touch `.md` → on prod | 4 – 8 s |
+| Delete `.md` → 404 on prod | 5 – 9 s |
+
+The 5s poll interval is the dominant factor. CO-151 upgrades to protobuf-over-WebSocket for sub-500ms latency.
 
 ## One-time setup
 
 ```bash
-# 1. Stash the admin password in your keychain (replace YOUR_PASSWORD):
+# 1. Stash the admin password in your keychain:
 security add-generic-password \
     -a yuri@artelonga.com.br \
     -s co-prod-admin \
     -w 'YOUR_PASSWORD' \
     -U
 
-# 2. Verify the launchd job is loaded:
+# 2. Verify the launchd job is running:
 launchctl list | grep co-sync
-# → -  0  com.artelonga.co-sync
+# → 74531  0  com.artelonga.co-sync   (PID = currently running)
 
-# 3. Test it once before next Sunday:
-bash ~/projects/co/scripts/sync-all.sh
-tail -50 ~/.co/sync.log
+# 3. Tail the log to see ticks:
+tail -f ~/.co/watch.log
 ```
+
+The session cookie is auto-refreshed on 401. If `~/.co/cookie.txt` ever goes stale, the next 401 triggers a fresh `password-login` from the keychain.
 
 ## Files
 
 | Path | Purpose |
 |---|---|
-| `~/projects/co/scripts/sync-all.sh` | The wrapper (pull + login + upload all 4) |
-| `~/projects/co/scripts/bulk-upload-binary.py` | The two-pass uploader |
-| `~/Library/LaunchAgents/com.artelonga.co-sync.plist` | The schedule (Sundays 09:00) |
-| `~/.co/cookie.txt` | Refreshed session cookie (also symlinked to `/tmp/c.txt`) |
-| `~/.co/sync.log` | Per-run log |
-| `~/.co/launchd-stdout.log` / `.../launchd-stderr.log` | launchd's view |
+| `~/projects/co/scripts/co-watch.py` | The continuous watcher daemon |
+| `~/projects/co/scripts/bulk-upload-binary.py` | The bootstrap uploader (idempotent; for first import) |
+| `~/projects/co/scripts/sync-all.sh` | The pull-then-bulk-upload one-shot script (now superseded by the watcher; kept as a manual fallback) |
+| `~/Library/LaunchAgents/com.artelonga.co-sync.plist` | launchd plist (continuous, KeepAlive) |
+| `~/projects/co/scripts/co-sync.plist` | Mirror of the plist for repo tracking |
+| `~/.co/cookie.txt` | Session cookie (also symlinked at `/tmp/c.txt`) |
+| `~/.co/watch.log` | Per-tick log |
+| `~/.co/launchd-stdout.log` / `.../launchd-stderr.log` | launchd's view of the daemon |
 
 ## Tweaks
 
-- **Change the schedule:** edit `~/Library/LaunchAgents/com.artelonga.co-sync.plist`, then `launchctl unload && launchctl load -w` it.
-- **Add a repo:** append a `slug|/path` pair to the `REPOS` array in `sync-all.sh`.
-- **Pause:** `launchctl unload ~/Library/LaunchAgents/com.artelonga.co-sync.plist`.
-- **Resume:** `launchctl load -w ~/Library/LaunchAgents/com.artelonga.co-sync.plist`.
+- **Pause:** `launchctl unload ~/Library/LaunchAgents/com.artelonga.co-sync.plist`
+- **Resume:** `launchctl load -w ~/Library/LaunchAgents/com.artelonga.co-sync.plist`
+- **Tighter polling:** edit `POLL_INTERVAL` in `co-watch.py` (default 5 s).
+- **Add a repo:** append a `(slug, path)` to the `REPOS` list in `co-watch.py`.
+- **Restart now:** `launchctl kickstart -k gui/$(id -u)/com.artelonga.co-sync`.
 - **Fully remove:** unload, then `rm ~/Library/LaunchAgents/com.artelonga.co-sync.plist`.
+
+## Wire format (v1)
+
+JSON over the existing REST endpoints. Per-tick fan-out: one HTTP request per changed file. Reuses TLS keep-alive via urllib's connection pool.
+
+CO-151 upgrades this to protobuf `SyncDelta` over WebSocket with zstd compression and bidirectional flow (server can push deltas to connected clients).
+
+## Bootstrap vs continuous
+
+The first time you point the daemon at a repo, the initial snapshot treats existing files as already-synced — **no upload storm on first start**. If the prod universe is missing those files, run the one-shot bootstrap first:
+
+```bash
+bash ~/projects/co/scripts/sync-all.sh
+```
+
+That POSTs every binary and PUTs every markdown once, then the watcher picks up deltas from there. (The bootstrap is itself idempotent — running it on an already-synced repo uploads zero new bytes.)
 
 ## Why local launchd, not cloud cron?
 
-Anthropic's `/schedule` cloud cron can't reach `/Users/artelonga/projects/...` — it runs in Anthropic's environment, not yours. Auto-sync needs your local file tree as the source. macOS's launchd is the right tool.
+Anthropic's `/schedule` cloud cron can't reach `/Users/artelonga/projects/...` — it runs in Anthropic's environment, not yours. Local file watching needs local processes. macOS launchd is the right tool.
 
-If you want to lift this to a server-side pull (CO-91 territory), the design is: have prod periodically clone/pull from `github.com/artelonga/<repo>` directly. That's a deploy + new endpoint and outside this loop's scope.
+If you want to lift this to a server-side pull (CO-91 territory), the design is: have prod periodically clone/pull from `github.com/artelonga/<repo>` directly. That's an extra deploy + new endpoint, and gives up the live-edit-to-prod feedback loop. Local watcher is faster.
