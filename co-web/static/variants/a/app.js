@@ -3109,6 +3109,64 @@
         }
     }
 
+    // ===== CO-160: Inline PDF Viewer helpers =====
+
+    function shouldRenderInlinePdf(entry) {
+        const fm = entry.frontmatter || {};
+        return (
+            fm.type === 'reference' &&
+            fm.medium === 'pdf' &&
+            fm.file &&
+            fm.file.endsWith('.pdf')
+        );
+    }
+
+    function pdfUrlFromCard(universe, entry) {
+        const fm = entry.frontmatter || {};
+        if (fm.blob_sha256) {
+            return `/api/v1/universes/${universe}/assets/${fm.blob_sha256}`;
+        }
+        const dir = (entry.path || '').split('/').slice(0, -1).join('/');
+        const filename = fm.file || '';
+        return `/api/v1/universes/${universe}/vault/${dir ? dir + '/' : ''}${encodeURIComponent(filename)}`;
+    }
+
+    function buildPdfViewerHtml(pdfUrl, filename) {
+        const viewerSrc = `/pdfjs/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`;
+        const dlName = filename || 'documento.pdf';
+        return `<div class="pdf-viewer" id="co-pdf-viewer">
+  <iframe id="co-pdf-iframe"
+          src="${esc(viewerSrc)}"
+          width="100%"
+          height="800"
+          loading="lazy"
+          style="border:0;border-radius:8px;display:block"
+          allowfullscreen></iframe>
+  <div class="pdf-viewer-actions">
+    <a href="${esc(pdfUrl)}" download="${esc(dlName)}" class="pdf-download-btn btn btn-secondary">
+      <span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">download</span>
+      Baixar PDF
+    </a>
+    <button class="pdf-fullscreen-btn btn btn-secondary" id="co-pdf-fullscreen">
+      <span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">fullscreen</span>
+      Tela cheia
+    </button>
+  </div>
+</div>`;
+    }
+
+    function initPdfViewerActions(container) {
+        const btn = container.querySelector('#co-pdf-fullscreen');
+        const iframe = container.querySelector('#co-pdf-iframe');
+        if (!btn || !iframe) return;
+        btn.addEventListener('click', () => {
+            const el = iframe;
+            if (el.requestFullscreen) el.requestFullscreen();
+            else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+            else if (el.mozRequestFullScreen) el.mozRequestFullScreen();
+        });
+    }
+
     // ===== Zoom Viewer Modal (CO-42) =====
     // PDF-style full-screen overlay for reading/editing content entries.
 
@@ -3178,6 +3236,14 @@
             if (md2 && md2.enableImageZoom) md2.enableImageZoom(zoomBody);
             if (md2 && md2.highlightCode) md2.highlightCode(zoomBody);
             if (md2 && md2.renderMermaidBlocks) md2.renderMermaidBlocks(zoomBody);
+
+            // CO-160: Append inline PDF viewer for reference entries with medium:pdf
+            if (shouldRenderInlinePdf(fullEntry)) {
+                const pdfUrl = pdfUrlFromCard(fetchUniverse, fullEntry);
+                const fm = fullEntry.frontmatter || {};
+                zoomBody.insertAdjacentHTML('beforeend', buildPdfViewerHtml(pdfUrl, fm.file || ''));
+                initPdfViewerActions(zoomBody);
+            }
 
             zoomBody.addEventListener('dblclick', enterEditMode, { once: true });
         }

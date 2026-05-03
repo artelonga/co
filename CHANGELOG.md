@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.0] — 2026-05-03
+
+### Added — CO-160: Inline PDF renderer in the SPA (PDF.js)
+
+Reference entries with `type: reference`, `medium: pdf`, and a valid `file:` field now render an inline PDF viewer below the markdown body when opened in the zoom modal. The viewer is powered by PDF.js 5.7.284 (self-hosted, no external dependency), embedded at `/pdfjs/` and served by the same static file handler as other assets.
+
+- `shouldRenderInlinePdf` / `pdfUrlFromCard` / `buildPdfViewerHtml` / `initPdfViewerActions` helpers detect the entry shape and wire up the iframe
+- PDF URL resolves via the asset endpoint (`blob_sha256`) if available, falling back to the vault path-relative URL
+- `<iframe loading="lazy" allowfullscreen>` uses browser-native lazy loading; PDF bytes are only fetched when the viewer is in the viewport
+- "Baixar PDF" button triggers a browser download with the original filename via the `download` attribute
+- "Tela cheia" button calls `requestFullscreen()` on the iframe element (Fullscreen API)
+- Auth cookies are forwarded automatically (same-origin); private universe PDFs are not accessible to anonymous viewers without a session
+- `pdfjs/` path prefix added to the static file handler in `server.rs`; `.mjs` MIME type added to `guess_content_type`
+- PDF.js bundle: `build/pdf.mjs`, `build/pdf.worker.mjs`, `build/pdf.sandbox.mjs`, `web/viewer.html`, `web/viewer.mjs`, `web/viewer.css`, `web/images/`, `web/locale/en-US/` + `web/locale/pt-BR/` — ~4.3 MB vendored at `co-web/static/pdfjs/`
+- No LCP regression on entries that don't have an inline-PDF section (iframe is never inserted)
+
 ## [1.40.0] — 2026-05-03
 
 ### Added — CO-158: Reference versioning — work_id + editions[] + primary/secondary source chain
