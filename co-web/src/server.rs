@@ -1190,6 +1190,24 @@ async fn serve_variant_file(
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
 
+    // CO-160: Serve PDF.js viewer bundle at /pdfjs/...
+    if path.starts_with("pdfjs/") {
+        let fs_path = std::path::Path::new(&state.config.static_dir).join(path);
+        if let Some(contents) = resolve_asset(path, Some(&fs_path)) {
+            let content_type = guess_content_type(path);
+            let cache_header = cache_control_for(path);
+            return (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+                    (header::CACHE_CONTROL, cache_header),
+                ],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
     // Try shared/ first (for experiment.js, experiment.css)
     if path.starts_with("shared/") || path == "manifest.json" || path == "sw.js" {
         let embed_path = if path.starts_with("shared/") {
@@ -1281,7 +1299,7 @@ fn guess_content_type(path: &str) -> &'static str {
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript; charset=utf-8",
         Some("json") => "application/json",
         Some("svg") => "image/svg+xml",
         Some("png") => "image/png",

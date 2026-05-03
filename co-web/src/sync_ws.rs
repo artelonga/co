@@ -338,8 +338,8 @@ async fn handle_uplink(
 }
 
 fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &str) {
-    use co::proto::sync::sync_delta::{Body, Kind};
     use crate::entry_index::{EntryIndex, make_entry};
+    use co::proto::sync::sync_delta::{Body, Kind};
 
     let Ok(storage) = state.storage.lock() else {
         return;
@@ -352,9 +352,14 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
         let kind = Kind::try_from(d.kind).unwrap_or(Kind::Unspecified);
         match kind {
             Kind::Upserted => {
-                let Some(Body::Cofile(ref cofile)) = d.body else { continue };
+                let Some(Body::Cofile(ref cofile)) = d.body else {
+                    continue;
+                };
                 let Ok(content) = std::str::from_utf8(&cofile.content) else {
-                    warn!("sync-ws: upsert with non-utf8 cofile body, skipping {path}", path = d.entry_path);
+                    warn!(
+                        "sync-ws: upsert with non-utf8 cofile body, skipping {path}",
+                        path = d.entry_path
+                    );
                     continue;
                 };
 
@@ -367,20 +372,29 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
                         (fm, body)
                     }
                     Ok((_, body)) => (serde_json::Value::Object(Default::default()), body),
-                    Err(_) => (serde_json::Value::Object(Default::default()), content.to_string()),
+                    Err(_) => (
+                        serde_json::Value::Object(Default::default()),
+                        content.to_string(),
+                    ),
                 };
 
                 let entry = make_entry(&d.entry_path, fm, &body);
 
                 if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
-                    warn!("sync-ws write_entry failed for {path}: {e}", path = d.entry_path);
+                    warn!(
+                        "sync-ws write_entry failed for {path}: {e}",
+                        path = d.entry_path
+                    );
                     continue;
                 }
 
                 if let Ok(guard) = conn_arc.lock() {
                     let idx = EntryIndex::new(&guard);
                     if let Err(e) = idx.upsert(universe_key, &entry) {
-                        warn!("sync-ws index upsert failed for {path}: {e}", path = d.entry_path);
+                        warn!(
+                            "sync-ws index upsert failed for {path}: {e}",
+                            path = d.entry_path
+                        );
                     }
                 }
             }
