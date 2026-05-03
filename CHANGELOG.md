@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.5] — 2026-05-03
+
+### Fixed — sync-driven writes now reconcile `content_count` per batch
+
+After 1.38.4 redeployed, `co` still drifted (513 cached vs 500 actual). Cause: `apply_deltas_to_storage` calls `EntryIndex::upsert` and `DELETE FROM entries` on the per-universe DB but never touches the cached `content_count` field on `meta.universes`. Boot-time `recompute_content_counts` corrected the drift but new sync writes immediately reintroduced it.
+
+`apply_deltas_to_storage` now ends each batch with `UPDATE universes SET content_count = (SELECT COUNT(*) FROM entries) WHERE key = ?` — one extra `COUNT(*)` per batch, atomic, drift-free. Already-shipped boot reconcile + per-batch reconcile = `content_count` stays accurate forever.
+
 ## [1.38.4] — 2026-05-03
 
 ### Fixed — SPA route fallback for nested universe paths + content_count reconcile

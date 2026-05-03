@@ -397,6 +397,28 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
             _ => {}
         }
     }
+
+    // Reconcile content_count once per batch — the per-universe upsert/delete
+    // doesn't touch the cached counter on `meta.universes`. Without this,
+    // sync-driven writes drift the counter (observed: `co` 513 cached vs 500
+    // actual). One COUNT(*) per batch is cheap.
+    let actual: Option<i64> = {
+        if let Ok(guard) = conn_arc.lock() {
+            guard
+                .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))
+                .ok()
+        } else {
+            None
+        }
+    };
+    if let Some(n) = actual
+        && let Ok(storage) = state.storage.lock()
+    {
+        let _ = storage.conn().execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            rusqlite::params![n, universe_key],
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
