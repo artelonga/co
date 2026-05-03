@@ -353,9 +353,7 @@ mod tests {
 
     use std::sync::Mutex;
 
-    use co::proto::sync::SyncDelta;
     use co::sync::delta as dc;
-    use futures_util::{SinkExt as _, StreamExt as _};
     use tokio::net::TcpListener;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMsg;
@@ -587,7 +585,7 @@ mod tests {
 
         // Alice sends 3 batches.
         for i in 0u8..3 {
-            let d = delta::upserted_delta(universe, &format!("f{i}.md"), vec![i], "sha", i as i64);
+            let d = delta::upserted_delta(universe, format!("f{i}.md"), vec![i], "sha", i as i64);
             let b = SyncBatch {
                 deltas: vec![d],
                 client_id: "alice".into(),
@@ -630,10 +628,10 @@ mod tests {
             let msg = tokio::time::timeout(Duration::from_millis(500), ws_bob.next()).await;
             match msg {
                 Ok(Some(Ok(WsMsg::Binary(b)))) => {
-                    if let Ok(decoded) = dc::decode_batch(&b) {
-                        if !decoded.deltas.is_empty() {
-                            received += 1;
-                        }
+                    if let Ok(decoded) = dc::decode_batch(&b)
+                        && !decoded.deltas.is_empty()
+                    {
+                        received += 1;
                     }
                 }
                 Ok(Some(Ok(WsMsg::Ping(_)))) => continue,
@@ -678,7 +676,7 @@ mod tests {
                 format!("ws://127.0.0.1:{port}/api/v1/sync/ws?universe={universe}&token={tok}");
             handles.push(tokio::spawn(async move {
                 let (mut ws, _) = connect_async(&url).await?;
-                let d = delta::upserted_delta(universe, &format!("f{i}.md"), vec![1], "s", 0);
+                let d = delta::upserted_delta(universe, format!("f{i}.md"), vec![1], "s", 0);
                 let b = SyncBatch {
                     deltas: vec![d],
                     client_id: format!("c{i}"),
