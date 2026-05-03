@@ -92,6 +92,31 @@ CREATE TABLE IF NOT EXISTS assets (
 );
 CREATE INDEX IF NOT EXISTS idx_assets_mime       ON assets(mime);
 CREATE INDEX IF NOT EXISTS idx_assets_created_at ON assets(created_at_ns);
+
+-- CO-147: per-asset user-supplied tags (Phase 2 of CO-145).
+CREATE TABLE IF NOT EXISTS asset_tags (
+    sha256 TEXT NOT NULL,
+    tag    TEXT NOT NULL,
+    PRIMARY KEY (sha256, tag),
+    FOREIGN KEY (sha256) REFERENCES assets(sha256) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_asset_tags_tag ON asset_tags(tag);
+
+-- CO-147: searchable plaintext shadow of frontmatter (Phase 2 of CO-145).
+-- Survives encryption-at-rest in Phase 3 (CO-148) because body bytes get
+-- encrypted but the typed metadata that drives search/sort/filter stays here.
+CREATE TABLE IF NOT EXISTS frontmatter_index (
+    entry_path    TEXT PRIMARY KEY,
+    title         TEXT,
+    entry_type    TEXT,
+    status        TEXT,
+    tags_json     TEXT,
+    created_at_ns INTEGER,
+    due_at_ns     INTEGER,
+    parent_path   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_fm_type   ON frontmatter_index(entry_type);
+CREATE INDEX IF NOT EXISTS idx_fm_status ON frontmatter_index(status);
 ";
 
 // ---------------------------------------------------------------------------
@@ -229,5 +254,39 @@ fn run_universe_migrations(conn: &Connection) {
         // CO-146: assets table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
         conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
             .expect("universe schema_version v4");
+    }
+    if v < 5 {
+        // CO-147: asset_tags + frontmatter_index already created via
+        // UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (5)", [])
+            .expect("universe schema_version v5");
+    }
+    if v < 6 {
+        // CO-148: encryption envelope columns on assets.
+        // `encrypted = 0` rows are Phase 1 plaintext blobs (stay readable).
+        // `encrypted = 1` rows are ChaCha20-Poly1305 ciphertext with `nonce`
+        // populated and `cipher_size` reflecting the on-disk byte count.
+        ensure_universe_column(conn, "assets", "nonce", "BLOB");
+        ensure_universe_column(conn, "assets", "cipher_size", "INTEGER");
+        ensure_universe_column(conn, "assets", "encrypted", "INTEGER NOT NULL DEFAULT 0");
+        conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
+            .expect("universe schema_version v6");
+    }
+}
+
+/// Per-universe DB version of the storage.rs `ensure_column` helper. Mirrors
+/// the CO-137 drift-safe pattern.
+fn ensure_universe_column(conn: &Connection, table: &str, column: &str, def: &str) {
+    let exists: bool = conn
+        .query_row(
+            &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
+            rusqlite::params![column],
+            |_| Ok(true),
+        )
+        .ok()
+        .unwrap_or(false);
+    if !exists {
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))
+            .unwrap_or_else(|e| panic!("ensure_universe_column {table}.{column}: {e}"));
     }
 }

@@ -7,39 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.37.0] — 2026-05-02
 
-### Added — SPA lazy-load integration — img/video, asset browser, frontmatter excerpts (CO-150, Phase 5 of CO-145)
+### Added — encrypted, indexable, lazy-loaded assets (CO-147 + CO-148 + CO-149 + CO-150)
 
-**Markdown renderer (co-web/static/shared/markdown.js + editor.bundle.js)**
+Closes phases 2–5 of CO-145. Every blob written through the asset endpoint is now ChaCha20-Poly1305 ciphertext on disk, indexable by tags + mime + filename without decryption, range-fetchable for video and large media, and lazy-loaded by default in the SPA.
 
-- `![alt](sha256:abc…)` syntax now resolves to `/api/v1/universes/{key}/assets/{sha}` with `loading="lazy" decoding="async"` — sha256-addressed images are lazy-loaded out of the box.
-- All images (`<img>`) now render with `loading="lazy" decoding="async"` in both the fallback and full (marked) renderers, satisfying the Lighthouse lazy-load audit.
-- New ` ```video ` code block shortcode: renders `<video src="…" preload="none" controls>` — video never pre-buffers.
-- New ` ```iframe ` code block shortcode: renders `<iframe loading="lazy">` for embedded content.
-- `CoMarkdown.setUniverseKey(key)` — call this when navigating to a universe so all sha256: URLs resolve correctly. Mirrors `CoEditor.setUniverseKey(key)`.
-
-**Drag-and-drop / paste image upload (editor.bundle.js)**
-
-- Dropping an image or video file onto the CodeMirror editor uploads it to `POST /api/v1/universes/{key}/assets`, then inserts `![filename](sha256:…)` (image) or ` ```video\nsha256:…\n``` ` (video) at the cursor.
-- Pasting an image from the clipboard works the same way.
-- Universe key is resolved from the current URL (`/co/{slug}/…`) — no SPA changes required.
-
-**API — new endpoints**
+**CO-147 — indexable metadata**
 
 ```
-GET  /api/v1/universes/{u}/assets              → { assets: [...], total }
-GET  /api/v1/universes/{u}/entries/{path}?excerpt=true  → { frontmatter, excerpt }
+GET    /api/v1/universes/{u}/assets?mime=&search=&tag=  → { assets: [{…, tags}], total }
+GET    /api/v1/universes/{u}/assets/tags                → [{ tag, count }]
+POST   /api/v1/universes/{u}/assets/{sha}/tags          body: {"tags": ["a","b"]}
+DELETE /api/v1/universes/{u}/assets/{sha}/tags/{tag}
 ```
 
-- `GET /assets` lists all assets for a universe with optional `?mime=image/` prefix filter and `?search=filename` substring search. Auth mirrors the existing GET-by-sha rule (public universes readable anonymously; private require owner/member).
-- `?excerpt=true` returns only `{ frontmatter, excerpt: first200chars }` for task-card rendering — eliminates full-body transfers on board load.
+- New `asset_tags` table (FK CASCADE on assets); list endpoint joins per-asset tags into the response so the asset browser UI can render them inline.
+- New `frontmatter_index` shadow table (title, type, status, tags_json, dates, parent_path) — designed to survive encryption-at-rest because typed metadata stays plaintext while body bytes get encrypted.
 
-**Asset browser — `/co/{u}/assets`**
+**CO-148 — encryption envelope**
 
-- Grid view of all assets with inline image previews (lazy-loaded) and MIME icons for non-image files.
-- Filter bar: MIME-type dropdown + filename search.
-- Click any asset → detail modal with sha256, size, MIME, creation date, refcount, ready-to-paste markdown syntax, and delete button (shown only when `refcount == 0`).
+- ChaCha20-Poly1305 AEAD, per-blob random 12-byte nonce, AAD = `universe_key || sha256` so a copied blob fails to decrypt across universes or under a different sha.
+- Per-universe DEK derived deterministically: BLAKE3-keyed-hash(master_key, "co-asset-dek-v1\0" || universe_key). Master key sourced from `CO_ASSETS_MASTER_KEY` env (preferred) or `JWT_SECRET` (dev fallback). DEK never lands on disk.
+- Schema additions: `assets.nonce BLOB`, `assets.cipher_size INTEGER`, `assets.encrypted INTEGER NOT NULL DEFAULT 0`. Old Phase 1 plaintext rows continue to read transparently; new uploads write ciphertext.
+- **Threat model (Tier 1 — what ships):** disk-only attacker (stolen volume, leaked backup, accidental dump) cannot read content; needs the master key too. Real protection against backup leaks, dev-machine theft, S3 mistakes.
+- **Threat model (Tier 2 — deferred):** server-trusted attacker with root + env still can. Closing this gap requires user-password-derived KEK with session-scoped DEK; filed as CO-148 follow-up.
 
-**See also:** `docs/co-150-asset-browser.png` — demo screenshot.
+**CO-149 — HTTP range support**
+
+- `Range: bytes=N-M`, `bytes=N-`, `bytes=-N` all parse; multi-range rejected.
+- 206 with `Content-Range: bytes N-M/total` + `Accept-Ranges: bytes`.
+- 416 (Range Not Satisfiable) with `Content-Range: */total` for invalid ranges.
+- Full-decrypt-then-slice: ChaCha20-Poly1305 verifies over the whole stream, so chunked-AEAD would change Phase 3's correctness story. Acceptable up to ~50 MB; chunked-AEAD for larger media is filed as future work.
+
+**CO-150 — SPA lazy-load**
+
+- `?excerpt=true` already shipped on entry GET (returns `{frontmatter, excerpt}` capped at 200 chars).
+- Asset browser at `/co/{slug}/assets` consumes the new `GET /assets` endpoint.
+- `markdown.js` post-processes rendered HTML in both fallback and full (marked + DOMPurify) paths: `<img src="sha256:abc…">` → asset URL + `loading="lazy" decoding="async"`; `<video src="sha256:…">` → asset URL + `preload="none"`; bare `<img>` tags get `loading="lazy"` if missing.
+- Markdown source `![alt](sha256:abc…)` and ` ```video\nsha256:abc\n``` ` syntax both resolve through the renderer.
+
+**Tests:** 13 asset integration tests (round-trip, dedupe, ETag/304, anon-on-private blocked, anon-on-public allowed, oversize rejection, ciphertext-on-disk, HTTP range 206 + suffix + 416, tag CRUD round-trip, delete-when-unreferenced) + 4 crypto unit tests + 6 asset_routes unit tests. Full co-web suite (380+) green; clippy clean.
 
 ---
 

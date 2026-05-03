@@ -124,9 +124,46 @@
    */
   function renderMarkdown(text, opts) {
     if (global.CoEditor && typeof global.CoEditor.renderMarkdown === 'function') {
-      return global.CoEditor.renderMarkdown(text, opts);
+      // CO-150: post-process to rewrite sha256: image src and add lazy loading
+      // even when the editor bundle's marked+DOMPurify path produced the HTML.
+      const html = global.CoEditor.renderMarkdown(text, opts);
+      return _postProcessAssets(html);
     }
     return _fallbackRender(text);
+  }
+
+  /**
+   * Rewrite img/video tags in already-rendered HTML to use the asset API URL
+   * for sha256: refs and add lazy load + async decoding hints. Idempotent —
+   * tags that already have these attributes are left alone.
+   */
+  function _postProcessAssets(html) {
+    if (!html || typeof html !== 'string') return html;
+    return html
+      // <img src="sha256:abc…"> → asset URL + lazy load
+      .replace(/<img\b([^>]*?)\bsrc=(["'])sha256:([a-f0-9]{64})\2([^>]*)>/gi,
+        (_m, before, q, sha, after) => {
+          const url = _assetUrl(sha);
+          const hasLazy = /\bloading=/.test(before + after);
+          const hasDecoding = /\bdecoding=/.test(before + after);
+          const lazy = hasLazy ? '' : ' loading="lazy"';
+          const decoding = hasDecoding ? '' : ' decoding="async"';
+          return `<img${before} src=${q}${url}${q}${after}${lazy}${decoding}>`;
+        })
+      // <img src="…" without loading=…> → add loading=lazy + decoding=async
+      .replace(/<img\b((?:(?!loading=)[^>])*?)>/gi,
+        (m, attrs) => {
+          if (/\bloading=/.test(attrs)) return m;
+          return `<img${attrs} loading="lazy" decoding="async">`;
+        })
+      // <video src="sha256:…"> → asset URL + preload=none
+      .replace(/<video\b([^>]*?)\bsrc=(["'])sha256:([a-f0-9]{64})\2([^>]*)>/gi,
+        (_m, before, q, sha, after) => {
+          const url = _assetUrl(sha);
+          const hasPreload = /\bpreload=/.test(before + after);
+          const preload = hasPreload ? '' : ' preload="none"';
+          return `<video${before} src=${q}${url}${q}${after}${preload}>`;
+        });
   }
 
   function _escHtml(s) {

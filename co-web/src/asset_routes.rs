@@ -279,14 +279,21 @@ pub async fn upload_asset(
             .map_err(|e| AppError::Internal(format!("create blob dir: {e}")))?;
     }
 
+    // CO-148: encrypt at rest. Bytes on disk are ChaCha20-Poly1305 ciphertext;
+    // sha256 is still of the plaintext (content identity is content, not envelope).
+    let (ciphertext, nonce) = crate::asset_crypto::encrypt_blob(&body, &universe_key, &sha256)
+        .map_err(|e| AppError::Internal(format!("encrypt blob: {e}")))?;
+
     // Atomic write: write to temp then rename (POSIX atomic on the same FS).
     let tmp_path = blob_path.with_extension("tmp");
-    std::fs::write(&tmp_path, &body).map_err(|e| AppError::Internal(format!("write blob: {e}")))?;
+    std::fs::write(&tmp_path, &ciphertext)
+        .map_err(|e| AppError::Internal(format!("write blob: {e}")))?;
     std::fs::rename(&tmp_path, &blob_path)
         .map_err(|e| AppError::Internal(format!("rename blob: {e}")))?;
 
     let rel_blob_path = format!("blobs/{}/{}/{}", &sha256[0..2], &sha256[2..4], &sha256);
     let size = body.len() as i64;
+    let cipher_size = ciphertext.len() as i64;
     let now = now_ns();
 
     {
@@ -296,9 +303,11 @@ pub async fn upload_asset(
         guard
             .execute(
                 "INSERT OR REPLACE INTO assets \
-                 (sha256, blob_path, mime, size_bytes, filename, created_at_ns, created_by, refcount) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, COALESCE(\
-                    (SELECT refcount FROM assets WHERE sha256 = ?1), 0))",
+                 (sha256, blob_path, mime, size_bytes, filename, created_at_ns, created_by, \
+                  refcount, nonce, cipher_size, encrypted) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, \
+                  COALESCE((SELECT refcount FROM assets WHERE sha256 = ?1), 0), \
+                  ?8, ?9, 1)",
                 rusqlite::params![
                     &sha256,
                     &rel_blob_path,
@@ -307,6 +316,8 @@ pub async fn upload_asset(
                     q.filename.as_deref(),
                     now,
                     &user_id,
+                    &nonce[..],
+                    cipher_size,
                 ],
             )
             .map_err(|e| AppError::Internal(format!("insert asset row: {e}")))?;
@@ -364,42 +375,139 @@ pub async fn get_asset(
         )
     };
 
-    let row: Option<(String, String, i64)> = {
+    // CO-148: row now carries nonce + encrypted flag; nonce is empty for
+    // legacy plaintext rows (encrypted=0).
+    type Row = (String, String, i64, Option<Vec<u8>>, i64);
+    let row: Option<Row> = {
         let guard = conn
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
         guard
             .query_row(
-                "SELECT blob_path, mime, size_bytes FROM assets WHERE sha256 = ?1",
+                "SELECT blob_path, mime, size_bytes, nonce, COALESCE(encrypted, 0) \
+                 FROM assets WHERE sha256 = ?1",
                 rusqlite::params![&sha256],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, i64>(2)?,
+                        row.get::<_, Option<Vec<u8>>>(3)?,
+                        row.get::<_, i64>(4)?,
                     ))
                 },
             )
             .ok()
     };
 
-    let (blob_rel_path, mime, _size) = row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
+    let (blob_rel_path, mime, _size, nonce_blob, encrypted) =
+        row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
     let blob_path = universe_dir.join(&blob_rel_path);
-    let bytes = std::fs::read(&blob_path)
+    let raw = std::fs::read(&blob_path)
         .map_err(|e| AppError::NotFound(format!("Asset bytes missing: {e}")))?;
+
+    // Phase 1 plaintext rows (encrypted=0) pass through unchanged. Phase 3
+    // ciphertext rows decrypt with the per-universe DEK + stored nonce.
+    let plaintext = if encrypted == 1 {
+        let nonce_vec =
+            nonce_blob.ok_or_else(|| AppError::Internal("Encrypted asset missing nonce".into()))?;
+        if nonce_vec.len() != 12 {
+            return Err(AppError::Internal("Asset nonce wrong length".into()));
+        }
+        let mut nonce_arr = [0u8; 12];
+        nonce_arr.copy_from_slice(&nonce_vec);
+        crate::asset_crypto::decrypt_blob(&raw, &nonce_arr, &universe_key, &sha256)
+            .map_err(|e| AppError::Internal(format!("decrypt blob: {e}")))?
+    } else {
+        raw
+    };
+
+    // CO-149: HTTP Range support. Parse `Range: bytes=N-M` (or open-ended)
+    // and reply 206 with `Content-Range`. Full decrypt is fine here because
+    // ChaCha20-Poly1305 verifies over the whole stream — any chunked-AEAD
+    // path would change Phase 3's correctness story.
+    if let Some(range_hdr) = headers.get(header::RANGE).and_then(|v| v.to_str().ok()) {
+        let total = plaintext.len();
+        if let Some((start, end)) = parse_range(range_hdr, total) {
+            if start > end || end >= total {
+                return Ok(Response::builder()
+                    .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                    .header(header::CONTENT_RANGE, format!("bytes */{total}"))
+                    .body(axum::body::Body::empty())
+                    .unwrap());
+            }
+            let slice = plaintext[start..=end].to_vec();
+            return Ok(Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, &mime)
+                .header(header::CONTENT_LENGTH, slice.len())
+                .header(
+                    header::CONTENT_RANGE,
+                    format!("bytes {start}-{end}/{total}"),
+                )
+                .header(header::ETAG, etag)
+                .header(
+                    header::CACHE_CONTROL,
+                    "private, max-age=31536000, immutable",
+                )
+                .header(header::ACCEPT_RANGES, "bytes")
+                .body(axum::body::Body::from(slice))
+                .unwrap());
+        }
+    }
 
     Ok(Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, &mime)
-        .header(header::CONTENT_LENGTH, bytes.len())
+        .header(header::CONTENT_LENGTH, plaintext.len())
         .header(header::ETAG, etag)
         .header(
             header::CACHE_CONTROL,
             "private, max-age=31536000, immutable",
         )
         .header(header::ACCEPT_RANGES, "bytes")
-        .body(axum::body::Body::from(bytes))
+        .body(axum::body::Body::from(plaintext))
         .unwrap())
+}
+
+/// Parse a single byte-range expression like `bytes=0-1023`, `bytes=10-`,
+/// or `bytes=-500`. Returns `(start, end)` inclusive, or `None` if the
+/// header is malformed or specifies multiple ranges (we only support one
+/// in Phase 4).
+fn parse_range(header: &str, total: usize) -> Option<(usize, usize)> {
+    let header = header.trim();
+    let spec = header.strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (s, e) = spec.split_once('-')?;
+    let s = s.trim();
+    let e = e.trim();
+    match (s, e) {
+        ("", "") => None,
+        ("", suffix) => {
+            // bytes=-N → last N bytes
+            let n: usize = suffix.parse().ok()?;
+            if n == 0 || total == 0 {
+                return None;
+            }
+            let n = n.min(total);
+            Some((total - n, total - 1))
+        }
+        (start, "") => {
+            // bytes=N- → from N to end
+            let s: usize = start.parse().ok()?;
+            if total == 0 {
+                return None;
+            }
+            Some((s, total - 1))
+        }
+        (start, end) => {
+            let s: usize = start.parse().ok()?;
+            let e: usize = end.parse().ok()?;
+            Some((s, e))
+        }
+    }
 }
 
 /// `DELETE /api/v1/universes/:slug/assets/:sha256`
@@ -472,12 +580,22 @@ pub struct ListAssetsQuery {
     pub mime: Option<String>,
     /// Filename substring search (case-insensitive contains).
     pub search: Option<String>,
+    /// Tag filter — only assets carrying this tag.
+    pub tag: Option<String>,
 }
 
 #[derive(Serialize)]
 pub struct AssetListResponse {
-    pub assets: Vec<AssetMeta>,
+    pub assets: Vec<AssetWithTags>,
     pub total: usize,
+}
+
+/// Asset row plus its tag list — what the asset browser UI consumes.
+#[derive(Serialize)]
+pub struct AssetWithTags {
+    #[serde(flatten)]
+    pub meta: AssetMeta,
+    pub tags: Vec<String>,
 }
 
 /// `GET /api/v1/universes/:slug/assets`
@@ -512,7 +630,7 @@ pub async fn list_assets(
         )
         .map_err(|e| AppError::Internal(format!("list assets prepare: {e}")))?;
 
-    let assets: Vec<AssetMeta> = stmt
+    let metas: Vec<AssetMeta> = stmt
         .query_map([], |row| {
             Ok(AssetMeta {
                 sha256: row.get(0)?,
@@ -537,8 +655,154 @@ pub async fn list_assets(
         })
         .collect();
 
+    // Per-asset tag fetch in one pass.
+    let mut tag_stmt = guard
+        .prepare("SELECT tag FROM asset_tags WHERE sha256 = ?1 ORDER BY tag")
+        .map_err(|e| AppError::Internal(format!("tag fetch prepare: {e}")))?;
+
+    let mut assets: Vec<AssetWithTags> = Vec::with_capacity(metas.len());
+    for meta in metas {
+        let tags: Vec<String> = tag_stmt
+            .query_map(rusqlite::params![&meta.sha256], |r| r.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+        if let Some(want) = q.tag.as_deref()
+            && !tags.iter().any(|t| t == want)
+        {
+            continue;
+        }
+        assets.push(AssetWithTags { meta, tags });
+    }
+    drop(tag_stmt);
+
     let total = assets.len();
     Ok(Json(AssetListResponse { assets, total }))
+}
+
+#[derive(Serialize)]
+pub struct TagCount {
+    pub tag: String,
+    pub count: i64,
+}
+
+/// `GET /api/v1/universes/:slug/assets/tags` — tag counts across all assets.
+pub async fn list_tags(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<TagCount>>, AppError> {
+    check_reader(&state, &headers, &universe_key)?;
+    let conn = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let mut stmt = guard
+        .prepare(
+            "SELECT tag, COUNT(*) FROM asset_tags GROUP BY tag ORDER BY COUNT(*) DESC, tag ASC",
+        )
+        .map_err(|e| AppError::Internal(format!("tag list prepare: {e}")))?;
+    let tags: Vec<TagCount> = stmt
+        .query_map([], |row| {
+            Ok(TagCount {
+                tag: row.get(0)?,
+                count: row.get(1)?,
+            })
+        })
+        .map_err(|e| AppError::Internal(format!("tag list query: {e}")))?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(Json(tags))
+}
+
+#[derive(Deserialize)]
+pub struct TagAddRequest {
+    pub tags: Vec<String>,
+}
+
+/// `POST /api/v1/universes/:slug/assets/:sha256/tags` — add one or more tags.
+pub async fn add_tags(
+    State(state): State<AppState>,
+    Path((universe_key, sha256)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(req): Json<TagAddRequest>,
+) -> Result<StatusCode, AppError> {
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::BadRequest("Malformed sha256".into()));
+    }
+    require_writer(&state, &headers, &universe_key)?;
+
+    let conn = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    // Asset must exist (FK would catch it, but a clear 404 is friendlier).
+    let exists: bool = guard
+        .query_row(
+            "SELECT 1 FROM assets WHERE sha256 = ?1",
+            rusqlite::params![&sha256],
+            |_| Ok(true),
+        )
+        .unwrap_or(false);
+    if !exists {
+        return Err(AppError::NotFound("Asset".into()));
+    }
+
+    for tag in &req.tags {
+        let trimmed = tag.trim();
+        if trimmed.is_empty() || trimmed.len() > 64 {
+            continue;
+        }
+        guard
+            .execute(
+                "INSERT OR IGNORE INTO asset_tags (sha256, tag) VALUES (?1, ?2)",
+                rusqlite::params![&sha256, trimmed],
+            )
+            .map_err(|e| AppError::Internal(format!("insert tag: {e}")))?;
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// `DELETE /api/v1/universes/:slug/assets/:sha256/tags/:tag` — remove one tag.
+pub async fn remove_tag(
+    State(state): State<AppState>,
+    Path((universe_key, sha256, tag)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<StatusCode, AppError> {
+    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(AppError::BadRequest("Malformed sha256".into()));
+    }
+    require_writer(&state, &headers, &universe_key)?;
+
+    let conn = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        storage.universe_conn(&universe_key)
+    };
+    let guard = conn
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    guard
+        .execute(
+            "DELETE FROM asset_tags WHERE sha256 = ?1 AND tag = ?2",
+            rusqlite::params![&sha256, &tag],
+        )
+        .map_err(|e| AppError::Internal(format!("delete tag: {e}")))?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 // ---------------------------------------------------------------------------
@@ -546,12 +810,16 @@ pub async fn list_assets(
 // ---------------------------------------------------------------------------
 
 pub fn asset_router() -> Router<AppState> {
+    use axum::routing::{delete as del, post};
     Router::new()
         .route("/{slug}/assets", get(list_assets).post(upload_asset))
+        .route("/{slug}/assets/tags", get(list_tags))
         .route(
             "/{slug}/assets/{sha256}",
             get(get_asset).delete(delete_asset),
         )
+        .route("/{slug}/assets/{sha256}/tags", post(add_tags))
+        .route("/{slug}/assets/{sha256}/tags/{tag}", del(remove_tag))
 }
 
 // ---------------------------------------------------------------------------

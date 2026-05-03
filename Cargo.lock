@@ -624,6 +624,7 @@ dependencies = [
  "argon2",
  "axum",
  "blake3",
+ "chacha20poly1305",
  "chrono",
  "clap",
  "co",

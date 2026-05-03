@@ -337,6 +337,236 @@ async fn upload_oversize_rejected() {
 }
 
 #[tokio::test]
+async fn blob_on_disk_is_ciphertext() {
+    // CO-148: bytes on disk must NOT contain the plaintext.
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    unsafe { std::env::set_var("CO_ASSETS_MASTER_KEY", "test-master-key-1") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    let plaintext = b"super-secret-marker-XYZ";
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(plaintext.to_vec()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let universe_dir = {
+        let storage = state.storage.lock().unwrap();
+        storage.universe_pool.universe_dir("u1")
+    };
+    let blob_root = universe_dir.join("blobs");
+    let mut found = false;
+    for aa in std::fs::read_dir(&blob_root).unwrap() {
+        let aa = aa.unwrap().path();
+        for bb in std::fs::read_dir(&aa).unwrap() {
+            let bb = bb.unwrap().path();
+            for f in std::fs::read_dir(&bb).unwrap() {
+                let p = f.unwrap().path();
+                let bytes = std::fs::read(&p).unwrap();
+                assert!(
+                    !bytes.windows(plaintext.len()).any(|w| w == plaintext),
+                    "ciphertext on disk leaked plaintext marker"
+                );
+                found = true;
+            }
+        }
+    }
+    assert!(found, "expected at least one blob on disk");
+}
+
+#[tokio::test]
+async fn http_range_returns_206_with_slice() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    unsafe { std::env::set_var("CO_ASSETS_MASTER_KEY", "test-master-key-2") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    let payload = vec![b'A'; 100];
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "application/octet-stream")
+                .body(Body::from(payload.clone()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let sha = json["sha256"].as_str().unwrap().to_string();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/u1/assets/{sha}"))
+                .header("authorization", user_bearer("owner-1"))
+                .header("range", "bytes=10-19")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    let cr = resp
+        .headers()
+        .get(header::CONTENT_RANGE)
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(cr, "bytes 10-19/100");
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(body.len(), 10);
+    assert!(body.iter().all(|b| *b == b'A'));
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/u1/assets/{sha}"))
+                .header("authorization", user_bearer("owner-1"))
+                .header("range", "bytes=-5")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    assert_eq!(body.len(), 5);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/u1/assets/{sha}"))
+                .header("authorization", user_bearer("owner-1"))
+                .header("range", "bytes=200-300")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+}
+
+#[tokio::test]
+async fn tag_crud_round_trip() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_app(dir.path());
+    make_universe(&state, "u1", "owner-1", false);
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/u1/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "text/plain")
+                .body(Body::from("hello"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/universes/u1/assets/{SHA_HELLO}/tags"))
+                .header("authorization", user_bearer("owner-1"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"tags":["foo","bar"]}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u1/assets")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let tags = json["assets"][0]["tags"].as_array().unwrap();
+    let tag_strs: Vec<&str> = tags.iter().filter_map(|t| t.as_str()).collect();
+    assert!(tag_strs.contains(&"foo"));
+    assert!(tag_strs.contains(&"bar"));
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u1/assets?tag=foo")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["total"].as_i64().unwrap(), 1);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/u1/assets/tags")
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json.as_array().unwrap().len(), 2);
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(format!("/api/v1/universes/u1/assets/{SHA_HELLO}/tags/foo"))
+                .header("authorization", user_bearer("owner-1"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
 async fn delete_removes_blob_when_unreferenced() {
     unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
     let dir = tempdir().unwrap();
