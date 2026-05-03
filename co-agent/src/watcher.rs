@@ -245,8 +245,16 @@ fn relativize(absolute: &Path, roots: &[PathBuf]) -> Option<PathBuf> {
     None
 }
 
-/// True if the file's extension marks it as content we sync. Cuts down on
-/// notify spam from .DS_Store, .swp, .git/index, etc.
+/// True if the file's extension marks it as content the WS sync path
+/// handles. Cuts down on notify spam from .DS_Store, .swp, .git/index, etc.
+///
+/// Currently `.md` only — the SyncDelta wire format encodes content as
+/// `CoFile.content` and the server's `apply_deltas_to_storage` requires
+/// UTF-8 bytes. Binaries (PDF, image, audio, video) need the dedicated
+/// `/api/v1/universes/{u}/assets` path with sha256 content addressing;
+/// run `scripts/bulk-upload-binary.py` to upload them. CO-151 Phase 2
+/// will add a typed `Asset` body to `SyncDelta` so the watcher can stream
+/// binaries too.
 fn is_syncable(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
         return false;
@@ -258,14 +266,7 @@ fn is_syncable(path: &Path) -> bool {
         .extension()
         .and_then(|e| e.to_str())
         .map(|s| s.to_ascii_lowercase());
-    matches!(
-        ext.as_deref(),
-        Some("md")
-            | Some("png" | "jpg" | "jpeg" | "gif" | "webp" | "svg")
-            | Some("mp4" | "mov" | "webm")
-            | Some("mp3" | "wav" | "ogg" | "m4a")
-            | Some("pdf"),
-    )
+    matches!(ext.as_deref(), Some("md"))
 }
 
 fn watch_dirs_blocking(

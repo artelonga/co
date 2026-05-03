@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.8] — 2026-05-03
+
+### Changed — topologia universes private; watcher narrows to `.md`-only
+
+`seed_admin_content_universes` now declares the 4 topologia universes (`concepts`, `guarani-mbya`, `portuguese`, `yoruba`) as `visibility: private` (down from `public-subscribable`). Reason: the term entries are still under active authoring with non-native draft status; flipping back to public-subscribable comes when seed_status passes review. The reconcile pass on every boot pushes the new visibility through. `mbya` (Arandu) stays public-subscribable.
+
+`co-agent-watch::is_syncable` narrowed to `.md`-only. Binaries (PDF, image, audio, video) need the `/api/v1/universes/{u}/assets` path with sha256 content addressing — the WS protocol's `CoFile.content` is UTF-8-checked at the server, so PDFs were previously sent over the wire and silently rejected. Filter at the source instead. Run `scripts/bulk-upload-binary.py <slug> <root>` to push binaries; CO-151 Phase 2 will add a typed `Asset` body to `SyncDelta` so the watcher can stream them too.
+
+### Added — CO-156 filed (universal envelope: binary content cards + uniform CRUD telemetry)
+
+Filed `work/co/CO-156.md` codifying the pattern that emerged from the topologia + mbya/refs work: a `reference` content type with a `.md` metadata card sibling for any non-markdown asset (PDF, image, video, YouTube URL); an indexable `references_meta` shadow table + FTS over `transcription`; a single telemetry envelope every CRUD + WS state change emits. Subsumes/supersedes CO-154's narrower scope.
+
+### Authored — content (synced via watcher to prod)
+
+- `topologia/concepts/concepts/fractality.md` — new concept anchor (kosmos domain).
+- `topologia/concepts/concepts/recursion.md` — new concept anchor (language domain).
+- `topologia/guarani-mbya/terms/pindovy.md` — 4-way species mapping example: Mbyá `pindovy` ↔ folk Portuguese names ↔ scientific *Syagrus romanzoffiana* ↔ geographic distribution. Demonstrates the universal-schema pattern from `topologia/docs/universe-as-list-of-lists.md`.
+- `topologia/portuguese/terms/jeriva.md` — companion folk-name entry pointing back at the canonical pindovy mapping.
+- `topologia/docs/universe-as-list-of-lists.md` — philosophy note: universe = list of lists; state = (user_session, version_deployment); universal CRUD + telemetry envelope.
+- `mbya/refs/index.md` — index of references (7 PDFs + 1 YouTube stub).
+- `mbya/refs/{CADERNO4_CRISTINE_TAKUA_GUA, educacao_indigena_…, GNDicInt, GNDicLex, Livro_Guarani_digital, PICH0255-T}.md` — metadata cards for each PDF in the project, with `seed_status`, mime, size, language, keywords, and links into the lexicon.
+- `mbya/refs/youtube-czwpPvu3ziQ.md` — pattern stub for YouTube references (URL + chapters/transcription/likely-mbya-terms slots).
+
 ## [1.38.7] — 2026-05-03
 
 ### Added — meaning-topology universes (mbya + topologia 4-plane) into sync

@@ -4520,29 +4520,33 @@ impl Storage {
                 "Lexicon and learning content for Mbyá Guarani (Arandu project)",
                 "public-subscribable",
             ),
+            // Topologia universes are private for now — they're under
+            // active authoring with non-native draft entries that need
+            // review before being open to anonymous readers. Flip to
+            // public-subscribable when seed_status passes review.
             (
                 "concepts",
                 "Concepts (topologia)",
                 "Language-agnostic meaning anchors — the meta plane onto which language-specific terms project",
-                "public-subscribable",
+                "private",
             ),
             (
                 "guarani-mbya",
                 "Guarani Mbyá (topologia)",
                 "Mbyá Guarani term plane — shallow cross-language anchor layer above the Arandu lexicon",
-                "public-subscribable",
+                "private",
             ),
             (
                 "portuguese",
                 "Portuguese (topologia)",
                 "Portuguese term plane in the meaning-topology",
-                "public-subscribable",
+                "private",
             ),
             (
                 "yoruba",
                 "Yoruba (topologia)",
                 "Yoruba term plane in the meaning-topology",
-                "public-subscribable",
+                "private",
             ),
         ] {
             let _ = self.conn.execute(
