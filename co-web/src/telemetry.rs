@@ -154,6 +154,131 @@ fn extract_ip_from_headers(headers: &HeaderMap) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// CO-156: Universal CRUD telemetry envelope
+// ---------------------------------------------------------------------------
+
+/// A uniform server-side event emitted for every entry/asset/relation/WS/auth
+/// state change.  Written to `telemetry_events` with `event_type = "crud"`.
+pub struct CrudEvent {
+    /// Event kind (e.g. "entry.upsert", "asset.upload", "ws.connect").
+    pub kind: &'static str,
+    /// Universe key (empty string for global events like auth.login).
+    pub universe: String,
+    /// Content type / directory the event targets (e.g. "reference", "refs").
+    pub list: Option<String>,
+    /// Entry path or asset sha256.
+    pub key: Option<String>,
+    /// Authenticated user ID; `None` for anonymous callers.
+    pub actor: Option<String>,
+    /// Stable session token derived from the JWT cookie or anon-cookie hash.
+    pub session_id: Option<String>,
+    /// Kind-specific extra data serialised into `properties`.
+    pub extra: Option<serde_json::Value>,
+}
+
+/// Emit a [`CrudEvent`] to `telemetry_events` (fire-and-forget via `tokio::spawn`).
+///
+/// `deployment_version` is set from `CARGO_PKG_VERSION` at compile time.
+pub fn emit_crud_event(state: &crate::server::AppState, ev: CrudEvent) {
+    let state_clone = std::sync::Arc::clone(state);
+    let timestamp_ns = chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000);
+    let timestamp = chrono::Utc::now().to_rfc3339();
+    let props = serde_json::json!({
+        "list": ev.list,
+        "deployment_version": env!("CARGO_PKG_VERSION"),
+        "timestamp_ns": timestamp_ns,
+        "extra": ev.extra,
+    });
+    let row = EventRow {
+        timestamp,
+        visitor_token: None,
+        user_id: ev.actor,
+        session_id: ev.session_id,
+        event_type: "crud".to_string(),
+        event_name: ev.kind.to_string(),
+        universe_key: if ev.universe.is_empty() {
+            None
+        } else {
+            Some(ev.universe)
+        },
+        path: ev.key,
+        properties: Some(props),
+        duration_ms: None,
+        ip_hash: None,
+        ua_device: None,
+        ua_browser: None,
+        ua_os: None,
+    };
+    tokio::spawn(async move {
+        if let Ok(storage) = state_clone.storage.lock() {
+            insert_event(storage.conn(), &row);
+        }
+    });
+}
+
+/// Derive a stable session token from request headers without exposing the raw token.
+///
+/// Hashes the JWT session cookie (or anon visitante_id cookie) with xxh3.
+pub fn extract_session_id(headers: &axum::http::HeaderMap) -> Option<String> {
+    if let Some(session) = get_cookie(headers, "co_session") {
+        let hash = xxhash_rust::xxh3::xxh3_64(session.as_bytes());
+        return Some(format!("ses_{hash:016x}"));
+    }
+    if let Some(vid) = get_cookie(headers, "visitante_id") {
+        let hash = xxhash_rust::xxh3::xxh3_64(vid.as_bytes());
+        return Some(format!("anon_{hash:016x}"));
+    }
+    None
+}
+
+// ---------------------------------------------------------------------------
+// CO-156: CRUD event summary (24-hour window) for admin dashboard
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct CrudEventSummary {
+    pub total_crud_24h: i64,
+    pub by_kind: Vec<TypeCount>,
+}
+
+pub fn crud_event_summary_24h(conn: &Connection) -> CrudEventSummary {
+    let total_crud_24h: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM telemetry_events \
+             WHERE event_type = 'crud' AND timestamp > datetime('now', '-24 hours')",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let by_kind: Vec<TypeCount> = conn
+        .prepare(
+            "SELECT event_name, COUNT(*) AS cnt FROM telemetry_events \
+             WHERE event_type = 'crud' AND timestamp > datetime('now', '-24 hours') \
+             GROUP BY event_name ORDER BY cnt DESC",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                Ok(TypeCount {
+                    event_type: r.get(0)?,
+                    count: r.get(1)?,
+                })
+            })
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+
+    CrudEventSummary {
+        total_crud_24h,
+        by_kind,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Event row — written to telemetry_events
 // ---------------------------------------------------------------------------
 
@@ -861,6 +986,12 @@ const ADMIN_DASHBOARD_HTML: &str = r#"<!DOCTYPE html>
     <div id="traffic-chart" style="display:flex;align-items:flex-end;gap:3px;height:80px;overflow:hidden"></div>
     <table id="events-by-day" style="margin-top:12px"></table>
   </div>
+
+  <div class="section">
+    <h2>CRUD Events — últimas 24 horas</h2>
+    <div id="crud-total" style="font-size:1.5rem;font-weight:700;color:var(--accent);margin-bottom:12px">—</div>
+    <table id="crud-by-kind"></table>
+  </div>
 </div>
 
 <script>
@@ -879,6 +1010,7 @@ async function loadData() {
     render(d);
     document.getElementById('main').style.display = '';
     document.getElementById('btn-export').style.display = '';
+    await loadCrudData();
   } catch(e) { showError(e.message); }
 }
 
@@ -920,6 +1052,23 @@ function render(d) {
     ).join('');
 }
 
+async function loadCrudData() {
+  try {
+    const res = await fetch('/api/v1/admin/telemetry/crud-summary', {
+      headers: { 'Authorization': 'Bearer ' + githubToken }
+    });
+    if (!res.ok) return;
+    const d = await res.json();
+    document.getElementById('crud-total').textContent = fmt(d.total_crud_24h) + ' eventos CRUD';
+    const maxKind = Math.max(...(d.by_kind.map(k => k.count)), 1);
+    document.getElementById('crud-by-kind').innerHTML =
+      '<tr><th>Tipo</th><th>24h</th><th style="width:120px"></th></tr>' +
+      d.by_kind.map(k =>
+        `<tr><td>${esc(k.event_type)}</td><td>${fmt(k.count)}</td><td><div class="bar" style="width:${Math.round(k.count/maxKind*100)}%"></div></td></tr>`
+      ).join('');
+  } catch(_) {}
+}
+
 async function exportCSV() {
   const res = await fetch('/api/v1/admin/telemetry/export', {
     headers: { 'Authorization': 'Bearer ' + githubToken }
@@ -955,12 +1104,21 @@ pub fn router() -> Router<AppState> {
         .route("/events", post(marketing_events_handler))
 }
 
+/// GET /api/v1/admin/telemetry/crud-summary — CRUD events in last 24 hours.
+pub async fn crud_summary_handler(State(state): State<AppState>) -> impl IntoResponse {
+    match state.storage.lock() {
+        Ok(storage) => Json(crud_event_summary_24h(storage.conn())).into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 /// Admin-only telemetry endpoints.
 /// Requires GitHub admin auth extensions to be layered in from server.rs.
 pub fn admin_router() -> Router<AppState> {
     Router::new()
         .route("/telemetry/summary", get(summary_handler))
         .route("/telemetry/export", get(export_handler))
+        .route("/telemetry/crud-summary", get(crud_summary_handler))
         .layer(axum::middleware::from_fn(
             crate::github_auth::require_github_admin,
         ))

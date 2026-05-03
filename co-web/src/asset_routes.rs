@@ -323,6 +323,20 @@ pub async fn upload_asset(
             .map_err(|e| AppError::Internal(format!("insert asset row: {e}")))?;
     }
 
+    // CO-156: emit asset.upload telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "asset.upload",
+            universe: universe_key.clone(),
+            list: None,
+            key: Some(sha256.clone()),
+            actor: Some(user_id),
+            session_id: crate::telemetry::extract_session_id(&headers),
+            extra: Some(serde_json::json!({ "mime": mime, "size_bytes": size })),
+        },
+    );
+
     Ok(Json(AssetUploadResponse {
         sha256: sha256.clone(),
         mime,
@@ -574,6 +588,20 @@ pub async fn delete_asset(
 
     let blob_path = universe_dir.join(&blob_rel_path);
     let _ = std::fs::remove_file(&blob_path); // best-effort
+
+    // CO-156: emit asset.delete telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "asset.delete",
+            universe: universe_key.clone(),
+            list: None,
+            key: Some(sha256.clone()),
+            actor: require_writer(&state, &headers, &universe_key).ok(),
+            session_id: crate::telemetry::extract_session_id(&headers),
+            extra: None,
+        },
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }

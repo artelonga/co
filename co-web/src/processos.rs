@@ -435,6 +435,20 @@ pub async fn approve_alterar_pagina(
         .map_err(|e| AppError::Internal(format!("update run state: {e}")))?;
     drop(storage);
 
+    // CO-156: emit entry.upsert telemetry for the process sink write
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.upsert",
+            universe: universe_key.clone(),
+            list: Some("alterar-pagina-na-web".to_string()),
+            key: Some(page_path.to_string()),
+            actor: Some(user_id.0.clone()),
+            session_id: None,
+            extra: Some(serde_json::json!({ "run_id": run_id, "field": field })),
+        },
+    );
+
     Ok(Json(RunResponse {
         run_id,
         state: "completed".into(),
@@ -595,7 +609,28 @@ pub async fn revert_alterar_pagina(
         rusqlite::params![user_id.0, body.universe, revert_payload.to_string(), now],
     );
 
+    let universe_key_clone = body.universe.clone();
+    let page_path_owned = page_path.to_string();
+    let revert_run_id_clone = revert_run_id.clone();
+    let actor_clone = user_id.0.clone();
+
     drop(storage);
+
+    // CO-156: emit entry.delete telemetry for the revert (the prior write is being undone)
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "entry.delete",
+            universe: universe_key_clone,
+            list: Some("alterar-pagina-na-web".to_string()),
+            key: Some(page_path_owned),
+            actor: Some(actor_clone),
+            session_id: None,
+            extra: Some(
+                serde_json::json!({ "revert_run_id": revert_run_id_clone, "parent_run_id": parent_run_id }),
+            ),
+        },
+    );
 
     Ok(Json(RunResponse {
         run_id: revert_run_id,

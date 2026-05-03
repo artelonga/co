@@ -22,6 +22,7 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "doc_generators",
     "relationships",
     "views",
+    "properties_per_type",
 ];
 
 // ---------------------------------------------------------------------------
@@ -63,6 +64,37 @@ pub struct ParseResult {
 // Manifest struct hierarchy
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// CO-156: properties_per_type — per-content-type property declarations using
+// the lightweight `kind: text|int|enum|list` vocabulary.
+// ---------------------------------------------------------------------------
+
+/// Property kind in the `properties_per_type` YAML vocabulary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PropKind {
+    Text,
+    Int,
+    Enum,
+    List,
+}
+
+/// A property definition inside `properties_per_type.<type>.<field>`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PropDef {
+    pub kind: PropKind,
+    #[serde(default)]
+    pub required: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub values: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Manifest struct
+// ---------------------------------------------------------------------------
+
 /// Top-level universe manifest (`_universe.yaml`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -76,6 +108,10 @@ pub struct Manifest {
     pub relationships: Vec<Relationship>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<View>,
+    /// CO-156: per-content-type property declarations using the `kind` vocabulary.
+    /// Merged into `content_types` schemas during parsing; not serialised on output.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub properties_per_type: BTreeMap<String, BTreeMap<String, PropDef>>,
 }
 
 /// A content type declared in the manifest.
@@ -299,10 +335,89 @@ pub fn parse(bytes: &[u8]) -> Result<ParseResult, ManifestError> {
         }
     }
 
-    let manifest: Manifest = serde_yaml::from_value(raw)?;
+    // CO-156: normalise content_types so string entries (e.g. `- reference`) are
+    // expanded to full ContentType objects before serde_yaml deserialises them.
+    let raw = normalize_content_type_strings(raw);
+
+    let mut manifest: Manifest = serde_yaml::from_value(raw)?;
+
+    // CO-156: merge properties_per_type into content_types schemas.
+    merge_properties_per_type(&mut manifest);
+
     validate(&manifest)?;
 
     Ok(ParseResult { manifest, warnings })
+}
+
+/// Convert any bare-string items inside `content_types:` to `{name: <string>}` mappings
+/// so the standard ContentType deserialiser can handle them.
+fn normalize_content_type_strings(mut raw: serde_yaml::Value) -> serde_yaml::Value {
+    if let serde_yaml::Value::Mapping(ref mut map) = raw {
+        let key = serde_yaml::Value::String("content_types".to_string());
+        if let Some(serde_yaml::Value::Sequence(seq)) = map.get_mut(&key) {
+            for item in seq.iter_mut() {
+                if let serde_yaml::Value::String(ref name) = item.clone() {
+                    let mut ct_map = serde_yaml::Mapping::new();
+                    ct_map.insert(
+                        serde_yaml::Value::String("name".to_string()),
+                        serde_yaml::Value::String(name.clone()),
+                    );
+                    *item = serde_yaml::Value::Mapping(ct_map);
+                }
+            }
+        }
+    }
+    raw
+}
+
+/// Merge `properties_per_type` entries into the corresponding ContentType schemas.
+///
+/// - If a content type named by the key already exists in `content_types`, its
+///   schema is augmented (existing fields are NOT overwritten).
+/// - If no matching ContentType exists, a new one is created and appended.
+fn merge_properties_per_type(manifest: &mut Manifest) {
+    if manifest.properties_per_type.is_empty() {
+        return;
+    }
+    for (type_name, props) in &manifest.properties_per_type.clone() {
+        let ct = if let Some(ct) = manifest
+            .content_types
+            .iter_mut()
+            .find(|ct| ct.name == *type_name)
+        {
+            ct
+        } else {
+            manifest.content_types.push(ContentType {
+                name: type_name.clone(),
+                schema: BTreeMap::new(),
+                presentation: Presentation::default(),
+                indexes: vec![],
+            });
+            manifest.content_types.last_mut().unwrap()
+        };
+
+        for (field_name, prop_def) in props {
+            ct.schema
+                .entry(field_name.clone())
+                .or_insert_with(|| prop_def_to_field_def(prop_def));
+        }
+    }
+}
+
+fn prop_def_to_field_def(prop: &PropDef) -> FieldDef {
+    let field_type = match prop.kind {
+        PropKind::Text => FieldType::String,
+        PropKind::Int => FieldType::Number,
+        PropKind::Enum => FieldType::Enum,
+        PropKind::List => FieldType::String,
+    };
+    FieldDef {
+        field_type,
+        required: prop.required,
+        values: prop.values.clone(),
+        semantic: None,
+        target: None,
+    }
 }
 
 /// Parse a `_universe.yaml` manifest from a UTF-8 string.
@@ -416,6 +531,7 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
         doc_generators: vec![],
         relationships: vec![],
         views: vec![],
+        properties_per_type: BTreeMap::new(),
     }
 }
 
@@ -721,6 +837,7 @@ content_types:
             doc_generators: vec![],
             relationships: vec![],
             views: vec![],
+            properties_per_type: BTreeMap::new(),
         };
         assert!(m.triggers_migration_from(1));
         assert!(!m.triggers_migration_from(2));
@@ -782,6 +899,104 @@ content_types:
         assert!(
             yaml.contains("ref_list"),
             "FieldType::RefList must serialize as ref_list: {yaml}"
+        );
+    }
+
+    // CO-156: properties_per_type tests
+    #[test]
+    fn test_parse_properties_per_type_string_content_types() {
+        let yaml = r#"schema_version: 1
+name: Topologia
+content_types:
+  - term
+  - reference
+properties_per_type:
+  reference:
+    file:
+      kind: text
+      description: Sibling asset filename.
+    mime:
+      kind: text
+      required: true
+    medium:
+      kind: enum
+      values: [pdf, image, video, audio, web, citation]
+      required: true
+    seed_status:
+      kind: enum
+      values: [stub, reviewed, native-confirmed]
+      required: true
+    authors:
+      kind: list
+    size_bytes:
+      kind: int
+"#;
+        let result = parse_str(yaml).expect("should parse properties_per_type");
+        assert!(result.warnings.is_empty());
+        let m = &result.manifest;
+        assert_eq!(m.content_types.len(), 2);
+
+        let term_ct = m.content_types.iter().find(|ct| ct.name == "term").unwrap();
+        assert!(term_ct.schema.is_empty(), "term has no properties declared");
+
+        let ref_ct = m
+            .content_types
+            .iter()
+            .find(|ct| ct.name == "reference")
+            .unwrap();
+        assert!(ref_ct.schema.contains_key("file"));
+        assert!(ref_ct.schema.contains_key("mime"));
+        assert!(ref_ct.schema.contains_key("medium"));
+
+        let medium = &ref_ct.schema["medium"];
+        assert_eq!(medium.field_type, FieldType::Enum);
+        assert!(medium.required);
+        assert!(medium.values.contains(&"pdf".to_string()));
+        assert!(medium.values.contains(&"video".to_string()));
+
+        let mime = &ref_ct.schema["mime"];
+        assert_eq!(mime.field_type, FieldType::String);
+        assert!(mime.required);
+
+        let authors = &ref_ct.schema["authors"];
+        assert_eq!(authors.field_type, FieldType::String, "list maps to String");
+        assert!(!authors.required);
+
+        let size = &ref_ct.schema["size_bytes"];
+        assert_eq!(size.field_type, FieldType::Number);
+    }
+
+    #[test]
+    fn test_parse_properties_per_type_creates_missing_content_type() {
+        let yaml = r#"schema_version: 1
+name: Test
+properties_per_type:
+  reference:
+    mime:
+      kind: text
+      required: true
+    medium:
+      kind: enum
+      values: [pdf]
+      required: true
+"#;
+        let result = parse_str(yaml).expect("should parse");
+        let m = &result.manifest;
+        let ref_ct = m
+            .content_types
+            .iter()
+            .find(|ct| ct.name == "reference")
+            .unwrap();
+        assert!(ref_ct.schema.contains_key("mime"));
+    }
+
+    #[test]
+    fn test_parse_properties_per_type_no_warning() {
+        let yaml = "schema_version: 1\nname: X\nproperties_per_type:\n  reference:\n    mime:\n      kind: text\n      required: true\n    medium:\n      kind: enum\n      values: [pdf]\n      required: true\n";
+        let result = parse_str(yaml).expect("should parse");
+        assert!(
+            result.warnings.is_empty(),
+            "properties_per_type must not produce warnings"
         );
     }
 }

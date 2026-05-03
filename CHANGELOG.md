@@ -15,7 +15,7 @@ Two new relation query endpoints:
 - `GET /api/v1/universes/:slug/relations/inbound?path=<p>` — returns all inbound edges from same-universe AND cross-universe (scans every other universe's DB for `to_universe = slug`).
 - `GET /api/v1/universes/:slug/relations/outbound?path=<p>` — returns outbound edges from `<p>`, including cross-universe edges (`to_universe` non-null).
 
-### Added — CO-154: References as a first-class content type
+### Added — CO-154: References as a first-class content type (per-citation index)
 
 `references_index` + `references_fts` tables in every per-universe SQLite DB (v8 migration). On every entry write, `{url, source, retrieved}` items from `frontmatter.references[]` are extracted and upserted; body sections under `## Referência: <source>` headings are matched and stored as `excerpt_body`. FTS5 virtual table enables full-text search across source + excerpt. Backfill runs once per universe on first open after this deploy.
 
@@ -23,7 +23,35 @@ New API endpoints:
 - `GET /api/v1/universes/{u}/references?source=&url_contains=&q=` — filter/search references
 - `GET /api/v1/universes/{u}/references/orphan-wikilinks` — candidate-entry backlog
 
-All three entry write paths (entry create, entry update, vault write) sync the references index.
+All three entry write paths (entry create, entry update, vault write) sync the citations index.
+
+### Added — CO-156: Universal envelope — `reference` content type + uniform CRUD telemetry
+
+Complementary to CO-154 (which indexes citation *items* inside any entry's frontmatter): CO-156 indexes the reference *card* itself (its bound blob, mime, seed_status, language, medium). Both tables coexist; they answer different questions.
+
+#### Part A — `reference` as a first-class content type
+
+- `_universe.yaml` parser now accepts `properties_per_type` with the per-content-type property map using `kind: text|int|enum|list` vocabulary; content types may be declared as bare strings (`- reference`) or full objects.
+- Per-universe DB v8 migration creates `references_meta` (structured shadow table) + `reference_cards_fts` (FTS5 index over title, body, transcription).
+- Every reference-card write (via entry_routes, vault_routes, or the new reference_routes) upserts `references_meta`; sha256 of the bound sibling asset is resolved and stored.
+- New REST API under `/api/v1/universes/{u}/references`:
+  - `GET /references?medium=pdf` — list cards with medium/seed_status/FTS filters
+  - `GET /references/orphan-blobs` — assets with no card
+  - `GET /references/broken-cards` — cards whose `file:` doesn't resolve
+  - `GET /references/{*path}` — single card
+  - `POST /references` — create card
+  - `PUT /references/{*path}` — update card
+  - `DELETE /references/{*path}` — delete card (blob unaffected)
+
+#### Part B — Universal CRUD telemetry envelope
+
+Every state change now emits one `telemetry_events` row with `event_type = "crud"` carrying a uniform envelope: `kind` (`entry.upsert`, `entry.delete`, `asset.upload`, `asset.delete`, `relation.create`, `relation.delete`, `ws.connect`, `ws.disconnect`, `ws.lag`, `auth.login`, `auth.logout`), `universe`, `list`, `key`, `actor`, `session_id`, `deployment_version` (from `CARGO_PKG_VERSION`), `timestamp_ns`, and `extra`.
+
+- `deployment_version` matches `cargo workspace.package.version` at write time.
+- `session_id` is derived from JWT session cookie hash or anon visitante cookie hash.
+- `/co/co/telemetria` admin dashboard now shows CRUD events by kind with 24-hour window.
+- `GET /api/v1/admin/telemetry/crud-summary` returns the 24h CRUD breakdown.
+- `docs/telemetry-envelope.md` documents all event kinds and their `extra` shapes.
 
 ## [1.38.11] — 2026-05-03
 

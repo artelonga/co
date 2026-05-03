@@ -141,13 +141,51 @@ CREATE INDEX IF NOT EXISTS idx_refs_source
 CREATE INDEX IF NOT EXISTS idx_refs_url
     ON references_index(url) WHERE url IS NOT NULL;
 
--- FTS over source + excerpt for full-text search across reference excerpts.
+-- CO-154: FTS over source + excerpt for full-text search across reference
+-- excerpts (per-citation index).
 CREATE VIRTUAL TABLE IF NOT EXISTS references_fts USING fts5(
     universe_key UNINDEXED,
     entry_path   UNINDEXED,
     ref_index    UNINDEXED,
     source,
     excerpt_body
+);
+
+-- CO-156: `reference` content type shadow table — one row per `.md` card
+-- with entry_type = 'reference'. Distinct from CO-154's references_index
+-- (which indexes individual citation items inside any entry's frontmatter):
+-- this table indexes the reference *card* itself (its bound blob, mime,
+-- seed_status, language, medium). Both can coexist; they answer different
+-- questions ("what citations does this entry have?" vs "what reference
+-- cards exist in this universe?").
+CREATE TABLE IF NOT EXISTS references_meta (
+    universe_key  TEXT NOT NULL,
+    entry_path    TEXT NOT NULL,
+    file          TEXT,
+    blob_sha256   TEXT,
+    url           TEXT,
+    medium        TEXT NOT NULL DEFAULT 'unknown',
+    mime          TEXT,
+    size_bytes    INTEGER,
+    language      TEXT,
+    seed_status   TEXT NOT NULL DEFAULT 'stub',
+    indexed_at    TEXT NOT NULL,
+    PRIMARY KEY (universe_key, entry_path)
+);
+CREATE INDEX IF NOT EXISTS idx_refs_meta_medium      ON references_meta(medium);
+CREATE INDEX IF NOT EXISTS idx_refs_meta_seed_status ON references_meta(seed_status);
+CREATE INDEX IF NOT EXISTS idx_refs_meta_blob
+    ON references_meta(blob_sha256) WHERE blob_sha256 IS NOT NULL;
+
+-- CO-156: FTS over reference card content (title, body, transcription).
+-- Renamed from `references_fts` to avoid colliding with CO-154's per-citation
+-- FTS above.
+CREATE VIRTUAL TABLE IF NOT EXISTS reference_cards_fts USING fts5(
+    universe_key UNINDEXED,
+    entry_path   UNINDEXED,
+    title,
+    body,
+    transcription
 );
 ";
 
@@ -329,13 +367,19 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
             .expect("universe schema_version v7");
     }
     if v < 8 {
-        // CO-154: references_index + references_fts already created via
-        // UNIVERSE_SCHEMA IF NOT EXISTS. One-shot backfill: walk existing
-        // entries and populate references tables.
+        // CO-154 + CO-156: references_index + references_fts (citation index)
+        // and references_meta + reference_cards_fts (card shadow table) all
+        // created via UNIVERSE_SCHEMA IF NOT EXISTS. One-shot backfill walks
+        // existing entries.
         let _ = crate::reference_index::backfill_references(conn, universe_key);
         conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
             .expect("universe schema_version v8");
     }
+}
+
+#[cfg(test)]
+pub(crate) fn run_universe_migrations_for_test(conn: &Connection) {
+    run_universe_migrations(conn);
 }
 
 /// Per-universe DB version of the storage.rs `ensure_column` helper. Mirrors

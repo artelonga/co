@@ -216,6 +216,20 @@ async fn handle_sync_socket(
 
     debug!("sync-ws connect: user={user_id} universe={universe_key}");
 
+    // CO-156: emit ws.connect telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "ws.connect",
+            universe: universe_key.clone(),
+            list: None,
+            key: None,
+            actor: Some(user_id.clone()),
+            session_id: None,
+            extra: Some(serde_json::json!({ "conn_id": conn_id })),
+        },
+    );
+
     // Replay missed frames on reconnect.
     if let Some(rt) = resume_token {
         match room.replay_since(rt).await {
@@ -278,6 +292,19 @@ async fn handle_sync_socket(
                     }
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         warn!("sync-ws lagged {n} messages: user={user_id}");
+                        // CO-156: emit ws.lag telemetry
+                        crate::telemetry::emit_crud_event(
+                            &state,
+                            crate::telemetry::CrudEvent {
+                                kind: "ws.lag",
+                                universe: universe_key.clone(),
+                                list: None,
+                                key: None,
+                                actor: Some(user_id.clone()),
+                                session_id: None,
+                                extra: Some(serde_json::json!({ "lagged": n })),
+                            },
+                        );
                     }
                     Err(_) => break,
                 }
@@ -295,6 +322,20 @@ async fn handle_sync_socket(
 
     send_task.abort();
     debug!("sync-ws disconnect: user={user_id}");
+
+    // CO-156: emit ws.disconnect telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "ws.disconnect",
+            universe: universe_key.clone(),
+            list: None,
+            key: None,
+            actor: Some(user_id),
+            session_id: None,
+            extra: Some(serde_json::json!({ "conn_id": conn_id })),
+        },
+    );
 }
 
 // ---------------------------------------------------------------------------

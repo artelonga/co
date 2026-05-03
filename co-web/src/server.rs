@@ -196,7 +196,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/v1/auth/stats",
             get(user_stats_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
-        .route("/v1/auth/logout", post(logout_handler))
+        .route("/v1/auth/logout", post(logout_handler)) // State extracted inside
         // CO-85: generic password-based login (any env, user must have password_hash set)
         .route("/v1/auth/password-login", post(password_login_handler))
         // CO-44: compat alias — returns 404 in prod (kept for scripts and CLAUDE.md docs)
@@ -330,6 +330,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CO-146: Binary asset upload + content-addressable storage ---
     let asset_api = crate::asset_routes::asset_router();
 
+    // --- CO-156: Reference content type CRUD ---
+    let reference_api = crate::reference_routes::reference_router();
+
     // --- CO-124: Vercel Log Drain receiver ---
     let log_drain_api = crate::log_drain_routes::router();
 
@@ -409,6 +412,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-153: cross-universe relation queries
         .nest("/api/v1/universes", relation_api)
         .nest("/api/v1/universes", asset_api)
+        .nest("/api/v1/universes", reference_api)
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)
         // CO-124: Vercel Log Drain receiver
@@ -1808,6 +1812,20 @@ async fn verify_handler(
 
     let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
 
+    // CO-156: emit auth.login telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "auth.login",
+            universe: String::new(),
+            list: Some("magic-link".to_string()),
+            key: Some(user_id.clone()),
+            actor: Some(user_id.clone()),
+            session_id: None,
+            extra: None,
+        },
+    );
+
     let response_body = VerifyResponse {
         user_id,
         email,
@@ -1913,7 +1931,22 @@ async fn user_stats_handler(
     })))
 }
 
-async fn logout_handler() -> Response {
+async fn logout_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    // CO-156: emit auth.logout telemetry (best-effort, before cookie is cleared)
+    let session_id = crate::telemetry::extract_session_id(&headers);
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "auth.logout",
+            universe: String::new(),
+            list: None,
+            key: None,
+            actor: crate::auth::resolve_user_id(&state, &headers),
+            session_id,
+            extra: None,
+        },
+    );
+
     let clear_cookie = "session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0";
     (
         StatusCode::OK,
@@ -1972,6 +2005,20 @@ async fn password_login_handler(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+
+    // CO-156: emit auth.login telemetry
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "auth.login",
+            universe: String::new(),
+            list: Some("password".to_string()),
+            key: Some(user.id.clone()),
+            actor: Some(user.id.clone()),
+            session_id: None,
+            extra: None,
+        },
+    );
 
     Ok((
         StatusCode::OK,
