@@ -78,9 +78,10 @@ CREATE INDEX IF NOT EXISTS idx_er_from
     ON entry_relations(universe_key, from_path, relation_type);
 CREATE INDEX IF NOT EXISTS idx_er_to
     ON entry_relations(universe_key, to_path,   relation_type);
-CREATE INDEX IF NOT EXISTS idx_er_to_universe
-    ON entry_relations(to_universe, to_path)
-    WHERE to_universe IS NOT NULL;
+-- idx_er_to_universe lives in the v7 migration block (universe_pool.rs):
+-- can't be created here because existing prod DBs predating v7 don't have
+-- the `to_universe` column, and CREATE TABLE IF NOT EXISTS skips the
+-- table creation, so the column isn't there when this index runs.
 
 -- CO-146: content-addressable binary assets (Phase 1 of CO-145).
 -- Bytes live on disk at universe_dir/blobs/<aa>/<bb>/<sha256>.
