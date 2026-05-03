@@ -269,6 +269,16 @@ pub async fn rate_limit_middleware(
         return Ok(next.run(req).await);
     }
 
+    // CO-145: bulk-upload escape hatch. Authenticated callers can opt out of
+    // the per-min cap by sending `X-Admin-Override-Quota: true`. Anonymous
+    // requests cannot — the header is only honored when the JWT/session
+    // resolves a real user. CO-90 keeps `tier` billing-only, so the admin
+    // owns universes via owner_id, not a global tier bypass — and the
+    // ownership check still runs inside the route handler.
+    if tier != Tier::Anonymous && has_admin_override(req.headers()) {
+        return Ok(next.run(req).await);
+    }
+
     let op = OpClass::from_method(&method);
     let limits = tier_limits(tier);
 

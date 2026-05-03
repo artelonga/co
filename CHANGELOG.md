@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.1] — 2026-05-03
+
+### Fixed — bulk-upload usability: 413 on >2 MB assets, 429 saturating burst writes
+
+Surfaced by the first quilomboaraucaria upload pass (401 binaries / 558 ok, 35 markdown / 95 ok). Two distinct failure modes:
+
+1. **413 "Failed to buffer the request body: length limit exceeded"** on full-resolution images and MP4 (`*.orig.jpg`, `*.orig.png`, `*.mp4`, `fotos/post-*.jpg`). axum applies a 2 MB `DefaultBodyLimit` to all routes by default; the asset router's internal `MAX_ASSET_BYTES = 50 MB` never got a chance to run.
+2. **429 rate_limited** on the markdown PUT burst — the per-bucket cap is 60 writes/min for `tier=user`, and a 95-file Vault dump trivially exceeds that.
+
+**Fixes:**
+
+- `asset_router()` now applies `DefaultBodyLimit::max(MAX_ASSET_BYTES)` (50 MB) on the router layer so the handler-level cap is the only gate.
+- `rate_limit_middleware` now honors `X-Admin-Override-Quota: true` for authenticated callers (any tier ≠ Anonymous). CO-90 keeps `tier` billing-only, so the bypass is opt-in per request and the ownership/membership check still runs inside the route handler — anonymous callers can set the header but it's ignored. Bulk-upload script sends this header.
+- `scripts/bulk-upload-binary.py` rewritten with `ThreadPoolExecutor` (8 workers), exponential backoff retry on 429/timeout/HTTP 0, idempotent skip-if-already-uploaded probe, and the override header. Same two-pass shape: binaries first to capture sha256, then markdown with `![](relative)` → `![](sha256:…)` rewriting.
+
+After this deploy: a 50 MB JPG uploads cleanly, a 200-file markdown burst doesn't trigger 429, and a re-run of the same content is a no-op (sha256 idempotency + entry upsert).
+
 ## [1.37.0] — 2026-05-02
 
 ### Added — encrypted, indexable, lazy-loaded assets (CO-147 + CO-148 + CO-149 + CO-150)

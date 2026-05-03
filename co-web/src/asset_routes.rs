@@ -810,7 +810,13 @@ pub async fn remove_tag(
 // ---------------------------------------------------------------------------
 
 pub fn asset_router() -> Router<AppState> {
+    use axum::extract::DefaultBodyLimit;
     use axum::routing::{delete as del, post};
+    // CO-145 / CO-146: asset uploads carry binary bodies up to 50 MB —
+    // axum's 2 MB default body limit (and the 1 MB cap applied to other
+    // routers in server.rs) would 413 every full-resolution image. Raise
+    // the limit on this router specifically; MAX_ASSET_BYTES still gates
+    // the handler so the cap stays consistent with what tests verify.
     Router::new()
         .route("/{slug}/assets", get(list_assets).post(upload_asset))
         .route("/{slug}/assets/tags", get(list_tags))
@@ -820,6 +826,7 @@ pub fn asset_router() -> Router<AppState> {
         )
         .route("/{slug}/assets/{sha256}/tags", post(add_tags))
         .route("/{slug}/assets/{sha256}/tags/{tag}", del(remove_tag))
+        .layer(DefaultBodyLimit::max(MAX_ASSET_BYTES))
 }
 
 // ---------------------------------------------------------------------------
