@@ -816,7 +816,85 @@ pub fn asset_router() -> Router<AppState> {
         )
         .route("/{slug}/assets/{sha256}/tags", post(add_tags))
         .route("/{slug}/assets/{sha256}/tags/{tag}", del(remove_tag))
+        // Raw blob: serve any file from the universe directory by relative path.
+        // Used by the PDF viewer when a reference card has `file:` but no blob_sha256.
+        // Visibility gate already applied (universe_content_api layer).
+        .route("/{slug}/blob/{*path}", get(get_raw_blob))
         .layer(DefaultBodyLimit::max(MAX_ASSET_BYTES))
+}
+
+// ---------------------------------------------------------------------------
+// Raw blob endpoint
+// ---------------------------------------------------------------------------
+
+/// `GET /api/v1/universes/:slug/blob/*path`
+///
+/// Serve an arbitrary file from the universe directory. Intended for binary
+/// siblings of reference cards (PDFs, images) that were never uploaded as
+/// content-addressed assets (no `blob_sha256`). Visibility gate is applied
+/// by the outer `universe_content_api` layer.
+pub async fn get_raw_blob(
+    axum::extract::State(state): axum::extract::State<crate::server::AppState>,
+    axum::extract::Path((slug, path)): axum::extract::Path<(String, String)>,
+) -> Result<axum::response::Response, AppError> {
+    let universe_root = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("Storage lock".into()))?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_root(&slug)
+    };
+
+    // Reject obvious path traversal attempts before canonicalization.
+    if path.contains("..") {
+        return Err(AppError::Forbidden("Path traversal rejected".into()));
+    }
+
+    let file_path = universe_root.join(&path);
+    // Canonicalize to resolve symlinks, then verify we're still inside universe_root.
+    let canonical = file_path
+        .canonicalize()
+        .map_err(|_| AppError::NotFound(format!("File '{path}' not found")))?;
+    if !canonical.starts_with(&universe_root) {
+        return Err(AppError::Forbidden("Path escapes universe root".into()));
+    }
+
+    let bytes =
+        std::fs::read(&canonical).map_err(|e| AppError::NotFound(format!("Read '{path}': {e}")))?;
+
+    // Determine MIME from extension, defaulting to octet-stream.
+    let ext = canonical.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let mime = match ext {
+        "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "mp4" => "video/mp4",
+        "webm" => "video/webm",
+        "mp3" => "audio/mpeg",
+        "ogg" => "audio/ogg",
+        "txt" | "md" => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::IntoResponse;
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_str(mime)
+            .unwrap_or_else(|_| axum::http::HeaderValue::from_static("application/octet-stream")),
+    );
+    // 1-hour cache (not immutable — file content can change without a new sha256 key)
+    headers.insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("private, max-age=3600"),
+    );
+    Ok((StatusCode::OK, headers, bytes).into_response())
 }
 
 // ---------------------------------------------------------------------------

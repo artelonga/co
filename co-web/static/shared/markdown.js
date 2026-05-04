@@ -308,6 +308,16 @@
    * @param {string} universeSlug - Current universe key/slug
    * @returns {string} HTML with relative .md hrefs rewritten
    */
+  /** Encode a slash-separated path preserving the separators. */
+  function _encodePath(p) {
+    return p.split('/').map(encodeURIComponent).join('/');
+  }
+
+  /** Build the SPA viewer URL for an entry: /co/{slug}/{path} (no /entries/ segment). */
+  function _entryHref(universeSlug, entryPath) {
+    return '/co/' + _escHtml(universeSlug) + '/' + _encodePath(entryPath);
+  }
+
   function _rewriteRelativeMdLinks(html, universeSlug) {
     if (!html || !universeSlug) return html;
     // Match <a ...href="path.md"...> where href is NOT http/https/#/ (relative only)
@@ -315,7 +325,7 @@
       /<a\b([^>]*?)\bhref=(["'])((?!https?:\/\/|#|\/)[^"'?#]+\.md)\2([^>]*)>/gi,
       (_, before, q, mdPath, after) => {
         const entryPath = mdPath.replace(/\.md$/i, '');
-        const href = '/co/' + _escHtml(universeSlug) + '/entries/' + encodeURIComponent(entryPath);
+        const href = _entryHref(universeSlug, entryPath);
         const hasClass = /\bclass=/.test(before + after);
         const cls = hasClass ? '' : ' class="wikilink"';
         return `<a${before} href=${q}${href}${q}${after}${cls}>`;
@@ -326,23 +336,17 @@
   /**
    * Replace [[wikilinks]] in rendered HTML with SPA viewer anchors, and
    * rewrite any relative .md links produced by the markdown renderer.
-   *
-   * @param {string} html         - Already-rendered HTML from renderMarkdown()
-   * @param {string} universeSlug - Current universe key/slug
-   * @returns {string} HTML with all internal links resolved
+   * URL format: /co/{slug}/{entry-path} — no /entries/ segment.
    */
   function resolveWikilinks(html, universeSlug) {
     if (!html) return html;
-    // Wikilinks survive DOMPurify as plain text since [[…]] isn't HTML.
-    // Strip .md extension so the SPA router receives a clean path.
     let result = html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
       const rawTarget = target.trim();
       const display = _escHtml(label ? label.trim() : rawTarget);
       const cleanPath = rawTarget.replace(/\.md$/i, '');
-      const href = '/co/' + _escHtml(universeSlug) + '/entries/' + encodeURIComponent(cleanPath);
+      const href = _entryHref(universeSlug, cleanPath);
       return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(rawTarget)}">${display}</a>`;
     });
-    // Rewrite raw relative .md links (e.g. from [text](refs/file.md) in source)
     return _rewriteRelativeMdLinks(result, universeSlug);
   }
 
