@@ -4503,74 +4503,57 @@ impl Storage {
     pub fn seed_admin_content_universes(&mut self) {
         let now = Utc::now().to_rfc3339();
 
-        for (key, name, desc, vis) in [
+        // (key, name, description, visibility, parent_key)
+        for (key, name, desc, vis, parent) in [
+            (
+                "co",
+                "CO",
+                "CO platform — development board, tasks CO-1…, docs",
+                "public-subscribable",
+                None,
+            ),
             (
                 "artelonga",
                 "ArteLonga",
                 "Arte Longa — conteúdo público, portfólio e presença digital",
                 "public-subscribable",
+                None,
             ),
             (
                 "rfq",
                 "RFQ Gateway",
                 "Plataforma de cotações e registro de negociações",
                 "private",
+                None,
             ),
+            // Language parent — groups mbya + topologia
             (
-                "co",
-                "Co Platform",
-                "Board público do Co — roadmap, releases e decisões",
+                "language",
+                "Language",
+                "Parent group for language universes",
                 "public-subscribable",
+                None,
             ),
-            // CO-141: meaning-topology universes. Each language plane is its
-            // own universe key; `concepts` is the language-agnostic anchor
-            // plane; `mbya` is the Arandu Mbyá Guarani lexicon (separate from
-            // the shallow `guarani-mbya` cross-language plane).
             (
                 "mbya",
-                "Arandu — Mbyá Guarani",
-                "Lexicon and learning content for Mbyá Guarani (Arandu project)",
+                "Mbya Guarani",
+                "Arandu — Mbyá Guarani lexicon and learning content",
                 "public-subscribable",
-            ),
-            // Topologia universes are private for now — they're under
-            // active authoring with non-native draft entries that need
-            // review before being open to anonymous readers. Flip to
-            // public-subscribable when seed_status passes review.
-            (
-                "concepts",
-                "Concepts (topologia)",
-                "Language-agnostic meaning anchors — the meta plane onto which language-specific terms project",
-                "private",
+                Some("language"),
             ),
             (
-                "guarani-mbya",
-                "Guarani Mbyá (topologia)",
-                "Mbyá Guarani term plane — shallow cross-language anchor layer above the Arandu lexicon",
-                "private",
-            ),
-            (
-                "portuguese",
-                "Portuguese (topologia)",
-                "Portuguese term plane in the meaning-topology",
-                "private",
-            ),
-            (
-                "yoruba",
-                "Yoruba (topologia)",
-                "Yoruba term plane in the meaning-topology",
-                "private",
-            ),
-            (
-                "languages",
-                "Languages catalog (topologia)",
-                "Centralized queryable index of every language plane — code, family, Glottolog/SAPhon authority links, geographic centroid, speaker estimate, and cross-ref to the term plane",
-                "private",
+                "topologia",
+                "Topologia da Linguagem",
+                "Cross-language meaning topology — concepts, terms, relations",
+                "public-subscribable",
+                Some("language"),
             ),
             (
                 "time",
-                "Time — earth, sky, and system events",
-                "Time-stamped events: astronomical phenomena (moon phases, eclipses, equinoxes), earth-time milestones, AND internal CRUD/telemetry events from the universal envelope (CO-156). One queryable timeline.",
+                "Time",
+                "Time-stamped events: astronomical, earth-time milestones, system events",
                 "private",
+                None,
             ),
         ] {
             let _ = self.conn.execute(
@@ -4580,24 +4563,15 @@ impl Storage {
                  VALUES (?1, ?2, ?3, 'system', ?4, 0, 0, ?5, 'scholarly-light', 'board', 0)",
                 rusqlite::params![key, name, desc, now, vis],
             );
-            // CO-143 follow-up (2026-05-02): reconcile visibility to declared
-            // intent on every boot. INSERT OR IGNORE above doesn't update
-            // existing rows, so a row created with an old default (e.g.
-            // 'private' before the public-subscribable convention) would
-            // silently stay wrong forever. Surfaced as: artelonga returning
-            // 404 to anonymous despite the seed declaring public-subscribable.
-            //
-            // Only updates when the stored visibility doesn't match.
-            // is_public bit kept in sync (0 for private, 1 otherwise) so
-            // legacy callers checking that flag also see the intended state.
+            // Reconcile name, description, visibility, and parent_key on every boot.
+            // INSERT OR IGNORE doesn't update existing rows, so corrections here
+            // ensure the live DB matches the declared intent.
             let is_public_bit: i64 = if vis == "private" { 0 } else { 1 };
             let _ = self.conn.execute(
-                "UPDATE universes SET visibility = ?2, is_public = ?3 \
-                 WHERE key = ?1 AND (visibility != ?2 OR is_public != ?3)",
-                rusqlite::params![key, vis, is_public_bit],
+                "UPDATE universes SET name = ?2, description = ?3, visibility = ?4, \
+                 is_public = ?5, parent_key = ?6 WHERE key = ?1",
+                rusqlite::params![key, name, desc, vis, is_public_bit, parent],
             );
-            // Assign every admin user as owner of these universes.
-            // membership is wired by ensure_admin_universe_memberships at startup.
         }
     }
 

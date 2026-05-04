@@ -3245,8 +3245,21 @@
             if (shouldRenderInlinePdf(fullEntry)) {
                 const pdfUrl = pdfUrlFromCard(fetchUniverse, fullEntry);
                 const fm = fullEntry.frontmatter || {};
-                zoomBody.insertAdjacentHTML('beforeend', buildPdfViewerHtml(pdfUrl, fm.file || ''));
-                initPdfViewerActions(zoomBody);
+                // Check if the file is available before rendering the iframe.
+                fetch(pdfUrl, { method: 'HEAD' }).then(r => {
+                    if (r.ok) {
+                        zoomBody.insertAdjacentHTML('beforeend', buildPdfViewerHtml(pdfUrl, fm.file || ''));
+                        initPdfViewerActions(zoomBody);
+                    } else {
+                        zoomBody.insertAdjacentHTML('beforeend',
+                            `<div style="margin-top:16px;padding:12px 16px;background:#fef9c3;border-radius:8px;font-size:.85rem;color:#713f12">
+                              <strong>PDF não sincronizado</strong> — execute <code>co-sync &lt;token&gt;</code>
+                              para enviar os arquivos locais ao servidor.
+                              ${fm.file ? `<br><span style="color:#92400e">Arquivo: ${esc(fm.file)}</span>` : ''}
+                            </div>`
+                        );
+                    }
+                }).catch(() => {});
             }
 
             zoomBody.addEventListener('dblclick', enterEditMode, { once: true });
