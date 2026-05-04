@@ -31,6 +31,9 @@ notify-debouncer-mini = "0.4"
 # CO-151: WebSocket client for sync channel
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
+toml = "0.8"
+rpassword = "7"
+dirs-next = "2"
 
 [[bin]]
 name = "co-agent"
@@ -39,6 +42,10 @@ path = "src/main.rs"
 [[bin]]
 name = "co-agent-watch"
 path = "src/bin/watch.rs"
+
+[[bin]]
+name = "co-sync"
+path = "src/bin/co-sync.rs"
 
 [dev-dependencies]
 axum = { version = "0.8" }

@@ -160,9 +160,10 @@ fn extract_resume_token(headers: &HeaderMap) -> Option<u64> {
 // HTTP handler
 // ---------------------------------------------------------------------------
 
-/// `GET /api/v1/sync/ws?universe=<key>[&token=<jwt>]`
+/// `GET /api/v1/sync/ws?universe=<key>[&token=<jwt-or-api-token>]`
 ///
-/// Auth: JWT bearer (`?token=`) or session cookie.
+/// Auth: JWT or long-lived API token in `?token=` or session cookie.
+/// API tokens are accepted so the sync daemon can run without JWT renewal.
 /// Returns 400 if `?universe=` is missing; 401 for unauthenticated requests.
 pub async fn sync_ws_handler(
     ws: WebSocketUpgrade,
@@ -170,10 +171,25 @@ pub async fn sync_ws_handler(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
-    let token = params.token.or_else(|| extract_session_cookie(&headers));
-    let user_id = match token.and_then(|t| decode_user_id(&t, &jwt_secret()).ok()) {
-        Some(id) => id,
+    let token_str = params.token.or_else(|| extract_session_cookie(&headers));
+    let user_id = match token_str {
         None => return StatusCode::UNAUTHORIZED.into_response(),
+        Some(ref t) => {
+            // Try JWT first (fast, no DB).
+            if let Ok(uid) = decode_user_id(t, &jwt_secret()) {
+                uid
+            } else {
+                // Fall back to long-lived API token (CO-35).
+                let storage = match state.storage.lock() {
+                    Ok(s) => s,
+                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+                };
+                match storage.get_api_token_by_value(t) {
+                    Ok(Some(tok)) => tok.user_id,
+                    _ => return StatusCode::UNAUTHORIZED.into_response(),
+                }
+            }
+        }
     };
 
     let universe_key = match params.universe {

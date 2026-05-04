@@ -1,3 +1,5 @@
+/// co-sync config file format.
+pub mod sync_config;
 /// CO-151: filesystem watcher + sync WebSocket client.
 pub mod watcher;
 
