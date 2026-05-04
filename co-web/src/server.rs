@@ -384,6 +384,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/co/{slug}", get(serve_co_index))
         // CO-150: asset browser page for universe owners
         .route("/co/{slug}/assets", get(serve_assets_page))
+        // Sync settings page — creates/shows API token for co-sync
+        .route("/co/settings/sync", get(serve_sync_settings))
         // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
         .route("/co/yggdrasil/{game}", get(serve_co_index))
         // CO-144 fix: any deeper SPA path under a universe (e.g.
@@ -1205,6 +1207,102 @@ async fn serve_assets_page(State(state): State<AppState>) -> Response {
             .into_response();
     }
     (StatusCode::NOT_FOUND, "Asset browser page not found").into_response()
+}
+
+/// GET /co/settings/sync — server-rendered page that creates an API token
+/// and shows the ready-to-run `co-sync` command. Requires auth (session cookie).
+async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) -> Response {
+    // Must be authenticated.
+    let user_id = match crate::auth::resolve_user_id(&state, &headers) {
+        Some(id) => id,
+        None => {
+            return (
+                StatusCode::FOUND,
+                [(header::LOCATION, HeaderValue::from_static("/co"))],
+                (),
+            )
+                .into_response();
+        }
+    };
+
+    // Create (or reuse) a long-lived API token named "co-sync".
+    let token = {
+        let storage = match state.storage.lock() {
+            Ok(s) => s,
+            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Storage error").into_response(),
+        };
+        match storage.create_api_token(&user_id, "co-sync") {
+            Ok(t) => t.token,
+            Err(e) => {
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Token error: {e}"),
+                )
+                    .into_response();
+            }
+        }
+    };
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>CO — Sync</title>
+<style>
+  body {{ font-family: system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 24px; color: #1a1a1a; }}
+  h1 {{ font-size: 1.5rem; margin-bottom: 8px; }}
+  p {{ color: #555; line-height: 1.6; }}
+  pre {{ background: #f4f4f5; border-radius: 8px; padding: 16px; font-size: .9rem; overflow-x: auto; position: relative; }}
+  code {{ font-family: 'SF Mono', Menlo, monospace; }}
+  .copy-btn {{ position: absolute; top: 8px; right: 8px; background: #fff; border: 1px solid #ddd;
+               border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: .8rem; }}
+  .copy-btn:active {{ background: #e5e7eb; }}
+  .note {{ font-size: .85rem; color: #888; margin-top: 32px; border-top: 1px solid #eee; padding-top: 16px; }}
+  a {{ color: #2563eb; }}
+</style>
+</head>
+<body>
+<h1>Sync local folder with CO</h1>
+<p>Run this command in any folder that has a <code>_universe.yaml</code>.
+   It syncs automatically whenever you save a file. No other setup needed.</p>
+
+<pre><code id="cmd">co-sync {token} $(pwd)</code><button class="copy-btn" onclick="copy()">Copy</button></pre>
+
+<p>Or for multiple folders at once:</p>
+<pre><code>co-sync {token} ~/projects/mbya ~/projects/artelonga ~/projects/topologia</code></pre>
+
+<p class="note">
+  The token is saved locally and never asked for again.<br>
+  To install: <a href="https://github.com/artelonga/co#sync" target="_blank">github.com/artelonga/co</a>
+  &rarr; <code>cargo install --git https://github.com/artelonga/co co-sync</code>
+</p>
+
+<script>
+function copy() {{
+  const t = document.getElementById('cmd').textContent;
+  navigator.clipboard.writeText(t).then(() => {{
+    document.querySelector('.copy-btn').textContent = 'Copied!';
+    setTimeout(() => document.querySelector('.copy-btn').textContent = 'Copy', 2000);
+  }});
+}}
+</script>
+</body>
+</html>"#,
+        token = token,
+    );
+    (
+        StatusCode::OK,
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            ),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        html,
+    )
+        .into_response()
 }
 
 async fn serve_variant_file(
