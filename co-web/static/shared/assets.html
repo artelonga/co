@@ -8,192 +8,88 @@
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body {
-            font-family: var(--font, system-ui, sans-serif);
-            background: var(--bg, #f5f5f5);
-            color: var(--text, #111);
-            min-height: 100vh;
-        }
-        .page-header {
-            background: var(--card-bg, #fff);
-            border-bottom: 1px solid var(--border, #e5e7eb);
-            padding: 12px 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .page-header a {
-            color: var(--accent, #6366f1);
-            text-decoration: none;
-            font-size: 14px;
-        }
+        body { font-family: var(--font, system-ui, sans-serif); background: var(--bg, #f5f5f5); color: var(--text, #111); min-height: 100vh; }
+        .page-header { background: var(--card-bg, #fff); border-bottom: 1px solid var(--border, #e5e7eb); padding: 12px 24px; display: flex; align-items: center; gap: 12px; }
+        .page-header a { color: var(--accent, #6366f1); text-decoration: none; font-size: 14px; }
         .page-header h1 { font-size: 18px; font-weight: 600; }
-        .toolbar {
-            background: var(--card-bg, #fff);
-            border-bottom: 1px solid var(--border, #e5e7eb);
-            padding: 10px 24px;
-            display: flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
-        }
-        .toolbar input, .toolbar select {
-            border: 1px solid var(--border, #e5e7eb);
-            border-radius: 6px;
-            padding: 6px 10px;
-            font-size: 13px;
-            background: var(--bg, #fff);
-            color: var(--text, #111);
-            outline: none;
-        }
-        .toolbar input:focus, .toolbar select:focus {
-            border-color: var(--accent, #6366f1);
-        }
-        .asset-count { font-size: 13px; color: var(--text-muted, #6b7280); margin-left: auto; }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-            gap: 16px;
-            padding: 24px;
-        }
-        .asset-card {
-            background: var(--card-bg, #fff);
-            border: 1px solid var(--border, #e5e7eb);
-            border-radius: 8px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: box-shadow 0.15s, border-color 0.15s;
-        }
-        .asset-card:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-            border-color: var(--accent, #6366f1);
-        }
-        .asset-thumb {
-            width: 100%;
-            aspect-ratio: 1;
-            object-fit: cover;
-            display: block;
-            background: var(--bg, #f5f5f5);
-        }
-        .asset-icon {
-            width: 100%;
-            aspect-ratio: 1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: var(--bg, #f0f2f5);
-            font-size: 36px;
-            color: var(--text-muted, #9ca3af);
-        }
-        .asset-info {
-            padding: 8px 10px;
-            font-size: 12px;
-            color: var(--text-muted, #6b7280);
-            border-top: 1px solid var(--border, #e5e7eb);
-        }
-        .asset-info .filename {
-            font-weight: 500;
-            color: var(--text, #111);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-        .empty-state {
-            text-align: center;
-            padding: 60px 24px;
-            color: var(--text-muted, #9ca3af);
-        }
-        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-        /* Detail modal */
-        .modal-overlay {
-            display: none;
-            position: fixed;
-            inset: 0;
-            background: rgba(0,0,0,0.5);
-            z-index: 100;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-overlay.visible { display: flex; }
-        .modal {
-            background: var(--card-bg, #fff);
+
+        /* Upload zone */
+        .upload-zone {
+            margin: 20px 24px 0;
+            border: 2px dashed var(--border, #d1d5db);
             border-radius: 12px;
-            padding: 24px;
-            max-width: 540px;
-            width: 90%;
-            max-height: 80vh;
-            overflow-y: auto;
-            position: relative;
-        }
-        .modal-close {
-            position: absolute;
-            top: 12px;
-            right: 12px;
-            background: none;
-            border: none;
-            font-size: 20px;
+            padding: 28px 20px;
+            text-align: center;
             cursor: pointer;
-            color: var(--text-muted, #9ca3af);
+            transition: border-color 0.2s, background 0.2s;
+            background: var(--card-bg, #fff);
         }
+        .upload-zone.drag-over { border-color: var(--accent, #6366f1); background: color-mix(in srgb, var(--accent, #6366f1) 5%, transparent); }
+        .upload-zone .upload-icon { font-size: 36px; margin-bottom: 8px; }
+        .upload-zone p { font-size: 14px; color: var(--text-muted, #6b7280); margin-bottom: 10px; }
+        .upload-zone .types { font-size: 12px; color: var(--text-muted, #9ca3af); }
+        .btn-upload { display: inline-block; padding: 8px 18px; background: var(--accent, #6366f1); color: #fff; border: none; border-radius: 6px; font-size: 13px; cursor: pointer; margin-top: 8px; }
+        .btn-upload:hover { opacity: .9; }
+
+        /* Upload progress list */
+        .upload-list { margin: 12px 24px 0; display: flex; flex-direction: column; gap: 8px; }
+        .upload-item { background: var(--card-bg, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 8px; padding: 10px 14px; display: flex; align-items: center; gap: 12px; }
+        .upload-item .upload-name { flex: 1; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .upload-item .upload-status { font-size: 12px; color: var(--text-muted, #6b7280); white-space: nowrap; }
+        .upload-item .upload-status.done { color: #16a34a; }
+        .upload-item .upload-status.error { color: #dc2626; }
+        .progress-bar { height: 3px; background: var(--border, #e5e7eb); border-radius: 2px; margin-top: 6px; }
+        .progress-fill { height: 100%; background: var(--accent, #6366f1); border-radius: 2px; transition: width 0.2s; }
+
+        /* Ref card button */
+        .btn-ref { font-size: 11px; padding: 3px 8px; border: 1px solid var(--accent, #6366f1); border-radius: 4px; background: transparent; color: var(--accent, #6366f1); cursor: pointer; white-space: nowrap; }
+        .btn-ref:hover { background: color-mix(in srgb, var(--accent, #6366f1) 10%, transparent); }
+
+        /* Toolbar */
+        .toolbar { background: var(--card-bg, #fff); border-bottom: 1px solid var(--border, #e5e7eb); padding: 10px 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+        .toolbar input, .toolbar select { border: 1px solid var(--border, #e5e7eb); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: var(--bg, #fff); color: var(--text, #111); outline: none; }
+        .toolbar input:focus, .toolbar select:focus { border-color: var(--accent, #6366f1); }
+        .asset-count { font-size: 13px; color: var(--text-muted, #6b7280); margin-left: auto; }
+
+        /* Grid */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; padding: 24px; }
+        .asset-card { background: var(--card-bg, #fff); border: 1px solid var(--border, #e5e7eb); border-radius: 8px; overflow: hidden; cursor: pointer; transition: box-shadow 0.15s, border-color 0.15s; }
+        .asset-card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.1); border-color: var(--accent, #6366f1); }
+        .asset-thumb { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--bg, #f5f5f5); }
+        .asset-icon { width: 100%; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; background: var(--bg, #f0f2f5); font-size: 36px; color: var(--text-muted, #9ca3af); }
+        .asset-info { padding: 8px 10px; font-size: 12px; color: var(--text-muted, #6b7280); border-top: 1px solid var(--border, #e5e7eb); }
+        .asset-info .filename { font-weight: 500; color: var(--text, #111); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .empty-state { text-align: center; padding: 60px 24px; color: var(--text-muted, #9ca3af); }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+
+        /* Detail modal */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 100; align-items: center; justify-content: center; }
+        .modal-overlay.visible { display: flex; }
+        .modal { background: var(--card-bg, #fff); border-radius: 12px; padding: 24px; max-width: 540px; width: 90%; max-height: 80vh; overflow-y: auto; position: relative; }
+        .modal-close { position: absolute; top: 12px; right: 12px; background: none; border: none; font-size: 20px; cursor: pointer; color: var(--text-muted, #9ca3af); }
         .modal h2 { font-size: 16px; font-weight: 600; margin-bottom: 16px; }
         .detail-preview { text-align: center; margin-bottom: 16px; }
-        .detail-preview img {
-            max-width: 100%;
-            max-height: 240px;
-            border-radius: 6px;
-            object-fit: contain;
-        }
-        .detail-preview video {
-            max-width: 100%;
-            max-height: 240px;
-            border-radius: 6px;
-        }
-        .detail-row {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 8px;
-            font-size: 13px;
-        }
-        .detail-row .label {
-            color: var(--text-muted, #9ca3af);
-            min-width: 80px;
-            flex-shrink: 0;
-        }
-        .detail-row .value {
-            color: var(--text, #111);
-            word-break: break-all;
-            font-family: var(--font-mono, monospace);
-            font-size: 12px;
-        }
-        .copy-btn {
-            font-size: 11px;
-            padding: 3px 8px;
-            border: 1px solid var(--border, #e5e7eb);
-            border-radius: 4px;
-            background: var(--bg, #f5f5f5);
-            cursor: pointer;
-            color: var(--text-muted, #6b7280);
-            margin-left: 6px;
-        }
+        .detail-preview img { max-width: 100%; max-height: 240px; border-radius: 6px; object-fit: contain; }
+        .detail-preview video { max-width: 100%; max-height: 240px; border-radius: 6px; }
+        .detail-row { display: flex; gap: 8px; margin-bottom: 8px; font-size: 13px; align-items: flex-start; }
+        .detail-row .label { color: var(--text-muted, #9ca3af); min-width: 80px; flex-shrink: 0; }
+        .detail-row .value { color: var(--text, #111); word-break: break-all; font-family: var(--font-mono, monospace); font-size: 12px; }
+        .copy-btn { font-size: 11px; padding: 3px 8px; border: 1px solid var(--border, #e5e7eb); border-radius: 4px; background: var(--bg, #f5f5f5); cursor: pointer; color: var(--text-muted, #6b7280); margin-left: 6px; flex-shrink: 0; }
         .copy-btn:hover { background: var(--bg-hover, #e8eaed); }
-        .btn-danger {
-            background: #fee2e2;
-            color: #991b1b;
-            border: 1px solid #fca5a5;
-            border-radius: 6px;
-            padding: 7px 14px;
-            font-size: 13px;
-            cursor: pointer;
-            margin-top: 16px;
-        }
+        .btn-danger { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; margin-top: 16px; }
         .btn-danger:hover { background: #fecaca; }
         .loading { text-align: center; padding: 60px; color: var(--text-muted, #9ca3af); }
-        .error-banner {
-            background: #fee2e2;
-            color: #991b1b;
-            padding: 12px 24px;
-            font-size: 13px;
-        }
+        .error-banner { background: #fee2e2; color: #991b1b; padding: 12px 24px; font-size: 13px; }
+
+        /* Ref card creation form */
+        .ref-form { margin-top: 16px; padding: 12px; background: var(--bg, #f9fafb); border-radius: 8px; border: 1px solid var(--border, #e5e7eb); }
+        .ref-form h3 { font-size: 13px; font-weight: 600; margin-bottom: 10px; }
+        .ref-form label { display: block; font-size: 12px; color: var(--text-muted, #6b7280); margin-bottom: 3px; }
+        .ref-form input, .ref-form select, .ref-form textarea { width: 100%; border: 1px solid var(--border, #e5e7eb); border-radius: 5px; padding: 5px 8px; font-size: 12px; background: var(--card-bg, #fff); color: var(--text, #111); margin-bottom: 8px; font-family: inherit; }
+        .ref-form textarea { resize: vertical; min-height: 60px; }
+        .btn-create-ref { padding: 7px 14px; background: var(--accent, #6366f1); color: #fff; border: none; border-radius: 6px; font-size: 12px; cursor: pointer; }
+        .btn-create-ref:hover { opacity: .9; }
+        .ref-success { color: #16a34a; font-size: 12px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -201,8 +97,21 @@
         <a id="back-link" href="/co/">← Universo</a>
         <h1 id="page-title">Assets</h1>
     </div>
+
+    <!-- Upload zone -->
+    <div class="upload-zone" id="upload-zone">
+        <div class="upload-icon">⬆️</div>
+        <p>Arraste PDF, imagens ou vídeos aqui</p>
+        <p class="types">PDF · PNG · JPG · GIF · WebP · MP4 · WebM · MP3 · OGG</p>
+        <button class="btn-upload" id="btn-choose">Escolher arquivos</button>
+        <input type="file" id="file-input" multiple
+               accept=".pdf,.png,.jpg,.jpeg,.gif,.webp,.mp4,.webm,.mp3,.ogg,.wav,.m4a,.epub"
+               style="display:none">
+    </div>
+    <div class="upload-list" id="upload-list"></div>
+
     <div class="toolbar">
-        <input type="search" id="search-input" placeholder="Buscar por nome..." style="min-width:180px">
+        <input type="search" id="search-input" placeholder="Buscar por nome...">
         <select id="mime-filter">
             <option value="">Todos os tipos</option>
             <option value="image/">Imagens</option>
@@ -217,7 +126,7 @@
     <div id="grid" class="grid" style="display:none"></div>
     <div id="empty" class="empty-state" style="display:none">
         <div class="icon">📁</div>
-        <div>Nenhum asset encontrado</div>
+        <div>Nenhum asset. Arraste arquivos acima para fazer upload.</div>
     </div>
 
     <!-- Detail modal -->
@@ -227,6 +136,7 @@
             <h2 id="modal-filename">Asset</h2>
             <div class="detail-preview" id="modal-preview"></div>
             <div id="modal-details"></div>
+            <div id="ref-card-section"></div>
             <button class="btn-danger" id="btn-delete" style="display:none">Excluir asset</button>
         </div>
     </div>
@@ -237,10 +147,7 @@
 
         const m = window.location.pathname.match(/^\/co\/([^\/]+)/);
         const universeKey = m ? m[1] : '';
-        if (!universeKey) {
-            document.getElementById('loading').textContent = 'Universo não encontrado.';
-            return;
-        }
+        if (!universeKey) { document.getElementById('loading').textContent = 'Universo não encontrado.'; return; }
 
         document.getElementById('back-link').href = '/co/' + universeKey;
         document.getElementById('page-title').textContent = 'Assets — ' + universeKey;
@@ -248,6 +155,8 @@
 
         let allAssets = [];
         let currentAsset = null;
+
+        // ── Helpers ──────────────────────────────────────────────────────────
 
         function mimeIcon(mime) {
             if (mime.startsWith('image/')) return '🖼️';
@@ -264,6 +173,142 @@
             return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
         }
 
+        function mediumFromMime(mime) {
+            if (mime === 'application/pdf') return 'pdf';
+            if (mime.startsWith('image/')) return 'image';
+            if (mime.startsWith('video/')) return 'video';
+            if (mime.startsWith('audio/')) return 'audio';
+            return 'web';
+        }
+
+        function mdSyntax(asset) {
+            if (asset.mime.startsWith('video/'))
+                return '```video\nsha256:' + asset.sha256 + '\n```';
+            if (asset.mime.startsWith('audio/'))
+                return '```audio\nsha256:' + asset.sha256 + '\n```';
+            if (asset.mime === 'application/pdf')
+                return '[[refs/' + (asset.filename || asset.sha256.slice(0,12)) + '.md]]';
+            return '![' + (asset.filename || 'imagem') + '](sha256:' + asset.sha256 + ')';
+        }
+
+        function authHeaders() {
+            const cookie = document.cookie.split(';').map(c => c.trim())
+                .find(c => c.startsWith('session='));
+            if (cookie) return { 'Authorization': 'Bearer ' + cookie.split('=')[1] };
+            return {};
+        }
+
+        // ── Upload ───────────────────────────────────────────────────────────
+
+        const uploadZone = document.getElementById('upload-zone');
+        const fileInput  = document.getElementById('file-input');
+        const uploadList = document.getElementById('upload-list');
+
+        document.getElementById('btn-choose').addEventListener('click', e => {
+            e.stopPropagation();
+            fileInput.click();
+        });
+        uploadZone.addEventListener('click', () => fileInput.click());
+
+        uploadZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            uploadZone.classList.add('drag-over');
+        });
+        uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+        uploadZone.addEventListener('drop', e => {
+            e.preventDefault();
+            uploadZone.classList.remove('drag-over');
+            uploadFiles(Array.from(e.dataTransfer.files));
+        });
+        fileInput.addEventListener('change', () => {
+            uploadFiles(Array.from(fileInput.files));
+            fileInput.value = '';
+        });
+
+        async function uploadFiles(files) {
+            for (const file of files) {
+                await uploadOne(file);
+            }
+        }
+
+        async function uploadOne(file) {
+            const item = document.createElement('div');
+            item.className = 'upload-item';
+            item.innerHTML = `
+                <span class="upload-name">${file.name}</span>
+                <span class="upload-status" id="us-${file.name.replace(/\W/g,'_')}">Enviando…</span>
+                <div class="progress-bar" style="position:absolute;bottom:0;left:0;right:0">
+                  <div class="progress-fill" style="width:0%"></div>
+                </div>`;
+            item.style.position = 'relative';
+            uploadList.prepend(item);
+
+            const statusEl = item.querySelector('.upload-status');
+            const progressEl = item.querySelector('.progress-fill');
+
+            try {
+                const url = `/api/v1/universes/${universeKey}/assets?filename=${encodeURIComponent(file.name)}`;
+
+                // Use XHR for progress
+                const result = await new Promise((resolve, reject) => {
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', url);
+                    Object.entries(authHeaders()).forEach(([k,v]) => xhr.setRequestHeader(k, v));
+                    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+                    xhr.upload.onprogress = e => {
+                        if (e.lengthComputable)
+                            progressEl.style.width = Math.round(e.loaded / e.total * 100) + '%';
+                    };
+                    xhr.onload = () => {
+                        if (xhr.status >= 200 && xhr.status < 300) {
+                            resolve(JSON.parse(xhr.responseText));
+                        } else {
+                            reject(new Error('HTTP ' + xhr.status));
+                        }
+                    };
+                    xhr.onerror = () => reject(new Error('Erro de rede'));
+                    xhr.send(file);
+                });
+
+                progressEl.style.width = '100%';
+                statusEl.textContent = '✓ ' + fmtSize(result.size);
+                statusEl.className = 'upload-status done';
+
+                // Add to grid
+                const asset = {
+                    sha256: result.sha256,
+                    mime: result.mime,
+                    size: result.size,
+                    filename: file.name,
+                    created_at_ns: Date.now() * 1_000_000,
+                    refcount: 0,
+                };
+                allAssets.unshift(asset);
+                applyFilters();
+
+                // Auto-open detail for PDF to offer reference card creation
+                if (file.type === 'application/pdf') {
+                    setTimeout(() => openDetail(asset), 400);
+                }
+
+                // Add copy md button
+                const copyBtn = document.createElement('button');
+                copyBtn.className = 'copy-btn';
+                copyBtn.textContent = 'Copiar MD';
+                copyBtn.style.marginLeft = '8px';
+                copyBtn.addEventListener('click', () => navigator.clipboard.writeText(mdSyntax(asset)));
+                item.appendChild(copyBtn);
+
+            } catch (err) {
+                progressEl.style.width = '100%';
+                progressEl.style.background = '#dc2626';
+                statusEl.textContent = '✗ ' + err.message;
+                statusEl.className = 'upload-status error';
+            }
+        }
+
+        // ── Grid ─────────────────────────────────────────────────────────────
+
         function renderGrid(assets) {
             const grid = document.getElementById('grid');
             const empty = document.getElementById('empty');
@@ -278,8 +323,6 @@
             assets.forEach(a => {
                 const card = document.createElement('div');
                 card.className = 'asset-card';
-                card.dataset.sha = a.sha256;
-
                 const assetUrl = `/api/v1/universes/${universeKey}/assets/${a.sha256}`;
                 if (a.mime.startsWith('image/')) {
                     const img = document.createElement('img');
@@ -295,13 +338,10 @@
                     icon.textContent = mimeIcon(a.mime);
                     card.appendChild(icon);
                 }
-
                 const info = document.createElement('div');
                 info.className = 'asset-info';
-                info.innerHTML = `<div class="filename">${a.filename || a.sha256.slice(0, 12) + '…'}</div>
-                    <div>${a.mime} · ${fmtSize(a.size)}</div>`;
+                info.innerHTML = `<div class="filename">${a.filename || a.sha256.slice(0,12) + '…'}</div><div>${a.mime} · ${fmtSize(a.size)}</div>`;
                 card.appendChild(info);
-
                 card.addEventListener('click', () => openDetail(a));
                 grid.appendChild(card);
             });
@@ -311,21 +351,22 @@
         function applyFilters() {
             const search = document.getElementById('search-input').value.toLowerCase();
             const mime = document.getElementById('mime-filter').value;
-            const filtered = allAssets.filter(a => {
+            renderGrid(allAssets.filter(a => {
                 const nameMatch = !search || (a.filename || '').toLowerCase().includes(search) || a.sha256.includes(search);
                 const mimeMatch = !mime || a.mime.startsWith(mime);
                 return nameMatch && mimeMatch;
-            });
-            renderGrid(filtered);
+            }));
         }
 
         document.getElementById('search-input').addEventListener('input', applyFilters);
         document.getElementById('mime-filter').addEventListener('change', applyFilters);
 
+        // ── Detail modal ──────────────────────────────────────────────────────
+
         function openDetail(asset) {
             currentAsset = asset;
             const assetUrl = `/api/v1/universes/${universeKey}/assets/${asset.sha256}`;
-            document.getElementById('modal-filename').textContent = asset.filename || asset.sha256.slice(0, 16) + '…';
+            document.getElementById('modal-filename').textContent = asset.filename || asset.sha256.slice(0,16) + '…';
 
             const preview = document.getElementById('modal-preview');
             preview.innerHTML = '';
@@ -338,7 +379,7 @@
             } else if (asset.mime.startsWith('video/')) {
                 const vid = document.createElement('video');
                 vid.src = assetUrl;
-                vid.preload = 'none';
+                vid.preload = 'metadata';
                 vid.controls = true;
                 preview.appendChild(vid);
             } else {
@@ -348,19 +389,15 @@
                 preview.appendChild(icon);
             }
 
-            const mdSyntax = asset.mime.startsWith('video/')
-                ? `\`\`\`video\nsha256:${asset.sha256}\n\`\`\``
-                : `![${asset.filename || 'imagem'}](sha256:${asset.sha256})`;
-
+            const md = mdSyntax(asset);
             const createdDate = asset.created_at_ns
                 ? new Date(Math.floor(asset.created_at_ns / 1_000_000)).toLocaleString('pt-BR')
                 : '—';
 
             document.getElementById('modal-details').innerHTML = `
                 <div class="detail-row">
-                    <span class="label">SHA256</span>
-                    <span class="value">${asset.sha256}</span>
-                    <button class="copy-btn" onclick="navigator.clipboard.writeText('${asset.sha256}')">Copiar</button>
+                    <span class="label">Arquivo</span>
+                    <span class="value">${asset.filename || '—'}</span>
                 </div>
                 <div class="detail-row">
                     <span class="label">Tipo</span>
@@ -375,20 +412,97 @@
                     <span class="value">${createdDate}</span>
                 </div>
                 <div class="detail-row">
-                    <span class="label">Referências</span>
-                    <span class="value">${asset.refcount}</span>
+                    <span class="label">SHA256</span>
+                    <span class="value">${asset.sha256.slice(0,24)}…</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('${asset.sha256}')">Copiar</button>
                 </div>
                 <div class="detail-row">
                     <span class="label">Markdown</span>
-                    <span class="value">${mdSyntax}</span>
-                    <button class="copy-btn" onclick="navigator.clipboard.writeText(${JSON.stringify(mdSyntax)})">Copiar</button>
-                </div>
-            `;
+                    <span class="value">${md.replace(/</g,'&lt;')}</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText(${JSON.stringify(md)})">Copiar</button>
+                </div>`;
+
+            // Reference card creation for PDFs and media
+            const refSection = document.getElementById('ref-card-section');
+            if (asset.mime === 'application/pdf' || asset.mime.startsWith('image/') || asset.mime.startsWith('video/') || asset.mime.startsWith('audio/')) {
+                const stem = (asset.filename || asset.sha256.slice(0,12)).replace(/\.[^.]+$/, '');
+                const medium = mediumFromMime(asset.mime);
+                refSection.innerHTML = `
+                    <div class="ref-form">
+                      <h3>📎 Criar cartão de referência</h3>
+                      <label>Título</label>
+                      <input id="ref-title" type="text" placeholder="Título do documento" value="${stem}">
+                      <label>Pasta (path sem .md)</label>
+                      <input id="ref-path" type="text" placeholder="refs/${stem}" value="refs/${stem}">
+                      <label>Idioma</label>
+                      <input id="ref-lang" type="text" placeholder="pt-BR" value="pt-BR">
+                      <label>Autores (separados por vírgula)</label>
+                      <input id="ref-authors" type="text" placeholder="Autor 1, Autor 2">
+                      <label>Descrição</label>
+                      <textarea id="ref-desc" placeholder="Descrição breve do conteúdo…"></textarea>
+                      <button class="btn-create-ref" id="btn-create-ref">Criar cartão</button>
+                      <div id="ref-success" class="ref-success"></div>
+                    </div>`;
+                document.getElementById('btn-create-ref').addEventListener('click', () => createRefCard(asset, medium));
+            } else {
+                refSection.innerHTML = '';
+            }
 
             const delBtn = document.getElementById('btn-delete');
             delBtn.style.display = asset.refcount === 0 ? '' : 'none';
-
             document.getElementById('modal-overlay').classList.add('visible');
+        }
+
+        async function createRefCard(asset, medium) {
+            const title   = document.getElementById('ref-title').value.trim() || asset.filename;
+            const path    = (document.getElementById('ref-path').value.trim() || 'refs/' + (asset.filename || asset.sha256.slice(0,12)).replace(/\.[^.]+$/, '')) + '.md';
+            const lang    = document.getElementById('ref-lang').value.trim() || 'pt-BR';
+            const authors = document.getElementById('ref-authors').value.split(',').map(s => s.trim()).filter(Boolean);
+            const desc    = document.getElementById('ref-desc').value.trim();
+            const btn     = document.getElementById('btn-create-ref');
+            const success = document.getElementById('ref-success');
+
+            btn.disabled = true;
+            btn.textContent = 'Criando…';
+
+            const frontmatter = {
+                type: 'reference',
+                title,
+                medium,
+                mime: asset.mime,
+                file: asset.filename || '',
+                blob_sha256: asset.sha256,
+                size_bytes: asset.size,
+                language: lang,
+                authors,
+                seed_status: 'stub',
+                tags: ['reference', medium],
+            };
+
+            const body = desc ? `# ${title}\n\n${desc}\n` : `# ${title}\n`;
+
+            try {
+                const resp = await fetch(`/api/v1/universes/${universeKey}/entries`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+                    body: JSON.stringify({ path, frontmatter, body }),
+                });
+                if (resp.ok || resp.status === 201 || resp.status === 200) {
+                    success.textContent = '✓ Cartão criado em ' + path;
+                    btn.textContent = 'Criado!';
+                } else {
+                    const err = await resp.json().catch(() => ({}));
+                    success.style.color = '#dc2626';
+                    success.textContent = '✗ ' + (err.message_en || resp.status);
+                    btn.disabled = false;
+                    btn.textContent = 'Criar cartão';
+                }
+            } catch (e) {
+                success.style.color = '#dc2626';
+                success.textContent = '✗ ' + e.message;
+                btn.disabled = false;
+                btn.textContent = 'Criar cartão';
+            }
         }
 
         document.getElementById('modal-close').addEventListener('click', () => {
@@ -403,27 +517,23 @@
         });
 
         document.getElementById('btn-delete').addEventListener('click', async () => {
-            if (!currentAsset) return;
-            if (!confirm('Excluir este asset permanentemente?')) return;
+            if (!currentAsset || !confirm('Excluir este asset permanentemente?')) return;
             try {
                 const resp = await fetch(
                     `/api/v1/universes/${universeKey}/assets/${currentAsset.sha256}`,
-                    { method: 'DELETE' }
+                    { method: 'DELETE', headers: authHeaders() }
                 );
                 if (resp.ok || resp.status === 204) {
                     allAssets = allAssets.filter(a => a.sha256 !== currentAsset.sha256);
                     document.getElementById('modal-overlay').classList.remove('visible');
                     currentAsset = null;
                     applyFilters();
-                } else {
-                    alert('Erro ao excluir: ' + resp.status);
-                }
-            } catch (err) {
-                alert('Erro de rede: ' + err.message);
-            }
+                } else { alert('Erro ao excluir: ' + resp.status); }
+            } catch (err) { alert('Erro de rede: ' + err.message); }
         });
 
-        // Load assets
+        // ── Load ──────────────────────────────────────────────────────────────
+
         fetch(`/api/v1/universes/${universeKey}/assets`)
             .then(r => r.ok ? r.json() : Promise.reject(r.status))
             .then(data => {
@@ -437,6 +547,7 @@
                 banner.textContent = 'Erro ao carregar assets: ' + err;
                 banner.style.display = '';
             });
+
     })();
     </script>
 </body>
