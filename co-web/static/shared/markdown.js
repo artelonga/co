@@ -259,24 +259,50 @@
   // ===== Wikilink resolution =====
 
   /**
-   * Replace [[wikilinks]] in rendered HTML with anchor elements pointing to
-   * entries in the current universe.
+   * Rewrite <a href="relative/path.md"> produced by the markdown renderer into
+   * CO entry viewer URLs. Only rewrites relative .md hrefs (not http/https/# or
+   * already-absolute /paths). Adds class="wikilink" for consistent styling.
    *
-   * @param {string} html       - Already-rendered HTML from renderMarkdown()
+   * @param {string} html         - Already-rendered HTML
    * @param {string} universeSlug - Current universe key/slug
-   * @returns {string} HTML with wikilinks resolved
+   * @returns {string} HTML with relative .md hrefs rewritten
+   */
+  function _rewriteRelativeMdLinks(html, universeSlug) {
+    if (!html || !universeSlug) return html;
+    // Match <a ...href="path.md"...> where href is NOT http/https/#/ (relative only)
+    return html.replace(
+      /<a\b([^>]*?)\bhref=(["'])((?!https?:\/\/|#|\/)[^"'?#]+\.md)\2([^>]*)>/gi,
+      (_, before, q, mdPath, after) => {
+        const entryPath = mdPath.replace(/\.md$/i, '');
+        const href = '/co/' + _escHtml(universeSlug) + '/entries/' + encodeURIComponent(entryPath);
+        const hasClass = /\bclass=/.test(before + after);
+        const cls = hasClass ? '' : ' class="wikilink"';
+        return `<a${before} href=${q}${href}${q}${after}${cls}>`;
+      }
+    );
+  }
+
+  /**
+   * Replace [[wikilinks]] in rendered HTML with SPA viewer anchors, and
+   * rewrite any relative .md links produced by the markdown renderer.
+   *
+   * @param {string} html         - Already-rendered HTML from renderMarkdown()
+   * @param {string} universeSlug - Current universe key/slug
+   * @returns {string} HTML with all internal links resolved
    */
   function resolveWikilinks(html, universeSlug) {
     if (!html) return html;
     // Wikilinks survive DOMPurify as plain text since [[…]] isn't HTML.
-    // After rendering, [[Title]] appears inside text nodes — we look for the
-    // literal pattern in the HTML string (safe because DOMPurify already ran).
-    return html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
-      const display = _escHtml((label || target).trim());
-      const slug = encodeURIComponent(target.trim());
-      const href = `/co/${_escHtml(universeSlug)}/entries/${slug}`;
-      return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(target.trim())}">${display}</a>`;
+    // Strip .md extension so the SPA router receives a clean path.
+    let result = html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
+      const rawTarget = target.trim();
+      const display = _escHtml(label ? label.trim() : rawTarget);
+      const cleanPath = rawTarget.replace(/\.md$/i, '');
+      const href = '/co/' + _escHtml(universeSlug) + '/entries/' + encodeURIComponent(cleanPath);
+      return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(rawTarget)}">${display}</a>`;
     });
+    // Rewrite raw relative .md links (e.g. from [text](refs/file.md) in source)
+    return _rewriteRelativeMdLinks(result, universeSlug);
   }
 
   // ===== Prism lazy loader =====

@@ -343,6 +343,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .merge(relation_api)
         .merge(asset_api)
         .merge(reference_api)
+        // CO-162: template scaffold + type audit (POST /{slug}/apply-template)
+        .merge(crate::universe_routes::universe_actions_router())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::auth::universe_writer_gate,
