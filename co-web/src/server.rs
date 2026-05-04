@@ -1209,8 +1209,8 @@ async fn serve_assets_page(State(state): State<AppState>) -> Response {
     (StatusCode::NOT_FOUND, "Asset browser page not found").into_response()
 }
 
-/// GET /co/settings/sync — server-rendered page: lists ALL owned universes,
-/// lets user map each to a local path, generates `co-sync` command. Auth required.
+/// GET /co/settings/sync — shows API token. Paths live in co-universes.yaml locally.
+/// Auth required.
 async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) -> Response {
     let user_id = match crate::auth::resolve_user_id(&state, &headers) {
         Some(id) => id,
@@ -1224,12 +1224,12 @@ async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) 
         }
     };
 
-    let (token, universes) = {
+    let token = {
         let storage = match state.storage.lock() {
             Ok(s) => s,
             Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Storage error").into_response(),
         };
-        let tok = match storage.create_api_token(&user_id, "co-sync") {
+        match storage.create_api_token(&user_id, "co-sync") {
             Ok(t) => t.token,
             Err(e) => {
                 return (
@@ -1238,125 +1238,58 @@ async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) 
                 )
                     .into_response();
             }
-        };
-        // All universes the user owns (not template, not anonymous clones).
-        let owned: Vec<String> = storage
-            .list_universes_for_user(&user_id)
-            .into_iter()
-            .filter(|u| u.owner_id == user_id && !u.is_template && !u.key.starts_with("anon-"))
-            .map(|u| u.key)
-            .collect();
-        (tok, owned)
+        }
     };
-
-    // Build one <tr> per owned universe.
-    let rows: String = universes
-        .iter()
-        .map(|slug| {
-            format!(
-                r#"<tr>
-  <td><code>{slug}</code></td>
-  <td><input class="path-input" data-slug="{slug}" type="text"
-             placeholder="~/projects/{slug}"
-             oninput="rebuild()" /></td>
-</tr>"#
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    let universe_count = universes.len();
 
     let html = format!(
         r#"<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>CO — Sync setup</title>
+<title>CO — Sync</title>
 <style>
-  *{{box-sizing:border-box;}}
-  body{{font-family:system-ui,sans-serif;max-width:680px;margin:48px auto;padding:0 20px;color:#111;}}
-  h1{{font-size:1.4rem;margin-bottom:4px;}}
-  .sub{{color:#666;margin-bottom:24px;font-size:.95rem;}}
-  table{{width:100%;border-collapse:collapse;margin-bottom:20px;}}
-  th{{text-align:left;font-size:.8rem;color:#888;padding:4px 8px;border-bottom:1px solid #eee;}}
-  td{{padding:6px 8px;vertical-align:middle;}}
-  input.path-input{{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px 10px;font-family:monospace;font-size:.85rem;}}
-  input.path-input:focus{{outline:none;border-color:#2563eb;}}
-  .cmd-box{{position:relative;background:#f4f4f5;border-radius:8px;padding:14px 16px;
-            font-family:monospace;font-size:.85rem;white-space:pre-wrap;word-break:break-all;
-            min-height:48px;color:#1a1a1a;border:1px solid #e5e7eb;}}
-  .copy-btn{{position:absolute;top:8px;right:8px;background:#fff;border:1px solid #ddd;
-             border-radius:4px;padding:4px 12px;cursor:pointer;font-size:.8rem;}}
-  .copy-btn:active{{background:#e5e7eb;}}
-  .hint{{font-size:.8rem;color:#888;margin-top:6px;}}
-  .install{{margin-top:28px;padding-top:20px;border-top:1px solid #eee;font-size:.85rem;color:#555;}}
-  .install code{{background:#f4f4f5;padding:2px 6px;border-radius:4px;}}
+  body{{font-family:system-ui,sans-serif;max-width:560px;margin:60px auto;padding:0 24px;color:#111;}}
+  h1{{font-size:1.4rem;margin-bottom:6px;}}
+  p{{color:#555;line-height:1.6;margin:0 0 16px;}}
+  .cmd{{background:#f4f4f5;border:1px solid #e5e7eb;border-radius:8px;padding:14px 16px;
+        font-family:monospace;font-size:.95rem;position:relative;user-select:all;}}
+  .copy{{position:absolute;top:8px;right:8px;background:#fff;border:1px solid #ddd;
+         border-radius:4px;padding:4px 12px;cursor:pointer;font-size:.8rem;}}
+  .copy:active{{background:#eee;}}
+  .step{{font-size:.8rem;color:#888;margin:4px 0 12px;}}
+  hr{{border:none;border-top:1px solid #eee;margin:28px 0;}}
+  code{{background:#f4f4f5;padding:2px 6px;border-radius:4px;font-size:.85rem;}}
   a{{color:#2563eb;}}
 </style>
 </head>
 <body>
-<h1>Sync your universes</h1>
-<p class="sub">Enter the local path for each universe you want to sync.
-  Then copy the command below and run it once.</p>
+<h1>Sync</h1>
+<p>Universe paths are declared in <code>co-universes.yaml</code> — no configuration needed here.
+Copy your token and run once from the CO repo directory.</p>
 
-<table>
-<thead><tr><th>Universe</th><th>Local path on this machine</th></tr></thead>
-<tbody>{rows}</tbody>
-</table>
+<div class="cmd" id="cmd">co-sync {token}<button class="copy" onclick="copy()">Copy</button></div>
+<p class="step">Reads <code>co-universes.yaml</code>, syncs all universes, watches for changes.</p>
 
-<p style="font-size:.85rem;color:#555;margin-bottom:8px;">
-  Command to run (<span id="count">0</span> of {universe_count} universes mapped):
+<hr>
+<p style="font-size:.85rem;">
+  <strong>Install</strong><br>
+  <code>cargo install --git https://github.com/artelonga/co co-sync</code>
 </p>
-<div class="cmd-box" id="cmd-output">Fill in at least one path above.</div>
-<button class="copy-btn" id="copy-btn" onclick="copyCmd()" style="position:static;margin-top:8px;display:inline-block;">Copy</button>
-<p class="hint">Runs in the background. Re-run the same command any time to add more paths.</p>
-
-<div class="install">
-  <strong>Install co-sync</strong> (Rust required):<br>
-  <code>cargo install --git https://github.com/artelonga/co co-sync</code><br><br>
-  <strong>Auto-start at login (macOS):</strong><br>
-  Add <code>co-sync</code> to System Settings → General → Login Items,
-  or run <code>nohup co-sync &amp;</code> in your terminal.
-</div>
+<p style="font-size:.85rem;">
+  <strong>Auto-start at login</strong><br>
+  Add <code>co-sync</code> to System Settings → General → Login Items.
+</p>
 
 <script>
-const TOKEN = "{token}";
-
-function rebuild() {{
-  const inputs = document.querySelectorAll('.path-input');
-  const parts = [];
-  let filled = 0;
-  inputs.forEach(inp => {{
-    const raw = inp.value.trim();
-    if (raw) {{
-      parts.push(raw);
-      filled++;
-    }}
-  }});
-  document.getElementById('count').textContent = filled;
-  const out = document.getElementById('cmd-output');
-  if (parts.length === 0) {{
-    out.textContent = 'Fill in at least one path above.';
-  }} else {{
-    out.textContent = 'co-sync ' + TOKEN + ' \\\n  ' + parts.join(' \\\n  ');
-  }}
-}}
-
-function copyCmd() {{
-  const txt = document.getElementById('cmd-output').textContent;
-  if (!txt || txt.startsWith('Fill')) return;
-  navigator.clipboard.writeText(txt).then(() => {{
-    const btn = document.getElementById('copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => btn.textContent = 'Copy', 2000);
+function copy() {{
+  navigator.clipboard.writeText(document.getElementById('cmd').textContent.replace('Copy','').trim()).then(() => {{
+    document.querySelector('.copy').textContent = 'Copied!';
+    setTimeout(() => document.querySelector('.copy').textContent = 'Copy', 2000);
   }});
 }}
 </script>
 </body>
 </html>"#,
-        rows = rows,
-        universe_count = universe_count,
         token = token,
     );
     (
