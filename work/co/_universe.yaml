@@ -1,0 +1,71 @@
+name: CO Platform
+description: >
+  CO open-source platform — board de desenvolvimento com todas as user-stories,
+  epics, tarefas, processos e eventos do projeto CO (CO-1 a CO-161+).
+schema_version: 1
+content_types:
+  - name: user-story
+    schema:
+      id:
+        type: number
+        required: true
+      title:
+        type: string
+        required: true
+      status:
+        type: enum
+        values: [todo, in_progress, done, blocked, cancelled]
+      priority:
+        type: enum
+        values: [low, medium, high, critical]
+      type:
+        type: string
+      parent:
+        type: number
+      module:
+        type: string
+  - name: epic
+    schema:
+      id:
+        type: number
+      title:
+        type: string
+        required: true
+      status:
+        type: enum
+        values: [todo, in_progress, done]
+  - name: task
+    schema:
+      title:
+        type: string
+        required: true
+      status:
+        type: enum
+        values: [todo, doing, done]
+  - name: event
+    schema:
+      title:
+        type: string
+        required: true
+      event_at:
+        type: date
+        semantic: event_at
+  - name: page
+    schema:
+      title:
+        type: string
+        required: true
+  - name: reference
+    schema:
+      title:
+        type: string
+        required: true
+      medium:
+        type: enum
+        values: [pdf, video, web, citation]
+  - name: process
+    schema:
+      title:
+        type: string
+        required: true
+  - name: doc
