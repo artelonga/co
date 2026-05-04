@@ -4637,6 +4637,17 @@ impl Storage {
         }
 
         let universe_root = self.universe_root("co");
+
+        // Wipe the existing entry index so stale entries from old deploys
+        // don't survive alongside the new content. The files on disk are
+        // overwritten by copy_dir_all already; this keeps SQLite in sync.
+        {
+            let co_uc = self.universe_pool.get_or_open("co");
+            if let Ok(guard) = co_uc.lock() {
+                let _ = guard.execute("DELETE FROM entries WHERE universe_key = 'co'", []);
+                let _ = guard.execute("DELETE FROM entries_fts WHERE universe_key = 'co'", []);
+            }
+        }
         let now_str = Utc::now().to_rfc3339();
         let mut upserted = 0usize;
         let mut skipped = 0usize;
@@ -4668,16 +4679,9 @@ impl Storage {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                // Compute entry path: depth-0 → tasks/<filename>; deeper → relative.
-                let entry_path = if rel
-                    .parent()
-                    .map(|p| p.as_os_str().is_empty())
-                    .unwrap_or(true)
-                {
-                    format!("tasks/{}", rel.display())
-                } else {
-                    rel.display().to_string()
-                };
+                // Entry path = path relative to source dir, forward slashes.
+                // No tasks/ prefix — CO-*.md live at root of the universe.
+                let entry_path = rel.display().to_string().replace('\\', "/");
                 out.push((p, entry_path));
             }
             out
@@ -4721,8 +4725,14 @@ impl Storage {
             upserted += 1;
         }
 
+        // Sync content_count to actual indexed count.
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = 'co'",
+            rusqlite::params![upserted as i64],
+        );
+
         tracing::info!(
-            "seed_co_universe_tasks: upserted {upserted} task(s) from {} (skipped {skipped})",
+            "seed_co_universe_tasks: seeded {upserted} entries from {} (skipped {skipped})",
             source_dir.display()
         );
     }
