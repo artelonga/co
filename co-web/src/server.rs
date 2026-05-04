@@ -375,6 +375,19 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     // --- /co landing + universe routes (serve index.html for SPA routing) ---
     let co_routes = Router::new()
+        // Root redirect → /co (the SPA landing)
+        .route(
+            "/",
+            get(|| async {
+                (
+                    axum::http::StatusCode::FOUND,
+                    [(
+                        axum::http::header::LOCATION,
+                        axum::http::HeaderValue::from_static("/co"),
+                    )],
+                )
+            }),
+        )
         .route("/co", get(serve_co_index))
         // CO-142: retargeted from /co/co-dev/telemetria (co-dev deprecated in Phase C)
         .route(
@@ -1272,8 +1285,8 @@ Copy your token and run once from the CO repo directory.</p>
 
 <hr>
 <p style="font-size:.85rem;">
-  <strong>Install</strong><br>
-  <code>cargo install --git https://github.com/artelonga/co co-sync</code>
+  <strong>Install</strong> (from the CO repo):<br>
+  <code>cargo install --path co-agent --bin co-sync</code>
 </p>
 <p style="font-size:.85rem;">
   <strong>Auto-start at login</strong><br>
