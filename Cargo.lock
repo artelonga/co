@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.41.0"
+version = "1.42.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "co-agent"
-version = "1.41.0"
+version = "1.42.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -536,6 +536,7 @@ dependencies = [
  "chrono",
  "clap",
  "co",
+ "dirs-next",
  "futures-util",
  "hex",
  "hmac",
@@ -545,13 +546,16 @@ dependencies = [
  "prost",
  "rand 0.8.6",
  "reqwest",
+ "rpassword",
  "serde",
  "serde_json",
+ "serde_yaml",
  "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-tungstenite 0.26.2",
+ "toml",
  "tower",
  "tracing",
  "tracing-subscriber",
@@ -574,7 +578,7 @@ dependencies = [
 
 [[package]]
 name = "co-cli"
-version = "0.37.0"
+version = "0.37.1"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -600,7 +604,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.41.0"
+version = "1.42.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -629,7 +633,7 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "1.41.0"
+version = "1.42.1"
 dependencies = [
  "anyhow",
  "argon2",
@@ -955,6 +959,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dirs-next"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b98cf8ebf19c3d1b223e151f99a4f9f0690dca41414773390fc824184ac833e1"
+dependencies = [
+ "cfg-if",
+ "dirs-sys-next",
+]
+
+[[package]]
 name = "dirs-sys"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -964,6 +978,17 @@ dependencies = [
  "option-ext",
  "redox_users",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "dirs-sys-next"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ebda144c4fe02d1f7ea1a7d9641b6fc6b580adcfa024ae48797ecdeb6825b4d"
+dependencies = [
+ "libc",
+ "redox_users",
+ "winapi",
 ]
 
 [[package]]
@@ -2655,6 +2680,27 @@ name = "roff"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "323c417e1d9665a65b263ec744ba09030cfb277e9daa0b018a4ab62e57bc8189"
+
+[[package]]
+name = "rpassword"
+version = "7.5.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ac5b223d9738ef56e0b98305410be40fa0941bf6036c56f1506751e43552d64"
+dependencies = [
+ "libc",
+ "rtoolbox",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rtoolbox"
+version = "0.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "50a0e551c1e27e1731aba276dbeaeac73f53c7cd34d1bda485d02bd1e0f36844"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
+]
 
 [[package]]
 name = "rusqlite"

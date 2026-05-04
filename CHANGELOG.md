@@ -5,6 +5,12 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.1] — 2026-05-04
+
+### Fixed — rate limiter recognizes API tokens
+
+The rate-limit middleware (`extract_auth_identity`) only decoded JWTs, so requests authenticated via long-lived API tokens (CO-35) fell through to the Anonymous-by-IP bucket — a single admin running multiple background workers got the same 20-reads/min limit as a public visitor. New `extract_auth_identity_with_token` does the JWT decode first, then on miss looks up `api_tokens` and joins to `users` for the owner's tier. Manifested as 7 watchers failing initial WS upgrade with HTTP 429 during co-sync startup.
+
 ## [1.42.0] — 2026-05-04
 
 ### Added — universe template, reindex, raw blob, link/PDF fixes

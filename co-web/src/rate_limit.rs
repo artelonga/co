@@ -203,8 +203,10 @@ impl Default for RateLimiter {
 // Identity helpers
 // ---------------------------------------------------------------------------
 
-/// Extract (user_id, tier) from request headers for authenticated users.
-/// Returns `None` if the request has no valid JWT or session cookie.
+/// Extract (user_id, tier) from request headers, JWT-only.
+/// Returns `None` for unauthenticated or API-token-only requests. Callers that
+/// also want long-lived API tokens resolved (e.g., the rate-limit middleware)
+/// should use [`extract_auth_identity_with_token`].
 pub fn extract_auth_identity(headers: &HeaderMap) -> Option<(String, Tier)> {
     let token = headers
         .get("authorization")
@@ -219,10 +221,37 @@ pub fn extract_auth_identity(headers: &HeaderMap) -> Option<(String, Tier)> {
         .map(|claims| (claims.sub, Tier::parse(&claims.tier)))
 }
 
+/// Like [`extract_auth_identity`] but also resolves long-lived API tokens
+/// (CO-35) by looking up the `api_tokens` table and reading the owner's tier
+/// from the `users` table. Without this, API tokens authenticate at the route
+/// handler but fall through to the Anonymous-by-IP bucket here, so a single
+/// admin running multiple background workers gets rate-limited as if it were
+/// public traffic.
+pub fn extract_auth_identity_with_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Option<(String, Tier)> {
+    if let Some(id) = extract_auth_identity(headers) {
+        return Some(id);
+    }
+
+    let token = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| extract_session_cookie(headers))?;
+
+    let storage = state.storage.lock().ok()?;
+    let api_token = storage.get_api_token_by_value(&token).ok().flatten()?;
+    let user = storage.get_user_by_id(&api_token.user_id)?;
+    Some((api_token.user_id, Tier::parse(&user.tier)))
+}
+
 /// Internal: get bucket key + tier for rate limiting.
 /// Authenticated → (user_id, tier). Anonymous → (anon:{ip}, Anonymous).
-fn extract_rate_limit_identity(headers: &HeaderMap) -> (String, Tier) {
-    extract_auth_identity(headers).unwrap_or_else(|| {
+fn extract_rate_limit_identity(state: &AppState, headers: &HeaderMap) -> (String, Tier) {
+    extract_auth_identity_with_token(state, headers).unwrap_or_else(|| {
         let ip = headers
             .get("x-forwarded-for")
             .and_then(|v| v.to_str().ok())
@@ -262,7 +291,7 @@ pub async fn rate_limit_middleware(
         return Ok(next.run(req).await);
     }
 
-    let (bucket_key, tier) = extract_rate_limit_identity(req.headers());
+    let (bucket_key, tier) = extract_rate_limit_identity(&state, req.headers());
 
     // Admin tier: unlimited, no bucket check.
     if tier == Tier::Admin {

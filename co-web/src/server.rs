@@ -2496,6 +2496,60 @@ mod tests {
         );
     }
 
+    /// Admin user authenticating via long-lived API token (CO-35) gets the
+    /// admin tier (unlimited), not the Anonymous-by-IP fallback. Pre-fix the
+    /// rate-limit middleware decoded only JWTs, so admin API tokens hit the
+    /// 20-reads/min anonymous bucket — breaking multi-watcher background sync.
+    #[tokio::test]
+    async fn test_rate_limit_admin_api_token_resolves_to_admin_tier() {
+        // SAFETY: single-threaded test setup, no concurrent set_var calls.
+        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        let api_token = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let user_id = format!(
+                "usr_admin_{}",
+                &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
+            );
+            let now = chrono::Utc::now().to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO users (id, email, display_name, tier, created_at) \
+                     VALUES (?1, 'admin@test.local', 'Admin Test', 'admin', ?2)",
+                    rusqlite::params![user_id, now],
+                )
+                .unwrap();
+            storage
+                .create_api_token(&user_id, "test-rate-limit")
+                .unwrap()
+                .token
+        };
+
+        // 25 reads is past the 20/min anonymous read budget — none should 429.
+        for i in 0..25 {
+            let resp = app
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method("GET")
+                        .uri("/api/v1/universes/template")
+                        .header("Authorization", format!("Bearer {}", api_token))
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_ne!(
+                resp.status(),
+                StatusCode::TOO_MANY_REQUESTS,
+                "request {i}: admin API token must not be rate-limited"
+            );
+        }
+    }
+
     /// Storage quota exhaustion returns 402 with quota details.
     #[tokio::test]
     async fn test_storage_quota_exceeded_returns_402() {
