@@ -4692,7 +4692,6 @@
         const tryPaths = [entryPath + '.md', entryPath];
         for (const p of tryPaths) {
             try {
-                // Encode each segment separately so slashes are preserved in the URL path
                 const encodedPath = p.split('/').map(encodeURIComponent).join('/');
                 const entry = await apiFetch(
                     `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${encodedPath}`
@@ -4704,6 +4703,26 @@
                 }
             } catch (_) {}
         }
+
+        // Exact path failed — try full-text search for the last path segment.
+        // Handles wikilinks like [[GNDicInt]] pointing to refs/GNDicInt.md.
+        const stem = entryPath.split('/').pop().replace(/\.md$/i, '');
+        try {
+            const res = await apiFetch(
+                `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries?q=${encodeURIComponent(stem)}&limit=5`
+            );
+            if (res && res.entries && res.entries.length > 0) {
+                // Prefer an entry whose path stem matches exactly.
+                const exact = res.entries.find(e => {
+                    const s = (e.path || '').split('/').pop().replace(/\.md$/i, '');
+                    return s.toLowerCase() === stem.toLowerCase();
+                }) || res.entries[0];
+                window.history.replaceState({}, '', `/co/${universeSlug}`);
+                openZoomModal({ ...exact, _universeSlug: universeSlug }, false);
+                return;
+            }
+        } catch (_) {}
+
         window.history.replaceState({}, '', `/co/${universeSlug}`);
         maybeOpenPageFromUrl(universeSlug);
     }
