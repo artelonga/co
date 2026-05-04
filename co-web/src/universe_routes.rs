@@ -1604,11 +1604,77 @@ fn build_hub_md(results: &[UniverseTemplateResult]) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// Reindex
+// ---------------------------------------------------------------------------
+
+/// Response for `POST /:slug/reindex`.
+#[derive(Debug, serde::Serialize)]
+pub struct ReindexResponse {
+    pub indexed: usize,
+    pub errors: Vec<String>,
+}
+
+/// POST /api/v1/universes/:slug/reindex
+///
+/// Walk every `.md` file in the universe directory, parse frontmatter + body,
+/// and upsert into the per-universe SQLite entry index. Idempotent — safe on
+/// a live server. Also syncs `content_count` and invalidates query caches.
+///
+/// Auth: protected by `universe_writer_gate` middleware (owner or member).
+pub async fn reindex(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<axum::Json<ReindexResponse>, AppError> {
+    let universe_root = {
+        let storage = lock_storage(&state)?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage.universe_root(&slug)
+    };
+
+    let disk_entries = co::scan_entries(&universe_root)
+        .map_err(|e| AppError::Internal(format!("scan_entries: {e}")))?;
+
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage.universe_conn(&slug)
+    };
+    let guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&guard);
+
+    let mut indexed = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for entry in &disk_entries {
+        match index.upsert(&slug, entry) {
+            Ok(()) => indexed += 1,
+            Err(e) => errors.push(format!("{}: {e}", entry.path)),
+        }
+    }
+
+    // Sync content_count to on-disk reality.
+    if let Ok(storage) = state.storage.lock() {
+        let _ = storage.conn().execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            rusqlite::params![disk_entries.len() as i64, &slug],
+        );
+    }
+
+    state.cache.invalidate_universe(&slug);
+
+    Ok(axum::Json(ReindexResponse { indexed, errors }))
+}
+
 /// Router for universe-level action endpoints that require the writer gate.
 /// Merged into `universe_content_api` in `server::build_router`.
 pub fn universe_actions_router() -> axum::Router<AppState> {
     use axum::routing::post;
-    axum::Router::new().route("/{slug}/apply-template", post(apply_template))
+    axum::Router::new()
+        .route("/{slug}/apply-template", post(apply_template))
+        .route("/{slug}/reindex", post(reindex))
 }
 
 // ---------------------------------------------------------------------------

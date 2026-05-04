@@ -4650,15 +4650,59 @@
 
     function readUniverseSlugFromUrl() {
         // Path-based routing: /co → template, /co/{slug} → slug
-        // Also handle /co/yggdrasil/{game} — return 'yggdrasil'
-        const gameMatch = window.location.pathname.match(/^\/co\/yggdrasil\/([a-z0-9-]+)$/);
+        // Also handle /co/yggdrasil/{game} and deep paths /co/{slug}/{*rest}
+        const gameMatch = window.location.pathname.match(/^\/co\/yggdrasil\/([a-z0-9-]+)/);
         if (gameMatch) return 'yggdrasil';
-        const pathMatch = window.location.pathname.match(/^\/co\/([a-z0-9-]+)$/);
-        if (pathMatch) return pathMatch[1];
+        // Deep path: /co/{slug}/{*rest} — capture the first segment as slug
+        const deepMatch = window.location.pathname.match(/^\/co\/([a-z0-9-]+)(\/|$)/);
+        if (deepMatch) return deepMatch[1];
         if (window.location.pathname === '/co') return 'template';
-        // Fallback: query param (legacy / root path)
         const params = new URLSearchParams(window.location.search);
         return params.get('u') || 'template';
+    }
+
+    /**
+     * Extract the entry path from a deep URL like /co/{slug}/docs/file.md
+     * Returns null when the URL has no subpath beyond the universe slug.
+     */
+    function readEntryPathFromUrl(universeSlug) {
+        const prefix = `/co/${universeSlug}/`;
+        const p = window.location.pathname;
+        if (!p.startsWith(prefix)) return null;
+        const sub = p.slice(prefix.length);
+        if (!sub) return null;
+        // Strip trailing .md so path matches the entry index key
+        return sub.replace(/\.md$/i, '');
+    }
+
+    /**
+     * If the current URL contains a deep entry path (e.g. /co/mbya/refs/foo),
+     * fetch and open that entry in the zoom modal after the universe boots.
+     */
+    async function maybeOpenEntryFromUrl(universeSlug) {
+        const entryPath = readEntryPathFromUrl(universeSlug);
+        if (!entryPath) {
+            maybeOpenPageFromUrl(universeSlug);
+            return;
+        }
+        // Try with and without .md extension so both forms resolve
+        const tryPaths = [entryPath, entryPath + '.md'];
+        for (const p of tryPaths) {
+            try {
+                const entry = await apiFetch(
+                    `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${encodeURIComponent(p)}`
+                );
+                if (entry && entry.path) {
+                    // Clean the URL to the canonical slug-only form so back-navigation works
+                    window.history.replaceState({}, '', `/co/${universeSlug}`);
+                    openZoomModal({ ...entry, _universeSlug: universeSlug }, false);
+                    return;
+                }
+            } catch (_) {}
+        }
+        // Entry not found — just stay on the universe home
+        window.history.replaceState({}, '', `/co/${universeSlug}`);
+        maybeOpenPageFromUrl(universeSlug);
     }
 
     function readGameFromUrl() {
@@ -5779,7 +5823,7 @@
             hideLoginModal();
             renderUserBadge(me);
             await bootAppForUniverse(slug);
-            maybeOpenPageFromUrl(slug);
+            await maybeOpenEntryFromUrl(slug);
             return;
         }
 
