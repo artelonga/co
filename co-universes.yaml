@@ -1,0 +1,58 @@
+# CO Universe Registry
+# Declares all content universes and their local sources.
+# Server-generated universes (user boards, anon clones) are NOT listed here.
+#
+# Run:  co-sync <token>
+# Token: co.artelonga.com.br/co/settings/sync  (one time)
+
+server: https://co.artelonga.com.br
+
+universes:
+
+  # --- CO Platform ---
+  - slug: co
+    name: CO Platform
+    local: work/co          # relative to this file
+    visibility: public-subscribable
+    description: CO open-source platform — board, tasks, docs
+
+  # --- Language group ---
+  - slug: language
+    name: Language
+    visibility: public-subscribable
+    description: Parent group for language universes
+    server_only: true       # exists only to group children — no local files
+
+  - slug: mbya
+    name: Mbya Guarani
+    local: ~/projects/mbya
+    parent: language
+    visibility: public-subscribable
+    description: Arandu — Mbyá Guarani lexicon and learning content
+
+  - slug: topologia
+    name: Topologia da Linguagem
+    local: ~/projects/topologia
+    parent: language
+    visibility: public-subscribable
+    description: Cross-language meaning topology — concepts, terms, relations
+    # github: https://github.com/artelonga/topologia  # optional git backup
+
+  # --- Content universes ---
+  - slug: artelonga
+    name: ArteLonga
+    local: ~/projects/artelonga
+    visibility: public-subscribable
+    description: Arte Longa — agência de gestão de carreira e comunicação
+
+  - slug: quilomboaraucaria
+    name: Quilombo Araucária
+    local: ~/projects/quilomboaraucaria
+    visibility: public-subscribable
+    description: Plataforma comunitária do Quilombo Araucária
+
+  - slug: rfq
+    name: RFQ Gateway
+    local: ~/projects/rfq-gateway
+    visibility: private
+    description: RFQ Gateway — trading API documentation

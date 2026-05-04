@@ -1,51 +1,104 @@
-//! `~/.co/sync.toml` — configuration for the co-sync daemon.
+//! Configuration for the co-sync daemon.
 //!
-//! ```toml
-//! server   = "https://co.artelonga.com.br"
-//! ws_url   = "wss://co.artelonga.com.br/api/v1/sync/ws"
-//! token    = "tok_xxxxxxxxxxxx"  # long-lived API token, never expires manually
-//!
-//! [[universes]]
-//! slug  = "co"
-//! local = "/Users/yuri/projects/co"
-//!
-//! [[universes]]
-//! slug  = "mbya"
-//! local = "/Users/yuri/projects/mbya"
-//!
-//! [[universes]]
-//! slug  = "topologia"
-//! local = "/Users/yuri/projects/topologia"
-//! ```
+//! Two config files:
+//!   `co-universes.yaml`  — repo-level, committed, declares all universes
+//!   `~/.co/sync.toml`   — user-level, stores token + resolved paths
 
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+// ---------------------------------------------------------------------------
+// co-universes.yaml  (repo-level, committed)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UniverseRegistry {
+    pub server: String,
+    pub universes: Vec<UniverseDecl>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UniverseDecl {
+    pub slug: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// `local` path (relative to co-universes.yaml or absolute).
+    /// Absent means server_only = true (no local files to sync).
+    pub local: Option<String>,
+    /// Parent universe slug for hierarchical grouping.
+    pub parent: Option<String>,
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+    /// If true, universe is created on server but no files are synced.
+    #[serde(default)]
+    pub server_only: bool,
+    /// Optional GitHub repo URL (informational; co-sync does not use git).
+    pub github: Option<String>,
+}
+
+fn default_visibility() -> String {
+    "private".into()
+}
+
+impl UniverseRegistry {
+    /// Load from `co-universes.yaml`.
+    pub fn load(path: &Path) -> Result<Self> {
+        let raw =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+        serde_yaml::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    /// Search for `co-universes.yaml` starting from `start_dir` and walking up.
+    pub fn find(start_dir: &Path) -> Option<PathBuf> {
+        let mut dir = start_dir.to_path_buf();
+        loop {
+            let candidate = dir.join("co-universes.yaml");
+            if candidate.exists() {
+                return Some(candidate);
+            }
+            if !dir.pop() {
+                return None;
+            }
+        }
+    }
+
+    /// Resolve the local path for a universe declaration relative to the
+    /// registry file's directory (if the path is relative) or the home dir
+    /// (if it starts with `~/`).
+    pub fn resolve_local(decl: &UniverseDecl, registry_dir: &Path) -> Option<PathBuf> {
+        let raw = decl.local.as_deref()?;
+        let p = if raw.starts_with("~/") {
+            dirs_next::home_dir()?.join(raw.strip_prefix("~/").unwrap_or(raw))
+        } else if Path::new(raw).is_absolute() {
+            PathBuf::from(raw)
+        } else {
+            registry_dir.join(raw)
+        };
+        Some(p)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ~/.co/sync.toml  (user-level, stores token)
+// ---------------------------------------------------------------------------
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncConfig {
-    /// HTTPS base URL, e.g. `https://co.artelonga.com.br`.
     #[serde(default = "default_server")]
     pub server: String,
-
-    /// WebSocket URL for the CO-151 sync endpoint.
     #[serde(default = "default_ws_url")]
     pub ws_url: String,
-
-    /// Long-lived API token (CO-35). Set once via `co-sync init`.
     pub token: String,
-
-    /// Universe → local directory mappings.
     #[serde(default)]
     pub universes: Vec<UniverseMapping>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UniverseMapping {
-    /// Universe slug on the server (e.g. `co`, `mbya`, `topologia`).
     pub slug: String,
-    /// Absolute path to the local directory to watch.
     pub local: String,
 }
 
@@ -58,7 +111,6 @@ fn default_ws_url() -> String {
 }
 
 impl SyncConfig {
-    /// Default config file path: `~/.co/sync.toml`.
     pub fn default_path() -> PathBuf {
         dirs_next::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
@@ -78,7 +130,6 @@ impl SyncConfig {
         }
         let toml = toml::to_string_pretty(self)?;
         std::fs::write(path, toml.as_bytes())?;
-        // Restrict permissions to owner-only (token is sensitive).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

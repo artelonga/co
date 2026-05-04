@@ -1,20 +1,11 @@
-//! `co-sync` — proactive local→CO sync daemon.
+//! `co-sync` — content universe sync daemon.
 //!
-//! Dual-channel, git-independent:
-//!   • Markdown  → WebSocket SyncDelta (real-time, bidirectional)
-//!   • Binary    → REST asset upload (PDF, image, video — on-change)
+//! Reads `co-universes.yaml` (searched upward from cwd).
+//! For each declared universe: ensures it exists, sets parent, pushes all
+//! local files, reindexes, then watches for changes.
 //!
-//! On startup: full REST push of every file in the watched directories,
-//! then switches to filesystem-event-driven incremental updates.
-//!
-//! Setup (one time):
-//!   1. Log in at co.artelonga.com.br
-//!   2. Visit  co.artelonga.com.br/co/settings/sync
-//!   3. Copy the command — paste and run.
-//!
-//! Usage:
-//!   co-sync <token> ~/projects/mbya ~/projects/artelonga
-//!   co-sync                         # resume with cached config
+//! Usage:  co-sync <token>
+//! Token:  co.artelonga.com.br/co/settings/sync  (one time)
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,7 +14,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use co_agent::sync_config::{SyncConfig, UniverseMapping};
+use co_agent::sync_config::{SyncConfig, UniverseRegistry};
 use co_agent::watcher::{SyncWatcher, WatcherConfig};
 use notify::RecursiveMode;
 use notify::Watcher as _;
@@ -32,34 +23,25 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-const DEFAULT_SERVER: &str = "https://co.artelonga.com.br";
-const CONFIG_PATH_ENV: &str = "CO_SYNC_CONFIG";
-
-// Files to never sync.
-const IGNORE_NAMES: &[&str] = &[".DS_Store", ".git", ".svn", "node_modules", "target", ".co"];
+const IGNORE_NAMES: &[&str] = &[
+    ".DS_Store",
+    ".git",
+    ".svn",
+    "node_modules",
+    "target",
+    ".co",
+    "__pycache__",
+];
 
 #[derive(Parser)]
 #[command(
     name = "co-sync",
-    about = "Proactive local→CO sync — no git required",
-    long_about = "Syncs every file in your local folders to CO universes.\n\n\
-                  Get your token at: https://co.artelonga.com.br/co/settings/sync\n\n\
-                  EXAMPLES:\n  \
-                  co-sync tok_xxx ~/projects/mbya ~/projects/artelonga\n  \
-                  co-sync                   # resume"
+    about = "Sync content universes — reads co-universes.yaml"
 )]
 struct Cli {
-    #[arg(value_name = "TOKEN")]
-    token: Option<String>,
-    #[arg(value_name = "DIR")]
-    dirs: Vec<PathBuf>,
-    #[arg(long, env = "CO_SERVER", default_value = DEFAULT_SERVER)]
-    server: String,
+    /// API token from co.artelonga.com.br/co/settings/sync
+    token: String,
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -72,61 +54,67 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
-    let config_path = config_path();
+    let cwd = std::env::current_dir()?;
+    let registry_path = UniverseRegistry::find(&cwd).context("co-universes.yaml not found")?;
+    let registry_dir = registry_path.parent().unwrap_or(&cwd).to_path_buf();
+    info!("Registry: {}", registry_path.display());
 
-    let (token, server) = match cli.token {
-        Some(t) => {
-            let s = cli.server.clone();
-            save_config(&config_path, &t, &cli.dirs, &s)?;
-            (t, s)
-        }
-        None => match SyncConfig::load(&config_path) {
-            Ok(cfg) => {
-                if !cli.dirs.is_empty() {
-                    save_config(&config_path, &cfg.token, &cli.dirs, &cfg.server)?;
-                }
-                let s = cfg.server.clone();
-                (cfg.token, s)
-            }
-            Err(_) => {
-                eprintln!("No token. Get yours at: {DEFAULT_SERVER}/co/settings/sync");
-                eprintln!("Then run: co-sync <token> [dir...]");
-                std::process::exit(1);
-            }
-        },
-    };
-
-    let config = SyncConfig::load(&config_path)?;
-    let universes = if config.universes.is_empty() {
-        let cwd = std::env::current_dir()?;
-        let slug = detect_slug(&cwd);
-        eprintln!(
-            "Watching current directory as '{slug}'. Use co-sync <token> [dir...] to configure."
-        );
-        vec![UniverseMapping {
-            slug,
-            local: cwd.to_string_lossy().into_owned(),
-        }]
-    } else {
-        config.universes
-    };
+    let registry = UniverseRegistry::load(&registry_path)?;
+    save_token(&cli.token, &registry.server)?;
 
     let http = Arc::new(
         reqwest::Client::builder()
-            .timeout(Duration::from_secs(60))
+            .timeout(Duration::from_secs(120))
             .build()?,
     );
 
-    // Run all universes concurrently.
+    // Step 1: ensure all universes exist with correct parents
+    for decl in &registry.universes {
+        ensure_universe(decl, &registry.server, &cli.token, &http).await;
+    }
+
+    // Step 2: sync universes that have local content
+    let syncable: Vec<_> = registry
+        .universes
+        .iter()
+        .filter(|d| !d.server_only && d.local.is_some())
+        .filter_map(|d| {
+            UniverseRegistry::resolve_local(d, &registry_dir).map(|p| (d.slug.clone(), p))
+        })
+        .collect();
+
+    if syncable.is_empty() {
+        warn!("No local universes to sync.");
+        return Ok(());
+    }
+
+    info!(
+        "Syncing {} universe(s): {}",
+        syncable.len(),
+        syncable
+            .iter()
+            .map(|(s, _)| s.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+
+    let ws_url = format!(
+        "{}/api/v1/sync/ws",
+        registry
+            .server
+            .replace("https://", "wss://")
+            .replace("http://", "ws://")
+    );
+
     let mut handles = Vec::new();
-    for universe in universes {
-        let token = token.clone();
-        let server = server.clone();
-        let ws_url = config.ws_url.clone();
+    for (slug, root) in syncable {
+        let token = cli.token.clone();
+        let server = registry.server.clone();
+        let ws_url = ws_url.clone();
         let http = Arc::clone(&http);
         handles.push(tokio::spawn(async move {
-            if let Err(e) = sync_universe(universe, token, server, ws_url, http).await {
-                warn!("universe sync exited: {e:#}");
+            if let Err(e) = sync_universe(slug, root, token, server, ws_url, http).await {
+                warn!("sync exited: {e:#}");
             }
         }));
     }
@@ -134,73 +122,109 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-// ---------------------------------------------------------------------------
-// Per-universe sync
-// ---------------------------------------------------------------------------
+async fn ensure_universe(
+    decl: &co_agent::sync_config::UniverseDecl,
+    server: &str,
+    token: &str,
+    http: &reqwest::Client,
+) {
+    let url = format!("{server}/api/v1/universes/{}", decl.slug);
+    let exists = http
+        .get(&url)
+        .send()
+        .await
+        .is_ok_and(|r| r.status().is_success());
+    if !exists {
+        let body = serde_json::json!({
+            "key": decl.slug, "name": decl.name, "description": decl.description,
+        });
+        match http
+            .post(format!("{server}/api/v1/universes"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 409 => {}
+            Ok(r) => {
+                warn!("create '{}': {}", decl.slug, r.status());
+                return;
+            }
+            Err(e) => {
+                warn!("create '{}': {e}", decl.slug);
+                return;
+            }
+        }
+    }
+    // Set visibility + parent in one PUT
+    let mut update = serde_json::json!({ "visibility": decl.visibility });
+    if let Some(parent) = &decl.parent {
+        update["parent_key"] = serde_json::Value::String(parent.clone());
+    }
+    let _ = http.put(&url).bearer_auth(token).json(&update).send().await;
+    info!(
+        "  {} ready (parent: {})",
+        decl.slug,
+        decl.parent.as_deref().unwrap_or("—")
+    );
+}
 
 async fn sync_universe(
-    universe: UniverseMapping,
+    slug: String,
+    root: PathBuf,
     token: String,
     server: String,
     ws_url: String,
     http: Arc<reqwest::Client>,
 ) -> Result<()> {
-    let root = PathBuf::from(&universe.local);
-    let slug = universe.slug.clone();
+    if !root.exists() {
+        warn!("{slug}: '{}' does not exist — skipping", root.display());
+        return Ok(());
+    }
+    info!("{slug}: {}", root.display());
 
-    info!("{slug}: starting — {}", root.display());
+    let (md, bin) = initial_push(&root, &slug, &server, &token, &http).await;
+    info!("{slug}: {md} text + {bin} binary");
 
-    // ── 1. Initial full push via REST ─────────────────────────────────────
-    info!("{slug}: initial push…");
-    let (md_count, bin_count) = initial_push(&root, &slug, &server, &token, &http).await;
-    info!("{slug}: initial push done — {md_count} text, {bin_count} binary");
-
-    // Reindex so the server reflects the full push immediately.
     let _ = http
         .post(format!("{server}/api/v1/universes/{slug}/reindex"))
         .bearer_auth(&token)
         .send()
         .await;
+    info!("{slug}: reindexed ✓");
 
-    // ── 2. WebSocket watcher for ongoing .md changes ──────────────────────
+    // Binary watcher
     let (bin_tx, mut bin_rx) = mpsc::unbounded_channel::<PathBuf>();
-    let root2 = root.clone();
-    let slug2 = slug.clone();
+    let (r2, s2, sl2) = (root.clone(), slug.clone(), slug.clone());
+    std::thread::spawn(move || watch_binaries_blocking(r2, sl2, bin_tx));
 
-    // Spawn the binary-file watcher on a dedicated thread (notify needs it).
-    std::thread::spawn(move || {
-        watch_binaries_blocking(root2, slug2, bin_tx);
-    });
-
-    // Spawn REST uploader for binary changes.
-    let http2 = Arc::clone(&http);
-    let server2 = server.clone();
-    let token2 = token.clone();
-    let slug2 = slug.clone();
-    let root2 = root.clone();
+    let (h2, sv2, tk2, sl2, rt2) = (
+        Arc::clone(&http),
+        server.clone(),
+        token.clone(),
+        slug.clone(),
+        root.clone(),
+    );
     tokio::spawn(async move {
-        // Debounce: collect events for 500 ms before uploading.
         let mut pending: HashMap<PathBuf, Instant> = HashMap::new();
         loop {
             tokio::select! {
                 Some(p) = bin_rx.recv() => { pending.insert(p, Instant::now()); }
                 _ = tokio::time::sleep(Duration::from_millis(500)) => {
                     let now = Instant::now();
-                    let ready: Vec<PathBuf> = pending
-                        .iter()
+                    let ready: Vec<_> = pending.iter()
                         .filter(|(_, t)| now.duration_since(**t) >= Duration::from_millis(400))
-                        .map(|(p, _)| p.clone())
-                        .collect();
+                        .map(|(p, _)| p.clone()).collect();
                     for path in ready {
                         pending.remove(&path);
-                        upload_binary(&path, &root2, &slug2, &server2, &token2, &http2).await;
+                        upload_binary(&path, &rt2, &sl2, &sv2, &tk2, &h2).await;
                     }
                 }
             }
         }
     });
+    let _ = s2; // used in thread spawn above
 
-    // ── 3. WebSocket watcher for .md files (reconnects automatically) ─────
     loop {
         let cfg = WatcherConfig {
             watch_dirs: vec![root.clone()],
@@ -210,16 +234,12 @@ async fn sync_universe(
             resume_token: 0,
         };
         match SyncWatcher::new(cfg).run().await {
-            Ok(()) => info!("{slug}: WS disconnected, reconnecting…"),
-            Err(e) => warn!("{slug}: WS error: {e:#}, reconnecting…"),
+            Ok(()) => info!("{slug}: WS reconnecting…"),
+            Err(e) => warn!("{slug}: WS {e:#}, reconnecting…"),
         }
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
-
-// ---------------------------------------------------------------------------
-// Initial full push (REST)
-// ---------------------------------------------------------------------------
 
 async fn initial_push(
     root: &Path,
@@ -228,41 +248,34 @@ async fn initial_push(
     token: &str,
     http: &reqwest::Client,
 ) -> (usize, usize) {
-    let mut md = 0usize;
-    let mut bin = 0usize;
-
-    let entries = walkdir(root);
-    for path in entries {
+    let (mut md, mut bin) = (0usize, 0usize);
+    for path in walkdir(root) {
         let rel = match path.strip_prefix(root) {
             Ok(r) => r.to_string_lossy().replace('\\', "/"),
             Err(_) => continue,
         };
-
         let ext = path
             .extension()
             .and_then(|e| e.to_str())
             .unwrap_or("")
             .to_lowercase();
-
-        if ext == "md" || ext == "yaml" || ext == "yml" || ext == "toml" {
-            // Text file → Vault PUT
+        if matches!(ext.as_str(), "md" | "yaml" | "yml" | "toml") {
             if let Ok(body) = std::fs::read_to_string(&path) {
-                let url = format!("{server}/api/v1/universes/{slug}/vault/{rel}");
-                let _ = http.put(&url).bearer_auth(token).body(body).send().await;
+                let _ = http
+                    .put(format!("{server}/api/v1/universes/{slug}/vault/{rel}"))
+                    .bearer_auth(token)
+                    .body(body)
+                    .send()
+                    .await;
                 md += 1;
             }
         } else if is_binary_ext(&ext) {
-            // Binary file → asset upload
             upload_binary(&path, root, slug, server, token, http).await;
             bin += 1;
         }
     }
     (md, bin)
 }
-
-// ---------------------------------------------------------------------------
-// Binary file upload via REST assets endpoint
-// ---------------------------------------------------------------------------
 
 async fn upload_binary(
     path: &Path,
@@ -273,27 +286,23 @@ async fn upload_binary(
     http: &reqwest::Client,
 ) {
     let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-
     let Ok(bytes) = std::fs::read(path) else {
         return;
     };
-
-    // Skip if already uploaded (compare sha256 against asset index).
     let sha256 = format!("{:x}", Sha256::digest(&bytes));
-    let check_url = format!("{server}/api/v1/universes/{slug}/assets/{sha256}");
     if http
-        .get(&check_url)
+        .get(format!("{server}/api/v1/universes/{slug}/assets/{sha256}"))
         .bearer_auth(token)
         .send()
         .await
         .is_ok_and(|r| r.status().is_success())
     {
-        return; // already on server
+        return;
     }
-
-    let url = format!("{server}/api/v1/universes/{slug}/assets?filename={filename}");
     match http
-        .post(&url)
+        .post(format!(
+            "{server}/api/v1/universes/{slug}/assets?filename={filename}"
+        ))
         .bearer_auth(token)
         .header("Content-Type", "application/octet-stream")
         .body(bytes)
@@ -301,50 +310,26 @@ async fn upload_binary(
         .await
     {
         Ok(r) if r.status().is_success() => {
-            info!("{slug}: uploaded {} → sha256:{}…", filename, &sha256[..12]);
-            // If a sibling .md reference card mentions this file, update it.
-            maybe_update_reference_card(path, root, slug, server, token, &sha256, http).await;
+            info!("{slug}: {filename} uploaded");
+            update_ref_card(
+                path,
+                &RefCardCtx {
+                    root,
+                    slug,
+                    server,
+                    token,
+                    sha256: &sha256,
+                    filename,
+                    http,
+                },
+            )
+            .await;
         }
-        Ok(r) => warn!("{slug}: asset upload {} → {}", filename, r.status()),
-        Err(e) => warn!("{slug}: asset upload {filename} error: {e}"),
+        _ => {}
     }
 }
 
-/// If a sibling `.md` file has `file: <filename>` and no `blob_sha256`,
-/// inject the sha256, push the updated card.
-async fn maybe_update_reference_card(
-    bin_path: &Path,
-    root: &Path,
-    slug: &str,
-    server: &str,
-    token: &str,
-    sha256: &str,
-    http: &reqwest::Client,
-) {
-    let stem = bin_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let filename = bin_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    let u = CardUpdate {
-        root,
-        slug,
-        server,
-        token,
-        sha256,
-        filename,
-        http,
-    };
-    let card = bin_path.with_extension("md");
-    if card.exists() {
-        update_card(&card, &u).await;
-    } else {
-        let dir = bin_path.parent().unwrap_or(root);
-        let alt = dir.join(format!("{stem}.md"));
-        if alt.exists() {
-            update_card(&alt, &u).await;
-        }
-    }
-}
-
-struct CardUpdate<'a> {
+struct RefCardCtx<'a> {
     root: &'a Path,
     slug: &'a str,
     server: &'a str,
@@ -354,59 +339,63 @@ struct CardUpdate<'a> {
     http: &'a reqwest::Client,
 }
 
-async fn update_card(card: &Path, u: &CardUpdate<'_>) {
-    let Ok(text) = std::fs::read_to_string(card) else {
+async fn update_ref_card(bin: &Path, c: &RefCardCtx<'_>) {
+    let stem = bin.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+    let card = {
+        let card_inner = bin.with_extension("md");
+        if card_inner.exists() {
+            card_inner
+        } else {
+            let a = bin.parent().unwrap_or(c.root).join(format!("{stem}.md"));
+            if !a.exists() {
+                return;
+            } else {
+                a
+            }
+        }
+    };
+    let Ok(text) = std::fs::read_to_string(&card) else {
         return;
     };
-    if !text.contains(&format!("file: {}", u.filename)) || text.contains("blob_sha256:") {
+    if !text.contains(&format!("file: {}", c.filename)) || text.contains("blob_sha256:") {
         return;
     }
     let updated = text.replacen(
-        &format!("file: {}", u.filename),
-        &format!("file: {}\nblob_sha256: {}", u.filename, u.sha256),
+        &format!("file: {}", c.filename),
+        &format!("file: {}\nblob_sha256: {}", c.filename, c.sha256),
         1,
     );
-    if std::fs::write(card, &updated).is_ok() {
+    if std::fs::write(&card, &updated).is_ok() {
         let rel = card
-            .strip_prefix(u.root)
-            .unwrap_or(card)
+            .strip_prefix(c.root)
+            .unwrap_or(&card)
             .to_string_lossy()
             .replace('\\', "/");
-        let url = format!("{}/api/v1/universes/{}/vault/{rel}", u.server, u.slug);
-        let _ = u
+        let _ = c
             .http
-            .put(&url)
-            .bearer_auth(u.token)
+            .put(format!(
+                "{}/api/v1/universes/{}/vault/{rel}",
+                c.server, c.slug
+            ))
+            .bearer_auth(c.token)
             .body(updated)
             .send()
             .await;
-        info!("{}: updated {rel} with blob_sha256", u.slug);
     }
 }
 
-// ---------------------------------------------------------------------------
-// Binary filesystem watcher (blocking thread)
-// ---------------------------------------------------------------------------
-
 fn watch_binaries_blocking(root: PathBuf, slug: String, tx: mpsc::UnboundedSender<PathBuf>) {
     let (raw_tx, raw_rx) = std::sync::mpsc::channel();
-    let mut watcher = match notify::recommended_watcher(move |res: Result<notify::Event, _>| {
+    let Ok(mut watcher) = notify::recommended_watcher(move |res: Result<notify::Event, _>| {
         if let Ok(ev) = res {
             let _ = raw_tx.send(ev);
         }
-    }) {
-        Ok(w) => w,
-        Err(e) => {
-            warn!("{slug}: binary watcher error: {e}");
-            return;
-        }
+    }) else {
+        return;
     };
-
-    if let Err(e) = watcher.watch(&root, RecursiveMode::Recursive) {
-        warn!("{slug}: watch error: {e}");
+    if watcher.watch(&root, RecursiveMode::Recursive).is_err() {
         return;
     }
-
     while let Ok(ev) = raw_rx.recv() {
         for path in ev.paths {
             let ext = path
@@ -419,47 +408,12 @@ fn watch_binaries_blocking(root: PathBuf, slug: String, tx: mpsc::UnboundedSende
             }
         }
     }
+    let _ = slug;
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn config_path() -> PathBuf {
-    if let Ok(p) = std::env::var(CONFIG_PATH_ENV) {
-        return PathBuf::from(p);
-    }
-    SyncConfig::default_path()
-}
-
-fn detect_slug(dir: &Path) -> String {
-    let manifest = dir.join("_universe.yaml");
-    if let Ok(raw) = std::fs::read_to_string(&manifest) {
-        for line in raw.lines() {
-            if let Some(rest) = line.strip_prefix("name:") {
-                let name = rest.trim().trim_matches('"').trim_matches('\'');
-                if !name.is_empty() {
-                    return name
-                        .to_lowercase()
-                        .chars()
-                        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-                        .collect::<String>()
-                        .split('-')
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>()
-                        .join("-");
-                }
-            }
-        }
-    }
-    dir.file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("unknown")
-        .to_lowercase()
-}
-
-fn save_config(config_path: &Path, token: &str, dirs: &[PathBuf], server: &str) -> Result<()> {
-    let mut config = SyncConfig::load(config_path).unwrap_or(SyncConfig {
+fn save_token(token: &str, server: &str) -> Result<()> {
+    let path = SyncConfig::default_path();
+    let mut cfg = SyncConfig::load(&path).unwrap_or(SyncConfig {
         server: server.to_string(),
         ws_url: server
             .replace("https://", "wss://")
@@ -468,21 +422,8 @@ fn save_config(config_path: &Path, token: &str, dirs: &[PathBuf], server: &str) 
         token: token.to_string(),
         universes: vec![],
     });
-    config.token = token.to_string();
-    for dir in dirs {
-        let abs = dir
-            .canonicalize()
-            .with_context(|| format!("cannot resolve '{}'", dir.display()))?;
-        let slug = detect_slug(&abs);
-        if !config.universes.iter().any(|u| u.slug == slug) {
-            info!("Adding {} → {}", slug, abs.display());
-            config.universes.push(UniverseMapping {
-                slug,
-                local: abs.to_string_lossy().into_owned(),
-            });
-        }
-    }
-    config.save(config_path)
+    cfg.token = token.to_string();
+    cfg.save(&path)
 }
 
 fn is_binary_ext(ext: &str) -> bool {
@@ -503,15 +444,12 @@ fn is_binary_ext(ext: &str) -> bool {
             | "epub"
     )
 }
-
 fn is_ignored(path: &Path) -> bool {
     path.components().any(|c| {
         let s = c.as_os_str().to_string_lossy();
         s.starts_with('.') || IGNORE_NAMES.iter().any(|n| *n == s.as_ref())
     })
 }
-
-/// Walk a directory recursively, skipping ignored paths, returning all files.
 fn walkdir(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     fn recurse(dir: &Path, out: &mut Vec<PathBuf>) {
