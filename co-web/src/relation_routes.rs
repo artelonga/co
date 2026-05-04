@@ -10,7 +10,6 @@
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
-    http::HeaderMap,
     routing::get,
 };
 use serde::{Deserialize, Serialize};
@@ -72,9 +71,8 @@ pub async fn get_inbound_relations(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<RelationQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<InboundRelation>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let (all_keys, pool): (Vec<String>, Arc<UniversePool>) = {
         let storage = lock_storage(&state)?;
         let keys = storage.all_universe_keys();
@@ -144,9 +142,8 @@ pub async fn get_outbound_relations(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<RelationQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<OutboundRelation>>, AppError> {
-    crate::entry_routes::check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)

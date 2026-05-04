@@ -3,13 +3,14 @@ use std::path::Path;
 use axum::{
     Json,
     body::Body,
-    http::{Request, StatusCode},
+    http::{Method, Request, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use redb::{Database, TableDefinition};
+use rusqlite;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -428,6 +429,182 @@ pub fn decode_user_id(token: &str, secret: &str) -> anyhow::Result<String> {
         &validation,
     )?;
     Ok(data.claims.sub)
+}
+
+// ---------------------------------------------------------------------------
+// CO-161: Universe-scoped visibility middleware
+// ---------------------------------------------------------------------------
+
+/// Extract the universe slug from a request path that has had the
+/// `/api/v1/universes` prefix stripped by axum's nest(), e.g. `/<slug>/entries`.
+fn extract_universe_slug(path: &str) -> Option<String> {
+    let after_slash = path.strip_prefix('/')?;
+    let slug = after_slash.split('/').next()?;
+    if slug.is_empty() {
+        None
+    } else {
+        Some(slug.to_string())
+    }
+}
+
+fn err_response(status: StatusCode, error: &str, message: &str) -> Response {
+    (
+        status,
+        Json(serde_json::json!({
+            "error": error,
+            "message_en": message,
+        })),
+    )
+        .into_response()
+}
+
+/// Tower middleware — applied once on the combined `/api/v1/universes/{slug}/…`
+/// sub-router. Public and template universes pass through; private universes
+/// require an authenticated user who is the owner or a `universe_members` row.
+///
+/// Replaces 13 per-handler `check_reader_for_entries` calls and the
+/// `asset_routes::check_reader` duplicate (CO-161).
+pub async fn universe_visibility_gate(
+    axum::extract::State(state): axum::extract::State<crate::server::AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    let slug = match extract_universe_slug(req.uri().path()) {
+        Some(s) => s,
+        None => return Ok(next.run(req).await),
+    };
+
+    let universe = {
+        let storage = state.storage.lock().map_err(|_| {
+            err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Storage lock failed",
+            )
+        })?;
+        match storage.get_universe(&slug) {
+            Some(u) => u,
+            None => {
+                return Err(err_response(
+                    StatusCode::NOT_FOUND,
+                    "not_found",
+                    &format!("Universe '{slug}' not found"),
+                ));
+            }
+        }
+    };
+
+    if universe.is_public || universe.is_template {
+        return Ok(next.run(req).await);
+    }
+
+    let user_id = resolve_user_id(&state, req.headers())
+        .ok_or_else(|| err_response(StatusCode::UNAUTHORIZED, "unauthorized", "Login required"))?;
+
+    let is_allowed = {
+        let storage = state.storage.lock().map_err(|_| {
+            err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Storage lock failed",
+            )
+        })?;
+        let universe = storage.get_universe(&slug).ok_or_else(|| {
+            err_response(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                &format!("Universe '{slug}' not found"),
+            )
+        })?;
+        if universe.owner_id == user_id {
+            true
+        } else {
+            storage
+                .conn()
+                .query_row(
+                    "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                    rusqlite::params![&slug, &user_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false)
+        }
+    };
+
+    if is_allowed {
+        Ok(next.run(req).await)
+    } else {
+        Err(err_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Not authorized to access this universe",
+        ))
+    }
+}
+
+/// Tower middleware — applied once on the combined universe sub-router for all
+/// mutating methods (POST / PUT / PATCH / DELETE). Passes GET/HEAD/OPTIONS
+/// through unchanged (handled by `universe_visibility_gate` above).
+///
+/// Requires the caller to be the universe owner or a `universe_members` row.
+pub async fn universe_writer_gate(
+    axum::extract::State(state): axum::extract::State<crate::server::AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
+    let is_write = matches!(
+        req.method(),
+        &Method::POST | &Method::PUT | &Method::PATCH | &Method::DELETE
+    );
+    if !is_write {
+        return Ok(next.run(req).await);
+    }
+
+    let slug = match extract_universe_slug(req.uri().path()) {
+        Some(s) => s,
+        None => return Ok(next.run(req).await),
+    };
+
+    let user_id = resolve_user_id(&state, req.headers())
+        .ok_or_else(|| err_response(StatusCode::UNAUTHORIZED, "unauthorized", "Login required"))?;
+
+    let is_allowed = {
+        let storage = state.storage.lock().map_err(|_| {
+            err_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "internal_error",
+                "Storage lock failed",
+            )
+        })?;
+        let universe = storage.get_universe(&slug).ok_or_else(|| {
+            err_response(
+                StatusCode::NOT_FOUND,
+                "not_found",
+                &format!("Universe '{slug}' not found"),
+            )
+        })?;
+        if universe.owner_id == user_id {
+            true
+        } else {
+            storage
+                .conn()
+                .query_row(
+                    "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                    rusqlite::params![&slug, &user_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false)
+        }
+    };
+
+    if is_allowed {
+        Ok(next.run(req).await)
+    } else {
+        Err(err_response(
+            StatusCode::FORBIDDEN,
+            "forbidden",
+            "Not authorized to write to this universe",
+        ))
+    }
 }
 
 /// Decode a JWT token and return the full claims if valid.

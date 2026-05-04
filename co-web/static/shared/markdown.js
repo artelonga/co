@@ -194,6 +194,41 @@
       .replace(/`([^`]+?)`/g, '<code>$1</code>');
   }
 
+  /**
+   * Parse a GFM-style markdown table block into an HTML <table>.
+   * Returns null if `block` is not a table.
+   */
+  function _renderTable(block) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return null;
+    // Every line must start and end with |
+    if (!lines.every(l => l.startsWith('|') && l.endsWith('|'))) return null;
+    // Second line must be a separator (only |, -, :, space)
+    if (!/^\|[\s|:\-]+\|$/.test(lines[1])) return null;
+
+    const parseCells = line =>
+      line.slice(1, -1).split('|').map(c => _inlineMd(_escHtml(c.trim())));
+
+    const headers = parseCells(lines[0]);
+    const aligns = lines[1].slice(1, -1).split('|').map(c => {
+      const s = c.trim();
+      if (s.startsWith(':') && s.endsWith(':')) return ' style="text-align:center"';
+      if (s.endsWith(':')) return ' style="text-align:right"';
+      return '';
+    });
+
+    const thead = '<thead><tr>' +
+      headers.map((h, i) => `<th${aligns[i] || ''}>${h}</th>`).join('') +
+      '</tr></thead>';
+
+    const tbody = lines.slice(2).map(l => {
+      const cells = parseCells(l);
+      return '<tr>' + cells.map((c, i) => `<td${aligns[i] || ''}>${c}</td>`).join('') + '</tr>';
+    }).join('');
+
+    return `<table class="md-table"><${thead}<tbody>${tbody}</tbody></table>`;
+  }
+
   function _fallbackRender(text) {
     if (!text) return '';
     const { body } = extractFrontmatter(text);
@@ -232,6 +267,12 @@
         return `<blockquote><p>${_inlineMd(_escHtml(lines))}</p></blockquote>`;
       }
 
+      // Table (GFM pipe table)
+      if (t.startsWith('|')) {
+        const table = _renderTable(t);
+        if (table) return table;
+      }
+
       // List (unordered or ordered)
       if (/^[-*]\s/.test(t) || /^\d+\.\s/.test(t)) {
         const items = t.split('\n').filter(l => l.trim()).map(l => {
@@ -259,24 +300,54 @@
   // ===== Wikilink resolution =====
 
   /**
-   * Replace [[wikilinks]] in rendered HTML with anchor elements pointing to
-   * entries in the current universe.
+   * Rewrite <a href="relative/path.md"> produced by the markdown renderer into
+   * CO entry viewer URLs. Only rewrites relative .md hrefs (not http/https/# or
+   * already-absolute /paths). Adds class="wikilink" for consistent styling.
    *
-   * @param {string} html       - Already-rendered HTML from renderMarkdown()
+   * @param {string} html         - Already-rendered HTML
    * @param {string} universeSlug - Current universe key/slug
-   * @returns {string} HTML with wikilinks resolved
+   * @returns {string} HTML with relative .md hrefs rewritten
+   */
+  /** Encode a slash-separated path preserving the separators. */
+  function _encodePath(p) {
+    return p.split('/').map(encodeURIComponent).join('/');
+  }
+
+  /** Build the SPA viewer URL for an entry: /co/{slug}/{path} (no /entries/ segment). */
+  function _entryHref(universeSlug, entryPath) {
+    return '/co/' + _escHtml(universeSlug) + '/' + _encodePath(entryPath);
+  }
+
+  function _rewriteRelativeMdLinks(html, universeSlug) {
+    if (!html || !universeSlug) return html;
+    // Match <a ...href="path.md"...> where href is NOT http/https/#/ (relative only)
+    return html.replace(
+      /<a\b([^>]*?)\bhref=(["'])((?!https?:\/\/|#|\/)[^"'?#]+\.md)\2([^>]*)>/gi,
+      (_, before, q, mdPath, after) => {
+        const entryPath = mdPath.replace(/\.md$/i, '');
+        const href = _entryHref(universeSlug, entryPath);
+        const hasClass = /\bclass=/.test(before + after);
+        const cls = hasClass ? '' : ' class="wikilink"';
+        return `<a${before} href=${q}${href}${q}${after}${cls}>`;
+      }
+    );
+  }
+
+  /**
+   * Replace [[wikilinks]] in rendered HTML with SPA viewer anchors, and
+   * rewrite any relative .md links produced by the markdown renderer.
+   * URL format: /co/{slug}/{entry-path} — no /entries/ segment.
    */
   function resolveWikilinks(html, universeSlug) {
     if (!html) return html;
-    // Wikilinks survive DOMPurify as plain text since [[…]] isn't HTML.
-    // After rendering, [[Title]] appears inside text nodes — we look for the
-    // literal pattern in the HTML string (safe because DOMPurify already ran).
-    return html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
-      const display = _escHtml((label || target).trim());
-      const slug = encodeURIComponent(target.trim());
-      const href = `/co/${_escHtml(universeSlug)}/entries/${slug}`;
-      return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(target.trim())}">${display}</a>`;
+    let result = html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
+      const rawTarget = target.trim();
+      const display = _escHtml(label ? label.trim() : rawTarget);
+      const cleanPath = rawTarget.replace(/\.md$/i, '');
+      const href = _entryHref(universeSlug, cleanPath);
+      return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(rawTarget)}">${display}</a>`;
     });
+    return _rewriteRelativeMdLinks(result, universeSlug);
   }
 
   // ===== Prism lazy loader =====

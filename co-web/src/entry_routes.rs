@@ -93,6 +93,8 @@ pub struct EntryListQuery {
     pub from: Option<String>,
     /// CO-73: inclusive ISO-8601 end of date range
     pub to: Option<String>,
+    /// Max entries to return. Defaults to 5000; capped at 50000.
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -157,50 +159,8 @@ fn accept_protobuf(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
-/// Returns Ok(()) if the caller may read entries from this universe.
-///
-/// Public/template universes are readable anonymously. Private universes
-/// require an authenticated user who is the owner or a `universe_members`
-/// row. Mirrors `asset_routes::check_reader` so `/entries`, `/citations`,
-/// `/references`, and `/assets` all use the same visibility gate.
-pub(crate) fn check_reader_for_entries(
-    state: &AppState,
-    headers: &HeaderMap,
-    universe_key: &str,
-) -> Result<(), AppError> {
-    let storage = lock_storage(state)?;
-    let universe = storage
-        .get_universe(universe_key)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
-    if universe.is_public || universe.is_template {
-        return Ok(());
-    }
-    drop(storage);
-    let user_id = crate::auth::resolve_user_id(state, headers)
-        .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
-    let storage = lock_storage(state)?;
-    let universe = storage
-        .get_universe(universe_key)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
-    if universe.owner_id == user_id {
-        return Ok(());
-    }
-    let is_member: bool = storage
-        .conn()
-        .query_row(
-            "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
-            rusqlite::params![universe_key, &user_id],
-            |_| Ok(true),
-        )
-        .unwrap_or(false);
-    if is_member {
-        Ok(())
-    } else {
-        Err(AppError::Forbidden(
-            "Not authorized to read entries from this universe".into(),
-        ))
-    }
-}
+// check_reader_for_entries removed — universe read visibility is enforced by
+// universe_visibility_gate middleware applied in server::build_router (CO-161).
 
 // ---------------------------------------------------------------------------
 // Handlers
@@ -213,7 +173,7 @@ pub async fn list_entries(
     Query(q): Query<EntryListQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -234,14 +194,12 @@ pub async fn list_entries(
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else {
         let entry_type = q.entry_type.as_deref().unwrap_or("");
+        let limit = q.limit;
         if entry_type.is_empty() {
             // list all
             index
-                .query(&slug, "", &serde_json::json!({}))
-                .or_else(|_| {
-                    // fallback: return all entries via raw query
-                    Ok::<Vec<EntryRow>, anyhow::Error>(vec![])
-                })
+                .query_with_limit(&slug, "", &serde_json::json!({}), limit)
+                .or_else(|_| Ok::<Vec<EntryRow>, anyhow::Error>(vec![]))
                 .unwrap_or_default()
         } else {
             let filter = q
@@ -250,7 +208,7 @@ pub async fn list_entries(
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
             index
-                .query(&slug, entry_type, &filter)
+                .query_with_limit(&slug, entry_type, &filter, limit)
                 .map_err(|e| AppError::Internal(e.to_string()))?
         }
     };
@@ -283,9 +241,8 @@ pub async fn list_entries(
 pub async fn list_entry_tags(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<TagCount>>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -305,9 +262,8 @@ pub async fn entry_tree(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<TreeQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<TreeNode>>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -344,7 +300,7 @@ pub async fn get_entry(
     Query(q): Query<GetEntryQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -710,9 +666,8 @@ pub async fn update_entry(
 pub async fn get_manifest(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<co::manifest::Manifest>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let universe_root = {
         let storage = lock_storage(&state)?;
         storage.universe_root(&slug)
@@ -843,9 +798,8 @@ pub async fn query_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<QueryDslParams>,
-    headers: HeaderMap,
 ) -> Result<Json<EntryListResponse>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -900,9 +854,8 @@ pub(crate) async fn list_references(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(params): Query<ReferencesQuery>,
-    headers: HeaderMap,
 ) -> Result<Json<ReferencesResponse>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
@@ -930,9 +883,8 @@ pub(crate) async fn list_references(
 pub(crate) async fn list_orphan_wikilinks(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    headers: HeaderMap,
 ) -> Result<Json<Vec<String>>, AppError> {
-    check_reader_for_entries(&state, &headers, &slug)?;
+    // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state)?;
         storage.universe_conn(&slug)
