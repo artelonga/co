@@ -159,12 +159,26 @@ impl<'a> EntryIndex<'a> {
     /// - `{"field": "value"}` — exact match
     /// - `{"field": {"$ne": "value"}}` — not equal
     /// - `{"$sort": {"field": 1}}` — ascending sort (`-1` = descending)
+    ///
+    /// `limit` caps the result set. Pass `None` to use the default (5 000).
+    /// Hard cap is 50 000.
     pub fn query(
         &self,
         universe_key: &str,
         entry_type: &str,
         filters: &JsonValue,
     ) -> anyhow::Result<Vec<EntryRow>> {
+        self.query_with_limit(universe_key, entry_type, filters, None)
+    }
+
+    pub fn query_with_limit(
+        &self,
+        universe_key: &str,
+        entry_type: &str,
+        filters: &JsonValue,
+        limit: Option<usize>,
+    ) -> anyhow::Result<Vec<EntryRow>> {
+        let effective_limit = limit.unwrap_or(5_000).min(50_000);
         // Empty entry_type means "any type" — used by the unfiltered list_entries
         // endpoint. When non-empty, restrict by exact type.
         let mut conditions = vec!["universe_key = ?1".to_string()];
@@ -215,8 +229,8 @@ impl<'a> EntryIndex<'a> {
         let where_clause = conditions.join(" AND ");
         let sql = format!(
             "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at \
-             FROM entries WHERE {}{} LIMIT 500",
-            where_clause, order_clause
+             FROM entries WHERE {}{} LIMIT {}",
+            where_clause, order_clause, effective_limit
         );
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_strings
@@ -473,7 +487,7 @@ impl<'a> EntryIndex<'a> {
                ON ed.universe_key = e.universe_key AND ed.entry_path = e.path \
              WHERE {where_clause} \
              ORDER BY ed.value ASC \
-             LIMIT 500"
+             LIMIT 5000"
         );
 
         let params_refs: Vec<&dyn rusqlite::types::ToSql> = param_strings

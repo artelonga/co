@@ -194,6 +194,41 @@
       .replace(/`([^`]+?)`/g, '<code>$1</code>');
   }
 
+  /**
+   * Parse a GFM-style markdown table block into an HTML <table>.
+   * Returns null if `block` is not a table.
+   */
+  function _renderTable(block) {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length < 2) return null;
+    // Every line must start and end with |
+    if (!lines.every(l => l.startsWith('|') && l.endsWith('|'))) return null;
+    // Second line must be a separator (only |, -, :, space)
+    if (!/^\|[\s|:\-]+\|$/.test(lines[1])) return null;
+
+    const parseCells = line =>
+      line.slice(1, -1).split('|').map(c => _inlineMd(_escHtml(c.trim())));
+
+    const headers = parseCells(lines[0]);
+    const aligns = lines[1].slice(1, -1).split('|').map(c => {
+      const s = c.trim();
+      if (s.startsWith(':') && s.endsWith(':')) return ' style="text-align:center"';
+      if (s.endsWith(':')) return ' style="text-align:right"';
+      return '';
+    });
+
+    const thead = '<thead><tr>' +
+      headers.map((h, i) => `<th${aligns[i] || ''}>${h}</th>`).join('') +
+      '</tr></thead>';
+
+    const tbody = lines.slice(2).map(l => {
+      const cells = parseCells(l);
+      return '<tr>' + cells.map((c, i) => `<td${aligns[i] || ''}>${c}</td>`).join('') + '</tr>';
+    }).join('');
+
+    return `<table class="md-table"><${thead}<tbody>${tbody}</tbody></table>`;
+  }
+
   function _fallbackRender(text) {
     if (!text) return '';
     const { body } = extractFrontmatter(text);
@@ -230,6 +265,12 @@
       if (t.startsWith('> ')) {
         const lines = t.split('\n').map(l => l.replace(/^>\s?/, '')).join(' ');
         return `<blockquote><p>${_inlineMd(_escHtml(lines))}</p></blockquote>`;
+      }
+
+      // Table (GFM pipe table)
+      if (t.startsWith('|')) {
+        const table = _renderTable(t);
+        if (table) return table;
       }
 
       // List (unordered or ordered)

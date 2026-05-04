@@ -93,6 +93,8 @@ pub struct EntryListQuery {
     pub from: Option<String>,
     /// CO-73: inclusive ISO-8601 end of date range
     pub to: Option<String>,
+    /// Max entries to return. Defaults to 5000; capped at 50000.
+    pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,14 +194,12 @@ pub async fn list_entries(
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else {
         let entry_type = q.entry_type.as_deref().unwrap_or("");
+        let limit = q.limit;
         if entry_type.is_empty() {
             // list all
             index
-                .query(&slug, "", &serde_json::json!({}))
-                .or_else(|_| {
-                    // fallback: return all entries via raw query
-                    Ok::<Vec<EntryRow>, anyhow::Error>(vec![])
-                })
+                .query_with_limit(&slug, "", &serde_json::json!({}), limit)
+                .or_else(|_| Ok::<Vec<EntryRow>, anyhow::Error>(vec![]))
                 .unwrap_or_default()
         } else {
             let filter = q
@@ -208,7 +208,7 @@ pub async fn list_entries(
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
             index
-                .query(&slug, entry_type, &filter)
+                .query_with_limit(&slug, entry_type, &filter, limit)
                 .map_err(|e| AppError::Internal(e.to_string()))?
         }
     };
