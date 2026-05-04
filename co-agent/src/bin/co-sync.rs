@@ -138,22 +138,41 @@ async fn cmd_init(config_path: &std::path::Path, server: &str, email: &str) -> R
     println!("Authenticating with {server}…");
     let client = reqwest::Client::new();
 
-    // 1. Password login → session JWT
-    let login_res: serde_json::Value = client
+    // 1. Password login — JWT is returned in the Set-Cookie: session=<jwt> header.
+    let login_resp = client
         .post(format!("{server}/api/v1/auth/password-login"))
         .json(&PasswordLoginRequest {
             email,
             password: &password,
         })
         .send()
-        .await?
-        .json()
-        .await?;
+        .await
+        .context("password login request")?;
 
-    let jwt = login_res["session"]
-        .as_str()
-        .with_context(|| format!("Login failed: {login_res}"))?
-        .to_string();
+    let status = login_resp.status();
+    // Extract the JWT from Set-Cookie before consuming the body.
+    let jwt_opt = login_resp
+        .headers()
+        .get("set-cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            s.split(';')
+                .next()
+                .and_then(|p| p.strip_prefix("session="))
+                .map(str::to_string)
+        });
+
+    if !status.is_success() {
+        let body = login_resp.text().await.unwrap_or_default();
+        bail!("Login failed ({status}): {body}");
+    }
+
+    let jwt = jwt_opt.ok_or_else(|| {
+        anyhow::anyhow!(
+            "Login OK but no session cookie in response — \
+             check that password-login is enabled for this account"
+        )
+    })?;
 
     // 2. Create long-lived API token
     let token_res: CreateTokenResponse = client
