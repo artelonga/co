@@ -949,6 +949,8 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/subscribers", get(list_subscribers))
         // CO-72: doc-gen job submission (owner only, auth via require_auth layer)
         .route("/{slug}/jobs/doc-gen", post(submit_doc_gen_job))
+        // Bulk template apply + hub generation (owner-scoped, auth via require_auth)
+        .route("/apply-template-all", post(apply_template_all))
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     Router::new().merge(public_routes).merge(protected_routes)
@@ -1345,6 +1347,260 @@ fn build_api_md(slug: &str) -> String {
          | POST | `/apply-template` | Re-run scaffold + type audit |\n\n\
          ## Schema\n\n\
          See [[_universe.yaml]] for declared content types.\n"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Bulk template + universe hub
+// ---------------------------------------------------------------------------
+
+/// Per-universe result inside `ApplyAllResponse`.
+#[derive(Debug, serde::Serialize)]
+pub struct UniverseTemplateResult {
+    pub slug: String,
+    pub name: String,
+    pub content_count: i64,
+    pub created: Vec<String>,
+    pub skipped: Vec<String>,
+    pub type_error_count: usize,
+}
+
+/// Response for `POST /apply-template-all`.
+#[derive(Debug, serde::Serialize)]
+pub struct ApplyAllResponse {
+    pub results: Vec<UniverseTemplateResult>,
+    pub hub_entry: Option<String>,
+}
+
+/// Request body for `POST /apply-template-all`.
+#[derive(Debug, serde::Deserialize)]
+pub struct ApplyAllRequest {
+    /// Slug of the universe that should receive the auto-generated hub entry
+    /// (e.g. your private `co` dev universe). Leave empty to skip hub creation.
+    #[serde(default)]
+    pub hub_universe: String,
+}
+
+/// POST /api/v1/universes/apply-template-all
+///
+/// Applies the standard scaffold (CLAUDE.md, docs/api.md) to every universe
+/// the authenticated user owns, then writes a datos-style summary entry
+/// (`universes.md`) into `hub_universe` (if supplied).
+///
+/// Auth: JWT required (owner scope per-universe — only owned universes touched).
+pub async fn apply_template_all(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(body): Json<ApplyAllRequest>,
+) -> Result<axum::Json<ApplyAllResponse>, AppError> {
+    use co::manifest::MANIFEST_FILENAME;
+    use std::collections::HashSet;
+
+    // Collect universes owned by this user.
+    let owned: Vec<crate::models::Universe> = {
+        let storage = lock_storage(&state)?;
+        storage
+            .list_universes_for_user(&user_id.0)
+            .into_iter()
+            .filter(|u| u.owner_id == user_id.0)
+            .collect()
+    };
+
+    let mut results: Vec<UniverseTemplateResult> = Vec::new();
+
+    for universe in &owned {
+        let slug = &universe.key.clone();
+        let universe_root = {
+            let storage = lock_storage(&state)?;
+            storage.universe_root(slug)
+        };
+
+        // --- manifest: ensure doc type ---
+        let mut manifest_opt: Option<co::manifest::Manifest> = {
+            std::fs::read(universe_root.join(MANIFEST_FILENAME))
+                .ok()
+                .and_then(|b| co::manifest::parse(&b).ok().map(|r| r.manifest))
+        };
+        if let Some(ref mut m) = manifest_opt
+            && !m.content_types.iter().any(|ct| ct.name == "doc")
+        {
+            m.content_types.push(co::manifest::ContentType {
+                name: "doc".to_string(),
+                schema: Default::default(),
+                presentation: Default::default(),
+                indexes: vec![],
+            });
+            if let Ok(yaml) = m.to_yaml() {
+                let _ = std::fs::write(universe_root.join(MANIFEST_FILENAME), yaml.as_bytes());
+            }
+        }
+
+        let manifest = std::fs::read(universe_root.join(MANIFEST_FILENAME))
+            .ok()
+            .and_then(|b| co::manifest::parse(&b).ok().map(|r| r.manifest));
+        let known_types: HashSet<String> = manifest
+            .as_ref()
+            .map(|m| m.content_types.iter().map(|ct| ct.name.clone()).collect())
+            .unwrap_or_default();
+        let type_names: Vec<String> = manifest
+            .as_ref()
+            .map(|m| m.content_types.iter().map(|ct| ct.name.clone()).collect())
+            .unwrap_or_default();
+
+        // --- scaffold files ---
+        let scaffold: Vec<(&str, String)> = vec![
+            (
+                "CLAUDE.md",
+                build_claude_md(&universe.name, &universe.description, slug, &type_names),
+            ),
+            ("docs/api.md", build_api_md(slug)),
+        ];
+        let mut created: Vec<String> = Vec::new();
+        let mut skipped: Vec<String> = Vec::new();
+        for (rel, body_text) in &scaffold {
+            let disk_path = universe_root.join(rel);
+            if disk_path.exists() {
+                skipped.push(rel.to_string());
+                continue;
+            }
+            let fm = serde_json::json!({ "type": "doc", "title": rel });
+            let entry = crate::entry_index::make_entry(rel, fm, body_text);
+            if co::write_entry(&universe_root, &entry).is_ok() {
+                let uc = {
+                    let s = lock_storage(&state)?;
+                    s.universe_conn(slug)
+                };
+                if let Ok(g) = uc.lock() {
+                    let _ = crate::entry_index::EntryIndex::new(&g).upsert(slug, &entry);
+                }
+                if let Ok(mut s) = state.storage.lock() {
+                    s.increment_universe_content_count(slug);
+                }
+                created.push(rel.to_string());
+            }
+        }
+
+        // --- type check ---
+        let type_error_count = {
+            let uc = {
+                let s = lock_storage(&state)?;
+                s.universe_conn(slug)
+            };
+            uc.lock()
+                .ok()
+                .and_then(|g| run_type_check(&g, slug, &known_types).ok())
+                .map(|v| v.len())
+                .unwrap_or(0)
+        };
+
+        results.push(UniverseTemplateResult {
+            slug: slug.to_string(),
+            name: universe.name.clone(),
+            content_count: universe.content_count,
+            created,
+            skipped,
+            type_error_count,
+        });
+    }
+
+    // --- hub entry ---
+    let hub_slug = body.hub_universe.trim().to_string();
+    let hub_entry_path = if !hub_slug.is_empty() {
+        let hub_root = {
+            let storage = lock_storage(&state)?;
+            if storage.get_universe(&hub_slug).is_none() {
+                return Err(AppError::NotFound(format!(
+                    "Hub universe '{hub_slug}' not found"
+                )));
+            }
+            // Caller must own or be a member of the hub universe
+            let is_ok = storage
+                .conn()
+                .query_row(
+                    "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                    rusqlite::params![&hub_slug, &user_id.0],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false)
+                || storage
+                    .get_universe(&hub_slug)
+                    .is_some_and(|u| u.owner_id == user_id.0);
+            if !is_ok {
+                return Err(AppError::Forbidden(
+                    "Not a member of the hub universe".into(),
+                ));
+            }
+            storage.universe_root(&hub_slug)
+        };
+
+        let hub_body = build_hub_md(&results);
+        let fm = serde_json::json!({
+            "type": "doc",
+            "title": "Universe Hub",
+            "updated_at": chrono::Utc::now().to_rfc3339(),
+        });
+        let entry = crate::entry_index::make_entry("universes.md", fm, &hub_body);
+        co::write_entry(&hub_root, &entry)
+            .map_err(|e| AppError::Internal(format!("write hub: {e}")))?;
+        let uc = {
+            let s = lock_storage(&state)?;
+            s.universe_conn(&hub_slug)
+        };
+        if let Ok(g) = uc.lock() {
+            let _ = crate::entry_index::EntryIndex::new(&g).upsert(&hub_slug, &entry);
+        }
+        Some(format!("{hub_slug}/universes.md"))
+    } else {
+        None
+    };
+
+    Ok(axum::Json(ApplyAllResponse {
+        results,
+        hub_entry: hub_entry_path,
+    }))
+}
+
+/// Generate the markdown body for the universe hub entry.
+fn build_hub_md(results: &[UniverseTemplateResult]) -> String {
+    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC");
+    let mut rows = String::new();
+    for r in results {
+        let template_ok = if r.created.is_empty() && !r.skipped.is_empty() {
+            "✓"
+        } else if !r.created.is_empty() {
+            "✓ new"
+        } else {
+            "—"
+        };
+        let type_col = if r.type_error_count == 0 {
+            "✓".to_string()
+        } else {
+            format!("⚠ {}", r.type_error_count)
+        };
+        rows.push_str(&format!(
+            "| [[{slug}]] | {name} | {count} | {template} | {types} |\n",
+            slug = r.slug,
+            name = r.name,
+            count = r.content_count,
+            template = template_ok,
+            types = type_col,
+        ));
+    }
+    let total: i64 = results.iter().map(|r| r.content_count).sum();
+    let total_errors: usize = results.iter().map(|r| r.type_error_count).sum();
+    format!(
+        "---\ntype: doc\ntitle: Universe Hub\n---\n\n\
+         # Universe Hub\n\n\
+         > Generated {now} — {n} universes, {total} entries total\n\n\
+         | Universe | Name | Entries | Template | Types |\n\
+         |----------|------|---------|----------|-------|\n\
+         {rows}\n\
+         **Total:** {total} entries across {n} universes — \
+         {err} type {errlabel}.\n\n\
+         To refresh: `POST /api/v1/universes/apply-template-all`\n",
+        n = results.len(),
+        err = total_errors,
+        errlabel = if total_errors == 1 { "error" } else { "errors" },
     )
 }
 
