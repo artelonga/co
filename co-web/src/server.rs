@@ -1209,10 +1209,9 @@ async fn serve_assets_page(State(state): State<AppState>) -> Response {
     (StatusCode::NOT_FOUND, "Asset browser page not found").into_response()
 }
 
-/// GET /co/settings/sync — server-rendered page that creates an API token
-/// and shows the ready-to-run `co-sync` command. Requires auth (session cookie).
+/// GET /co/settings/sync — server-rendered page: lists ALL owned universes,
+/// lets user map each to a local path, generates `co-sync` command. Auth required.
 async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) -> Response {
-    // Must be authenticated.
     let user_id = match crate::auth::resolve_user_id(&state, &headers) {
         Some(id) => id,
         None => {
@@ -1225,13 +1224,12 @@ async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) 
         }
     };
 
-    // Create (or reuse) a long-lived API token named "co-sync".
-    let token = {
+    let (token, universes) = {
         let storage = match state.storage.lock() {
             Ok(s) => s,
             Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Storage error").into_response(),
         };
-        match storage.create_api_token(&user_id, "co-sync") {
+        let tok = match storage.create_api_token(&user_id, "co-sync") {
             Ok(t) => t.token,
             Err(e) => {
                 return (
@@ -1240,55 +1238,125 @@ async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) 
                 )
                     .into_response();
             }
-        }
+        };
+        // All universes the user owns (not template, not anonymous clones).
+        let owned: Vec<String> = storage
+            .list_universes_for_user(&user_id)
+            .into_iter()
+            .filter(|u| u.owner_id == user_id && !u.is_template && !u.key.starts_with("anon-"))
+            .map(|u| u.key)
+            .collect();
+        (tok, owned)
     };
+
+    // Build one <tr> per owned universe.
+    let rows: String = universes
+        .iter()
+        .map(|slug| {
+            format!(
+                r#"<tr>
+  <td><code>{slug}</code></td>
+  <td><input class="path-input" data-slug="{slug}" type="text"
+             placeholder="~/projects/{slug}"
+             oninput="rebuild()" /></td>
+</tr>"#
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let universe_count = universes.len();
 
     let html = format!(
         r#"<!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="utf-8">
-<title>CO — Sync</title>
+<title>CO — Sync setup</title>
 <style>
-  body {{ font-family: system-ui, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 24px; color: #1a1a1a; }}
-  h1 {{ font-size: 1.5rem; margin-bottom: 8px; }}
-  p {{ color: #555; line-height: 1.6; }}
-  pre {{ background: #f4f4f5; border-radius: 8px; padding: 16px; font-size: .9rem; overflow-x: auto; position: relative; }}
-  code {{ font-family: 'SF Mono', Menlo, monospace; }}
-  .copy-btn {{ position: absolute; top: 8px; right: 8px; background: #fff; border: 1px solid #ddd;
-               border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: .8rem; }}
-  .copy-btn:active {{ background: #e5e7eb; }}
-  .note {{ font-size: .85rem; color: #888; margin-top: 32px; border-top: 1px solid #eee; padding-top: 16px; }}
-  a {{ color: #2563eb; }}
+  *{{box-sizing:border-box;}}
+  body{{font-family:system-ui,sans-serif;max-width:680px;margin:48px auto;padding:0 20px;color:#111;}}
+  h1{{font-size:1.4rem;margin-bottom:4px;}}
+  .sub{{color:#666;margin-bottom:24px;font-size:.95rem;}}
+  table{{width:100%;border-collapse:collapse;margin-bottom:20px;}}
+  th{{text-align:left;font-size:.8rem;color:#888;padding:4px 8px;border-bottom:1px solid #eee;}}
+  td{{padding:6px 8px;vertical-align:middle;}}
+  input.path-input{{width:100%;border:1px solid #ddd;border-radius:6px;padding:6px 10px;font-family:monospace;font-size:.85rem;}}
+  input.path-input:focus{{outline:none;border-color:#2563eb;}}
+  .cmd-box{{position:relative;background:#f4f4f5;border-radius:8px;padding:14px 16px;
+            font-family:monospace;font-size:.85rem;white-space:pre-wrap;word-break:break-all;
+            min-height:48px;color:#1a1a1a;border:1px solid #e5e7eb;}}
+  .copy-btn{{position:absolute;top:8px;right:8px;background:#fff;border:1px solid #ddd;
+             border-radius:4px;padding:4px 12px;cursor:pointer;font-size:.8rem;}}
+  .copy-btn:active{{background:#e5e7eb;}}
+  .hint{{font-size:.8rem;color:#888;margin-top:6px;}}
+  .install{{margin-top:28px;padding-top:20px;border-top:1px solid #eee;font-size:.85rem;color:#555;}}
+  .install code{{background:#f4f4f5;padding:2px 6px;border-radius:4px;}}
+  a{{color:#2563eb;}}
 </style>
 </head>
 <body>
-<h1>Sync local folder with CO</h1>
-<p>Run this command in any folder that has a <code>_universe.yaml</code>.
-   It syncs automatically whenever you save a file. No other setup needed.</p>
+<h1>Sync your universes</h1>
+<p class="sub">Enter the local path for each universe you want to sync.
+  Then copy the command below and run it once.</p>
 
-<pre><code id="cmd">co-sync {token} $(pwd)</code><button class="copy-btn" onclick="copy()">Copy</button></pre>
+<table>
+<thead><tr><th>Universe</th><th>Local path on this machine</th></tr></thead>
+<tbody>{rows}</tbody>
+</table>
 
-<p>Or for multiple folders at once:</p>
-<pre><code>co-sync {token} ~/projects/mbya ~/projects/artelonga ~/projects/topologia</code></pre>
-
-<p class="note">
-  The token is saved locally and never asked for again.<br>
-  To install: <a href="https://github.com/artelonga/co#sync" target="_blank">github.com/artelonga/co</a>
-  &rarr; <code>cargo install --git https://github.com/artelonga/co co-sync</code>
+<p style="font-size:.85rem;color:#555;margin-bottom:8px;">
+  Command to run (<span id="count">0</span> of {universe_count} universes mapped):
 </p>
+<div class="cmd-box" id="cmd-output">Fill in at least one path above.</div>
+<button class="copy-btn" id="copy-btn" onclick="copyCmd()" style="position:static;margin-top:8px;display:inline-block;">Copy</button>
+<p class="hint">Runs in the background. Re-run the same command any time to add more paths.</p>
+
+<div class="install">
+  <strong>Install co-sync</strong> (Rust required):<br>
+  <code>cargo install --git https://github.com/artelonga/co co-sync</code><br><br>
+  <strong>Auto-start at login (macOS):</strong><br>
+  Add <code>co-sync</code> to System Settings → General → Login Items,
+  or run <code>nohup co-sync &amp;</code> in your terminal.
+</div>
 
 <script>
-function copy() {{
-  const t = document.getElementById('cmd').textContent;
-  navigator.clipboard.writeText(t).then(() => {{
-    document.querySelector('.copy-btn').textContent = 'Copied!';
-    setTimeout(() => document.querySelector('.copy-btn').textContent = 'Copy', 2000);
+const TOKEN = "{token}";
+
+function rebuild() {{
+  const inputs = document.querySelectorAll('.path-input');
+  const parts = [];
+  let filled = 0;
+  inputs.forEach(inp => {{
+    const raw = inp.value.trim();
+    if (raw) {{
+      parts.push(raw);
+      filled++;
+    }}
+  }});
+  document.getElementById('count').textContent = filled;
+  const out = document.getElementById('cmd-output');
+  if (parts.length === 0) {{
+    out.textContent = 'Fill in at least one path above.';
+  }} else {{
+    out.textContent = 'co-sync ' + TOKEN + ' \\\n  ' + parts.join(' \\\n  ');
+  }}
+}}
+
+function copyCmd() {{
+  const txt = document.getElementById('cmd-output').textContent;
+  if (!txt || txt.startsWith('Fill')) return;
+  navigator.clipboard.writeText(txt).then(() => {{
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
   }});
 }}
 </script>
 </body>
 </html>"#,
+        rows = rows,
+        universe_count = universe_count,
         token = token,
     );
     (
