@@ -5,13 +5,25 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.41.2] — 2026-05-03
+## [1.42.0] — 2026-05-04
 
-### Refactored — CO-161: visibility gate consolidated into a single tower middleware
+### Added — universe template, reindex, raw blob, link/PDF fixes
 
-Replaced 13 per-handler `check_reader_for_entries` calls (across `entry_routes`, `relation_routes`, `reference_routes`) and the duplicate `asset_routes::check_reader` with a single `universe_visibility_gate` middleware applied once to the combined universe-content router in `server::build_router`. A companion `universe_writer_gate` enforces ownership/membership on all mutating methods (POST/PUT/PATCH/DELETE), closing the latent gap where vault and reference write handlers only checked authentication but not universe membership. New sub-handlers automatically inherit both gates; no per-endpoint boilerplate needed.
+**CO-161: single tower visibility gate** — Replaced 13 per-handler `check_reader_for_entries` calls and the duplicate `asset_routes::check_reader` with `universe_visibility_gate` + `universe_writer_gate` middleware applied once to the combined `universe_content_api` router. 4 integration tests: anon/public → 200, anon/private → 401, owner/private → 200, non-member/private → 403.
 
-Four integration tests added: anon/public → 200, anon/private → 401, owner/private → 200, non-member/private → 403.
+**Universe template scaffold** — `POST /{slug}/apply-template` creates `CLAUDE.md` and `docs/api.md` (type: doc), adds `doc` to `_universe.yaml`, and returns a type-check report of entries with missing or undeclared types. Idempotent. `POST /apply-template-all` runs across all owned universes and writes a dados-style hub entry (`universes.md`) in a designated private universe.
+
+**Reindex** — `POST /{slug}/reindex` walks all `.md` files on disk via `co::scan_entries` and rebuilds the SQLite entry index. Fixes stale content when files are added outside the Vault API (git commits, local edits). Also syncs `content_count` and invalidates caches.
+
+**Entry limit raised** — Default query limit 500 → 5 000. Configurable via `?limit=N` (max 50 000). Fixes mbya showing only 500 of 4 608 lexemes.
+
+**Raw blob endpoint** — `GET /{slug}/blob/{*path}` serves any file from the universe directory with the correct Content-Type. Protected by visibility gate. Used by the PDF viewer when a reference card has `file:` but no `blob_sha256` (e.g. `mbya/refs/*.pdf`).
+
+**Wikilink and deep-URL fixes** — Wikilinks now resolve to `/co/{slug}/{path}` (removed spurious `/entries/` segment). `readUniverseSlugFromUrl` handles deep paths `/co/{slug}/{*rest}`. `maybeOpenEntryFromUrl` fetches and opens any linked entry directly. Per-segment path encoding (`split('/').map(encodeURIComponent).join('/')`) preserves slashes in multi-segment paths.
+
+**Markdown tables** — Fallback renderer now handles GFM pipe tables including column alignment.
+
+**Migration scripts** — `scripts/sync-to-prod.sh` and `scripts/consolidate-topologia.sh` for pushing local content to prod and merging topologia sub-universes into a single universe (option C: alphabetical folders).
 
 ## [1.41.1] — 2026-05-03
 
