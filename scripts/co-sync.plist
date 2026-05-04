@@ -1,5 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  com.artelonga.co-sync — auto-sync daemon for content universes.
+
+  Runs the `co-sync` Rust binary, which reads ~/projects/co/co-universes.yaml
+  (server URL + universe list with parents/visibility), ensures each universe
+  exists on prod, pushes all local files, and watches for filesystem changes
+  via persistent WebSocket (protobuf SyncDelta + zstd).
+
+  Auth: long-lived API token in macOS Keychain (service=co-sync-token, account=prod).
+  Bootstrap once via:
+    POST /api/v1/auth/password-login  (admin creds from co-prod-admin keychain)
+    POST /api/v1/auth/token { name: "co-sync-launchd" }
+    security add-generic-password -a prod -s co-sync-token -U -w "$TOKEN"
+
+  Install:
+    launchctl unload ~/Library/LaunchAgents/com.artelonga.co-sync.plist 2>/dev/null
+    cp scripts/co-sync.plist ~/Library/LaunchAgents/com.artelonga.co-sync.plist
+    launchctl load ~/Library/LaunchAgents/com.artelonga.co-sync.plist
+    tail -f ~/.co/co-sync.log
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
@@ -7,11 +27,11 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/artelonga/projects/co/scripts/co-watch.py</string>
+        <string>/bin/bash</string>
+        <string>-c</string>
+        <string>exec /Users/artelonga/.cargo/bin/co-sync "$(security find-generic-password -a prod -s co-sync-token -w)"</string>
     </array>
 
-    <!-- Run continuously: launchd starts it at login and restarts on crash. -->
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -19,23 +39,20 @@
     <key>ThrottleInterval</key>
     <integer>30</integer>
 
-    <key>StandardOutPath</key>
-    <string>/Users/artelonga/.co/launchd-stdout.log</string>
-
-    <key>StandardErrorPath</key>
-    <string>/Users/artelonga/.co/launchd-stderr.log</string>
-
     <key>WorkingDirectory</key>
     <string>/Users/artelonga/projects/co</string>
+
+    <key>StandardOutPath</key>
+    <string>/Users/artelonga/.co/co-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/artelonga/.co/co-sync.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
-        <key>CO_BASE</key>
-        <string>https://co-artelonga.fly.dev</string>
-        <key>CO_EMAIL</key>
-        <string>yuri@artelonga.com.br</string>
+        <string>/Users/artelonga/.cargo/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>RUST_LOG</key>
+        <string>co_sync=info,co_agent=info</string>
     </dict>
 </dict>
 </plist>

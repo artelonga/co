@@ -56,3 +56,9 @@ universes:
     local: ~/projects/rfq-gateway
     visibility: private
     description: RFQ Gateway — trading API documentation
+
+  - slug: time
+    name: Time — earth, sky, and system events
+    local: ~/projects/time
+    visibility: public-subscribable
+    description: Single universe for every time-stamped event — moon phases, eclipses, equinoxes, plus internal CRUD/telemetry. Absorbs the topologia fragments.
