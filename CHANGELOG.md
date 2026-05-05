@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.44.0] — 2026-05-05
+
+### Changed — Conteúdo is the default view; Calendar/Timeline are first-class tabs
+
+Tab order: **Conteúdo** (default) → Kanban → Tabela → Calendário → Timeline → Painel. Conteúdo is now the universal default for any universe — entries-as-source-of-truth, regardless of whether the universe has a populated kanban project. Calendar can render entries-as-events even without a project when the manifest declares a `presentation.calendar.date_field` (CO-73), so the time universe's `at_iso` events show on the calendar grid out of the box.
+
+**Known gap:** Timeline view still reads from `filteredTasks()` (legacy), so it doesn't yet render entries-as-events. The `events should be compatible with timeline format and calendar` directive is half-done — calendar works, timeline needs a separate pass to share the manifest-date path.
+
 ## [1.43.1] — 2026-05-05
 
 ### Fixed — static assets returning SPA HTML after URL refactor

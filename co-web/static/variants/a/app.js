@@ -6,7 +6,7 @@
         projects: [],
         currentProject: null,
         tasks: [],
-        view: 'kanban',
+        view: 'conteudo',
         editingTaskId: null,
         searchQuery: '',
         loading: false,
@@ -396,16 +396,18 @@
         loadCustomFonts(config);
 
         // 4. Set default layout / view from config (board → kanban, others map directly).
+        // Conteúdo is the universal default — every universe shows entries first,
+        // and other views (kanban, calendar, etc.) are opt-in per layout config.
         const layoutToView = {
             'board': 'kanban',
             'table': 'table',
             'timeline': 'timeline',
             'calendar': 'calendar',
             'dashboard': 'dashboard',
+            'conteudo': 'conteudo',
         };
-        const defaultView = layoutToView[config.layout] || 'kanban';
-        // Only switch if no user override is active yet.
-        if (state.view === 'kanban' && defaultView !== 'kanban') {
+        const defaultView = layoutToView[config.layout] || 'conteudo';
+        if (state.view !== defaultView) {
             switchView(defaultView);
         }
     }
@@ -4222,6 +4224,15 @@
             const manifest = state.universeManifest;
             const viewDef = manifest && (manifest.views || []).find(v => v.type === 'gantt' && v.name === viewName);
             if (viewDef) { renderGantt(viewDef); return; }
+        }
+        // Calendar can render entries-as-events when the manifest declares a
+        // date-semantic field (CO-73), even without a project. Same for the
+        // time universe and any other event-shaped universe.
+        const manifestHasCalendar = (state.universeManifest?.content_types || [])
+            .some(ct => ct.presentation?.calendar?.date_field);
+        if (state.view === 'calendar' && manifestHasCalendar) {
+            renderCalendar();
+            return;
         }
         if (!state.currentProject) {
             // No project in this universe (or fetch failed). Render an empty
