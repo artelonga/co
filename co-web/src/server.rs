@@ -1154,10 +1154,37 @@ async fn redirect_legacy_co_subpath(Path((slug, subpath)): Path<(String, String)
         .into_response()
 }
 
+/// Returns `true` when the URL path looks like a static asset request
+/// (has a file extension somewhere, or starts with a known asset prefix).
+/// Used to keep `/{slug}` from swallowing `/style.css`, `/shared/foo.css`,
+/// `/variants/a/app.js`, etc. after the v1.43 URL refactor.
+fn looks_like_static_asset(path: &str) -> bool {
+    const ASSET_PREFIXES: &[&str] = &["shared/", "variants/", "pdfjs/", "games/", "icons/"];
+    let stripped = path.trim_start_matches('/');
+    if ASSET_PREFIXES.iter().any(|p| stripped.starts_with(p)) {
+        return true;
+    }
+    // Last path segment contains a `.` → treat as filename.
+    stripped
+        .rsplit('/')
+        .next()
+        .map(|seg| seg.contains('.'))
+        .unwrap_or(false)
+}
+
 /// Serve `index.html` for `/`, `/{slug}`, and deep SPA paths. The hub
 /// (`/`) and any universe view (`/{slug}/...`) all return the same SPA
 /// shell; the client-side router resolves the path.
-async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Response {
+///
+/// After the v1.43 URL refactor `/{slug}` matches every top-level path,
+/// including filename-like ones (`/style.css`, `/app.js`, `/manifest.json`)
+/// and asset-prefix paths (`/shared/production.css`). [`looks_like_static_asset`]
+/// detects these and delegates to the static-file handler.
+async fn serve_co_index(headers: HeaderMap, uri: Uri, State(state): State<AppState>) -> Response {
+    if looks_like_static_asset(uri.path()) {
+        return serve_variant_file(headers, uri, State(state)).await;
+    }
+
     let variant = extract_variant(&headers, &state.config);
     let embed_path = format!("variants/{}/index.html", variant);
     let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
@@ -2384,6 +2411,29 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// `/{slug}` must NOT swallow static asset requests. Regression for the
+    /// 1.43.0 URL refactor where `/style.css` returned the SPA HTML instead
+    /// of CSS, breaking layout entirely.
+    #[test]
+    fn test_looks_like_static_asset_recognizes_filenames_and_prefixes() {
+        // Top-level filenames
+        assert!(looks_like_static_asset("/style.css"));
+        assert!(looks_like_static_asset("/app.js"));
+        assert!(looks_like_static_asset("/sw.js"));
+        assert!(looks_like_static_asset("/manifest.json"));
+        assert!(looks_like_static_asset("/icon.png"));
+        // Asset prefixes
+        assert!(looks_like_static_asset("/shared/production.css"));
+        assert!(looks_like_static_asset("/variants/a/style.css"));
+        assert!(looks_like_static_asset("/pdfjs/web/viewer.html"));
+        // Universe slugs (no extension) — must be SPA
+        assert!(!looks_like_static_asset("/"));
+        assert!(!looks_like_static_asset("/co"));
+        assert!(!looks_like_static_asset("/mbya"));
+        assert!(!looks_like_static_asset("/mbya/refs/foo"));
+        assert!(!looks_like_static_asset("/co/telemetria"));
     }
 
     // --- seed_admin_user_from_env drift detection tests ---

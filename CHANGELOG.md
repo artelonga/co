@@ -5,6 +5,12 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.43.1] — 2026-05-05
+
+### Fixed — static assets returning SPA HTML after URL refactor
+
+`/{slug}` matched `/style.css`, `/app.js`, `/manifest.json`, and `/shared/production.css` — every static asset got served the SPA HTML shell, killing all CSS and breaking the layout entirely. `serve_co_index` now sniffs for file extensions in the path and asset prefixes (`shared/`, `variants/`, `pdfjs/`, `games/`, `icons/`) and delegates to the static-file handler. Plus 301 redirects from legacy `/co/{slug}` URLs to `/{slug}` so old bookmarks land in the right universe instead of the SPA shell loading `co` with a phantom subpath.
+
 ## [1.43.0] — 2026-05-05
 
 ### Changed — drop the `/co` URL prefix; CO is hosted at the root
