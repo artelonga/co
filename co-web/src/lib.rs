@@ -37,7 +37,7 @@ pub mod reference_routes;
 pub mod relation_index;
 pub mod relation_routes;
 pub mod server;
-pub mod snapshot_routes;
+pub mod state_routes;
 pub mod storage;
 pub mod sync_ws;
 pub mod telemetry;

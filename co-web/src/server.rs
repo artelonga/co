@@ -343,8 +343,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .merge(relation_api)
         .merge(asset_api)
         .merge(reference_api)
-        // 1.47.0: snapshots (CO-native versioning Phase 1)
-        .merge(crate::snapshot_routes::router())
+        // 1.47.0: states (CO-native versioning Phase 1)
+        .merge(crate::state_routes::router())
         // CO-162: template scaffold + type audit (POST /{slug}/apply-template)
         .merge(crate::universe_routes::universe_actions_router())
         .layer(axum::middleware::from_fn_with_state(

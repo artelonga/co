@@ -1,16 +1,16 @@
-//! Snapshots — atomic point-in-time captures of a universe (Phase 1 of the
+//! States — atomic point-in-time captures of a universe (Phase 1 of the
 //! CO-native versioning that replaces git for development workflows).
 //!
-//! A snapshot is just an entry with `type=snapshot`, stored at
-//! `snapshots/<ISO-timestamp>-<nanoid>.md`. Its body is a stable
-//! line-per-entry serialization of `<sha256>  <path>` for every non-snapshot
-//! entry in the universe at the moment of capture, sorted by path. The hash
-//! of that body is the universe's `state_hash` — two snapshots with the
-//! same `state_hash` represent identical content.
+//! A state is just an entry with `type=state`, stored at
+//! `states/<ISO-timestamp>-<nanoid>.md`. Its body is a stable line-per-entry
+//! serialization of `<sha256>  <path>` for every non-state entry in the
+//! universe at the moment of capture, sorted by path. The hash of that
+//! body is `state_hash` — two states with the same hash represent
+//! identical content (the equivalent of a git commit ID).
 //!
-//! `parent` (in frontmatter) chains snapshots into a linear history. The
-//! POST handler auto-discovers the most recent snapshot to wire as parent.
-//! Branches (named pointers to snapshots) come in Phase 2.
+//! `parent` (in frontmatter) chains states into a linear history. The
+//! POST handler auto-discovers the most recent prior state to wire as
+//! parent. Branches (named pointers to a state) come in Phase 2.
 
 use axum::{
     Json, Router,
@@ -28,13 +28,13 @@ use crate::error::AppError;
 use crate::server::AppState;
 
 #[derive(Debug, Deserialize, Default)]
-pub struct CreateSnapshotRequest {
+pub struct CreateStateRequest {
     #[serde(default)]
     pub message: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct SnapshotResponse {
+pub struct StateResponse {
     pub path: String,
     pub author: Option<String>,
     pub message: String,
@@ -45,25 +45,25 @@ pub struct SnapshotResponse {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/{slug}/snapshots", post(create_snapshot))
+    Router::new().route("/{slug}/states", post(create_state))
 }
 
-/// `POST /api/v1/universes/:slug/snapshots` — capture the current state.
+/// `POST /api/v1/universes/:slug/states` — capture the current state.
 ///
-/// 1. Walk every entry in the universe (excluding `type=snapshot` so the
+/// 1. Walk every entry in the universe (excluding `type=state` so the
 ///    history doesn't recursively include itself).
 /// 2. Sort by path, hash each `(frontmatter_json + body)` pair, and build a
 ///    line-per-entry body of `<sha256>  <path>`.
 /// 3. Hash that body → `state_hash`.
-/// 4. Find the most recent existing snapshot and wire it as `parent`.
-/// 5. Write the snapshot itself as an entry via the vault writer (so it
-///    flows through the same indexing, FTS, and WS-broadcast paths every
-///    other write uses).
-pub async fn create_snapshot(
+/// 4. Find the most recent existing state and wire it as `parent`.
+/// 5. Write the state itself as an entry via the vault writer (so it flows
+///    through the same indexing, FTS, and WS-broadcast paths every other
+///    write uses).
+pub async fn create_state(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     headers: HeaderMap,
-    Json(req): Json<CreateSnapshotRequest>,
+    Json(req): Json<CreateStateRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let author = resolve_user_id(&state, &headers);
 
@@ -71,9 +71,9 @@ pub async fn create_snapshot(
     let now_iso = now.to_rfc3339();
     let timestamp = now.format("%Y-%m-%dT%H%M%SZ").to_string();
     let suffix = nanoid::nanoid!(8);
-    let snapshot_path = format!("snapshots/{}-{}.md", timestamp, suffix);
+    let state_path = format!("states/{}-{}.md", timestamp, suffix);
 
-    // --- 1. Walk all non-snapshot entries, build the state body ---
+    // --- 1. Walk all non-state entries, build the manifest body ---
 
     let (state_lines, parent_path) = {
         let uc = {
@@ -81,9 +81,8 @@ pub async fn create_snapshot(
                 .storage
                 .lock()
                 .map_err(|_| AppError::Internal("storage lock failed".into()))?;
-            // Verify the universe exists; the visibility middleware already
-            // gated this route, but a defensive 404 here keeps the error
-            // shape consistent with other handlers when called from tests.
+            // Defensive 404: visibility middleware already gated this route,
+            // but a direct test-call without it should still 404 cleanly.
             if storage.get_universe(&slug).is_none() {
                 return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
             }
@@ -98,11 +97,11 @@ pub async fn create_snapshot(
             .query(&slug, "", &json!({}))
             .map_err(|e| AppError::Internal(format!("query entries: {e}")))?;
 
-        // Exclude snapshots from their own state (otherwise the hash drifts
-        // every time you take a snapshot — recursion).
+        // Exclude states from their own state (otherwise the hash drifts
+        // every time you take a state — recursion).
         let mut state_entries: Vec<(String, String)> = all
             .iter()
-            .filter(|e| e.entry_type != "snapshot")
+            .filter(|e| e.entry_type != "state")
             .map(|e| {
                 let mut h = Sha256::new();
                 h.update(e.frontmatter.to_string().as_bytes());
@@ -119,11 +118,11 @@ pub async fn create_snapshot(
             .map(|(path, hash)| format!("{hash}  {path}\n"))
             .collect();
 
-        // Parent: the snapshot with the largest path (paths sort
+        // Parent: the state with the largest path (paths sort
         // lexicographically by ISO timestamp, so largest = most recent).
         let parent = all
             .iter()
-            .filter(|e| e.entry_type == "snapshot")
+            .filter(|e| e.entry_type == "state")
             .map(|e| e.path.clone())
             .max();
 
@@ -133,11 +132,11 @@ pub async fn create_snapshot(
     let entry_count = state_lines.lines().count();
     let state_hash = format!("{:x}", Sha256::digest(state_lines.as_bytes()));
 
-    // --- 2. Build the snapshot entry's frontmatter + body ---
+    // --- 2. Build the state entry's frontmatter + body ---
 
     let mut frontmatter = json!({
-        "type": "snapshot",
-        "title": format!("Snapshot {timestamp}"),
+        "type": "state",
+        "title": format!("State {timestamp}"),
         "message": req.message,
         "entry_count": entry_count,
         "state_hash": state_hash.clone(),
@@ -151,7 +150,7 @@ pub async fn create_snapshot(
     }
 
     let body = format!(
-        "# Snapshot {timestamp}\n\
+        "# State {timestamp}\n\
         \n\
         - **state_hash:** `{state_hash}`\n\
         - **entries:** {entry_count}\n\
@@ -163,18 +162,18 @@ pub async fn create_snapshot(
         parent_path
             .as_deref()
             .map(|p| format!("`{p}`"))
-            .unwrap_or_else(|| "_(none — first snapshot)_".to_string()),
+            .unwrap_or_else(|| "_(none — first state)_".to_string()),
         state_lines.trim_end()
     );
 
     // --- 3. Persist via the existing vault writer ---
 
-    crate::vault_routes::write_vault_entry(&state, &slug, &snapshot_path, frontmatter, &body)?;
+    crate::vault_routes::write_vault_entry(&state, &slug, &state_path, frontmatter, &body)?;
 
     Ok((
         axum::http::StatusCode::CREATED,
-        Json(SnapshotResponse {
-            path: snapshot_path,
+        Json(StateResponse {
+            path: state_path,
             author,
             message: req.message,
             parent: parent_path,
@@ -189,7 +188,7 @@ pub async fn create_snapshot(
 mod tests {
     use super::*;
 
-    /// Smoke: hashing two snapshots of the same content yields the same
+    /// Smoke: hashing two states of the same content yields the same
     /// `state_hash` (the operation is deterministic), and adding a new
     /// entry between them changes the hash.
     #[test]

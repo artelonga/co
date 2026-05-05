@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.47.0] — 2026-05-05
 
-### Added — Snapshots: CO-native versioning Phase 1 (replaces `git commit`)
+### Added — States: CO-native versioning Phase 1 (replaces `git commit`)
 
-`POST /api/v1/universes/:slug/snapshots` writes an atomic point-in-time capture of every entry in the universe (excluding snapshots themselves, to prevent recursive hash drift). The snapshot is stored as just another entry — `type=snapshot`, path `snapshots/<ISO-timestamp>-<nanoid>.md`, body is a stable line-per-entry serialization of `<sha256>  <path>` sorted by path. Frontmatter carries `parent` (auto-wired to the most recent prior snapshot), `state_hash` (sha256 of the body), `entry_count`, `author`, `message`. Same dedup property as a git commit hash — two snapshots with the same `state_hash` capture identical content.
+`POST /api/v1/universes/:slug/states` writes an atomic point-in-time capture of every entry in the universe (excluding states themselves, to prevent recursive hash drift). The state is stored as just another entry — `type=state`, path `states/<ISO-timestamp>-<nanoid>.md`, body is a stable line-per-entry serialization of `<sha256>  <path>` sorted by path. Frontmatter carries `parent` (auto-wired to the most recent prior state), `state_hash` (sha256 of the body), `entry_count`, `author`, `message`. Same dedup property as a git commit hash — two states with the same `state_hash` capture identical content.
 
-Forward-compatible: snapshots are entries, so they flow through every existing infrastructure path (FTS search, vault API, WS broadcast, visibility gate). Listing snapshots is just `GET /entries?type=snapshot&$sort={created_at:-1}`. No new tables, no schema migration. Branches and merges arrive in subsequent phases as additional content types.
+Forward-compatible: states are entries, so they flow through every existing infrastructure path (FTS search, vault API, WS broadcast, visibility gate). Listing states is just `GET /entries?type=state&$sort={created_at:-1}`. No new tables, no schema migration. Branches and merges arrive in subsequent phases as additional content types.
 
 This is the first concrete primitive replacing git for CO development workflows — see `feedback_no_git.md` memory for the broader direction.
 
@@ -190,7 +190,7 @@ Every state change now emits one `telemetry_events` row with `event_type = "crud
 - Idempotent: skip if `at_iso` matches the existing file; update if INMET revised the table
 - Fails loudly on any unexpected HTML structure so silent data corruption is impossible
 - Cross-year: `--time-dir` and `?ano=<year>` URL parameter work for any year
-- `tests/fixtures/inmet-luas-2026.html` — offline HTML snapshot for CI (2026: 50 phases)
+- `tests/fixtures/inmet-luas-2026.html` — offline HTML state for CI (2026: 50 phases)
 - Ran against `~/projects/time` to populate all 50 phases for 2026
 
 ## [1.38.11] — 2026-05-03
@@ -690,9 +690,9 @@ Closes the filesystem-cruft gap surfaced after CO-142 Phases C+D hard-deleted DB
 
 ### Done — CO-100 documentation pass for 1.34.x reality
 
-`docs/ARCHITECTURE.md` updated from 1.21.x snapshot to current state:
+`docs/ARCHITECTURE.md` updated from 1.21.x state to current state:
 - C4 component diagram now includes co-agent (CO-120), ClickHouse (CO-123), Cloudflare CDN+WAE (CO-117), admin surface (CO-105), and the per-universe SQLite split (CO-77)
-- New "Armazenamento (1.23+)" section documenting the meta.db / per-universe data.db topology, WAL-safe snapshot rules, idempotent migrations (`ensure_column` / `ensure_table`)
+- New "Armazenamento (1.23+)" section documenting the meta.db / per-universe data.db topology, WAL-safe state rules, idempotent migrations (`ensure_column` / `ensure_table`)
 - New "Endpoints novos (1.22 → 1.34)" table covering admin / A/B / log-drains / cache / themes / generic entries
 - New "Componentes opcionais" section on co-agent, ClickHouse, backup-cron, Cloudflare
 - New "Evolução desde 1.21.x" cross-reference table mapping each shipped feature to its commit/file location
@@ -936,10 +936,10 @@ After this fix:
 
 ## [1.28.0] — 2026-05-01
 
-### Added — CO-104: Backup automation — daily snapshot of SQLite + universes/ to S3
+### Added — CO-104: Backup automation — daily state of SQLite + universes/ to S3
 
 **Scripts**
-- `scripts/backup-prod.sh` — atomic SQLite snapshot via `.backup` + `universes/` tarball, uploads both to S3 (`co.db/<date>.db`, `universes/<date>.tar.gz`); idempotent, no interactive prompts
+- `scripts/backup-prod.sh` — atomic SQLite state via `.backup` + `universes/` tarball, uploads both to S3 (`co.db/<date>.db`, `universes/<date>.tar.gz`); idempotent, no interactive prompts
 - `scripts/restore.sh` — restores from S3 (date mode) or local file; added **production safety guard**: fails loud if target is `co-artelonga` without `--yes-i-want-to-overwrite-prod`; restores both SQLite and `universes/` tarball when pulling from S3
 
 **Cron automation**
@@ -1194,7 +1194,7 @@ Additional infrastructure:
 
 ### Fixed — CO-137: harden ALTER ADD COLUMN migrations against partial-application + diagnostic endpoint
 
-**Root cause investigation (CO-137):** Migration v22 (`parent_key` on `universes`) was checked with `if current_version < 22` after a fresh `MAX(version)` read — mechanically correct. Code analysis suggests the most likely failure mode is a stale `schema_version=22` row recorded without the matching `ALTER TABLE` completing (volume snapshot edge case or a previous deploy that committed the version row but not the schema change). The diagnostic endpoint added in this release confirms prod schema state.
+**Root cause investigation (CO-137):** Migration v22 (`parent_key` on `universes`) was checked with `if current_version < 22` after a fresh `MAX(version)` read — mechanically correct. Code analysis suggests the most likely failure mode is a stale `schema_version=22` row recorded without the matching `ALTER TABLE` completing (volume state edge case or a previous deploy that committed the version row but not the schema change). The diagnostic endpoint added in this release confirms prod schema state.
 
 **Structural fix:** Replaced bare `ALTER TABLE … ADD COLUMN` calls in migrations v17–v22 with `ensure_column` — a `pragma_table_info`-guarded helper that is a no-op when the column already exists. This makes every column-add migration idempotent: re-running a partially-applied migration recovers cleanly instead of panicking on "duplicate column name."
 
@@ -1510,7 +1510,7 @@ Seed content for the template universe (sobre, termos, privacidade, dados-rastre
 
 `Storage::clone_universe` had project + task + page-specific copy paths but skipped everything else (events, clips, doc.*, untyped markdown). The first 1.20.0 duplicate of `quilomboaraucaria` produced an empty universe because all 70 source entries were `event` type from the legacy quilombo-blog migration.
 
-- Added a final bulk `INSERT INTO entries SELECT FROM entries` step that copies all entry types not covered by the typed paths (entry_type NOT IN ('project','task','page')). Source paths/titles/frontmatter/body preserved verbatim — the duplicate is a true snapshot.
+- Added a final bulk `INSERT INTO entries SELECT FROM entries` step that copies all entry types not covered by the typed paths (entry_type NOT IN ('project','task','page')). Source paths/titles/frontmatter/body preserved verbatim — the duplicate is a true state.
 - `INSERT OR IGNORE` makes it safe to re-run if a partial copy needs completion.
 
 ## [1.20.0] — 2026-04-29
@@ -1528,7 +1528,7 @@ Helper for handlers outside the JWT-only `require_auth` middleware that still ne
 
 ### Spec
 
-- `work/co/CO-95.md`: Universe branching — 4-phase plan (snapshot → op log → replay → merge). Phase 1 ships in this release.
+- `work/co/CO-95.md`: Universe branching — 4-phase plan (state → op log → replay → merge). Phase 1 ships in this release.
 - `work/co/CO-96.md`: Universe CRUD UX in the SPA — sidebar `+ New universe` button, context menu (rename / change visibility / duplicate / delete), settings tab, soft-delete + 30-day trash. 3 phases mapped to 1.20.0 / 1.21.0 / 1.22.0.
 
 ## [1.19.2] — 2026-04-29
@@ -1926,7 +1926,7 @@ re-bumped after CO-37 deploy) is implicitly bundled into this release.
 - `playbooks/provision.yml` — creates `co` unprivileged user, installs ca-certificates + sqlite3 + zstd + Caddy, creates `/opt/co/` + `/var/lib/co/data/`, configures UFW (allow 80/443, deny rest)
 - `playbooks/deploy.yml` — cross-compiles co-web via `cross`, copies binary, writes systemd unit, runs seed SQL on first deploy, restarts service, verifies `/api/health`
 - `playbooks/backup.yml` — SQLite `.backup` (online, consistent), zstd compression, 7 daily + 4 weekly rotation, optional rclone upload to S3/B2, cron at 03:00 UTC
-- `playbooks/fly-deploy.yml` — wraps `flyctl deploy --remote-only` with pre-deploy snapshot and post-deploy health check
+- `playbooks/fly-deploy.yml` — wraps `flyctl deploy --remote-only` with pre-deploy state and post-deploy health check
 - `templates/co-web.service.j2` — systemd unit with ExecStart, WorkingDirectory, Environment, systemd hardening (NoNewPrivileges, ProtectSystem)
 - `templates/caddy.conf.j2` — reverse proxy with auto-SSL, zstd+gzip compression, security headers (HSTS, X-Frame-Options, etc.), static asset caching
 - `group_vars/all.yml` — shared config: co_version, co_port, co_domain, backup retention settings
