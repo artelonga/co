@@ -311,7 +311,7 @@ async fn test_admin_dashboard_page_served() {
 
     let req = Request::builder()
         .method("GET")
-        .uri("/co/co/telemetria")
+        .uri("/co/telemetria")
         .body(Body::empty())
         .unwrap();
 

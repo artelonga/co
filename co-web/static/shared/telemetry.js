@@ -71,9 +71,10 @@
       properties: props || null,
     };
 
-    // universe slug from /co/{slug}
-    const m = location.pathname.match(/^\/co\/([^/]+)/);
-    if (m && m[1] !== 'co-dev') body.universe_key = m[1];
+    // universe slug from /{slug}/...
+    const RESERVED = ['admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'api'];
+    const m = location.pathname.match(/^\/([^/]+)/);
+    if (m && !RESERVED.includes(m[1])) body.universe_key = m[1];
 
     // sendBeacon with a string body sends Content-Type: text/plain (or none),
     // which the server's Json extractor rejects with 415. Use a Blob with

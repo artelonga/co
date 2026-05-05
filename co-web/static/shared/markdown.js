@@ -313,9 +313,9 @@
     return p.split('/').map(encodeURIComponent).join('/');
   }
 
-  /** Build the SPA viewer URL for an entry: /co/{slug}/{path} (no /entries/ segment). */
+  /** Build the SPA viewer URL for an entry: /{slug}/{path} (no /entries/ segment). */
   function _entryHref(universeSlug, entryPath) {
-    return '/co/' + _escHtml(universeSlug) + '/' + _encodePath(entryPath);
+    return '/' + _escHtml(universeSlug) + '/' + _encodePath(entryPath);
   }
 
   function _rewriteRelativeMdLinks(html, universeSlug) {
@@ -336,7 +336,7 @@
   /**
    * Replace [[wikilinks]] in rendered HTML with SPA viewer anchors, and
    * rewrite any relative .md links produced by the markdown renderer.
-   * URL format: /co/{slug}/{entry-path} — no /entries/ segment.
+   * URL format: /{slug}/{entry-path} — no /entries/ segment.
    */
   function resolveWikilinks(html, universeSlug) {
     if (!html) return html;

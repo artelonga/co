@@ -4666,24 +4666,21 @@
     // ===== Universe routing helpers =====
 
     function readUniverseSlugFromUrl() {
-        // Path-based routing: /co → template, /co/{slug} → slug
-        // Also handle /co/yggdrasil/{game} and deep paths /co/{slug}/{*rest}
-        const gameMatch = window.location.pathname.match(/^\/co\/yggdrasil\/([a-z0-9-]+)/);
-        if (gameMatch) return 'yggdrasil';
-        // Deep path: /co/{slug}/{*rest} — capture the first segment as slug
-        const deepMatch = window.location.pathname.match(/^\/co\/([a-z0-9-]+)(\/|$)/);
-        if (deepMatch) return deepMatch[1];
-        if (window.location.pathname === '/co') return 'template';
-        const params = new URLSearchParams(window.location.search);
-        return params.get('u') || 'template';
+        // Path-based routing: `/` → template, `/{slug}` → slug, `/{slug}/...`
+        // → slug. Reserved top-level paths return 'template' (the hub).
+        const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app'];
+        if (window.location.pathname.match(/^\/yggdrasil\/[a-z0-9-]+/)) return 'yggdrasil';
+        const m = window.location.pathname.match(/^\/([a-z0-9-]+)(\/|$)/);
+        if (m && !RESERVED.includes(m[1])) return m[1];
+        return 'template';
     }
 
     /**
-     * Extract the entry path from a deep URL like /co/{slug}/docs/file.md
+     * Extract the entry path from a deep URL like /{slug}/docs/file.md.
      * Returns null when the URL has no subpath beyond the universe slug.
      */
     function readEntryPathFromUrl(universeSlug) {
-        const prefix = `/co/${universeSlug}/`;
+        const prefix = `/${universeSlug}/`;
         const p = window.location.pathname;
         if (!p.startsWith(prefix)) return null;
         const sub = p.slice(prefix.length);
@@ -4693,7 +4690,7 @@
     }
 
     /**
-     * If the current URL contains a deep entry path (e.g. /co/mbya/refs/foo),
+     * If the current URL contains a deep entry path (e.g. /mbya/refs/foo),
      * fetch and open that entry in the zoom modal after the universe boots.
      */
     async function maybeOpenEntryFromUrl(universeSlug) {
@@ -4710,7 +4707,7 @@
                     `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${encodedPath}`
                 );
                 if (entry && entry.path) {
-                    window.history.replaceState({}, '', `/co/${universeSlug}`);
+                    window.history.replaceState({}, '', `/${universeSlug}`);
                     openZoomModal({ ...entry, _universeSlug: universeSlug }, false);
                     return;
                 }
@@ -4730,36 +4727,25 @@
                     const s = (e.path || '').split('/').pop().replace(/\.md$/i, '');
                     return s.toLowerCase() === stem.toLowerCase();
                 }) || res.entries[0];
-                window.history.replaceState({}, '', `/co/${universeSlug}`);
+                window.history.replaceState({}, '', `/${universeSlug}`);
                 openZoomModal({ ...exact, _universeSlug: universeSlug }, false);
                 return;
             }
         } catch (_) {}
 
-        window.history.replaceState({}, '', `/co/${universeSlug}`);
+        window.history.replaceState({}, '', `/${universeSlug}`);
         maybeOpenPageFromUrl(universeSlug);
     }
 
     function readGameFromUrl() {
-        const m = window.location.pathname.match(/^\/co\/yggdrasil\/([a-z0-9-]+)$/);
+        const m = window.location.pathname.match(/^\/yggdrasil\/([a-z0-9-]+)$/);
         return m ? m[1] : null;
     }
 
     function setUniverseSlugInUrl(slug) {
-        // Use path-based routing when on /co
-        if (window.location.pathname.startsWith('/co')) {
-            const newPath = slug === 'template' ? '/co' : `/co/${slug}`;
-            window.history.pushState({}, '', newPath);
-        } else {
-            // Legacy query param routing (root path)
-            const url = new URL(window.location.href);
-            if (slug === 'template') {
-                url.searchParams.delete('u');
-            } else {
-                url.searchParams.set('u', slug);
-            }
-            window.history.pushState({}, '', url.toString());
-        }
+        // Path-based routing: hub at `/`, universes at `/{slug}`.
+        const newPath = slug === 'template' ? '/' : `/${slug}`;
+        window.history.pushState({}, '', newPath);
         // Persist preferred universe so login → correct board on next visit.
         if (slug && slug !== 'template') {
             try { localStorage.setItem('co_preferred_universe', slug); } catch (_) {}
@@ -5347,7 +5333,7 @@
 
         document.getElementById('ygg-back-btn').addEventListener('click', () => {
             state.gameView = null;
-            window.history.pushState({}, '', '/co/yggdrasil');
+            window.history.pushState({}, '', '/yggdrasil');
             renderYggdrasilHub(me);
         });
 
@@ -5387,7 +5373,7 @@
 
     function navigateToGame(gameId) {
         state.gameView = gameId;
-        window.history.pushState({}, '', `/co/yggdrasil/${gameId}`);
+        window.history.pushState({}, '', `/yggdrasil/${gameId}`);
         api.me().then(me => {
             if (me) renderYggdrasilGame(gameId, me);
             else renderYggdrasilLoginWall(gameId);
@@ -5506,7 +5492,7 @@
                         </p>
                         <p style="margin:0;display:flex;gap:8px;flex-wrap:wrap">
                             <button class="btn btn-primary btn-sm" onclick="window.location.reload()">Recarregar</button>
-                            <a class="btn btn-secondary btn-sm" href="/co" style="text-decoration:none">Voltar ao template</a>
+                            <a class="btn btn-secondary btn-sm" href="/" style="text-decoration:none">Voltar ao template</a>
                             <a class="btn btn-secondary btn-sm" href="/reset-sw.html" style="text-decoration:none">Reset cache</a>
                         </p>
                     </div>`;

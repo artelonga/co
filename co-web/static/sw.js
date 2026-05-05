@@ -216,15 +216,17 @@ self.addEventListener('fetch', (e) => {
 
   // HTML / JS / CSS + SPA routes: network-first so deploys are picked up on
   // next request. Falls back to cache only if the network errors (offline).
-  // /co and /co/* are SPA navigation routes — they return index.html and must
-  // be network-first so stale HTML doesn't block post-deploy updates.
+  // After the v1.43 URL refactor, every non-/api path is a SPA navigation
+  // route — they all return index.html and must be network-first so stale
+  // HTML doesn't block post-deploy updates.
   const isAppShell =
-    url.pathname === '/' ||
-    url.pathname === '/co' ||
-    url.pathname.startsWith('/co/') ||
-    url.pathname.endsWith('.html') ||
-    url.pathname.endsWith('.js') ||
-    url.pathname.endsWith('.css');
+    !url.pathname.endsWith('.png') &&
+    !url.pathname.endsWith('.jpg') &&
+    !url.pathname.endsWith('.jpeg') &&
+    !url.pathname.endsWith('.webp') &&
+    !url.pathname.endsWith('.gif') &&
+    !url.pathname.endsWith('.svg') &&
+    !url.pathname.endsWith('.pdf');
   if (isAppShell) {
     e.respondWith(
       fetch(req)

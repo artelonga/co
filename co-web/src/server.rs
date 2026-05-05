@@ -373,40 +373,36 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let sync_ws_route =
         Router::new().route("/api/v1/sync/ws", get(crate::sync_ws::sync_ws_handler));
 
-    // --- /co landing + universe routes (serve index.html for SPA routing) ---
+    // --- SPA routes (serve index.html for client-side routing) ---
+    //
+    // The `/co` URL prefix was dropped: the platform is hosted at the root,
+    // and `co` is now just one universe slug among many (its own dogfooding
+    // instance, no special path). Reserved top-level paths that must NOT be
+    // matched as universe slugs: `api`, `admin`, `settings`, `yggdrasil`,
+    // `static`, `health`. All literal routes are registered before `/{slug}`
+    // so axum's matcher prefers them over the param.
     let co_routes = Router::new()
-        // Root redirect → /co (the SPA landing)
+        // SPA hub at root.
+        .route("/", get(serve_co_index))
+        // CO-105: /admin page — server-side auth.
+        .route("/admin", get(crate::admin_routes::serve_admin_page))
+        // Telemetry admin dashboard for the `co` universe (dogfooding).
         .route(
-            "/",
-            get(|| async {
-                (
-                    axum::http::StatusCode::FOUND,
-                    [(
-                        axum::http::header::LOCATION,
-                        axum::http::HeaderValue::from_static("/co"),
-                    )],
-                )
-            }),
-        )
-        .route("/co", get(serve_co_index))
-        // CO-142: retargeted from /co/co-dev/telemetria (co-dev deprecated in Phase C)
-        .route(
-            "/co/co/telemetria",
+            "/co/telemetria",
             get(crate::telemetry::serve_admin_dashboard),
         )
-        .route("/co/{slug}", get(serve_co_index))
-        // CO-150: asset browser page for universe owners
-        .route("/co/{slug}/assets", get(serve_assets_page))
-        // Sync settings page — creates/shows API token for co-sync
-        .route("/co/settings/sync", get(serve_sync_settings))
-        // CO-38: Yggdrasil game view — /co/yggdrasil/{game} served by the SPA
-        .route("/co/yggdrasil/{game}", get(serve_co_index))
-        // CO-144 fix: any deeper SPA path under a universe (e.g.
-        // `/co/yuri/dados`, `/co/co/processos/alterar-pagina-na-web`)
-        // also serves the SPA shell so the client-side router can resolve it.
-        // Must come AFTER the more specific `/co/{slug}/assets` and
-        // `/co/yggdrasil/{game}` routes so axum's matcher prefers them.
-        .route("/co/{slug}/{*subpath}", get(serve_co_index));
+        // Sync settings page — creates/shows API token for co-sync.
+        .route("/settings/sync", get(serve_sync_settings))
+        // CO-38: Yggdrasil game view — served by the SPA.
+        .route("/yggdrasil/{game}", get(serve_co_index))
+        // CO-150: asset browser page for universe owners.
+        .route("/{slug}/assets", get(serve_assets_page))
+        // Universe view (SPA).
+        .route("/{slug}", get(serve_co_index))
+        // CO-144: any deeper SPA path under a universe — must come AFTER the
+        // more specific `/{slug}/assets` and top-level routes so axum's
+        // matcher prefers them.
+        .route("/{slug}/{*subpath}", get(serve_co_index));
 
     // --- CO-105: Admin dashboard API + static page ---
     let admin_dashboard_api = crate::admin_routes::api_router();
@@ -415,8 +411,6 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .merge(ws_route)
         .merge(sync_ws_route)
         .merge(co_routes)
-        // CO-105: /admin page — server-side auth, must precede the fallback
-        .route("/admin", get(crate::admin_routes::serve_admin_page))
         .nest("/api", board_public)
         .nest("/api", board_protected)
         .nest("/api", auth_api)
@@ -1133,7 +1127,9 @@ fn extract_participant(headers: &HeaderMap) -> Option<String> {
     None
 }
 
-/// Serve `index.html` for `/co` and `/co/{slug}` — SPA landing routes.
+/// Serve `index.html` for `/`, `/{slug}`, and deep SPA paths. The hub
+/// (`/`) and any universe view (`/{slug}/...`) all return the same SPA
+/// shell; the client-side router resolves the path.
 async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Response {
     let variant = extract_variant(&headers, &state.config);
     let embed_path = format!("variants/{}/index.html", variant);
@@ -1201,7 +1197,7 @@ async fn serve_co_index(headers: HeaderMap, State(state): State<AppState>) -> Re
     (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
-/// CO-150: Serve the asset browser page at `/co/{slug}/assets`.
+/// CO-150: Serve the asset browser page at `/{slug}/assets`.
 async fn serve_assets_page(State(state): State<AppState>) -> Response {
     let embed_path = "shared/assets.html";
     let fs_path = std::path::Path::new(&state.config.static_dir).join(embed_path);
@@ -1222,7 +1218,7 @@ async fn serve_assets_page(State(state): State<AppState>) -> Response {
     (StatusCode::NOT_FOUND, "Asset browser page not found").into_response()
 }
 
-/// GET /co/settings/sync — shows API token. Paths live in co-universes.yaml locally.
+/// GET /settings/sync — shows API token. Paths live in co-universes.yaml locally.
 /// Auth required.
 async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) -> Response {
     let user_id = match crate::auth::resolve_user_id(&state, &headers) {
@@ -1230,7 +1226,7 @@ async fn serve_sync_settings(headers: HeaderMap, State(state): State<AppState>) 
         None => {
             return (
                 StatusCode::FOUND,
-                [(header::LOCATION, HeaderValue::from_static("/co"))],
+                [(header::LOCATION, HeaderValue::from_static("/"))],
                 (),
             )
                 .into_response();

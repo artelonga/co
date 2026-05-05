@@ -1293,7 +1293,7 @@ fn build_claude_md(name: &str, description: &str, slug: &str, types: &[String]) 
          ## Universe\n\n\
          - **Slug**: `{slug}`\n\
          - **API base**: `/api/v1/universes/{slug}`\n\
-         - **Viewer**: `/co/{slug}`\n\n\
+         - **Viewer**: `/{slug}`\n\n\
          ## Content types\n\n{ct_list}\n\n\
          ## Working with this universe\n\n\
          All entries are `.md` files with YAML front-matter stored under the \

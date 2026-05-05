@@ -543,11 +543,23 @@ pub async fn telemetry_middleware(
         .and_then(|v| v.to_str().ok())
         .map(String::from);
 
-    // Extract universe slug from /co/{slug} path
+    // Extract universe slug from `/{slug}/...` path. After the v1.43 URL
+    // refactor the platform is hosted at the root, so any non-reserved
+    // top-level segment is treated as a universe key.
+    const RESERVED_TOP: &[&str] = &[
+        "api",
+        "admin",
+        "settings",
+        "yggdrasil",
+        "static",
+        "health",
+        "_app",
+        "v1",
+    ];
     let universe_key: Option<String> = path
-        .strip_prefix("/co/")
-        .and_then(|rest| rest.split('/').next())
-        .filter(|s| !s.is_empty() && *s != "co-dev")
+        .split('/')
+        .nth(1)
+        .filter(|s| !s.is_empty() && !RESERVED_TOP.contains(s))
         .map(String::from);
 
     let start = Instant::now();
@@ -1233,7 +1245,7 @@ mod tests {
                 event_type: "pageview".to_string(),
                 event_name: "page.view".to_string(),
                 universe_key: None,
-                path: Some("/co".to_string()),
+                path: Some("/".to_string()),
                 properties: None,
                 duration_ms: Some(42),
                 ip_hash: Some("abc123".to_string()),
@@ -1253,7 +1265,7 @@ mod tests {
                 event_type: "error".to_string(),
                 event_name: "js.error".to_string(),
                 universe_key: None,
-                path: Some("/co".to_string()),
+                path: Some("/".to_string()),
                 properties: Some(serde_json::json!({"message": "TypeError"})),
                 duration_ms: None,
                 ip_hash: Some("def456".to_string()),

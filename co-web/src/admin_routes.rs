@@ -353,17 +353,17 @@ pub async fn dashboard_handler(
 /// GET /admin
 ///
 /// Serves the admin HTML page after validating the session cookie.
-/// Redirects to /co if unauthenticated; returns 403 if not the seed admin.
+/// Redirects to / if unauthenticated; returns 403 if not the seed admin.
 pub async fn serve_admin_page(headers: HeaderMap) -> Response {
     let token = match crate::auth::extract_session_cookie(&headers) {
         Some(t) => t,
-        None => return Redirect::to("/co").into_response(),
+        None => return Redirect::to("/").into_response(),
     };
 
     let secret = crate::auth::jwt_secret();
     let claims = match crate::auth::decode_claims(&token, &secret) {
         Ok(c) => c,
-        Err(_) => return Redirect::to("/co").into_response(),
+        Err(_) => return Redirect::to("/").into_response(),
     };
 
     if !check_admin_email(&claims.email) {
@@ -751,7 +751,7 @@ mod tests {
         assert_eq!(resp.status(), AxumStatus::SEE_OTHER);
         assert_eq!(
             resp.headers().get("location").and_then(|v| v.to_str().ok()),
-            Some("/co")
+            Some("/")
         );
     }
 
