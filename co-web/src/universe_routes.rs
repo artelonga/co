@@ -283,14 +283,16 @@ pub async fn update_universe(
     }
 
     if let Some(vis) = body.get("visibility").and_then(|v| v.as_str()) {
-        // Owners may flip between these three; "template" is system-only.
-        let (is_public, requires_login) = match vis {
-            "private" => (0, 0),
-            "public-subscribable" => (1, 0),
-            "requires_login" => (0, 1),
+        // 1.46.0: only `private` and `public-subscribable` are user-settable.
+        // `template` is system-only; `requires_login` was collapsed into
+        // `public-subscribable` (paired with `default_for_new_users` for
+        // universes that should auto-attach to every new user).
+        let is_public = match vis {
+            "private" => 0,
+            "public-subscribable" => 1,
             _ => {
                 return Err(AppError::BadRequest(format!(
-                    "Invalid visibility '{}'. Must be: private, public-subscribable, requires_login",
+                    "Invalid visibility '{}'. Must be: private, public-subscribable",
                     vis
                 )));
             }
@@ -299,9 +301,9 @@ pub async fn update_universe(
         storage
             .conn()
             .execute(
-                "UPDATE universes SET visibility = ?1, is_public = ?2, requires_login = ?3 \
-                 WHERE key = ?4",
-                rusqlite::params![vis, is_public, requires_login, slug],
+                "UPDATE universes SET visibility = ?1, is_public = ?2, requires_login = 0 \
+                 WHERE key = ?3",
+                rusqlite::params![vis, is_public, slug],
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
@@ -2291,7 +2293,10 @@ mod tests {
         assert_eq!(access, crate::models::UniverseAccess::MetadataOnly);
     }
 
-    /// 6. Public-subscribable → MetadataOnly for non-subscribed logged-in user.
+    /// 1.46.0: public-subscribable → ReadOnly for any logged-in user
+    /// (including non-subscribers). Anonymous still gets MetadataOnly. The
+    /// pre-collapse behavior gated content behind subscription; the new
+    /// model treats any authed user as eligible to read.
     #[test]
     fn test_access_public_subscribable_logged_in_not_subscribed() {
         let (mut storage, _dir) = make_storage();
@@ -2307,7 +2312,10 @@ mod tests {
             .unwrap();
         set_visibility(&storage, "disco2", "public-subscribable");
         let access = storage.check_universe_access(Some("other-user"), "disco2");
-        assert_eq!(access, crate::models::UniverseAccess::MetadataOnly);
+        assert_eq!(access, crate::models::UniverseAccess::ReadOnly);
+        // Anonymous still sees only metadata.
+        let anon = storage.check_universe_access(None, "disco2");
+        assert_eq!(anon, crate::models::UniverseAccess::MetadataOnly);
     }
 
     /// 7. Private universe → Denied for non-owner.

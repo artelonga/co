@@ -1091,6 +1091,37 @@ impl Storage {
                 .expect("Failed to run migration v28");
         }
 
+        if current_version < 29 {
+            // 1.46.0 visibility consolidation: drop `requires_login` as a
+            // distinct visibility — collapse into `public-subscribable`
+            // (anonymous gets metadata-only, authed gets read+write).
+            // Universes that need to be available to every authed user by
+            // default are tagged with `default_for_new_users` and the
+            // signup path auto-subscribes new users to them.
+            ensure_column(
+                &self.conn,
+                "universes",
+                "default_for_new_users",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v29: universes.default_for_new_users column");
+
+            self.conn
+                .execute_batch(
+                    "
+                    UPDATE universes
+                       SET visibility = 'public-subscribable',
+                           is_public = 1,
+                           requires_login = 0,
+                           default_for_new_users = 1
+                     WHERE visibility = 'requires_login' OR requires_login = 1;
+
+                    INSERT INTO schema_version (version) VALUES (29);
+                    ",
+                )
+                .expect("Failed to run migration v29");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.
@@ -2595,11 +2626,17 @@ impl Storage {
             "INSERT INTO users (id, email, display_name, tier, created_at) VALUES (?1, ?2, ?3, 'admin', ?4)",
             params![id, email, display_name, now_str],
         )?;
+        // 1.46.0: every new user auto-subscribes to default universes
+        // (yggdrasil today; future onboarding universes opt in via the
+        // `default_for_new_users` flag).
+        if let Err(e) = self.subscribe_user_to_default_universes(&id) {
+            tracing::warn!("create_user: default subscriptions failed for {id}: {e}");
+        }
         Ok(crate::models::User {
             id,
             email: email.to_string(),
             display_name: display_name.to_string(),
-            tier: "player".to_string(),
+            tier: "admin".to_string(),
             created_at: now,
         })
     }
@@ -3497,6 +3534,47 @@ impl Storage {
 
     // --- CO-49: Subscriptions ---
 
+    /// 1.46.0: auto-subscribe a user to every universe flagged
+    /// `default_for_new_users=1`. Idempotent. Called on signup and on every
+    /// boot for existing users (one-time backfill — the `INSERT OR IGNORE`
+    /// makes repeat calls cheap).
+    pub fn subscribe_user_to_default_universes(&self, user_id: &str) -> anyhow::Result<usize> {
+        let now_str = Utc::now().to_rfc3339();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key FROM universes WHERE default_for_new_users = 1")?;
+        let keys: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+        let mut added = 0usize;
+        for key in &keys {
+            let n = self.conn.execute(
+                "INSERT OR IGNORE INTO subscriptions (user_id, universe_key, subscribed_at) \
+                 VALUES (?1, ?2, ?3)",
+                params![user_id, key, now_str],
+            )?;
+            added += n;
+        }
+        Ok(added)
+    }
+
+    /// 1.46.0: subscribe every existing user to every default universe.
+    /// Run once at boot so the v29 migration that flagged yggdrasil
+    /// reaches users who already exist.
+    pub fn backfill_default_subscriptions(&self) -> anyhow::Result<usize> {
+        let mut stmt = self.conn.prepare("SELECT id FROM users")?;
+        let user_ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+        let mut added = 0usize;
+        for uid in &user_ids {
+            added += self.subscribe_user_to_default_universes(uid)?;
+        }
+        Ok(added)
+    }
+
     /// Subscribe a user to a public-subscribable universe.
     pub fn subscribe_universe(&mut self, user_id: &str, universe_key: &str) -> anyhow::Result<()> {
         let universe = self
@@ -3654,18 +3732,16 @@ impl Storage {
             }
         }
 
-        // 6. Public-subscribable: show metadata to anyone (for discovery).
+        // 6. Public-subscribable:
+        //    - anonymous → MetadataOnly (discovery surface)
+        //    - authenticated → ReadOnly (every authed user is admin per 1.45.0,
+        //      and "if you can see it you can edit it" — but the writer gate
+        //      decides on write. ReadOnly here is enough for the read path.)
         if universe.visibility == "public-subscribable" {
-            return UniverseAccess::MetadataOnly;
-        }
-
-        // requires_login: any logged-in user gets read access;
-        // anonymous users get LoginRequired (401).
-        if universe.visibility == "requires_login" || universe.requires_login {
             if user_id.is_some() {
                 return UniverseAccess::ReadOnly;
             }
-            return UniverseAccess::LoginRequired;
+            return UniverseAccess::MetadataOnly;
         }
 
         // 7. Everything else is denied.
@@ -4474,8 +4550,11 @@ impl Storage {
 
     /// Seed the `yggdrasil` special universe — the minigames hub (CO-38).
     ///
-    /// `is_public=1`, `requires_login=1`, `owner='system'`, Relic Dark theme,
-    /// layout='gaming'. Safe to call multiple times — idempotent via INSERT OR IGNORE.
+    /// 1.46.0: `public-subscribable` (anonymous gets metadata, authed gets
+    /// full read) + `default_for_new_users=1` so every new signup auto-
+    /// subscribes. Owner='system', Relic Dark theme, layout='gaming'.
+    /// Idempotent via INSERT OR IGNORE; the migration v29 already flipped
+    /// existing rows from `requires_login` to this shape.
     pub fn seed_yggdrasil_universe(&mut self) {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
@@ -4483,14 +4562,15 @@ impl Storage {
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
-              requires_login, visibility, theme_preset, layout, font_headline, font_body, content_count) \
+              requires_login, visibility, default_for_new_users, theme_preset, layout, \
+              font_headline, font_body, content_count) \
              VALUES ('yggdrasil', 'Yggdrasil', \
              'Hub de minijogos — perfis de jogadores e rankings globais', \
-             'system', ?1, 0, 1, 1, 'requires_login', 'relic', 'gaming', \
+             'system', ?1, 0, 1, 0, 'public-subscribable', 1, 'relic', 'gaming', \
              'Newsreader', 'Manrope', 0)",
             params![now_str],
         );
-        tracing::info!("Yggdrasil universe seeded (key=yggdrasil, requires_login=true)");
+        tracing::info!("Yggdrasil universe seeded (public-subscribable, default-for-new-users)");
     }
 
     // --- CO Dev universe (CO-53 / CO-140) ---

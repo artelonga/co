@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.46.0] — 2026-05-05
+
+### Changed — collapse `requires_login` into `public-subscribable` + default-subscriptions
+
+Three visibility states remain (down from four): `template`, `public-subscribable`, `private`. `requires_login` was redundant — it gated existence behind login but otherwise behaved like `public-subscribable` for authenticated users. Migration v29 flips every `requires_login` row to `public-subscribable` and tags it `default_for_new_users=1`.
+
+New `default_for_new_users` flag on `universes`: when set, every new signup auto-subscribes (`subscribe_user_to_default_universes` runs on `create_user`). Existing users get a one-time `backfill_default_subscriptions` on boot so the v29 flag actually reaches their sidebars. Yggdrasil is the first beneficiary — every authed user now sees it without explicit opt-in, the way `requires_login` used to imply.
+
+`check_universe_access` for `public-subscribable` now returns `ReadOnly` for any logged-in user (matches the 1.45.0 single-tier model — every authed user is admin, so subscription-as-paywall is gone). Anonymous still gets `MetadataOnly` (discovery surface intact).
+
+`PUT /universes/:slug` rejects `visibility=requires_login` as invalid — only `private` and `public-subscribable` are user-settable now.
+
 ## [1.45.0] — 2026-05-05
 
 ### Changed — single-tier permission model: every authenticated user is admin

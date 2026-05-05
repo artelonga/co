@@ -789,6 +789,14 @@ pub async fn start_server(config: WebConfig) {
             if let Err(e) = storage.ensure_admin_universe_memberships(&email) {
                 tracing::error!("Failed to ensure admin universe memberships: {e}");
             }
+            // 1.46.0: subscribe every existing user to default universes
+            // (currently just yggdrasil) so the v29 migration's flag
+            // actually reaches their sidebar.
+            match storage.backfill_default_subscriptions() {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("Default-subscriptions backfill: added {n} row(s)"),
+                Err(e) => tracing::error!("backfill_default_subscriptions: {e}"),
+            }
             // Re-home universes whose original owner user_id is no longer in
             // the users table (e.g. after a wipe / re-seed). Without this, the
             // universe remains in the DB but the new admin can't see it.
