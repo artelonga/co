@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.48.0] — 2026-05-05
+
+### Added — Branches: CO-native versioning Phase 2 (replaces `git branch`)
+
+A `branch` is just an entry with `type=branch`, stored at `branches/<name>.md`. Frontmatter carries `name`, `head_state` (path to a `state` entry), `default`, plus the usual `created_at`/`updated_at`/`author`. Branch names accept letters, digits, hyphen, underscore, and slash (so `feat/new-flow` works), 1–100 chars.
+
+New endpoints:
+- `POST /api/v1/universes/:slug/branches` — create a branch pointing at a state
+- `PUT /api/v1/universes/:slug/branches/:name` — advance head to a newer state
+
+Listing is just `GET /entries?type=branch` (existing endpoint). Both create and advance verify that the referenced `head_state` exists in the universe before writing.
+
+Deliberately deferred to Phase 3+: "active branch" semantics (which branch new writes flow into — today writes go to the universe filesystem flat; branches are bookmarks over the linear state history), branch deletion (depends on `DELETE /universes/:slug` first), and merge events with conflict resolution.
+
 ## [1.47.0] — 2026-05-05
 
 ### Added — States: CO-native versioning Phase 1 (replaces `git commit`)

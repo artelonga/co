@@ -5,6 +5,7 @@ pub mod asset_crypto;
 pub mod asset_routes;
 pub mod auth;
 pub mod baseline;
+pub mod branch_routes;
 pub mod cache;
 pub mod config;
 pub mod dev_board;
