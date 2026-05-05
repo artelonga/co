@@ -5,6 +5,12 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.44.1] — 2026-05-05
+
+### Added — Timeline view renders entries-as-events
+
+Closes the gap from 1.44.0: when the universe manifest declares a `presentation.calendar.date_field` (CO-73), the Timeline tab now renders a chronological feed of those entries grouped by month, instead of falling through to the legacy task gantt that requires a project. Entry click opens the zoom modal. Pairs with the calendar grid view — same data source, two layouts, picked by tab.
+
 ## [1.44.0] — 2026-05-05
 
 ### Changed — Conteúdo is the default view; Calendar/Timeline are first-class tabs

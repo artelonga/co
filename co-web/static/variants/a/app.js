@@ -2108,6 +2108,112 @@
         scrollToTodayInitial(range, colWidth, today);
     }
 
+    // ===== Render: Events Timeline (CO-1.44.1) =====
+    // Chronological feed of entries-as-events for any universe whose manifest
+    // declares a `presentation.calendar.date_field`. Pairs with the calendar
+    // grid: same data source, different layout. Used by /time and any other
+    // event-shaped universe.
+    async function renderEventsTimeline() {
+        const content = $('#content');
+        content.className = 'content events-timeline';
+        const manifest = state.universeManifest;
+        if (!manifest) {
+            content.innerHTML = '<p class="empty-state" style="padding:24px">Sem manifest — adicione `presentation.calendar.date_field` ao tipo do conteúdo.</p>';
+            return;
+        }
+
+        // Find the calendar field name + semantic from the manifest.
+        const ct = (manifest.content_types || []).find(c =>
+            c.presentation && c.presentation.calendar && c.presentation.calendar.date_field
+        );
+        if (!ct) {
+            content.innerHTML = '<p class="empty-state" style="padding:24px">Sem campo de data declarado no manifest deste universo.</p>';
+            return;
+        }
+        const dateField = ct.presentation.calendar.date_field;
+        const fieldDef = (ct.schema || {})[dateField];
+        const semantic = (fieldDef && fieldDef.semantic) || dateField;
+
+        const slug = state.currentUniverseSlug;
+        let entries;
+        try {
+            entries = await api.getEntriesByDate(slug, semantic, null, null);
+        } catch (err) {
+            content.innerHTML = `<p class="empty-state" style="padding:24px">Erro ao carregar eventos: ${esc(String(err))}</p>`;
+            return;
+        }
+        if (!entries || entries.length === 0) {
+            content.innerHTML = '<p class="empty-state" style="padding:24px">Nenhum evento.</p>';
+            return;
+        }
+
+        // Sort chronologically (asc) and group by month.
+        const items = entries
+            .map(e => {
+                const raw = e.frontmatter && e.frontmatter[dateField];
+                const dt = raw ? new Date(raw) : null;
+                return { e, dt, raw };
+            })
+            .filter(x => x.dt && !isNaN(x.dt.getTime()))
+            .sort((a, b) => a.dt - b.dt);
+
+        const groups = new Map();
+        for (const x of items) {
+            const key = `${x.dt.getFullYear()}-${String(x.dt.getMonth() + 1).padStart(2, '0')}`;
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(x);
+        }
+
+        const monthNames = (typeof MONTH_NAMES !== 'undefined' && MONTH_NAMES.length === 12)
+            ? MONTH_NAMES
+            : ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+
+        const groupHtml = [...groups.entries()].map(([k, xs]) => {
+            const [y, m] = k.split('-').map(Number);
+            const monthLabel = `${monthNames[m - 1]} ${y}`;
+            const rowsHtml = xs.map(({ e, dt }) => {
+                const day = dt.getDate();
+                const time = dt.getHours() || dt.getMinutes()
+                    ? `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`
+                    : '';
+                const title = (e.frontmatter && e.frontmatter.title) || e.path || '';
+                const path = e.path || '';
+                return `
+                    <div class="event-row" data-entry-path="${esc(path)}">
+                        <div class="event-date">
+                            <span class="event-day">${day}</span>
+                            ${time ? `<span class="event-time">${esc(time)}</span>` : ''}
+                        </div>
+                        <div class="event-body">
+                            <span class="event-title">${esc(title)}</span>
+                            <span class="event-path">${esc(path)}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+            return `
+                <section class="events-month">
+                    <h2 class="events-month-label">${esc(monthLabel)}</h2>
+                    <div class="events-month-rows">${rowsHtml}</div>
+                </section>`;
+        }).join('');
+
+        content.innerHTML = `<div class="events-feed" style="padding:16px;max-width:880px;margin:0 auto">${groupHtml}</div>`;
+
+        // Open zoom modal on click.
+        content.querySelectorAll('.event-row').forEach(row => {
+            row.addEventListener('click', async () => {
+                const path = row.dataset.entryPath;
+                if (!path) return;
+                try {
+                    const entry = await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/entries/${path.split('/').map(encodeURIComponent).join('/')}`
+                    );
+                    if (entry && entry.path) openZoomModal({ ...entry, _universeSlug: slug }, false);
+                } catch (_) {}
+            });
+        });
+    }
+
     function positionTaskBars(range, colWidth, today) {
         const tasks = filteredTasks().filter(t => t.due_date || t.created_at);
 
@@ -4225,13 +4331,17 @@
             const viewDef = manifest && (manifest.views || []).find(v => v.type === 'gantt' && v.name === viewName);
             if (viewDef) { renderGantt(viewDef); return; }
         }
-        // Calendar can render entries-as-events when the manifest declares a
-        // date-semantic field (CO-73), even without a project. Same for the
-        // time universe and any other event-shaped universe.
+        // Calendar and Timeline can render entries-as-events when the
+        // manifest declares a date-semantic field (CO-73), even without a
+        // project. Used by the time universe and any event-shaped universe.
         const manifestHasCalendar = (state.universeManifest?.content_types || [])
             .some(ct => ct.presentation?.calendar?.date_field);
         if (state.view === 'calendar' && manifestHasCalendar) {
             renderCalendar();
+            return;
+        }
+        if (state.view === 'timeline' && manifestHasCalendar) {
+            renderEventsTimeline();
             return;
         }
         if (!state.currentProject) {
