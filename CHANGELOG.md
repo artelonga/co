@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.47.0] — 2026-05-05
+
+### Added — Snapshots: CO-native versioning Phase 1 (replaces `git commit`)
+
+`POST /api/v1/universes/:slug/snapshots` writes an atomic point-in-time capture of every entry in the universe (excluding snapshots themselves, to prevent recursive hash drift). The snapshot is stored as just another entry — `type=snapshot`, path `snapshots/<ISO-timestamp>-<nanoid>.md`, body is a stable line-per-entry serialization of `<sha256>  <path>` sorted by path. Frontmatter carries `parent` (auto-wired to the most recent prior snapshot), `state_hash` (sha256 of the body), `entry_count`, `author`, `message`. Same dedup property as a git commit hash — two snapshots with the same `state_hash` capture identical content.
+
+Forward-compatible: snapshots are entries, so they flow through every existing infrastructure path (FTS search, vault API, WS broadcast, visibility gate). Listing snapshots is just `GET /entries?type=snapshot&$sort={created_at:-1}`. No new tables, no schema migration. Branches and merges arrive in subsequent phases as additional content types.
+
+This is the first concrete primitive replacing git for CO development workflows — see `feedback_no_git.md` memory for the broader direction.
+
 ## [1.46.0] — 2026-05-05
 
 ### Changed — collapse `requires_login` into `public-subscribable` + default-subscriptions

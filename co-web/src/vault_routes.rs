@@ -295,7 +295,7 @@ fn parse_markdown_content(content: &str) -> (JsonValue, String) {
 }
 
 /// Upsert an entry: write .md file + update SQLite index. Returns row data.
-fn write_vault_entry(
+pub(crate) fn write_vault_entry(
     state: &AppState,
     universe_key: &str,
     path: &str,

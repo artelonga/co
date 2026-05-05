@@ -301,7 +301,11 @@ async fn test_template_exists_prevents_double_seed() {
 // --- CO-38: Yggdrasil universe ---
 
 #[tokio::test]
-async fn test_yggdrasil_seed_and_requires_login() {
+async fn test_yggdrasil_seed_and_default_for_new_users() {
+    // 1.46.0: yggdrasil is now public-subscribable. The legacy
+    // `requires_login` flag is gone — existence-behind-login was collapsed
+    // into "every authed user auto-subscribes via the default flag" (see
+    // migration v29).
     let dir = tempdir().unwrap();
     let mut storage = Storage::new(dir.path().to_str().unwrap());
     assert!(
@@ -317,8 +321,12 @@ async fn test_yggdrasil_seed_and_requires_login() {
     let u = storage
         .get_universe("yggdrasil")
         .expect("yggdrasil not found");
-    assert!(u.requires_login, "yggdrasil must require login");
+    assert!(
+        !u.requires_login,
+        "yggdrasil must NOT require login (1.46.0 collapse)"
+    );
     assert!(u.is_public, "yggdrasil must be public");
+    assert_eq!(u.visibility, "public-subscribable");
     assert!(!u.is_template, "yggdrasil must not be a template");
     assert_eq!(u.owner_id, "system");
 
@@ -327,15 +335,16 @@ async fn test_yggdrasil_seed_and_requires_login() {
     assert!(storage.yggdrasil_universe_exists());
 }
 
-/// CO-38: anonymous access to a requires_login universe returns 401.
+/// 1.46.0: anonymous access to yggdrasil now returns 200 (metadata-only),
+/// because the universe is public-subscribable. Pre-collapse behavior
+/// (401) is no longer correct.
 #[tokio::test]
-async fn test_yggdrasil_requires_login_returns_401() {
+async fn test_yggdrasil_anonymous_returns_metadata() {
     let dir = tempdir().unwrap();
     let mut storage = Storage::new(dir.path().to_str().unwrap());
     storage.seed_yggdrasil_universe();
     let app = build_template_app(dir.path());
 
-    // Anonymous request (no auth header) — should get 401
     let req = Request::builder()
         .uri("/api/v1/universes/yggdrasil")
         .body(Body::empty())
@@ -343,12 +352,17 @@ async fn test_yggdrasil_requires_login_returns_401() {
     let resp = app.oneshot(req).await.unwrap();
     assert_eq!(
         resp.status(),
-        StatusCode::UNAUTHORIZED,
-        "anonymous access to yggdrasil must return 401"
+        StatusCode::OK,
+        "anonymous /universes/yggdrasil returns metadata after 1.46.0 collapse"
     );
+
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(info["key"], "yggdrasil");
+    assert_eq!(info["visibility"], "public-subscribable");
 }
 
-/// CO-38: authenticated access to yggdrasil succeeds.
+/// 1.46.0: authenticated access still works (this never changed).
 #[tokio::test]
 async fn test_yggdrasil_authenticated_access_ok() {
     let dir = tempdir().unwrap();
@@ -371,7 +385,10 @@ async fn test_yggdrasil_authenticated_access_ok() {
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let info: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(info["key"], "yggdrasil");
-    assert_eq!(info["requires_login"], true);
+    assert_eq!(
+        info["requires_login"], false,
+        "1.46.0: yggdrasil no longer requires login"
+    );
 }
 
 /// CO-38: non-yggdrasil public universes (template) remain accessible without login.
