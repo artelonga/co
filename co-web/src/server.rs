@@ -395,6 +395,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/settings/sync", get(serve_sync_settings))
         // CO-38: Yggdrasil game view — served by the SPA.
         .route("/yggdrasil/{game}", get(serve_co_index))
+        // 301 redirect for legacy `/co/{slug}/...` URLs to the new
+        // `/{slug}/...` shape. axum picks this over `/{slug}/{*subpath}`
+        // because the literal `co` segment is more specific than `{slug}`.
+        .route("/co/{slug}", get(redirect_legacy_co_slug))
+        .route("/co/{slug}/{*subpath}", get(redirect_legacy_co_subpath))
         // CO-150: asset browser page for universe owners.
         .route("/{slug}/assets", get(serve_assets_page))
         // Universe view (SPA).
@@ -1125,6 +1130,28 @@ fn extract_participant(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
+}
+
+/// 301-redirect legacy `/co/{slug}` to `/{slug}` after the v1.43 prefix drop.
+async fn redirect_legacy_co_slug(Path(slug): Path<String>) -> Response {
+    let target = format!("/{}", slug);
+    (
+        StatusCode::MOVED_PERMANENTLY,
+        [(header::LOCATION, target)],
+        (),
+    )
+        .into_response()
+}
+
+/// 301-redirect legacy `/co/{slug}/{subpath}` to `/{slug}/{subpath}`.
+async fn redirect_legacy_co_subpath(Path((slug, subpath)): Path<(String, String)>) -> Response {
+    let target = format!("/{}/{}", slug, subpath);
+    (
+        StatusCode::MOVED_PERMANENTLY,
+        [(header::LOCATION, target)],
+        (),
+    )
+        .into_response()
 }
 
 /// Serve `index.html` for `/`, `/{slug}`, and deep SPA paths. The hub
