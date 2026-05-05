@@ -2592,7 +2592,7 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
         self.conn.execute(
-            "INSERT INTO users (id, email, display_name, tier, created_at) VALUES (?1, ?2, ?3, 'player', ?4)",
+            "INSERT INTO users (id, email, display_name, tier, created_at) VALUES (?1, ?2, ?3, 'admin', ?4)",
             params![id, email, display_name, now_str],
         )?;
         Ok(crate::models::User {
@@ -2732,18 +2732,24 @@ impl Storage {
             .ok();
 
         match existing {
-            Some((_, ref existing_hash)) if existing_hash.as_deref() == Some(password_hash) => {
-                tracing::info!("admin user already seeded: {email} (hash unchanged)");
+            Some((user_id, ref existing_hash))
+                if existing_hash.as_deref() == Some(password_hash) =>
+            {
+                // 1.45.0: idempotently ensure tier='admin' even when the
+                // hash is unchanged — pre-collapse rows on already-deployed
+                // prods need to flip from 'user'/'player'/'pro' to 'admin'.
+                self.conn.execute(
+                    "UPDATE users SET tier = 'admin' WHERE id = ?1 AND tier <> 'admin'",
+                    params![user_id],
+                )?;
+                tracing::info!("admin user already seeded: {email} (hash unchanged, tier admin)");
             }
             Some((user_id, _)) => {
-                // CO-90: tier is billing-only; do not write 'admin' here. The
-                // seeded user gets privileged access via per-universe ownership,
-                // not a global tier bypass.
                 self.conn.execute(
-                    "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+                    "UPDATE users SET password_hash = ?1, tier = 'admin' WHERE id = ?2",
                     params![password_hash, user_id],
                 )?;
-                tracing::info!("seeded user updated: {email} (hash refreshed)");
+                tracing::info!("seeded user updated: {email} (hash refreshed, tier admin)");
             }
             None => {
                 let id = format!(
@@ -2751,14 +2757,13 @@ impl Storage {
                     &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
                 );
                 let now = Utc::now().to_rfc3339();
-                // CO-90: tier='user' (billing default). Authority over system
-                // universes comes from owner_id, not tier.
+                // 1.45.0: every authenticated user is an admin. Tier collapse.
                 self.conn.execute(
                     "INSERT INTO users (id, email, display_name, tier, created_at, password_hash) \
-                     VALUES (?1, ?2, ?2, 'user', ?3, ?4)",
+                     VALUES (?1, ?2, ?2, 'admin', ?3, ?4)",
                     params![id, email, now, password_hash],
                 )?;
-                tracing::info!("seeded user created: {email}");
+                tracing::info!("seeded user created: {email} (tier admin)");
             }
         }
         Ok(())

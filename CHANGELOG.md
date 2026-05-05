@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.45.0] — 2026-05-05
+
+### Changed — single-tier permission model: every authenticated user is admin
+
+`Tier::parse` now maps every named tier value (`user`, `player`, `pro`, `admin`) → `Tier::Admin`. Anonymous remains the only non-admin tier. The legacy `User`/`Pro` enum variants stay around for backward compatibility with existing test fixtures and DB rows but are no longer produced by parsing — pre-collapse rows on already-deployed prods read as Admin without a DB migration.
+
+Owner-only checks dropped on `PUT /api/v1/universes/:slug` (universe-metadata edit) and `GET /api/v1/universes/:slug/subscribers` — any authenticated user can edit any universe they can see. The visibility gate (private vs subscribable vs public) remains the only access control. A future `is_static` flag will be the single read-only exception.
+
+`seed_admin_user_from_env` (run on every boot) now updates `tier='admin'` for the seeded user even when their hash is unchanged — pre-1.45 prods automatically promote the seed admin on deploy. New users created via any flow (seed, login, password-login) default to `tier='admin'`.
+
+Storage-quota tests rewritten: the tier-based 10k-entry cap is gone for authenticated users; anonymous 100-entry cap remains.
+
 ## [1.44.1] — 2026-05-05
 
 ### Added — Timeline view renders entries-as-events

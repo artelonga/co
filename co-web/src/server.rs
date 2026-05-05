@@ -2623,15 +2623,18 @@ mod tests {
         }
     }
 
-    /// Storage quota exhaustion returns 402 with quota details.
+    /// 1.45.0: tier collapse removes the storage quota for authenticated
+    /// users — every authed user is admin, with unlimited storage. The test
+    /// now verifies the inverse: an authenticated user is NOT 402'd even
+    /// past the legacy 10k-entry cap. Anonymous quotas (100-entry cap) live
+    /// on a different code path and remain enforced.
     #[tokio::test]
-    async fn test_storage_quota_exceeded_returns_402() {
+    async fn test_authed_user_storage_unlimited_post_tier_collapse() {
         // SAFETY: single-threaded test setup, no concurrent set_var calls.
         unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
 
-        // Create a "user" tier user and a universe that is already at quota.
         let user_id = {
             let storage = Storage::new(dir.path().to_str().unwrap());
             let id = format!(
@@ -2639,6 +2642,8 @@ mod tests {
                 &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
             );
             let now = chrono::Utc::now().to_rfc3339();
+            // tier='user' is a legacy stored value; Tier::parse maps it to
+            // Admin under the 1.45.0 model.
             storage
                 .conn()
                 .execute(
@@ -2647,7 +2652,6 @@ mod tests {
                     rusqlite::params![id, now],
                 )
                 .unwrap();
-            // Universe at 10001 entries — exceeds user tier (10000).
             storage
                 .conn()
                 .execute(
@@ -2681,21 +2685,11 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(
+        assert_ne!(
             resp.status(),
             StatusCode::PAYMENT_REQUIRED,
-            "storage quota exhaustion must return 402"
+            "authenticated user must NOT hit storage quota under 1.45.0 collapse"
         );
-        let body = body_str(resp.into_body()).await;
-        assert!(
-            body.contains("quota_exceeded"),
-            "body must contain quota_exceeded, got: {body}"
-        );
-        assert!(
-            body.contains("used"),
-            "body must include used count: {body}"
-        );
-        assert!(body.contains("limit"), "body must include limit: {body}");
     }
 
     /// Admin user with X-Admin-Override-Quota bypasses quota check (audit logged).

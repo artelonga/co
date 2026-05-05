@@ -32,12 +32,17 @@ pub enum Tier {
 }
 
 impl Tier {
+    /// 1.45.0 model collapse: there is only one authenticated tier — every
+    /// authenticated user is an admin. Legacy tier values (`user`, `player`,
+    /// `pro`) on existing user rows still parse cleanly; they all resolve to
+    /// `Tier::Admin` at runtime so older accounts don't need a DB migration.
+    /// `Tier::User` and `Tier::Pro` are kept as enum variants for the unit
+    /// tests around `tier_limits` and historical comparison; they are no
+    /// longer produced by `parse`.
     pub fn parse(s: &str) -> Self {
-        match s {
-            "admin" => Tier::Admin,
-            "pro" => Tier::Pro,
-            "player" | "user" => Tier::User,
-            _ => Tier::Anonymous,
+        match s.trim() {
+            "" | "anonymous" => Tier::Anonymous,
+            _ => Tier::Admin,
         }
     }
 }
@@ -425,10 +430,13 @@ mod tests {
 
     #[test]
     fn test_tier_from_str() {
+        // 1.45.0: every authenticated tier collapses to Admin. Legacy stored
+        // values ('user', 'player', 'pro') still parse cleanly to Admin so
+        // pre-collapse rows don't need a DB migration.
         assert_eq!(Tier::parse("admin"), Tier::Admin);
-        assert_eq!(Tier::parse("pro"), Tier::Pro);
-        assert_eq!(Tier::parse("user"), Tier::User);
-        assert_eq!(Tier::parse("player"), Tier::User);
+        assert_eq!(Tier::parse("pro"), Tier::Admin);
+        assert_eq!(Tier::parse("user"), Tier::Admin);
+        assert_eq!(Tier::parse("player"), Tier::Admin);
         assert_eq!(Tier::parse("anonymous"), Tier::Anonymous);
         assert_eq!(Tier::parse(""), Tier::Anonymous);
     }

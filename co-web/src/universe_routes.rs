@@ -242,19 +242,17 @@ pub async fn update_universe(
     headers: HeaderMap,
     Json(body): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let caller_id = extract_optional_user_id(&headers, &state)
+    // 1.45.0 model: every authenticated user is an admin and can edit any
+    // universe they can see. The visibility gate (private vs subscribable
+    // vs public) is the only access control that remains. A future `static`
+    // flag will be the single read-only exception.
+    let _caller_id = extract_optional_user_id(&headers, &state)
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
 
     let storage = lock_storage(&state)?;
-    let universe = storage
+    let _universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-
-    if universe.owner_id != caller_id {
-        return Err(AppError::Forbidden(
-            "Only the owner can update this universe".into(),
-        ));
-    }
 
     drop(storage);
 
@@ -501,15 +499,13 @@ pub async fn list_subscribers(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<Json<Vec<Subscription>>, AppError> {
+    // 1.45.0 model: any authenticated user can list subscribers of any
+    // universe. The `user_id` extractor still gates anonymous callers.
+    let _ = user_id;
     let storage = lock_storage(&state)?;
-    let universe = storage
+    let _universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-    if universe.owner_id != user_id.0 {
-        return Err(AppError::Forbidden(
-            "Only the owner can list subscribers".into(),
-        ));
-    }
     Ok(Json(storage.list_universe_subscribers(&slug)))
 }
 
