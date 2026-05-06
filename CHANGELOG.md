@@ -5,6 +5,31 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.51.0] — 2026-05-06
+
+### Added — Diff API: compare two state manifests (Phase 4 of CO-native versioning)
+
+`GET /api/v1/universes/:slug/states/diff?from=<state>&to=<state>` returns the path-level differences between two states in the same universe:
+
+```json
+{
+  "from": "states/2026-...A.md",
+  "to":   "states/2026-...B.md",
+  "added":    [{ "path": "concepts/new.md", "to_hash": "..." }],
+  "removed":  [{ "path": "old.md", "from_hash": "..." }],
+  "modified": [{ "path": "x.md", "from_hash": "...", "to_hash": "..." }],
+  "unchanged": 47
+}
+```
+
+Implementation parses the line-per-entry manifest from each state's body (the fenced `<hash>  <path>` block written by `create_state` since 1.47.0) and computes the set difference. No new tables, no schema migration. The diff is now usable by:
+
+- the proposal review surface ("show me what this proposal changes")
+- a "what's new since I last visited" indicator over a subscription's last-seen state
+- bisect-style "when did this entry first appear" queries over a state chain
+
+3 new unit tests cover the parser (fenced-block extraction, empty-fence edge case, ignoring text outside the fence).
+
 ## [1.50.0] — 2026-05-06
 
 ### Added — DELETE /universes/:slug + structured-data files write verbatim

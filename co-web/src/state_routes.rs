@@ -14,10 +14,10 @@
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::HeaderMap,
     response::IntoResponse,
-    routing::post,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
@@ -45,7 +45,9 @@ pub struct StateResponse {
 }
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/{slug}/states", post(create_state))
+    Router::new()
+        .route("/{slug}/states", post(create_state))
+        .route("/{slug}/states/diff", get(diff_states))
 }
 
 /// `POST /api/v1/universes/:slug/states` — capture the current state.
@@ -184,6 +186,170 @@ pub async fn create_state(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// GET /:slug/states/diff?from=&to= — compare two state manifests
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct DiffQuery {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiffEntry {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to_hash: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiffResponse {
+    pub from: String,
+    pub to: String,
+    pub added: Vec<DiffEntry>,
+    pub removed: Vec<DiffEntry>,
+    pub modified: Vec<DiffEntry>,
+    pub unchanged: usize,
+}
+
+/// `GET /api/v1/universes/:slug/states/diff?from=<state>&to=<state>` —
+/// list the path-level differences between two state manifests. Both
+/// state paths must live in the same universe and start with `states/`.
+///
+/// Returns three sorted lists:
+/// - `added`:    paths in `to` but not in `from`
+/// - `removed`:  paths in `from` but not in `to`
+/// - `modified`: paths in both with different content hash
+///
+/// `unchanged` is just the count of paths whose hash matched on both
+/// sides — kept lightweight (no body) so a "what changed" UI can show
+/// "47 unchanged" without flooding the response.
+pub async fn diff_states(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<DiffQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let from_manifest = read_state_manifest(&state, &slug, &q.from)?;
+    let to_manifest = read_state_manifest(&state, &slug, &q.to)?;
+
+    use std::collections::HashMap;
+    let from_map: HashMap<&str, &str> = from_manifest
+        .iter()
+        .map(|(p, h)| (p.as_str(), h.as_str()))
+        .collect();
+    let to_map: HashMap<&str, &str> = to_manifest
+        .iter()
+        .map(|(p, h)| (p.as_str(), h.as_str()))
+        .collect();
+
+    let mut added = Vec::new();
+    let mut modified = Vec::new();
+    let mut unchanged = 0usize;
+    for (path, to_hash) in &to_map {
+        match from_map.get(path) {
+            None => added.push(DiffEntry {
+                path: path.to_string(),
+                from_hash: None,
+                to_hash: Some(to_hash.to_string()),
+            }),
+            Some(from_hash) if from_hash != to_hash => modified.push(DiffEntry {
+                path: path.to_string(),
+                from_hash: Some(from_hash.to_string()),
+                to_hash: Some(to_hash.to_string()),
+            }),
+            _ => unchanged += 1,
+        }
+    }
+    let mut removed = Vec::new();
+    for (path, from_hash) in &from_map {
+        if !to_map.contains_key(path) {
+            removed.push(DiffEntry {
+                path: path.to_string(),
+                from_hash: Some(from_hash.to_string()),
+                to_hash: None,
+            });
+        }
+    }
+    added.sort_by(|a, b| a.path.cmp(&b.path));
+    removed.sort_by(|a, b| a.path.cmp(&b.path));
+    modified.sort_by(|a, b| a.path.cmp(&b.path));
+
+    Ok(Json(DiffResponse {
+        from: q.from,
+        to: q.to,
+        added,
+        removed,
+        modified,
+        unchanged,
+    }))
+}
+
+/// Read the line-per-entry manifest stored in a state's body. Returns
+/// `Vec<(path, hash)>`. The body shape is fixed by `create_state` —
+/// fenced code-block whose lines are `<hash>  <path>`.
+fn read_state_manifest(
+    state: &AppState,
+    slug: &str,
+    state_path: &str,
+) -> Result<Vec<(String, String)>, AppError> {
+    if !state_path.starts_with("states/") {
+        return Err(AppError::BadRequest(format!(
+            "'{state_path}' is not a states/ path"
+        )));
+    }
+    let uc = {
+        let storage = state
+            .storage
+            .lock()
+            .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+        if storage.get_universe(slug).is_none() {
+            return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+        }
+        storage.universe_conn(slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let row = index
+        .get(slug, state_path)
+        .map_err(|e| AppError::Internal(format!("get state: {e}")))?
+        .ok_or_else(|| AppError::NotFound(format!("State '{state_path}' not found")))?;
+    if row.entry_type != "state" {
+        return Err(AppError::BadRequest(format!(
+            "'{state_path}' is type '{}', not 'state'",
+            row.entry_type
+        )));
+    }
+    Ok(parse_state_manifest_body(&row.body))
+}
+
+/// Parse the fenced manifest block: lines of `<hash>  <path>` between the
+/// first and second triple-backticks. Permissive — bad lines are skipped.
+pub(crate) fn parse_state_manifest_body(body: &str) -> Vec<(String, String)> {
+    let mut in_fence = false;
+    let mut entries = Vec::new();
+    for line in body.lines() {
+        if line.trim_start().starts_with("```") {
+            in_fence = !in_fence;
+            continue;
+        }
+        if !in_fence {
+            continue;
+        }
+        if let Some((hash, path)) = line.split_once("  ")
+            && !hash.trim().is_empty()
+            && !path.trim().is_empty()
+        {
+            entries.push((path.trim().to_string(), hash.trim().to_string()));
+        }
+    }
+    entries
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,5 +378,47 @@ mod tests {
         let h3 = format!("{:x}", Sha256::digest(lines3.as_bytes()));
 
         assert_ne!(h1, h3, "new entry must change state_hash");
+    }
+
+    #[test]
+    fn test_parse_state_manifest_body_extracts_fenced_lines() {
+        let body = "# State 2026-01-01T000000Z\n\n\
+            - **state_hash:** `abc`\n\n\
+            ## Manifest\n\n\
+            ```\n\
+            hash-a  path/to/a.md\n\
+            hash-b  path/to/b.md\n\
+            \n\
+            hash-c  c.md\n\
+            ```\n";
+        let parsed = parse_state_manifest_body(body);
+        assert_eq!(parsed.len(), 3);
+        assert_eq!(
+            parsed[0],
+            ("path/to/a.md".to_string(), "hash-a".to_string())
+        );
+        assert_eq!(
+            parsed[1],
+            ("path/to/b.md".to_string(), "hash-b".to_string())
+        );
+        assert_eq!(parsed[2], ("c.md".to_string(), "hash-c".to_string()));
+    }
+
+    #[test]
+    fn test_parse_state_manifest_body_handles_empty_fence() {
+        let body = "# State\n\n## Manifest\n\n```\n```\n";
+        let parsed = parse_state_manifest_body(body);
+        assert_eq!(parsed.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_state_manifest_body_ignores_text_outside_fence() {
+        let body = "garbage  fake-path\n```\nreal-hash  real-path.md\n```\nmore  garbage\n";
+        let parsed = parse_state_manifest_body(body);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(
+            parsed[0],
+            ("real-path.md".to_string(), "real-hash".to_string())
+        );
     }
 }
