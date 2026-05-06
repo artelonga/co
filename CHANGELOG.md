@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.55.0] — 2026-05-06
+
+### Added — "⏱ Estado" button: first frontend surface for CO-native versioning
+
+A header button next to "+ Nova Tarefa" in every universe view. Click prompts for an optional message, posts to `/api/v1/universes/:slug/states`, and shows a toast with the new state's hash prefix and entry count. First end-user-facing surface for the versioning roadmap (Phases 1-4 had API only); takes a `git commit`-equivalent in two clicks.
+
+i18n: `save_state` key added in pt-BR ("⏱ Estado") and en ("⏱ State").
+
+Doesn't yet surface state history, branches, proposals, merges, or diff — those land as the SPA UI catches up to the API surface. The button is the smallest unit that brings versioning out of curl-only.
+
 ## [1.54.0] — 2026-05-06
 
 ### Fixed — boot-reconcile no longer stomps user edits

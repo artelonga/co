@@ -4495,6 +4495,32 @@
         if (state.currentProject) openTaskModal(null);
     });
 
+    // 1.55.0: Save state — atomic snapshot of the universe (CO-native versioning).
+    // Prompts for an optional message, POSTs to /states, shows a toast.
+    const btnSaveState = $('#btn-save-state');
+    if (btnSaveState) {
+        btnSaveState.addEventListener('click', async () => {
+            if (state.isTemplate) { await ensureOwnUniverse(); return; }
+            const slug = state.currentUniverseSlug;
+            if (!slug) return;
+            const msg = window.prompt('Message for this state (optional):', '');
+            if (msg === null) return; // cancelled
+            try {
+                const resp = await apiFetch(
+                    `/api/v1/universes/${encodeURIComponent(slug)}/states`,
+                    { method: 'POST', body: JSON.stringify({ message: msg }), headers: { 'Content-Type': 'application/json' } },
+                    true,
+                );
+                const hash = (resp && resp.state_hash) ? String(resp.state_hash).slice(0, 12) : '?';
+                const count = (resp && resp.entry_count) || 0;
+                showToast(`State saved · ${hash}… · ${count} entries`, 'success');
+            } catch (err) {
+                console.error('save state failed', err);
+                showToast('Failed to save state', 'error');
+            }
+        });
+    }
+
     // Modal
     $('#modal-close').addEventListener('click', closeModal);
     $('#btn-cancel').addEventListener('click', closeModal);
