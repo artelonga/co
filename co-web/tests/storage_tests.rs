@@ -873,14 +873,14 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 29); // 1.46.0 added v29 (visibility collapse + default_for_new_users)
-    assert_eq!(storage.schema_version(), 29);
+    assert_eq!(storage.schema_version(), 30); // 1.60.0 added v30 (subscriptions.pinned_state)
+    assert_eq!(storage.schema_version(), 30);
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 29); // 1.46.0 added v29
-    assert_eq!(storage2.schema_version(), 29);
+    assert_eq!(storage2.schema_version(), 30); // 1.60.0 added v30
+    assert_eq!(storage2.schema_version(), 30);
 }
 
 #[test]

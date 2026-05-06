@@ -552,6 +552,75 @@ pub async fn unsubscribe_universe(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// 1.60.0: PUT /api/v1/universes/:slug/subscribe/pin — pin a subscription
+// to a specific state. Body: {"state": "states/...md"}. Auto-subscribes
+// the user if they don't have a row yet. Validates that the named state
+// exists in this universe.
+#[derive(serde::Deserialize)]
+pub struct PinSubscriptionRequest {
+    pub state: String,
+}
+
+pub async fn pin_subscription(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+    Json(req): Json<PinSubscriptionRequest>,
+) -> Result<StatusCode, AppError> {
+    if !req.state.starts_with("states/") {
+        return Err(AppError::BadRequest(
+            "state must be a path under states/".into(),
+        ));
+    }
+    // Verify the state exists in the universe before pinning to it.
+    {
+        let uc = {
+            let storage = lock_storage(&state)?;
+            if storage.get_universe(&slug).is_none() {
+                return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+            }
+            storage.universe_conn(&slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let index = crate::entry_index::EntryIndex::new(&uc_guard);
+        let row = index
+            .get(&slug, &req.state)
+            .map_err(|e| AppError::Internal(format!("get state: {e}")))?
+            .ok_or_else(|| {
+                AppError::BadRequest(format!(
+                    "state '{}' not found in universe '{}'",
+                    req.state, slug
+                ))
+            })?;
+        if row.entry_type != "state" {
+            return Err(AppError::BadRequest(format!(
+                "'{}' is not a state entry",
+                req.state
+            )));
+        }
+    }
+    lock_storage(&state)?
+        .pin_subscription(&user_id.0, &slug, Some(&req.state))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// 1.60.0: DELETE /api/v1/universes/:slug/subscribe/pin — clear the pin
+// (subscriber resumes following head). The subscription itself is left
+// in place — this is just toggling the lock-to-version flag.
+pub async fn unpin_subscription(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<StatusCode, AppError> {
+    lock_storage(&state)?
+        .pin_subscription(&user_id.0, &slug, None)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 // GET /api/v1/universes/:slug/subscribers — list subscribers (owner only)
 pub async fn list_subscribers(
     State(state): State<AppState>,
@@ -1000,6 +1069,11 @@ pub fn router() -> Router<AppState> {
         .route(
             "/{slug}/subscribe",
             post(subscribe_universe).delete(unsubscribe_universe),
+        )
+        // 1.60.0: pin a subscription to a specific state (Phase 6 storage)
+        .route(
+            "/{slug}/subscribe/pin",
+            put(pin_subscription).delete(unpin_subscription),
         )
         .route("/{slug}/subscribers", get(list_subscribers))
         // CO-72: doc-gen job submission (owner only, auth via require_auth layer)

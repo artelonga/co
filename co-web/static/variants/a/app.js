@@ -4655,11 +4655,35 @@
                      title="Click to see what changed in this state">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
                         <code style="font-size:11px;font-family:var(--mono,monospace);background:var(--bg-subtle,#f3f4f6);padding:2px 6px;border-radius:3px">${esc(hash)}…</code>
-                        <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <button class="state-pin-btn" data-state-path="${esc(e.path)}" data-slug="${esc(slug)}" title="Pin your subscription to this version" style="background:none;border:1px solid var(--border,#e5e7eb);padding:1px 8px;border-radius:10px;font-size:10px;cursor:pointer;color:var(--text-muted,#6b7280)">📌 pin</button>
+                            <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
+                        </div>
                     </div>
                     <div style="margin-top:4px">${esc(msg) || '<em style="color:var(--text-muted,#6b7280)">(no message)</em>'} · ${count} entries ${author}</div>
                 </div>`;
         }).join('');
+
+        // 1.60.0: pin handler. Stops propagation so the row's click-to-diff
+        // doesn't fire on the same click.
+        container.querySelectorAll('.state-pin-btn').forEach(btn => {
+            btn.addEventListener('click', async (ev) => {
+                ev.stopPropagation();
+                const statePath = btn.dataset.statePath;
+                const rowSlug = btn.dataset.slug;
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(rowSlug)}/subscribe/pin`,
+                        { method: 'PUT', body: JSON.stringify({ state: statePath }), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`Pinned to ${statePath.split('/').pop().slice(0, 16)}…`, 'success');
+                } catch (err) {
+                    console.error('pin failed', err);
+                    showToast('Failed to pin (login required)', 'error');
+                }
+            });
+        });
         container.querySelectorAll('.state-row').forEach(row => {
             row.addEventListener('click', async () => {
                 const existing = row.querySelector('.state-diff');

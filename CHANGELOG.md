@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.60.0] — 2026-05-06
+
+### Added — Phase 6 storage: subscribers can pin to a specific state
+
+Migration v30 adds `pinned_state` column to `subscriptions` (TEXT, NULL = head-following). New endpoints:
+
+- `PUT /api/v1/universes/:slug/subscribe/pin` body `{state: "states/...md"}` — pin (auto-subscribes if needed; validates that the state exists)
+- `DELETE /api/v1/universes/:slug/subscribe/pin` — clear pin (still subscribed, follows head)
+
+UI: a `📌 pin` button next to each state in the info-modal state log. Click → POST pin → toast confirms.
+
+**What's NOT shipped yet (deferred to Phase 7):** the rewind view itself — i.e., serving entries-as-of the pinned state when a pinned subscriber reads. Today the pin is just stored. The behavioral effect ships when the entries query path becomes pin-aware. This split lets the data settle before anyone depends on the rewind semantics.
+
 ## [1.59.0] — 2026-05-06
 
 ### Added — info modal: branches + proposals/merges sections; Conteúdo hides backend types

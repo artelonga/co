@@ -1122,6 +1122,20 @@ impl Storage {
                 .expect("Failed to run migration v29");
         }
 
+        if current_version < 30 {
+            // 1.60.0: subscribers can pin to a specific state ID. NULL =
+            // head-following (default); non-NULL = "show me this universe
+            // as of state X". The rewind-view behavior (serving entries
+            // as of the pinned state) is NOT implemented yet — Phase 7.
+            // This migration is just the data layer.
+            ensure_column(&self.conn, "subscriptions", "pinned_state", "TEXT")
+                .expect("migration v30: subscriptions.pinned_state column");
+
+            self.conn
+                .execute("INSERT INTO schema_version (version) VALUES (30)", [])
+                .expect("Failed to record migration v30");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.
@@ -3603,6 +3617,39 @@ impl Storage {
             params![user_id, universe_key],
         )?;
         Ok(())
+    }
+
+    /// 1.60.0: pin a subscription to a specific state. Auto-subscribes the
+    /// user if they don't already have a row. `state_path` must be a
+    /// `states/...md` path that exists in the universe (caller validates).
+    /// NULL state_path clears the pin → subscriber follows head again.
+    pub fn pin_subscription(
+        &mut self,
+        user_id: &str,
+        universe_key: &str,
+        state_path: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        // Upsert: insert if missing, otherwise update pin.
+        self.conn.execute(
+            "INSERT INTO subscriptions (user_id, universe_key, subscribed_at, pinned_state) \
+             VALUES (?1, ?2, ?3, ?4) \
+             ON CONFLICT(user_id, universe_key) DO UPDATE SET pinned_state = ?4",
+            params![user_id, universe_key, now, state_path],
+        )?;
+        Ok(())
+    }
+
+    /// 1.60.0: read a subscription's pin (None if not subscribed or no pin).
+    pub fn get_subscription_pin(&self, user_id: &str, universe_key: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT pinned_state FROM subscriptions WHERE user_id = ?1 AND universe_key = ?2",
+                params![user_id, universe_key],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten()
     }
 
     /// Check whether a user is subscribed to a universe.
