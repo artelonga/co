@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.74.0] — 2026-05-06
+
+### Added — Phase 8 step 4: content-fidelity rewind via blob lookups
+
+The CO-native versioning roadmap is **complete**: pinned subscribers reading entries via `?as_of=<state>` now receive the **historical bytes** of each entry, not the current ones. This is true `git checkout` semantics — the universe served at a pin is exactly what existed when the state was captured.
+
+**Implementation:**
+1. State manifest format extended from `<combined_hash>  <path>` → `<combined_hash>  <body_hash>  <path>` per line. New `parse_state_manifest_full` returns `(path, combined, Option<body_hash>)`. Legacy 2-column lines continue to parse as no-body-hash (path-fidelity fallback).
+2. `list_entries` rewind branch reads each entry's recorded body_hash from the manifest, fetches from `blobs` via `Storage::get_blob`, and substitutes the entry body. Entries without a body_hash (from pre-1.74 states, or if the blob is missing) fall back to the current body — never a fetch error.
+3. Backward-compat: existing states (created before 1.74) keep working at path-fidelity. Every state captured from 1.74 onward gets the body_hash column and full content rewind.
+
+**The full roadmap:** Phase 1 (states/commits) · Phase 2 (branches) · Phase 3 (proposals+merges) · Phase 4 (diff) · Phase 6 (pin storage) · Phase 7 (path-fidelity rewind) · Phase 8 (CAS + content-fidelity rewind, 4 steps). All shipped. The platform now version-controls itself end-to-end with API + UI parity for the canonical git operations, plus the substrate (blobs, mining, MCP-ready) to interoperate with mempalace.
+
 ## [1.73.0] — 2026-05-06
 
 ### Added — Phase 8 step 3: boot-time backfill of existing entries into CAS blobs

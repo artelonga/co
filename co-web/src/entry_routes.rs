@@ -219,9 +219,12 @@ pub async fn list_entries(
         }
     };
 
-    // 1.62.0 Phase 7: rewind view via `?as_of=states/...md`. Filters the
-    // result down to paths that existed in that state's manifest. This is
-    // path-fidelity rewind only — bodies served are current.
+    // 1.62.0 Phase 7 + 1.74.0 Phase 8 step 4: rewind view via
+    // `?as_of=states/...md`. Filters the result to paths in the manifest
+    // AND, when the manifest carries a per-entry `body_hash` (3-column
+    // form, post-1.74.0 captures), substitutes the entry body with the
+    // historical bytes from the CAS blob store. Legacy 2-column manifest
+    // lines fall through to current bodies (path-fidelity only).
     let entries = if let Some(as_of) = q.as_of.as_deref() {
         if !as_of.starts_with("states/") {
             return Err(AppError::BadRequest(format!(
@@ -240,12 +243,33 @@ pub async fn list_entries(
                 state_row.entry_type
             )));
         }
-        let allowed = crate::state_routes::parse_state_manifest_body(&state_row.body);
+        let manifest = crate::state_routes::parse_state_manifest_full(&state_row.body);
+        let body_hash_by_path: std::collections::HashMap<&str, &str> = manifest
+            .iter()
+            .filter_map(|(path, _combined, body_hash)| {
+                body_hash.as_deref().map(|h| (path.as_str(), h))
+            })
+            .collect();
         let allowed_paths: std::collections::HashSet<&str> =
-            allowed.iter().map(|(p, _h)| p.as_str()).collect();
+            manifest.iter().map(|(p, _, _)| p.as_str()).collect();
+
+        let storage_for_blobs = lock_storage(&state)?;
         entries
             .into_iter()
             .filter(|e| allowed_paths.contains(e.path.as_str()))
+            .map(|mut e| {
+                // If the manifest carries a body_hash for this path AND we
+                // have the bytes in the CAS blob store, swap the current
+                // body for the historical one. Otherwise leave as-is
+                // (path-fidelity fallback).
+                if let Some(h) = body_hash_by_path.get(e.path.as_str())
+                    && let Some(bytes) = storage_for_blobs.get_blob(h)
+                    && let Ok(historical) = String::from_utf8(bytes)
+                {
+                    e.body = historical;
+                }
+                e
+            })
             .collect()
     } else {
         entries

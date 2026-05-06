@@ -101,7 +101,13 @@ pub async fn create_state(
 
         // Exclude states from their own state (otherwise the hash drifts
         // every time you take a state — recursion).
-        let mut state_entries: Vec<(String, String)> = all
+        // 1.74.0: manifest line gains a third column — `body_hash` — so the
+        // pin rewind path (Phase 8 step 4) can look up the entry body
+        // verbatim from the CAS blob store. Format becomes
+        // `{combined_hash}  {body_hash}  {path}\n`. The combined hash stays
+        // first for backward-compat with the diff API; legacy 2-column lines
+        // continue to parse as no-body-hash.
+        let mut state_entries: Vec<(String, String, String)> = all
             .iter()
             .filter(|e| e.entry_type != "state")
             .map(|e| {
@@ -109,15 +115,16 @@ pub async fn create_state(
                 h.update(e.frontmatter.to_string().as_bytes());
                 h.update(b"\n");
                 h.update(e.body.as_bytes());
-                let hash = format!("{:x}", h.finalize());
-                (e.path.clone(), hash)
+                let combined = format!("{:x}", h.finalize());
+                let body_hash = format!("{:x}", Sha256::digest(e.body.as_bytes()));
+                (e.path.clone(), combined, body_hash)
             })
             .collect();
         state_entries.sort_by(|a, b| a.0.cmp(&b.0));
 
         let lines: String = state_entries
             .iter()
-            .map(|(path, hash)| format!("{hash}  {path}\n"))
+            .map(|(path, combined, body_hash)| format!("{combined}  {body_hash}  {path}\n"))
             .collect();
 
         // Parent: the state with the largest path (paths sort
@@ -327,9 +334,24 @@ fn read_state_manifest(
     Ok(parse_state_manifest_body(&row.body))
 }
 
-/// Parse the fenced manifest block: lines of `<hash>  <path>` between the
-/// first and second triple-backticks. Permissive — bad lines are skipped.
+/// Parse the fenced manifest block: lines of `<combined_hash>  <path>` or
+/// `<combined_hash>  <body_hash>  <path>` between the first and second
+/// triple-backticks. Permissive — bad lines are skipped. Returns
+/// `(path, combined_hash)` pairs (the combined-hash form), dropping any
+/// body_hash column for backward compat. Use `parse_state_manifest_full`
+/// when the body_hash is needed (Phase 8 rewind).
 pub(crate) fn parse_state_manifest_body(body: &str) -> Vec<(String, String)> {
+    parse_state_manifest_full(body)
+        .into_iter()
+        .map(|(path, combined, _body_hash)| (path, combined))
+        .collect()
+}
+
+/// 1.74.0: full manifest parse — returns `(path, combined_hash, Option<body_hash>)`
+/// per entry. Lines with 2 whitespace-separated tokens are legacy
+/// (combined+path); lines with 3 tokens carry body_hash too. Used by the
+/// rewind path to fetch verbatim historical bytes from the CAS blob store.
+pub(crate) fn parse_state_manifest_full(body: &str) -> Vec<(String, String, Option<String>)> {
     let mut in_fence = false;
     let mut entries = Vec::new();
     for line in body.lines() {
@@ -340,11 +362,21 @@ pub(crate) fn parse_state_manifest_body(body: &str) -> Vec<(String, String)> {
         if !in_fence {
             continue;
         }
-        if let Some((hash, path)) = line.split_once("  ")
-            && !hash.trim().is_empty()
-            && !path.trim().is_empty()
-        {
-            entries.push((path.trim().to_string(), hash.trim().to_string()));
+        let tokens: Vec<&str> = line.split_whitespace().collect();
+        match tokens.as_slice() {
+            [combined, path] if !combined.is_empty() && !path.is_empty() => {
+                entries.push((path.to_string(), combined.to_string(), None));
+            }
+            [combined, body_hash, path]
+                if !combined.is_empty() && !body_hash.is_empty() && !path.is_empty() =>
+            {
+                entries.push((
+                    path.to_string(),
+                    combined.to_string(),
+                    Some(body_hash.to_string()),
+                ));
+            }
+            _ => {}
         }
     }
     entries
