@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.50.0] — 2026-05-06
+
+### Added — DELETE /universes/:slug + structured-data files write verbatim
+
+`DELETE /api/v1/universes/:slug` removes a universe entirely — cascades through `entries`, `entries_fts`, `universe_members`, `subscriptions`, then the on-disk universe directory. Refuses to delete `template`. Any authenticated user can delete (1.45.0 single-tier model). Closes the gap that left 5 stale fragment universes (`concepts`, `guarani-mbya`, `portuguese`, `yoruba`, `languages`) plus the test fork from 1.49 unreachable for cleanup.
+
+### Fixed — vault PUT no longer wraps non-markdown files with frontmatter
+
+Vault PUT previously treated every body as markdown-with-frontmatter, prepending `---\n{}\n---\n` to YAML/TOML/JSON files. That broke `_universe.yaml` parsing because the manifest reader saw `{}` as the first YAML doc. New `is_raw_data_file()` helper detects `.yaml`/`.yml`/`.toml`/`.json` paths and writes them verbatim via `write_raw_vault_file` + `index_raw_vault_file` (still indexes the entry but with empty frontmatter and the raw body). Existing `.md` writes are unchanged.
+
 ## [1.49.0] — 2026-05-06
 
 ### Added — Proposals + merges: cross-universe versioning Phase 3 (replaces `git pull request`)

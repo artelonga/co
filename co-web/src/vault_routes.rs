@@ -280,6 +280,19 @@ fn entry_to_content(frontmatter: &JsonValue, body: &str) -> String {
     co::entry::entry_to_markdown(frontmatter, body).unwrap_or_else(|_| body.to_string())
 }
 
+/// 1.50.0: paths whose vault PUT body is structured data, not markdown.
+/// These files are written verbatim to disk (no `---\n{}\n---\n` wrapper)
+/// and indexed with empty frontmatter + raw body. Critical for files like
+/// `_universe.yaml` whose downstream parser doesn't expect a markdown
+/// frontmatter prefix.
+fn is_raw_data_file(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".yaml")
+        || lower.ends_with(".yml")
+        || lower.ends_with(".toml")
+        || lower.ends_with(".json")
+}
+
 /// Parse a raw markdown string into (frontmatter JSON, body).
 fn parse_markdown_content(content: &str) -> (JsonValue, String) {
     match co::entry::split_frontmatter(content) {
@@ -292,6 +305,62 @@ fn parse_markdown_content(content: &str) -> (JsonValue, String) {
         Ok((_, body)) => (JsonValue::Object(Default::default()), body),
         Err(_) => (JsonValue::Object(Default::default()), content.to_string()),
     }
+}
+
+/// 1.50.0: write a structured-data file (yaml/toml/json) verbatim to the
+/// universe's filesystem root, with no markdown frontmatter wrap. Used by
+/// `put_vault_file` when the path matches `is_raw_data_file`. Caller is
+/// responsible for index registration via `index_raw_vault_file`.
+fn write_raw_vault_file(
+    state: &AppState,
+    universe_key: &str,
+    path: &str,
+    body: &str,
+) -> Result<(), AppError> {
+    let universe_root = {
+        let storage = lock_storage(state)?;
+        storage
+            .get_universe(universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        storage.universe_root(universe_key)
+    };
+    let full_path = universe_root.join(path);
+    if let Some(parent) = full_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+    // Atomic: tmp + rename.
+    let tmp_path = full_path.with_extension("co-tmp");
+    std::fs::write(&tmp_path, body).map_err(|e| AppError::Internal(e.to_string()))?;
+    std::fs::rename(&tmp_path, &full_path).map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(())
+}
+
+/// 1.50.0: index-only entry-row update for a raw-data file. Mirrors the
+/// portion of `write_vault_entry` that touches the per-universe SQLite,
+/// without re-writing the file (which would re-add the frontmatter wrap).
+fn index_raw_vault_file(
+    state: &AppState,
+    universe_key: &str,
+    path: &str,
+    body: &str,
+) -> Result<crate::entry_index::EntryRow, AppError> {
+    let entry = make_entry(path, JsonValue::Object(Default::default()), body);
+    let uc = {
+        let storage = lock_storage(state)?;
+        storage.universe_conn(universe_key)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = EntryIndex::new(&uc_guard);
+    index
+        .upsert(universe_key, &entry)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let row = index
+        .get(universe_key, path)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::Internal("raw entry vanished after upsert".into()))?;
+    Ok(row)
 }
 
 /// Upsert an entry: write .md file + update SQLite index. Returns row data.
@@ -481,12 +550,33 @@ pub async fn put_vault_file(
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
 
-    let (frontmatter, body_text) = parse_markdown_content(&body);
+    // 1.50.0: write structured-data files (.yaml/.yml/.toml/.json) verbatim
+    // to disk so downstream parsers (e.g., manifest reader on
+    // `_universe.yaml`) don't choke on a synthetic markdown frontmatter
+    // wrapper. Markdown writes still go through the existing path.
+    let (frontmatter, body_text) = if is_raw_data_file(&path) {
+        write_raw_vault_file(&state, &slug, &path, &body)?;
+        (JsonValue::Object(Default::default()), body.clone())
+    } else {
+        parse_markdown_content(&body)
+    };
     // CO-37: parse Obsidian Tasks checkbox from body and set frontmatter status
     // (frontmatter status is canonical and is not overwritten if already present).
-    let (frontmatter, body_text) =
-        crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text);
-    let row = write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?;
+    let (frontmatter, body_text) = if is_raw_data_file(&path) {
+        (frontmatter, body_text)
+    } else {
+        crate::obsidian_tasks::apply_obsidian_tasks(frontmatter, &body_text)
+    };
+    // For raw-data files we already wrote to disk above; only `make_entry`-style
+    // markdown content needs the full vault writer path (which adds the
+    // frontmatter wrapper). Index-only update via write_vault_entry would
+    // re-write the file with the wrapper — undoing our raw write — so we
+    // do an index-only upsert for raw files.
+    let row = if is_raw_data_file(&path) {
+        index_raw_vault_file(&state, &slug, &path, &body)?
+    } else {
+        write_vault_entry(&state, &slug, &path, frontmatter, &body_text)?
+    };
 
     // CO-156: emit entry.upsert telemetry
     crate::telemetry::emit_crud_event(

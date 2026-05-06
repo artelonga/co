@@ -324,6 +324,63 @@ pub async fn update_universe(
     })))
 }
 
+/// DELETE /api/v1/universes/:slug — delete a universe entirely (1.50.0).
+///
+/// Removes the `universes` row, all `entries`/`entries_fts` rows for the
+/// universe, all `universe_members`, and the on-disk universe directory.
+/// 1.45.0 model: any authenticated user can delete any universe they can
+/// see; the visibility middleware already gates discovery, and the
+/// platform's single-tier permission model makes finer-grained checks
+/// redundant. Refuses to delete `template` (the seed) for safety.
+pub async fn delete_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let _caller_id = extract_optional_user_id(&headers, &state)
+        .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
+
+    if slug == "template" {
+        return Err(AppError::BadRequest(
+            "Cannot delete the template universe".into(),
+        ));
+    }
+
+    let storage = lock_storage(&state)?;
+    if storage.get_universe(&slug).is_none() {
+        return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+    }
+    let universe_dir = storage.universe_root(&slug);
+
+    // Cascade in the meta DB. Per-universe SQLite files in `universes/<slug>/`
+    // are removed when we delete the directory below.
+    storage
+        .conn()
+        .execute_batch(&format!(
+            "DELETE FROM entries WHERE universe_key = '{slug}';
+             DELETE FROM universe_members WHERE universe_key = '{slug}';
+             DELETE FROM subscriptions WHERE universe_key = '{slug}';
+             DELETE FROM universes WHERE key = '{slug}';"
+        ))
+        .map_err(|e| AppError::Internal(format!("delete cascade: {e}")))?;
+    drop(storage);
+
+    if universe_dir.exists() {
+        let _ = std::fs::remove_dir_all(&universe_dir);
+    }
+
+    // Invalidate all caches keyed by this slug.
+    state.cache.invalidate_universe(&slug);
+    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+
+    Ok((
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({
+            "deleted": slug,
+        })),
+    ))
+}
+
 /// POST /api/v1/universes/:slug/duplicate — create an owner-controlled copy of
 /// a universe (CO-95 preview). Unlike `/clone` (which is anon-friendly and
 /// gated on the source being public/template), `/duplicate` requires
@@ -936,7 +993,7 @@ pub fn router() -> Router<AppState> {
         .route("/", get(list_universes).post(create_universe))
         .route("/{key}/members", get(list_members).post(add_member))
         .route("/{key}/members/{user_id}", delete(remove_member))
-        .route("/{slug}", put(update_universe))
+        .route("/{slug}", put(update_universe).delete(delete_universe))
         .route("/{slug}/claim", post(claim_universe))
         .route("/{slug}/config", put(update_universe_config))
         // CO-49: subscription routes
