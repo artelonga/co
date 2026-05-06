@@ -803,6 +803,16 @@ pub async fn start_server(config: WebConfig) {
                 Ok(n) => tracing::info!("Default-subscriptions backfill: added {n} row(s)"),
                 Err(e) => tracing::error!("backfill_default_subscriptions: {e}"),
             }
+            // 1.73.0 (Phase 8 step 3): backfill CAS blobs from existing
+            // entries on every boot. Cheap after the first run (hash
+            // collisions hit INSERT OR IGNORE no-op) — first run on prod
+            // imports ~5K bodies into blobs.
+            let (us, ents, added) = storage.backfill_blobs_from_entries();
+            if added > 0 || ents > 0 {
+                tracing::info!(
+                    "blob backfill at boot: {us} universe(s), {ents} entries, {added} new blob(s)"
+                );
+            }
             // Re-home universes whose original owner user_id is no longer in
             // the users table (e.g. after a wipe / re-seed). Without this, the
             // universe remains in the DB but the new admin can't see it.

@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.73.0] — 2026-05-06
+
+### Added — Phase 8 step 3: boot-time backfill of existing entries into CAS blobs
+
+`Storage::backfill_blobs_from_entries` walks every universe in the meta DB, opens each per-universe SQLite, reads `body` from every entry, and calls `put_blob` for each. Idempotent — `INSERT OR IGNORE` on the unique hash means subsequent boots no-op for already-stored content. Wired into the post-seed startup path so the first boot after this deploy materializes ~5K+ existing entries' bodies into the global `blobs` table.
+
+Sets up Phase 8 step 4 (the actual content-fidelity rewind): with every entry's body retrievable by `body_hash` from blobs, pinned subscribers can now be served historical bytes. State manifests already store `(path, hash)` pairs — the missing piece was the bytes-by-hash store, which now exists with a complete content corpus.
+
 ## [1.72.0] — 2026-05-06
 
 ### Added — `co-mine-claude-sessions`: import Claude Code transcripts as CO entries

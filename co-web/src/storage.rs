@@ -3683,6 +3683,62 @@ impl Storage {
             .unwrap_or(false)
     }
 
+    /// 1.73.0 (Phase 8 step 3): one-time backfill — walk every entry in
+    /// every per-universe DB and put its body into the CAS blob store.
+    /// Idempotent (INSERT OR IGNORE inside `put_blob`). Returns the
+    /// (universes_scanned, entries_processed, blobs_added) tuple. Boot-
+    /// time call is cheap on subsequent runs because the only work for
+    /// already-stored bodies is a hash compute + an INSERT OR IGNORE
+    /// that no-ops at the unique-key level.
+    pub fn backfill_blobs_from_entries(&self) -> (usize, usize, usize) {
+        let mut stmt = match self.conn.prepare("SELECT key FROM universes") {
+            Ok(s) => s,
+            Err(_) => return (0, 0, 0),
+        };
+        let keys: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+
+        let mut universes_scanned = 0usize;
+        let mut entries_processed = 0usize;
+        let mut blobs_added = 0usize;
+
+        for key in &keys {
+            universes_scanned += 1;
+            let uc = self.universe_pool.get_or_open(key);
+            let guard = match uc.lock() {
+                Ok(g) => g,
+                Err(_) => continue,
+            };
+            let mut s = match guard.prepare("SELECT body FROM entries WHERE universe_key = ?1") {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let bodies: Vec<String> = match s.query_map(params![key], |row| row.get::<_, String>(0))
+            {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => continue,
+            };
+            drop(s);
+            drop(guard);
+
+            for body in &bodies {
+                entries_processed += 1;
+                use sha2::{Digest, Sha256};
+                let hash = format!("{:x}", Sha256::digest(body.as_bytes()));
+                if !self.has_blob(&hash) && self.put_blob(body.as_bytes()).is_ok() {
+                    blobs_added += 1;
+                }
+            }
+        }
+
+        tracing::info!(
+            "blob backfill: scanned {universes_scanned} universe(s), processed {entries_processed} entries, {blobs_added} new blob(s) added"
+        );
+        (universes_scanned, entries_processed, blobs_added)
+    }
+
     /// 1.60.0: pin a subscription to a specific state. Auto-subscribes the
     /// user if they don't already have a row. `state_path` must be a
     /// `states/...md` path that exists in the universe (caller validates).
