@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.59.0] — 2026-05-06
+
+### Added — info modal: branches + proposals/merges sections; Conteúdo hides backend types
+
+The ℹ Universo modal now has five sections instead of three: overview, content-types, **states** (with click-to-diff), **branches**, **proposals + merges**. Branches show `name`, default flag, head state ID, and last-updated timestamp. Proposals + merges interleaved newest-first with status badges (open/merged/rejected) and source-universe references.
+
+Conteúdo no longer includes versioning entries (`type=state|branch|proposal|merge`) in its untyped-pages fallback. They were previously bleeding into the SPA's content view as orphan markdown files; now they live solely on the info modal where they belong.
+
 ## [1.58.0] — 2026-05-06
 
 ### Changed — versioning + stats moved to a "ℹ Universo" info modal

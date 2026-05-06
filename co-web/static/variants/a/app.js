@@ -2882,7 +2882,13 @@
             ...pageEntries.map(e => e.path),
             ...clipEntries.map(e => e.path),
         ]);
+        // 1.59.0: backend / versioning types belong on the universe info page
+        // (the ℹ modal), never in Conteúdo. Hide them from the user-facing
+        // content view.
+        const CONTEUDO_BACKEND_TYPES = new Set(['state', 'branch', 'proposal', 'merge']);
         for (const e of allEntries) {
+            const t = (e.frontmatter || {}).type;
+            if (CONTEUDO_BACKEND_TYPES.has(t)) continue;
             if (!knownPaths.has(e.path) && (e.path || '').endsWith('.md')) {
                 pageEntries.push(e);
             }
@@ -4533,22 +4539,24 @@
                 const r = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/entries?limit=5000`, {}, true);
                 entries = (r && r.entries) || [];
             } catch (_) {}
-            // States and branches are filtered via the same listing.
+            // Versioning entries are filtered from the same listing.
             const stateEntries = entries.filter(e => (e.frontmatter || {}).type === 'state');
             const branchEntries = entries.filter(e => (e.frontmatter || {}).type === 'branch');
+            const proposalEntries = entries.filter(e => (e.frontmatter || {}).type === 'proposal');
+            const mergeEntries = entries.filter(e => (e.frontmatter || {}).type === 'merge');
             const typeCounts = {};
             for (const e of entries) {
                 const t = (e.frontmatter || {}).type || '(none)';
                 typeCounts[t] = (typeCounts[t] || 0) + 1;
             }
-            renderInfoSections(slug, info, entries, stateEntries, branchEntries, typeCounts);
+            renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts);
         } catch (err) {
             console.error('universe info fetch failed', err);
             infoBody.innerHTML = '<p class="empty-state" style="margin:16px;color:#dc2626">Erro ao carregar informações.</p>';
         }
     }
 
-    function renderInfoSections(slug, info, entries, stateEntries, branchEntries, typeCounts) {
+    function renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts) {
         if (!infoBody) return;
         const visBadge = info.visibility === 'private'
             ? '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px">private</span>'
@@ -4580,15 +4588,29 @@
             </section>`;
         // State save action (auth required) + state history with inline diff.
         const stateSection = `
-            <section style="padding:16px">
+            <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
                     <h3 style="margin:0;font-size:14px">Estados (versões)</h3>
                     <button class="btn btn-secondary btn-sm" id="info-save-state">⏱ Capturar estado</button>
                 </div>
                 <div id="info-state-list" style="font-size:12px"></div>
             </section>`;
-        infoBody.innerHTML = overview + typesSection + stateSection;
+        // Branches (named pointers to a state).
+        const branchSection = `
+            <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
+                <h3 style="margin:0 0 8px;font-size:14px">Branches</h3>
+                <div id="info-branch-list" style="font-size:12px"></div>
+            </section>`;
+        // Proposals + merge events.
+        const propSection = `
+            <section style="padding:16px">
+                <h3 style="margin:0 0 8px;font-size:14px">Propostas e merges</h3>
+                <div id="info-proposal-list" style="font-size:12px"></div>
+            </section>`;
+        infoBody.innerHTML = overview + typesSection + stateSection + branchSection + propSection;
         renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug);
+        renderBranchesInto(infoBody.querySelector('#info-branch-list'), branchEntries, slug);
+        renderProposalsInto(infoBody.querySelector('#info-proposal-list'), proposalEntries, mergeEntries, slug);
         const saveBtn = infoBody.querySelector('#info-save-state');
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => {
@@ -4675,6 +4697,84 @@
                 }
             });
         });
+    }
+
+    function renderBranchesInto(container, branches, slug) {
+        if (!container) return;
+        if (!branches || branches.length === 0) {
+            container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem branches ainda. Use <code>POST /api/v1/universes/' + esc(slug) + '/branches</code> para criar.</em>';
+            return;
+        }
+        const sorted = branches.slice().sort((a, b) => {
+            const da = (a.frontmatter || {}).default ? 0 : 1;
+            const db = (b.frontmatter || {}).default ? 0 : 1;
+            return da - db || (a.path < b.path ? -1 : 1);
+        });
+        container.innerHTML = sorted.map(e => {
+            const fm = e.frontmatter || {};
+            const head = fm.head_state || '';
+            const headShort = head ? head.split('/').pop().slice(0, 24) : '?';
+            const isDefault = fm.default ? '<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">default</span>' : '';
+            const updated = fm.updated_at ? new Date(fm.updated_at).toLocaleString() : '';
+            return `
+                <div style="padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                    <div><strong>${esc(fm.name || '?')}</strong>${isDefault}</div>
+                    <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
+                        head: <code>${esc(headShort)}…</code> · updated ${esc(updated)}
+                    </div>
+                </div>`;
+        }).join('');
+    }
+
+    function renderProposalsInto(container, proposals, merges, slug) {
+        if (!container) return;
+        if ((!proposals || proposals.length === 0) && (!merges || merges.length === 0)) {
+            container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem propostas ou merges. <code>POST /api/v1/universes/' + esc(slug) + '/proposals</code> abre uma.</em>';
+            return;
+        }
+        const items = [];
+        for (const p of (proposals || [])) {
+            const fm = p.frontmatter || {};
+            const status = fm.status || 'open';
+            const statusBadge = status === 'open'
+                ? '<span style="background:#dbeafe;color:#1e40af;padding:1px 6px;border-radius:8px;font-size:10px">open</span>'
+                : status === 'merged'
+                    ? '<span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:8px;font-size:10px">merged</span>'
+                    : `<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px">${esc(status)}</span>`;
+            const created = fm.created_at ? new Date(fm.created_at).toLocaleString() : '';
+            items.push({
+                ts: fm.created_at || '',
+                html: `
+                    <div style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+                            <strong style="font-size:13px">${esc(fm.title || p.path)}</strong>
+                            ${statusBadge}
+                        </div>
+                        <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
+                            from <code>${esc(fm.source_universe || '?')}</code> · ${esc(created)}
+                        </div>
+                    </div>`,
+            });
+        }
+        for (const m of (merges || [])) {
+            const fm = m.frontmatter || {};
+            const merged = fm.merged_at ? new Date(fm.merged_at).toLocaleString() : '';
+            items.push({
+                ts: fm.merged_at || '',
+                html: `
+                    <div style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                        <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+                            <strong style="font-size:13px">⇆ ${esc(fm.title || 'merge')}</strong>
+                            <span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:8px;font-size:10px">${fm.entries_copied || 0} entries</span>
+                        </div>
+                        <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
+                            from <code>${esc(fm.source_universe || '?')}</code> → branch <code>${esc(fm.target_branch || 'main')}</code> · ${esc(merged)}
+                        </div>
+                    </div>`,
+            });
+        }
+        items.sort((a, b) => (a.ts < b.ts ? 1 : -1)); // newest first
+        container.innerHTML = items.map(x => x.html).join('');
     }
 
     // ---- (legacy 1.56-only state-history modal handlers; not wired) ----
