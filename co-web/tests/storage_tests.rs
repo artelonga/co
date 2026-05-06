@@ -873,14 +873,39 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 30); // 1.60.0 added v30 (subscriptions.pinned_state)
-    assert_eq!(storage.schema_version(), 30);
+    assert_eq!(storage.schema_version(), 31); // 1.70.0 added v31 (blobs CAS table)
+    assert_eq!(storage.schema_version(), 31);
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 30); // 1.60.0 added v30
-    assert_eq!(storage2.schema_version(), 30);
+    assert_eq!(storage2.schema_version(), 31); // 1.70.0 added v31
+    assert_eq!(storage2.schema_version(), 31);
+}
+
+/// 1.70.0 (Phase 8 step 1): blob storage round-trip — same bytes hash to
+/// the same key, deduplicate on insert, retrieve by hash.
+#[test]
+fn test_blob_storage_roundtrip() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path());
+
+    let body_a = b"# Hello\n\nThis is an entry body.\n";
+    let body_b = b"different body";
+
+    let h_a1 = storage.put_blob(body_a).unwrap();
+    let h_a2 = storage.put_blob(body_a).unwrap(); // re-store same bytes
+    let h_b = storage.put_blob(body_b).unwrap();
+
+    assert_eq!(h_a1, h_a2, "same bytes must hash to same key");
+    assert_ne!(h_a1, h_b, "different bytes must hash differently");
+    assert_eq!(h_a1.len(), 64, "sha256 hex is 64 chars");
+
+    assert_eq!(storage.get_blob(&h_a1).as_deref(), Some(body_a.as_slice()));
+    assert_eq!(storage.get_blob(&h_b).as_deref(), Some(body_b.as_slice()));
+    assert!(storage.has_blob(&h_a1));
+    assert!(!storage.has_blob("0".repeat(64).as_str()));
+    assert_eq!(storage.get_blob("nonexistent"), None);
 }
 
 #[test]

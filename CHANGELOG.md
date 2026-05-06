@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.70.0] — 2026-05-06
+
+### Added — Phase 8 step 1: content-addressed blob storage layer
+
+Migration v31 adds a `blobs` table — each row is `(hash, bytes, size, created_at)` keyed by sha256 of the bytes. Storage methods `put_blob`, `get_blob`, `has_blob`. Idempotent insert (same bytes → same hash → INSERT OR IGNORE). No vault-write integration yet — this is just the data plane that future phases (full-fidelity rewind, deduplicated entries, content-version pins) will build on.
+
+Step 2 (next): vault PUTs dual-write — every entry's body lands in `blobs` keyed by its hash, with the entry storing `body_blob_hash`. Step 3 backfills existing entries. Step 4 pins+rewind read historical bytes via blob lookups.
+
 ## [1.69.0] — 2026-05-06
 
 ### Changed — file moves: `mbya` + `topologia` + `language` collapsed into `comunicacao`

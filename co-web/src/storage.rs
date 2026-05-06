@@ -1136,6 +1136,31 @@ impl Storage {
                 .expect("Failed to record migration v30");
         }
 
+        if current_version < 31 {
+            // 1.70.0 (Phase 8 step 1): content-addressed blob storage. Each
+            // unique entry body becomes a row keyed by its sha256 hash.
+            // States can reference these hashes to enable full-fidelity
+            // rewind — serving entries with their historical bytes, not
+            // just current ones. This step ships the storage layer only;
+            // vault writes don't dual-write yet (step 2). Reads/writes from
+            // application code go through put_blob / get_blob.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS blobs (
+                        hash       TEXT PRIMARY KEY,
+                        bytes      BLOB NOT NULL,
+                        size       INTEGER NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_blobs_size ON blobs(size);
+
+                    INSERT INTO schema_version (version) VALUES (31);
+                    ",
+                )
+                .expect("Failed to run migration v31");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.
@@ -3617,6 +3642,45 @@ impl Storage {
             params![user_id, universe_key],
         )?;
         Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 8 step 1: content-addressed blob storage (1.70.0)
+    // -------------------------------------------------------------------
+
+    /// Store the bytes (typically an entry body), keyed by sha256.
+    /// Returns the hex-encoded sha256 hash. Idempotent — re-storing the
+    /// same bytes is a no-op (INSERT OR IGNORE).
+    pub fn put_blob(&self, bytes: &[u8]) -> anyhow::Result<String> {
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(bytes));
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO blobs (hash, bytes, size, created_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![hash, bytes, bytes.len() as i64, now],
+        )?;
+        Ok(hash)
+    }
+
+    /// Fetch a blob's bytes by hash. Returns `None` if the hash isn't stored.
+    pub fn get_blob(&self, hash: &str) -> Option<Vec<u8>> {
+        self.conn
+            .query_row(
+                "SELECT bytes FROM blobs WHERE hash = ?1",
+                params![hash],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .ok()
+    }
+
+    /// True if the blob exists. Cheaper than `get_blob` (no body read).
+    pub fn has_blob(&self, hash: &str) -> bool {
+        self.conn
+            .query_row("SELECT 1 FROM blobs WHERE hash = ?1", params![hash], |_| {
+                Ok(true)
+            })
+            .unwrap_or(false)
     }
 
     /// 1.60.0: pin a subscription to a specific state. Auto-subscribes the
