@@ -4645,21 +4645,20 @@ impl Storage {
                 None,
             ),
         ] {
+            // 1.54.0: INSERT OR IGNORE only — no boot-reconcile UPDATE. The
+            // pre-1.54 reconcile stomped user-set name/description/visibility
+            // /parent_key on every deploy, contradicting the 1.45.0 single-
+            // tier "any authed user can edit any universe" model. Seed values
+            // are initial defaults only. Corrections to the declared intent
+            // (e.g., renaming a universe in this list) require an explicit
+            // migration that targets the specific row.
+            let is_public_bit: i64 = if vis == "private" { 0 } else { 1 };
             let _ = self.conn.execute(
                 "INSERT OR IGNORE INTO universes \
                  (key, name, description, owner_id, created_at, is_template, is_public, \
-                  visibility, theme_preset, layout, content_count) \
-                 VALUES (?1, ?2, ?3, 'system', ?4, 0, 0, ?5, 'scholarly-light', 'board', 0)",
-                rusqlite::params![key, name, desc, now, vis],
-            );
-            // Reconcile name, description, visibility, and parent_key on every boot.
-            // INSERT OR IGNORE doesn't update existing rows, so corrections here
-            // ensure the live DB matches the declared intent.
-            let is_public_bit: i64 = if vis == "private" { 0 } else { 1 };
-            let _ = self.conn.execute(
-                "UPDATE universes SET name = ?2, description = ?3, visibility = ?4, \
-                 is_public = ?5, parent_key = ?6 WHERE key = ?1",
-                rusqlite::params![key, name, desc, vis, is_public_bit, parent],
+                  visibility, theme_preset, layout, content_count, parent_key) \
+                 VALUES (?1, ?2, ?3, 'system', ?4, 0, ?5, ?6, 'scholarly-light', 'board', 0, ?7)",
+                rusqlite::params![key, name, desc, now, is_public_bit, vis, parent],
             );
         }
     }

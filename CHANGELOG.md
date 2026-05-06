@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.54.0] — 2026-05-06
+
+### Fixed — boot-reconcile no longer stomps user edits
+
+`seed_admin_content_universes` previously ran an unconditional `UPDATE universes SET name=…, description=…, visibility=…, parent_key=…` for every seeded universe on every boot. Any user edit to those fields was reverted on the next deploy — directly contradicting the 1.45.0 "any authed user can edit any universe" model.
+
+Now the seed is INSERT OR IGNORE only (with `parent_key` and a correctly derived `is_public` added to the initial-insert column list). Existing rows are never touched. User edits persist across deploys.
+
+Trade-off: seed values are now strict defaults — if you change the seed list (e.g., rename `time` from "Time" to "Tempo"), the new value won't propagate to existing rows. Corrections to declared intent for already-seeded universes require an explicit migration that targets the specific row by key. This is the right boundary: declared seed = initial scaffolding, not ongoing source of truth.
+
 ## [1.53.0] — 2026-05-06
 
 ### Fixed — `time` universe seeded as `public-subscribable` (was hardcoded `private`)
