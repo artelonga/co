@@ -4521,6 +4521,69 @@
         });
     }
 
+    // 1.56.0: state history — modal listing recent states (newest first).
+    const btnHistory = $('#btn-state-history');
+    const historyOverlay = $('#state-history-overlay');
+    const historyClose = $('#state-history-close');
+    const historyBody = $('#state-history-body');
+
+    function renderStateHistory(entries) {
+        if (!historyBody) return;
+        if (!entries || entries.length === 0) {
+            historyBody.innerHTML = '<p class="empty-state" style="margin:0">Sem estados ainda. Clique <strong>⏱ Estado</strong> para criar o primeiro.</p>';
+            return;
+        }
+        const sorted = entries.slice().sort((a, b) => (a.path < b.path ? 1 : -1));
+        const rows = sorted.map(e => {
+            const fm = e.frontmatter || {};
+            const hash = (fm.state_hash || '').slice(0, 12);
+            const msg = fm.message || '';
+            const count = fm.entry_count != null ? fm.entry_count : '?';
+            const created = fm.created_at || '';
+            const author = fm.author ? `<span style="color:var(--text-muted,#6b7280);font-size:11px">by ${esc(String(author).slice(0, 12))}</span>` : '';
+            const parent = fm.parent ? `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:2px">parent: <code>${esc(fm.parent.split('/').pop().slice(0, 24))}…</code></div>` : '';
+            const ts = created ? new Date(created).toLocaleString() : '';
+            return `
+                <div class="state-row" style="padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+                        <code style="font-size:12px;font-family:var(--mono,monospace);background:var(--bg-subtle,#f3f4f6);padding:2px 6px;border-radius:3px">${esc(hash)}…</code>
+                        <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
+                    </div>
+                    <div style="margin-top:4px;font-size:13px">${esc(msg) || '<em style="color:var(--text-muted,#6b7280)">(no message)</em>'}</div>
+                    <div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:2px">${count} entries ${author}</div>
+                    ${parent}
+                </div>`;
+        }).join('');
+        historyBody.innerHTML = rows;
+    }
+
+    if (btnHistory) {
+        btnHistory.addEventListener('click', async () => {
+            if (!historyOverlay) return;
+            historyOverlay.classList.remove('hidden');
+            if (historyBody) historyBody.innerHTML = '<p class="empty-state" style="margin:0">Carregando…</p>';
+            const slug = state.currentUniverseSlug;
+            if (!slug) {
+                if (historyBody) historyBody.innerHTML = '<p class="empty-state" style="margin:0">Nenhum universo selecionado.</p>';
+                return;
+            }
+            try {
+                const resp = await apiFetch(
+                    `/api/v1/universes/${encodeURIComponent(slug)}/entries?type=state&limit=100`,
+                    {}, true,
+                );
+                renderStateHistory((resp && resp.entries) || []);
+            } catch (err) {
+                console.error('state history fetch failed', err);
+                if (historyBody) historyBody.innerHTML = `<p class="empty-state" style="margin:0;color:var(--danger,#dc2626)">Erro ao carregar histórico.</p>`;
+            }
+        });
+    }
+    if (historyClose) historyClose.addEventListener('click', () => historyOverlay && historyOverlay.classList.add('hidden'));
+    if (historyOverlay) historyOverlay.addEventListener('click', e => {
+        if (e.target === historyOverlay) historyOverlay.classList.add('hidden');
+    });
+
     // Modal
     $('#modal-close').addEventListener('click', closeModal);
     $('#btn-cancel').addEventListener('click', closeModal);

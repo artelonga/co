@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.56.0] — 2026-05-06
+
+### Added — state history modal (🕓 button next to "⏱ Estado")
+
+Click the clock icon to open a modal listing every state of the current universe (newest first), each row showing the `state_hash` prefix, the message you typed, entry count, parent state, author, and a localized timestamp. No interaction beyond viewing yet — diff visualization and "rewind to this state" are still on the roadmap.
+
+`git log` equivalent reached parity with `git commit` (1.55.0). Branch listing, diff view, and proposal review are next on the SPA UI track.
+
 ## [1.55.0] — 2026-05-06
 
 ### Added — "⏱ Estado" button: first frontend surface for CO-native versioning
