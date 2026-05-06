@@ -4495,39 +4495,192 @@
         if (state.currentProject) openTaskModal(null);
     });
 
-    // 1.55.0: Save state — atomic snapshot of the universe (CO-native versioning).
-    // Prompts for an optional message, POSTs to /states, shows a toast.
-    const btnSaveState = $('#btn-save-state');
-    if (btnSaveState) {
-        btnSaveState.addEventListener('click', async () => {
-            if (state.isTemplate) { await ensureOwnUniverse(); return; }
-            const slug = state.currentUniverseSlug;
-            if (!slug) return;
-            const msg = window.prompt('Message for this state (optional):', '');
-            if (msg === null) return; // cancelled
-            try {
-                const resp = await apiFetch(
-                    `/api/v1/universes/${encodeURIComponent(slug)}/states`,
-                    { method: 'POST', body: JSON.stringify({ message: msg }), headers: { 'Content-Type': 'application/json' } },
-                    true,
-                );
-                const hash = (resp && resp.state_hash) ? String(resp.state_hash).slice(0, 12) : '?';
-                const count = (resp && resp.entry_count) || 0;
-                showToast(`State saved · ${hash}… · ${count} entries`, 'success');
-            } catch (err) {
-                console.error('save state failed', err);
-                showToast('Failed to save state', 'error');
-            }
+    // 1.58.0: Universe info modal — public read-only metadata + stats, plus
+    // (auth-gated) state save and state history with diff. Replaces the
+    // header-only ⏱/🕓 buttons from 1.55-1.57 — versioning surface lives in
+    // the info page, not on the Conteúdo header.
+    const btnInfo = $('#btn-universe-info');
+    const infoOverlay = $('#universe-info-overlay');
+    const infoClose = $('#universe-info-close');
+    const infoBody = $('#universe-info-body');
+    const infoTitle = $('#universe-info-title');
+
+    if (infoClose) infoClose.addEventListener('click', () => infoOverlay && infoOverlay.classList.add('hidden'));
+    if (infoOverlay) infoOverlay.addEventListener('click', e => {
+        if (e.target === infoOverlay) infoOverlay.classList.add('hidden');
+    });
+
+    if (btnInfo) {
+        btnInfo.addEventListener('click', async () => {
+            if (!infoOverlay) return;
+            infoOverlay.classList.remove('hidden');
+            await renderUniverseInfo();
         });
     }
 
-    // 1.56.0: state history — modal listing recent states (newest first).
-    const btnHistory = $('#btn-state-history');
-    const historyOverlay = $('#state-history-overlay');
-    const historyClose = $('#state-history-close');
-    const historyBody = $('#state-history-body');
+    async function renderUniverseInfo() {
+        const slug = state.currentUniverseSlug;
+        if (!slug || !infoBody) return;
+        if (infoTitle) infoTitle.textContent = `Universo · ${slug}`;
+        infoBody.innerHTML = '<p class="empty-state" style="margin:16px">Carregando…</p>';
+        try {
+            // Always-public: universe metadata.
+            const info = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}`, {}, true);
+            // Always-public: entry list (used for type breakdown). Errors here
+            // are non-fatal — we still render metadata.
+            let entries = [];
+            try {
+                const r = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/entries?limit=5000`, {}, true);
+                entries = (r && r.entries) || [];
+            } catch (_) {}
+            // States and branches are filtered via the same listing.
+            const stateEntries = entries.filter(e => (e.frontmatter || {}).type === 'state');
+            const branchEntries = entries.filter(e => (e.frontmatter || {}).type === 'branch');
+            const typeCounts = {};
+            for (const e of entries) {
+                const t = (e.frontmatter || {}).type || '(none)';
+                typeCounts[t] = (typeCounts[t] || 0) + 1;
+            }
+            renderInfoSections(slug, info, entries, stateEntries, branchEntries, typeCounts);
+        } catch (err) {
+            console.error('universe info fetch failed', err);
+            infoBody.innerHTML = '<p class="empty-state" style="margin:16px;color:#dc2626">Erro ao carregar informações.</p>';
+        }
+    }
 
-    function renderStateHistory(entries) {
+    function renderInfoSections(slug, info, entries, stateEntries, branchEntries, typeCounts) {
+        if (!infoBody) return;
+        const visBadge = info.visibility === 'private'
+            ? '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px">private</span>'
+            : info.visibility === 'template'
+                ? '<span style="background:#e0e7ff;color:#3730a3;padding:2px 8px;border-radius:10px;font-size:11px">template</span>'
+                : '<span style="background:#d1fae5;color:#065f46;padding:2px 8px;border-radius:10px;font-size:11px">public-subscribable</span>';
+        const typesHtml = Object.entries(typeCounts)
+            .sort((a, b) => b[1] - a[1])
+            .map(([t, n]) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px dashed var(--border,#e5e7eb);font-size:13px"><span>${esc(t)}</span><strong>${n}</strong></div>`)
+            .join('');
+        const overview = `
+            <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px">
+                    <h3 style="margin:0;font-size:16px">${esc(info.name || slug)}</h3>
+                    ${visBadge}
+                </div>
+                <p style="margin:6px 0 0;color:var(--text-muted,#6b7280);font-size:13px">${esc(info.description || '')}</p>
+                <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:12px;font-size:13px">
+                    <div><strong>${info.content_count != null ? info.content_count : entries.length}</strong> entries</div>
+                    <div><strong>${stateEntries.length}</strong> states</div>
+                    <div><strong>${branchEntries.length}</strong> branches</div>
+                    <div style="color:var(--text-muted,#6b7280);font-size:11px">slug: <code>${esc(slug)}</code></div>
+                </div>
+            </section>`;
+        const typesSection = `
+            <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
+                <h3 style="margin:0 0 8px;font-size:14px">Tipos de conteúdo</h3>
+                ${typesHtml || '<em style="color:var(--text-muted,#6b7280);font-size:12px">Sem entradas.</em>'}
+            </section>`;
+        // State save action (auth required) + state history with inline diff.
+        const stateSection = `
+            <section style="padding:16px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+                    <h3 style="margin:0;font-size:14px">Estados (versões)</h3>
+                    <button class="btn btn-secondary btn-sm" id="info-save-state">⏱ Capturar estado</button>
+                </div>
+                <div id="info-state-list" style="font-size:12px"></div>
+            </section>`;
+        infoBody.innerHTML = overview + typesSection + stateSection;
+        renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug);
+        const saveBtn = infoBody.querySelector('#info-save-state');
+        if (saveBtn) {
+            saveBtn.addEventListener('click', async () => {
+                if (state.isTemplate) { await ensureOwnUniverse(); return; }
+                const msg = window.prompt('Message for this state (optional):', '');
+                if (msg === null) return;
+                try {
+                    const r = await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/states`,
+                        { method: 'POST', body: JSON.stringify({ message: msg }), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`State saved · ${String(r.state_hash).slice(0, 12)}…`, 'success');
+                    await renderUniverseInfo(); // re-fetch
+                } catch (err) {
+                    console.error('save state failed', err);
+                    showToast('Failed to save state', 'error');
+                }
+            });
+        }
+    }
+
+    function renderStatesInto(container, entries, slug) {
+        if (!container) return;
+        if (!entries || entries.length === 0) {
+            container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem estados ainda. Clique "⏱ Capturar estado" para criar o primeiro.</em>';
+            return;
+        }
+        const sorted = entries.slice().sort((a, b) => (a.path < b.path ? 1 : -1));
+        container.innerHTML = sorted.map(e => {
+            const fm = e.frontmatter || {};
+            const hash = (fm.state_hash || '').slice(0, 12);
+            const msg = fm.message || '';
+            const count = fm.entry_count != null ? fm.entry_count : '?';
+            const created = fm.created_at || '';
+            const author = fm.author ? `<span style="color:var(--text-muted,#6b7280);font-size:11px">by ${esc(String(fm.author).slice(0, 12))}</span>` : '';
+            const parentPath = fm.parent || '';
+            const ts = created ? new Date(created).toLocaleString() : '';
+            return `
+                <div class="state-row" style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb);cursor:pointer"
+                     data-state-path="${esc(e.path)}" data-parent-path="${esc(parentPath)}" data-slug="${esc(slug)}"
+                     title="Click to see what changed in this state">
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
+                        <code style="font-size:11px;font-family:var(--mono,monospace);background:var(--bg-subtle,#f3f4f6);padding:2px 6px;border-radius:3px">${esc(hash)}…</code>
+                        <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
+                    </div>
+                    <div style="margin-top:4px">${esc(msg) || '<em style="color:var(--text-muted,#6b7280)">(no message)</em>'} · ${count} entries ${author}</div>
+                </div>`;
+        }).join('');
+        container.querySelectorAll('.state-row').forEach(row => {
+            row.addEventListener('click', async () => {
+                const existing = row.querySelector('.state-diff');
+                if (existing) { existing.remove(); return; }
+                const statePath = row.dataset.statePath;
+                const parentPath = row.dataset.parentPath;
+                const rowSlug = row.dataset.slug;
+                const panel = document.createElement('div');
+                panel.className = 'state-diff';
+                panel.style.cssText = 'margin-top:8px;padding:8px 10px;background:var(--bg-subtle,#f9fafb);border-radius:4px;font-size:11px;border:1px solid var(--border,#e5e7eb)';
+                panel.innerHTML = '<em>Loading diff…</em>';
+                row.appendChild(panel);
+                if (!parentPath) {
+                    panel.innerHTML = '<em style="color:var(--text-muted,#6b7280)">First state — no parent to diff against.</em>';
+                    return;
+                }
+                try {
+                    const url = `/api/v1/universes/${encodeURIComponent(rowSlug)}/states/diff?from=${encodeURIComponent(parentPath)}&to=${encodeURIComponent(statePath)}`;
+                    const diff = await apiFetch(url, {}, true);
+                    const fmtList = (xs, sign, color) => xs.slice(0, 50).map(e =>
+                        `<div style="padding-left:12px;color:${color};font-family:var(--mono,monospace)">${sign} ${esc(e.path)}</div>`
+                    ).join('') + (xs.length > 50 ? `<div style="padding-left:12px;color:var(--text-muted,#6b7280)">… and ${xs.length - 50} more</div>` : '');
+                    const parts = [];
+                    if (diff.added.length) parts.push(`<div style="color:#059669;font-weight:600">+${diff.added.length} added</div>` + fmtList(diff.added, '+', '#059669'));
+                    if (diff.modified.length) parts.push(`<div style="color:#d97706;font-weight:600;margin-top:4px">~${diff.modified.length} modified</div>` + fmtList(diff.modified, '~', '#d97706'));
+                    if (diff.removed.length) parts.push(`<div style="color:#dc2626;font-weight:600;margin-top:4px">-${diff.removed.length} removed</div>` + fmtList(diff.removed, '-', '#dc2626'));
+                    if (parts.length === 0) {
+                        panel.innerHTML = `<em style="color:var(--text-muted,#6b7280)">No changes — ${diff.unchanged} entries unchanged.</em>`;
+                    } else {
+                        panel.innerHTML = parts.join('') + `<div style="margin-top:6px;color:var(--text-muted,#6b7280)">${diff.unchanged} unchanged</div>`;
+                    }
+                } catch (err) {
+                    console.error('diff fetch failed', err);
+                    panel.innerHTML = '<em style="color:#dc2626">Failed to load diff.</em>';
+                }
+            });
+        });
+    }
+
+    // ---- (legacy 1.56-only state-history modal handlers; not wired) ----
+    // eslint-disable-next-line no-unused-vars
+    function _legacy_renderStateHistory(entries) {
+        const historyBody = $('#state-history-body');
         if (!historyBody) return;
         if (!entries || entries.length === 0) {
             historyBody.innerHTML = '<p class="empty-state" style="margin:0">Sem estados ainda. Clique <strong>⏱ Estado</strong> para criar o primeiro.</p>';
@@ -4607,33 +4760,6 @@
             });
         });
     }
-
-    if (btnHistory) {
-        btnHistory.addEventListener('click', async () => {
-            if (!historyOverlay) return;
-            historyOverlay.classList.remove('hidden');
-            if (historyBody) historyBody.innerHTML = '<p class="empty-state" style="margin:0">Carregando…</p>';
-            const slug = state.currentUniverseSlug;
-            if (!slug) {
-                if (historyBody) historyBody.innerHTML = '<p class="empty-state" style="margin:0">Nenhum universo selecionado.</p>';
-                return;
-            }
-            try {
-                const resp = await apiFetch(
-                    `/api/v1/universes/${encodeURIComponent(slug)}/entries?type=state&limit=100`,
-                    {}, true,
-                );
-                renderStateHistory((resp && resp.entries) || []);
-            } catch (err) {
-                console.error('state history fetch failed', err);
-                if (historyBody) historyBody.innerHTML = `<p class="empty-state" style="margin:0;color:var(--danger,#dc2626)">Erro ao carregar histórico.</p>`;
-            }
-        });
-    }
-    if (historyClose) historyClose.addEventListener('click', () => historyOverlay && historyOverlay.classList.add('hidden'));
-    if (historyOverlay) historyOverlay.addEventListener('click', e => {
-        if (e.target === historyOverlay) historyOverlay.classList.add('hidden');
-    });
 
     // Modal
     $('#modal-close').addEventListener('click', closeModal);

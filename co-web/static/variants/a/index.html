@@ -112,8 +112,7 @@
                     <div id="header-user-area" class="header-user-area">
                         <button class="btn btn-ghost header-entrar" id="btn-header-entrar" data-i18n="action.login">Entrar</button>
                     </div>
-                    <button class="btn btn-secondary btn-sm" id="btn-save-state" title="Capture an atomic state of this universe (CO-native versioning)" data-i18n="save_state">⏱ Estado</button>
-                    <button class="btn btn-ghost btn-sm" id="btn-state-history" title="Histórico de estados deste universo" style="padding:4px 8px">🕓</button>
+                    <button class="btn btn-ghost btn-sm" id="btn-universe-info" title="Informações e estatísticas deste universo" style="padding:4px 10px">ℹ</button>
                     <button class="btn btn-primary btn-new-task" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
                 </div>
             </header>
@@ -408,18 +407,15 @@
         </div>
     </div>
 
-    <!-- 1.56.0: State history modal — list of recent states for the current universe -->
-    <div id="state-history-overlay" class="modal-overlay hidden">
-        <div class="modal" id="state-history-modal" style="max-width:640px">
+    <!-- 1.58.0: Universe info modal — public read-only stats + (auth-gated) state save/history -->
+    <div id="universe-info-overlay" class="modal-overlay hidden">
+        <div class="modal" id="universe-info-modal" style="max-width:720px">
             <div class="modal-header">
-                <h2>Histórico de estados</h2>
-                <button class="modal-close" id="state-history-close">&times;</button>
+                <h2 id="universe-info-title">Universo</h2>
+                <button class="modal-close" id="universe-info-close">&times;</button>
             </div>
-            <div id="state-history-body" style="padding:16px;max-height:60vh;overflow:auto">
-                <p class="empty-state" style="margin:0">Carregando…</p>
-            </div>
-            <div class="modal-footer" style="padding:12px 16px;border-top:1px solid var(--border,#e5e7eb);font-size:12px;color:var(--text-muted,#6b7280)">
-                Cada estado é um snapshot atômico. <code>state_hash</code> é o equivalente de um commit ID.
+            <div id="universe-info-body" style="padding:0;max-height:70vh;overflow:auto">
+                <p class="empty-state" style="margin:16px">Carregando…</p>
             </div>
         </div>
     </div>

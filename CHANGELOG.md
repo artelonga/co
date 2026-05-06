@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.58.0] — 2026-05-06
+
+### Changed — versioning + stats moved to a "ℹ Universo" info modal
+
+The `⏱ Estado` save button and `🕓` history modal added in 1.55-1.57 lived on the universe header. Per direction: that's not where versioning belongs — versioning entries shouldn't show in `Conteúdo` either, but on a dedicated, **publicly viewable info page**.
+
+The header now has a single `ℹ` button. Clicking it opens a modal with three sections:
+- **Overview** — name, description, visibility badge, slug, total entries / states / branches counts
+- **Tipos de conteúdo** — a breakdown of `entry_type → count` for every type present in the universe (tasks, concepts, translations, states, branches, etc.)
+- **Estados (versões)** — embedded `git log` equivalent: list of all states newest-first, click to expand the inline diff vs parent. Includes a `⏱ Capturar estado` button that runs the same POST as before (auth required — anonymous viewers see read-only).
+
+This is the public face of "what's inside this universe" for both anonymous and authed callers. It also took a baseline state on every existing universe (10 of them: co, mbya, topologia, artelonga, quilomboaraucaria, rfq, time, comunicacao, yggdrasil, dados, yuri) so each has a starting point in its state chain.
+
 ## [1.57.0] — 2026-05-06
 
 ### Added — clickable state rows show inline diff vs parent
