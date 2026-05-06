@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.71.0] — 2026-05-06
+
+### Added — Phase 8 step 2: vault writes dual-write to CAS blobs
+
+`write_vault_entry` and `index_raw_vault_file` now both call `meta.put_blob(body.as_bytes())` after the index upsert. The entry's pre-existing `body_hash` column is already sha256 of the body, which is the same key the blob store uses — so the entry doubles as a reference into `blobs` with zero schema change to the per-universe entry tables. Failures are logged but non-fatal (the on-disk file + entries index are already durable).
+
+Going forward, every new vault write puts its body in the global `blobs` table. Existing entries (5K+ pre-1.71) will be backfilled in step 3. Step 4 makes pin-rewind reads serve historical bytes via blob lookups — the long-promised content-fidelity rewind.
+
 ## [1.70.0] — 2026-05-06
 
 ### Added — Phase 8 step 1: content-addressed blob storage layer

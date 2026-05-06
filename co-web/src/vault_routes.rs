@@ -376,6 +376,12 @@ fn index_raw_vault_file(
         .get(universe_key, path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::Internal("raw entry vanished after upsert".into()))?;
+    // 1.71.0 (Phase 8 step 2): same CAS dual-write for raw YAML files.
+    if let Ok(meta) = state.storage.lock()
+        && let Err(e) = meta.put_blob(body.as_bytes())
+    {
+        tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+    }
     Ok(row)
 }
 
@@ -446,6 +452,19 @@ pub(crate) fn write_vault_entry(
             frontmatter.get("title").and_then(|v| v.as_str()),
             &universe_root,
         );
+        // 1.71.0 (Phase 8 step 2): dual-write the body to the CAS blob
+        // store. The entry's `body_hash` column is already sha256 of the
+        // body, which is the same key `put_blob` uses — so the entry
+        // doubles as a reference into `blobs` with zero schema change.
+        // Phase 8 step 4 will read historical bytes via this on pin
+        // rewind. Errors are logged but non-fatal — the vault write is
+        // already durable in the on-disk file + entries index.
+        if let Ok(meta) = state.storage.lock()
+            && let Err(e) = meta.put_blob(body.as_bytes())
+        {
+            tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+        }
+
         // 1.67.0: refresh content_count from the actual entry-index row
         // count after every write. The pre-1.67 increment-by-one approach
         // overcounted on updates and undercounted on writes that bypassed
