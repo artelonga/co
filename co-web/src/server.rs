@@ -450,6 +450,15 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", universe_api)
         // CO-161: all universe-content routes under a single visibility + writer gate.
         .nest("/api/v1/universes", universe_content_api)
+        // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
+        // Accepts JWT or long-lived API token via require_auth_with_token.
+        .nest(
+            "/api/v1",
+            crate::blob_routes::router().layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::auth::require_auth_with_token,
+            )),
+        )
         .nest("/api/v1/auth", token_api)
         .nest("/api/v1/themes", themes_api)
         // CO-124: Vercel Log Drain receiver

@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.75.0] — 2026-05-06
+
+### Added — Blob CAS API: GET/HEAD/POST `/api/v1/blobs`
+
+Exposes the meta-DB `blobs` table over HTTP for external tools (mempalace BaseBackend shim, future MCP server, agents needing raw content by hash):
+
+- `GET /api/v1/blobs/:hash` — returns the bytes (`application/octet-stream`, immutable cache-control).
+- `HEAD /api/v1/blobs/:hash` — 200 if stored, 404 otherwise.
+- `POST /api/v1/blobs` — body bytes go into the CAS; returns `{hash, size}`.
+
+Auth via `require_auth_with_token` — JWT or long-lived API token. Hash validation requires 64-char lowercase hex (sha256). The `immutable` cache-control matters: bytes-by-hash never change, so any client (CDN, mempalace, MCP) can cache aggressively.
+
+This is the foundation for the mempalace `BaseBackend` shim (interop step 2 in the project_co_mempalace_interop memory). A Python `MempalaceCoBackend` can call these endpoints to dedupe drawer storage into CO's CAS, getting versioning + sync for free.
+
 ## [1.74.0] — 2026-05-06
 
 ### Added — Phase 8 step 4: content-fidelity rewind via blob lookups
