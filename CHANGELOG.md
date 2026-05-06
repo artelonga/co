@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.76.0] — 2026-05-06
+
+### Added — Mempalace BaseBackend Python shim (`scripts/mempalace_co_backend.py`)
+
+`MempalaceCoBackend` implements mempalace's `BaseBackend` ABC backed by CO's HTTP API:
+
+- `upsert` writes content blob via `POST /api/v1/blobs`, embedding blob via `POST /api/v1/blobs`, and metadata entry via vault PUT — three calls, parallelised via `ThreadPoolExecutor`.
+- `get(ids)` reads vault entries by path, resolves `blob_hash` → bytes via `GET /api/v1/blobs/:hash`.
+- `query` falls back to keyword search via `GET /api/v1/universes/:slug/entries?q=…` today; exposes a `_vector_search` hook (no-op) for swapping in CO-164's vector endpoint when it ships.
+- `delete` removes vault entries; CAS blobs are content-addressed and shared — never deleted by the shim.
+- Chroma-style `where` clauses: `$eq/$gt/$gte/$lt/$lte/$in` mapped server-side to CO's frontmatter index; `$ne/$nin/$and/$or` evaluated client-side.
+
+Ships with `scripts/test_mempalace_co.py` (27 unit + mock-HTTP tests, 2 live-server integration tests behind `CO_INTEGRATION_TEST=1`) and `scripts/mempalace_co_README.md` documenting config, the keyword-only `query` caveat, and the CO-164 upgrade path.
+
+No Rust changes. Pure Python, stdlib-only (`urllib.request`, `struct`, `json`).
+
 ## [1.75.0] — 2026-05-06
 
 ### Added — Blob CAS API: GET/HEAD/POST `/api/v1/blobs`
