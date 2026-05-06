@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.72.0] — 2026-05-06
+
+### Added — `co-mine-claude-sessions`: import Claude Code transcripts as CO entries
+
+`scripts/co-mine-claude-sessions.py` walks `~/.claude/projects/*/` for `.jsonl` session files, renders each as markdown (title + per-turn `## User · ts` / `## Assistant · ts` blocks), and PUTs them into a target CO universe at `sessions/<project-dir>/<session-id-short>.md`. Frontmatter carries `type=claude-session`, `session_id`, `project`, `user_messages`, `assistant_messages`, `started_at`, `ended_at`. Idempotent — vault PUT is upsert.
+
+Mempalace inspiration: equivalent of `mempalace mine ~/.claude/projects --mode convos`, but writing into CO's vault. Closes the dogfood loop: every Claude Code session that built CO is now versioned + searchable inside CO.
+
+CLI: `python3 scripts/co-mine-claude-sessions.py [universe] [--limit N] [--project SUBSTR] [--dry-run]`. Auth: API token from macOS Keychain (service=co-sync-token).
+
+156 sessions detected at first run (97 from `~/projects/co`). Volume target: `co` universe by default.
+
 ## [1.71.0] — 2026-05-06
 
 ### Added — Phase 8 step 2: vault writes dual-write to CAS blobs
