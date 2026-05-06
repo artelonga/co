@@ -180,6 +180,7 @@ mod tests {
         let game_db_path = dir.join("game_test.db");
         let game_storage =
             Arc::new(game_core::storage::Storage::open(&game_db_path).expect("open game storage"));
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: AppState = Arc::new(AppStateInner {
             storage: Mutex::new(storage),
             experiment: Mutex::new(experiment),
@@ -193,6 +194,8 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
         });
         build_router(state, None)
     }

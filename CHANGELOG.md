@@ -5,6 +5,37 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.77.0] — 2026-05-06
+
+### Added — CO-164: Vector index for entries — semantic search
+
+Local text-embedding pipeline using `fastembed` (all-MiniLM-L6-v2, 384-dim, ~80 MB) — no external API calls, offline-first.
+
+- **`entry_embeddings` table** (migration v10): stores `embedding BLOB` (384 × f32 LE), `body_hash` (staleness guard), `model`, `indexed_at` per `(universe_key, path)`. `idx_emb_body_hash` index.
+- **`EmbeddingService`** (`embedding.rs`): lazy-loads fastembed model from `~/.co/models/` (or `CO_MODELS_DIR`). Gracefully disabled when model unavailable — server continues without semantic search.
+- **Background worker** (`embedding_worker.rs`): dedicated OS thread, batches up to 32 entries per inference call (≤100 ms window). Enqueued on every entry create/update/delete. Fire-and-forget (`try_send`).
+- **Boot scan**: on startup, compares `entries.body_hash` vs `entry_embeddings.body_hash` across all universes and enqueues stale/missing entries. Does not re-embed unchanged content.
+- **`GET /api/v1/universes/:slug/entries?semantic=<query>&k=10`**: returns top-K entries by cosine similarity, each with `_score ∈ [0, 1]`.
+- **Hybrid search** (`?q=&semantic=`): merges FTS rank + cosine similarity via harmonic mean, outperforming either alone.
+- **`GET /api/v1/universes/:slug/entries/similar?path=<vault-path>&k=10`**: similar entries to a given one (excludes self).
+- **`GET /api/v1/search?semantic=<query>&k=10`**: cross-universe semantic search across all universes the user can read.
+- `EntryRow._score` field (optional, `skip_serializing_if = None`) — set on semantic results only.
+
+## [1.76.0] — 2026-05-04
+
+### Added — Temporal validity on `entry_relations` (mempalace knowledge-graph parity)
+
+Edges in the typed FK relation graph can now carry `valid_from` / `valid_until` bounds — half-open `[from, until)` interval. Both `NULL` means unbounded (back-compat with all existing rows).
+
+- Migration v9 (`run_universe_migrations`): `ensure_universe_column` adds `valid_from TEXT`, `valid_until TEXT` to `entry_relations`. Idempotent, safe on every existing per-universe DB.
+- `RelationIndex::replace_all_with_validity(...)` writes the bounds; `replace_all(...)` (3-arg) stays for unbounded callers.
+- `sync_entry_relations` reads the *from-entry's* frontmatter `valid_from` / `valid_until` (RFC3339 strings) and applies them uniformly to every outbound edge — entry-level lifecycle, not per-edge. Entries without these fields produce unbounded edges.
+- Backfill loop reads the same fields from `entries.frontmatter_json`.
+- `GET /api/v1/universes/:slug/relations/{inbound,outbound}?path=…&at=<ISO>` filters to edges valid at that instant via `relation_valid_at`. The `at` param is optional; absent = no filter.
+- Response payloads now include `valid_from` / `valid_until` on each edge (omitted when `NULL` via `skip_serializing_if`).
+
+Smallest temporal primitive that lets the graph answer "what was true on date X" — useful for biographical / historical universes where relationships have lifecycles (mempalace-style room lifecycles within wings).
+
 ## [1.75.0] — 2026-05-06
 
 ### Added — Blob CAS API: GET/HEAD/POST `/api/v1/blobs`

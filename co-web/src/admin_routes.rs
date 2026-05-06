@@ -664,6 +664,7 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path)
                 .expect("Failed to open test game storage"),
         );
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
             storage: StdMutex::new(storage),
             experiment: StdMutex::new(experiment),
@@ -677,6 +678,8 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
         });
         crate::server::build_router(state, None)
     }

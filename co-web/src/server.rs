@@ -63,6 +63,10 @@ pub struct AppStateInner {
     pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
     /// CO-118: Workers Analytics Engine emitter (no-op when env vars absent).
     pub wae: Arc<crate::wae::WaeEmitter>,
+    /// CO-164: shared embedding model (all-MiniLM-L6-v2).
+    pub embeddings: Arc<crate::embedding::EmbeddingService>,
+    /// CO-164: channel to send embedding jobs to the background worker.
+    pub embedding_tx: crate::embedding_worker::EmbeddingSender,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -474,7 +478,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
         .nest("/api/v1/admin", admin_dashboard_api)
         // CO-144 Phase C: process model — first process is alterar-pagina-na-web
-        .nest("/api/v1/processos", crate::processos::router());
+        .nest("/api/v1/processos", crate::processos::router())
+        // CO-164: cross-universe semantic search
+        .nest("/api/v1", crate::search_routes::router());
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -942,6 +948,11 @@ pub async fn start_server(config: WebConfig) {
     // CO-118: build WAE emitter (no-op when WAE_ENDPOINT / WAE_API_KEY are absent).
     let wae = crate::wae::WaeEmitter::new(config.wae_endpoint.clone(), config.wae_api_key.clone());
 
+    // CO-164: load embedding model (non-blocking — fails gracefully if offline).
+    let model_dir = crate::embedding::default_model_dir();
+    let embeddings = Arc::new(crate::embedding::EmbeddingService::new(model_dir));
+    let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
+
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
         experiment: Mutex::new(experiment),
@@ -955,6 +966,8 @@ pub async fn start_server(config: WebConfig) {
         cache: crate::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         wae,
+        embeddings,
+        embedding_tx,
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -966,6 +979,10 @@ pub async fn start_server(config: WebConfig) {
 
     // CO-72: spawn doc-gen worker loop.
     crate::job_queue::spawn_worker(Arc::clone(&state));
+
+    // CO-164: spawn embedding background worker + run boot scan for stale embeddings.
+    crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
+    crate::embedding_worker::boot_scan(Arc::clone(&state));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.
@@ -2321,6 +2338,7 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path)
                 .expect("Failed to open test game storage"),
         );
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: AppState = Arc::new(AppStateInner {
             storage: Mutex::new(storage),
             experiment: Mutex::new(experiment),
@@ -2334,6 +2352,8 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
         });
         build_router(state, None)
     }

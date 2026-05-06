@@ -133,6 +133,7 @@ fn parse_co_entry(file_path: &std::path::Path) -> Option<EntryRow> {
         body_hash,
         created_at,
         updated_at,
+        _score: None,
     })
 }
 

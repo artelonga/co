@@ -112,6 +112,11 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
     });
 
     build_router(state, None)
@@ -206,6 +211,11 @@ async fn test_owner_on_private_universe_gets_200() {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
     });
 
     let app = build_router(state, None);
@@ -271,6 +281,11 @@ async fn test_non_member_on_private_universe_gets_403() {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
     });
 
     let app = build_router(state, None);

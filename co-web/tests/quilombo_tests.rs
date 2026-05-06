@@ -55,6 +55,11 @@ fn build_quilombo_app(dir: &std::path::Path) -> axum::Router {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
     });
     build_router(state, None)
 }
