@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.49.0] — 2026-05-06
+
+### Added — Proposals + merges: cross-universe versioning Phase 3 (replaces `git pull request`)
+
+A `proposal` is an entry of `type=proposal` requesting that the content from a `source_universe`'s `source_state` be merged into a `target_universe`'s named branch. A `merge` is the event-record of acceptance — also an entry, stored alongside the merged target state for forensics.
+
+New endpoints:
+- `POST /api/v1/universes/:slug/proposals` — create a proposal targeting `:slug`. Validates source universe + source state exist and source ≠ target.
+- `POST /api/v1/universes/:slug/merges` — execute the merge. Body: `{proposal: "proposals/...md"}`. The handler copies every non-metadata entry from the source state into the target (filtering out `state`, `branch`, `proposal`, `merge` types so universe-local bookkeeping doesn't propagate), takes a fresh state in the target, advances `target_branch.head_state` if the branch exists, writes a `merge` entry recording the event, and flips `proposal.status="merged"`.
+
+Naive Phase 3 semantics: source state wins on overlap (same-path entries get overwritten); entries in target that aren't in source are left untouched (additive). True three-way merge with conflict resolution is deferred to Phase 4.
+
+This closes the basic git-replacement loop: `state` (commit) + `branch` (named pointer) + `proposal`/`merge` (PR flow). Phase 4 adds subscriber pinning to a state ID; Phase 5 adds proper conflict resolution.
+
 ## [1.48.0] — 2026-05-05
 
 ### Added — Branches: CO-native versioning Phase 2 (replaces `git branch`)

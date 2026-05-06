@@ -26,6 +26,7 @@ pub mod models;
 pub mod obsidian_tasks;
 pub mod plugin_loader;
 pub mod processos;
+pub mod proposal_routes;
 pub mod query_dsl;
 pub mod quilombo_models;
 pub mod quilombo_permissoes;
