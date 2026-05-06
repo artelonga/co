@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.67.0] — 2026-05-06
+
+### Fixed — `content_count` refreshed correctly after every vault write
+
+`write_vault_entry` now ends by `SELECT COUNT(*) FROM entries WHERE universe_key = ?` and writing the result to `universes.content_count`. Replaces the pre-1.67 `increment_universe_content_count` call that lived in `put_vault_file` only — and was buggy on two axes: it overcounted on updates (+1 every time you re-saved), and it undercounted on every state/branch/proposal/merge write because those go through `write_vault_entry` directly, bypassing `put_vault_file`.
+
+`SELECT COUNT(*)` on the indexed per-universe `entries` table is cheap and idempotent. Both legacy increment call sites in `put_vault_file` and `clipper_post` are removed (count refresh happens inside `write_vault_entry` now).
+
 ## [1.66.0] — 2026-05-06
 
 ### Added — subscribe / unsubscribe inline in the info modal

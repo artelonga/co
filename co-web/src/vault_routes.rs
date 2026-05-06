@@ -430,6 +430,27 @@ pub(crate) fn write_vault_entry(
             frontmatter.get("title").and_then(|v| v.as_str()),
             &universe_root,
         );
+        // 1.67.0: refresh content_count from the actual entry-index row
+        // count after every write. The pre-1.67 increment-by-one approach
+        // overcounted on updates and undercounted on writes that bypassed
+        // put_vault_file (states/branches/proposals/merges all go through
+        // write_vault_entry directly). SELECT COUNT(*) is cheap on the
+        // per-universe SQLite (indexed by universe_key) and idempotent.
+        let actual_count: Option<i64> = uc_guard
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1",
+                rusqlite::params![universe_key],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(n) = actual_count
+            && let Ok(meta) = state.storage.lock()
+        {
+            let _ = meta.conn().execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                rusqlite::params![n, universe_key],
+            );
+        }
     }
 
     Ok(crate::entry_index::EntryRow {
@@ -625,8 +646,9 @@ pub async fn put_vault_file(
         }
     }
 
-    // Update content count
-    let _ = lock_storage(&state).map(|mut s| s.increment_universe_content_count(&slug));
+    // 1.67.0: content_count is now refreshed inside write_vault_entry
+    // (SELECT COUNT(*)). The legacy increment-by-one call here was both
+    // redundant (already covered) and incorrect (overcounted on updates).
 
     let stat = make_stat(
         row.created_at.as_deref(),
@@ -1278,7 +1300,7 @@ pub async fn vault_clip(
     }
 
     write_vault_entry(&state, &slug, &path, frontmatter, &body)?;
-    let _ = lock_storage(&state).map(|mut s| s.increment_universe_content_count(&slug));
+    // 1.67.0: count refreshed inside write_vault_entry — no redundant call.
 
     let url = format!("/api/v1/universes/{slug}/vault/{path}");
     Ok((
