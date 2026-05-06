@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.66.0] — 2026-05-06
+
+### Added — subscribe / unsubscribe inline in the info modal
+
+The subscription status line in the info modal grew managers:
+- **Not subscribed** → `+ Subscribe` button (POST /:slug/subscribe)
+- **Subscribed (following head)** → `unsubscribe` button (DELETE /:slug/subscribe)
+- **📌 Pinned to X** → existing `unpin` button (DELETE /:slug/subscribe/pin)
+
+Only shown for `public-subscribable` universes — server enforces the visibility constraint, the client mirrors it. Anonymous users see nothing here (they get null subscription).
+
+This makes subscription a one-click operation alongside the pin flow it shares the data layer with.
+
 ## [1.65.0] — 2026-05-06
 
 ### Added — proposal create + merge from info modal

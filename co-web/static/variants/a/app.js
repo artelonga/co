@@ -4608,18 +4608,24 @@
                 <h3 style="margin:0 0 8px;font-size:14px">Tipos de conteúdo</h3>
                 ${typesHtml || '<em style="color:var(--text-muted,#6b7280);font-size:12px">Sem entradas.</em>'}
             </section>`;
-        // State save action (auth required) + state history with inline diff.
         // 1.61.0: surface subscription status — subscribed yes/no + pinned-to.
+        // 1.66.0: add Subscribe / Unsubscribe buttons inline so users can
+        // manage subscription state without leaving the modal. Only shown
+        // for public-subscribable universes (the only kind you can subscribe
+        // to — server enforces this).
         let subBlock = '';
-        if (subscription) {
+        if (subscription && info.visibility === 'public-subscribable') {
             const pinPath = subscription.pinned_state || '';
             const pinShort = pinPath ? pinPath.split('/').pop().slice(0, 24) : '';
-            const status = subscription.subscribed
-                ? (pinPath
-                    ? `📌 Pinned to <code>${esc(pinShort)}…</code> <button id="info-unpin" class="btn-text-sm" style="margin-left:8px;color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;padding:2px 6px">unpin</button>`
-                    : `Subscribed (following head)`)
-                : `Not subscribed`;
-            subBlock = `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-bottom:8px">${status}</div>`;
+            let statusHtml;
+            if (subscription.subscribed && pinPath) {
+                statusHtml = `📌 Pinned to <code>${esc(pinShort)}…</code> <button id="info-unpin" class="btn-text-sm" style="margin-left:8px;color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;padding:2px 6px">unpin</button>`;
+            } else if (subscription.subscribed) {
+                statusHtml = `Subscribed (following head) <button id="info-unsubscribe" class="btn-text-sm" style="margin-left:8px;color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;padding:2px 6px">unsubscribe</button>`;
+            } else {
+                statusHtml = `Not subscribed <button id="info-subscribe" class="btn-text-sm" style="margin-left:8px;color:#1e40af;background:none;border:1px solid #1e40af;cursor:pointer;font-size:11px;padding:2px 8px;border-radius:3px">+ Subscribe</button>`;
+            }
+            subBlock = `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-bottom:8px">${statusHtml}</div>`;
         }
         const stateSection = `
             <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
@@ -4663,6 +4669,42 @@
                 } catch (err) {
                     console.error('unpin failed', err);
                     showToast('Failed to unpin', 'error');
+                }
+            });
+        }
+
+        // 1.66.0: subscribe / unsubscribe handlers.
+        const subBtn = infoBody.querySelector('#info-subscribe');
+        if (subBtn) {
+            subBtn.addEventListener('click', async () => {
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/subscribe`,
+                        { method: 'POST' }, true,
+                    );
+                    showToast('Subscribed', 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('subscribe failed', err);
+                    showToast('Failed to subscribe (login required?)', 'error');
+                }
+            });
+        }
+        const unsubBtn = infoBody.querySelector('#info-unsubscribe');
+        if (unsubBtn) {
+            unsubBtn.addEventListener('click', async () => {
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/subscribe`,
+                        { method: 'DELETE' }, true,
+                    );
+                    showToast('Unsubscribed', 'success');
+                    delete state.subscriptionPin[slug];
+                    await renderUniverseInfo();
+                    if (state.currentUniverseSlug === slug) renderContent();
+                } catch (err) {
+                    console.error('unsubscribe failed', err);
+                    showToast('Failed to unsubscribe', 'error');
                 }
             });
         }
