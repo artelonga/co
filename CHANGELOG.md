@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.52.0] — 2026-05-06
+
+### Fixed — `co` boot-seed no longer wipes user-generated entries
+
+`seed_co_universe_tasks` previously ran `DELETE FROM entries WHERE universe_key = 'co'` on every deploy before re-seeding from `seed-co/`, then upserted the seed files back. The wipe killed every state, branch, proposal, and merge entry created since the last deploy — the CO-native versioning roadmap couldn't dogfood on the `co` universe itself.
+
+The seed is now purely additive: it only upserts paths that exist in `seed-co/`, leaving every other entry untouched. If you remove a file from `seed-co/`, the corresponding entry will linger on prod until explicitly deleted via `DELETE /universes/:slug/...` (or the entry's vault path) — but that's the right tradeoff for a system whose canonical content source is auto-sync from local, not the baked-in seed.
+
+`content_count` now reflects the actual entry-index row count rather than just the seed-file count, so user-generated entries get counted in `GET /universes/co`.
+
 ## [1.51.0] — 2026-05-06
 
 ### Added — Diff API: compare two state manifests (Phase 4 of CO-native versioning)

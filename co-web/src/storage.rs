@@ -4682,6 +4682,16 @@ impl Storage {
     /// 2026-05-02 — Phase E of CO-142 populated `/data/co/` for the dev_board
     /// admin scan, but the SPA's `/co/co` board reads from the per-universe
     /// `entries` table. This function bridges that.
+    ///
+    /// **1.52.0:** No longer wipes the entry table before re-seeding. The
+    /// pre-1.52 wipe killed user-generated content (states/branches/proposals
+    /// from the CO-native versioning roadmap) on every deploy. Now purely
+    /// additive: the seed only upserts paths it knows about (CO-N.md files
+    /// from `seed-co/`); paths the seed never wrote stay untouched. If you
+    /// remove a file from `seed-co/`, the corresponding entry will linger
+    /// on prod until explicitly deleted via `DELETE /universes/:slug/...` —
+    /// but that's the right tradeoff for a system whose canonical source
+    /// is auto-sync from local, not the baked-in seed.
     pub fn seed_co_universe_tasks(&mut self, source_dir: &std::path::Path) {
         if !source_dir.exists() {
             tracing::warn!(
@@ -4696,17 +4706,6 @@ impl Storage {
         }
 
         let universe_root = self.universe_root("co");
-
-        // Wipe the existing entry index so stale entries from old deploys
-        // don't survive alongside the new content. The files on disk are
-        // overwritten by copy_dir_all already; this keeps SQLite in sync.
-        {
-            let co_uc = self.universe_pool.get_or_open("co");
-            if let Ok(guard) = co_uc.lock() {
-                let _ = guard.execute("DELETE FROM entries WHERE universe_key = 'co'", []);
-                let _ = guard.execute("DELETE FROM entries_fts WHERE universe_key = 'co'", []);
-            }
-        }
         let now_str = Utc::now().to_rfc3339();
         let mut upserted = 0usize;
         let mut skipped = 0usize;
@@ -4784,14 +4783,31 @@ impl Storage {
             upserted += 1;
         }
 
-        // Sync content_count to actual indexed count.
+        // 1.52.0: count actual rows in the per-universe entry index, not
+        // just `upserted` (which only sees seed-co files). Otherwise user-
+        // generated states/branches/proposals get under-counted.
+        let actual_count: i64 = {
+            let co_uc = self.universe_pool.get_or_open("co");
+            co_uc
+                .lock()
+                .ok()
+                .and_then(|g| {
+                    g.query_row(
+                        "SELECT COUNT(*) FROM entries WHERE universe_key = 'co'",
+                        [],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .ok()
+                })
+                .unwrap_or(upserted as i64)
+        };
         let _ = self.conn.execute(
             "UPDATE universes SET content_count = ?1 WHERE key = 'co'",
-            rusqlite::params![upserted as i64],
+            rusqlite::params![actual_count],
         );
 
         tracing::info!(
-            "seed_co_universe_tasks: seeded {upserted} entries from {} (skipped {skipped})",
+            "seed_co_universe_tasks: seeded {upserted} from {} (skipped {skipped}); co now has {actual_count} entries total",
             source_dir.display()
         );
     }
