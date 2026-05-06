@@ -621,6 +621,29 @@ pub async fn unpin_subscription(
     Ok(StatusCode::NO_CONTENT)
 }
 
+// 1.61.0: GET /api/v1/universes/:slug/subscription — current user's
+// subscription status for this universe. Returns subscribed bool +
+// optional pinned_state. Auth required (anonymous gets 401).
+#[derive(serde::Serialize)]
+pub struct SubscriptionStatus {
+    pub subscribed: bool,
+    pub pinned_state: Option<String>,
+}
+
+pub async fn get_my_subscription(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<Json<SubscriptionStatus>, AppError> {
+    let storage = lock_storage(&state)?;
+    let subscribed = storage.is_subscribed(&user_id.0, &slug);
+    let pinned_state = storage.get_subscription_pin(&user_id.0, &slug);
+    Ok(Json(SubscriptionStatus {
+        subscribed,
+        pinned_state,
+    }))
+}
+
 // GET /api/v1/universes/:slug/subscribers — list subscribers (owner only)
 pub async fn list_subscribers(
     State(state): State<AppState>,
@@ -1075,6 +1098,8 @@ pub fn router() -> Router<AppState> {
             "/{slug}/subscribe/pin",
             put(pin_subscription).delete(unpin_subscription),
         )
+        // 1.61.0: read current user's subscription status (subscribed + pin)
+        .route("/{slug}/subscription", get(get_my_subscription))
         .route("/{slug}/subscribers", get(list_subscribers))
         // CO-72: doc-gen job submission (owner only, auth via require_auth layer)
         .route("/{slug}/jobs/doc-gen", post(submit_doc_gen_job))

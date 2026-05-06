@@ -4539,6 +4539,12 @@
                 const r = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/entries?limit=5000`, {}, true);
                 entries = (r && r.entries) || [];
             } catch (_) {}
+            // 1.61.0: fetch user's subscription status (subscribed + pin).
+            // Errors → null (anonymous / not subscribed).
+            let subscription = null;
+            try {
+                subscription = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/subscription`, {}, true);
+            } catch (_) {}
             // Versioning entries are filtered from the same listing.
             const stateEntries = entries.filter(e => (e.frontmatter || {}).type === 'state');
             const branchEntries = entries.filter(e => (e.frontmatter || {}).type === 'branch');
@@ -4549,14 +4555,14 @@
                 const t = (e.frontmatter || {}).type || '(none)';
                 typeCounts[t] = (typeCounts[t] || 0) + 1;
             }
-            renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts);
+            renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts, subscription);
         } catch (err) {
             console.error('universe info fetch failed', err);
             infoBody.innerHTML = '<p class="empty-state" style="margin:16px;color:#dc2626">Erro ao carregar informações.</p>';
         }
     }
 
-    function renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts) {
+    function renderInfoSections(slug, info, entries, stateEntries, branchEntries, proposalEntries, mergeEntries, typeCounts, subscription) {
         if (!infoBody) return;
         const visBadge = info.visibility === 'private'
             ? '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:10px;font-size:11px">private</span>'
@@ -4587,12 +4593,25 @@
                 ${typesHtml || '<em style="color:var(--text-muted,#6b7280);font-size:12px">Sem entradas.</em>'}
             </section>`;
         // State save action (auth required) + state history with inline diff.
+        // 1.61.0: surface subscription status — subscribed yes/no + pinned-to.
+        let subBlock = '';
+        if (subscription) {
+            const pinPath = subscription.pinned_state || '';
+            const pinShort = pinPath ? pinPath.split('/').pop().slice(0, 24) : '';
+            const status = subscription.subscribed
+                ? (pinPath
+                    ? `📌 Pinned to <code>${esc(pinShort)}…</code> <button id="info-unpin" class="btn-text-sm" style="margin-left:8px;color:#dc2626;background:none;border:none;cursor:pointer;font-size:11px;padding:2px 6px">unpin</button>`
+                    : `Subscribed (following head)`)
+                : `Not subscribed`;
+            subBlock = `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-bottom:8px">${status}</div>`;
+        }
         const stateSection = `
             <section style="padding:16px;border-bottom:1px solid var(--border,#e5e7eb)">
                 <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
                     <h3 style="margin:0;font-size:14px">Estados (versões)</h3>
                     <button class="btn btn-secondary btn-sm" id="info-save-state">⏱ Capturar estado</button>
                 </div>
+                ${subBlock}
                 <div id="info-state-list" style="font-size:12px"></div>
             </section>`;
         // Branches (named pointers to a state).
@@ -4608,9 +4627,27 @@
                 <div id="info-proposal-list" style="font-size:12px"></div>
             </section>`;
         infoBody.innerHTML = overview + typesSection + stateSection + branchSection + propSection;
-        renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug);
+        renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug, (subscription && subscription.pinned_state) || null);
         renderBranchesInto(infoBody.querySelector('#info-branch-list'), branchEntries, slug);
         renderProposalsInto(infoBody.querySelector('#info-proposal-list'), proposalEntries, mergeEntries, slug);
+
+        // 1.61.0: unpin handler.
+        const unpinBtn = infoBody.querySelector('#info-unpin');
+        if (unpinBtn) {
+            unpinBtn.addEventListener('click', async () => {
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/subscribe/pin`,
+                        { method: 'DELETE' }, true,
+                    );
+                    showToast('Unpinned (now following head)', 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('unpin failed', err);
+                    showToast('Failed to unpin', 'error');
+                }
+            });
+        }
         const saveBtn = infoBody.querySelector('#info-save-state');
         if (saveBtn) {
             saveBtn.addEventListener('click', async () => {
@@ -4633,7 +4670,7 @@
         }
     }
 
-    function renderStatesInto(container, entries, slug) {
+    function renderStatesInto(container, entries, slug, pinnedPath) {
         if (!container) return;
         if (!entries || entries.length === 0) {
             container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem estados ainda. Clique "⏱ Capturar estado" para criar o primeiro.</em>';
@@ -4649,14 +4686,19 @@
             const author = fm.author ? `<span style="color:var(--text-muted,#6b7280);font-size:11px">by ${esc(String(fm.author).slice(0, 12))}</span>` : '';
             const parentPath = fm.parent || '';
             const ts = created ? new Date(created).toLocaleString() : '';
+            const isPinned = pinnedPath && e.path === pinnedPath;
+            const rowBg = isPinned ? 'background:rgba(59,130,246,0.06)' : '';
+            const pinBtn = isPinned
+                ? `<span title="Pinned to this state" style="font-size:10px;color:#1e40af">📌 pinned</span>`
+                : `<button class="state-pin-btn" data-state-path="${esc(e.path)}" data-slug="${esc(slug)}" title="Pin your subscription to this version" style="background:none;border:1px solid var(--border,#e5e7eb);padding:1px 8px;border-radius:10px;font-size:10px;cursor:pointer;color:var(--text-muted,#6b7280)">📌 pin</button>`;
             return `
-                <div class="state-row" style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb);cursor:pointer"
+                <div class="state-row" style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb);cursor:pointer;${rowBg}"
                      data-state-path="${esc(e.path)}" data-parent-path="${esc(parentPath)}" data-slug="${esc(slug)}"
                      title="Click to see what changed in this state">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
                         <code style="font-size:11px;font-family:var(--mono,monospace);background:var(--bg-subtle,#f3f4f6);padding:2px 6px;border-radius:3px">${esc(hash)}…</code>
                         <div style="display:flex;gap:6px;align-items:center">
-                            <button class="state-pin-btn" data-state-path="${esc(e.path)}" data-slug="${esc(slug)}" title="Pin your subscription to this version" style="background:none;border:1px solid var(--border,#e5e7eb);padding:1px 8px;border-radius:10px;font-size:10px;cursor:pointer;color:var(--text-muted,#6b7280)">📌 pin</button>
+                            ${pinBtn}
                             <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
                         </div>
                     </div>
@@ -4665,7 +4707,8 @@
         }).join('');
 
         // 1.60.0: pin handler. Stops propagation so the row's click-to-diff
-        // doesn't fire on the same click.
+        // doesn't fire on the same click. 1.61.0: re-render the modal after
+        // success so the new pinned state shows the "📌 pinned" indicator.
         container.querySelectorAll('.state-pin-btn').forEach(btn => {
             btn.addEventListener('click', async (ev) => {
                 ev.stopPropagation();
@@ -4678,6 +4721,7 @@
                         true,
                     );
                     showToast(`Pinned to ${statePath.split('/').pop().slice(0, 16)}…`, 'success');
+                    await renderUniverseInfo();
                 } catch (err) {
                     console.error('pin failed', err);
                     showToast('Failed to pin (login required)', 'error');

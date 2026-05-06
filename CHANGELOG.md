@@ -5,6 +5,12 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.61.0] — 2026-05-06
+
+### Added — pin status surfaced in the info modal
+
+`GET /api/v1/universes/:slug/subscription` returns `{subscribed, pinned_state}` for the calling user. The info modal fetches it on open and shows: "📌 Pinned to `<state>` [unpin]" when set, "Subscribed (following head)" when subscribed-no-pin, "Not subscribed" otherwise. The pinned state row gets a subtle blue background and `📌 pinned` badge instead of the pin button. Click `unpin` to clear and re-render.
+
 ## [1.60.0] — 2026-05-06
 
 ### Added — Phase 6 storage: subscribers can pin to a specific state
