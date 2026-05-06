@@ -4644,7 +4644,7 @@
             </section>`;
         infoBody.innerHTML = overview + typesSection + stateSection + branchSection + propSection;
         renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug, (subscription && subscription.pinned_state) || null);
-        renderBranchesInto(infoBody.querySelector('#info-branch-list'), branchEntries, slug);
+        renderBranchesInto(infoBody.querySelector('#info-branch-list'), branchEntries, slug, stateEntries);
         renderProposalsInto(infoBody.querySelector('#info-proposal-list'), proposalEntries, mergeEntries, slug);
 
         // 1.61.0: unpin handler.
@@ -4789,31 +4789,83 @@
         });
     }
 
-    function renderBranchesInto(container, branches, slug) {
+    function renderBranchesInto(container, branches, slug, stateEntries) {
         if (!container) return;
-        if (!branches || branches.length === 0) {
-            container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem branches ainda. Use <code>POST /api/v1/universes/' + esc(slug) + '/branches</code> para criar.</em>';
-            return;
+        // 1.63.0: inline create-branch form. Available to authed users only
+        // (server gates the POST). Opens on "+ Nova branch" click; submits
+        // {name, head_state, default} and re-renders the info modal.
+        const stateOptions = (stateEntries || [])
+            .slice()
+            .sort((a, b) => (a.path < b.path ? 1 : -1))
+            .map(e => {
+                const fm = e.frontmatter || {};
+                const hash = (fm.state_hash || '').slice(0, 10);
+                const msg = (fm.message || '').slice(0, 40);
+                return `<option value="${esc(e.path)}">${esc(hash)}… ${msg ? '· ' + esc(msg) : ''}</option>`;
+            }).join('');
+        const list = (!branches || branches.length === 0)
+            ? '<em style="color:var(--text-muted,#6b7280);font-size:11px;display:block;padding:4px 0">Sem branches ainda.</em>'
+            : (() => {
+                const sorted = branches.slice().sort((a, b) => {
+                    const da = (a.frontmatter || {}).default ? 0 : 1;
+                    const db = (b.frontmatter || {}).default ? 0 : 1;
+                    return da - db || (a.path < b.path ? -1 : 1);
+                });
+                return sorted.map(e => {
+                    const fm = e.frontmatter || {};
+                    const head = fm.head_state || '';
+                    const headShort = head ? head.split('/').pop().slice(0, 24) : '?';
+                    const isDefault = fm.default ? '<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">default</span>' : '';
+                    const updated = fm.updated_at ? new Date(fm.updated_at).toLocaleString() : '';
+                    return `
+                        <div style="padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                            <div><strong>${esc(fm.name || '?')}</strong>${isDefault}</div>
+                            <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
+                                head: <code>${esc(headShort)}…</code> · updated ${esc(updated)}
+                            </div>
+                        </div>`;
+                }).join('');
+            })();
+
+        const formHtml = (stateEntries && stateEntries.length > 0)
+            ? `
+                <details style="margin-top:8px">
+                    <summary style="cursor:pointer;color:var(--accent,#6366f1);font-size:12px">+ Nova branch</summary>
+                    <form id="info-branch-form" style="margin-top:8px;display:grid;gap:6px">
+                        <input type="text" name="name" placeholder="branch name (e.g. feat/foo)" pattern="[a-zA-Z0-9_/-]{1,100}" required style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">
+                        <select name="head_state" required style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">${stateOptions}</select>
+                        <label style="font-size:11px;display:flex;gap:4px;align-items:center"><input type="checkbox" name="default"> default branch</label>
+                        <button type="submit" class="btn btn-secondary btn-sm" style="font-size:12px">Criar branch</button>
+                    </form>
+                </details>`
+            : '<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:6px">Capture um estado primeiro para poder criar uma branch.</div>';
+
+        container.innerHTML = list + formHtml;
+
+        const form = container.querySelector('#info-branch-form');
+        if (form) {
+            form.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+                const fd = new FormData(form);
+                const body = {
+                    name: String(fd.get('name') || '').trim(),
+                    head_state: String(fd.get('head_state') || ''),
+                    default: !!fd.get('default'),
+                };
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/branches`,
+                        { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`Branch "${body.name}" created`, 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('create branch failed', err);
+                    showToast('Failed to create branch (login required?)', 'error');
+                }
+            });
         }
-        const sorted = branches.slice().sort((a, b) => {
-            const da = (a.frontmatter || {}).default ? 0 : 1;
-            const db = (b.frontmatter || {}).default ? 0 : 1;
-            return da - db || (a.path < b.path ? -1 : 1);
-        });
-        container.innerHTML = sorted.map(e => {
-            const fm = e.frontmatter || {};
-            const head = fm.head_state || '';
-            const headShort = head ? head.split('/').pop().slice(0, 24) : '?';
-            const isDefault = fm.default ? '<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">default</span>' : '';
-            const updated = fm.updated_at ? new Date(fm.updated_at).toLocaleString() : '';
-            return `
-                <div style="padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">
-                    <div><strong>${esc(fm.name || '?')}</strong>${isDefault}</div>
-                    <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
-                        head: <code>${esc(headShort)}…</code> · updated ${esc(updated)}
-                    </div>
-                </div>`;
-        }).join('');
     }
 
     function renderProposalsInto(container, proposals, merges, slug) {

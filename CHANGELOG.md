@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.63.0] — 2026-05-06
+
+### Added — branch creation form in info modal
+
+The Branches section now has a `+ Nova branch` disclosure that expands an inline form: branch name (alphanumeric + `-`, `_`, `/`), state dropdown listing every existing state with hash + message, and a "default branch" checkbox. Submits `POST /:slug/branches` and re-renders the modal. Anonymous viewers see the existing branch list but no creation control (server gates the POST).
+
+If the universe has no states yet, the form is replaced with "Capture um estado primeiro" — branches need a state to point at.
+
+This rounds out the branch interaction loop in the SPA: list, create, advance (via the merge handler when you accept a proposal). Direct branch-head advance from the UI is still API-only.
+
 ## [1.62.0] — 2026-05-06
 
 ### Added — Phase 7: rewind view (`?as_of=` filter on /entries)
