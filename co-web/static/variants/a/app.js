@@ -4817,12 +4817,27 @@
                     const headShort = head ? head.split('/').pop().slice(0, 24) : '?';
                     const isDefault = fm.default ? '<span style="background:#e0e7ff;color:#3730a3;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:6px">default</span>' : '';
                     const updated = fm.updated_at ? new Date(fm.updated_at).toLocaleString() : '';
+                    // 1.64.0: per-branch advance disclosure. PUT /branches/:name
+                    // with a different state path to fast-forward (no merge logic
+                    // here — just bump the pointer).
+                    const branchName = fm.name || '';
+                    const advanceForm = (stateEntries && stateEntries.length > 0)
+                        ? `
+                            <details style="margin-top:4px">
+                                <summary style="cursor:pointer;color:var(--accent,#6366f1);font-size:11px">↳ advance head</summary>
+                                <form class="info-branch-advance-form" data-branch-name="${esc(branchName)}" style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                                    <select name="head_state" required style="padding:3px 6px;font-size:11px;border:1px solid var(--border,#e5e7eb);border-radius:3px;flex:1;min-width:200px">${stateOptions}</select>
+                                    <button type="submit" class="btn btn-secondary btn-sm" style="font-size:11px;padding:2px 8px">apply</button>
+                                </form>
+                            </details>`
+                        : '';
                     return `
                         <div style="padding:6px 0;border-bottom:1px solid var(--border,#e5e7eb)">
                             <div><strong>${esc(fm.name || '?')}</strong>${isDefault}</div>
                             <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
                                 head: <code>${esc(headShort)}…</code> · updated ${esc(updated)}
                             </div>
+                            ${advanceForm}
                         </div>`;
                 }).join('');
             })();
@@ -4866,6 +4881,29 @@
                 }
             });
         }
+
+        // 1.64.0: per-branch advance handlers. Each form has its own branch name.
+        container.querySelectorAll('.info-branch-advance-form').forEach(advForm => {
+            advForm.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+                const branchName = advForm.dataset.branchName;
+                const fd = new FormData(advForm);
+                const headState = String(fd.get('head_state') || '');
+                if (!branchName || !headState) return;
+                try {
+                    await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/branches/${encodeURIComponent(branchName)}`,
+                        { method: 'PUT', body: JSON.stringify({ head_state: headState }), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`Branch "${branchName}" advanced`, 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('advance branch failed', err);
+                    showToast('Failed to advance branch (login required?)', 'error');
+                }
+            });
+        });
     }
 
     function renderProposalsInto(container, proposals, merges, slug) {

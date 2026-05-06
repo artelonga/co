@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.64.0] — 2026-05-06
+
+### Added — branch head-advance from the info modal
+
+Each branch row now has a `↳ advance head` disclosure. Expanding shows a state dropdown + apply button; submitting `PUT /:slug/branches/:name` with the chosen `head_state` fast-forwards the branch's head pointer (no merge logic — just a pointer move).
+
+This closes the in-UI branch loop: list, create, advance head, see the change reflect in the branch row's `head:` field on re-render. Direct branch deletion is still API-only, but with `DELETE /:slug/<branches/...>` available via the entry route, it's reachable if you need it.
+
 ## [1.63.0] — 2026-05-06
 
 ### Added — branch creation form in info modal
