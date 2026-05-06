@@ -567,8 +567,22 @@
             }, true);
         },
         async getUniverses() {
-            const r = await apiFetch('/api/v1/universes', {}, true);
-            return r || [];
+            // 1.68.0: try authed listing first; fall back to /public for
+            // anonymous visitors so the hub sidebar isn't empty.
+            try {
+                const r = await apiFetch('/api/v1/universes', {}, true);
+                return r || [];
+            } catch (err) {
+                if (err && (err.status === 401 || /401|unauthorized/i.test(String(err.message || '')))) {
+                    try {
+                        const r = await apiFetch('/api/v1/universes/public', {}, true);
+                        return r || [];
+                    } catch (_) {
+                        return [];
+                    }
+                }
+                return [];
+            }
         },
         async getPublicacoes() {
             const r = await apiFetch('/api/v1/quilombo/publicacoes', {}, true);

@@ -104,6 +104,57 @@ pub async fn list_universes(
     Ok(Json(universes))
 }
 
+// 1.68.0: GET /api/v1/universes/public — list public-subscribable universes.
+// No auth required. Used by the SPA hub for anonymous visitors so they see
+// something at `/` instead of an empty sidebar.
+pub async fn list_public_universes(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<Universe>>, AppError> {
+    let storage = lock_storage(&state)?;
+    let mut stmt = storage
+        .conn()
+        .prepare(
+            "SELECT key, name, description, owner_id, created_at, is_template, is_public, \
+                COALESCE(content_count, 0), COALESCE(requires_login, 0), \
+                COALESCE(visibility, 'private'), \
+                COALESCE(parent_key, '') \
+         FROM universes \
+         WHERE visibility = 'public-subscribable' OR is_template = 1 \
+         ORDER BY name ASC",
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(Universe {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                owner_id: row.get(3)?,
+                created_at: row
+                    .get::<_, String>(4)
+                    .ok()
+                    .and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|d| d.with_timezone(&chrono::Utc))
+                    })
+                    .unwrap_or_else(chrono::Utc::now),
+                is_template: row.get::<_, i64>(5).unwrap_or(0) != 0,
+                is_public: row.get::<_, i64>(6).unwrap_or(0) != 0,
+                content_count: row.get(7)?,
+                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                visibility: row.get(9)?,
+                parent_key: {
+                    let s: String = row.get(10).unwrap_or_default();
+                    if s.is_empty() { None } else { Some(s) }
+                },
+            })
+        })
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let universes: Vec<Universe> = rows.filter_map(|r| r.ok()).collect();
+    Ok(Json(universes))
+}
+
 // POST /api/v1/universes — create a universe (caller becomes owner)
 pub async fn create_universe(
     State(state): State<AppState>,
@@ -1066,6 +1117,8 @@ pub fn router() -> Router<AppState> {
         .route("/quilomboaraucaria/stats", get(quilombo_stats))
         // CO-49: universe search (no auth required)
         .route("/search", get(search_universes))
+        // 1.68.0: public listing for the SPA hub (anonymous-visitor-friendly)
+        .route("/public", get(list_public_universes))
         .route("/{slug}", get(get_universe_info))
         .route("/{slug}/config", get(get_universe_config))
         .route("/{slug}/theme.css", get(get_universe_theme_css))

@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.68.0] — 2026-05-06
+
+### Added — public universe listing for anonymous visitors
+
+`GET /api/v1/universes/public` returns every `public-subscribable` universe (plus the `template`) without requiring auth. The SPA's `getUniverses()` now tries the authed `/api/v1/universes` first and falls back to `/public` on 401, so anonymous visitors at the hub see a populated sidebar instead of an empty one.
+
+Visibility-private universes still require auth + membership; this change only surfaces what was already public.
+
 ## [1.67.0] — 2026-05-06
 
 ### Fixed — `content_count` refreshed correctly after every vault write
