@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.69.0] — 2026-05-06
+
+### Changed — file moves: `mbya` + `topologia` + `language` collapsed into `comunicacao`
+
+Local: `~/projects/topologia/` and `~/projects/mbya/` content merged into a new `~/projects/comunicacao/` directory. Topologia's content sits at the root (`concepts/`, `guarani-mbya/`, `portuguese/`, `yoruba/`, `languages/`, `_template-language/`); Arandu Mbyá content is nested under `mbya/` (4619 .md files). Total 4666 .md files. Origin repos preserved on disk for now (manual cleanup later if desired).
+
+`co-universes.yaml` updated: dropped `mbya`, `topologia`, `language` entries; the existing `comunicacao` slug now points at `~/projects/comunicacao`. Auto-sync restarted to pick up the new layout. Server-side `mbya`, `topologia`, `language` universes will be deleted (via `DELETE /universes/:slug`) once `comunicacao` finishes its initial bulk push.
+
+### Fixed — admin-tier API tokens skip the vault per-token rate limit
+
+The vault PUT path had a 60 req/min per-token rate limiter (CO-80) that bottlenecked legitimate bulk operations like `co-sync`'s initial push. Now admin-tier users bypass it; the check still runs for non-admin tokens (currently a no-op since the 1.45.0 single-tier model maps every authed user to admin, but kept for forward-compat). The original abuse-protection intent was for anonymous quotas, which a separate code path covers.
+
 ## [1.68.0] — 2026-05-06
 
 ### Added — public universe listing for anonymous visitors

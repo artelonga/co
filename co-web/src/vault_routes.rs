@@ -221,14 +221,30 @@ fn validate_vault_auth(
 
 /// Authenticate and rate-limit a vault request.
 /// Returns the user_id on success.
+///
+/// 1.69.0: API tokens owned by admin-tier users skip the per-token rate
+/// limit. The check still applies to non-admin tokens. Matches the
+/// 1.45.0 single-tier model where every authenticated user is admin —
+/// in practice, this means the limit is now effectively only for the
+/// (currently unused) public anonymous-tier path. Bulk-pushes from
+/// `co-sync` no longer hit the 60/min ceiling.
 fn vault_auth(state: &AppState, headers: &HeaderMap) -> Result<String, AppError> {
     let (user_id, token_id) = validate_vault_auth(state, headers)?;
-    if let Some(ref tid) = token_id
-        && !check_rate_limit(tid)
-    {
-        return Err(AppError::TooManyRequests(
-            "Rate limit exceeded (60 req/min)".into(),
-        ));
+    if let Some(ref tid) = token_id {
+        // Look up the token's owner tier; admin-tier owners bypass the limit.
+        let is_admin = {
+            let storage = state.storage.lock().ok();
+            storage
+                .as_ref()
+                .and_then(|s| s.get_user_by_id(&user_id))
+                .map(|u| u.tier == "admin")
+                .unwrap_or(false)
+        };
+        if !is_admin && !check_rate_limit(tid) {
+            return Err(AppError::TooManyRequests(
+                "Rate limit exceeded (60 req/min)".into(),
+            ));
+        }
     }
     Ok(user_id)
 }

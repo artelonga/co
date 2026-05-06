@@ -16,27 +16,14 @@ universes:
     visibility: public-subscribable
     description: CO open-source platform — board, tasks, docs
 
-  # --- Language group ---
-  - slug: language
-    name: Language
+  # --- Comunicação (i18n + chat + chamadas) ---
+  # Replaces the separate `language` / `mbya` / `topologia` entries (1.69.0).
+  # Local dir is the unified merge of ~/projects/topologia + ~/projects/mbya.
+  - slug: comunicacao
+    name: Comunicação
+    local: ~/projects/comunicacao
     visibility: public-subscribable
-    description: Parent group for language universes
-    server_only: true       # exists only to group children — no local files
-
-  - slug: mbya
-    name: Mbya Guarani
-    local: ~/projects/mbya
-    parent: language
-    visibility: public-subscribable
-    description: Arandu — Mbyá Guarani lexicon and learning content
-
-  - slug: topologia
-    name: Topologia da Linguagem
-    local: ~/projects/topologia
-    parent: language
-    visibility: public-subscribable
-    description: Cross-language meaning topology — concepts, terms, relations
-    # github: https://github.com/artelonga/topologia  # optional git backup
+    description: i18n + chat + chamadas — espaço comunitário com tradução de conteúdo, mensagens e calls. Absorbs former mbya, topologia, and language universes.
 
   # --- Content universes ---
   - slug: artelonga
