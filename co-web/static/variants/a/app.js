@@ -4645,7 +4645,7 @@
         infoBody.innerHTML = overview + typesSection + stateSection + branchSection + propSection;
         renderStatesInto(infoBody.querySelector('#info-state-list'), stateEntries, slug, (subscription && subscription.pinned_state) || null);
         renderBranchesInto(infoBody.querySelector('#info-branch-list'), branchEntries, slug, stateEntries);
-        renderProposalsInto(infoBody.querySelector('#info-proposal-list'), proposalEntries, mergeEntries, slug);
+        renderProposalsInto(infoBody.querySelector('#info-proposal-list'), proposalEntries, mergeEntries, slug, stateEntries);
 
         // 1.61.0: unpin handler.
         const unpinBtn = infoBody.querySelector('#info-unpin');
@@ -4906,12 +4906,10 @@
         });
     }
 
-    function renderProposalsInto(container, proposals, merges, slug) {
+    function renderProposalsInto(container, proposals, merges, slug, stateEntries) {
         if (!container) return;
-        if ((!proposals || proposals.length === 0) && (!merges || merges.length === 0)) {
-            container.innerHTML = '<em style="color:var(--text-muted,#6b7280)">Sem propostas ou merges. <code>POST /api/v1/universes/' + esc(slug) + '/proposals</code> abre uma.</em>';
-            return;
-        }
+
+        // Build the rows.
         const items = [];
         for (const p of (proposals || [])) {
             const fm = p.frontmatter || {};
@@ -4922,13 +4920,17 @@
                     ? '<span style="background:#d1fae5;color:#065f46;padding:1px 6px;border-radius:8px;font-size:10px">merged</span>'
                     : `<span style="background:#fee2e2;color:#991b1b;padding:1px 6px;border-radius:8px;font-size:10px">${esc(status)}</span>`;
             const created = fm.created_at ? new Date(fm.created_at).toLocaleString() : '';
+            // 1.65.0: open proposals get a Merge button.
+            const mergeBtn = status === 'open'
+                ? `<button class="info-merge-btn" data-proposal-path="${esc(p.path)}" style="background:#1e40af;color:white;border:none;padding:2px 10px;border-radius:3px;font-size:11px;cursor:pointer">⇆ Merge</button>`
+                : '';
             items.push({
                 ts: fm.created_at || '',
                 html: `
                     <div style="padding:8px 0;border-bottom:1px solid var(--border,#e5e7eb)">
                         <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
                             <strong style="font-size:13px">${esc(fm.title || p.path)}</strong>
-                            ${statusBadge}
+                            <div style="display:flex;gap:6px;align-items:center">${statusBadge}${mergeBtn}</div>
                         </div>
                         <div style="color:var(--text-muted,#6b7280);font-size:11px;margin-top:2px">
                             from <code>${esc(fm.source_universe || '?')}</code> · ${esc(created)}
@@ -4954,7 +4956,90 @@
             });
         }
         items.sort((a, b) => (a.ts < b.ts ? 1 : -1)); // newest first
-        container.innerHTML = items.map(x => x.html).join('');
+
+        const listHtml = items.length === 0
+            ? '<em style="color:var(--text-muted,#6b7280);font-size:11px;display:block;padding:4px 0">Sem propostas ou merges ainda.</em>'
+            : items.map(x => x.html).join('');
+
+        // 1.65.0: + Propor mudanças form. Posts to TARGET universe's
+        // /proposals endpoint with this universe's state as source.
+        const stateOptions = (stateEntries || [])
+            .slice()
+            .sort((a, b) => (a.path < b.path ? 1 : -1))
+            .map(e => {
+                const fm = e.frontmatter || {};
+                const hash = (fm.state_hash || '').slice(0, 10);
+                const msg = (fm.message || '').slice(0, 40);
+                return `<option value="${esc(e.path)}">${esc(hash)}… ${msg ? '· ' + esc(msg) : ''}</option>`;
+            }).join('');
+        const proposeHtml = (stateEntries && stateEntries.length > 0)
+            ? `
+                <details style="margin-top:8px">
+                    <summary style="cursor:pointer;color:var(--accent,#6366f1);font-size:12px">+ Propor mudanças a outro universo</summary>
+                    <form id="info-proposal-form" style="margin-top:8px;display:grid;gap:6px">
+                        <input type="text" name="target_universe" placeholder="target universe slug (e.g. comunicacao)" required style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">
+                        <input type="text" name="title" placeholder="proposal title" required maxlength="200" style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">
+                        <textarea name="description" placeholder="description (optional)" rows="2" style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px;resize:vertical"></textarea>
+                        <select name="source_state" required style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">${stateOptions}</select>
+                        <input type="text" name="target_branch" value="main" placeholder="target_branch (default: main)" style="padding:4px 8px;font-size:12px;border:1px solid var(--border,#e5e7eb);border-radius:3px">
+                        <button type="submit" class="btn btn-secondary btn-sm" style="font-size:12px">Criar proposta</button>
+                    </form>
+                </details>`
+            : '<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:6px">Capture um estado primeiro para poder propor mudanças.</div>';
+
+        container.innerHTML = listHtml + proposeHtml;
+
+        // Wire up the create-proposal form.
+        const propForm = container.querySelector('#info-proposal-form');
+        if (propForm) {
+            propForm.addEventListener('submit', async (ev) => {
+                ev.preventDefault();
+                const fd = new FormData(propForm);
+                const targetUniverse = String(fd.get('target_universe') || '').trim();
+                if (!targetUniverse) return;
+                const body = {
+                    source_universe: slug, // current universe is the source
+                    source_state: String(fd.get('source_state') || ''),
+                    title: String(fd.get('title') || '').trim(),
+                    description: String(fd.get('description') || ''),
+                    target_branch: String(fd.get('target_branch') || 'main').trim() || 'main',
+                };
+                try {
+                    const r = await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(targetUniverse)}/proposals`,
+                        { method: 'POST', body: JSON.stringify(body), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`Proposal created in ${targetUniverse} · ${(r.path || '').split('/').pop().slice(0, 24)}`, 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('create proposal failed', err);
+                    showToast('Failed to create proposal', 'error');
+                }
+            });
+        }
+
+        // Wire up the per-proposal merge buttons (only on open proposals,
+        // listed in THIS universe — i.e. someone proposed changes to us).
+        container.querySelectorAll('.info-merge-btn').forEach(btn => {
+            btn.addEventListener('click', async () => {
+                const proposalPath = btn.dataset.proposalPath;
+                if (!proposalPath) return;
+                if (!window.confirm(`Merge ${proposalPath.split('/').pop()}? This will copy source-state entries into this universe.`)) return;
+                try {
+                    const r = await apiFetch(
+                        `/api/v1/universes/${encodeURIComponent(slug)}/merges`,
+                        { method: 'POST', body: JSON.stringify({ proposal: proposalPath }), headers: { 'Content-Type': 'application/json' } },
+                        true,
+                    );
+                    showToast(`Merged · ${r.entries_copied || 0} entries copied`, 'success');
+                    await renderUniverseInfo();
+                } catch (err) {
+                    console.error('merge failed', err);
+                    showToast('Failed to merge', 'error');
+                }
+            });
+        });
     }
 
     // ---- (legacy 1.56-only state-history modal handlers; not wired) ----

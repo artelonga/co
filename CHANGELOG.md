@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.65.0] — 2026-05-06
+
+### Added — proposal create + merge from info modal
+
+The Propostas e merges section now has:
+- `+ Propor mudanças a outro universo` disclosure → form with target universe slug, title, description, source state dropdown (from current universe), target branch (defaults "main"). Submits `POST /api/v1/universes/<target>/proposals` with the source as the current universe.
+- `⇆ Merge` button on each open proposal pointing AT this universe. Confirmation prompt → `POST /api/v1/universes/:slug/merges` with the proposal path. Toast shows entry-copy count.
+
+This closes the SPA-level proposal loop: create from any universe targeting any other, merge from the receiving side. The full git-replacement primitive set — capture, branch, advance, propose, merge, diff, pin, rewind — is now driveable end-to-end from the ℹ Universo modal.
+
 ## [1.64.0] — 2026-05-06
 
 ### Added — branch head-advance from the info modal
