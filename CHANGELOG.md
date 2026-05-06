@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.62.0] — 2026-05-06
+
+### Added — Phase 7: rewind view (`?as_of=` filter on /entries)
+
+`GET /api/v1/universes/:slug/entries?as_of=states/...md` filters the result down to paths that existed in the named state's manifest. Validates that `as_of` starts with `states/` and that the referenced state exists in the universe; rejects with 400 otherwise. Bodies served are still current — this is path-fidelity rewind, not full content rewind. Full-fidelity (entries served as-of-their-historical-bytes) requires content-addressed blob storage and is deferred.
+
+The SPA caches the user's pin in `state.subscriptionPin[slug]` whenever the info modal opens or after pin/unpin actions, then automatically appends `&as_of=<pin>` to every `getUniverseEntries()` call. Pin → renders the rewind view across Conteúdo, Calendário, Timeline, etc. Unpin → restores head view.
+
+This makes pinning behaviorally meaningful: pinned subscribers see the universe as it was when they pinned, even if upstream advances.
+
 ## [1.61.0] — 2026-05-06
 
 ### Added — pin status surfaced in the info modal

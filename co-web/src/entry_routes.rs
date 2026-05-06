@@ -95,6 +95,12 @@ pub struct EntryListQuery {
     pub to: Option<String>,
     /// Max entries to return. Defaults to 5000; capped at 50000.
     pub limit: Option<usize>,
+    /// 1.62.0 (Phase 7): rewind view — when set to a `states/...md` path,
+    /// the result is filtered to only entries whose path appears in that
+    /// state's manifest. Bodies served are still current (this is path-
+    /// only rewind for v1; full-fidelity rewind requires content-addressed
+    /// blob storage and is out of scope here). Use `?as_of=states/...md`.
+    pub as_of: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -211,6 +217,38 @@ pub async fn list_entries(
                 .query_with_limit(&slug, entry_type, &filter, limit)
                 .map_err(|e| AppError::Internal(e.to_string()))?
         }
+    };
+
+    // 1.62.0 Phase 7: rewind view via `?as_of=states/...md`. Filters the
+    // result down to paths that existed in that state's manifest. This is
+    // path-fidelity rewind only — bodies served are current.
+    let entries = if let Some(as_of) = q.as_of.as_deref() {
+        if !as_of.starts_with("states/") {
+            return Err(AppError::BadRequest(format!(
+                "as_of must be a path under states/ (got '{as_of}')"
+            )));
+        }
+        let state_row = index
+            .get(&slug, as_of)
+            .map_err(|e| AppError::Internal(format!("get state: {e}")))?
+            .ok_or_else(|| {
+                AppError::BadRequest(format!("state '{as_of}' not found in '{slug}'"))
+            })?;
+        if state_row.entry_type != "state" {
+            return Err(AppError::BadRequest(format!(
+                "'{as_of}' is type '{}', not 'state'",
+                state_row.entry_type
+            )));
+        }
+        let allowed = crate::state_routes::parse_state_manifest_body(&state_row.body);
+        let allowed_paths: std::collections::HashSet<&str> =
+            allowed.iter().map(|(p, _h)| p.as_str()).collect();
+        entries
+            .into_iter()
+            .filter(|e| allowed_paths.contains(e.path.as_str()))
+            .collect()
+    } else {
+        entries
     };
 
     if accept_protobuf(&headers) {

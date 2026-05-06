@@ -12,6 +12,10 @@
         loading: false,
         showArchived: false,
         userUniverses: [],
+        // 1.62.0 Phase 7: per-slug pin map. When set, the SPA appends
+        // `?as_of=<pin>` to entry queries so the user sees the rewind view.
+        // Populated on universe-info open and after pin/unpin actions.
+        subscriptionPin: {},
         // Calendar
         calendarDate: new Date(),
         // Table
@@ -610,11 +614,17 @@
                 body: JSON.stringify(config),
             });
         },
-        // CO-24: fetch entries by type from the universe
+        // CO-24: fetch entries by type from the universe.
+        // 1.62.0: when `state.subscriptionPin` is set for this slug, append
+        // `&as_of=<pin>` so the user gets the rewind view automatically.
         async getUniverseEntries(slug, type) {
-            const url = type
+            let url = type
                 ? `/api/v1/universes/${slug}/entries?type=${encodeURIComponent(type)}`
                 : `/api/v1/universes/${slug}/entries`;
+            const pin = state.subscriptionPin && state.subscriptionPin[slug];
+            if (pin) {
+                url += (url.includes('?') ? '&' : '?') + 'as_of=' + encodeURIComponent(pin);
+            }
             const r = await apiFetch(url, {}, true);
             return (r && r.entries) || [];
         },
@@ -4540,11 +4550,17 @@
                 entries = (r && r.entries) || [];
             } catch (_) {}
             // 1.61.0: fetch user's subscription status (subscribed + pin).
-            // Errors → null (anonymous / not subscribed).
+            // 1.62.0: cache the pin so other code paths (Conteúdo, Calendário,
+            // …) can append `?as_of=` and get the rewind view automatically.
             let subscription = null;
             try {
                 subscription = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/subscription`, {}, true);
             } catch (_) {}
+            if (subscription && subscription.pinned_state) {
+                state.subscriptionPin[slug] = subscription.pinned_state;
+            } else {
+                delete state.subscriptionPin[slug];
+            }
             // Versioning entries are filtered from the same listing.
             const stateEntries = entries.filter(e => (e.frontmatter || {}).type === 'state');
             const branchEntries = entries.filter(e => (e.frontmatter || {}).type === 'branch');
@@ -4641,7 +4657,9 @@
                         { method: 'DELETE' }, true,
                     );
                     showToast('Unpinned (now following head)', 'success');
+                    delete state.subscriptionPin[slug];
                     await renderUniverseInfo();
+                    if (state.currentUniverseSlug === slug) renderContent();
                 } catch (err) {
                     console.error('unpin failed', err);
                     showToast('Failed to unpin', 'error');
@@ -4721,7 +4739,11 @@
                         true,
                     );
                     showToast(`Pinned to ${statePath.split('/').pop().slice(0, 16)}…`, 'success');
+                    state.subscriptionPin[rowSlug] = statePath;
                     await renderUniverseInfo();
+                    // 1.62.0: re-render the background view so the rewind
+                    // (?as_of=) actually filters entries.
+                    if (state.currentUniverseSlug === rowSlug) renderContent();
                 } catch (err) {
                     console.error('pin failed', err);
                     showToast('Failed to pin (login required)', 'error');
