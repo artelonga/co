@@ -4637,7 +4637,11 @@ impl Storage {
                 "time",
                 "Time",
                 "Time-stamped events: astronomical, earth-time milestones, system events",
-                "private",
+                // 1.53.0: was hardcoded `private` and the boot-reconcile UPDATE
+                // below stomped any user-set visibility on every deploy.
+                // co-universes.yaml declares this as public-subscribable —
+                // align the seed with the registry.
+                "public-subscribable",
                 None,
             ),
         ] {

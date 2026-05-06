@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.53.0] — 2026-05-06
+
+### Fixed — `time` universe seeded as `public-subscribable` (was hardcoded `private`)
+
+`seed_admin_content_universes` listed the `time` universe with `visibility=private` and the boot-reconcile UPDATE re-asserted that on every deploy, stomping any user-set value. Aligns the seed with `co-universes.yaml` (declared `public-subscribable`). Now anonymous viewers can see metadata for `/time` and authed users get full read on its 56 events without explicit subscription.
+
+The broader pattern — boot-reconcile UPDATE overwriting user-set fields — is still present for `name`, `description`, `parent_key`, and other seeded universes. That contradicts the 1.45.0 "any authed user can edit any universe" model. A separate fix to make the reconcile additive (only fill in nulls, never overwrite user values) is on the followup list.
+
+`dados` visibility (`public-subscribable` despite never being in the seed) traced to the v29 migration: it must have had `requires_login=1` set in its original row, which v29 collapsed to `public-subscribable`. That's fine — the universe is functioning and the migration was idempotent.
+
 ## [1.52.0] — 2026-05-06
 
 ### Fixed — `co` boot-seed no longer wipes user-generated entries
