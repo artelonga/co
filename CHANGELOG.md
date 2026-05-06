@@ -5,6 +5,16 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.57.0] — 2026-05-06
+
+### Added — clickable state rows show inline diff vs parent
+
+In the state history modal (1.56.0), clicking a state row now expands an inline panel showing the diff against that state's parent — green `+` for added paths, amber `~` for modified, red `-` for removed, plus the unchanged count. Uses the `/states/diff` API (1.51.0). Click again to collapse.
+
+Lists are truncated at 50 paths per category with a `… and N more` footer to keep large changesets readable. The first state in a chain shows "no parent to diff against" instead of a fetch.
+
+This brings the SPA to `git log --stat` parity for the versioning roadmap.
+
 ## [1.56.0] — 2026-05-06
 
 ### Added — state history modal (🕓 button next to "⏱ Estado")

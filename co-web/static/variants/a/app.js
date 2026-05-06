@@ -4534,27 +4534,78 @@
             return;
         }
         const sorted = entries.slice().sort((a, b) => (a.path < b.path ? 1 : -1));
+        const slug = state.currentUniverseSlug;
         const rows = sorted.map(e => {
             const fm = e.frontmatter || {};
             const hash = (fm.state_hash || '').slice(0, 12);
             const msg = fm.message || '';
             const count = fm.entry_count != null ? fm.entry_count : '?';
             const created = fm.created_at || '';
-            const author = fm.author ? `<span style="color:var(--text-muted,#6b7280);font-size:11px">by ${esc(String(author).slice(0, 12))}</span>` : '';
-            const parent = fm.parent ? `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:2px">parent: <code>${esc(fm.parent.split('/').pop().slice(0, 24))}…</code></div>` : '';
+            const author = fm.author ? `<span style="color:var(--text-muted,#6b7280);font-size:11px">by ${esc(String(fm.author).slice(0, 12))}</span>` : '';
+            const parentPath = fm.parent || '';
+            const parentTag = parentPath ? `<div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:2px">parent: <code>${esc(parentPath.split('/').pop().slice(0, 24))}…</code></div>` : '';
             const ts = created ? new Date(created).toLocaleString() : '';
             return `
-                <div class="state-row" style="padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb)">
+                <div class="state-row" style="padding:10px 0;border-bottom:1px solid var(--border,#e5e7eb);cursor:pointer"
+                     data-state-path="${esc(e.path)}" data-parent-path="${esc(parentPath)}" data-slug="${esc(slug)}"
+                     title="Click to see what changed in this state">
                     <div style="display:flex;justify-content:space-between;gap:12px;align-items:baseline">
                         <code style="font-size:12px;font-family:var(--mono,monospace);background:var(--bg-subtle,#f3f4f6);padding:2px 6px;border-radius:3px">${esc(hash)}…</code>
                         <span style="font-size:11px;color:var(--text-muted,#6b7280)">${esc(ts)}</span>
                     </div>
                     <div style="margin-top:4px;font-size:13px">${esc(msg) || '<em style="color:var(--text-muted,#6b7280)">(no message)</em>'}</div>
                     <div style="font-size:11px;color:var(--text-muted,#6b7280);margin-top:2px">${count} entries ${author}</div>
-                    ${parent}
+                    ${parentTag}
                 </div>`;
         }).join('');
         historyBody.innerHTML = rows;
+
+        // 1.57.0: click a state row → inline diff panel showing what changed
+        // vs its parent state. Uses the /states/diff API (1.51.0). Click again
+        // to collapse. First state (no parent) shows a friendly note.
+        historyBody.querySelectorAll('.state-row').forEach(row => {
+            row.addEventListener('click', async () => {
+                const existing = row.querySelector('.state-diff');
+                if (existing) { existing.remove(); return; }
+                const statePath = row.dataset.statePath;
+                const parentPath = row.dataset.parentPath;
+                const rowSlug = row.dataset.slug;
+                const panel = document.createElement('div');
+                panel.className = 'state-diff';
+                panel.style.cssText = 'margin-top:8px;padding:8px 10px;background:var(--bg-subtle,#f9fafb);border-radius:4px;font-size:12px;border:1px solid var(--border,#e5e7eb)';
+                panel.innerHTML = '<em>Loading diff…</em>';
+                row.appendChild(panel);
+                if (!parentPath) {
+                    panel.innerHTML = '<em style="color:var(--text-muted,#6b7280)">First state — no parent to diff against.</em>';
+                    return;
+                }
+                try {
+                    const url = `/api/v1/universes/${encodeURIComponent(rowSlug)}/states/diff?from=${encodeURIComponent(parentPath)}&to=${encodeURIComponent(statePath)}`;
+                    const diff = await apiFetch(url, {}, true);
+                    const parts = [];
+                    const fmtList = (xs, sign, color) => xs.slice(0, 50).map(e =>
+                        `<div style="padding-left:12px;color:${color};font-family:var(--mono,monospace);font-size:11px">${sign} ${esc(e.path)}</div>`
+                    ).join('') + (xs.length > 50 ? `<div style="padding-left:12px;color:var(--text-muted,#6b7280);font-size:11px">… and ${xs.length - 50} more</div>` : '');
+                    if (diff.added.length) {
+                        parts.push(`<div style="color:#059669;font-weight:600">+${diff.added.length} added</div>` + fmtList(diff.added, '+', '#059669'));
+                    }
+                    if (diff.modified.length) {
+                        parts.push(`<div style="color:#d97706;font-weight:600;margin-top:4px">~${diff.modified.length} modified</div>` + fmtList(diff.modified, '~', '#d97706'));
+                    }
+                    if (diff.removed.length) {
+                        parts.push(`<div style="color:#dc2626;font-weight:600;margin-top:4px">-${diff.removed.length} removed</div>` + fmtList(diff.removed, '-', '#dc2626'));
+                    }
+                    if (parts.length === 0) {
+                        panel.innerHTML = `<em style="color:var(--text-muted,#6b7280)">No changes — ${diff.unchanged} entries unchanged from parent.</em>`;
+                    } else {
+                        panel.innerHTML = parts.join('') + `<div style="margin-top:6px;color:var(--text-muted,#6b7280);font-size:11px">${diff.unchanged} unchanged</div>`;
+                    }
+                } catch (err) {
+                    console.error('diff fetch failed', err);
+                    panel.innerHTML = '<em style="color:#dc2626">Failed to load diff.</em>';
+                }
+            });
+        });
     }
 
     if (btnHistory) {
