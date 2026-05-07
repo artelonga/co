@@ -40,6 +40,8 @@ pub mod quilombo_routes;
 pub mod quilombo_storage;
 pub mod quilombo_telemetria;
 pub mod rate_limit;
+pub mod recovery_crypto;
+pub mod recovery_routes;
 pub mod reference_index;
 pub mod reference_routes;
 pub mod relation_index;

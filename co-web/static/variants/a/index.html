@@ -60,6 +60,7 @@
                 </button>
                 <div class="sidebar-user hidden" id="sidebar-user">
                     <span class="sidebar-user-name" id="user-display-name"></span>
+                    <button class="btn-text-sm" id="btn-security" data-i18n="recovery_channels_title">Canais de recuperação</button>
                     <button class="btn-text-sm" id="btn-logout" data-i18n="sign_out">Sair</button>
                 </div>
             </div>
@@ -356,9 +357,43 @@
                     <button type="button" class="btn btn-primary btn-full" id="btn-entrar" data-i18n="sign_in">Entrar</button>
                 </div>
                 <p id="login-error" class="form-error hidden"></p>
+                <div class="login-links" style="text-align:center;margin-top:0.75rem">
+                    <button type="button" class="btn-text-sm" id="btn-forgot-password" data-i18n="forgot_password">Esqueci minha senha</button>
+                </div>
+            </div>
+
+            <!-- Forgot password: step 1 — enter identifier -->
+            <div id="login-step-forgot" class="hidden">
+                <p class="login-subtitle" data-i18n="forgot_password_subtitle">Digite seu usuário ou email</p>
+                <div class="form-group">
+                    <label for="forgot-identifier" data-i18n="forgot_password_identifier_label">Usuário ou canal</label>
+                    <input type="text" id="forgot-identifier" autocomplete="username" data-i18n-placeholder="forgot_password_identifier_placeholder" placeholder="usuario ou email@exemplo.com">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-full" id="btn-forgot-send" data-i18n="forgot_password_send">Enviar código</button>
+                </div>
+                <p id="forgot-error" class="form-error hidden"></p>
+            </div>
+
+            <!-- Forgot password: step 2 — enter code + new password -->
+            <div id="login-step-reset" class="hidden">
+                <p class="login-subtitle" data-i18n="forgot_password_sent">Código enviado.</p>
+                <div class="form-group">
+                    <label for="reset-code" data-i18n="forgot_password_code_label">Código</label>
+                    <input type="text" id="reset-code" autocomplete="one-time-code" maxlength="6" data-i18n-placeholder="forgot_password_code_placeholder" placeholder="000000">
+                </div>
+                <div class="form-group">
+                    <label for="reset-new-password" data-i18n="forgot_password_new_password_label">Nova senha</label>
+                    <input type="password" id="reset-new-password" autocomplete="new-password" placeholder="••••••••">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-full" id="btn-reset-submit" data-i18n="forgot_password_set">Definir senha</button>
+                </div>
+                <p id="reset-error" class="form-error hidden"></p>
             </div>
 
             <div class="login-footer">
+                <button class="btn-text-sm" id="btn-back-to-login" style="display:none" data-i18n="back_to_login">← Voltar</button>
                 <button class="btn-text-sm lang-toggle" id="btn-lang-toggle" data-i18n="lang.switch">English</button>
             </div>
         </div>
@@ -503,5 +538,66 @@
         }
     })();
     </script>
+
+    <!-- CO-165: Account Security Modal (recovery channels + change password) -->
+    <div id="security-modal-overlay" class="modal-overlay hidden">
+        <div class="modal" id="security-modal" style="max-width:520px">
+            <div class="modal-header">
+                <h2 data-i18n="recovery_channels_title">Canais de recuperação</h2>
+                <button class="modal-close" id="security-modal-close">&times;</button>
+            </div>
+            <div id="security-modal-body">
+                <!-- Recovery channels section -->
+                <section style="margin-bottom:1.5rem">
+                    <h3 style="margin-bottom:0.5rem;font-size:0.95rem" data-i18n="recovery_channels_title">Canais de recuperação</h3>
+                    <p class="form-hint" style="margin-bottom:0.75rem" data-i18n="recovery_channels_subtitle">Adicione canais para recuperar sua conta.</p>
+                    <div id="recovery-channels-list" style="margin-bottom:0.75rem"></div>
+                    <details id="recovery-add-section" style="margin-top:0.5rem">
+                        <summary class="btn-text-sm" data-i18n="recovery_add_channel">Adicionar canal</summary>
+                        <div style="margin-top:0.75rem">
+                            <div class="form-group" style="margin-bottom:0.5rem">
+                                <label data-i18n="recovery_channel_type">Tipo</label>
+                                <select id="recovery-channel-type">
+                                    <option value="email" data-i18n="recovery_channel_email">Email</option>
+                                    <option value="whatsapp" data-i18n="recovery_channel_whatsapp">WhatsApp</option>
+                                    <option value="sms" data-i18n="recovery_channel_sms">SMS</option>
+                                </select>
+                            </div>
+                            <div class="form-group" style="margin-bottom:0.5rem">
+                                <label data-i18n="recovery_channel_value">Endereço</label>
+                                <input type="text" id="recovery-channel-value" placeholder="email@exemplo.com">
+                            </div>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-recovery-add" data-i18n="recovery_send_code">Enviar código</button>
+                        </div>
+                    </details>
+                    <div id="recovery-verify-section" class="hidden" style="margin-top:0.75rem">
+                        <div class="form-group" style="margin-bottom:0.5rem">
+                            <label data-i18n="forgot_password_code_label">Código</label>
+                            <input type="text" id="recovery-verify-code" maxlength="6" placeholder="000000">
+                        </div>
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-recovery-verify" data-i18n="recovery_verify_code">Verificar</button>
+                        <p id="recovery-channel-msg" class="form-hint" style="margin-top:0.4rem"></p>
+                    </div>
+                </section>
+
+                <hr style="margin-bottom:1.5rem;opacity:0.2">
+
+                <!-- Change password section -->
+                <section>
+                    <h3 style="margin-bottom:0.5rem;font-size:0.95rem" data-i18n="change_password_title">Mudar senha</h3>
+                    <div class="form-group" style="margin-bottom:0.5rem">
+                        <label data-i18n="change_password_current">Senha atual</label>
+                        <input type="password" id="security-current-password" autocomplete="current-password" placeholder="••••••••">
+                    </div>
+                    <div class="form-group" style="margin-bottom:0.75rem">
+                        <label data-i18n="change_password_new">Nova senha</label>
+                        <input type="password" id="security-new-password" autocomplete="new-password" placeholder="••••••••">
+                    </div>
+                    <button type="button" class="btn btn-primary btn-sm" id="btn-change-password" data-i18n="change_password_save">Salvar senha</button>
+                    <p id="security-pw-msg" class="form-hint" style="margin-top:0.4rem"></p>
+                </section>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

@@ -5,7 +5,44 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.82.0] — 2026-05-08
+
+### Added — CO-165: Forgot password / change password with verified recovery channels
+
+**New module `recovery_crypto.rs`** — ChaCha20-Poly1305 encryption for channel values:
+- Master key from `CO_RECOVERY_KEY` → fallback `JWT_SECRET` → dev default.
+- Two BLAKE3-derived subkeys: `enc` (for encryption) and `lkp` (deterministic lookup hash).
+- `encrypt_channel_value` / `decrypt_channel_value` — store ciphertext+nonce in DB.
+- `compute_lookup_hash` — 64-char hex for indexed lookups without decryption.
+- `normalize_channel_value` — email: trim+lowercase; phone: digits+leading `+`.
+- `mask_channel_value` — display masking (`j***@domain.com`, `****1234`, `wa:****1234`).
+
+**New module `recovery_routes.rs`** — 8 endpoints:
+- `POST /api/v1/auth/recovery/channels` — add channel, send 6-digit verification code.
+- `POST /api/v1/auth/recovery/channels/verify` — verify channel with code (argon2id).
+- `GET  /api/v1/auth/recovery/channels` — list channels with masked values.
+- `DELETE /api/v1/auth/recovery/channels/{id}` — remove channel (requires current password).
+- `POST /api/v1/auth/forgot-password` — send reset codes to all verified channels (always 202).
+- `POST /api/v1/auth/forgot-password/verify` — verify code, receive one-time reset token.
+- `POST /api/v1/auth/reset-password` — exchange token for new password, get new session.
+- `POST /api/v1/auth/change-password` — change password (requires current password + JWT).
+
+**Migration v37** — users table: email nullable + `usuario` column (backfilled from email local-part);
+three new tables: `user_recovery_channels`, `recovery_verifications`, `password_reset_tokens`.
+
+**`password_login_handler`** updated to accept `email` or `usuario` field (username+email decoupling).
+
+18 tests: 14 endpoint tests (including delete channel, lockout, E2E happy path) + 7 crypto unit tests.
+
 ## [1.81.0] — 2026-05-08
+
+### Fixed — Anonymous landing page now shows the CO template tutorial
+
+Boot-time template seeding became idempotent. Previously, if the `template` universe row already existed (every deploy after the first), `seed_template_universe()` was skipped entirely — only content pages were refreshed. If the project + tutorial tasks had been lost from the per-universe entries DB at any point (old migration, manual cleanup), they stayed lost forever, so anon hitting `/` saw an empty kanban (`projects: []`) with no tutorial content to render.
+
+`seed_template_universe()` now runs on every boot. Internal `already_seeded` check guards on `projects/CO/_project.md` existing in the entries DB — fresh tutorial tasks are NOT created if a project is present (preserves anything users edited on first-boot installs). Content pages still re-seed unconditionally on every boot, theme stays pinned to `modern`. After this deploy, prod's template universe will get its 7 tutorial tasks back on first boot.
+
+## [1.76.0] — 2026-05-06
 
 ### Added — Direct notification provider adapters (CO-169)
 

@@ -1260,10 +1260,6 @@ impl Storage {
 
         if current_version < 36 {
             // CO-169 (1.81.0): direct notification provider adapters.
-            // 1. Add telefone column to quilombo_usuarios.
-            // 2. Add channel + recipient columns to notifications.
-            // 3. Insert sentinel webhook row for direct-channel notifications
-            //    (satisfies FK constraint on notifications.webhook_id).
             ensure_column(&self.conn, "quilombo_usuarios", "telefone", "TEXT")
                 .expect("migration v36: quilombo_usuarios.telefone");
             ensure_column(&self.conn, "notifications", "channel", "TEXT")
@@ -1280,6 +1276,156 @@ impl Storage {
                 )
                 .expect("Failed to run migration v36");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 37 {
+            // CO-165 (1.82.0): username+email decoupling + recovery channel tables.
+            //
+            // Step 1: make users.email nullable, add users.usuario.
+            // SQLite doesn't support DROP NOT NULL constraints, so we recreate
+            // the table. FKs referencing users.id are unaffected (same id column).
+            //
+            // Step 2: create recovery channel, verification, and reset token tables.
+            self.conn
+                .execute_batch(
+                    "
+                    PRAGMA foreign_keys=OFF;
+
+                    ALTER TABLE users RENAME TO users_old;
+
+                    CREATE TABLE users (
+                        id            TEXT PRIMARY KEY,
+                        email         TEXT UNIQUE,
+                        display_name  TEXT NOT NULL DEFAULT '',
+                        tier          TEXT NOT NULL DEFAULT 'player',
+                        created_at    TEXT NOT NULL,
+                        password_hash TEXT,
+                        usuario       TEXT UNIQUE
+                    );
+
+                    INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
+                    SELECT id, email, display_name, tier, created_at, password_hash
+                    FROM users_old;
+
+                    UPDATE users SET usuario = CASE
+                        WHEN email LIKE '%@%'
+                        THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
+                        ELSE NULL
+                    END WHERE usuario IS NULL;
+
+                    DROP TABLE users_old;
+
+                    PRAGMA foreign_keys=ON;
+
+                    CREATE TABLE IF NOT EXISTS user_recovery_channels (
+                        id                TEXT PRIMARY KEY,
+                        user_id           TEXT NOT NULL,
+                        channel_type      TEXT NOT NULL
+                                          CHECK (channel_type IN ('email','whatsapp','sms')),
+                        value_ciphertext  BLOB NOT NULL,
+                        value_nonce       BLOB NOT NULL,
+                        value_lookup_hash TEXT NOT NULL,
+                        verified_at       TEXT,
+                        created_at        TEXT NOT NULL,
+                        last_used_at      TEXT,
+                        lockout_until     TEXT,
+                        FOREIGN KEY (user_id) REFERENCES users(id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_urc_user
+                        ON user_recovery_channels(user_id);
+
+                    CREATE TABLE IF NOT EXISTS recovery_verifications (
+                        id          TEXT PRIMARY KEY,
+                        channel_id  TEXT NOT NULL,
+                        user_id     TEXT NOT NULL,
+                        purpose     TEXT NOT NULL
+                                    CHECK (purpose IN ('add_channel','reset_password','change_email')),
+                        code_hash   TEXT NOT NULL,
+                        expires_at  TEXT NOT NULL,
+                        consumed_at TEXT,
+                        attempts    INTEGER NOT NULL DEFAULT 0,
+                        created_at  TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_rv_channel
+                        ON recovery_verifications(channel_id, consumed_at);
+                    CREATE INDEX IF NOT EXISTS idx_rv_user_purpose
+                        ON recovery_verifications(user_id, purpose, consumed_at);
+
+                    CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                        token_hash  TEXT PRIMARY KEY,
+                        user_id     TEXT NOT NULL,
+                        channel_id  TEXT NOT NULL,
+                        expires_at  TEXT NOT NULL,
+                        consumed_at TEXT,
+                        created_at  TEXT NOT NULL
+                    );
+
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (37);
+                    ",
+                )
+                .expect("Failed to run migration v37");
+        }
+
+        // CO-165 unconditional backfill: ensure recovery tables exist even if
+        // v37 migration was partially applied (same pattern as CO-137).
+        ensure_column(&self.conn, "users", "usuario", "TEXT").ok();
+        ensure_table(
+            &self.conn,
+            "user_recovery_channels",
+            "CREATE TABLE IF NOT EXISTS user_recovery_channels (
+                id                TEXT PRIMARY KEY,
+                user_id           TEXT NOT NULL,
+                channel_type      TEXT NOT NULL
+                                  CHECK (channel_type IN ('email','whatsapp','sms')),
+                value_ciphertext  BLOB NOT NULL,
+                value_nonce       BLOB NOT NULL,
+                value_lookup_hash TEXT NOT NULL,
+                verified_at       TEXT,
+                created_at        TEXT NOT NULL,
+                last_used_at      TEXT,
+                lockout_until     TEXT,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            );",
+        )
+        .ok();
+        ensure_table(
+            &self.conn,
+            "recovery_verifications",
+            "CREATE TABLE IF NOT EXISTS recovery_verifications (
+                id          TEXT PRIMARY KEY,
+                channel_id  TEXT NOT NULL,
+                user_id     TEXT NOT NULL,
+                purpose     TEXT NOT NULL
+                            CHECK (purpose IN ('add_channel','reset_password','change_email')),
+                code_hash   TEXT NOT NULL,
+                expires_at  TEXT NOT NULL,
+                consumed_at TEXT,
+                attempts    INTEGER NOT NULL DEFAULT 0,
+                created_at  TEXT NOT NULL
+            );",
+        )
+        .ok();
+        ensure_table(
+            &self.conn,
+            "password_reset_tokens",
+            "CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                token_hash  TEXT PRIMARY KEY,
+                user_id     TEXT NOT NULL,
+                channel_id  TEXT NOT NULL,
+                expires_at  TEXT NOT NULL,
+                consumed_at TEXT,
+                created_at  TEXT NOT NULL
+            );",
+        )
+        .ok();
 
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
@@ -2797,6 +2943,7 @@ impl Storage {
             display_name: display_name.to_string(),
             tier: "admin".to_string(),
             created_at: now,
+            usuario: None,
         })
     }
 
@@ -2812,6 +2959,7 @@ impl Storage {
                         display_name: row.get(2)?,
                         tier: row.get(3)?,
                         created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        usuario: None,
                     })
                 },
             )
@@ -2821,7 +2969,8 @@ impl Storage {
     pub fn get_user_by_id(&self, id: &str) -> Option<crate::models::User> {
         self.conn
             .query_row(
-                "SELECT id, email, display_name, tier, created_at FROM users WHERE id = ?1",
+                "SELECT id, COALESCE(email,'') as email, display_name, tier, created_at \
+                 FROM users WHERE id = ?1",
                 params![id],
                 |row| {
                     Ok(crate::models::User {
@@ -2830,10 +2979,68 @@ impl Storage {
                         display_name: row.get(2)?,
                         tier: row.get(3)?,
                         created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        usuario: None,
                     })
                 },
             )
             .ok()
+    }
+
+    /// CO-165: Get user by usuario (username).
+    pub fn get_user_by_usuario(&self, usuario: &str) -> Option<crate::models::User> {
+        self.conn
+            .query_row(
+                "SELECT id, COALESCE(email,'') as email, display_name, tier, created_at \
+                 FROM users WHERE usuario = ?1",
+                params![usuario],
+                |row| {
+                    Ok(crate::models::User {
+                        id: row.get(0)?,
+                        email: row.get(1)?,
+                        display_name: row.get(2)?,
+                        tier: row.get(3)?,
+                        created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        usuario: Some(usuario.to_string()),
+                    })
+                },
+            )
+            .ok()
+    }
+
+    /// CO-165: Get user by ID along with their stored password hash.
+    pub fn get_user_by_id_with_hash(
+        &self,
+        id: &str,
+    ) -> Option<(crate::models::User, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT id, COALESCE(email,'') as email, display_name, tier, created_at, \
+                 password_hash FROM users WHERE id = ?1",
+                params![id],
+                |row| {
+                    Ok((
+                        crate::models::User {
+                            id: row.get(0)?,
+                            email: row.get(1)?,
+                            display_name: row.get(2)?,
+                            tier: row.get(3)?,
+                            created_at: parse_datetime(&row.get::<_, String>(4)?),
+                            usuario: None,
+                        },
+                        row.get::<_, Option<String>>(5)?,
+                    ))
+                },
+            )
+            .ok()
+    }
+
+    /// CO-165: Update user's password hash.
+    pub fn update_password_hash(&self, user_id: &str, hash: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE users SET password_hash = ?1 WHERE id = ?2",
+            params![hash, user_id],
+        )?;
+        Ok(())
     }
 
     // --- UAT-specific methods (CO-44) ---
@@ -2857,6 +3064,7 @@ impl Storage {
                             display_name: row.get(2)?,
                             tier: row.get(3)?,
                             created_at: parse_datetime(&row.get::<_, String>(4)?),
+                            usuario: None,
                         },
                         row.get::<_, Option<String>>(5)?,
                     ))
@@ -3371,10 +3579,11 @@ impl Storage {
             Ok((
                 crate::models::User {
                     id: row.get(0)?,
-                    email: row.get(1)?,
+                    email: row.get::<_, Option<String>>(1)?.unwrap_or_default(),
                     display_name: row.get(2)?,
                     tier: row.get(3)?,
                     created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    usuario: None,
                 },
                 row.get::<_, Option<String>>(5)?,
             ))
@@ -6174,6 +6383,282 @@ impl Storage {
             Err(e) => Err(e.into()),
         }
     }
+
+    // -------------------------------------------------------------------------
+    // CO-165: Recovery channel storage methods
+    // -------------------------------------------------------------------------
+
+    pub fn create_recovery_channel(
+        &self,
+        user_id: &str,
+        channel_type: &str,
+        ciphertext: Vec<u8>,
+        nonce: [u8; 12],
+        lookup_hash: &str,
+    ) -> anyhow::Result<String> {
+        let id = format!("rc_{}", nanoid::nanoid!(10));
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO user_recovery_channels \
+             (id, user_id, channel_type, value_ciphertext, value_nonce, value_lookup_hash, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, user_id, channel_type, ciphertext, nonce.as_slice(), lookup_hash, now],
+        )?;
+        Ok(id)
+    }
+
+    pub fn get_recovery_channel(&self, id: &str) -> Option<crate::models::RecoveryChannel> {
+        self.conn
+            .query_row(
+                "SELECT id, user_id, channel_type, value_ciphertext, value_nonce, \
+                 value_lookup_hash, verified_at, created_at, last_used_at, lockout_until \
+                 FROM user_recovery_channels WHERE id = ?1",
+                params![id],
+                row_to_recovery_channel,
+            )
+            .ok()
+    }
+
+    pub fn get_recovery_channels_for_user(
+        &self,
+        user_id: &str,
+    ) -> Vec<crate::models::RecoveryChannel> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT id, user_id, channel_type, value_ciphertext, value_nonce, \
+             value_lookup_hash, verified_at, created_at, last_used_at, lockout_until \
+             FROM user_recovery_channels WHERE user_id = ?1 ORDER BY created_at",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![user_id], row_to_recovery_channel)
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    pub fn find_verified_channel_by_lookup_hash(
+        &self,
+        channel_type: &str,
+        lookup_hash: &str,
+    ) -> Option<crate::models::RecoveryChannel> {
+        self.conn
+            .query_row(
+                "SELECT id, user_id, channel_type, value_ciphertext, value_nonce, \
+                 value_lookup_hash, verified_at, created_at, last_used_at, lockout_until \
+                 FROM user_recovery_channels \
+                 WHERE channel_type = ?1 AND value_lookup_hash = ?2 AND verified_at IS NOT NULL",
+                params![channel_type, lookup_hash],
+                row_to_recovery_channel,
+            )
+            .ok()
+    }
+
+    pub fn verify_recovery_channel(
+        &self,
+        channel_id: &str,
+        verified_at: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE user_recovery_channels SET verified_at = ?1 WHERE id = ?2",
+            params![verified_at, channel_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_recovery_channel(&self, channel_id: &str, user_id: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "DELETE FROM user_recovery_channels WHERE id = ?1 AND user_id = ?2",
+            params![channel_id, user_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_channel_lockout(&self, channel_id: &str, lockout_until: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE user_recovery_channels SET lockout_until = ?1 WHERE id = ?2",
+            params![lockout_until, channel_id],
+        )?;
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------------
+    // CO-165: Recovery verification storage methods
+    // -------------------------------------------------------------------------
+
+    pub fn create_recovery_verification(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        purpose: &str,
+        code_hash: &str,
+        expires_at: &str,
+    ) -> anyhow::Result<String> {
+        let id = format!("rv_{}", nanoid::nanoid!(10));
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO recovery_verifications \
+             (id, channel_id, user_id, purpose, code_hash, expires_at, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, channel_id, user_id, purpose, code_hash, expires_at, now],
+        )?;
+        Ok(id)
+    }
+
+    pub fn get_active_verification(
+        &self,
+        channel_id: &str,
+        purpose: &str,
+    ) -> Option<crate::models::RecoveryVerification> {
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .query_row(
+                "SELECT id, channel_id, user_id, purpose, code_hash, expires_at, \
+                 consumed_at, attempts, created_at \
+                 FROM recovery_verifications \
+                 WHERE channel_id = ?1 AND purpose = ?2 AND consumed_at IS NULL \
+                 AND expires_at > ?3 \
+                 ORDER BY created_at DESC LIMIT 1",
+                params![channel_id, purpose, now],
+                row_to_recovery_verification,
+            )
+            .ok()
+    }
+
+    pub fn increment_verification_attempts(&self, id: &str) -> anyhow::Result<i64> {
+        self.conn.execute(
+            "UPDATE recovery_verifications SET attempts = attempts + 1 WHERE id = ?1",
+            params![id],
+        )?;
+        let count: i64 = self.conn.query_row(
+            "SELECT attempts FROM recovery_verifications WHERE id = ?1",
+            params![id],
+            |row| row.get(0),
+        )?;
+        Ok(count)
+    }
+
+    pub fn consume_verification(&self, id: &str) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE recovery_verifications SET consumed_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Expire a verification by setting expires_at to the past.
+    pub fn expire_verification(&self, id: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE recovery_verifications SET expires_at = '2000-01-01T00:00:00Z' WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn count_recent_verifications_for_channel(&self, channel_id: &str, since: &str) -> i64 {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM recovery_verifications \
+                 WHERE channel_id = ?1 AND created_at >= ?2",
+                params![channel_id, since],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    // -------------------------------------------------------------------------
+    // CO-165: Password reset token storage methods
+    // -------------------------------------------------------------------------
+
+    pub fn create_reset_token(
+        &self,
+        token_hash: &str,
+        user_id: &str,
+        channel_id: &str,
+        expires_at: &str,
+    ) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO password_reset_tokens \
+             (token_hash, user_id, channel_id, expires_at, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![token_hash, user_id, channel_id, expires_at, now],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_reset_token(&self, token_hash: &str) -> Option<crate::models::PasswordResetToken> {
+        self.conn
+            .query_row(
+                "SELECT token_hash, user_id, channel_id, expires_at, consumed_at, created_at \
+                 FROM password_reset_tokens WHERE token_hash = ?1",
+                params![token_hash],
+                |row| {
+                    Ok(crate::models::PasswordResetToken {
+                        token_hash: row.get(0)?,
+                        user_id: row.get(1)?,
+                        channel_id: row.get(2)?,
+                        expires_at: row.get(3)?,
+                        consumed_at: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                },
+            )
+            .ok()
+    }
+
+    pub fn consume_reset_token(&self, token_hash: &str) -> anyhow::Result<()> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE password_reset_tokens SET consumed_at = ?1 WHERE token_hash = ?2",
+            params![now, token_hash],
+        )?;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CO-165: Row-mapping helpers for recovery tables
+// ---------------------------------------------------------------------------
+
+fn row_to_recovery_channel(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::models::RecoveryChannel> {
+    let nonce_bytes: Vec<u8> = row.get(4)?;
+    let mut nonce = [0u8; 12];
+    if nonce_bytes.len() == 12 {
+        nonce.copy_from_slice(&nonce_bytes);
+    }
+    Ok(crate::models::RecoveryChannel {
+        id: row.get(0)?,
+        user_id: row.get(1)?,
+        channel_type: row.get(2)?,
+        value_ciphertext: row.get(3)?,
+        value_nonce: nonce,
+        value_lookup_hash: row.get(5)?,
+        verified_at: row.get(6)?,
+        created_at: row.get(7)?,
+        last_used_at: row.get(8)?,
+        lockout_until: row.get(9)?,
+    })
+}
+
+fn row_to_recovery_verification(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::models::RecoveryVerification> {
+    Ok(crate::models::RecoveryVerification {
+        id: row.get(0)?,
+        channel_id: row.get(1)?,
+        user_id: row.get(2)?,
+        purpose: row.get(3)?,
+        code_hash: row.get(4)?,
+        expires_at: row.get(5)?,
+        consumed_at: row.get(6)?,
+        attempts: row.get(7)?,
+        created_at: row.get(8)?,
+    })
 }
 
 // ---------------------------------------------------------------------------

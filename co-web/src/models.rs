@@ -561,6 +561,55 @@ pub struct User {
     pub display_name: String,
     pub tier: String,
     pub created_at: DateTime<Utc>,
+    pub usuario: Option<String>,
+}
+
+// --- CO-165: Recovery channels ---
+
+#[derive(Debug, Clone)]
+pub struct RecoveryChannel {
+    pub id: String,
+    pub user_id: String,
+    pub channel_type: String,
+    pub value_ciphertext: Vec<u8>,
+    pub value_nonce: [u8; 12],
+    pub value_lookup_hash: String,
+    pub verified_at: Option<String>,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+    pub lockout_until: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecoveryVerification {
+    pub id: String,
+    pub channel_id: String,
+    pub user_id: String,
+    pub purpose: String,
+    pub code_hash: String,
+    pub expires_at: String,
+    pub consumed_at: Option<String>,
+    pub attempts: i64,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct PasswordResetToken {
+    pub token_hash: String,
+    pub user_id: String,
+    pub channel_id: String,
+    pub expires_at: String,
+    pub consumed_at: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecoveryChannelResponse {
+    pub id: String,
+    pub channel_type: String,
+    pub masked_value: String,
+    pub verified_at: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Deserialize)]

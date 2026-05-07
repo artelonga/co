@@ -5469,6 +5469,229 @@
                 showLoginModal();
             });
         }
+
+        // CO-165: Forgot password flow
+        const btnForgot = document.getElementById('btn-forgot-password');
+        const btnBackLogin = document.getElementById('btn-back-to-login');
+        const btnForgotSend = document.getElementById('btn-forgot-send');
+        const btnResetSubmit = document.getElementById('btn-reset-submit');
+
+        function showLoginStep(step) {
+            ['login-step-password', 'login-step-forgot', 'login-step-reset'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const target = document.getElementById(step);
+            if (target) target.classList.remove('hidden');
+            if (btnBackLogin) btnBackLogin.style.display = (step === 'login-step-password') ? 'none' : '';
+        }
+
+        if (btnForgot) {
+            btnForgot.addEventListener('click', () => {
+                showLoginStep('login-step-forgot');
+                const el = document.getElementById('forgot-identifier');
+                if (el) el.focus();
+            });
+        }
+
+        if (btnBackLogin) {
+            btnBackLogin.addEventListener('click', () => {
+                showLoginStep('login-step-password');
+            });
+        }
+
+        let _forgotIdentifier = '';
+
+        if (btnForgotSend) {
+            btnForgotSend.addEventListener('click', async () => {
+                const identifier = (document.getElementById('forgot-identifier')?.value || '').trim();
+                const errEl = document.getElementById('forgot-error');
+                errEl.classList.add('hidden');
+                if (!identifier) return;
+                btnForgotSend.disabled = true;
+                btnForgotSend.textContent = window.t('forgot_password_sending');
+                _forgotIdentifier = identifier;
+                await fetch('/api/v1/auth/forgot-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username_or_channel_value: identifier }),
+                });
+                btnForgotSend.disabled = false;
+                btnForgotSend.textContent = window.t('forgot_password_send');
+                showLoginStep('login-step-reset');
+            });
+        }
+
+        if (btnResetSubmit) {
+            btnResetSubmit.addEventListener('click', async () => {
+                const code = (document.getElementById('reset-code')?.value || '').trim();
+                const newPassword = document.getElementById('reset-new-password')?.value || '';
+                const errEl = document.getElementById('reset-error');
+                errEl.classList.add('hidden');
+                if (!code || !newPassword) return;
+                btnResetSubmit.disabled = true;
+
+                // Step 1: verify code → get reset_token
+                const verifyResp = await fetch('/api/v1/auth/forgot-password/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username_or_channel_value: _forgotIdentifier, code }),
+                });
+                if (!verifyResp.ok) {
+                    errEl.textContent = window.t('forgot_password_error');
+                    errEl.classList.remove('hidden');
+                    btnResetSubmit.disabled = false;
+                    return;
+                }
+                const { reset_token } = await verifyResp.json();
+
+                // Step 2: set new password
+                const resetResp = await fetch('/api/v1/auth/reset-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ reset_token, new_password: newPassword }),
+                });
+                btnResetSubmit.disabled = false;
+                if (resetResp.ok) {
+                    hideLoginModal();
+                    showLoginStep('login-step-password');
+                    window.location.reload();
+                } else {
+                    errEl.textContent = window.t('forgot_password_error');
+                    errEl.classList.remove('hidden');
+                }
+            });
+        }
+
+        // Enter key support for forgot-password steps
+        const forgotIdentifierEl = document.getElementById('forgot-identifier');
+        if (forgotIdentifierEl) forgotIdentifierEl.addEventListener('keydown', e => { if (e.key === 'Enter' && btnForgotSend) btnForgotSend.click(); });
+        const resetCodeEl = document.getElementById('reset-code');
+        if (resetCodeEl) resetCodeEl.addEventListener('keydown', e => { if (e.key === 'Enter' && btnResetSubmit) btnResetSubmit.click(); });
+    }
+
+    // ===== Security modal (CO-165: recovery channels + change password) =====
+
+    function setupSecurityModal() {
+        const overlay = document.getElementById('security-modal-overlay');
+        const closeBtn = document.getElementById('security-modal-close');
+        const btnSecurity = document.getElementById('btn-security');
+
+        function openSecurityModal() {
+            if (overlay) overlay.classList.remove('hidden');
+            loadRecoveryChannels();
+        }
+
+        function closeSecurityModal() {
+            if (overlay) overlay.classList.add('hidden');
+        }
+
+        if (btnSecurity) btnSecurity.addEventListener('click', openSecurityModal);
+        if (closeBtn) closeBtn.addEventListener('click', closeSecurityModal);
+        if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) closeSecurityModal(); });
+
+        async function loadRecoveryChannels() {
+            const listEl = document.getElementById('recovery-channels-list');
+            if (!listEl) return;
+            try {
+                const resp = await apiFetch('/api/v1/auth/recovery/channels', {}, true);
+                if (!resp || !Array.isArray(resp)) { listEl.textContent = ''; return; }
+                if (resp.length === 0) {
+                    listEl.textContent = '';
+                    return;
+                }
+                listEl.innerHTML = resp.map(ch => `
+                    <div class="recovery-channel-row" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
+                        <span class="badge" style="font-size:0.75rem">${esc(ch.channel_type)}</span>
+                        <span>${esc(ch.masked_value)}</span>
+                        <span style="font-size:0.75rem;opacity:0.6">${ch.verified_at ? window.t('recovery_verified') : window.t('recovery_pending')}</span>
+                        <button class="btn-text-sm" data-channel-id="${esc(ch.id)}" onclick="window._removeChannel('${esc(ch.id)}')">${window.t('recovery_remove')}</button>
+                    </div>`).join('');
+            } catch (_) {}
+        }
+
+        window._removeChannel = async (channelId) => {
+            const pwd = prompt(window.t('change_password_current'));
+            if (!pwd) return;
+            await apiFetch(`/api/v1/auth/recovery/channels/${channelId}`, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ current_password: pwd }),
+            }, true);
+            loadRecoveryChannels();
+        };
+
+        // Add channel flow
+        let _pendingChannelId = null;
+
+        const btnAdd = document.getElementById('btn-recovery-add');
+        if (btnAdd) {
+            btnAdd.addEventListener('click', async () => {
+                const type = document.getElementById('recovery-channel-type')?.value;
+                const value = document.getElementById('recovery-channel-value')?.value?.trim();
+                if (!type || !value) return;
+                const resp = await apiFetch('/api/v1/auth/recovery/channels', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_type: type, value }),
+                }, true);
+                if (resp && resp.channel_id) {
+                    _pendingChannelId = resp.channel_id;
+                    const verifySection = document.getElementById('recovery-verify-section');
+                    if (verifySection) verifySection.classList.remove('hidden');
+                    const msg = document.getElementById('recovery-channel-msg');
+                    if (msg) msg.textContent = window.t('recovery_code_sent');
+                }
+            });
+        }
+
+        const btnVerify = document.getElementById('btn-recovery-verify');
+        if (btnVerify) {
+            btnVerify.addEventListener('click', async () => {
+                const code = document.getElementById('recovery-verify-code')?.value?.trim();
+                if (!code || !_pendingChannelId) return;
+                const resp = await apiFetch('/api/v1/auth/recovery/channels/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ channel_id: _pendingChannelId, code }),
+                }, true);
+                const msg = document.getElementById('recovery-channel-msg');
+                if (resp && resp.verified) {
+                    if (msg) msg.textContent = window.t('recovery_channel_verified');
+                    _pendingChannelId = null;
+                    document.getElementById('recovery-verify-section')?.classList.add('hidden');
+                    document.getElementById('recovery-channel-value').value = '';
+                    loadRecoveryChannels();
+                } else {
+                    if (msg) msg.textContent = window.t('forgot_password_error');
+                }
+            });
+        }
+
+        // Change password
+        const btnChangePw = document.getElementById('btn-change-password');
+        if (btnChangePw) {
+            btnChangePw.addEventListener('click', async () => {
+                const current = document.getElementById('security-current-password')?.value || '';
+                const next = document.getElementById('security-new-password')?.value || '';
+                const msgEl = document.getElementById('security-pw-msg');
+                if (!current || !next) return;
+                const resp = await apiFetch('/api/v1/auth/change-password', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ current_password: current, new_password: next }),
+                }, true);
+                if (msgEl) {
+                    msgEl.textContent = resp && resp.ok
+                        ? window.t('change_password_success')
+                        : window.t('change_password_error');
+                }
+                if (resp && resp.ok) {
+                    document.getElementById('security-current-password').value = '';
+                    document.getElementById('security-new-password').value = '';
+                }
+            });
+        }
     }
 
     // ===== Universe routing helpers =====
@@ -6596,6 +6819,7 @@
         initTimelineStart();
         setupHamburgerMenu();
         setupLoginModal();
+        setupSecurityModal();
         setupCriarModal();
         setupUsageLimitModal();
         setupSettingsPanel();

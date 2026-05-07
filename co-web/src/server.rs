@@ -507,7 +507,17 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         )
         .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json))
         // CO-164: cross-universe semantic search
-        .nest("/api/v1", crate::search_routes::router());
+        .nest("/api/v1", crate::search_routes::router())
+        // CO-165: recovery channels (requires auth) + forgot/reset password (public)
+        .nest(
+            "/api/v1/auth/recovery",
+            crate::recovery_routes::recovery_router()
+                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
+        .nest(
+            "/api/v1/auth",
+            crate::recovery_routes::forgot_password_router(),
+        );
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -720,25 +730,33 @@ pub async fn start_server(config: WebConfig) {
         drop(storage);
     }
 
-    // Seed template universe once on first boot.
+    // Seed template universe on every boot (idempotent).
+    //
+    // `seed_template_universe()` is internally idempotent: it `INSERT OR IGNORE`s
+    // the universe row, then early-returns BEFORE creating the project + tutorial
+    // tasks if `projects/CO/_project.md` already exists. Calling it
+    // unconditionally fixes a class of "anon sees empty board" bugs where the
+    // universe row exists from a prior deploy but the per-universe entries DB
+    // has lost the project + tasks (so anon lands on an empty kanban).
+    //
+    // After seeding, content pages are always re-seeded from the bundled
+    // markdown — they're treated as binary-shipped truth, unlike user-editable
+    // tutorial tasks which are only seeded if missing.
     {
         let mut storage = Storage::new(&config.data_dir);
-        if !storage.template_exists() {
-            tracing::info!("No template universe found — seeding template...");
-            storage.seed_template_universe();
-            tracing::info!("Template universe seeded (universe: template, project: MP)");
-        } else {
-            // Template already exists — refresh the content pages (intro + legal)
-            // so the binary's bundled markdown is the source of truth on every boot.
-            // Tasks/projects are NOT touched (user may have edited those).
-            storage.reseed_template_content_pages();
-            // Force theme preset back to 'modern' so the public landing page
-            // always renders with the intended default — old migrations could
-            // have left it on 'scholarly-light'.
-            storage.ensure_template_theme_preset("modern");
+        let had_template = storage.template_exists();
+        storage.seed_template_universe();
+        storage.reseed_template_content_pages();
+        // Force theme preset back to 'modern' so the public landing page
+        // always renders with the intended default — old migrations could
+        // have left it on 'scholarly-light'.
+        storage.ensure_template_theme_preset("modern");
+        if had_template {
             tracing::info!(
-                "Template content pages refreshed from bundled seed files; theme preset pinned to 'modern'"
+                "Template refreshed: project+tasks seeded if missing, content pages reseeded, theme pinned to 'modern'"
             );
+        } else {
+            tracing::info!("No template universe found — seeded fresh template");
         }
         // CO-41: seed quilomboaraucaria public universe once on first boot.
         if !storage.quilombo_universe_exists() {
@@ -2063,6 +2081,7 @@ async fn verify_handler(
                     display_name: String::new(),
                     tier: "player".to_string(),
                     created_at: Utc::now(),
+                    usuario: None,
                 });
             (id.clone(), u.display_name, u.tier)
         }
@@ -2241,26 +2260,41 @@ async fn logout_handler(State(state): State<AppState>, headers: HeaderMap) -> Re
 /// Request body for password login.
 #[derive(serde::Deserialize)]
 struct PasswordLoginRequest {
+    #[serde(default)]
     email: String,
+    #[serde(default)]
+    usuario: String,
     password: String,
 }
 
 /// POST /api/v1/auth/password-login — Argon2id password login, any environment.
 ///
+/// Accepts `email` or `usuario` field (CO-165: username+email decoupling).
 /// Succeeds when the user record has a non-NULL `password_hash` set.
-/// Returns 401 for unknown email, wrong password, or missing hash — all
+/// Returns 401 for unknown email/usuario, wrong password, or missing hash — all
 /// indistinguishable to callers to prevent user enumeration.
 async fn password_login_handler(
     State(state): State<AppState>,
     Json(req): Json<PasswordLoginRequest>,
 ) -> Result<Response, AppError> {
-    let email = req.email.trim().to_lowercase();
-
     let (user, hash_opt) = {
         let storage = lock_storage(&state)?;
-        storage
-            .get_user_by_email_with_hash(&email)
-            .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?
+        if !req.email.is_empty() {
+            let email = req.email.trim().to_lowercase();
+            storage
+                .get_user_by_email_with_hash(&email)
+                .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?
+        } else if !req.usuario.is_empty() {
+            let usuario = req.usuario.trim().to_lowercase();
+            let user = storage
+                .get_user_by_usuario(&usuario)
+                .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?;
+            storage
+                .get_user_by_id_with_hash(&user.id)
+                .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?
+        } else {
+            return Err(AppError::Unauthorized("Invalid credentials".into()));
+        }
     };
 
     let hash = hash_opt.ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?;
