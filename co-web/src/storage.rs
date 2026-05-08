@@ -6179,6 +6179,7 @@ fn entry_row_from_sql(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryRow> {
         body_hash: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        _score: None,
     })
 }
 

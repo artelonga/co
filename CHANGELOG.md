@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.78.0] — 2026-05-08
+
+### Added — CO-164: Vector index for entries — semantic search
+
+Local text-embedding pipeline using `fastembed` (all-MiniLM-L6-v2, 384-dim, ~80 MB) — no external API calls, offline-first.
+
+- **`entry_embeddings` table** (per-universe schema): stores `embedding BLOB` (384 × f32 LE), `body_hash` (staleness guard), `model`, `indexed_at` per `(universe_key, path)`. `idx_emb_body_hash` index.
+- **`EmbeddingService`** (`embedding.rs`): lazy-loads fastembed model from `~/.co/models/` (or `CO_MODELS_DIR`). Gracefully disabled when model unavailable — server continues without semantic search.
+- **Background worker** (`embedding_worker.rs`): dedicated OS thread, batches up to 32 entries per inference call (≤100 ms window). Enqueued on every entry create/update/delete. Fire-and-forget (`try_send`).
+- **Boot scan**: on startup, compares `entries.body_hash` vs `entry_embeddings.body_hash` across all universes and enqueues stale/missing entries. Does not re-embed unchanged content.
+- **`GET /api/v1/universes/:slug/entries?semantic=<query>&k=10`**: returns top-K entries by cosine similarity, each with `_score ∈ [0, 1]`.
+- **Hybrid search** (`?q=&semantic=`): merges FTS rank + cosine similarity via harmonic mean, outperforming either alone.
+- **`GET /api/v1/universes/:slug/entries/similar?path=<vault-path>&k=10`**: similar entries to a given one (excludes self).
+- **`GET /api/v1/search?semantic=<query>&k=10`**: cross-universe semantic search across all universes the user can read.
+- `EntryRow._score` field (optional, `skip_serializing_if = None`) — set on semantic results only.
+
 ## [1.77.0] — 2026-05-08
 
 ### Added — CO-163: Mempalace BaseBackend Python shim (`scripts/mempalace_co_backend.py`)

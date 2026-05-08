@@ -53,6 +53,9 @@ pub struct EntryRow {
     pub body_hash: String,
     pub created_at: Option<String>,
     pub updated_at: Option<String>,
+    /// CO-164: cosine similarity score ∈ [0, 1] — only present in semantic search results.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub _score: Option<f32>,
 }
 
 /// SQLite-backed index over Entry files.
@@ -599,6 +602,7 @@ fn row_to_entry_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<EntryRow> {
         body_hash: row.get(6)?,
         created_at: row.get(7)?,
         updated_at: row.get(8)?,
+        _score: None,
     })
 }
 

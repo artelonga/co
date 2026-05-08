@@ -72,6 +72,8 @@ CREATE TABLE IF NOT EXISTS entry_relations (
     relation_type TEXT NOT NULL,
     created_at    TEXT NOT NULL,
     to_universe   TEXT,
+    valid_from    TEXT,
+    valid_until   TEXT,
     PRIMARY KEY (universe_key, from_path, to_path, relation_type)
 );
 CREATE INDEX IF NOT EXISTS idx_er_from
@@ -193,6 +195,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS reference_cards_fts USING fts5(
     body,
     transcription
 );
+
+-- CO-164: vector embedding store for semantic search.
+-- 384 × f32 = 1536 bytes per embedding (all-MiniLM-L6-v2).
+-- body_hash lets the worker skip re-embedding unchanged content.
+CREATE TABLE IF NOT EXISTS entry_embeddings (
+    universe_key TEXT NOT NULL,
+    path         TEXT NOT NULL,
+    body_hash    TEXT NOT NULL,
+    embedding    BLOB NOT NULL,
+    model        TEXT NOT NULL,
+    indexed_at   TEXT NOT NULL,
+    PRIMARY KEY (universe_key, path)
+);
+CREATE INDEX IF NOT EXISTS idx_emb_body_hash ON entry_embeddings(body_hash);
 ";
 
 // ---------------------------------------------------------------------------
@@ -364,6 +380,21 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
         }
         conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
             .expect("universe schema_version v8");
+    }
+    if v < 9 {
+        // Temporal validity on entry_relations: edges valid only within
+        // [valid_from, valid_until). NULL on either side means unbounded.
+        // Sourced from the *from-entry's* frontmatter `valid_from`/`valid_until`
+        // and applied to all of its outbound edges (entry-level lifecycle).
+        ensure_universe_column(conn, "entry_relations", "valid_from", "TEXT");
+        ensure_universe_column(conn, "entry_relations", "valid_until", "TEXT");
+        conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])
+            .expect("universe schema_version v9");
+    }
+    if v < 10 {
+        // CO-164: vector embedding store — already created via UNIVERSE_SCHEMA IF NOT EXISTS.
+        conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
+            .expect("universe schema_version v10");
     }
 }
 

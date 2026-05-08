@@ -101,6 +101,18 @@ pub struct EntryListQuery {
     /// only rewind for v1; full-fidelity rewind requires content-addressed
     /// blob storage and is out of scope here). Use `?as_of=states/...md`.
     pub as_of: Option<String>,
+    /// CO-164: semantic similarity query text.
+    pub semantic: Option<String>,
+    /// CO-164: number of top-K results to return for semantic/similar queries (default 10).
+    pub k: Option<usize>,
+}
+
+/// CO-164: query parameters for the `/similar` endpoint.
+#[derive(Debug, Deserialize)]
+pub struct SimilarQuery {
+    /// Vault-relative path of the entry to find similar entries for.
+    pub path: String,
+    pub k: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -189,7 +201,12 @@ pub async fn list_entries(
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
     let index = crate::entry_index::EntryIndex::new(&uc_guard);
 
-    let entries = if let Some(ref fts_query) = q.q {
+    let entries = if let Some(ref sem_query) = q.semantic {
+        // CO-164: semantic similarity search (optionally combined with FTS for hybrid).
+        let k = q.k.unwrap_or(10).min(200);
+        semantic_search_entries(&state, &slug, &uc_guard, sem_query, k, q.q.as_deref())
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else if let Some(ref fts_query) = q.q {
         index
             .search(&slug, fts_query)
             .map_err(|e| AppError::Internal(e.to_string()))?
@@ -503,6 +520,15 @@ pub async fn create_entry(
         );
         rc
     };
+    // CO-164: enqueue embedding job for background indexing.
+    crate::embedding_worker::enqueue_upsert(
+        &state,
+        &slug,
+        &body.path,
+        &body.body,
+        &entry.body_hash,
+    );
+
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
 
@@ -574,6 +600,7 @@ pub async fn create_entry(
             body_hash: entry.body_hash,
             created_at: Some(entry.stat.created.to_rfc3339()),
             updated_at: Some(entry.stat.modified.to_rfc3339()),
+            _score: None,
         }),
     )
         .into_response())
@@ -671,6 +698,9 @@ pub async fn update_entry(
             &universe_root,
         );
     }
+    // CO-164: enqueue embedding job for background indexing.
+    crate::embedding_worker::enqueue_upsert(&state, &slug, &path, &new_body, &entry.body_hash);
+
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
 
@@ -717,6 +747,7 @@ pub async fn update_entry(
         body_hash: entry.body_hash,
         created_at: existing.created_at,
         updated_at: Some(entry.stat.modified.to_rfc3339()),
+        _score: None,
     }))
 }
 
@@ -797,7 +828,11 @@ pub async fn delete_entry(
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
         // CO-156: remove references_meta + references_fts (idempotent)
         crate::reference_routes::remove_reference_meta(&uc_guard, &slug, &path);
+        // CO-164: remove embedding row
+        let _ = crate::embedding_index::EmbeddingIndex::new(&uc_guard).remove(&slug, &path);
     }
+    // CO-164: enqueue delete (async cleanup, belt-and-suspenders with the sync remove above)
+    crate::embedding_worker::enqueue_delete(&state, &slug, &path);
     let mut storage = lock_storage(&state)?;
     storage.decrement_universe_content_count(&slug, 1);
 
@@ -961,6 +996,131 @@ pub(crate) async fn list_orphan_wikilinks(
 }
 
 // ---------------------------------------------------------------------------
+// CO-164: Semantic search helpers + `/similar` endpoint
+// ---------------------------------------------------------------------------
+
+/// Run semantic (and optionally hybrid) search, returning top-K `EntryRow`s with `_score`.
+///
+/// When `fts_query` is also provided, results are merged using the harmonic mean of the
+/// normalised FTS rank and cosine similarity score (hybrid search).
+pub(crate) fn semantic_search_entries(
+    state: &AppState,
+    universe_key: &str,
+    conn: &rusqlite::Connection,
+    sem_query: &str,
+    k: usize,
+    fts_query: Option<&str>,
+) -> anyhow::Result<Vec<EntryRow>> {
+    let query_embedding = match state.embeddings.embed_one(sem_query) {
+        Some(e) => e,
+        None => return Ok(vec![]), // model unavailable
+    };
+
+    let emb_idx = crate::embedding_index::EmbeddingIndex::new(conn);
+    let scored_paths = emb_idx.search_similar(universe_key, &query_embedding, k, None)?;
+
+    let fts_rank: std::collections::HashMap<String, f32> = if let Some(fts_q) = fts_query {
+        let fts_results = crate::entry_index::EntryIndex::new(conn).search(universe_key, fts_q)?;
+        let n = fts_results.len().max(1) as f32;
+        fts_results
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.path.clone(), 1.0 - (i as f32 / n)))
+            .collect()
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // Merge: if fts_query present use harmonic mean, else pure cosine score.
+    let mut merged: Vec<(String, f32)> = scored_paths
+        .into_iter()
+        .map(|(path, cos)| {
+            let score = if let Some(&fts) = fts_rank.get(&path) {
+                if fts > 0.0 && cos > 0.0 {
+                    2.0 * fts * cos / (fts + cos)
+                } else {
+                    fts.max(cos)
+                }
+            } else {
+                cos
+            };
+            (path, score)
+        })
+        .collect();
+
+    // Include FTS-only hits not in semantic results when hybrid
+    if fts_query.is_some() {
+        for (path, fts) in &fts_rank {
+            if !merged.iter().any(|(p, _)| p == path) {
+                merged.push((path.clone(), *fts * 0.5)); // penalise pure-FTS hits
+            }
+        }
+    }
+
+    merged.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    merged.truncate(k);
+
+    // Fetch full EntryRow for each path, inject score.
+    let entry_idx = crate::entry_index::EntryIndex::new(conn);
+    let mut results = Vec::with_capacity(merged.len());
+    for (path, score) in merged {
+        if let Ok(Some(mut row)) = entry_idx.get(universe_key, &path) {
+            row._score = Some(score);
+            results.push(row);
+        }
+    }
+    Ok(results)
+}
+
+/// GET /api/v1/universes/:slug/entries/similar?path=<vault-path>&k=10
+///
+/// Returns entries most similar to the given one (excluding itself).
+/// Uses `?path=` query param rather than a URL segment to avoid axum catch-all
+/// routing conflicts.
+pub async fn similar_entries(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<SimilarQuery>,
+) -> Result<Json<EntryListResponse>, AppError> {
+    let k = q.k.unwrap_or(10).min(200);
+    let path = q.path;
+    let uc = {
+        let storage = lock_storage(&state)?;
+        storage.universe_conn(&slug)
+    };
+    let conn = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let emb_idx = crate::embedding_index::EmbeddingIndex::new(&conn);
+    let query_embedding = match emb_idx.get_embedding(&slug, &path)? {
+        Some(e) => e,
+        None => {
+            return Ok(Json(EntryListResponse {
+                entries: vec![],
+                total: 0,
+            }));
+        }
+    };
+
+    let scored_paths = emb_idx.search_similar(&slug, &query_embedding, k, Some(&path))?;
+
+    let entry_idx = crate::entry_index::EntryIndex::new(&conn);
+    let mut results = Vec::with_capacity(scored_paths.len());
+    for (p, score) in scored_paths {
+        if let Ok(Some(mut row)) = entry_idx.get(&slug, &p) {
+            row._score = Some(score);
+            results.push(row);
+        }
+    }
+    let total = results.len();
+    Ok(Json(EntryListResponse {
+        entries: results,
+        total,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -973,6 +1133,8 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))
         .route("/{slug}/entries", get(list_entries).post(create_entry))
+        // CO-164: similar entries — uses ?path= query param to avoid catch-all conflict
+        .route("/{slug}/entries/similar", get(similar_entries))
         .route(
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),

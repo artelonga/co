@@ -65,6 +65,10 @@ pub struct AppStateInner {
     pub wae: Arc<crate::wae::WaeEmitter>,
     /// CO-166: EC P-256 key pair for ES256 JWT signing and JWKS endpoint.
     pub jwt_key: Arc<crate::auth::JwtKey>,
+    /// CO-164: shared embedding model (all-MiniLM-L6-v2).
+    pub embeddings: Arc<crate::embedding::EmbeddingService>,
+    /// CO-164: channel to send embedding jobs to the background worker.
+    pub embedding_tx: crate::embedding_worker::EmbeddingSender,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -494,7 +498,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/.well-known/openid-configuration",
             get(crate::oidc_routes::openid_configuration),
         )
-        .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json));
+        .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json))
+        // CO-164: cross-universe semantic search
+        .nest("/api/v1", crate::search_routes::router());
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -964,6 +970,10 @@ pub async fn start_server(config: WebConfig) {
 
     // CO-166: load or generate EC P-256 key for ES256 JWT signing and JWKS.
     let jwt_key = Arc::new(crate::auth::JwtKey::load_or_generate());
+    // CO-164: load embedding model (non-blocking — fails gracefully if offline).
+    let model_dir = crate::embedding::default_model_dir();
+    let embeddings = Arc::new(crate::embedding::EmbeddingService::new(model_dir));
+    let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
 
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
@@ -979,6 +989,8 @@ pub async fn start_server(config: WebConfig) {
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         wae,
         jwt_key,
+        embeddings,
+        embedding_tx,
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -990,6 +1002,10 @@ pub async fn start_server(config: WebConfig) {
 
     // CO-72: spawn doc-gen worker loop.
     crate::job_queue::spawn_worker(Arc::clone(&state));
+
+    // CO-164: spawn embedding background worker + run boot scan for stale embeddings.
+    crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
+    crate::embedding_worker::boot_scan(Arc::clone(&state));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.
@@ -2349,6 +2365,7 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path)
                 .expect("Failed to open test game storage"),
         );
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: AppState = Arc::new(AppStateInner {
             storage: Mutex::new(storage),
             experiment: Mutex::new(experiment),
@@ -2363,6 +2380,8 @@ mod tests {
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
         });
         build_router(state, None)
     }

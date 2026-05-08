@@ -755,6 +755,8 @@ mod tests {
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
             jwt_key: Arc::new(JwtKey::load_or_generate()),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx: { let (tx, _) = crate::embedding_worker::channel(); tx },
         });
         build_router(state, None)
     }
@@ -1022,6 +1024,8 @@ mod tests {
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
             jwt_key: Arc::new(JwtKey::load_or_generate()),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx: { let (tx, _) = crate::embedding_worker::channel(); tx },
         });
         let app = build_router(state, None);
 

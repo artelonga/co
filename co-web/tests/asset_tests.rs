@@ -62,6 +62,11 @@ fn build_test_app(dir: &std::path::Path) -> (axum::Router, AppState) {
         rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
         jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
     });
     let router = build_router(state.clone(), None);
     (router, state)
