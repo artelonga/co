@@ -1161,7 +1161,7 @@ impl Storage {
                 .expect("Failed to run migration v31");
         }
 
-        if current_version < 32 {
+        if current_version < 35 {
             // CO-168: outbound webhook system + notification queue.
             // webhooks — admin-registered HTTP endpoints that receive signed
             // POST events. notifications — the outbound delivery queue drained
@@ -1194,10 +1194,10 @@ impl Storage {
                         ON notifications(status, next_attempt_at)
                         WHERE status IN ('pending', 'failed');
 
-                    INSERT INTO schema_version (version) VALUES (32);
+                    INSERT INTO schema_version (version) VALUES (35);
                     ",
                 )
-                .expect("Failed to run migration v32");
+                .expect("Failed to run migration v35");
         }
 
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
