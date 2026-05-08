@@ -5,36 +5,25 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.77.0] — 2026-05-08
+
+### Added — CO-163: Mempalace BaseBackend Python shim (`scripts/mempalace_co_backend.py`)
+
+`MempalaceCoBackend` implements mempalace's `BaseBackend` ABC backed by CO's HTTP API:
+
+- `upsert` writes content blob via `POST /api/v1/blobs`, embedding blob via `POST /api/v1/blobs`, and metadata entry via vault PUT — three calls, parallelised via `ThreadPoolExecutor`.
+- `get(ids)` reads vault entries by path, resolves `blob_hash` → bytes via `GET /api/v1/blobs/:hash`.
+- `query` falls back to keyword search via `GET /api/v1/universes/:slug/entries?q=…` today; exposes a `_vector_search` hook (no-op) for swapping in CO-164's vector endpoint when it ships.
+- `delete` removes vault entries; CAS blobs are content-addressed and shared — never deleted by the shim.
+- Chroma-style `where` clauses: `$eq/$gt/$gte/$lt/$lte/$in` mapped server-side to CO's frontmatter index; `$ne/$nin/$and/$or` evaluated client-side.
+
+Ships with `scripts/test_mempalace_co.py` (27 unit + mock-HTTP tests, 2 live-server integration tests behind `CO_INTEGRATION_TEST=1`) and `scripts/mempalace_co_README.md` documenting config, the keyword-only `query` caveat, and the CO-164 upgrade path.
+
+No Rust changes. Pure Python, stdlib-only (`urllib.request`, `struct`, `json`).
+
 ## [1.76.0] — 2026-05-08
 
 ### Added — CO-166: Single Sign-On across universe deployments
-
-Three-phase SSO implementation:
-
-**Phase 1 — Cookie-share for `.artelonga.com.br` subdomains**
-
-- `CO_COOKIE_DOMAIN` env var: when set, adds `Domain=<value>` to all session cookies so they are shared across subdomains. Default: off (localhost-safe).
-- ES256 asymmetric JWT signing via `p256` crate. `JwtKey` struct in `auth.rs` loads from `CO_JWT_PRIVATE_KEY` env var (PKCS8 PEM) or generates a fresh key per boot.
-- `GET /.well-known/jwks.json` — JWK Set exposing the public EC P-256 key so external services can verify CO JWTs without sharing `JWT_SECRET`.
-- `build_session_cookie(token, domain, max_age)` helper centralizes all cookie construction; all five cookie-setting sites updated.
-- Integration kit at `scripts/co_auth_kit/`: TypeScript (`co_auth.ts`, Deno/Node), Python (`co_auth.py`, PyJWT), and `README.md` documenting both SSO mechanisms.
-
-**Phase 2 — OIDC for cross-apex deployments**
-
-- `oauth_clients`, `oauth_auth_codes`, `oauth_access_tokens` tables (migration v32).
-- `GET /.well-known/openid-configuration` — OIDC discovery document.
-- `GET /oauth/authorize` — authorization endpoint (requires session auth, PKCE S256, issues code).
-- `POST /oauth/token` — code exchange (validates PKCE, returns access_token + ES256 id_token).
-- `GET /oauth/userinfo` — user profile from access_token.
-- `POST /api/v1/gestao/oauth/clients` + `GET` — admin endpoints to register and list OIDC clients (GitHub auth required).
-
-**Phase 3 — Deprecation path**
-
-- `quilombo_usuarios.linked_co_user_id` column (migration v33).
-- `POST /api/v1/quilombo/auth/link-co-account` — authenticated quilombo users can link their account to a CO main-account user ID.
-- `CO_QUILOMBO_LEGACY_LOGIN=false` env flag: when set, `POST /api/v1/quilombo/auth/login` returns 410 Gone.
-
-**Tests**: 13 new unit/integration tests covering JWKS format, ES256 signing, cookie domain logic, OIDC authorize→token flow (PKCE S256), and legacy login deprecation (410).
 
 ## [1.75.0] — 2026-05-06
 
