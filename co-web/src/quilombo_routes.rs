@@ -153,6 +153,7 @@ async fn login_handler(
     let cookie =
         format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
 
+    let missing_email = user.email.is_none();
     let response_body = LoginResponse {
         token: token.clone(),
         usuario: UsuarioResumo {
@@ -161,6 +162,7 @@ async fn login_handler(
             nome: user.nome,
             papel: user.papel,
         },
+        missing_email,
     };
 
     quilombo_storage::registrar_atividade(
@@ -268,6 +270,7 @@ async fn cadastro_handler(
             nome: user.nome,
             papel: user.papel,
         },
+        missing_email: true,
     };
 
     Ok((
@@ -732,12 +735,36 @@ async fn obter_perfil_handler(
         .ok_or_else(|| AppError::NotFound("Profile not found".into()))
 }
 
+fn validate_email_format(email: &str) -> bool {
+    let parts: Vec<&str> = email.splitn(2, '@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    !parts[0].is_empty() && parts[1].contains('.')
+}
+
 async fn atualizar_perfil_handler(
     State(state): State<AppState>,
     user_id: UserId,
     Json(body): Json<AtualizarPerfil>,
 ) -> Result<Json<Usuario>, AppError> {
     let storage = lock_storage(&state)?;
+
+    if let Some(ref email) = body.email {
+        let email = email.trim().to_lowercase();
+        if !validate_email_format(&email) {
+            return Err(AppError::BadRequest("Invalid email format".into()));
+        }
+        quilombo_storage::definir_email(storage.conn(), &user_id.0, &email).map_err(
+            |e| match e {
+                quilombo_storage::EmailError::AlreadyTaken => {
+                    AppError::Conflict("Email already taken".into())
+                }
+                quilombo_storage::EmailError::Other(msg) => AppError::Internal(msg),
+            },
+        )?;
+    }
+
     let usuario = quilombo_storage::atualizar_perfil(storage.conn(), &user_id.0, &body)
         .map_err(AppError::NotFound)?;
 

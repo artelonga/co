@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.76.0] — 2026-05-08
+
+### Added — Email collection for quilombo users (CO-167)
+
+Bridge between quilombo accounts and CO unified auth (CO-166). Quilombo users can now attach an email for account recovery and future notifications:
+
+- **Migration v32**: adds nullable unique `email` column + `linked_co_user_id` column to `quilombo_usuarios`. Unique index on `email WHERE email IS NOT NULL` — multiple users without email never conflict.
+- **`PUT /api/v1/quilombo/perfil`** now accepts `email`; validates format and returns 409 if already taken by another user.
+- **`POST /api/v1/quilombo/auth/login`** response now includes `missing_email: true` when the user has no email set (nudge signal for the client to show the "add email" banner).
+- **`GET /api/v1/quilombo/admin/usuarios`** now includes `email` and `linked_co_user_id` per user row.
+- **`GET /api/v1/quilombo/admin/resumo`** now includes `com_email` (count with email) and `vinculados_co` (count with `linked_co_user_id`) in the summary JSON.
+
 ## [1.75.0] — 2026-05-06
 
 ### Added — Blob CAS API: GET/HEAD/POST `/api/v1/blobs`

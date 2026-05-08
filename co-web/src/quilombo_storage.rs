@@ -235,7 +235,7 @@ pub fn criar_usuario(
 
 pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
     conn.query_row(
-        "SELECT id, usuario, nome, papel, bio, foto_url, criado_em, atualizado_em FROM quilombo_usuarios WHERE id = ?1",
+        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em FROM quilombo_usuarios WHERE id = ?1",
         params![id],
         |row| {
             Ok(Usuario {
@@ -245,8 +245,10 @@ pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
                 papel: row.get::<_, String>(3)?.parse().unwrap_or(Papel::Membro),
                 bio: row.get(4)?,
                 foto_url: row.get(5)?,
-                criado_em: parse_datetime(&row.get::<_, String>(6)?),
-                atualizado_em: parse_datetime(&row.get::<_, String>(7)?),
+                email: row.get(6)?,
+                linked_co_user_id: row.get(7)?,
+                criado_em: parse_datetime(&row.get::<_, String>(8)?),
+                atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
             })
         },
     )
@@ -255,7 +257,7 @@ pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
 
 pub fn obter_usuario_por_nome(conn: &Connection, usuario: &str) -> Option<(Usuario, String)> {
     conn.query_row(
-        "SELECT id, usuario, nome, papel, bio, foto_url, criado_em, atualizado_em, senha_hash FROM quilombo_usuarios WHERE usuario = ?1",
+        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em, senha_hash FROM quilombo_usuarios WHERE usuario = ?1",
         params![usuario],
         |row| {
             Ok((
@@ -266,10 +268,12 @@ pub fn obter_usuario_por_nome(conn: &Connection, usuario: &str) -> Option<(Usuar
                     papel: row.get::<_, String>(3)?.parse().unwrap_or(Papel::Membro),
                     bio: row.get(4)?,
                     foto_url: row.get(5)?,
-                    criado_em: parse_datetime(&row.get::<_, String>(6)?),
-                    atualizado_em: parse_datetime(&row.get::<_, String>(7)?),
+                    email: row.get(6)?,
+                    linked_co_user_id: row.get(7)?,
+                    criado_em: parse_datetime(&row.get::<_, String>(8)?),
+                    atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
                 },
-                row.get::<_, String>(8)?,
+                row.get::<_, String>(10)?,
             ))
         },
     )
@@ -315,6 +319,32 @@ pub fn atualizar_perfil(
     .map_err(|e| format!("Failed to update profile: {e}"))?;
 
     obter_usuario_por_id(conn, id).ok_or_else(|| "User not found after update".to_string())
+}
+
+/// Set or update the email for a quilombo user. Returns Err if the address
+/// is already taken by another user (UNIQUE constraint violation).
+pub fn definir_email(conn: &Connection, id: &str, email: &str) -> Result<Usuario, EmailError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    conn.execute(
+        "UPDATE quilombo_usuarios SET email = ?1, atualizado_em = ?2 WHERE id = ?3",
+        params![email, now, id],
+    )
+    .map_err(|e| {
+        if e.to_string().contains("UNIQUE constraint failed") {
+            EmailError::AlreadyTaken
+        } else {
+            EmailError::Other(format!("Failed to set email: {e}"))
+        }
+    })?;
+
+    obter_usuario_por_id(conn, id)
+        .ok_or_else(|| EmailError::Other("User not found after email update".to_string()))
+}
+
+#[derive(Debug)]
+pub enum EmailError {
+    AlreadyTaken,
+    Other(String),
 }
 
 // --- Eventos ---
@@ -1001,7 +1031,7 @@ pub fn listar_comentarios_usuario(conn: &Connection, usuario_id: &str) -> Vec<Co
 
 pub fn listar_usuarios(conn: &Connection) -> Vec<Usuario> {
     let mut stmt = conn
-        .prepare("SELECT id, usuario, nome, papel, bio, foto_url, criado_em, atualizado_em FROM quilombo_usuarios ORDER BY criado_em")
+        .prepare("SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em FROM quilombo_usuarios ORDER BY criado_em")
         .expect("Failed to prepare listar_usuarios");
 
     stmt.query_map([], |row| {
@@ -1012,8 +1042,10 @@ pub fn listar_usuarios(conn: &Connection) -> Vec<Usuario> {
             papel: row.get::<_, String>(3)?.parse().unwrap_or(Papel::Membro),
             bio: row.get(4)?,
             foto_url: row.get(5)?,
-            criado_em: parse_datetime(&row.get::<_, String>(6)?),
-            atualizado_em: parse_datetime(&row.get::<_, String>(7)?),
+            email: row.get(6)?,
+            linked_co_user_id: row.get(7)?,
+            criado_em: parse_datetime(&row.get::<_, String>(8)?),
+            atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
         })
     })
     .expect("Failed to list users")
@@ -1096,11 +1128,29 @@ pub fn resumo_admin(conn: &Connection, days: i64) -> serde_json::Value {
         .filter_map(|r| r.ok())
         .collect();
 
+    let com_email: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM quilombo_usuarios WHERE email IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
+    let vinculados_co: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM quilombo_usuarios WHERE linked_co_user_id IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
+
     serde_json::json!({
         "periodo_dias": days,
         "visitas": total_visitas,
         "visitantes_unicos": visitantes_unicos,
         "usuarios": total_usuarios,
+        "com_email": com_email,
+        "vinculados_co": vinculados_co,
         "eventos": total_eventos,
         "missoes": total_missoes,
         "comentarios": total_comentarios,

@@ -1161,6 +1161,24 @@ impl Storage {
                 .expect("Failed to run migration v31");
         }
 
+        if current_version < 32 {
+            // CO-167: email + linked_co_user_id on quilombo_usuarios.
+            // email is nullable and unique (WHERE email IS NOT NULL) to allow
+            // multiple users without email without violating the constraint.
+            // linked_co_user_id enables OIDC account linking (CO-166).
+            ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
+                .expect("migration v32: quilombo_usuarios.email");
+            ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
+                .expect("migration v32: quilombo_usuarios.linked_co_user_id");
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_quilombo_usuarios_email
+                         ON quilombo_usuarios(email) WHERE email IS NOT NULL;
+                     INSERT INTO schema_version (version) VALUES (32);",
+                )
+                .expect("Failed to run migration v32");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.
