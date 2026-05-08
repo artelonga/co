@@ -1326,11 +1326,28 @@ impl Storage {
                         INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
                         SELECT id, email, display_name, tier, created_at, password_hash
                         FROM users_old;
-                        UPDATE users SET usuario = CASE
-                            WHEN email LIKE '%@%'
-                            THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
-                            ELSE NULL
-                        END WHERE usuario IS NULL;
+                        -- Backfill usuario from email local-part. Multiple rows
+                        -- can share a local-part (yuri@artelonga.com.br vs.
+                        -- yuri@uat.local) which `usuario UNIQUE` would reject;
+                        -- dedupe by suffixing `-2`, `-3`, ... after the
+                        -- earliest-created row in each partition.
+                        WITH numbered AS (
+                            SELECT id,
+                                   LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1)) AS base,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
+                                       ORDER BY created_at, id
+                                   ) AS rn
+                            FROM users
+                            WHERE email LIKE '%@%' AND usuario IS NULL
+                        )
+                        UPDATE users
+                        SET usuario = (
+                            SELECT CASE WHEN n.rn = 1 THEN n.base
+                                        ELSE n.base || '-' || n.rn END
+                            FROM numbered n WHERE n.id = users.id
+                        )
+                        WHERE EXISTS (SELECT 1 FROM numbered n WHERE n.id = users.id);
                         DROP TABLE users_old;
                         PRAGMA foreign_keys=ON;
                         ",
@@ -1356,11 +1373,28 @@ impl Storage {
                         INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
                         SELECT id, email, display_name, tier, created_at, password_hash
                         FROM users_old;
-                        UPDATE users SET usuario = CASE
-                            WHEN email LIKE '%@%'
-                            THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
-                            ELSE NULL
-                        END WHERE usuario IS NULL;
+                        -- Backfill usuario from email local-part. Multiple rows
+                        -- can share a local-part (yuri@artelonga.com.br vs.
+                        -- yuri@uat.local) which `usuario UNIQUE` would reject;
+                        -- dedupe by suffixing `-2`, `-3`, ... after the
+                        -- earliest-created row in each partition.
+                        WITH numbered AS (
+                            SELECT id,
+                                   LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1)) AS base,
+                                   ROW_NUMBER() OVER (
+                                       PARTITION BY LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
+                                       ORDER BY created_at, id
+                                   ) AS rn
+                            FROM users
+                            WHERE email LIKE '%@%' AND usuario IS NULL
+                        )
+                        UPDATE users
+                        SET usuario = (
+                            SELECT CASE WHEN n.rn = 1 THEN n.base
+                                        ELSE n.base || '-' || n.rn END
+                            FROM numbered n WHERE n.id = users.id
+                        )
+                        WHERE EXISTS (SELECT 1 FROM numbered n WHERE n.id = users.id);
                         DROP TABLE users_old;
                         PRAGMA foreign_keys=ON;
                         ",
@@ -3321,11 +3355,11 @@ impl Storage {
         // Only touches usernames currently NOT prefixed with 'legacy-' to
         // remain idempotent across re-runs.
         let updated = self.conn.execute(
-            "UPDATE users SET username = 'legacy-' || username \
+            "UPDATE users SET usuario = 'legacy-' || usuario \
              WHERE email LIKE '%@co.local' \
-               AND username IS NOT NULL \
-               AND username != '' \
-               AND username NOT LIKE 'legacy-%'",
+               AND usuario IS NOT NULL \
+               AND usuario != '' \
+               AND usuario NOT LIKE 'legacy-%'",
             [],
         )?;
         if updated > 0 {
