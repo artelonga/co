@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "co"
-version = "1.80.0"
+version = "1.81.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -671,7 +671,7 @@ dependencies = [
 
 [[package]]
 name = "co-agent"
-version = "1.80.0"
+version = "1.81.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "1.80.0"
+version = "1.81.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -776,10 +776,11 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "1.80.0"
+version = "1.81.0"
 dependencies = [
  "anyhow",
  "argon2",
+ "async-trait",
  "axum",
  "base64 0.22.1",
  "blake3",
