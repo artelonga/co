@@ -1,4 +1,5 @@
 // CO-41: quilomboaraucaria universe — seed, stats endpoint, idempotent import
+// CO-167: email collection for quilombo users
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -292,4 +293,244 @@ fn test_quilombo_preset_has_all_required_tokens() {
             "quilombo preset missing required token '{token}'"
         );
     }
+}
+
+// --- CO-167: email collection ---
+
+/// Login response includes missing_email: true for new user with no email.
+#[tokio::test]
+async fn test_login_missing_email_flag_true() {
+    let dir = tempdir().unwrap();
+    let app = build_quilombo_app(dir.path());
+
+    let body = serde_json::json!({
+        "usuario": "testuser_email",
+        "nome": "Test User",
+        "senha": "senha123456"
+    })
+    .to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/cadastro")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let token = json["token"].as_str().unwrap().to_string();
+
+    // Login → missing_email: true
+    let login_body =
+        serde_json::json!({"usuario": "testuser_email", "senha": "senha123456"}).to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/login")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(login_body))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        json["missing_email"], true,
+        "new user should have missing_email: true"
+    );
+}
+
+/// Setting an email via PUT /perfil works and login then shows missing_email: false.
+#[tokio::test]
+async fn test_set_email_works() {
+    let dir = tempdir().unwrap();
+    let app = build_quilombo_app(dir.path());
+
+    // Register
+    let body = serde_json::json!({
+        "usuario": "emailuser",
+        "nome": "Email User",
+        "senha": "senha123456"
+    })
+    .to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/cadastro")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let token = json["token"].as_str().unwrap().to_string();
+
+    // Set email via PUT /perfil
+    let perfil_body = serde_json::json!({"email": "emailuser@example.com"}).to_string();
+    let req = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/quilombo/perfil")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::from(perfil_body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let perfil: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(perfil["email"], "emailuser@example.com");
+
+    // Login again → missing_email: false
+    let login_body =
+        serde_json::json!({"usuario": "emailuser", "senha": "senha123456"}).to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/login")
+        .header("content-type", "application/json")
+        .body(Body::from(login_body))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        json["missing_email"], false,
+        "user with email should have missing_email: false"
+    );
+}
+
+/// Duplicate email returns 409 Conflict.
+#[tokio::test]
+async fn test_duplicate_email_returns_409() {
+    let dir = tempdir().unwrap();
+    let app = build_quilombo_app(dir.path());
+
+    // Register two users
+    for usuario in &["dupuser1", "dupuser2"] {
+        let body = serde_json::json!({
+            "usuario": usuario,
+            "nome": "Dup User",
+            "senha": "senha123456"
+        })
+        .to_string();
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/v1/quilombo/auth/cadastro")
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap();
+    }
+
+    // Get token for user1
+    let login1 = serde_json::json!({"usuario": "dupuser1", "senha": "senha123456"}).to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/login")
+        .header("content-type", "application/json")
+        .body(Body::from(login1))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let token1 = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Get token for user2
+    let login2 = serde_json::json!({"usuario": "dupuser2", "senha": "senha123456"}).to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/login")
+        .header("content-type", "application/json")
+        .body(Body::from(login2))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let token2 = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let shared_email = "shared@example.com";
+
+    // user1 sets email
+    let body = serde_json::json!({"email": shared_email}).to_string();
+    let req = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/quilombo/perfil")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token1}"))
+        .body(Body::from(body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // user2 tries the same email → 409
+    let body = serde_json::json!({"email": shared_email}).to_string();
+    let req = Request::builder()
+        .method("PUT")
+        .uri("/api/v1/quilombo/perfil")
+        .header("content-type", "application/json")
+        .header("authorization", format!("Bearer {token2}"))
+        .body(Body::from(body))
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+}
+
+/// Admin resumo includes com_email and vinculados_co counts.
+#[tokio::test]
+async fn test_admin_resumo_includes_email_stats() {
+    let dir = tempdir().unwrap();
+    let app = build_quilombo_app(dir.path());
+
+    // Register an admin and get token
+    let body = serde_json::json!({
+        "usuario": "admin_stats",
+        "nome": "Admin Stats",
+        "senha": "senha123456"
+    })
+    .to_string();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/quilombo/auth/cadastro")
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .unwrap();
+    let resp = app.clone().oneshot(req).await.unwrap();
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let token = json["token"].as_str().unwrap().to_string();
+
+    // Promote to admin directly via storage
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let user_id = json["usuario"]["id"].as_str().unwrap().to_string();
+    storage
+        .conn()
+        .execute(
+            "UPDATE quilombo_usuarios SET papel = 'admin' WHERE id = ?1",
+            rusqlite::params![user_id],
+        )
+        .unwrap();
+
+    // Hit admin resumo
+    let req = Request::builder()
+        .uri("/api/v1/quilombo/admin/resumo")
+        .header("authorization", format!("Bearer {token}"))
+        .body(Body::empty())
+        .unwrap();
+    let resp = app.oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let stats: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert!(
+        stats.get("com_email").is_some(),
+        "resumo should include com_email"
+    );
+    assert!(
+        stats.get("vinculados_co").is_some(),
+        "resumo should include vinculados_co"
+    );
+    assert_eq!(stats["com_email"], 0);
+    assert_eq!(stats["vinculados_co"], 0);
 }

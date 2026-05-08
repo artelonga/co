@@ -1163,9 +1163,6 @@ impl Storage {
 
         if current_version < 32 {
             // CO-166 (1.76.0): OIDC OAuth2 server tables.
-            // oauth_clients — registered OIDC relying-party applications.
-            // oauth_auth_codes — short-lived authorization codes (PKCE).
-            // oauth_access_tokens — long-lived access tokens for /userinfo.
             self.conn
                 .execute_batch(
                     "
@@ -1178,7 +1175,6 @@ impl Storage {
                         scopes TEXT NOT NULL,
                         created_at TEXT NOT NULL
                     );
-
                     CREATE TABLE IF NOT EXISTS oauth_auth_codes (
                         code TEXT PRIMARY KEY,
                         client_id TEXT NOT NULL,
@@ -1190,7 +1186,6 @@ impl Storage {
                         expires_at TEXT NOT NULL,
                         created_at TEXT NOT NULL
                     );
-
                     CREATE TABLE IF NOT EXISTS oauth_access_tokens (
                         token TEXT PRIMARY KEY,
                         client_id TEXT NOT NULL,
@@ -1199,7 +1194,6 @@ impl Storage {
                         expires_at TEXT NOT NULL,
                         created_at TEXT NOT NULL
                     );
-
                     INSERT INTO schema_version (version) VALUES (32);
                     ",
                 )
@@ -1208,13 +1202,28 @@ impl Storage {
 
         if current_version < 33 {
             // CO-166 (1.76.0): link quilombo accounts to CO main accounts.
-            // linked_co_user_id is NULL until the user calls
-            // POST /api/v1/quilombo/auth/link-co-account.
             ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
                 .expect("migration v33: quilombo_usuarios.linked_co_user_id column");
             self.conn
                 .execute("INSERT INTO schema_version (version) VALUES (33)", [])
                 .expect("Failed to record migration v33");
+        }
+
+        if current_version < 34 {
+            // CO-167 (1.79.0): email for quilombo users — bridge to CO unified auth.
+            // email is nullable and unique (WHERE email IS NOT NULL).
+            // ensure_column is idempotent — safe even if linked_co_user_id already exists.
+            ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
+                .expect("migration v34: quilombo_usuarios.email");
+            ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
+                .expect("migration v34: quilombo_usuarios.linked_co_user_id");
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_quilombo_usuarios_email
+                         ON quilombo_usuarios(email) WHERE email IS NOT NULL;
+                     INSERT INTO schema_version (version) VALUES (34);",
+                )
+                .expect("Failed to run migration v34");
         }
 
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for

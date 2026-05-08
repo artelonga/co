@@ -13,6 +13,10 @@ pub struct Usuario {
     pub bio: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub foto_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub linked_co_user_id: Option<String>,
     pub criado_em: DateTime<Utc>,
     pub atualizado_em: DateTime<Utc>,
 }
@@ -77,6 +81,7 @@ pub struct LoginUsuario {
 pub struct LoginResponse {
     pub token: String,
     pub usuario: UsuarioResumo,
+    pub missing_email: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,6 +97,7 @@ pub struct AtualizarPerfil {
     pub nome: Option<String>,
     pub bio: Option<String>,
     pub foto_url: Option<String>,
+    pub email: Option<String>,
 }
 
 // --- Evento ---
