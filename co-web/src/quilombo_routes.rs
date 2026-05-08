@@ -12,6 +12,8 @@ use crate::quilombo_storage;
 use crate::server::AppState;
 use crate::storage::Storage;
 
+use rusqlite;
+
 fn lock_storage(state: &AppState) -> Result<std::sync::MutexGuard<'_, Storage>, AppError> {
     state
         .storage
@@ -97,6 +99,8 @@ pub fn router() -> Router<AppState> {
         )
         // Admin
         .route("/admin/atividades", get(listar_atividades_handler))
+        // CO-166: link quilombo account to a CO user account
+        .route("/auth/link-co-account", post(link_co_account_handler))
         .layer(middleware::from_fn(auth::require_auth));
 
     Router::new().merge(public).merge(authenticated)
@@ -108,6 +112,17 @@ async fn login_handler(
     State(state): State<AppState>,
     Json(body): Json<LoginUsuario>,
 ) -> Result<Response, AppError> {
+    // CO-166: legacy login deprecation path.
+    if !state.config.quilombo_legacy_login {
+        return Ok((
+            axum::http::StatusCode::GONE,
+            axum::Json(serde_json::json!({
+                "error": "gone",
+                "message": "Quilombo legacy login is disabled. Use CO SSO instead."
+            })),
+        )
+            .into_response());
+    }
     let usuario = body.usuario.trim().to_lowercase();
     if usuario.is_empty() {
         return Err(AppError::BadRequest("Username is required".into()));
@@ -151,7 +166,7 @@ async fn login_handler(
     )?;
 
     let cookie =
-        format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
+        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
     let response_body = LoginResponse {
         token: token.clone(),
@@ -249,7 +264,7 @@ async fn cadastro_handler(
     )?;
 
     let cookie =
-        format!("session={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=604800");
+        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
     quilombo_storage::registrar_atividade(
         storage.conn(),
@@ -977,4 +992,49 @@ async fn admin_atualizar_usuario_handler(
         quilombo_storage::atualizar_papel(storage.conn(), &target_id, &papel)
             .map_err(AppError::NotFound)?,
     ))
+}
+
+// ---------------------------------------------------------------------------
+// CO-166: POST /api/v1/quilombo/auth/link-co-account
+// ---------------------------------------------------------------------------
+// Links the authenticated quilombo user to a CO main-account user ID.
+// The caller must be logged in (quilombo JWT, via require_auth middleware).
+// Body: { "co_user_id": "<ID>" }
+//
+// The link is stored in `quilombo_usuarios.linked_co_user_id` (migration v33).
+
+#[derive(serde::Deserialize)]
+struct LinkCoAccountBody {
+    co_user_id: String,
+}
+
+async fn link_co_account_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+    Json(body): Json<LinkCoAccountBody>,
+) -> Result<axum::Json<serde_json::Value>, AppError> {
+    if body.co_user_id.trim().is_empty() {
+        return Err(AppError::BadRequest("co_user_id is required".into()));
+    }
+
+    let storage = lock_storage(&state)?;
+
+    // Verify the quilombo user exists.
+    quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0)
+        .ok_or_else(|| AppError::NotFound("Quilombo user not found".into()))?;
+
+    // Write the link.
+    storage
+        .conn()
+        .execute(
+            "UPDATE quilombo_usuarios SET linked_co_user_id = ?1 WHERE id = ?2",
+            rusqlite::params![body.co_user_id.trim(), user_id.0],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(axum::Json(serde_json::json!({
+        "linked": true,
+        "quilombo_user_id": user_id.0,
+        "co_user_id": body.co_user_id.trim(),
+    })))
 }

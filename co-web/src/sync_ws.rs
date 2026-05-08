@@ -629,6 +629,8 @@ mod tests {
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
         }
     }
 
@@ -656,6 +658,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
 
         let app = build_router(state, None);
@@ -802,6 +805,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
         let app = build_router(state.clone(), None);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

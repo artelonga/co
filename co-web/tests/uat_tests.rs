@@ -50,6 +50,8 @@ fn test_config(dir: &std::path::Path, is_uat: bool) -> WebConfig {
         co_env: if is_uat { "uat".into() } else { "prod".into() },
         wae_endpoint: None,
         wae_api_key: None,
+        cookie_domain: None,
+        quilombo_legacy_login: true,
     }
 }
 
@@ -74,6 +76,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
     });
     build_router(state, None)
 }
@@ -332,6 +335,8 @@ fn test_is_uat_config() {
         co_env: "uat".into(),
         wae_endpoint: None,
         wae_api_key: None,
+        cookie_domain: None,
+        quilombo_legacy_login: true,
     };
     assert!(uat_config.is_uat());
 

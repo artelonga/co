@@ -1513,6 +1513,8 @@ mod tests {
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
         }
     }
 
@@ -1550,6 +1552,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: std::sync::Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
         build_router(state, None)
     }

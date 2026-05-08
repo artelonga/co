@@ -553,8 +553,11 @@ pub async fn clone_universe(
         let secret =
             std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".to_string());
         if let Ok((token, _)) = crate::auth::sign_jwt(&anon_id, "", "anon", &secret) {
-            let cookie =
-                format!("session={token}; Path=/; SameSite=Lax; HttpOnly; Max-Age=2592000");
+            let cookie = crate::auth::build_session_cookie(
+                &token,
+                state.config.cookie_domain.as_deref(),
+                2592000,
+            );
             if let Ok(val) = axum::http::HeaderValue::from_str(&cookie) {
                 response_headers.append(header::SET_COOKIE, val);
             }
@@ -2155,6 +2158,8 @@ mod tests {
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
         };
         let experiment = ExperimentStore::new(dir);
         let auth_store = crate::auth::AuthStore::new(dir).unwrap();
@@ -2175,6 +2180,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
         let router = build_router(state, None);
         let tmp = tempdir().unwrap(); // keep alive
