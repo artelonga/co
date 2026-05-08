@@ -1211,8 +1211,6 @@ impl Storage {
 
         if current_version < 34 {
             // CO-167 (1.79.0): email for quilombo users — bridge to CO unified auth.
-            // email is nullable and unique (WHERE email IS NOT NULL).
-            // ensure_column is idempotent — safe even if linked_co_user_id already exists.
             ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
                 .expect("migration v34: quilombo_usuarios.email");
             ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
@@ -1224,6 +1222,40 @@ impl Storage {
                      INSERT INTO schema_version (version) VALUES (34);",
                 )
                 .expect("Failed to run migration v34");
+        }
+
+        if current_version < 35 {
+            // CO-168 (1.80.0): outbound webhook system + notification queue.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS webhooks (
+                        id         TEXT PRIMARY KEY,
+                        url        TEXT NOT NULL,
+                        secret     TEXT NOT NULL,
+                        events     TEXT NOT NULL,
+                        enabled    INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL
+                    );
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        id              TEXT PRIMARY KEY,
+                        webhook_id      TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+                        event_type      TEXT NOT NULL,
+                        payload         TEXT NOT NULL,
+                        status          TEXT NOT NULL DEFAULT 'pending',
+                        attempts        INTEGER NOT NULL DEFAULT 0,
+                        next_attempt_at TEXT NOT NULL,
+                        sent_at         TEXT,
+                        error           TEXT,
+                        created_at      TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_notifications_pending
+                        ON notifications(status, next_attempt_at)
+                        WHERE status IN ('pending', 'failed');
+                    INSERT INTO schema_version (version) VALUES (35);
+                    ",
+                )
+                .expect("Failed to run migration v35");
         }
 
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for

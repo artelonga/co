@@ -873,12 +873,12 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 34); // v32 OIDC, v33 quilombo link, v34 quilombo email
+    assert_eq!(storage.schema_version(), 35); // v32 OIDC, v33 quilombo link, v34 quilombo email
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 34);
+    assert_eq!(storage2.schema_version(), 35);
 }
 
 /// 1.70.0 (Phase 8 step 1): blob storage round-trip — same bytes hash to

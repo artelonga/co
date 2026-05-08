@@ -316,6 +316,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     // --- A/B flag admin routes (CO-121) ---
     let ab_admin = crate::ab_routes::admin_router()
+        .layer(axum::Extension(github_token_cache.clone()))
+        .layer(axum::Extension(allowed_admins.clone()));
+
+    // CO-168: outbound webhook admin routes
+    let webhook_admin = crate::webhook_routes::router()
         .layer(axum::Extension(github_token_cache))
         .layer(axum::Extension(allowed_admins));
 
@@ -459,6 +464,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::quilombo_telemetria::canonical_host_middleware,
         ))
         .nest("/api/v1/gestao", gestao_api)
+        // CO-168: outbound webhook admin endpoints (admin-only, same auth as gestao)
+        .nest("/api/v1/gestao", webhook_admin)
         // CO-142 (Phase A): dev board moved to /api/v1/admin to un-shadow the public universe_api.
         .nest("/api/v1/admin", dev_board_api)
         .nest("/api/v1/universes", universe_api)
@@ -1006,6 +1013,8 @@ pub async fn start_server(config: WebConfig) {
     // CO-164: spawn embedding background worker + run boot scan for stale embeddings.
     crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
     crate::embedding_worker::boot_scan(Arc::clone(&state));
+    // CO-168: spawn outbound webhook delivery worker.
+    crate::webhook_worker::spawn_worker(Arc::clone(&state));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.

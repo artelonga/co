@@ -11,6 +11,7 @@ use crate::quilombo_permissoes::tem_permissao;
 use crate::quilombo_storage;
 use crate::server::AppState;
 use crate::storage::Storage;
+use crate::webhook;
 
 use rusqlite;
 
@@ -526,6 +527,17 @@ async fn criar_evento_handler(
         None,
     );
 
+    let _ = webhook::emit_event(
+        storage.conn(),
+        "quilombo.evento.criado",
+        &serde_json::json!({
+            "id": evento.id,
+            "titulo": evento.titulo,
+            "data": evento.data,
+            "criado_por": user.id,
+        }),
+    );
+
     Ok((StatusCode::CREATED, Json(evento)))
 }
 
@@ -634,6 +646,15 @@ async fn participar_missao_handler(
 
     let participacao = quilombo_storage::participar_missao(storage.conn(), id, &user_id.0)
         .map_err(AppError::Conflict)?;
+
+    let _ = webhook::emit_event(
+        storage.conn(),
+        "quilombo.missao.participou",
+        &serde_json::json!({
+            "missao_id": id,
+            "usuario_id": user_id.0,
+        }),
+    );
 
     Ok((StatusCode::CREATED, Json(participacao)))
 }
@@ -807,6 +828,17 @@ async fn criar_mensagem_handler(
     let storage = lock_storage(&state)?;
     let msg = quilombo_storage::criar_mensagem(storage.conn(), &body, Some(&user_id.0))
         .map_err(AppError::BadRequest)?;
+
+    let _ = webhook::emit_event(
+        storage.conn(),
+        "quilombo.mensagem.criada",
+        &serde_json::json!({
+            "id": msg.id,
+            "remetente_id": msg.remetente_id,
+            "destinatario_id": msg.destinatario_id,
+            "assunto": msg.assunto,
+        }),
+    );
 
     Ok((StatusCode::CREATED, Json(msg)))
 }

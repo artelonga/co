@@ -57,4 +57,7 @@ pub mod universe_routes;
 pub mod universo;
 pub mod vault_routes;
 pub mod wae;
+pub mod webhook;
+pub mod webhook_routes;
+pub mod webhook_worker;
 pub mod ws;
