@@ -1161,22 +1161,22 @@ impl Storage {
                 .expect("Failed to run migration v31");
         }
 
-        if current_version < 32 {
+        if current_version < 34 {
             // CO-167: email + linked_co_user_id on quilombo_usuarios.
             // email is nullable and unique (WHERE email IS NOT NULL) to allow
             // multiple users without email without violating the constraint.
             // linked_co_user_id enables OIDC account linking (CO-166).
             ensure_column(&self.conn, "quilombo_usuarios", "email", "TEXT")
-                .expect("migration v32: quilombo_usuarios.email");
+                .expect("migration v34: quilombo_usuarios.email");
             ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
-                .expect("migration v32: quilombo_usuarios.linked_co_user_id");
+                .expect("migration v34: quilombo_usuarios.linked_co_user_id");
             self.conn
                 .execute_batch(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_quilombo_usuarios_email
                          ON quilombo_usuarios(email) WHERE email IS NOT NULL;
-                     INSERT INTO schema_version (version) VALUES (32);",
+                     INSERT INTO schema_version (version) VALUES (34);",
                 )
-                .expect("Failed to run migration v32");
+                .expect("Failed to run migration v34");
         }
 
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
