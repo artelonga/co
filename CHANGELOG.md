@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.76.0] — 2026-05-08
+
+### Added — Outbound webhook system + notification queue (CO-168)
+
+CO now emits signed HTTP POST events to registered endpoints, enabling n8n/Zapier/custom-adapter integration without new Rust deployments:
+
+- **Migration v32**: `webhooks` + `notifications` tables in meta.db; partial-index on `(status, next_attempt_at)` for efficient polling.
+- **Admin API** (GitHub auth, `/api/v1/gestao/webhooks`): register (secret returned once), list (secret redacted), update url/events/enabled, delete (cascades notifications), delivery log (last 100 rows).
+- **`emit_event(conn, event_type, payload)`**: synchronous write to `notifications` for each enabled webhook whose event filter matches — called from request handlers after the triggering action succeeds.
+- **Webhook worker**: background task started at boot, polls every 5 s, delivers one notification per tick via `reqwest` with `HMAC-SHA256` signature (`X-CO-Signature-256: sha256=<hex>`) matching GitHub's scheme.
+- **Retry policy**: up to 3 retries with 5 s / 30 s / 2 min backoff; 4th failure marks `dead`.
+- **Wildcard event matching**: `*` (all), `quilombo.*` (namespace), or exact event type.
+- **3 quilombo events wired**: `quilombo.evento.criado`, `quilombo.missao.participou`, `quilombo.mensagem.criada`.
+- **`docs/webhooks.md`**: event catalogue, admin API reference, n8n/Zapier setup guide with HMAC validation example.
+
 ## [1.75.0] — 2026-05-06
 
 ### Added — Blob CAS API: GET/HEAD/POST `/api/v1/blobs`

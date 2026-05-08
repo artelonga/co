@@ -1161,6 +1161,45 @@ impl Storage {
                 .expect("Failed to run migration v31");
         }
 
+        if current_version < 32 {
+            // CO-168: outbound webhook system + notification queue.
+            // webhooks — admin-registered HTTP endpoints that receive signed
+            // POST events. notifications — the outbound delivery queue drained
+            // by the webhook_worker every 5 s with exponential-backoff retries.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS webhooks (
+                        id         TEXT PRIMARY KEY,
+                        url        TEXT NOT NULL,
+                        secret     TEXT NOT NULL,
+                        events     TEXT NOT NULL,
+                        enabled    INTEGER NOT NULL DEFAULT 1,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS notifications (
+                        id              TEXT PRIMARY KEY,
+                        webhook_id      TEXT NOT NULL REFERENCES webhooks(id) ON DELETE CASCADE,
+                        event_type      TEXT NOT NULL,
+                        payload         TEXT NOT NULL,
+                        status          TEXT NOT NULL DEFAULT 'pending',
+                        attempts        INTEGER NOT NULL DEFAULT 0,
+                        next_attempt_at TEXT NOT NULL,
+                        sent_at         TEXT,
+                        error           TEXT,
+                        created_at      TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_notifications_pending
+                        ON notifications(status, next_attempt_at)
+                        WHERE status IN ('pending', 'failed');
+
+                    INSERT INTO schema_version (version) VALUES (32);
+                    ",
+                )
+                .expect("Failed to run migration v32");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.
