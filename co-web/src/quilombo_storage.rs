@@ -235,7 +235,7 @@ pub fn criar_usuario(
 
 pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
     conn.query_row(
-        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em FROM quilombo_usuarios WHERE id = ?1",
+        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em, telefone FROM quilombo_usuarios WHERE id = ?1",
         params![id],
         |row| {
             Ok(Usuario {
@@ -247,6 +247,7 @@ pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
                 foto_url: row.get(5)?,
                 email: row.get(6)?,
                 linked_co_user_id: row.get(7)?,
+                telefone: row.get(10)?,
                 criado_em: parse_datetime(&row.get::<_, String>(8)?),
                 atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
             })
@@ -257,7 +258,7 @@ pub fn obter_usuario_por_id(conn: &Connection, id: &str) -> Option<Usuario> {
 
 pub fn obter_usuario_por_nome(conn: &Connection, usuario: &str) -> Option<(Usuario, String)> {
     conn.query_row(
-        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em, senha_hash FROM quilombo_usuarios WHERE usuario = ?1",
+        "SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em, senha_hash, telefone FROM quilombo_usuarios WHERE usuario = ?1",
         params![usuario],
         |row| {
             Ok((
@@ -270,6 +271,7 @@ pub fn obter_usuario_por_nome(conn: &Connection, usuario: &str) -> Option<(Usuar
                     foto_url: row.get(5)?,
                     email: row.get(6)?,
                     linked_co_user_id: row.get(7)?,
+                    telefone: row.get(11)?,
                     criado_em: parse_datetime(&row.get::<_, String>(8)?),
                     atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
                 },
@@ -1031,7 +1033,7 @@ pub fn listar_comentarios_usuario(conn: &Connection, usuario_id: &str) -> Vec<Co
 
 pub fn listar_usuarios(conn: &Connection) -> Vec<Usuario> {
     let mut stmt = conn
-        .prepare("SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em FROM quilombo_usuarios ORDER BY criado_em")
+        .prepare("SELECT id, usuario, nome, papel, bio, foto_url, email, linked_co_user_id, criado_em, atualizado_em, telefone FROM quilombo_usuarios ORDER BY criado_em")
         .expect("Failed to prepare listar_usuarios");
 
     stmt.query_map([], |row| {
@@ -1044,6 +1046,7 @@ pub fn listar_usuarios(conn: &Connection) -> Vec<Usuario> {
             foto_url: row.get(5)?,
             email: row.get(6)?,
             linked_co_user_id: row.get(7)?,
+            telefone: row.get(10)?,
             criado_em: parse_datetime(&row.get::<_, String>(8)?),
             atualizado_em: parse_datetime(&row.get::<_, String>(9)?),
         })

@@ -1258,6 +1258,29 @@ impl Storage {
                 .expect("Failed to run migration v35");
         }
 
+        if current_version < 36 {
+            // CO-169 (1.81.0): direct notification provider adapters.
+            // 1. Add telefone column to quilombo_usuarios.
+            // 2. Add channel + recipient columns to notifications.
+            // 3. Insert sentinel webhook row for direct-channel notifications
+            //    (satisfies FK constraint on notifications.webhook_id).
+            ensure_column(&self.conn, "quilombo_usuarios", "telefone", "TEXT")
+                .expect("migration v36: quilombo_usuarios.telefone");
+            ensure_column(&self.conn, "notifications", "channel", "TEXT")
+                .expect("migration v36: notifications.channel");
+            ensure_column(&self.conn, "notifications", "recipient", "TEXT")
+                .expect("migration v36: notifications.recipient");
+            self.conn
+                .execute_batch(
+                    "
+                    INSERT OR IGNORE INTO webhooks (id, url, secret, events, enabled, created_at)
+                        VALUES ('__direct__', 'direct://', '__direct__', '[]', 0, datetime('now'));
+                    INSERT INTO schema_version (version) VALUES (36);
+                    ",
+                )
+                .expect("Failed to run migration v36");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.

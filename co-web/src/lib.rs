@@ -27,6 +27,7 @@ pub mod index_manager;
 pub mod job_queue;
 pub mod log_drain_routes;
 pub mod models;
+pub mod notification_providers;
 pub mod obsidian_tasks;
 pub mod oidc_routes;
 pub mod plugin_loader;

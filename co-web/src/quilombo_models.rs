@@ -17,6 +17,8 @@ pub struct Usuario {
     pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub linked_co_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub telefone: Option<String>,
     pub criado_em: DateTime<Utc>,
     pub atualizado_em: DateTime<Utc>,
 }

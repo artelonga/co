@@ -20,6 +20,9 @@ use sha2::Sha256;
 use uuid::Uuid;
 
 use crate::error::AppError;
+use crate::notification_providers::{
+    EvolutionApiProvider, ResendProvider, encode_email_payload, get_template, render_template,
+};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -48,6 +51,10 @@ pub struct Notification {
     pub sent_at: Option<String>,
     pub error: Option<String>,
     pub created_at: String,
+    /// `'email'` | `'whatsapp'` | `None` for legacy webhook rows
+    pub channel: Option<String>,
+    /// Channel-specific recipient address (email address or phone number)
+    pub recipient: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -86,7 +93,10 @@ pub fn create_webhook(
 /// List all webhooks with secret redacted.
 pub fn list_webhooks(conn: &Connection) -> Result<Vec<Webhook>, AppError> {
     let mut stmt = conn
-        .prepare("SELECT id, url, events, enabled, created_at FROM webhooks ORDER BY created_at")
+        .prepare(
+            "SELECT id, url, events, enabled, created_at FROM webhooks
+             WHERE id != '__direct__' ORDER BY created_at",
+        )
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     let rows = stmt
@@ -200,7 +210,7 @@ pub fn list_deliveries(conn: &Connection, webhook_id: &str) -> Result<Vec<Notifi
     let mut stmt = conn
         .prepare(
             "SELECT id, webhook_id, event_type, payload, status, attempts,
-                    next_attempt_at, sent_at, error, created_at
+                    next_attempt_at, sent_at, error, created_at, channel, recipient
              FROM notifications
              WHERE webhook_id = ?1
              ORDER BY created_at DESC
@@ -231,7 +241,67 @@ fn notification_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notificati
         sent_at: row.get(7)?,
         error: row.get(8)?,
         created_at: row.get(9)?,
+        channel: row.get(10)?,
+        recipient: row.get(11)?,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Direct channel enqueue helpers
+// ---------------------------------------------------------------------------
+
+fn enqueue_email_if_configured(
+    conn: &Connection,
+    event_type: &str,
+    payload: &serde_json::Value,
+    recipient: &str,
+    now: &str,
+) -> Result<(), AppError> {
+    if ResendProvider::from_env().is_none() {
+        return Ok(());
+    }
+    let subject_tpl = get_template(event_type, "EMAIL_SUBJECT");
+    let body_tpl = get_template(event_type, "EMAIL_BODY");
+    if let (Some(subject_tpl), Some(body_tpl)) = (subject_tpl, body_tpl) {
+        let subject = render_template(&subject_tpl, payload);
+        let body = render_template(&body_tpl, payload);
+        let channel_payload = encode_email_payload(&subject, &body);
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO notifications
+                (id, webhook_id, event_type, payload, status, attempts,
+                 next_attempt_at, created_at, channel, recipient)
+             VALUES (?1, '__direct__', ?2, ?3, 'pending', 0, ?4, ?4, 'email', ?5)",
+            params![id, event_type, channel_payload, now, recipient],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+    Ok(())
+}
+
+fn enqueue_whatsapp_if_configured(
+    conn: &Connection,
+    event_type: &str,
+    payload: &serde_json::Value,
+    recipient: &str,
+    now: &str,
+) -> Result<(), AppError> {
+    if EvolutionApiProvider::from_env().is_none() {
+        return Ok(());
+    }
+    if let Some(tpl) = get_template(event_type, "WHATSAPP") {
+        let message = render_template(&tpl, payload);
+        let id = Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO notifications
+                (id, webhook_id, event_type, payload, status, attempts,
+                 next_attempt_at, created_at, channel, recipient)
+             VALUES (?1, '__direct__', ?2, ?3, 'pending', 0, ?4, ?4, 'whatsapp', ?5)",
+            params![id, event_type, message, now, recipient],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -239,51 +309,64 @@ fn notification_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Notificati
 // ---------------------------------------------------------------------------
 
 /// Write a notification row for each enabled webhook whose event filter matches
-/// `event_type`. Called from request handlers after the triggering action succeeds.
+/// `event_type`. When direct provider env vars are set and a recipient is
+/// available, also enqueue channel-specific rows (email / whatsapp).
+///
+/// Called from request handlers after the triggering action succeeds.
 pub fn emit_event(
     conn: &Connection,
     event_type: &str,
     payload: &serde_json::Value,
+    email: Option<&str>,
+    telefone: Option<&str>,
 ) -> Result<(), AppError> {
-    // Load all enabled webhooks once.
-    let mut stmt = conn
-        .prepare("SELECT id, events FROM webhooks WHERE enabled = 1")
-        .map_err(|e| AppError::Internal(e.to_string()))?;
-
-    let matching_ids: Vec<String> = stmt
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .map_err(|e| AppError::Internal(e.to_string()))?
-        .filter_map(|r| r.ok())
-        .filter_map(|(id, events_json)| {
-            let patterns: Vec<String> = serde_json::from_str(&events_json).ok()?;
-            if patterns.iter().any(|p| event_matches(p, event_type)) {
-                Some(id)
-            } else {
-                None
-            }
-        })
-        .collect();
-
-    if matching_ids.is_empty() {
-        return Ok(());
-    }
-
     let payload_str =
         serde_json::to_string(payload).map_err(|e| AppError::Internal(e.to_string()))?;
     let now = Utc::now().to_rfc3339();
 
-    for webhook_id in matching_ids {
-        let id = Uuid::new_v4().to_string();
-        conn.execute(
-            "INSERT INTO notifications
-                (id, webhook_id, event_type, payload, status, attempts,
-                 next_attempt_at, created_at)
-             VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?5)",
-            params![id, webhook_id, event_type, payload_str, now],
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // --- Outbound webhooks ---
+    {
+        let mut stmt = conn
+            .prepare("SELECT id, events FROM webhooks WHERE enabled = 1 AND id != '__direct__'")
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let matching_ids: Vec<String> = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })
+            .map_err(|e| AppError::Internal(e.to_string()))?
+            .filter_map(|r| r.ok())
+            .filter_map(|(id, events_json)| {
+                let patterns: Vec<String> = serde_json::from_str(&events_json).ok()?;
+                if patterns.iter().any(|p| event_matches(p, event_type)) {
+                    Some(id)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for webhook_id in matching_ids {
+            let id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO notifications
+                    (id, webhook_id, event_type, payload, status, attempts,
+                     next_attempt_at, created_at)
+                 VALUES (?1, ?2, ?3, ?4, 'pending', 0, ?5, ?5)",
+                params![id, webhook_id, event_type, payload_str, now],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+    }
+
+    // --- Direct email channel ---
+    if let Some(recipient) = email {
+        enqueue_email_if_configured(conn, event_type, payload, recipient, &now)?;
+    }
+
+    // --- Direct WhatsApp channel ---
+    if let Some(recipient) = telefone {
+        enqueue_whatsapp_if_configured(conn, event_type, payload, recipient, &now)?;
     }
 
     Ok(())
@@ -316,7 +399,7 @@ pub fn claim_next_notification(conn: &Connection) -> Option<Notification> {
              LIMIT 1
          )
          RETURNING id, webhook_id, event_type, payload, status, attempts,
-                   next_attempt_at, sent_at, error, created_at",
+                   next_attempt_at, sent_at, error, created_at, channel, recipient",
         params![now],
         notification_from_row,
     )
@@ -492,6 +575,8 @@ mod tests {
             storage.conn(),
             "quilombo.evento.criado",
             &serde_json::json!({"id": 1}),
+            None,
+            None,
         )
         .unwrap();
 
@@ -521,6 +606,8 @@ mod tests {
             storage.conn(),
             "quilombo.evento.criado",
             &serde_json::json!({"id": 42}),
+            None,
+            None,
         )
         .unwrap();
 
@@ -549,6 +636,8 @@ mod tests {
             storage.conn(),
             "quilombo.evento.criado",
             &serde_json::json!({}),
+            None,
+            None,
         )
         .unwrap();
 
@@ -571,7 +660,14 @@ mod tests {
 
         update_webhook(storage.conn(), &wh.id, None, None, Some(false)).unwrap();
 
-        emit_event(storage.conn(), "co.entry.criado", &serde_json::json!({})).unwrap();
+        emit_event(
+            storage.conn(),
+            "co.entry.criado",
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .unwrap();
 
         let count: i64 = storage
             .conn()
@@ -591,7 +687,14 @@ mod tests {
             &["*".to_string()],
         )
         .unwrap();
-        emit_event(storage.conn(), "test.event", &serde_json::json!({})).unwrap();
+        emit_event(
+            storage.conn(),
+            "test.event",
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .unwrap();
 
         let n = claim_next_notification(storage.conn()).unwrap();
         assert_eq!(n.status, "sending");
@@ -619,7 +722,14 @@ mod tests {
             &["*".to_string()],
         )
         .unwrap();
-        emit_event(storage.conn(), "test.event", &serde_json::json!({})).unwrap();
+        emit_event(
+            storage.conn(),
+            "test.event",
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .unwrap();
 
         let n = claim_next_notification(storage.conn()).unwrap();
         mark_notification_failed(storage.conn(), &n.id, MAX_ATTEMPTS, "final error");
@@ -644,7 +754,14 @@ mod tests {
             &["*".to_string()],
         )
         .unwrap();
-        emit_event(storage.conn(), "test.event", &serde_json::json!({})).unwrap();
+        emit_event(
+            storage.conn(),
+            "test.event",
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .unwrap();
 
         let first = claim_next_notification(storage.conn());
         let second = claim_next_notification(storage.conn());
@@ -664,7 +781,14 @@ mod tests {
             &["*".to_string()],
         )
         .unwrap();
-        emit_event(storage.conn(), "test.event", &serde_json::json!({})).unwrap();
+        emit_event(
+            storage.conn(),
+            "test.event",
+            &serde_json::json!({}),
+            None,
+            None,
+        )
+        .unwrap();
         let n = claim_next_notification(storage.conn()).unwrap();
 
         mark_notification_sent(storage.conn(), &n.id);
@@ -679,5 +803,153 @@ mod tests {
             .unwrap();
         assert_eq!(status, "sent");
         assert!(sent_at.is_some());
+    }
+
+    // --- direct channel enqueuing ---
+
+    /// Mutex to serialize env-var-dependent tests so concurrent test threads
+    /// cannot interfere with each other's RESEND_API_KEY / EVOLUTION_* vars.
+    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        key: String,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: test-only, guarded by ENV_MUTEX
+            unsafe { std::env::set_var(key, value) };
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+
+        fn remove(key: &str) -> Self {
+            let original = std::env::var(key).ok();
+            // SAFETY: test-only, guarded by ENV_MUTEX
+            unsafe { std::env::remove_var(key) };
+            Self {
+                key: key.to_string(),
+                original,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => unsafe { std::env::set_var(&self.key, v) },
+                None => unsafe { std::env::remove_var(&self.key) },
+            }
+        }
+    }
+
+    #[test]
+    fn emit_event_enqueues_email_when_resend_configured() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::set("RESEND_API_KEY", "test-key");
+        let (storage, _tmp) = make_storage();
+
+        emit_event(
+            storage.conn(),
+            "quilombo.evento.criado",
+            &serde_json::json!({"titulo": "Festa", "nome": "Yuri"}),
+            Some("yuri@example.com"),
+            None,
+        )
+        .unwrap();
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE channel = 'email'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "one email notification should be enqueued");
+    }
+
+    #[test]
+    fn emit_event_no_email_when_resend_key_absent() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::remove("RESEND_API_KEY");
+        let (storage, _tmp) = make_storage();
+
+        emit_event(
+            storage.conn(),
+            "quilombo.evento.criado",
+            &serde_json::json!({"titulo": "Festa"}),
+            Some("yuri@example.com"),
+            None,
+        )
+        .unwrap();
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE channel = 'email'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "no email rows without RESEND_API_KEY");
+    }
+
+    #[test]
+    fn emit_event_enqueues_whatsapp_when_evolution_configured() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard_key = EnvGuard::set("EVOLUTION_API_KEY", "test-key");
+        let _guard_url = EnvGuard::set("EVOLUTION_API_URL", "https://api.example.com");
+        let _guard_instance = EnvGuard::set("EVOLUTION_INSTANCE", "test");
+        let (storage, _tmp) = make_storage();
+
+        emit_event(
+            storage.conn(),
+            "quilombo.evento.criado",
+            &serde_json::json!({"titulo": "Festa"}),
+            None,
+            Some("+5541999999999"),
+        )
+        .unwrap();
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE channel = 'whatsapp'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "one whatsapp notification should be enqueued");
+    }
+
+    #[test]
+    fn emit_event_no_whatsapp_when_evolution_key_absent() {
+        let _lock = ENV_MUTEX.lock().unwrap();
+        let _guard = EnvGuard::remove("EVOLUTION_API_KEY");
+        let (storage, _tmp) = make_storage();
+
+        emit_event(
+            storage.conn(),
+            "quilombo.evento.criado",
+            &serde_json::json!({"titulo": "Festa"}),
+            None,
+            Some("+5541999999999"),
+        )
+        .unwrap();
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM notifications WHERE channel = 'whatsapp'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 0, "no whatsapp rows without EVOLUTION_API_KEY");
     }
 }

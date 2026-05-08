@@ -535,7 +535,10 @@ async fn criar_evento_handler(
             "titulo": evento.titulo,
             "data": evento.data,
             "criado_por": user.id,
+            "nome": user.nome,
         }),
+        user.email.as_deref(),
+        user.telefone.as_deref(),
     );
 
     Ok((StatusCode::CREATED, Json(evento)))
@@ -647,6 +650,7 @@ async fn participar_missao_handler(
     let participacao = quilombo_storage::participar_missao(storage.conn(), id, &user_id.0)
         .map_err(AppError::Conflict)?;
 
+    let user_email_tel = quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0);
     let _ = webhook::emit_event(
         storage.conn(),
         "quilombo.missao.participou",
@@ -654,6 +658,8 @@ async fn participar_missao_handler(
             "missao_id": id,
             "usuario_id": user_id.0,
         }),
+        user_email_tel.as_ref().and_then(|u| u.email.as_deref()),
+        user_email_tel.as_ref().and_then(|u| u.telefone.as_deref()),
     );
 
     Ok((StatusCode::CREATED, Json(participacao)))
@@ -829,6 +835,7 @@ async fn criar_mensagem_handler(
     let msg = quilombo_storage::criar_mensagem(storage.conn(), &body, Some(&user_id.0))
         .map_err(AppError::BadRequest)?;
 
+    let remetente = quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0);
     let _ = webhook::emit_event(
         storage.conn(),
         "quilombo.mensagem.criada",
@@ -838,6 +845,8 @@ async fn criar_mensagem_handler(
             "destinatario_id": msg.destinatario_id,
             "assunto": msg.assunto,
         }),
+        remetente.as_ref().and_then(|u| u.email.as_deref()),
+        remetente.as_ref().and_then(|u| u.telefone.as_deref()),
     );
 
     Ok((StatusCode::CREATED, Json(msg)))

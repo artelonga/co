@@ -23,7 +23,7 @@ default-members = [
 
 [workspace.package]
 
-version = "1.80.0"
+version = "1.81.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/artelonga/co"
@@ -47,6 +47,7 @@ rustyline = "14"
 
 # Async
 tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
 
 # Files
 memmap2 = "0.9"

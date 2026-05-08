@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.81.0] — 2026-05-08
+
+### Added — Direct notification provider adapters (CO-169)
+
+CO now delivers notifications directly to Resend (email) and Evolution API (WhatsApp) without requiring an external webhook receiver:
+
+- **`ChannelProvider` trait** (`notification_providers.rs`): `name()` + async `send()` — implemented by `ResendProvider` and `EvolutionApiProvider`.
+- **`ResendProvider`**: sends transactional email via `POST api.resend.com/emails`. Requires `RESEND_API_KEY` (+ optional `RESEND_FROM`).
+- **`EvolutionApiProvider`**: sends WhatsApp text via Evolution API `sendText` endpoint. Requires `EVOLUTION_API_KEY` (+ optional `EVOLUTION_API_URL`, `EVOLUTION_INSTANCE`).
+- **Migration v36**: adds `telefone TEXT` to `quilombo_usuarios`; adds `channel` + `recipient` columns to `notifications`; inserts sentinel webhook row `__direct__` (satisfies FK, never dispatched as HTTP webhook).
+- **`emit_event` extended**: new signature includes `email: Option<&str>` + `telefone: Option<&str>`. When provider env vars are set and a recipient is known, enqueues channel-specific rows with `channel='email'` or `channel='whatsapp'`.
+- **Worker dispatch**: `webhook_worker` loads providers once at startup; dispatches by `notifications.channel`; existing webhook path unchanged.
+- **Template rendering**: `{{key}}` substitution from event payload. Built-in defaults for `quilombo.evento.criado` (email subject, email body, WhatsApp text); override via `CO_TPL_{PREFIX}_{SLOT}` env vars.
+- **Tests**: `notification_providers` module tests cover template rendering, prefix derivation, env-var overrides, `from_env()` (returns `None` without keys), `name()`, and `MockChannelProvider`; `webhook.rs` tests cover email/whatsapp row enqueuing and absence when keys are missing.
+- **3 event call sites updated**: `quilombo.evento.criado`, `quilombo.missao.participou`, `quilombo.mensagem.criada` all pass the acting user's email + telefone.
+
 ## [1.80.0] — 2026-05-08
 
 ### Added — Outbound webhook system + notification queue (CO-168)
