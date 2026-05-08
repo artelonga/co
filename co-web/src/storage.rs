@@ -1289,42 +1289,89 @@ impl Storage {
         if current_version < 37 {
             // CO-165 (1.82.0): username+email decoupling + recovery channel tables.
             //
-            // Step 1: make users.email nullable, add users.usuario.
-            // SQLite doesn't support DROP NOT NULL constraints, so we recreate
-            // the table. FKs referencing users.id are unaffected (same id column).
-            //
-            // Step 2: create recovery channel, verification, and reset token tables.
+            // Restart-safe: a previous run may have left users_old (rename done)
+            // but users not yet recreated (CREATE TABLE failed mid-batch).
+            // Detect both states and resume accordingly.
+            let users_old_exists: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users_old'",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+            let users_exists: bool = self
+                .conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='users'",
+                    [],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false);
+
+            if users_old_exists && !users_exists {
+                // Partial-migration recovery: rename already happened; finish from here.
+                self.conn
+                    .execute_batch(
+                        "
+                        CREATE TABLE users (
+                            id            TEXT PRIMARY KEY,
+                            email         TEXT UNIQUE,
+                            display_name  TEXT NOT NULL DEFAULT '',
+                            tier          TEXT NOT NULL DEFAULT 'player',
+                            created_at    TEXT NOT NULL,
+                            password_hash TEXT,
+                            usuario       TEXT UNIQUE
+                        );
+                        INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
+                        SELECT id, email, display_name, tier, created_at, password_hash
+                        FROM users_old;
+                        UPDATE users SET usuario = CASE
+                            WHEN email LIKE '%@%'
+                            THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
+                            ELSE NULL
+                        END WHERE usuario IS NULL;
+                        DROP TABLE users_old;
+                        PRAGMA foreign_keys=ON;
+                        ",
+                    )
+                    .expect("Failed partial-recovery of migration v37 (users)");
+            } else {
+                // Normal path: both tables clean.
+                self.conn
+                    .execute_batch(
+                        "
+                        PRAGMA foreign_keys=OFF;
+                        DROP TABLE IF EXISTS users_old;
+                        ALTER TABLE users RENAME TO users_old;
+                        CREATE TABLE users (
+                            id            TEXT PRIMARY KEY,
+                            email         TEXT UNIQUE,
+                            display_name  TEXT NOT NULL DEFAULT '',
+                            tier          TEXT NOT NULL DEFAULT 'player',
+                            created_at    TEXT NOT NULL,
+                            password_hash TEXT,
+                            usuario       TEXT UNIQUE
+                        );
+                        INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
+                        SELECT id, email, display_name, tier, created_at, password_hash
+                        FROM users_old;
+                        UPDATE users SET usuario = CASE
+                            WHEN email LIKE '%@%'
+                            THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
+                            ELSE NULL
+                        END WHERE usuario IS NULL;
+                        DROP TABLE users_old;
+                        PRAGMA foreign_keys=ON;
+                        ",
+                    )
+                    .expect("Failed to run migration v37 (users table recreate)");
+            }
+
+            // Recovery tables (safe to run unconditionally — IF NOT EXISTS).
             self.conn
                 .execute_batch(
                     "
-                    PRAGMA foreign_keys=OFF;
-
-                    ALTER TABLE users RENAME TO users_old;
-
-                    CREATE TABLE users (
-                        id            TEXT PRIMARY KEY,
-                        email         TEXT UNIQUE,
-                        display_name  TEXT NOT NULL DEFAULT '',
-                        tier          TEXT NOT NULL DEFAULT 'player',
-                        created_at    TEXT NOT NULL,
-                        password_hash TEXT,
-                        usuario       TEXT UNIQUE
-                    );
-
-                    INSERT INTO users (id, email, display_name, tier, created_at, password_hash)
-                    SELECT id, email, display_name, tier, created_at, password_hash
-                    FROM users_old;
-
-                    UPDATE users SET usuario = CASE
-                        WHEN email LIKE '%@%'
-                        THEN LOWER(SUBSTR(email, 1, INSTR(email, '@') - 1))
-                        ELSE NULL
-                    END WHERE usuario IS NULL;
-
-                    DROP TABLE users_old;
-
-                    PRAGMA foreign_keys=ON;
-
                     CREATE TABLE IF NOT EXISTS user_recovery_channels (
                         id                TEXT PRIMARY KEY,
                         user_id           TEXT NOT NULL,
@@ -1341,7 +1388,6 @@ impl Storage {
                     );
                     CREATE INDEX IF NOT EXISTS idx_urc_user
                         ON user_recovery_channels(user_id);
-
                     CREATE TABLE IF NOT EXISTS recovery_verifications (
                         id          TEXT PRIMARY KEY,
                         channel_id  TEXT NOT NULL,
@@ -1358,7 +1404,6 @@ impl Storage {
                         ON recovery_verifications(channel_id, consumed_at);
                     CREATE INDEX IF NOT EXISTS idx_rv_user_purpose
                         ON recovery_verifications(user_id, purpose, consumed_at);
-
                     CREATE TABLE IF NOT EXISTS password_reset_tokens (
                         token_hash  TEXT PRIMARY KEY,
                         user_id     TEXT NOT NULL,
@@ -1367,11 +1412,10 @@ impl Storage {
                         consumed_at TEXT,
                         created_at  TEXT NOT NULL
                     );
-
                     INSERT OR IGNORE INTO schema_version (version) VALUES (37);
                     ",
                 )
-                .expect("Failed to run migration v37");
+                .expect("Failed to run migration v37 (recovery tables)");
         }
 
         // CO-165 unconditional backfill: ensure recovery tables exist even if

@@ -154,32 +154,68 @@ fn sha256_hex(input: &str) -> String {
 }
 
 /// Deliver a verification code over the appropriate channel.
-/// Phase 1: always logs. Phase 2: SMTP / WhatsApp / Twilio.
+///
+/// Email: real SMTP via [`crate::email_smtp::send_recovery_code`] when
+/// `CO_SMTP_*` env vars are set; otherwise falls back to logging the code
+/// (the existing `/auth/login` dev pattern). Either way the code reaches
+/// either the user (prod) or the developer running the server (dev).
+///
+/// WhatsApp + SMS remain stubbed — see CO-165 Phase 2 for Twilio + Meta API.
+/// Spawned as a detached task so the request handler returns immediately
+/// (recovery codes always return 202 — delivery is best-effort).
 fn send_verification_code(channel_type: &str, value: &str, code: &str) {
-    match channel_type {
-        "email" => {
-            // TODO Phase 2: send via SMTP when CO_SMTP_HOST is set.
-            tracing::info!(
-                "Recovery code for {}: {} [channel={}]",
-                value,
-                code,
-                channel_type
-            );
+    let value = value.to_string();
+    let code = code.to_string();
+    let channel_type = channel_type.to_string();
+    tokio::spawn(async move {
+        match channel_type.as_str() {
+            "email" => match crate::email_smtp::send_recovery_code(&value, &code).await {
+                Ok(true) => {
+                    tracing::info!("Recovery code emailed to {}", redact_email(&value));
+                }
+                Ok(false) => {
+                    tracing::info!(
+                        "Recovery code for {}: {} [channel=email; SMTP not configured — code logged]",
+                        value,
+                        code
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Recovery email to {} failed: {e}. Code logged: {} (dev fallback)",
+                        redact_email(&value),
+                        code
+                    );
+                }
+            },
+            "whatsapp" => {
+                // TODO Phase 2: WhatsApp Business Cloud API
+                // (CO_WHATSAPP_ACCESS_TOKEN, CO_WHATSAPP_PHONE_ID).
+                tracing::info!(
+                    "Recovery code for WhatsApp {}: {} [STUB - Phase 2]",
+                    value,
+                    code
+                );
+            }
+            "sms" => {
+                // TODO Phase 2: Twilio (CO_TWILIO_SID, CO_TWILIO_TOKEN, CO_TWILIO_FROM).
+                tracing::info!(
+                    "Recovery code for SMS {}: {} [STUB - Phase 2]",
+                    value,
+                    code
+                );
+            }
+            _ => {}
         }
-        "whatsapp" => {
-            // TODO Phase 2: WhatsApp Business Cloud API
-            // (CO_WHATSAPP_ACCESS_TOKEN, CO_WHATSAPP_PHONE_ID).
-            tracing::info!(
-                "Recovery code for WhatsApp {}: {} [STUB - Phase 2]",
-                value,
-                code
-            );
-        }
-        "sms" => {
-            // TODO Phase 2: Twilio (CO_TWILIO_SID, CO_TWILIO_TOKEN, CO_TWILIO_FROM).
-            tracing::info!("Recovery code for SMS {}: {} [STUB - Phase 2]", value, code);
-        }
-        _ => {}
+    });
+}
+
+fn redact_email(email: &str) -> String {
+    if let Some((local, domain)) = email.split_once('@') {
+        let head = local.chars().next().map(|c| c.to_string()).unwrap_or_default();
+        format!("{head}***@{domain}")
+    } else {
+        "***".to_string()
     }
 }
 

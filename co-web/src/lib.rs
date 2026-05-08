@@ -11,6 +11,7 @@ pub mod cache;
 pub mod config;
 pub mod dev_board;
 pub mod doc_gen;
+pub mod email_smtp;
 pub mod embedding;
 pub mod embedding_index;
 pub mod embedding_worker;

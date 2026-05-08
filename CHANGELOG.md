@@ -5,6 +5,35 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.83.0] — 2026-05-08
+
+### Added — CO-165: real SMTP delivery for recovery codes (email)
+
+The `email` arm of `send_verification_code` now delivers via SMTP when configured. Previously it logged the code to stderr only — workable for dev, broken for any real user.
+
+**New module `email_smtp.rs`** — lettre-based async SMTP:
+- `send_recovery_code(to, code) → Result<bool>` — `Ok(true)` when SMTP delivered, `Ok(false)` when SMTP not configured (caller logs as dev fallback), `Err` on delivery failure.
+- Reads `CO_SMTP_HOST`, `CO_SMTP_USER`, `CO_SMTP_PASS`, `CO_SMTP_FROM`, `CO_SMTP_PORT` (default 587). All four required fields must be set; missing any one falls back to log mode.
+- STARTTLS via rustls-TLS (`tokio1-rustls-tls` feature). PT body, plain text.
+
+**Wired into `recovery_routes::send_verification_code`:**
+- Email branch tries SMTP, falls back to logging the code with redacted recipient (`j***@artelonga.com.br`) on failure or no-SMTP.
+- Spawned as a `tokio::spawn` so the request returns immediately — recovery endpoints already always return 202 (no enumeration), and SMTP can take 1-3s.
+- WhatsApp + SMS arms unchanged — still Phase 2 stubs (Twilio + Meta API).
+
+**New deps:** `lettre 0.11` with `smtp-transport`, `tokio1-rustls-tls`, `builder` features only (no native-tls, no SMTP-pool).
+
+**Operator setup** (fly secrets):
+```
+flyctl secrets set CO_SMTP_HOST=smtp.example.com \
+                   CO_SMTP_USER=postmaster@... \
+                   CO_SMTP_PASS=... \
+                   CO_SMTP_FROM='CO <noreply@artelonga.com.br>' \
+                   -a co-artelonga
+```
+
+When set, recovery codes go to real inboxes. When unset (e.g. local dev), codes still print to logs so the existing dev flow keeps working.
+
 ## [1.82.0] — 2026-05-08
 
 ### Added — CO-165: Forgot password / change password with verified recovery channels

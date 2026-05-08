@@ -1,14 +1,16 @@
 # Stage 1: Build
-FROM rust:1.88-slim AS builder
+# Trixie (Debian 13) carries glibc 2.40 — needed because ort-sys (via fastembed
+# / CO-164) compiles ONNX parser C++ from source and the cached object files
+# can reference __isoc23_strtoull / __isoc23_strtol (glibc 2.38+ symbols).
+# Bookworm's glibc 2.36 doesn't define these, breaking the link step. The
+# previous CXXFLAGS=-std=c++14 workaround is unreliable because ort-sys's
+# build.rs can override CXX flags. Easier to ship on a base image that has
+# the symbols natively.
+FROM rust:1.90-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler pkg-config libssl-dev g++ \
     && rm -rf /var/lib/apt/lists/*
-
-# ort-sys (fastembed/CO-164) compiles ONNX parser C++ from source. On Debian
-# Bookworm (glibc 2.36), gcc 12 can emit __isoc23_strtoull refs (glibc 2.38+
-# symbol) when C23 redirects activate. Force C++14 to prevent that.
-ENV CXXFLAGS="-std=c++14"
 
 WORKDIR /usr/src/co
 
@@ -67,7 +69,10 @@ RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-*
     cargo build --release -p co-web
 
 # Stage 2: Runtime
-FROM debian:bookworm-slim
+# Trixie matches the builder's glibc 2.40 — bookworm's older glibc 2.36 would
+# fail at runtime if any object compiled in the builder references trixie-only
+# symbols.
+FROM debian:trixie-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git \
