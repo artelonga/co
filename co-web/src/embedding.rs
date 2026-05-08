@@ -55,11 +55,39 @@ impl EmbeddingService {
         }
     }
 
-    /// Construct a disabled service (no model). Used in tests.
+    /// Construct a disabled service (no model). Used in tests and for
+    /// deferred boot loading (see `load_deferred`).
     pub fn disabled() -> Self {
         Self {
             model: Mutex::new(None),
         }
+    }
+
+    /// Load and install the model in the background. Returns immediately;
+    /// the model becomes available once the tokio task completes.
+    /// Idempotent — does nothing if the model is already loaded.
+    pub fn load_deferred(self: std::sync::Arc<Self>, model_dir: std::path::PathBuf) {
+        tokio::spawn(async move {
+            if self.is_available() {
+                return;
+            }
+            match tokio::task::spawn_blocking(move || load_model(model_dir)).await {
+                Ok(Ok(m)) => {
+                    if let Ok(mut guard) = self.model.lock() {
+                        *guard = Some(m);
+                        tracing::info!("CO-164: embedding model '{}' ready (deferred)", MODEL_NAME);
+                    }
+                }
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        "CO-164: deferred embedding model load failed — semantic search disabled: {e:#}"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("CO-164: embedding model task panicked: {e}");
+                }
+            }
+        });
     }
 
     /// Returns `true` when the model is loaded and ready.

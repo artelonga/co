@@ -995,9 +995,10 @@ pub async fn start_server(config: WebConfig) {
 
     // CO-166: load or generate EC P-256 key for ES256 JWT signing and JWKS.
     let jwt_key = Arc::new(crate::auth::JwtKey::load_or_generate());
-    // CO-164: load embedding model (non-blocking — fails gracefully if offline).
+    // CO-164: embedding service starts disabled so the server binds quickly.
+    // Model is loaded in the background after the server is accepting traffic.
     let model_dir = crate::embedding::default_model_dir();
-    let embeddings = Arc::new(crate::embedding::EmbeddingService::new(model_dir));
+    let embeddings = Arc::new(crate::embedding::EmbeddingService::disabled());
     let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
 
     let state: AppState = Arc::new(AppStateInner {
@@ -1028,9 +1029,12 @@ pub async fn start_server(config: WebConfig) {
     // CO-72: spawn doc-gen worker loop.
     crate::job_queue::spawn_worker(Arc::clone(&state));
 
-    // CO-164: spawn embedding background worker + run boot scan for stale embeddings.
+    // CO-164: spawn embedding background worker + load model after server binds.
     crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
     crate::embedding_worker::boot_scan(Arc::clone(&state));
+    // Load the embedding model in the background so startup doesn't block on it.
+    // Server health check passes immediately; model becomes available ~10–60s later.
+    Arc::clone(&state.embeddings).load_deferred(model_dir);
     // CO-168: spawn outbound webhook delivery worker.
     crate::webhook_worker::spawn_worker(Arc::clone(&state));
 
