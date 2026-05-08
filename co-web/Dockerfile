@@ -5,6 +5,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler pkg-config libssl-dev g++ \
     && rm -rf /var/lib/apt/lists/*
 
+# ort-sys (fastembed/CO-164) compiles ONNX parser C++ from source. On Debian
+# Bookworm (glibc 2.36), gcc 12 can emit __isoc23_strtoull refs (glibc 2.38+
+# symbol) when C23 redirects activate. Force C++14 to prevent that.
+ENV CXXFLAGS="-std=c++14"
+
 WORKDIR /usr/src/co
 
 # --- Dependency cache layer ---
