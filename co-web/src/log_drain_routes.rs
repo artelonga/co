@@ -172,6 +172,8 @@ mod tests {
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
         };
         let storage = Storage::new(&config.data_dir);
         let experiment = ExperimentStore::new(&config.data_dir);
@@ -193,6 +195,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
         build_router(state, None)
     }

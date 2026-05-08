@@ -25,6 +25,7 @@ pub mod job_queue;
 pub mod log_drain_routes;
 pub mod models;
 pub mod obsidian_tasks;
+pub mod oidc_routes;
 pub mod plugin_loader;
 pub mod processos;
 pub mod proposal_routes;

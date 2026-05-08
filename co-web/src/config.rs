@@ -55,6 +55,13 @@ pub struct WebConfig {
     pub wae_endpoint: Option<String>,
     /// CO-118: Bearer token sent to the WAE Worker proxy.
     pub wae_api_key: Option<String>,
+    /// CO-166: Domain used for session cookies (e.g. `.artelonga.com.br`).
+    /// When absent, no Domain attribute is added (localhost-safe default).
+    /// Set via `CO_COOKIE_DOMAIN` env var.
+    pub cookie_domain: Option<String>,
+    /// CO-166: When false, `POST /api/v1/quilombo/auth/login` returns 410 Gone.
+    /// Default: true (legacy login enabled). Set via `CO_QUILOMBO_LEGACY_LOGIN=false`.
+    pub quilombo_legacy_login: bool,
 }
 
 impl WebConfig {
@@ -86,6 +93,10 @@ impl From<Args> for WebConfig {
             co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
             wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
             wae_api_key: std::env::var("WAE_API_KEY").ok(),
+            cookie_domain: std::env::var("CO_COOKIE_DOMAIN").ok(),
+            quilombo_legacy_login: std::env::var("CO_QUILOMBO_LEGACY_LOGIN")
+                .map(|v| v != "false")
+                .unwrap_or(true),
         }
     }
 }

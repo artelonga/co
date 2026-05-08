@@ -63,6 +63,8 @@ pub struct AppStateInner {
     pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
     /// CO-118: Workers Analytics Engine emitter (no-op when env vars absent).
     pub wae: Arc<crate::wae::WaeEmitter>,
+    /// CO-166: EC P-256 key pair for ES256 JWT signing and JWKS endpoint.
+    pub jwt_key: Arc<crate::auth::JwtKey>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -303,6 +305,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::Extension(github_token_cache.clone()))
         .layer(axum::Extension(allowed_admins.clone()));
 
+    // --- CO-166: OIDC OAuth client admin routes ---
+    let gestao_oauth_api = crate::oidc_routes::gestao_oauth_router()
+        .layer(axum::Extension(github_token_cache.clone()))
+        .layer(axum::Extension(allowed_admins.clone()));
+
     // --- A/B flag admin routes (CO-121) ---
     let ab_admin = crate::ab_routes::admin_router()
         .layer(axum::Extension(github_token_cache))
@@ -415,6 +422,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // matcher prefers them.
         .route("/{slug}/{*subpath}", get(serve_co_index));
 
+    // --- CO-166: OIDC OAuth endpoints (authorization, token, userinfo) ---
+    let oauth_api = crate::oidc_routes::oauth_router();
+
     // --- CO-105: Admin dashboard API + static page ---
     let admin_dashboard_api = crate::admin_routes::api_router();
 
@@ -474,7 +484,17 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
         .nest("/api/v1/admin", admin_dashboard_api)
         // CO-144 Phase C: process model — first process is alterar-pagina-na-web
-        .nest("/api/v1/processos", crate::processos::router());
+        .nest("/api/v1/processos", crate::processos::router())
+        // CO-166: OIDC authorization code flow + userinfo
+        .nest("/oauth", oauth_api)
+        // CO-166: OIDC client management (gestão admin)
+        .nest("/api/v1/gestao/oauth", gestao_oauth_api)
+        // CO-166: OIDC discovery endpoints (well-known)
+        .route(
+            "/.well-known/openid-configuration",
+            get(crate::oidc_routes::openid_configuration),
+        )
+        .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json));
 
     // Mount plugin routes if any plugins were loaded
     if let Some(plugin_router) = plugin_routes {
@@ -942,6 +962,9 @@ pub async fn start_server(config: WebConfig) {
     // CO-118: build WAE emitter (no-op when WAE_ENDPOINT / WAE_API_KEY are absent).
     let wae = crate::wae::WaeEmitter::new(config.wae_endpoint.clone(), config.wae_api_key.clone());
 
+    // CO-166: load or generate EC P-256 key for ES256 JWT signing and JWKS.
+    let jwt_key = Arc::new(crate::auth::JwtKey::load_or_generate());
+
     let state: AppState = Arc::new(AppStateInner {
         storage: Mutex::new(storage),
         experiment: Mutex::new(experiment),
@@ -955,6 +978,7 @@ pub async fn start_server(config: WebConfig) {
         cache: crate::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         wae,
+        jwt_key,
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
@@ -2040,7 +2064,8 @@ async fn verify_handler(
         auth.delete_code(&email)?;
     }
 
-    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+    let cookie =
+        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
@@ -2234,7 +2259,8 @@ async fn password_login_handler(
     let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+    let cookie =
+        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
@@ -2307,6 +2333,8 @@ mod tests {
             co_env: "prod".into(),
             wae_endpoint: None,
             wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
         }
     }
 
@@ -2334,6 +2362,7 @@ mod tests {
             cache: crate::cache::CacheLayer::new(),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         });
         build_router(state, None)
     }

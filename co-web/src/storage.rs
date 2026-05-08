@@ -1161,6 +1161,62 @@ impl Storage {
                 .expect("Failed to run migration v31");
         }
 
+        if current_version < 32 {
+            // CO-166 (1.76.0): OIDC OAuth2 server tables.
+            // oauth_clients — registered OIDC relying-party applications.
+            // oauth_auth_codes — short-lived authorization codes (PKCE).
+            // oauth_access_tokens — long-lived access tokens for /userinfo.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS oauth_clients (
+                        id TEXT PRIMARY KEY,
+                        client_id TEXT UNIQUE NOT NULL,
+                        client_secret TEXT NOT NULL,
+                        name TEXT NOT NULL,
+                        redirect_uris TEXT NOT NULL,
+                        scopes TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS oauth_auth_codes (
+                        code TEXT PRIMARY KEY,
+                        client_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        redirect_uri TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        code_challenge TEXT NOT NULL,
+                        code_challenge_method TEXT NOT NULL DEFAULT 'S256',
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS oauth_access_tokens (
+                        token TEXT PRIMARY KEY,
+                        client_id TEXT NOT NULL,
+                        user_id TEXT NOT NULL,
+                        scope TEXT NOT NULL,
+                        expires_at TEXT NOT NULL,
+                        created_at TEXT NOT NULL
+                    );
+
+                    INSERT INTO schema_version (version) VALUES (32);
+                    ",
+                )
+                .expect("Failed to run migration v32");
+        }
+
+        if current_version < 33 {
+            // CO-166 (1.76.0): link quilombo accounts to CO main accounts.
+            // linked_co_user_id is NULL until the user calls
+            // POST /api/v1/quilombo/auth/link-co-account.
+            ensure_column(&self.conn, "quilombo_usuarios", "linked_co_user_id", "TEXT")
+                .expect("migration v33: quilombo_usuarios.linked_co_user_id column");
+            self.conn
+                .execute("INSERT INTO schema_version (version) VALUES (33)", [])
+                .expect("Failed to record migration v33");
+        }
+
         // CO-77 unconditional backfill: entries + entries_fts on meta.db for
         // the startup migration to per-universe DBs. Uses ensure_table so the
         // call site is consistent with the migration-drift class fixes.

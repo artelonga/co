@@ -7,8 +7,11 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use p256::ecdsa::SigningKey;
+use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use redb::{Database, TableDefinition};
 use rusqlite;
 use serde::{Deserialize, Serialize};
@@ -92,6 +95,185 @@ struct ErrorResponse {
 /// Reads `JWT_SECRET` from the environment, falling back to a development default.
 pub fn jwt_secret() -> String {
     std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
+}
+
+// ---------------------------------------------------------------------------
+// CO-166: ES256 asymmetric JWT key (used for OIDC + cross-domain SSO)
+// ---------------------------------------------------------------------------
+
+/// EC P-256 key pair used for ES256 JWT signing and the JWKS endpoint.
+///
+/// Keys are loaded from `CO_JWT_PRIVATE_KEY` (PEM) or generated fresh each
+/// boot. On boot-generated keys, tokens are only valid for the lifetime of
+/// the process — this is fine for dev. In production, set `CO_JWT_PRIVATE_KEY`
+/// so the key survives restarts and multiple instances can verify tokens.
+pub struct JwtKey {
+    /// Key ID — included in JWTs so verifiers can select the right JWK.
+    pub kid: String,
+    signing_pem: String,
+    verifying_pem: String,
+    x_bytes: Vec<u8>,
+    y_bytes: Vec<u8>,
+}
+
+impl JwtKey {
+    /// Load from `CO_JWT_PRIVATE_KEY` env var (PKCS8 PEM) or generate a new key.
+    pub fn load_or_generate() -> Self {
+        if let Ok(pem) = std::env::var("CO_JWT_PRIVATE_KEY") {
+            if let Ok(key) = Self::from_pem(&pem) {
+                tracing::info!("CO-166: loaded EC key from CO_JWT_PRIVATE_KEY");
+                return key;
+            }
+            tracing::warn!("CO-166: CO_JWT_PRIVATE_KEY set but invalid PEM, generating new key");
+        }
+        let key = Self::generate();
+        tracing::info!("CO-166: generated fresh EC P-256 key (kid={})", key.kid);
+        key
+    }
+
+    fn generate() -> Self {
+        let signing_key = SigningKey::random(&mut rand::thread_rng());
+        Self::from_signing_key(signing_key)
+    }
+
+    fn from_pem(pem: &str) -> anyhow::Result<Self> {
+        use p256::pkcs8::DecodePrivateKey;
+        let signing_key = SigningKey::from_pkcs8_pem(pem)?;
+        Ok(Self::from_signing_key(signing_key))
+    }
+
+    fn from_signing_key(signing_key: SigningKey) -> Self {
+        let verifying_key = signing_key.verifying_key();
+        let private_pem = signing_key
+            .to_pkcs8_pem(LineEnding::LF)
+            .expect("PKCS8 PEM encode failed")
+            .to_string();
+        let public_pem = verifying_key
+            .to_public_key_pem(LineEnding::LF)
+            .expect("SubjectPublicKeyInfo PEM encode failed");
+
+        let point = verifying_key.to_encoded_point(false); // uncompressed (x, y)
+        let x_bytes = point.x().expect("EC point x coordinate").to_vec();
+        let y_bytes = point.y().expect("EC point y coordinate").to_vec();
+
+        // kid = first 16 hex chars of blake3 of x_bytes||y_bytes
+        let mut combined = x_bytes.clone();
+        combined.extend_from_slice(&y_bytes);
+        let hash = blake3::hash(&combined);
+        // Format first 8 bytes as lowercase hex (16 chars).
+        let kid = hash.as_bytes()[..8].iter().fold(String::new(), |mut s, b| {
+            s.push_str(&format!("{b:02x}"));
+            s
+        });
+
+        Self {
+            kid,
+            signing_pem: private_pem,
+            verifying_pem: public_pem,
+            x_bytes,
+            y_bytes,
+        }
+    }
+
+    /// Build an `EncodingKey` for signing JWTs with ES256.
+    pub fn encoding_key(&self) -> anyhow::Result<EncodingKey> {
+        Ok(EncodingKey::from_ec_pem(self.signing_pem.as_bytes())?)
+    }
+
+    /// Build a `DecodingKey` for verifying ES256 JWTs.
+    pub fn decoding_key(&self) -> anyhow::Result<DecodingKey> {
+        Ok(DecodingKey::from_ec_pem(self.verifying_pem.as_bytes())?)
+    }
+
+    /// Build the JWK representation of the public key for `/.well-known/jwks.json`.
+    pub fn public_jwk(&self) -> serde_json::Value {
+        let x_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.x_bytes);
+        let y_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&self.y_bytes);
+        serde_json::json!({
+            "kty": "EC",
+            "crv": "P-256",
+            "use": "sig",
+            "alg": "ES256",
+            "kid": self.kid,
+            "x": x_b64,
+            "y": y_b64,
+        })
+    }
+}
+
+/// Sign a JWT using ES256 (asymmetric). Returns (token, expires_at).
+///
+/// Used for OIDC flows and cross-domain tokens where the verifier can fetch
+/// the public key from JWKS rather than sharing a secret.
+pub fn sign_jwt_es256(
+    key: &JwtKey,
+    user_id: &str,
+    email: &str,
+    tier: &str,
+) -> anyhow::Result<(String, DateTime<Utc>)> {
+    let now = Utc::now();
+    let iat = now.timestamp() as usize;
+    let exp = (now.timestamp() + JWT_EXPIRY_SECS) as usize;
+    let expires_at = now + chrono::Duration::seconds(JWT_EXPIRY_SECS);
+
+    let claims = Claims {
+        sub: user_id.to_string(),
+        email: email.to_string(),
+        tier: tier.to_string(),
+        usuario: String::new(),
+        papel: String::new(),
+        exp,
+        iat,
+    };
+
+    let mut header = Header::new(Algorithm::ES256);
+    header.kid = Some(key.kid.clone());
+
+    let token = encode(&header, &claims, &key.encoding_key()?)?;
+    Ok((token, expires_at))
+}
+
+/// Decode and validate a JWT, trying ES256 first then falling back to HS256.
+///
+/// This lets the server accept both old HS256 session tokens and new ES256
+/// tokens transparently during the migration period.
+pub fn decode_claims_any(
+    token: &str,
+    jwt_key: &JwtKey,
+    hs256_secret: &str,
+) -> anyhow::Result<Claims> {
+    // Try ES256 first.
+    if let Ok(decoding_key) = jwt_key.decoding_key() {
+        let mut validation = Validation::new(Algorithm::ES256);
+        validation.validate_exp = true;
+        if let Ok(data) = decode::<Claims>(token, &decoding_key, &validation) {
+            return Ok(data.claims);
+        }
+    }
+
+    // Fall back to HS256.
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.validate_exp = true;
+    let data = decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(hs256_secret.as_bytes()),
+        &validation,
+    )?;
+    Ok(data.claims)
+}
+
+/// Build a `Set-Cookie` header value for the session token.
+///
+/// When `domain` is `Some(".artelonga.com.br")` the cookie is shared across
+/// all subdomains. When `None` (dev default), no `Domain` attribute is added
+/// and the cookie only works for the current host.
+pub fn build_session_cookie(token: &str, domain: Option<&str>, max_age: u64) -> String {
+    let mut cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}");
+    if let Some(d) = domain {
+        cookie.push_str("; Domain=");
+        cookie.push_str(d);
+    }
+    cookie
 }
 
 /// Resolve the calling user_id from a request's headers, accepting either:
@@ -688,5 +870,116 @@ mod tests {
         store.record_request(email).unwrap();
         // Now 3 requests recorded — should be exceeded.
         assert!(!store.check_rate_limit(email).unwrap());
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-166: JwtKey, JWKS, cookie domain, ES256 tests
+    // -----------------------------------------------------------------------
+
+    /// JwtKey::load_or_generate() produces a key with a non-empty kid.
+    #[test]
+    fn test_jwt_key_generates_kid() {
+        let key = JwtKey::load_or_generate();
+        assert!(!key.kid.is_empty(), "kid must be non-empty");
+        assert_eq!(key.kid.len(), 16, "kid should be 16 hex chars");
+    }
+
+    /// public_jwk() returns a JSON object with the required EC key fields.
+    #[test]
+    fn test_jwt_key_public_jwk_has_required_fields() {
+        let key = JwtKey::load_or_generate();
+        let jwk = key.public_jwk();
+        assert_eq!(jwk["kty"], "EC", "kty must be EC");
+        assert_eq!(jwk["crv"], "P-256", "crv must be P-256");
+        assert_eq!(jwk["alg"], "ES256", "alg must be ES256");
+        assert_eq!(jwk["use"], "sig", "use must be sig");
+        assert_eq!(jwk["kid"], key.kid, "kid must match");
+        assert!(jwk["x"].is_string(), "x must be a string (base64url)");
+        assert!(jwk["y"].is_string(), "y must be a string (base64url)");
+        // x and y must be non-empty base64url strings (32-byte P-256 coords = 43 chars)
+        let x = jwk["x"].as_str().unwrap();
+        let y = jwk["y"].as_str().unwrap();
+        assert!(
+            x.len() >= 40,
+            "x must be at least 40 chars: got {}",
+            x.len()
+        );
+        assert!(
+            y.len() >= 40,
+            "y must be at least 40 chars: got {}",
+            y.len()
+        );
+    }
+
+    /// sign_jwt_es256 produces a token that can be verified with the matching public key.
+    #[test]
+    fn test_sign_jwt_es256_verifiable() {
+        let key = JwtKey::load_or_generate();
+        let (token, _expires_at) =
+            sign_jwt_es256(&key, "user-123", "test@example.com", "player").unwrap();
+
+        // Must decode successfully with ES256.
+        let decoding_key = key.decoding_key().unwrap();
+        let mut validation = jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::ES256);
+        validation.validate_exp = true;
+        let data = jsonwebtoken::decode::<Claims>(&token, &decoding_key, &validation).unwrap();
+        assert_eq!(data.claims.sub, "user-123");
+        assert_eq!(data.claims.email, "test@example.com");
+        assert_eq!(data.claims.tier, "player");
+    }
+
+    /// decode_claims_any falls back to HS256 for old tokens.
+    #[test]
+    fn test_decode_claims_any_accepts_hs256_fallback() {
+        let key = JwtKey::load_or_generate();
+        let secret = "test-hs256-secret";
+        let (hs256_token, _) =
+            sign_jwt("legacy-user", "legacy@example.com", "free", secret).unwrap();
+
+        let claims = decode_claims_any(&hs256_token, &key, secret).unwrap();
+        assert_eq!(claims.sub, "legacy-user");
+    }
+
+    /// decode_claims_any accepts ES256 tokens.
+    #[test]
+    fn test_decode_claims_any_accepts_es256() {
+        let key = JwtKey::load_or_generate();
+        let (es256_token, _) = sign_jwt_es256(&key, "es-user", "es@example.com", "player").unwrap();
+
+        let claims = decode_claims_any(&es256_token, &key, "any-hs256-secret").unwrap();
+        assert_eq!(claims.sub, "es-user");
+    }
+
+    /// build_session_cookie without domain does not include Domain attribute.
+    #[test]
+    fn test_build_session_cookie_no_domain() {
+        let cookie = build_session_cookie("tok123", None, 604800);
+        assert!(
+            cookie.starts_with("session=tok123;"),
+            "cookie must start with session=<token>;"
+        );
+        assert!(
+            !cookie.contains("Domain="),
+            "cookie must not include Domain when domain is None"
+        );
+        assert!(
+            cookie.contains("Max-Age=604800"),
+            "cookie must include Max-Age"
+        );
+        assert!(cookie.contains("HttpOnly"), "cookie must include HttpOnly");
+        assert!(
+            cookie.contains("SameSite=Lax"),
+            "cookie must include SameSite=Lax"
+        );
+    }
+
+    /// build_session_cookie with domain appends Domain attribute.
+    #[test]
+    fn test_build_session_cookie_with_domain() {
+        let cookie = build_session_cookie("tok456", Some(".artelonga.com.br"), 604800);
+        assert!(
+            cookie.contains("Domain=.artelonga.com.br"),
+            "cookie must include Domain attribute: {cookie}"
+        );
     }
 }

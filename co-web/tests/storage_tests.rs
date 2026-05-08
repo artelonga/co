@@ -873,14 +873,14 @@ fn test_schema_version_tracking() {
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
 
-    assert_eq!(storage.schema_version(), 31); // 1.70.0 added v31 (blobs CAS table)
-    assert_eq!(storage.schema_version(), 31);
+    assert_eq!(storage.schema_version(), 33); // 1.76.0 added v32-v33 (OIDC tables + quilombo link)
+    assert_eq!(storage.schema_version(), 33);
 
     // Creating a second Storage instance on same dir should not re-run migrations
     drop(storage);
     let storage2 = Storage::new(dir.path());
-    assert_eq!(storage2.schema_version(), 31); // 1.70.0 added v31
-    assert_eq!(storage2.schema_version(), 31);
+    assert_eq!(storage2.schema_version(), 33); // 1.76.0 added v32-v33
+    assert_eq!(storage2.schema_version(), 33);
 }
 
 /// 1.70.0 (Phase 8 step 1): blob storage round-trip — same bytes hash to

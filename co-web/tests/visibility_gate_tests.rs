@@ -35,6 +35,8 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         co_env: "prod".into(),
         wae_endpoint: None,
         wae_api_key: None,
+        cookie_domain: None,
+        quilombo_legacy_login: true,
     }
 }
 
@@ -112,6 +114,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
     });
 
     build_router(state, None)
@@ -206,6 +209,7 @@ async fn test_owner_on_private_universe_gets_200() {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
     });
 
     let app = build_router(state, None);
@@ -271,6 +275,7 @@ async fn test_non_member_on_private_universe_gets_403() {
         cache: co_web::cache::CacheLayer::new(),
         rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
         wae: co_web::wae::WaeEmitter::new(None, None),
+        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
     });
 
     let app = build_router(state, None);
