@@ -2,7 +2,7 @@
 FROM rust:1.88-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    protobuf-compiler pkg-config libssl-dev \
+    protobuf-compiler pkg-config libssl-dev g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/co
