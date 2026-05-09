@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.88.4] — 2026-05-09
+
+### Added — Guia do Co: documentação para usuários no universo template
+
+Nova página de boas-vindas (`content/guia.md`) disponível em todos os universos derivados do template. Cobre:
+
+- Primeiros passos: criar universo, adicionar tarefas, convidar colaboradores.
+- Todas as seis visualizações (Quadro, Tabela, Linha do tempo, Calendário, Conteúdo, Dashboard).
+- Vault API e compatibilidade com Obsidian.
+- Linhas do tempo públicas (Tempo, Universo, Humanidade).
+- Temas e atalhos de teclado.
+- **Yggdrasil** — seção em destaque explicando o hub de jogos como "mundo fantasia": os cinco jogos (Tetris, Snake, Invaders, PointSet, Poker), sistema de perfil, ranking global e a origem mitológica do nome.
+
+A página é reescrita a cada boot via `reseed_template_content_pages` — a versão do binário é sempre a fonte da verdade.
+
 ## [1.88.3] — 2026-05-09
 
 ### Refactored — CO-171: modularize the 6k+ line monoliths

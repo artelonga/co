@@ -8,8 +8,8 @@ use super::Storage;
 use super::schema::{seed_page_body, seed_page_frontmatter, upsert_entry_row};
 
 use super::{
-    SEED_CO_PLATAFORMA_MD, SEED_DADOS_RASTREADOS_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD,
-    SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD,
+    SEED_CO_PLATAFORMA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_LINHAS_DO_TEMPO_MD,
+    SEED_PRIVACIDADE_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD,
 };
 
 impl Storage {
@@ -268,6 +268,7 @@ impl Storage {
             ("content/dados-rastreados.md", SEED_DADOS_RASTREADOS_MD),
             ("content/linhas-do-tempo.md", SEED_LINHAS_DO_TEMPO_MD),
             ("content/co-plataforma.md", SEED_CO_PLATAFORMA_MD),
+            ("content/guia.md", SEED_GUIA_MD),
         ] {
             let entry = make_entry(
                 path,

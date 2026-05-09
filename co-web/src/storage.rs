@@ -31,6 +31,7 @@ const SEED_PRIVACIDADE_MD: &str = include_str!("../seed/template/privacidade.md"
 const SEED_DADOS_RASTREADOS_MD: &str = include_str!("../seed/template/dados-rastreados.md");
 const SEED_LINHAS_DO_TEMPO_MD: &str = include_str!("../seed/template/linhas-do-tempo.md");
 const SEED_CO_PLATAFORMA_MD: &str = include_str!("../seed/template/co-plataforma.md");
+const SEED_GUIA_MD: &str = include_str!("../seed/template/guia.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
 // each backed by a JSON event manifest + a markdown index/front page. Loaded
