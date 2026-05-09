@@ -23,7 +23,7 @@ default-members = [
 
 [workspace.package]
 
-version = "1.88.4"
+version = "1.89.0"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/artelonga/co"

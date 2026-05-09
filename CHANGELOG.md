@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.89.0] — 2026-05-09
+
+### Added — CO-172: Quilombo signups become CO accounts — central auth + redirected password reset
+
+**Phase 1 — Bridge quilombo signup into `users`**
+- `Storage::ensure_co_user_for_quilombo` — idempotent: returns existing `linked_co_user_id`, finds CO user by email match, or INSERTs a new `users` row (tier=`player`, reuses Argon2id hash)
+- `Storage::link_quilombo_to_co` — sets `quilombo_usuarios.linked_co_user_id`
+- `POST /api/v1/quilombo/auth/cadastro` now bridges every new signup into `users`
+- `PUT /api/v1/quilombo/perfil` bridges quilombo user into CO when email is first set, and promotes a verified email recovery channel immediately
+
+**Phase 2 — Recovery channel backfill for quilombo users**
+- `Storage::backfill_quilombo_recovery_channels` — for every quilombo user with `email + linked_co_user_id` set, ensures a verified CO recovery channel; runs on every boot (idempotent)
+
+**Phase 3 — `/recover` endpoint + quilombo SPA redirects**
+- New `/recover` route on CO serves the SPA pre-pinned to the forgot-password step; reads `?identifier=` to pre-fill and `?return_to=` to redirect after success
+- `is_allowed_return_to` safelist: only `*.artelonga.com.br` and `quilomboaraucaria.com.br` accepted
+- Quilombo SPA "Esqueci minha senha" detects `quilomboaraucaria.com.br` hostname and redirects to `co.artelonga.com.br/recover?return_to=...&identifier=...`
+- Quilombo SPA "Alterar senha" redirects to `co.artelonga.com.br/recover?action=change_password&return_to=...`
+- After successful reset on `/recover`, SPA redirects to safelisted `return_to` instead of reloading
+
+**Phase 4 — Password reset propagation**
+- `Storage::mirror_password_to_quilombo` — after CO `reset-password`, new hash mirrored to all linked `quilombo_usuarios` rows so legacy quilombo login stays in sync
+
 ## [1.88.4] — 2026-05-09
 
 ### Added — Guia do Co: documentação para usuários no universo template

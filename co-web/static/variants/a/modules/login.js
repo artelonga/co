@@ -158,8 +158,24 @@ export function setupLoginModal() {
         if (btnBackLogin) btnBackLogin.style.display = (step === 'login-step-password') ? 'none' : '';
     }
 
+    // CO-172: On quilomboaraucaria.com.br, redirect forgot-password to CO /recover.
+    function buildCoRecoverUrl(params) {
+        const base = 'https://co.artelonga.com.br/recover';
+        const qs = new URLSearchParams(params).toString();
+        return qs ? `${base}?${qs}` : base;
+    }
+
+    const isQuilomboDomain = window.location.hostname === 'quilomboaraucaria.com.br';
+
     if (btnForgot) {
         btnForgot.addEventListener('click', () => {
+            if (isQuilomboDomain) {
+                const identifier = (document.getElementById('login-usuario')?.value || '').trim();
+                const params = { return_to: 'https://quilomboaraucaria.com.br' };
+                if (identifier) params.identifier = identifier;
+                window.location.href = buildCoRecoverUrl(params);
+                return;
+            }
             showLoginStep('login-step-forgot');
             const el = document.getElementById('forgot-identifier');
             if (el) el.focus();
@@ -194,6 +210,16 @@ export function setupLoginModal() {
         });
     }
 
+    // CO-172: validate a return_to URL against the artelonga safelist.
+    function isAllowedReturnTo(url) {
+        try {
+            const { hostname } = new URL(url);
+            return hostname === 'quilomboaraucaria.com.br'
+                || hostname === 'artelonga.com.br'
+                || hostname.endsWith('.artelonga.com.br');
+        } catch (_) { return false; }
+    }
+
     if (btnResetSubmit) {
         btnResetSubmit.addEventListener('click', async () => {
             const code = (document.getElementById('reset-code')?.value || '').trim();
@@ -223,6 +249,13 @@ export function setupLoginModal() {
             });
             btnResetSubmit.disabled = false;
             if (resetResp.ok) {
+                // CO-172: redirect back to origin if /recover was loaded with a safelisted return_to
+                const urlParams = new URLSearchParams(window.location.search);
+                const returnTo = urlParams.get('return_to');
+                if (returnTo && isAllowedReturnTo(returnTo)) {
+                    window.location.href = returnTo;
+                    return;
+                }
                 hideLoginModal();
                 showLoginStep('login-step-password');
                 window.location.reload();
@@ -231,6 +264,18 @@ export function setupLoginModal() {
                 errEl.classList.remove('hidden');
             }
         });
+    }
+
+    // CO-172: when loaded at /recover, pre-fill identifier and show forgot-password step.
+    if (window.location.pathname === '/recover') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const prefilledId = urlParams.get('identifier');
+        if (prefilledId) {
+            const el = document.getElementById('forgot-identifier');
+            if (el) el.value = prefilledId;
+        }
+        showLoginStep('login-step-forgot');
+        showLoginModal();
     }
 
     const forgotIdentifierEl = document.getElementById('forgot-identifier');
@@ -337,6 +382,15 @@ export function setupSecurityModal() {
     const btnChangePw = document.getElementById('btn-change-password');
     if (btnChangePw) {
         btnChangePw.addEventListener('click', async () => {
+            // CO-172: On quilomboaraucaria.com.br redirect password change to CO /recover
+            if (window.location.hostname === 'quilomboaraucaria.com.br') {
+                const params = new URLSearchParams({
+                    action: 'change_password',
+                    return_to: 'https://quilomboaraucaria.com.br',
+                });
+                window.location.href = `https://co.artelonga.com.br/recover?${params}`;
+                return;
+            }
             const current = document.getElementById('security-current-password')?.value || '';
             const next = document.getElementById('security-new-password')?.value || '';
             const msgEl = document.getElementById('security-pw-msg');

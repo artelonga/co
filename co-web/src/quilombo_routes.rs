@@ -257,6 +257,16 @@ async fn cadastro_handler(
     let user = quilombo_storage::criar_usuario(storage.conn(), &id, &usuario, &nome, &senha_hash)
         .map_err(AppError::Internal)?;
 
+    // CO-172 Phase 1: mirror quilombo signup into CO users
+    match storage.ensure_co_user_for_quilombo(&user.id) {
+        Ok(co_user_id) => {
+            let _ = storage.link_quilombo_to_co(&user.id, &co_user_id);
+        }
+        Err(e) => {
+            tracing::warn!("ensure_co_user_for_quilombo failed for {}: {e}", user.id);
+        }
+    }
+
     // Sign JWT
     let jwt_secret = auth::jwt_secret();
     let (token, _) = auth::sign_jwt_quilombo(
@@ -792,12 +802,13 @@ async fn atualizar_perfil_handler(
 ) -> Result<Json<Usuario>, AppError> {
     let storage = lock_storage(&state)?;
 
-    if let Some(ref email) = body.email {
-        let email = email.trim().to_lowercase();
-        if !validate_email_format(&email) {
+    let email_being_set = body.email.as_ref().map(|e| e.trim().to_lowercase());
+
+    if let Some(ref email) = email_being_set {
+        if !validate_email_format(email) {
             return Err(AppError::BadRequest("Invalid email format".into()));
         }
-        quilombo_storage::definir_email(storage.conn(), &user_id.0, &email).map_err(
+        quilombo_storage::definir_email(storage.conn(), &user_id.0, email).map_err(
             |e| match e {
                 quilombo_storage::EmailError::AlreadyTaken => {
                     AppError::Conflict("Email already taken".into())
@@ -809,6 +820,24 @@ async fn atualizar_perfil_handler(
 
     let usuario = quilombo_storage::atualizar_perfil(storage.conn(), &user_id.0, &body)
         .map_err(AppError::NotFound)?;
+
+    // CO-172 Phase 1: when email is set, upgrade quilombo user to a CO user
+    if email_being_set.is_some() {
+        match storage.ensure_co_user_for_quilombo(&user_id.0) {
+            Ok(co_user_id) => {
+                let _ = storage.link_quilombo_to_co(&user_id.0, &co_user_id);
+                if let Some(ref email) = usuario.email {
+                    let _ = storage.ensure_email_recovery_channel(&co_user_id, email);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "ensure_co_user_for_quilombo on email-set failed for {}: {e}",
+                    user_id.0
+                );
+            }
+        }
+    }
 
     Ok(Json(usuario))
 }

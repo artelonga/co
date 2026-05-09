@@ -417,6 +417,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/settings/sync", get(serve_sync_settings))
         // CO-38: Yggdrasil game view — served by the SPA.
         .route("/yggdrasil/{game}", get(serve_co_index))
+        // CO-172: /recover — serves the SPA pinned to the forgot-password step.
+        .route("/recover", get(serve_co_index))
         // CO-170: friendly aliases for the timeline composite view that the
         // SPA renders from the bundled `tempo`, `universo`, `humanity`
         // universes. The actual page is `/shared/timeline.html`; both
@@ -916,6 +918,11 @@ pub async fn start_server(config: WebConfig) {
                 tracing::info!(
                     "Recovery channel backfill: {n_channels} user(s) have a verified email channel"
                 );
+            }
+            // CO-172 Phase 2: backfill recovery channels for linked quilombo users.
+            let n_quilombo = storage.backfill_quilombo_recovery_channels();
+            if n_quilombo > 0 {
+                tracing::info!("Quilombo recovery channel backfill: {n_quilombo} user(s) promoted");
             }
             // 1.73.0 (Phase 8 step 3): backfill CAS blobs from existing
             // entries on every boot. Cheap after the first run (hash

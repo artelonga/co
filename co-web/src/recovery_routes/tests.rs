@@ -990,3 +990,218 @@ async fn test_e2e_reset_password_happy_path() {
         "consumed reset token must not be reusable"
     );
 }
+
+// =========================================================================
+// CO-172: Quilombo → CO bridge tests
+// =========================================================================
+
+fn insert_quilombo_user(dir: &std::path::Path, usuario: &str, senha_hash: &str) -> String {
+    let storage = Storage::new(dir.to_str().unwrap());
+    let id = format!(
+        "qu_{}",
+        &uuid::Uuid::new_v4().to_string().replace('-', "")[..8]
+    );
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO quilombo_usuarios \
+             (id, usuario, nome, senha_hash, papel, criado_em, atualizado_em) \
+             VALUES (?1, ?2, ?3, ?4, 'membro', ?5, ?5)",
+            rusqlite::params![id, usuario, usuario, senha_hash, now],
+        )
+        .expect("insert quilombo user");
+    id
+}
+
+// --- 19. ensure_co_user_for_quilombo creates CO user on first call ---
+
+#[tokio::test]
+async fn test_signup_creates_co_user() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let hash = argon2_hash("secret");
+    let qid = insert_quilombo_user(dir.path(), "pedro", &hash);
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let co_id = storage
+        .ensure_co_user_for_quilombo(&qid)
+        .expect("should create CO user");
+    assert!(!co_id.is_empty());
+
+    // Link then verify idempotency.
+    storage.link_quilombo_to_co(&qid, &co_id).unwrap();
+    let co_id2 = storage
+        .ensure_co_user_for_quilombo(&qid)
+        .expect("idempotent after link");
+    assert_eq!(co_id, co_id2, "should return existing linked CO user ID");
+}
+
+// --- 20. email-set links quilombo user to existing CO user ---
+
+#[tokio::test]
+async fn test_email_set_links_existing_co_user() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let hash = argon2_hash("secret");
+    let qid = insert_quilombo_user(dir.path(), "rosa", &hash);
+
+    let co_id_pre = insert_test_user(dir.path(), "rosa@example.com", Some("otherpass"));
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    storage
+        .conn()
+        .execute(
+            "UPDATE quilombo_usuarios SET email = 'rosa@example.com' WHERE id = ?1",
+            rusqlite::params![qid],
+        )
+        .unwrap();
+
+    let co_id = storage
+        .ensure_co_user_for_quilombo(&qid)
+        .expect("should find CO user by email");
+    assert_eq!(co_id, co_id_pre, "should link to the pre-existing CO user");
+}
+
+// --- 21. reset-password propagates hash to quilombo_usuarios ---
+
+#[tokio::test]
+async fn test_reset_propagates_to_quilombo() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let original_hash = argon2_hash("original");
+
+    let qid = insert_quilombo_user(dir.path(), "lua", &original_hash);
+    let co_id = insert_test_user(dir.path(), "lua@example.com", Some("original"));
+
+    let code = "987654";
+    let code_hash = hash_code(code).unwrap();
+    {
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        storage.link_quilombo_to_co(&qid, &co_id).unwrap();
+
+        let normalized =
+            crate::recovery_crypto::normalize_channel_value("email", "lua@example.com");
+        let (ct, nonce) =
+            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes()).unwrap();
+        let lhash = crate::recovery_crypto::compute_lookup_hash(&normalized);
+        let channel_id = storage
+            .create_recovery_channel(&co_id, "email", ct, nonce, &lhash)
+            .unwrap();
+        let verified_at = chrono::Utc::now().to_rfc3339();
+        storage
+            .verify_recovery_channel(&channel_id, &verified_at)
+            .unwrap();
+        storage
+            .conn()
+            .execute(
+                "UPDATE users SET usuario = 'lua' WHERE id = ?1",
+                rusqlite::params![co_id],
+            )
+            .unwrap();
+        let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
+        storage
+            .create_recovery_verification(
+                &channel_id,
+                &co_id,
+                "reset_password",
+                &code_hash,
+                &expires_at,
+            )
+            .unwrap();
+    }
+
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/forgot-password/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(format!(
+                    r#"{{"username_or_channel_value":"lua","code":"{code}"}}"#
+                )))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "forgot-password/verify should succeed"
+    );
+    let body_bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    let reset_token = body["reset_token"].as_str().unwrap().to_string();
+
+    let new_password = "new-secret-pass!";
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::json!({
+                        "reset_token": reset_token,
+                        "new_password": new_password
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "reset-password should succeed"
+    );
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let new_hash: String = storage
+        .conn()
+        .query_row(
+            "SELECT senha_hash FROM quilombo_usuarios WHERE id = ?1",
+            rusqlite::params![qid],
+            |row| row.get(0),
+        )
+        .expect("quilombo user should exist");
+
+    assert_ne!(
+        new_hash, original_hash,
+        "quilombo hash must be updated after CO reset"
+    );
+
+    use argon2::Argon2;
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+    let parsed = PasswordHash::new(&new_hash).expect("valid argon2 hash");
+    Argon2::default()
+        .verify_password(new_password.as_bytes(), &parsed)
+        .expect("new password must verify against quilombo hash");
+}
+
+// --- 22. is_allowed_return_to safelist ---
+
+#[test]
+fn test_return_to_safelist() {
+    use super::is_allowed_return_to;
+
+    assert!(is_allowed_return_to("https://quilomboaraucaria.com.br"));
+    assert!(is_allowed_return_to(
+        "https://quilomboaraucaria.com.br/login"
+    ));
+    assert!(is_allowed_return_to("https://co.artelonga.com.br"));
+    assert!(is_allowed_return_to("https://artelonga.com.br"));
+    assert!(is_allowed_return_to("https://quilombo.artelonga.com.br"));
+
+    assert!(!is_allowed_return_to("https://evil.com"));
+    assert!(!is_allowed_return_to("https://notartelonga.com.br"));
+    assert!(!is_allowed_return_to("https://artelonga.com.br.evil.com"));
+    assert!(!is_allowed_return_to("not-a-url"));
+    assert!(!is_allowed_return_to(""));
+    assert!(!is_allowed_return_to("https://fakeartelonga.com.br"));
+}

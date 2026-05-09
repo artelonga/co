@@ -121,6 +121,29 @@ struct ChangePasswordRequest {
 }
 
 // -------------------------------------------------------------------------
+// CO-172: return_to safelist
+// -------------------------------------------------------------------------
+
+/// Validate a `return_to` URL for the `/recover` redirect.
+/// Only `*.artelonga.com.br` and `quilomboaraucaria.com.br` are accepted.
+#[cfg_attr(not(test), allow(dead_code))]
+pub(crate) fn is_allowed_return_to(url: &str) -> bool {
+    fn extract_host(url: &str) -> Option<&str> {
+        let rest = url
+            .strip_prefix("https://")
+            .or_else(|| url.strip_prefix("http://"))?;
+        let host_port = rest.split(['/', '?', '#']).next()?;
+        Some(host_port.split(':').next().unwrap_or(host_port))
+    }
+    let Some(host) = extract_host(url) else {
+        return false;
+    };
+    host == "quilomboaraucaria.com.br"
+        || host == "artelonga.com.br"
+        || host.ends_with(".artelonga.com.br")
+}
+
+// -------------------------------------------------------------------------
 // Helpers
 // -------------------------------------------------------------------------
 
@@ -715,6 +738,22 @@ async fn reset_password_handler(
         let storage = lock_storage(&state)?;
         storage.update_password_hash(&reset_token.user_id, &new_hash)?;
         storage.consume_reset_token(&token_hash)?;
+        // CO-172 Phase 4: propagate new hash to all linked quilombo users
+        match storage.mirror_password_to_quilombo(&reset_token.user_id, &new_hash) {
+            Ok(n) if n > 0 => {
+                tracing::info!(
+                    user_id = %reset_token.user_id,
+                    "reset-password: mirrored hash to {n} quilombo_usuarios row(s)"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    user_id = %reset_token.user_id,
+                    "mirror_password_to_quilombo failed: {e}"
+                );
+            }
+            _ => {}
+        }
     }
 
     // Issue a new session JWT.

@@ -125,6 +125,7 @@ pub(crate) mod data_migrate;
 pub(crate) mod log_drain;
 pub mod migrations;
 pub(crate) mod projects;
+pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
 pub(crate) mod schema;
 pub(crate) mod seed;
