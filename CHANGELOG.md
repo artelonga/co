@@ -5,6 +5,173 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.88.3] — 2026-05-09
+
+### Refactored — CO-171: modularize the 6k+ line monoliths
+
+**`co-web/src/storage.rs`** (7 962 → 136 lines) extracted into 14 submodules under `co-web/src/storage/`:
+- `schema.rs` — `ensure_column`, `ensure_table`, `split_frontmatter`, `seed_page_frontmatter`, `seed_page_body`, `walkdir`, row-mapper helpers (`row_to_recovery_channel`, `row_to_recovery_verification`, `upsert_entry_row`, `entry_row_from_sql`, `entry_row_to_project`, `entry_row_to_task`, `entry_row_to_comment`), `parse_status/priority/datetime`, and `mod ensure_column_tests` + `mod seed_md_tests`
+- `migrations.rs` — `run_migrations`, `migrate_old_data_to_entries`, `maybe_migrate_entries_to_universe_dbs`; delegates SQL blocks to `migrations/apply.rs`
+- `log_drain.rs` — `get_log_drain_secret`, `set_log_drain_secret`, `insert_log_drain_event`, `log_uat_mutation`, `get_uat_mutations_since/watermark`, `backup_universe`, `universe_db_size`, `search_entries_across_universes`, `schema_version`
+- `projects.rs` — `list_projects`, `list_projects_for_universe`, `get_project`, `create_project`, `delete_project`
+- `tasks.rs` — `list_tasks`, `list_tasks_filtered/paginated`, `get_task`, `create_task`, `update_task`, `delete_task`, `bulk_update/delete_tasks`
+- `comments.rs` — `list_comments`, `create_comment`, `list_activity`
+- `dashboard.rs` — `get_dashboard` + private analytics helpers
+- `users.rs` — `create_user`, `get_user_by_email/id/usuario`, `update_password_hash`
+- `admin.rs` — `seed_uat_user`, `seed_admin_user_from_env`, `ensure_admin_*`, `cleanup_admin_anon_clutter`, `rescue_orphan_universes`, `cleanup_anon_universes`, `get/restore_all_users_with_hashes`
+- `universe.rs` — `create/get/list_universes_*`, membership CRUD, subscribe/unsubscribe
+- `blobs.rs` — `put_blob`, `get_blob`, `has_blob`, `backfill_blobs_from_entries`
+- `subscriptions.rs` — `pin_subscription`, `is_subscribed`, `list_universe_subscribers`, `search_public_universes`, `check_universe_access`, `count_*`, `claim_universe`, `get/update_universe_form_config`
+- `clone_ops.rs` — `migrate_co170_phase_b`, `rebuild_project_universe_index`, `delete_deprecated_universes`, `recompute_content_counts`, `clone_universe`, `list_user_universes`, `list_projects_for_user`, `is_project_in_template`
+- `api_tokens.rs` — `get/update_entry_body`, `create/list/delete/get_api_token_by_value`, `create/get/verify/delete/set_channel_lockout` recovery channel CRUD, `create/get/consume/expire` verification + reset tokens
+
+**`co-web/src/recovery_routes.rs`** (1 856 → 844 lines) test module moved to `recovery_routes/tests.rs` (992 lines)
+
+**`co-web/src/universe_routes.rs`** (2 742 → 1 179 lines):
+- `universe_routes/template.rs` (725 lines) — `apply_template`, `apply_template_all`, `submit_doc_gen_job`, `get_doc_gen_last_error`, `themes_router`, and private helpers `run_type_check`, `build_claude_md`, `build_api_md`, `slugify`
+- `universe_routes/tests.rs` (845 lines) — all 27 tests moved out of inline `mod tests`
+
+**`co-web/src/vault_routes.rs`** (2 216 → 1 485 lines) test module moved to `vault_routes/tests.rs` (731 lines)
+
+**`co-web/src/server.rs`** (2 930 → 1 325 lines):
+- `server/auth_handlers.rs` (450 lines) — `login_handler`, `verify_handler`, `me_handler`, `user_stats_handler`, `logout_handler`, `password_login_handler`, `uat_login_handler`
+- `server/legacy.rs` (304 lines) — legacy inline project/task handlers
+- `server/static_files.rs` (355 lines) — `serve_variant_file`, `serve_co_index`, `serve_assets_page`, `serve_sync_settings`, `guess_content_type`, `cache_control_for`, `looks_like_static_asset`
+- `server/tests.rs` (506 lines) — server-level tests
+
+**`co-web/static/variants/a/app.js`** (6 909 → 495 lines) split into 17 ES modules under `modules/`:
+- `state.js` — shared mutable `state` object
+- `constants.js` — STATUSES, label maps, theme maps, Obsidian compat functions
+- `helpers.js` — DOM, date/time, subtask, sorting, assignee utilities
+- `api.js` — `apiFetch` + `api` object
+- `settings.js` — toast, loading, theme CSS, settings panel, `applyUniverseConfig`
+- `sidebar.js` — `renderSidebar`, `renderHeader`, `renderUsageCount`, `setupHamburgerMenu`
+- `modals.js` — task modal, comments, activity, universe-info, usage-limit modal, editor
+- `login.js` — `showLoginModal`, `hideLoginModal`, `setupLoginModal`, `setupSecurityModal`
+- `onboarding.js` — `setupOnboarding`, `setupCriarModal`
+- `yggdrasil.js` — `bootYggdrasil`, `renderYggdrasilHub`, `renderYggdrasilGame`
+- `boot.js` — `bootAppForUniverse`, `renderUniverseHome`
+- `views/kanban.js` — `renderKanban`, `renderTaskCard`, drag-drop
+- `views/calendar.js` — `renderCalendar`, `renderMiniCalendar`, `renderGantt`
+- `views/table.js` — `renderTable`, `setupTableEvents`
+- `views/timeline.js` — `renderTimeline`, timeline math, bar drag, tooltip
+- `views/dashboard.js` — `renderDashboard`, SVG chart helpers
+- `views/conteudo.js` — `renderConteudo`, folder tree, zoom modal, view-dados
+
+`index.html` updated to `<script type="module" src="/app.js">` for native ES module loading.
+
+No public API change — all HTTP endpoints, `pub fn` signatures, and JS globals unchanged.
+
+## [1.88.2] — 2026-05-09
+
+### Fixed — CO-170 phase B: actually rebuild project_universe_index on every boot
+
+1.88.1 fixed the rebuild *logic* (sort + INSERT OR IGNORE + uppercase normalization) but the call site was gated on `if total_moves > 0`. After the moves landed in 1.88.0, every subsequent boot had `total = 0`, so the rebuild never re-ran — the index stayed in its pre-fix state.
+
+`rebuild_project_universe_index` is now public and called unconditionally from `server.rs` boot path right after `migrate_co170_phase_b`. Cheap (<100 rows total per universe walk) and idempotent.
+
+This is what actually surfaces the moved tasks in `/api/projects/CW/tasks?u=co` etc.
+
+## [1.88.1] — 2026-05-09
+
+### Fixed — CO-170 phase B follow-up: deterministic project_universe_index rebuild
+
+After the 1.88.0 data moves, `/api/projects/CW/tasks?u=co` still returned `[]` because `project_universe_index` couldn't disambiguate projects sharing a `key` between universes (e.g. `co/projects/CO/_project.md` "CO Platform" vs `template/projects/CO/_project.md` "Bem-vindo ao Co" both register `key: "CO"`). The rebuild used `INSERT OR REPLACE` and iterated universes in undefined order, so the winner was non-deterministic — and on this prod boot, the tutorial won.
+
+Two small changes:
+- Sort universes during rebuild: real content universes first, then `template` / `tempo` / `humanity` / `universo` / `yggdrasil` last.
+- Switch to `INSERT OR IGNORE` so the first-seen registration wins. Combined with the sort, that guarantees `co` always beats `template` for the `CO` key.
+- Normalize the stored `project_key` to uppercase to match the lookup path.
+
+The rebuild now logs the number of indexed rows so future drift is visible from boot logs.
+
+## [1.88.0] — 2026-05-09
+
+### Fixed — CO-170 phase B (data moves): consolidate misplaced project content
+
+Past co-sync runs preserved absolute filesystem paths when ingesting entries into the `co` universe (`data/universes/default/projects/AL/...`, `data/universes/template/projects/MP/...`). Result: 7 Arte Longa tasks living in `co`, 18+ Quilombo tasks living in `co`, 44 CO-platform tasks (API/CW/DS/PLT) living in `artelonga`, plus tutorial leaks (LOCACO, MP) in `co`. Per user direction "AL is its own universe; co stuff can be under co":
+
+`Storage::migrate_co170_phase_b()` runs on every boot. Idempotent — once entries move, the source matches no rows and each step no-ops:
+
+1. Drop tutorial / template leakage from `co`: `data/universes/template/projects/{MP,CO}/*`, `data/universes/template/{timeline,content}/*`, `data/universes/local-2cw54k/projects/LOCACO/*`.
+2. Move `co/data/universes/default/projects/AL/*` → `artelonga/projects/AL/*` (path stripped of `data/universes/default/` prefix).
+3. Move `co/data/universes/default/projects/QA/*` → `quilomboaraucaria/projects/QA/*` (same path-strip).
+4. Drop the empty `co/data/universes/default/projects/{API,DS,PLT,CO}/_project.md` stubs that overlap with destination keys.
+5. Move `artelonga/projects/{API,DS,PLT,CW}/*` → `co/projects/{...}/*` (path unchanged).
+6. Rebuild `project_universe_index` from scratch off the post-move state.
+
+Per-step row counts are logged so future drift surfaces without bisecting commits.
+
+A new `MoveRow` struct replaces the prior 9-element tuple in `move_entries_strip_prefix` to satisfy `clippy::type_complexity`.
+
+## [1.87.0] — 2026-05-09
+
+### Fixed — CO-170 phase B: drop empty cross-leaked project stubs
+
+The `co` universe listed projects AL, API, CO, DS, PLT and the `artelonga` universe listed API, ARTEP, CW, DS, PLT — both with `_project.md` rows but **zero tasks** under them. Empirical audit confirmed: every leaked project was a metadata-only stub. Past filesystem syncs wrote `projects/<KEY>/_project.md` into the wrong universe directories; the actual user-facing content (CO-N user-stories in `co`, `modelos/*.md` content in `artelonga`) lives outside the projects surface.
+
+`Storage::cleanup_empty_projects()` now runs on every boot. For each universe's per-universe DB:
+1. Find rows with `entry_type = 'project'`.
+2. Count siblings under `projects/<KEY>/` that are NOT `_project.md`.
+3. If zero, drop the project entry + the matching `project_universe_index` row.
+
+Per user direction "AL is its own universe; co stuff can be under co", the algorithm preserves any project that has real content, regardless of which universe it sits in. Today: every leaked project is empty, so all of them get cleaned. Future leaks (if any) will only get cleaned if they're equally hollow.
+
+Idempotent — re-running after a clean boot is a no-op.
+
+## [1.86.0] — 2026-05-09
+
+### Fixed — CO-170 phases A + D: universe sidebar hygiene + timeline aliases
+
+**Phase A — soft-hide deprecated/empty universes**
+- Migration v38 adds `universes.hidden INTEGER NOT NULL DEFAULT 0` (idempotent via `ensure_column`).
+- New `Storage::hide_deprecated_universes()` runs on every boot. Sets `hidden = 1` for `language`, `topologia` (both empty parent placeholders, 0 entries), and `mbya` (4620-entry corpus, intended pre-merge into `comunicacao` per 1.69.0 changelog but the actual content move never landed — see CO-170 Phase C).
+- Both `list_public_universes` (anon sidebar) and `list_universes_for_user` (admin sidebar) now filter `WHERE COALESCE(hidden, 0) = 0`. Direct URL access still works; only the listing surface is gated.
+
+**Bonus — surface timeline universes in the public list**
+- `list_public_universes` previously matched only `visibility = 'public-subscribable' OR is_template = 1`. The bundled timeline trio (`tempo`, `humanity`, `universo`) ships with `visibility = 'public-static'`, so they were accessible by direct URL but invisible in the sidebar. Query now includes `'public-static'` too. Anon visitors will see the timeline trio appear nested under `template` (via `parent_key`).
+
+**Phase D — friendly aliases for the timeline view**
+- Two new redirect routes: `/linhadotempo` and `/timeline` both 307 → `/shared/timeline.html?u=tempo,universo,humanity`. The composite timeline view always existed at the long URL; these aliases make it discoverable from a typed URL.
+
+This addresses 4 of the 6 issues in CO-170. Phase B (cross-universe project leak — `co` vs `artelonga` projects mixed) and Phase C (real `mbya` → `comunicacao` content merge) remain — both need destructive-data-move authorization.
+
+## [1.85.0] — 2026-05-09
+
+### Changed — CO-165: `users.email` is now an implicit verified recovery channel
+
+Forgot-password used to require an explicit "add channel → verify code" UI step before it would do anything. New behavior: any user with a non-empty `users.email` automatically has that address as a verified recovery channel — no add-channel dance required to recover the account.
+
+**Two new `Storage` methods:**
+- `ensure_email_recovery_channel(user_id, email)` — encrypts the email and inserts a verified channel row, or bumps an existing matching row to verified. Idempotent.
+- `backfill_email_recovery_channels()` — walks `users` and calls the above for every row with a non-NULL email. Returns the count touched.
+
+**Wiring:**
+- `seed_admin_user_from_env` calls `ensure_email_recovery_channel` after the admin row is created/updated, so the seed admin can recover from day one.
+- `server.rs` boot path calls `backfill_email_recovery_channels` once on every startup. Existing prod admins get backfilled; new signups via `password-login` paths inherit the same guarantee through the seed call site.
+
+The lookup hash is computed via `recovery_crypto::compute_lookup_hash` (BLAKE3 keyed) so the existing `forgot-password` lookup-by-channel-value path Just Works against the seeded rows.
+
+This makes `forgot-password yuri@artelonga.com.br` actually deliver to that mailbox via Resend (1.84.0 cascade) without any pre-setup.
+
+## [1.84.0] — 2026-05-09
+
+### Changed — CO-165 + CO-169: recovery delivery now uses CO-169 channel providers
+
+`recovery_routes::send_verification_code` was a flat match with SMTP-only email and stub WhatsApp/SMS. CO-169 shipped real provider abstractions (`ResendProvider`, `EvolutionApiProvider`) but they weren't wired into the password-recovery path.
+
+Now resolved with a tiered cascade per channel — every step is best-effort, every failure logs the redacted recipient + raw code so an operator can recover:
+
+- **Email** — `ResendProvider` (`RESEND_API_KEY`) → SMTP (`CO_SMTP_*`) → log only.
+- **WhatsApp** — `EvolutionApiProvider` (`EVOLUTION_API_KEY`/`EVOLUTION_API_URL`/`EVOLUTION_INSTANCE`) → log only.
+- **SMS** — log only (Twilio is the planned Phase 2 provider).
+
+Two new helper functions in `recovery_routes.rs` — `deliver_email_code` and `deliver_whatsapp_code` — replace the inline match. `redact_phone` masks all but the last four digits in WhatsApp logs (consistent with existing `redact_email`).
+
+The recovery body strings stay PT-only in this change; i18n is its own ticket.
+
+CO-165 acceptance items "WhatsApp + SMS providers stubbed in Phase 1" are no longer "stubbed in this codebase" — the Phase 2 work has shipped (CO-169) and now flows through the recovery code path. Operators can drop in `RESEND_API_KEY` or `EVOLUTION_API_KEY` and codes route correctly without code changes.
+
 ## [1.83.0] — 2026-05-08
 
 ### Added — CO-165: real SMTP delivery for recovery codes (email)

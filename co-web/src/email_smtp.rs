@@ -14,10 +14,9 @@
 use std::env;
 
 use lettre::{
-    Message, Tokio1Executor,
+    AsyncTransport, Message, Tokio1Executor,
     message::header::ContentType,
     transport::smtp::{AsyncSmtpTransport, authentication::Credentials},
-    AsyncTransport,
 };
 
 /// SMTP configuration assembled from env vars. `None` if any required field

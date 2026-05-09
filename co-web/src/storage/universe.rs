@@ -1,0 +1,465 @@
+use chrono::Utc;
+use rusqlite::params;
+use serde_json::json;
+
+use crate::entry_index::make_entry;
+
+use super::Storage;
+use super::schema::{parse_datetime, upsert_entry_row};
+
+impl Storage {
+    pub fn create_universe(
+        &mut self,
+        create: crate::models::CreateUniverse,
+        owner_id: &str,
+    ) -> anyhow::Result<crate::models::Universe> {
+        if self.get_universe(&create.key).is_some() {
+            anyhow::bail!("Universe '{}' already exists", create.key);
+        }
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO universes (key, name, description, owner_id, created_at, visibility) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 'private')",
+            params![
+                create.key,
+                create.name,
+                create.description,
+                owner_id,
+                now_str
+            ],
+        )?;
+        // Owner is automatically a member
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) VALUES (?1, ?2, 'owner', ?3)",
+            params![create.key, owner_id, now_str],
+        )?;
+
+        // Create ONE empty project named "Co" — private boards start empty.
+        // Project key is unique per universe to avoid cross-universe task leaks.
+        let proj_key = format!(
+            "{}P",
+            create
+                .key
+                .to_uppercase()
+                .chars()
+                .take(4)
+                .collect::<String>()
+        );
+        let proj_path = format!("projects/{}/_project.md", proj_key);
+        let proj_fm = json!({
+            "type": "project",
+            "key": proj_key,
+            "title": "Bem-vindo ao Co",
+            "status": "active",
+            "next_id": 1,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "tags": []
+        });
+        let proj_entry = make_entry(&proj_path, proj_fm, "");
+        let universe_root = self.universe_root(&create.key);
+        let _ = co::entry::write_entry(&universe_root, &proj_entry);
+        let _ = upsert_entry_row(&self.conn, &create.key, &proj_entry);
+
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = 1 WHERE key = ?1",
+            params![create.key],
+        );
+
+        Ok(crate::models::Universe {
+            key: create.key,
+            name: create.name,
+            description: create.description,
+            owner_id: owner_id.to_string(),
+            created_at: now,
+            is_template: false,
+            is_public: false,
+            content_count: 1,
+            requires_login: false,
+            visibility: "private".into(),
+            parent_key: None,
+        })
+    }
+
+    pub fn get_universe(&self, key: &str) -> Option<crate::models::Universe> {
+        // CO-98 hardening: query the stable schema first (always present at
+        // schema_v ≥ 17), then opportunistically fetch `parent_key` in a
+        // second query. If migration v22 never landed on this DB (or the
+        // column is otherwise absent), the second query returns None and the
+        // function still produces a valid Universe — instead of returning
+        // 404 to the caller as if the universe didn't exist at all.
+        let mut universe = self
+            .conn
+            .query_row(
+                "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
+                 COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
+                 FROM universes WHERE key = ?1",
+                params![key],
+                |row| {
+                    Ok(crate::models::Universe {
+                        key: row.get(0)?,
+                        name: row.get(1)?,
+                        description: row.get(2)?,
+                        owner_id: row.get(3)?,
+                        created_at: parse_datetime(&row.get::<_, String>(4)?),
+                        is_template: row.get::<_, i64>(5)? != 0,
+                        is_public: row.get::<_, i64>(6)? != 0,
+                        content_count: row.get::<_, i64>(7).unwrap_or(0),
+                        requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                        visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                        parent_key: None,
+                    })
+                },
+            )
+            .ok()?;
+        universe.parent_key = self
+            .conn
+            .query_row(
+                "SELECT parent_key FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
+        Some(universe)
+    }
+
+    pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
+        // Owned + member + subscribed universes, deduplicated.
+        // Also include `owner_id = user_id` directly as a defensive fallback —
+        // `create_universe` inserts an owner row in `universe_members`, but
+        // historic data or a partial migration could leave that row missing,
+        // which would silently hide the user's own universe from their sidebar.
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+                 u.is_template, u.is_public, u.content_count, \
+                 COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
+                 FROM universes u \
+                 WHERE COALESCE(u.hidden, 0) = 0 \
+                   AND ( \
+                       u.owner_id = ?1 \
+                       OR u.key IN ( \
+                         SELECT universe_key FROM universe_members WHERE user_id = ?1 \
+                         UNION \
+                         SELECT universe_key FROM subscriptions WHERE user_id = ?1 \
+                       ) \
+                   ) \
+                 ORDER BY u.created_at ASC",
+            )
+            .expect("Failed to prepare list_universes_for_user");
+        // CO-98 hardening: same two-query split as get_universe — the bulk
+        // SELECT stays on the stable schema, then we opportunistically fetch
+        // parent_key per row. Slightly more SQL round-trips but resilient to
+        // a partially-applied migration.
+        let universes: Vec<crate::models::Universe> = stmt
+            .query_map(params![user_id], |row| {
+                Ok(crate::models::Universe {
+                    key: row.get(0)?,
+                    name: row.get(1)?,
+                    description: row.get(2)?,
+                    owner_id: row.get(3)?,
+                    created_at: parse_datetime(&row.get::<_, String>(4)?),
+                    is_template: row.get::<_, i64>(5)? != 0,
+                    is_public: row.get::<_, i64>(6)? != 0,
+                    content_count: row.get::<_, i64>(7).unwrap_or(0),
+                    requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                    visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                    parent_key: None,
+                })
+            })
+            .expect("Failed to list universes for user")
+            .filter_map(|r| r.ok())
+            .collect();
+        universes
+            .into_iter()
+            .map(|mut u| {
+                u.parent_key = self
+                    .conn
+                    .query_row(
+                        "SELECT parent_key FROM universes WHERE key = ?1",
+                        params![u.key],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                u
+            })
+            .collect()
+    }
+
+    // --- Universe Members ---
+
+    pub fn is_universe_member(&self, universe_key: &str, user_id: &str) -> bool {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                params![universe_key, user_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        count > 0
+    }
+
+    pub fn list_universe_members(&self, universe_key: &str) -> Vec<crate::models::UniverseMember> {
+        let mut stmt = self.conn.prepare(
+            "SELECT um.universe_key, um.user_id, um.role, um.joined_at, u.email, u.display_name \
+             FROM universe_members um \
+             LEFT JOIN users u ON um.user_id = u.id \
+             WHERE um.universe_key = ?1 \
+             ORDER BY um.joined_at ASC",
+        ).expect("Failed to prepare list_universe_members");
+        stmt.query_map(params![universe_key], |row| {
+            Ok(crate::models::UniverseMember {
+                universe_key: row.get(0)?,
+                user_id: row.get(1)?,
+                role: row.get(2)?,
+                joined_at: parse_datetime(&row.get::<_, String>(3)?),
+                email: row.get(4)?,
+                display_name: row.get(5)?,
+            })
+        })
+        .expect("Failed to list universe members")
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    pub fn add_universe_member(
+        &mut self,
+        universe_key: &str,
+        user_id: &str,
+        role: &str,
+    ) -> anyhow::Result<crate::models::UniverseMember> {
+        if self.get_universe(universe_key).is_none() {
+            anyhow::bail!("Universe '{}' not found", universe_key);
+        }
+        // Note: user_id may refer to a quilombo user (not in the users table) — no FK check.
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) VALUES (?1, ?2, ?3, ?4)",
+            params![universe_key, user_id, role, now_str],
+        )?;
+        let member = self.conn.query_row(
+            "SELECT um.universe_key, um.user_id, um.role, um.joined_at, u.email, u.display_name \
+             FROM universe_members um LEFT JOIN users u ON um.user_id = u.id \
+             WHERE um.universe_key = ?1 AND um.user_id = ?2",
+            params![universe_key, user_id],
+            |row| {
+                Ok(crate::models::UniverseMember {
+                    universe_key: row.get(0)?,
+                    user_id: row.get(1)?,
+                    role: row.get(2)?,
+                    joined_at: parse_datetime(&row.get::<_, String>(3)?),
+                    email: row.get(4)?,
+                    display_name: row.get(5)?,
+                })
+            },
+        )?;
+        Ok(member)
+    }
+
+    pub fn remove_universe_member(
+        &mut self,
+        universe_key: &str,
+        user_id: &str,
+    ) -> anyhow::Result<()> {
+        // Prevent removing the owner
+        let universe = self
+            .get_universe(universe_key)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", universe_key))?;
+        if universe.owner_id == user_id {
+            anyhow::bail!("Cannot remove the owner from a universe");
+        }
+        self.conn.execute(
+            "DELETE FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+            params![universe_key, user_id],
+        )?;
+        Ok(())
+    }
+
+    // --- Universe member role helper ---
+
+    /// Return the role of a user in a universe, or None if not a member.
+    pub fn universe_member_role(&self, universe_key: &str, user_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT role FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
+                params![universe_key, user_id],
+                |row| row.get(0),
+            )
+            .ok()
+    }
+
+    // --- CO-49: Subscriptions ---
+
+    /// 1.46.0: auto-subscribe a user to every universe flagged
+    /// `default_for_new_users=1`. Idempotent. Called on signup and on every
+    /// boot for existing users (one-time backfill — the `INSERT OR IGNORE`
+    /// makes repeat calls cheap).
+    pub fn subscribe_user_to_default_universes(&self, user_id: &str) -> anyhow::Result<usize> {
+        let now_str = Utc::now().to_rfc3339();
+        let mut stmt = self
+            .conn
+            .prepare("SELECT key FROM universes WHERE default_for_new_users = 1")?;
+        let keys: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+        let mut added = 0usize;
+        for key in &keys {
+            let n = self.conn.execute(
+                "INSERT OR IGNORE INTO subscriptions (user_id, universe_key, subscribed_at) \
+                 VALUES (?1, ?2, ?3)",
+                params![user_id, key, now_str],
+            )?;
+            added += n;
+        }
+        Ok(added)
+    }
+
+    /// 1.46.0: subscribe every existing user to every default universe.
+    /// Run once at boot so the v29 migration that flagged yggdrasil
+    /// reaches users who already exist.
+    pub fn backfill_default_subscriptions(&self) -> anyhow::Result<usize> {
+        let mut stmt = self.conn.prepare("SELECT id FROM users")?;
+        let user_ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(Result::ok)
+            .collect();
+        let mut added = 0usize;
+        for uid in &user_ids {
+            added += self.subscribe_user_to_default_universes(uid)?;
+        }
+        Ok(added)
+    }
+
+    /// Subscribe a user to a public-subscribable universe.
+    pub fn subscribe_universe(&mut self, user_id: &str, universe_key: &str) -> anyhow::Result<()> {
+        let universe = self
+            .get_universe(universe_key)
+            .ok_or_else(|| anyhow::anyhow!("Universe '{}' not found", universe_key))?;
+        if universe.visibility != "public-subscribable" {
+            anyhow::bail!("Universe '{}' is not public-subscribable", universe_key);
+        }
+        let now_str = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO subscriptions (user_id, universe_key, subscribed_at) \
+             VALUES (?1, ?2, ?3)",
+            params![user_id, universe_key, now_str],
+        )?;
+        Ok(())
+    }
+
+    /// Unsubscribe a user from a universe.
+    pub fn unsubscribe_universe(
+        &mut self,
+        user_id: &str,
+        universe_key: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "DELETE FROM subscriptions WHERE user_id = ?1 AND universe_key = ?2",
+            params![user_id, universe_key],
+        )?;
+        Ok(())
+    }
+
+    // -------------------------------------------------------------------
+    // Phase 8 step 1: content-addressed blob storage (1.70.0)
+    // -------------------------------------------------------------------
+
+    /// Store the bytes (typically an entry body), keyed by sha256.
+    /// Returns the hex-encoded sha256 hash. Idempotent — re-storing the
+    /// same bytes is a no-op (INSERT OR IGNORE).
+    pub fn put_blob(&self, bytes: &[u8]) -> anyhow::Result<String> {
+        use sha2::{Digest, Sha256};
+        let hash = format!("{:x}", Sha256::digest(bytes));
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO blobs (hash, bytes, size, created_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![hash, bytes, bytes.len() as i64, now],
+        )?;
+        Ok(hash)
+    }
+
+    /// Fetch a blob's bytes by hash. Returns `None` if the hash isn't stored.
+    pub fn get_blob(&self, hash: &str) -> Option<Vec<u8>> {
+        self.conn
+            .query_row(
+                "SELECT bytes FROM blobs WHERE hash = ?1",
+                params![hash],
+                |row| row.get::<_, Vec<u8>>(0),
+            )
+            .ok()
+    }
+
+    /// True if the blob exists. Cheaper than `get_blob` (no body read).
+    pub fn has_blob(&self, hash: &str) -> bool {
+        self.conn
+            .query_row("SELECT 1 FROM blobs WHERE hash = ?1", params![hash], |_| {
+                Ok(true)
+            })
+            .unwrap_or(false)
+    }
+
+    /// 1.73.0 (Phase 8 step 3): one-time backfill — walk every entry in
+    /// every per-universe DB and put its body into the CAS blob store.
+    /// Idempotent (INSERT OR IGNORE inside `put_blob`). Returns the
+    /// (universes_scanned, entries_processed, blobs_added) tuple. Boot-
+    /// time call is cheap on subsequent runs because the only work for
+    /// already-stored bodies is a hash compute + an INSERT OR IGNORE
+    /// that no-ops at the unique-key level.
+    pub fn backfill_blobs_from_entries(&self) -> (usize, usize, usize) {
+        let mut stmt = match self.conn.prepare("SELECT key FROM universes") {
+            Ok(s) => s,
+            Err(_) => return (0, 0, 0),
+        };
+        let keys: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default();
+
+        let mut universes_scanned = 0usize;
+        let mut entries_processed = 0usize;
+        let mut blobs_added = 0usize;
+
+        for key in &keys {
+            universes_scanned += 1;
+            let uc = self.universe_pool.get_or_open(key);
+            let guard = match uc.lock() {
+                Ok(g) => g,
+                Err(_) => continue,
+            };
+            let mut s = match guard.prepare("SELECT body FROM entries WHERE universe_key = ?1") {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let bodies: Vec<String> = match s.query_map(params![key], |row| row.get::<_, String>(0))
+            {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => continue,
+            };
+            drop(s);
+            drop(guard);
+
+            for body in &bodies {
+                entries_processed += 1;
+                use sha2::{Digest, Sha256};
+                let hash = format!("{:x}", Sha256::digest(body.as_bytes()));
+                if !self.has_blob(&hash) && self.put_blob(body.as_bytes()).is_ok() {
+                    blobs_added += 1;
+                }
+            }
+        }
+
+        tracing::info!(
+            "blob backfill: scanned {universes_scanned} universe(s), processed {entries_processed} entries, {blobs_added} new blob(s) added"
+        );
+        (universes_scanned, entries_processed, blobs_added)
+    }
+}
