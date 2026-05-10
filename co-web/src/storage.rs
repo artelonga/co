@@ -122,6 +122,7 @@ pub(crate) mod api_tokens;
 pub(crate) mod clone_ops;
 pub(crate) mod dashboard;
 pub(crate) mod data_migrate;
+pub(crate) mod invitations;
 pub(crate) mod log_drain;
 pub mod migrations;
 pub(crate) mod projects;
@@ -133,6 +134,8 @@ pub(crate) mod subscriptions;
 pub(crate) mod tasks;
 pub(crate) mod universe;
 pub(crate) mod users;
+
+pub use invitations::Invitation;
 
 pub use schema::parse_datetime;
 pub use schema::seed_data;

@@ -1255,6 +1255,89 @@ impl Storage {
                 .expect("migration v38: version insert");
         }
 
+        if current_version < 39 {
+            // CO-177: Google OAuth linkage. `google_sub` stores Google's
+            // stable user identifier (the `sub` claim), and is what re-login
+            // matches on — email can change in Google but `sub` is forever.
+            // Nullable because most users won't link Google.
+            ensure_column(&self.conn, "users", "google_sub", "TEXT")
+                .expect("migration v39: users.google_sub");
+            // Partial unique index — one Google account links to at most one
+            // CO user. NULL `google_sub` rows are excluded (multiple unlinked
+            // users coexist).
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_google_sub \
+                     ON users(google_sub) WHERE google_sub IS NOT NULL;",
+                )
+                .expect("migration v39: idx_users_google_sub");
+            self.conn
+                .execute(
+                    "INSERT OR IGNORE INTO schema_version (version) VALUES (39)",
+                    [],
+                )
+                .expect("migration v39: version insert");
+        }
+
+        if current_version < 40 {
+            // CO-188: universe invitation tokens — single-use invites with
+            // role assignment. Raw token only in email; token_hash (sha256)
+            // stored here so the DB never sees the raw secret.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS universe_invitations (
+                        token_hash      TEXT PRIMARY KEY,
+                        universe_key    TEXT NOT NULL,
+                        invited_by      TEXT NOT NULL,
+                        invited_email   TEXT,
+                        invited_user_id TEXT,
+                        role            TEXT NOT NULL DEFAULT 'member',
+                        expires_at      TEXT NOT NULL,
+                        consumed_at     TEXT,
+                        revoked_at      TEXT,
+                        created_at      TEXT NOT NULL,
+                        FOREIGN KEY (universe_key) REFERENCES universes(key)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_invitations_universe
+                        ON universe_invitations(universe_key, consumed_at);
+                    CREATE INDEX IF NOT EXISTS idx_invitations_recipient
+                        ON universe_invitations(invited_email, consumed_at);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (40);
+                    ",
+                )
+                .expect("Failed to run migration v40");
+        }
+
+        // CO-188 unconditional backfill — ensures the table exists even if
+        // v40 was partially applied on an older instance.
+        ensure_table(
+            &self.conn,
+            "universe_invitations",
+            "CREATE TABLE IF NOT EXISTS universe_invitations (
+                token_hash      TEXT PRIMARY KEY,
+                universe_key    TEXT NOT NULL,
+                invited_by      TEXT NOT NULL,
+                invited_email   TEXT,
+                invited_user_id TEXT,
+                role            TEXT NOT NULL DEFAULT 'member',
+                expires_at      TEXT NOT NULL,
+                consumed_at     TEXT,
+                revoked_at      TEXT,
+                created_at      TEXT NOT NULL,
+                FOREIGN KEY (universe_key) REFERENCES universes(key)
+            );",
+        )
+        .expect("CO-188 backfill: universe_invitations table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_invitations_universe
+                     ON universe_invitations(universe_key, consumed_at);
+                 CREATE INDEX IF NOT EXISTS idx_invitations_recipient
+                     ON universe_invitations(invited_email, consumed_at);",
+            )
+            .expect("CO-188 backfill: invitation indexes");
+
         // CO-165 unconditional backfill: ensure recovery tables exist even if
         // v37 migration was partially applied (same pattern as CO-137).
         ensure_column(&self.conn, "users", "usuario", "TEXT").ok();

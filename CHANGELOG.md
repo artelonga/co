@@ -5,6 +5,340 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.95.0] — 2026-05-10
+
+### Added — CO-188: Universe invitation tokens
+
+Universe owners and admin members can now invite others to private universes via single-use tokens — no more manual SQL.
+
+**New endpoints:**
+- `POST /api/v1/universes/:slug/invitations` — mint a 14-day single-use invite (auth required; caller must be owner or admin member). Accepts `email`, `usuario`, or `user_id`. Returns `{token_hash, expires_at, sent_to}`. Raw token sent exclusively to the recipient via email (Resend → SMTP → log cascade). Never returned to the API caller.
+- `GET /api/v1/invitations/:token` — public preview: see universe name, inviter, and expiry before logging in. Returns 404 (not found), 410 (expired), or 200 with `already_consumed: true/false`.
+- `POST /api/v1/invitations/:token/accept` — auth required. Verifies caller identity matches the invitee (by user_id or email, case-insensitive). On success, inserts a `universe_members` row and marks the invitation consumed. Idempotent re-membership via `INSERT OR IGNORE`.
+
+**Migration v40:** new `universe_invitations` table with indexes on `(universe_key, consumed_at)` and `(invited_email, consumed_at)`. `revoked_at` column reserved for a future revoke endpoint (CO-189+).
+
+**Storage helpers** in `storage/invitations.rs`: `create_invitation`, `get_invitation_by_token`, `consume_invitation`, `list_invitations_for_universe`, `list_invitations_for_email`.
+
+**Tests:** 10 covering happy path (email / usuario / user_id), 403 non-owner, 409 already-member, 410 expired, 410 consumed (re-accept), and identity mismatch on accept.
+
+## [1.94.1] — 2026-05-10
+
+### Fixed — `return_to` safelist now includes `quilomboaraucaria.org`
+
+Production quilombo serves on `.org` (the `.com.br` is a dev/historic alias). The `is_allowed_return_to` safelist only had `quilomboaraucaria.com.br` → CO was 400-rejecting any handover bounce that named the live `.org` host. After this patch, both are accepted; the `quilomboaraucaria.org.evil.com` suffix-confusion attack is also tested as rejected.
+
+## [1.94.0] — 2026-05-09
+
+### Changed — CO-186: SSO handover tokens now signed ES256 (no shared secret per universe)
+
+Before: each new universe deploy needed `CO_JWT_SECRET=<JWT_SECRET on co-artelonga>` set as a Fly secret to validate handover tokens. Three operational pains: secret distribution per deploy, lockstep rotation, every deploy could forge tokens for any user.
+
+After: handover tokens signed with CO's existing P-256 private key (already used for `/.well-known/jwks.json` per CO-166). Receivers validate the public key fetched from CO's JWKS endpoint — no shared secret. Onboarding a new universe to SSO is now:
+- One env var: `CO_JWKS_URL=https://co.artelonga.com.br/.well-known/jwks.json` (configurable; this is the default).
+- One ~30-line `/auth/co-handover` endpoint: validate `co_token` via JWKS, mint local cookie, redirect.
+- One Google button anchor with `?return_to=https://<your-domain>/auth/co-handover`.
+
+**Code changes:**
+- `auth::sign_handover_jwt_es256(jwt_key, user_id, email, tier)` — new ES256 signer using `JwtKey` from CO-166. 60-second TTL.
+- `auth::sign_handover_jwt(...)` — kept as legacy HS256 helper (annotated for removal in CO-187).
+- `auth::maybe_attach_co_handover_token(...)` signature changed: now takes `&JwtKey` instead of `&str` HS256 secret.
+- `oauth_google::callback_handler` and `recovery_routes::reset_password_handler` updated to pass `&state.jwt_key`.
+
+**For deployment operators:**
+- `co-artelonga` doesn't need any new secret — uses the existing `JwtKey` infrastructure that was already powering JWKS.
+- `quilombo-araucaria` and any future universe SHOULD migrate `/auth/co-handover` to JWKS validation (filed as **QB-12** for quilombo). Until they migrate, both signing paths can coexist: CO-187 will retire HS256 once consumers cut over.
+
+**For new universes (the per-universe pattern, before adding any):**
+1. Implement `/auth/co-handover` endpoint that:
+   - Reads `?co_token=<JWT>` from URL.
+   - Fetches `https://co.artelonga.com.br/.well-known/jwks.json` (cache 1h).
+   - Verifies the token signature with the public key matching the `kid` header.
+   - Re-signs a local 7-day session JWT and sets a same-domain cookie.
+   - Redirects to `/`.
+2. Update login UI to point Google/recover anchors at `?return_to=https://<domain>/auth/co-handover`.
+3. No secrets to set on Fly. Done.
+
+This unblocks adding artelonga, yggdrasil, future deployments to SSO without per-add secret distribution.
+
+## [1.93.1] — 2026-05-09
+
+### Added — CO-185: short-lived `co_token` for cross-apex SSO handover
+
+QB-11 ships the SvelteKit `/auth/co-handover` endpoint that reads `co_token` from the URL and sets a quilombo-side session cookie. This patch is the co-web producer side.
+
+**`crate::auth`**:
+- `sign_handover_jwt(user_id, email, tier, secret)` — same Claims shape as `sign_jwt` but with **60-second** TTL. Long enough to traverse the redirect, short enough that a leaked URL is useless.
+- `maybe_attach_co_handover_token(return_to, ...)` — when `return_to` contains `/auth/co-handover` (any safelisted host), appends `?co_token=<jwt>` (or `&co_token=`). Otherwise returns the URL unchanged.
+
+**Wired into:**
+- `oauth_google::callback_handler` — on Google sign-in, the redirect to `return_to` now carries the handover token when bouncing to a co-handover URL. Cookie still set on `co.artelonga.com.br` so the user is also logged in here.
+- `recovery_routes::reset_password_handler` — response body now includes `co_token: "<short-lived jwt>"`. Login modal SPA reads it from the response and appends `?co_token=` to the redirect URL when `return_to` ends in `/auth/co-handover`. Same logic — `co.artelonga.com.br` cookie unchanged, plus URL handover.
+
+The handover token has 60-second lifetime by design — the receiving SvelteKit endpoint validates and immediately mints its own 7-day cookie (via re-signing with the shared `CO_JWT_SECRET`), so the browser never holds the URL-bound token longer than one redirect.
+
+When `return_to` does NOT contain `/auth/co-handover` (the common case — same-apex returns), behavior is unchanged: bare redirect, cookie carries the session.
+
+QB-11 expects `CO_JWT_SECRET` env var on the quilombo deployment to match `JWT_SECRET` on `co-artelonga`. Both decode the same HS256 JWTs.
+
+## [1.93.0] — 2026-05-09
+
+### Added — CO-184: reverse bridge — every CO sign-in auto-provisions a quilombo identity
+
+CO-172 made every quilombo signup auto-provision a CO account (one-way). User feedback:
+
+> we want single sign on for all users all routes, so a sign on to google on quilombo should return a co acount, similarly to a co sign on on co should return a quilombo account
+
+Closes the loop in the other direction. Whenever a user signs in to CO — Google OAuth, password-login, public signup, magic-link verify — `Storage::ensure_quilombo_user_for_co(co_user_id)` runs as a best-effort post-login hook. Idempotent:
+
+1. Returns the existing quilombo row when `linked_co_user_id` already points to this CO user.
+2. Links to a quilombo row that happens to share the same email (no new row).
+3. Otherwise inserts a fresh `quilombo_usuarios` row: `papel='membro'`, `senha_hash='!provisorio!'` (sentinel from QB-6 — legacy quilombo password login is blocked, but the user authenticates via CO session anyway), `usuario` derived from CO `usuario` or email local-part with `-N` dedupe on collision.
+
+Wired into:
+- `oauth_google::callback_handler` (Google sign-in)
+- `password_login_handler` (existing accounts)
+- `signup_handler` (CO-175 public signup)
+- `verify_handler` (magic-link `/auth/verify`)
+
+Failures log at WARN and don't block the sign-in itself — users can always recover their CO session even if the quilombo bridge transiently fails.
+
+After this lands, every authenticated CO user has a corresponding `quilombo_usuarios` row, so per-universe metadata (CO-173) returns quilombo profile data for them and `quilomboaraucaria.com.br` per-content auth checks resolve cleanly.
+
+**Cross-apex cookie handover** (the second half of "single sign-on across both domains") is filed as **QB-11** in the quilombo repo — the SvelteKit at `quilomboaraucaria.com.br` needs an `/auth/co-handover` route that reads a token from the redirect URL and sets its own session cookie. Cookies cannot share between `.artelonga.com.br` and `.com.br/quilomboaraucaria.com.br`, so token-handover via URL is the protocol.
+
+## [1.92.0] — 2026-05-09
+
+### Added — CO-177: Google OAuth sign-in (login + signup)
+
+Google sign-in / sign-up across the platform. One button on both the login modal and the signup form, available everywhere the CO SPA renders. Future cross-deployment bounces (quilombo SvelteKit's "Continuar com Google", a planned ArteLonga login) reuse the same `/api/v1/auth/google/start?return_to=...` endpoint via the existing `is_allowed_return_to` safelist — same pattern as `/recover`.
+
+**New module `oauth_google.rs`:**
+- `GET /api/v1/auth/google/start?return_to=<url>` — generates a state JWT (signed with the shared secret, carries `return_to` + nonce + 10-min TTL), redirects to Google's consent screen with `scope=openid email profile`, `prompt=select_account`.
+- `GET /api/v1/auth/google/callback?code=&state=` — verifies state JWT, exchanges code at `oauth2.googleapis.com/token`, fetches `openidconnect.googleapis.com/v1/userinfo`, finds-or-creates the CO user, sets the session cookie, 303-redirects to the safelisted `return_to` (or `/`).
+
+**Storage** — `Storage::find_or_create_user_by_google(sub, email, name)`:
+1. Match by `users.google_sub` → existing Google-linked user.
+2. Match by `users.email` → existing CO user, link Google sub to them, auto-promote email as verified recovery channel.
+3. Insert new user with `tier='player'`, deduped `usuario` from email local-part, default subscriptions, recovery channel auto-promotion.
+
+**Migration v39:**
+- `users.google_sub TEXT` (nullable).
+- `CREATE UNIQUE INDEX idx_users_google_sub ON users(google_sub) WHERE google_sub IS NOT NULL` — partial index, one Google account → one CO user, NULLs coexist freely.
+
+**Status endpoint** — `GET /api/v1/auth/google/status` returns `{configured: bool}` based on whether `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` env vars are set. The login UI hides the button on `configured: false`, so deployments that haven't configured Google never show a button that 503s.
+
+**Required env vars** (set per deployment via `flyctl secrets set ...`):
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI` (default `https://co.artelonga.com.br/api/v1/auth/google/callback`)
+
+**UI** — login modal + signup form gain an OAuth block with `or` divider and a Google-branded `Continuar com Google` / `Cadastrar com Google` link styled per Google's brand guidelines (4-color G icon as inline SVG). The block is `display:none` until JS confirms `configured: true` and forwards any `?return_to=` from the current page to the start endpoint.
+
+**i18n** — new keys (PT + EN): `oauth_divider`, `continue_with_google`, `signup_with_google`.
+
+**Error handling** — new `AppError::ServiceUnavailable(String)` → 503 with the standard `{error, message, message_en}` envelope. Used when the OAuth env vars aren't set on a deploy that nonetheless gets a callback.
+
+Telemetry: `auth.login` event with `list="google"` to distinguish from `password` and `magic-link`.
+
+To activate on a deploy:
+
+```bash
+flyctl secrets set GOOGLE_CLIENT_ID=...apps.googleusercontent.com \
+                   GOOGLE_CLIENT_SECRET=GOCSPX-... \
+                   GOOGLE_REDIRECT_URI='https://co.artelonga.com.br/api/v1/auth/google/callback' \
+                   -a co-artelonga
+```
+
+Register the redirect URI in the Google Cloud Console under "OAuth 2.0 Client IDs" → Authorized redirect URIs before flipping the secrets.
+
+## [1.91.3] — 2026-05-09
+
+### Changed — Recovery form requires both `usuario` AND `email` (no more "or")
+
+User feedback after the QB-9 e2e: the single "Usuário ou canal de recuperação" field was confusing because a quilombo user has both — a username at quilombo *and* an email. The form now asks for both explicitly:
+
+- **Field 1:** Usuário — identifies *which* account (quilombo usuario, CO usuario, or anything resolvable through the lookup chain).
+- **Field 2:** Email — confirms ownership *and* is the channel where the code arrives.
+
+Both are required client-side. Server-side a new `find_user_for_recovery_pair(identifier, email)` enforces that both resolve to the **same** user. When the email is empty (legacy API consumers), the lookup falls back to the single-identifier behavior.
+
+Both `forgot-password` and `forgot-password/verify` now accept the `email` field. The verify path uses the pair so a stolen code can't be replayed against a different account.
+
+New i18n keys: `forgot_password_username_label`, `forgot_password_username_placeholder`, `forgot_password_email_label`, `forgot_password_email_placeholder`, `forgot_password_username_required`, `forgot_password_email_required` (PT + EN). `forgot_password_subtitle` updated to "Digite seu usuário e email cadastrado".
+
+### Hardened — CO-176: quilombo signup bridge is mandatory + integrity log on boot
+
+Deployment-readiness pass for CO-172. Every quilombo signup must end with a linked CO account; previously the bridge just `tracing::warn!`d on failure and continued.
+
+- `quilombo_routes::cadastro_handler` now treats `ensure_co_user_for_quilombo` + `link_quilombo_to_co` as mandatory. On failure: rolls back the freshly-created `quilombo_usuarios` row with `DELETE WHERE id = ?1`, logs at `ERROR`, returns 500 with a Portuguese message hinting retry. The user gets a clean state to retry without hitting the username-taken path.
+- Boot-time integrity check: `server.rs` runs `SELECT COUNT(*) FROM quilombo_usuarios WHERE linked_co_user_id IS NULL` after the recovery backfills and warns at `WARN` if any are present. Pre-1.91.3 legacy rows recover lazily through the `/recover` flow (1.91.2 lazy bridge), but a non-zero count after the fleet has rolled to 1.91.3+ would indicate a regression.
+
+Combined with CO-176's lazy-bridge step in `find_user_for_recovery` (1.91.2), every quilombo user — legacy or new — has a path to a working CO account either at signup time (synchronous, mandatory) or at first password recovery (lazy, idempotent).
+
+## [1.91.2] — 2026-05-09
+
+### Fixed — CO-176 follow-up: lazy-bridge legacy quilombo users on recovery + simpler subtitle
+
+User-facing report after running QB-9 e2e: a quilombo user who set their email *after* signing up couldn't recover via that email — the system silently returned `sent_to: []` because their `quilombo_usuarios.email` was set but no `linked_co_user_id` / verified channel existed yet on the CO side.
+
+**Backend** — `find_user_for_recovery` gains a lazy-bridge step. If the verified-channel lookup misses but the typed value matches a `quilombo_usuarios.email`, the lookup runs the same `ensure_co_user_for_quilombo` → `link_quilombo_to_co` → `ensure_email_recovery_channel` chain that CO-172 Phase 1 runs at signup-time, then returns the new CO user id. Idempotent — once a user is bridged, the verified-channel lookup catches them on subsequent calls and the lazy step never fires.
+
+This rescues:
+- Quilombo signups from before CO-172 shipped (no `linked_co_user_id`).
+- Cases where the bridge silently warned-and-continued at email-set time (e.g. transient SQL error, lost log).
+- Manual `quilombo_usuarios.email` writes outside the perfil endpoint.
+
+**Frontend** — dropped the long "Sua conta funciona no Quilombo Araucária e em CO…" subtitle per user feedback ("no need to mntion sua conta funciona etc etc its okay"). The `/recover` page now reads:
+- Title: **Recuperar senha**
+- Subtitle: **Recupere o acesso à sua conta.**
+
+Removed unused i18n keys: `recover_subtitle_quilombo`, `recover_subtitle_external` (PT + EN).
+
+## [1.91.1] — 2026-05-09
+
+### Fixed — CO-176: `/recover` is friendlier when bounced from quilombo
+
+QB-9 shipped on quilomboaraucaria.com.br: clicking "Esqueci minha senha" bounces to `co.artelonga.com.br/recover?return_to=https%3A%2F%2Fquilomboaraucaria.com.br&identifier=...`. End-user feedback after running the flow:
+
+> Esqueci minha senha redireciona para [Co Entrar] que é okay mas confuso, porque o usuário precisa fornecer o usuário do quilombo E o email deles.
+
+Two fixes:
+
+**Frontend** — title + subtitle on the recover page now reflect the originating context:
+- Default `Co / Entrar / Acesse seu quadro de projetos` was confusing for a quilombo user mid-recovery.
+- When `?return_to=https://quilomboaraucaria.com.br`, modal title becomes "Recuperar senha" and the subtitle reads "Sua conta funciona no Quilombo Araucária e em CO. Use o mesmo email ou usuário." (PT) / "Your account works at Quilombo Araucária and CO. Use the same email or username." (EN).
+- Generic external `return_to` (any other safelisted host) gets a less-specific subtitle. Same-origin gets the plain "Recupere o acesso à sua conta."
+- The redundant `Digite seu usuário ou email de recuperação` step subtitle is hidden when the modal title already says "Recuperar senha".
+- New i18n keys (PT + EN): `recover_title`, `recover_subtitle`, `recover_subtitle_quilombo`, `recover_subtitle_external`.
+
+**Backend** — `find_user_for_recovery` now also looks up `quilombo_usuarios.usuario` and resolves through `linked_co_user_id` to the canonical CO user. Fixes the case where a quilombo user's `users.usuario` is `NULL` because `quilombo_bridge.rs` fell back on a unique-index collision — typing the quilombo username would hit dead-end `users.usuario` only without this. Email path still works (preferred); this just means the quilombo username path doesn't silently 202-with-empty-`sent_to`.
+
+## [1.91.0] — 2026-05-09
+
+### Added — CO-175 (G3): public signup endpoint + UI
+
+Closes the gap surfaced in the e2e checklist: a brand-new visitor at `co.artelonga.com.br` had no path to create an account. Quilombo signups bridged in via CO-172, but a direct CO signup form didn't exist.
+
+**Backend** — `POST /api/v1/auth/signup`:
+- Body: `{ usuario, password, email? }`. Email optional per `feedback_auth_email.md`.
+- Validation: usuario 3-30 chars `[a-z0-9_-]`, password ≥8 chars, email format if present.
+- 409 on usuario or email collision (separate messages so the UI can be specific).
+- **Rate limit: 100 new accounts per rolling 24h cluster-wide.** Counts `users.created_at` against the window. 101st request returns 429 with a Portuguese message hinting "tente novamente em algumas horas". Knob is `SIGNUP_DAILY_CAP` constant in `auth_handlers.rs`.
+- Tier hardcoded to `'player'` (admin reserved for env-seeded operator account).
+- Argon2id hash via `tokio::task::spawn_blocking` so the worker thread isn't pinned during the password derivation.
+- On success: writes `users` row, calls `ensure_email_recovery_channel` if email was supplied (auto-promotes to verified channel — `forgot-password` works immediately for the new user), issues the same JWT-cookie response shape as `password-login`.
+- Telemetry: emits `auth.signup` with `list="public"`.
+
+**Storage** — `Storage::create_user_with_password(usuario, password_hash, email?)`:
+- Idempotent in the sense that taken usuario / email returns `SignupError::UsuarioTaken` / `EmailTaken` for the route to map to 409.
+- Calls `subscribe_user_to_default_universes` (same path as the magic-link flow).
+
+**Storage** — `Storage::count_users_created_since(seconds)`:
+- Used by the rate-limit check; cheap COUNT against `users.created_at`.
+
+**UI** — login modal gains a "Criar conta" link next to "Esqueci minha senha":
+- New step `#login-step-signup` with usuario / password / email-optional form.
+- Client-side mirrors of the backend validation (length checks) for fast-fail.
+- "Já tenho conta" returns to the login step.
+- On success: page reload — `init()` reads `/me` and routes to the new user's hub.
+- New i18n strings (PT + EN): `signup_link`, `signup_subtitle`, `signup_usuario`, `signup_usuario_placeholder`, `signup_email_optional`, `signup_email_hint`, `signup_submit`, `signup_submitting`, `signup_have_account`, `signup_error_usuario_len`, `signup_error_senha_len`, `signup_error_generic`.
+
+Tiny CSS — `.login-link-sep` for the dot between the two header links.
+
+This closes G3 from the e2e checklist. New users can now create CO accounts without going through quilombo or admin seeding.
+
+## [1.90.3] — 2026-05-09
+
+### Fixed — `Entrar` button in the header was a no-op (CO-171 refactor regression)
+
+`renderHeaderUserArea(null)` runs at line 419 of `init()` — *before* `wireModules()` injects the real `showLoginModal` at line 421. The header binding was:
+
+```js
+btn.addEventListener('click', _showLoginModal);  // captures noop — broken
+```
+
+`addEventListener` captures the function reference at bind-time, so the listener stayed pointed at the initial `let _showLoginModal = () => {};` even after `injectShowLoginModal` reassigned the module-level variable.
+
+Two sites fixed with the defer-dereference pattern:
+
+```js
+btn.addEventListener('click', () => _showLoginModal());  // reads at click time
+```
+
+- `modules/sidebar.js:199` — `btn-header-entrar` (the symptom yuri@quilombo reported)
+- `modules/onboarding.js:235` — `btn-banner-entrar` (same shape, would have hit anonymous template visitors)
+
+Pattern note for future module-callback wiring: use `() => _fn()` indirection in `addEventListener` calls when the function is supplied via `inject*Callbacks` and the binding might happen pre-injection.
+
+## [1.90.2] — 2026-05-09
+
+### Changed — Security modal refactored: padding, login-card vibe, type-aware phone input
+
+The "Canais de recuperação" modal had a flat layout with no body padding — labels touched the modal's left edge — plus the same heading rendered twice (once in the modal header and again as an inner `h3`). Refactored to mirror the login modal's clean structure:
+
+- HTML: `#security-modal-body` now uses real classes (`.security-modal-body`, `.security-section`, `.security-section-header`) instead of inline styles. Single `Segurança` heading in the modal header; section headings (`Canais de recuperação`, `Mudar senha`) live below as `h3`s. Buttons promoted to `btn-full` so they match the login form's footprint.
+- CSS: new block in `style.css` defines body padding (`24px`), section gaps (`28px`), section dividers (`border-top` between `.security-section` siblings), and a tidy `.recovery-channel-row` (icon + masked value + status pill + remove button).
+- Channel rows: pill-style cards with `bg-hover` background instead of flat text. Unverified rows highlight the status with `--accent`. Channel-type icon prefix (`✉`, `💬`, `📱`).
+
+### Added — Phone-number recovery channels in UI
+
+`recovery_channels_title` already had `whatsapp` and `sms` options in the `<select>`, but the value input was hard-coded to `type="email"` with placeholder `email@exemplo.com`. New `syncChannelInputForType()` listener flips:
+
+- type → `tel`, `inputmode="tel"`, `autocomplete="tel"`
+- placeholder → `+55 41 99999-9999`
+- helper text → "Você receberá um código por mensagem do WhatsApp. Inclua o código do país (+55)." (or SMS variant)
+
+Email path keeps the original affordances. Backend already supports the channels (`recovery_crypto::normalize_channel_value` strips non-digits from phone numbers, preserves leading `+`).
+
+New i18n strings: `security_title`, `recovery_channel_email_hint`, `recovery_channel_whatsapp_hint`, `recovery_channel_sms_hint` (PT + EN).
+
+## [1.90.1] — 2026-05-09
+
+### Removed — CO-172 cleanup: dead quilombo outbound redirect from co-web's SPA
+
+`co-web/static/variants/a/modules/login.js` shipped with hostname-detection redirects assuming the SPA also served `quilomboaraucaria.com.br`. It doesn't — that domain serves the SvelteKit SPA from `~/projects/quilomboaraucaria/`, not co-web. The `window.location.hostname === 'quilomboaraucaria.com.br'` checks never matched in production, making the outbound redirect blocks dead code.
+
+Removed:
+- The `buildCoRecoverUrl(...)` + `isQuilomboDomain` constants and the `if (isQuilomboDomain) { ... return; }` guard in the forgot-password click handler.
+- The equivalent guard in the change-password click handler.
+
+Kept (these run when a quilombo user lands on `co.artelonga.com.br/recover` from the bounce):
+- `/recover` path detection that pre-fills `?identifier=` and pins the modal step.
+- `isAllowedReturnTo` safelist for the after-reset redirect.
+- The `return_to` redirect after a successful password update.
+
+The corresponding outbound redirect work is filed as CO-174 and lives in the `~/projects/quilomboaraucaria/` repo.
+
+## [1.90.0] — 2026-05-09
+
+### Added — CO-173: per-(user, universe) metadata in `/api/v1/auth/me`
+
+`MeResponse` now carries a `universes: Vec<UserUniverseEntry>` array — one entry per universe the authenticated user has any relation to (owner / member / subscriber). Each entry includes:
+- `key`, `name`
+- `role` (`"owner"` for `owner_id` matches, member's role string otherwise, `"subscriber"` for sub-only, `"viewer"` fallback)
+- boolean flags: `is_owner`, `is_member`, `is_subscriber`
+- `metadata: Value` — universe-specific bag
+
+Metadata sources, folded into a single bag per entry:
+- For any universe the user is a member of: `joined_at` from `universe_members`.
+- For `quilomboaraucaria` (when the user has a `quilombo_usuarios.linked_co_user_id`): `papel`, `bio`, `foto_url`, `telefone`, `email` straight from the quilombo profile.
+- Cross-deployment fetches (e.g. for a future ArteLonga server) deferred to CO-172v2's API mesh.
+
+`Storage::list_universes_with_metadata_for_user` walks `list_universes_for_user` plus three side queries (member roles, subscription set, the quilombo profile) and assembles the entries in O(n) over the user's universes.
+
+The `universes` field uses `#[serde(default, skip_serializing_if = "Vec::is_empty")]` — older clients that only read `user_id`/`email`/`display_name`/`tier` keep working unchanged. New clients get the per-universe data without a second roundtrip to `/api/v1/universes`.
+
+## [1.89.1] — 2026-05-09
+
+### Fixed — CO-172 hardening: server-side `?return_to=` safelist on `/recover`
+
+The `is_allowed_return_to` safelist in `recovery_routes.rs` was tested but never actually called — production enforcement lived only in `login.js::isAllowedReturnTo`. The SPA correctly refused to redirect to non-safelisted hosts, but `co.artelonga.com.br/recover?return_to=https://evil.com` still returned 200, so the URL itself was a valid phishing surface (trusted hostname, would-be victim never sees a server-side rejection).
+
+New `serve_recover` handler (in `server.rs`) wraps the `/recover` route, deserializes `?return_to=`, and returns **400** when the host isn't `*.artelonga.com.br` or `quilomboaraucaria.com.br`. Identical safelist function as the JS check — defense-in-depth.
+
+The `#[cfg_attr(not(test), allow(dead_code))]` came off `is_allowed_return_to` since it's now a load-bearing pub(crate) fn.
+
 ## [1.89.0] — 2026-05-09
 
 ### Added — CO-172: Quilombo signups become CO accounts — central auth + redirected password reset

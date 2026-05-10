@@ -205,6 +205,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/v1/auth/logout", post(logout_handler)) // State extracted inside
         // CO-85: generic password-based login (any env, user must have password_hash set)
         .route("/v1/auth/password-login", post(password_login_handler))
+        // CO-175 (G3): public signup — usuario + password (+ optional email).
+        // Rate-limited 100 / day cluster-wide.
+        .route("/v1/auth/signup", post(signup_handler))
+        // CO-177: Google OAuth sign-in. Status returns whether the deployment
+        // has client_id+secret set; UI hides the button when not configured.
+        .route("/v1/auth/google/status", get(google_status_handler))
+        .nest("/v1/auth", crate::oauth_google::router())
         // CO-44: compat alias — returns 404 in prod (kept for scripts and CLAUDE.md docs)
         .route("/v1/auth/uat-login", post(uat_login_handler));
 
@@ -330,6 +337,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- Universe multi-tenancy routes ---
     let universe_api = crate::universe_routes::router();
 
+    // --- CO-188: Universe invitation routes ---
+    let universe_invitation_api = crate::invitation_routes::universe_invitation_router()
+        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+    let invitation_api = crate::invitation_routes::invitation_router();
+
     // --- Theme tier routes ---
     let themes_api = crate::universe_routes::themes_router();
 
@@ -418,7 +430,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-38: Yggdrasil game view — served by the SPA.
         .route("/yggdrasil/{game}", get(serve_co_index))
         // CO-172: /recover — serves the SPA pinned to the forgot-password step.
-        .route("/recover", get(serve_co_index))
+        // Goes through `serve_recover` so a malformed `?return_to=` rejects with
+        // 400 server-side instead of reaching the SPA — closes the open-redirect-
+        // -looking phishing vector flagged in CO-172 review.
+        .route("/recover", get(serve_recover))
         // CO-170: friendly aliases for the timeline composite view that the
         // SPA renders from the bundled `tempo`, `universo`, `humanity`
         // universes. The actual page is `/shared/timeline.html`; both
@@ -492,6 +507,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-142 (Phase A): dev board moved to /api/v1/admin to un-shadow the public universe_api.
         .nest("/api/v1/admin", dev_board_api)
         .nest("/api/v1/universes", universe_api)
+        // CO-188: universe invitation create (auth-gated, under universe namespace)
+        .nest("/api/v1/universes", universe_invitation_api)
+        // CO-188: invitation preview + accept (public preview, per-route auth on accept)
+        .nest("/api/v1/invitations", invitation_api)
         // CO-161: all universe-content routes under a single visibility + writer gate.
         .nest("/api/v1/universes", universe_content_api)
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
@@ -924,6 +943,26 @@ pub async fn start_server(config: WebConfig) {
             if n_quilombo > 0 {
                 tracing::info!("Quilombo recovery channel backfill: {n_quilombo} user(s) promoted");
             }
+            // CO-176 deployment-readiness: surface unbridged quilombo users so
+            // operators can spot a regression. Counts `quilombo_usuarios`
+            // rows where `linked_co_user_id IS NULL` — every quilombo signup
+            // since 1.91.3 should be linked synchronously, so a non-zero
+            // count here means either pre-1.91.3 legacy rows or a bridge
+            // regression.
+            let unbridged: i64 = storage
+                .conn()
+                .query_row(
+                    "SELECT COUNT(*) FROM quilombo_usuarios WHERE linked_co_user_id IS NULL",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if unbridged > 0 {
+                tracing::warn!(
+                    "CO-176 integrity: {unbridged} quilombo user(s) without linked_co_user_id — \
+                     legacy rows recover lazily via /recover, but new signups must always link"
+                );
+            }
             // 1.73.0 (Phase 8 step 3): backfill CAS blobs from existing
             // entries on every boot. Cheap after the first run (hash
             // collisions hit INSERT OR IGNORE no-op) — first run on prod
@@ -1321,6 +1360,46 @@ async fn redirect_legacy_co_subpath(Path((slug, subpath)): Path<(String, String)
 
 pub(crate) mod static_files;
 use static_files::*;
+
+/// CO-172: query parameters accepted by `/recover`. Only `return_to` is
+/// validated server-side — `identifier` and `action` are pre-fill hints
+/// the SPA reads from the URL after this handler serves it.
+#[derive(serde::Deserialize)]
+struct RecoverQuery {
+    return_to: Option<String>,
+    #[allow(dead_code)]
+    identifier: Option<String>,
+    #[allow(dead_code)]
+    action: Option<String>,
+}
+
+/// CO-172 hardening: `/recover?return_to=<url>` is checked against the
+/// safelist (`*.artelonga.com.br` + `quilomboaraucaria.com.br`) before the
+/// SPA is served. Without this, a phishing email could send a victim to
+/// `co.artelonga.com.br/recover?return_to=https://evil.com` — the URL bar
+/// shows a trusted hostname, the user completes the reset, and the SPA
+/// would (sans the JS check) bounce them to the attacker's domain.
+///
+/// Rejecting at the server cuts the URL off before it ever loads. The JS
+/// check stays as defense-in-depth.
+async fn serve_recover(
+    Query(params): Query<RecoverQuery>,
+    headers: HeaderMap,
+    uri: Uri,
+    State(state): State<AppState>,
+) -> Response {
+    if let Some(rt) = params.return_to.as_deref()
+        && !crate::recovery_routes::is_allowed_return_to(rt)
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "return_to host is not in the safelist; \
+             only *.artelonga.com.br and quilomboaraucaria.com.br are allowed",
+        )
+            .into_response();
+    }
+    serve_co_index(headers, uri, State(state)).await
+}
 
 pub(crate) mod legacy;
 use legacy::*;
