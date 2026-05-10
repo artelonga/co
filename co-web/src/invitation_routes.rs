@@ -55,6 +55,7 @@ pub fn invitation_router() -> Router<AppState> {
 pub fn me_invitations_router() -> Router<AppState> {
     Router::new()
         .route("/invitations", get(me_invitations_handler))
+        .route("/invitations/accept", post(me_accept_invitation_handler))
         .layer(middleware::from_fn(crate::auth::require_auth))
 }
 
@@ -540,6 +541,59 @@ pub struct MeInvitationItem {
     pub role: String,
     pub expires_at: String,
     pub created_at: String,
+}
+
+/// CO-192: POST /api/v1/me/invitations/accept — accept a pending invite by universe_key.
+/// No raw token needed since the caller is authenticated and the invite lookup
+/// uses the user_id / email match from the invitations table directly.
+#[derive(Debug, serde::Deserialize)]
+pub struct MeAcceptInvitationBody {
+    pub universe_key: String,
+}
+
+pub async fn me_accept_invitation_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+    axum::Json(body): axum::Json<MeAcceptInvitationBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let storage = lock_storage(&state)?;
+
+    let user = storage
+        .get_user_by_id(&user_id.0)
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+    let invitations = storage.list_invitations_for_me(&user_id.0, &user.email);
+    let inv = invitations
+        .iter()
+        .find(|i| i.universe_key == body.universe_key)
+        .ok_or_else(|| AppError::NotFound("No pending invitation for this universe".into()))?
+        .clone();
+
+    if inv.consumed_at.is_some() {
+        return Err(AppError::Gone("Invitation already accepted".into()));
+    }
+    if Utc::now() > inv.expires_at {
+        return Err(AppError::Gone("Invitation has expired".into()));
+    }
+
+    let now_str = Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![inv.universe_key, user_id.0, inv.role, now_str],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    storage
+        .consume_invitation(&inv.token_hash)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(axum::Json(AcceptInvitationResponse {
+        universe_key: inv.universe_key,
+        role: inv.role,
+    }))
 }
 
 /// GET /api/v1/me/invitations — list pending invitations for the current user.

@@ -5,6 +5,89 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.99.0] — 2026-05-10
+
+### Added — CO-192: Sidebar consumes unified /me/universes shape
+
+Sidebar now renders universes in semantic sections sourced from the new
+`GET /api/v1/me/universes` endpoint (CO-191 precondition, also shipped here).
+
+**Backend (CO-191):**
+- `GET /api/v1/me/universes` (auth required) — returns bucketed shape:
+  `{owned, member, subscribed, invited, discoverable, counts}`. Each
+  bucket is sorted by name; `discoverable` capped at 50.
+- `POST /api/v1/me/invitations/accept` — authenticated accept-by-universe-key,
+  no raw token needed from the client.
+- Storage helpers: `list_owned_universes`, `list_member_universes`,
+  `list_subscribed_universes`, `list_discoverable_universes`.
+
+**Frontend (CO-192):**
+- Sidebar renders sections in fixed order: owned → member → subscribed →
+  invited → discoverable. Empty buckets produce no section header.
+- Non-owned items show a small role chip (admin / membro / inscrito / etc).
+- Invited section has 🎁 emoji + count in label; each row has functional
+  Aceitar / Recusar buttons that optimistically remove the row, call the API,
+  then refresh `meUniverses`.
+- Discoverable section is collapsible (default closed); state persists in
+  `localStorage` key `co_sidebar_discover`.
+- `loadMeUniverses()` called after login, clone, invite accept, subscribe.
+- Anonymous users keep the existing public-catalog sidebar (no regression).
+- All strings in PT + EN.
+
+## [1.98.0] — 2026-05-10
+
+### Added — CO-183: Lead capture pipeline (replaces artelonga `mailto:` contact form)
+
+Backend pipeline for the `/contato/` form on `artelonga.com.br` so mobile
+users without a mail client can submit, and so leads become queryable +
+assignable instead of disappearing into someone's inbox.
+
+**New endpoints:**
+
+- `POST /api/v1/leads` (public) — accepts `{nome, email, telefone, mensagem,
+  servico_titulo, parceiro_handle}`. Validates `mensagem` (required, ≤4000
+  chars). Bot-filters via UA (silent 200, no persist). Daily-salted IP
+  hash (CO-46 helper). Rate-limited 5/IP/24h (6th → 429). Persists, fires
+  async email notification to `LEADS_NOTIFY_TO` (default
+  `rede@artelonga.com.br`) — POST returns 201 even if mail send fails
+  (lead persisted > notification perfect). CORS includes artelonga.com.br.
+
+- `GET /api/v1/admin/leads` — admin-gated (`CO_SEED_ADMIN_EMAIL`).
+  Filterable by `status`, `since`, `assignee`, `limit` (default 50, max
+  200). Returns `{leads: [...], total}`.
+
+- `PATCH /api/v1/admin/leads/:id` — admin partial update with state-
+  machine validation (`new → triaged → in_progress → closed`). 400 on
+  invalid transition. Auto-bumps `updated_at`.
+
+- `GET /admin/leads.html` — cookie-auth handler serving the static SPA.
+
+**Schema:** unconditional `ensure_table` for `leads` plus 3 indexes on
+`status`, `created_at`, `assignee_handle`. Idempotent backfill pattern
+(runs every boot, no-op once table exists).
+
+**Retention task (LGPD):** `retention_task` daemon spawned at startup
+purges `leads WHERE created_at < now - 24 months AND status = 'closed'`
+once per day.
+
+**Admin SPA** (`co-web/static/variants/a/leads.html`): inline
+HTML+CSS+JS, summary chips per status, filterable table, detail panel
+with PATCH form, 60s auto-refresh, `#lead-N` anchor nav from email
+links.
+
+**Privacy:** raw IP never persisted (only `ip_hash`); UA truncated to
+256 chars; 24-month retention default.
+
+Tests: 10 covering valid POST → 201, missing mensagem → 400, bot UA →
+200 silent, rate limit 6th → 429, admin gate (no JWT → 401, non-admin
+→ 403), state transitions (valid → 200, invalid → 400), email-send
+failure still returns 201.
+
+Files: `co-web/src/lead_routes.rs` (new),
+`co-web/static/variants/a/leads.html` (new),
+`co-web/src/storage/migrations.rs`, `co-web/src/lib.rs`,
+`co-web/src/server.rs`, `docs/leads-api.md` (new).
+
 ## [1.97.0] — 2026-05-10
 
 ### Added — CO-190: Passwordless onboarding via email (magic-code sign-in or signup)

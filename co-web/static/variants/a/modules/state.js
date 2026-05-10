@@ -12,6 +12,9 @@ export const state = {
     loading: false,
     showArchived: false,
     userUniverses: [],
+    // CO-191: bucketed universes shape from /api/v1/me/universes.
+    // null = not yet loaded (anonymous or pre-login).
+    meUniverses: null,
     // 1.62.0 Phase 7: per-slug pin map. When set, the SPA appends
     // `?as_of=<pin>` to entry queries so the user sees the rewind view.
     // Populated on universe-info open and after pin/unpin actions.

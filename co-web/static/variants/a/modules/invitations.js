@@ -8,10 +8,12 @@ const PENDING_INVITE_KEY = 'co_pending_invite_token';
 
 let _showToast = null;
 let _showLoginModal = null;
+let _loadMeUniverses = async () => {};
 
-export function injectInvitationsCallbacks({ showToast, showLoginModal }) {
+export function injectInvitationsCallbacks({ showToast, showLoginModal, loadMeUniverses }) {
     _showToast = showToast;
     _showLoginModal = showLoginModal;
+    if (loadMeUniverses) _loadMeUniverses = loadMeUniverses;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,6 +166,7 @@ async function _doAccept(token, inv) {
             const loadMsg = _t('invitations.accepted_loading', 'Convite aceito! Carregando {universe}…')
                 .replace('{universe}', inv.universe.name);
             if (msg) { msg.style.color = 'var(--color-success,#16a34a)'; msg.textContent = loadMsg; }
+            await _loadMeUniverses();
             setTimeout(() => { window.location.href = `/${data.universe_key}`; }, 1200);
         } else if (resp.status === 410) {
             const body = await resp.json().catch(() => ({}));

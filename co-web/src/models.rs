@@ -399,6 +399,36 @@ fn default_visibility() -> String {
     "private".into()
 }
 
+/// CO-191: Universe with resolved role for the requesting user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseWithRole {
+    #[serde(flatten)]
+    pub universe: Universe,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+}
+
+/// CO-191: Response for GET /api/v1/me/universes — all universe relationships
+/// bucketed by type. Order within each bucket: by name.
+#[derive(Debug, Serialize)]
+pub struct MeUniversesResponse {
+    pub owned: Vec<UniverseWithRole>,
+    pub member: Vec<UniverseWithRole>,
+    pub subscribed: Vec<UniverseWithRole>,
+    pub invited: Vec<crate::invitation_routes::MeInvitationItem>,
+    pub discoverable: Vec<UniverseWithRole>,
+    pub counts: MeUniversesCounts,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MeUniversesCounts {
+    pub owned: usize,
+    pub member: usize,
+    pub subscribed: usize,
+    pub invited: usize,
+    pub discoverable: usize,
+}
+
 /// CO-49: Deterministic access level for a universe.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UniverseAccess {
@@ -552,6 +582,29 @@ pub struct MeResponse {
     pub email: String,
     pub display_name: String,
     pub tier: String,
+    /// CO-173: list of universes the user has any relation to (owner, member,
+    /// or subscriber), each with a metadata bag pulled from the source-of-
+    /// truth for that universe (e.g. quilombo_usuarios for quilombo).
+    /// Defaults to empty so older clients that only read user fields keep
+    /// working.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub universes: Vec<UserUniverseEntry>,
+}
+
+/// CO-173: per-universe metadata bag for the authenticated user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UserUniverseEntry {
+    pub key: String,
+    pub name: String,
+    /// Best-effort role string. For CO universes: `"owner"` / `"admin"` / `"editor"` / `"viewer"`.
+    /// For quilombo (when linked): the `quilombo_usuarios.papel` (`admin` / `membro`).
+    pub role: String,
+    pub is_owner: bool,
+    pub is_member: bool,
+    pub is_subscriber: bool,
+    /// Universe-source-specific metadata. Quilombo: `{papel,bio,foto_url,telefone}`.
+    /// Default CO universe: `{joined_at}`.
+    pub metadata: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

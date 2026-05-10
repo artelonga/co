@@ -527,6 +527,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/api/v1/me",
             crate::invitation_routes::me_invitations_router(),
         )
+        // CO-191: me/universes bucketed endpoint (auth required)
+        .route(
+            "/api/v1/me/universes",
+            axum::routing::get(crate::universe_routes::me_universes_handler)
+                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
         // CO-161: all universe-content routes under a single visibility + writer gate.
         .nest("/api/v1/universes", universe_content_api)
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).

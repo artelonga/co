@@ -50,6 +50,19 @@ import {
     injectInvitationsCallbacks, consumePendingInviteToken,
 } from './modules/invitations.js';
 
+// ===== CO-191: Bucketed universe loader =====
+async function loadMeUniverses() {
+    const me = await apiFetch('/api/v1/me/universes', {}, true);
+    if (!me) return;
+    state.meUniverses = me;
+    // Backward compat: keep state.userUniverses for any code still reading it.
+    state.userUniverses = [
+        ...(me.owned || []).map(u => u),
+        ...(me.member || []).map(u => u),
+        ...(me.subscribed || []).map(u => u),
+    ];
+}
+
 // ===== Tiny helpers that don't belong in any module =====
 
 function setUniverseSlugInUrl(slug) {
@@ -328,7 +341,7 @@ function wireModules() {
     injectApiCallbacks(showLoginModal, showUsageLimitModal, showToast);
     injectSwitchView(switchView);
     injectBootCallbacks({ showLoading, hideLoading, render, selectProject, removeManifestViewTabs, injectManifestViewTabs, switchView });
-    injectSidebarCallbacks({ bootAppForUniverse, selectProject, renderContent, showTemplateBanner, hideTemplateBanner });
+    injectSidebarCallbacks({ bootAppForUniverse, selectProject, renderContent, showTemplateBanner, hideTemplateBanner, loadMeUniverses, renderSidebar, showToast });
     injectSetUniverseSlugInUrl(setUniverseSlugInUrl);
     injectScrollToDate((dateStr) => scrollToDate(dateStr));
     injectSidebarShowLogin(showLoginModal);
@@ -341,7 +354,7 @@ function wireModules() {
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse });
     setupUniverseInfoModal({});
-    injectInvitationsCallbacks({ showToast, showLoginModal });
+    injectInvitationsCallbacks({ showToast, showLoginModal, loadMeUniverses });
     injectLoginCallbacks({
         render,
         bootAppForUniverse: async (slug) => {
@@ -357,8 +370,9 @@ function wireModules() {
         setUniverseSlugInUrl,
         hideTemplateBanner,
         showToast,
+        loadMeUniverses,
     });
-    injectOnboardingCallbacks({ render, showLoginModal, showToast, setUniverseSlugInUrl, bootAppForUniverse, hideTemplateBanner, renderUsageCount });
+    injectOnboardingCallbacks({ render, showLoginModal, showToast, setUniverseSlugInUrl, bootAppForUniverse, hideTemplateBanner, renderUsageCount, loadMeUniverses });
     injectYggdrasilCallbacks({ hideLoading, hideLoginModal, renderUserBadge });
 }
 
@@ -470,9 +484,8 @@ async function init() {
         if (me) {
             hideLoginModal();
             renderUserBadge(me);
-            const owned = await api.listUniverses();
-            const mine = (owned || []).filter(u => !u.is_template);
-            state.userUniverses = mine;
+            await loadMeUniverses();
+            const mine = state.userUniverses.filter(u => !u.is_template);
             if (mine.length > 0) {
                 const preferred = (() => { try { return localStorage.getItem('co_preferred_universe'); } catch (_) { return null; } })();
                 const target = (preferred && mine.find(u => u.key === preferred)) ? preferred : mine[0].key;
@@ -494,6 +507,7 @@ async function init() {
     if (me) {
         hideLoginModal();
         renderUserBadge(me);
+        await loadMeUniverses();
         await bootAppForUniverse(slug);
         await maybeOpenEntryFromUrl(slug);
         return;

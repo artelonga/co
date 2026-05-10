@@ -9,6 +9,7 @@ let _renderUserBadge = () => {};
 let _setUniverseSlugInUrl = () => {};
 let _hideTemplateBanner = () => {};
 let _showToast = () => {};
+let _loadMeUniverses = async () => {};
 
 export function injectLoginCallbacks(callbacks) {
     _render = callbacks.render;
@@ -18,6 +19,7 @@ export function injectLoginCallbacks(callbacks) {
     _setUniverseSlugInUrl = callbacks.setUniverseSlugInUrl;
     _hideTemplateBanner = callbacks.hideTemplateBanner;
     _showToast = callbacks.showToast;
+    if (callbacks.loadMeUniverses) _loadMeUniverses = callbacks.loadMeUniverses;
 }
 
 export function showLoginModal() {
@@ -69,9 +71,8 @@ export function setupLoginModal() {
             const me = await api.me();
             if (me) _renderUserBadge(me);
 
-            const owned = await api.listUniverses();
-            const mine = (owned || []).filter(u => !u.is_template);
-            state.userUniverses = mine;
+            await _loadMeUniverses();
+            const mine = state.userUniverses.filter(u => !u.is_template);
 
             let targetSlug;
             const userId = me?.user_id || '';
@@ -108,8 +109,7 @@ export function setupLoginModal() {
                 state.currentUniverseSlug = targetSlug;
                 state.isTemplate = false;
                 _hideTemplateBanner();
-                const refreshed = await api.listUniverses();
-                state.userUniverses = (refreshed || []).filter(u => !u.is_template);
+                await _loadMeUniverses();
                 await _bootAppForUniverse(targetSlug);
                 return;
             }

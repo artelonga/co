@@ -94,6 +94,69 @@ fn validate_universe_key(key: &str) -> Result<(), AppError> {
     Ok(())
 }
 
+// CO-191: GET /api/v1/me/universes — bucketed universe list for the caller.
+pub async fn me_universes_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<axum::Json<crate::models::MeUniversesResponse>, AppError> {
+    let storage = lock_storage(&state)?;
+
+    let user = storage
+        .get_user_by_id(&user_id.0)
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+    let owned = storage.list_owned_universes(&user_id.0);
+    let member = storage.list_member_universes(&user_id.0);
+    let subscribed = storage.list_subscribed_universes(&user_id.0);
+
+    let mut excluded: std::collections::HashSet<String> = owned
+        .iter()
+        .chain(member.iter())
+        .chain(subscribed.iter())
+        .map(|u| u.universe.key.clone())
+        .collect();
+
+    let invitations = storage.list_invitations_for_me(&user_id.0, &user.email);
+    let invited: Vec<crate::invitation_routes::MeInvitationItem> = invitations
+        .iter()
+        .filter_map(|inv| {
+            let u = storage.get_universe(&inv.universe_key)?;
+            let invited_by_name = storage
+                .get_user_by_id(&inv.invited_by)
+                .map(|u| u.display_name)
+                .unwrap_or_default();
+            excluded.insert(u.key.clone());
+            Some(crate::invitation_routes::MeInvitationItem {
+                universe_key: u.key,
+                universe_name: u.name,
+                invited_by_name,
+                role: inv.role.clone(),
+                expires_at: inv.expires_at.to_rfc3339(),
+                created_at: inv.created_at.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    let discoverable = storage.list_discoverable_universes(&excluded, 50);
+
+    let counts = crate::models::MeUniversesCounts {
+        owned: owned.len(),
+        member: member.len(),
+        subscribed: subscribed.len(),
+        invited: invited.len(),
+        discoverable: discoverable.len(),
+    };
+
+    Ok(axum::Json(crate::models::MeUniversesResponse {
+        owned,
+        member,
+        subscribed,
+        invited,
+        discoverable,
+        counts,
+    }))
+}
+
 // GET /api/v1/universes — list universes the caller belongs to
 pub async fn list_universes(
     State(state): State<AppState>,

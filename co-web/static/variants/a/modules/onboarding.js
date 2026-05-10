@@ -10,6 +10,7 @@ let _setUniverseSlugInUrl = () => {};
 let _bootAppForUniverse = async () => {};
 let _hideTemplateBanner = () => {};
 let _renderUsageCount = () => {};
+let _loadMeUniverses = async () => {};
 
 export function injectOnboardingCallbacks(callbacks) {
     _render = callbacks.render;
@@ -19,6 +20,7 @@ export function injectOnboardingCallbacks(callbacks) {
     _bootAppForUniverse = callbacks.bootAppForUniverse;
     _hideTemplateBanner = callbacks.hideTemplateBanner;
     _renderUsageCount = callbacks.renderUsageCount;
+    if (callbacks.loadMeUniverses) _loadMeUniverses = callbacks.loadMeUniverses;
 }
 
 export function setupOnboarding() {
@@ -222,6 +224,7 @@ export function setupCriarModal() {
         };
         _renderUsageCount();
         _hideTemplateBanner();
+        await _loadMeUniverses();
         await _bootAppForUniverse(result.key);
     });
 
@@ -232,7 +235,9 @@ export function setupCriarModal() {
     if (btnCriar) btnCriar.addEventListener('click', () => open({ copyFromTemplate: true }));
 
     const btnEntrar = document.getElementById('btn-banner-entrar');
-    if (btnEntrar) btnEntrar.addEventListener('click', _showLoginModal);
+    // Same defer-dereference pattern as sidebar.js — the inject callback may
+    // run after this binds; arrow wrapper reads `_showLoginModal` at click time.
+    if (btnEntrar) btnEntrar.addEventListener('click', () => _showLoginModal());
 
     const btnBannerLang = document.getElementById('btn-banner-lang');
     if (btnBannerLang) {

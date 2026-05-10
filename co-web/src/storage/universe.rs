@@ -191,6 +191,282 @@ impl Storage {
             .collect()
     }
 
+    /// CO-173: list every universe the user has any relation to (owner / member /
+    /// subscriber), each with a metadata bag pulled from the source-of-truth for
+    /// that universe. Quilombo metadata is folded in via `quilombo_usuarios.linked_co_user_id`.
+    ///
+    /// Cross-deployment universes are out of scope until CO-172v2 lands an API mesh.
+    pub fn list_universes_with_metadata_for_user(
+        &self,
+        user_id: &str,
+    ) -> Vec<crate::models::UserUniverseEntry> {
+        // 1. Universe membership/role (owner row reflected via owner_id check).
+        let universes = self.list_universes_for_user(user_id);
+
+        // 2. Pre-fetch the user's quilombo profile (if any) keyed by linked_co_user_id.
+        //    The columns we surface in metadata: papel, bio, foto_url, telefone, email.
+        let quilombo_meta: Option<serde_json::Value> = self
+            .conn
+            .query_row(
+                "SELECT papel, bio, foto_url, telefone, email \
+                 FROM quilombo_usuarios WHERE linked_co_user_id = ?1",
+                params![user_id],
+                |row| {
+                    let papel: String = row.get::<_, String>(0).unwrap_or_default();
+                    let bio: Option<String> = row.get(1).ok();
+                    let foto_url: Option<String> = row.get(2).ok();
+                    let telefone: Option<String> = row.get(3).ok();
+                    let email: Option<String> = row.get(4).ok();
+                    Ok(serde_json::json!({
+                        "papel": papel,
+                        "bio": bio,
+                        "foto_url": foto_url,
+                        "telefone": telefone,
+                        "email": email,
+                    }))
+                },
+            )
+            .ok();
+
+        // 3. Pre-fetch role + joined_at per universe from `universe_members`.
+        //    SQLite doesn't have a clean tuple-IN, so fetch the full set for the user.
+        let mut role_by_universe: std::collections::HashMap<String, (String, Option<String>)> =
+            std::collections::HashMap::new();
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT universe_key, role, joined_at FROM universe_members WHERE user_id = ?1",
+        ) {
+            for row in stmt
+                .query_map(params![user_id], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1).unwrap_or_else(|_| "viewer".into()),
+                        row.get::<_, Option<String>>(2).ok().flatten(),
+                    ))
+                })
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+            {
+                role_by_universe.insert(row.0, (row.1, row.2));
+            }
+        }
+
+        // 4. Pre-fetch subscription state per universe.
+        let mut subscriber_universes: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+        if let Ok(mut stmt) = self
+            .conn
+            .prepare("SELECT universe_key FROM subscriptions WHERE user_id = ?1")
+        {
+            for key in stmt
+                .query_map(params![user_id], |row| row.get::<_, String>(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+            {
+                subscriber_universes.insert(key);
+            }
+        }
+
+        // 5. Build entries.
+        universes
+            .into_iter()
+            .map(|u| {
+                let is_owner = u.owner_id == user_id;
+                let member = role_by_universe.get(&u.key);
+                let is_member = member.is_some();
+                let is_subscriber = subscriber_universes.contains(&u.key);
+
+                let role = if is_owner {
+                    "owner".to_string()
+                } else if let Some((r, _)) = member {
+                    r.clone()
+                } else if is_subscriber {
+                    "subscriber".to_string()
+                } else {
+                    "viewer".to_string()
+                };
+
+                let mut metadata = serde_json::Map::new();
+                if let Some((_, joined_at)) = member
+                    && let Some(joined) = joined_at
+                {
+                    metadata.insert(
+                        "joined_at".into(),
+                        serde_json::Value::String(joined.clone()),
+                    );
+                }
+                // Quilombo metadata only attaches to the quilomboaraucaria universe.
+                if u.key == "quilomboaraucaria"
+                    && let Some(meta) = quilombo_meta.as_ref()
+                    && let Some(obj) = meta.as_object()
+                {
+                    for (k, v) in obj {
+                        metadata.insert(k.clone(), v.clone());
+                    }
+                }
+
+                crate::models::UserUniverseEntry {
+                    key: u.key,
+                    name: u.name,
+                    role,
+                    is_owner,
+                    is_member,
+                    is_subscriber,
+                    metadata: serde_json::Value::Object(metadata),
+                }
+            })
+            .collect()
+    }
+
+    // --- CO-191: Bucketed universe helpers ---
+
+    fn row_to_universe_with_role(
+        &self,
+        row: &rusqlite::Row<'_>,
+    ) -> rusqlite::Result<(crate::models::Universe, Option<String>)> {
+        Ok((
+            crate::models::Universe {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2)?,
+                owner_id: row.get(3)?,
+                created_at: super::schema::parse_datetime(&row.get::<_, String>(4)?),
+                is_template: row.get::<_, i64>(5)? != 0,
+                is_public: row.get::<_, i64>(6)? != 0,
+                content_count: row.get::<_, i64>(7).unwrap_or(0),
+                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
+                parent_key: None,
+            },
+            row.get::<_, Option<String>>(10).unwrap_or(None),
+        ))
+    }
+
+    fn attach_parent_key(
+        &self,
+        universes: Vec<(crate::models::Universe, Option<String>)>,
+    ) -> Vec<crate::models::UniverseWithRole> {
+        universes
+            .into_iter()
+            .map(|(mut u, role)| {
+                u.parent_key = self
+                    .conn
+                    .query_row(
+                        "SELECT parent_key FROM universes WHERE key = ?1",
+                        params![u.key],
+                        |row| row.get::<_, Option<String>>(0),
+                    )
+                    .ok()
+                    .flatten();
+                crate::models::UniverseWithRole { universe: u, role }
+            })
+            .collect()
+    }
+
+    pub fn list_owned_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+             u.is_template, u.is_public, u.content_count, \
+             COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
+             'owner' AS role \
+             FROM universes u \
+             WHERE u.owner_id = ?1 AND COALESCE(u.hidden, 0) = 0 \
+               AND u.is_template = 0 \
+             ORDER BY u.name ASC",
+            )
+            .expect("prepare list_owned_universes");
+        let rows: Vec<_> = stmt
+            .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
+            .expect("list_owned_universes")
+            .filter_map(|r| r.ok())
+            .collect();
+        self.attach_parent_key(rows)
+    }
+
+    pub fn list_member_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+             u.is_template, u.is_public, u.content_count, \
+             COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
+             um.role \
+             FROM universe_members um \
+             JOIN universes u ON u.key = um.universe_key \
+             WHERE um.user_id = ?1 AND um.role != 'owner' \
+               AND COALESCE(u.hidden, 0) = 0 \
+               AND u.is_template = 0 \
+             ORDER BY u.name ASC",
+            )
+            .expect("prepare list_member_universes");
+        let rows: Vec<_> = stmt
+            .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
+            .expect("list_member_universes")
+            .filter_map(|r| r.ok())
+            .collect();
+        self.attach_parent_key(rows)
+    }
+
+    pub fn list_subscribed_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+             u.is_template, u.is_public, u.content_count, \
+             COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
+             'subscriber' AS role \
+             FROM subscriptions s \
+             JOIN universes u ON u.key = s.universe_key \
+             WHERE s.user_id = ?1 \
+               AND u.owner_id != ?1 \
+               AND u.key NOT IN (SELECT universe_key FROM universe_members WHERE user_id = ?1) \
+               AND COALESCE(u.hidden, 0) = 0 \
+               AND u.is_template = 0 \
+             ORDER BY u.name ASC",
+            )
+            .expect("prepare list_subscribed_universes");
+        let rows: Vec<_> = stmt
+            .query_map(params![user_id, user_id, user_id], |row| {
+                self.row_to_universe_with_role(row)
+            })
+            .expect("list_subscribed_universes")
+            .filter_map(|r| r.ok())
+            .collect();
+        self.attach_parent_key(rows)
+    }
+
+    pub fn list_discoverable_universes(
+        &self,
+        excluded_keys: &std::collections::HashSet<String>,
+        limit: usize,
+    ) -> Vec<crate::models::UniverseWithRole> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+             u.is_template, u.is_public, u.content_count, \
+             COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
+             NULL AS role \
+             FROM universes u \
+             WHERE (u.visibility = 'public-subscribable' OR u.is_public = 1) \
+               AND u.is_template = 0 \
+               AND COALESCE(u.hidden, 0) = 0 \
+             ORDER BY u.content_count DESC, u.name ASC",
+            )
+            .expect("prepare list_discoverable_universes");
+        let rows: Vec<_> = stmt
+            .query_map([], |row| self.row_to_universe_with_role(row))
+            .expect("list_discoverable_universes")
+            .filter_map(|r| r.ok())
+            .filter(|(u, _)| !excluded_keys.contains(&u.key))
+            .take(limit)
+            .collect();
+        self.attach_parent_key(rows)
+    }
+
     // --- Universe Members ---
 
     pub fn is_universe_member(&self, universe_key: &str, user_id: &str) -> bool {
