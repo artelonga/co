@@ -539,6 +539,61 @@ pub fn generate_code() -> String {
     format!("{:06}", n % 1_000_000)
 }
 
+/// CO-185 / CO-186: short-lived handover JWT for cross-apex SSO.
+///
+/// Signed with the server's P-256 private key. Receivers validate via
+/// the public key at `/.well-known/jwks.json` — no shared secret
+/// distribution required.
+///
+/// 60-second TTL — long enough for the browser redirect, short enough
+/// that a leaked URL is useless.
+pub fn sign_handover_jwt_es256(
+    key: &JwtKey,
+    user_id: &str,
+    email: &str,
+    tier: &str,
+) -> anyhow::Result<String> {
+    let now = Utc::now();
+    let iat = now.timestamp() as usize;
+    let exp = (now.timestamp() + 60) as usize;
+    let claims = Claims {
+        sub: user_id.to_string(),
+        email: email.to_string(),
+        tier: tier.to_string(),
+        usuario: String::new(),
+        papel: String::new(),
+        exp,
+        iat,
+    };
+    let mut header = Header::new(Algorithm::ES256);
+    header.kid = Some(key.kid.clone());
+    let token = encode(&header, &claims, &key.encoding_key()?)?;
+    Ok(token)
+}
+
+/// CO-186: when a redirect target points at a `/auth/co-handover` endpoint
+/// on a safelisted host, append a short-lived `co_token` query param so the
+/// receiving SvelteKit (or other framework) can establish its own session
+/// cookie cross-apex. Token signed ES256 — receivers validate via JWKS,
+/// no shared secret to distribute. Otherwise returns `return_to` unchanged.
+pub fn maybe_attach_co_handover_token(
+    return_to: &str,
+    user_id: &str,
+    email: &str,
+    tier: &str,
+    jwt_key: &JwtKey,
+) -> String {
+    if !return_to.contains("/auth/co-handover") {
+        return return_to.to_string();
+    }
+    let token = match sign_handover_jwt_es256(jwt_key, user_id, email, tier) {
+        Ok(t) => t,
+        Err(_) => return return_to.to_string(),
+    };
+    let separator = if return_to.contains('?') { '&' } else { '?' };
+    format!("{return_to}{separator}co_token={token}")
+}
+
 /// Signs a JWT for the given user. Returns (token, expires_at).
 pub fn sign_jwt(
     user_id: &str,
