@@ -1592,5 +1592,8 @@ impl Storage {
                  CREATE INDEX IF NOT EXISTS idx_leads_assignee ON leads(assignee_handle);",
             )
             .expect("CO-183: leads indexes");
+
+        // CO-193: per-universe chat — rooms + messages tables.
+        self.ensure_chat_tables();
     }
 }

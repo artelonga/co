@@ -119,6 +119,7 @@ impl Storage {
 }
 
 pub(crate) mod api_tokens;
+pub(crate) mod chat;
 pub(crate) mod clone_ops;
 pub(crate) mod dashboard;
 pub(crate) mod data_migrate;

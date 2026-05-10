@@ -68,6 +68,11 @@ impl Storage {
             params![create.key],
         );
 
+        // CO-193: seed a `general` chat room for every new universe.
+        if let Err(e) = self.ensure_default_room(&create.key) {
+            tracing::warn!(universe_key = %create.key, "ensure_default_room on create: {e}");
+        }
+
         Ok(crate::models::Universe {
             key: create.key,
             name: create.name,

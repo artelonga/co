@@ -342,6 +342,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
     let invitation_api = crate::invitation_routes::invitation_router();
 
+    // --- CO-193: Chat rooms + messages ---
+    let chat_api = crate::chat_routes::chat_router()
+        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+
     // --- Theme tier routes ---
     let themes_api = crate::universe_routes::themes_router();
 
@@ -522,6 +526,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", universe_invitation_api)
         // CO-188: invitation preview + accept (public preview, per-route auth on accept)
         .nest("/api/v1/invitations", invitation_api)
+        // CO-193: per-universe chat (auth required on all chat endpoints)
+        .nest("/api/v1/universes", chat_api)
         // CO-189: me/invitations inbox (auth required)
         .nest(
             "/api/v1/me",
@@ -1054,6 +1060,15 @@ pub async fn start_server(config: WebConfig) {
                     tracing::error!("Failed to clean admin anon clutter: {e}");
                 }
             }
+        }
+    }
+
+    // CO-193: backfill default `general` chat room for pre-existing universes.
+    {
+        let chat_storage = Storage::new(&config.data_dir);
+        let n = chat_storage.backfill_default_rooms();
+        if n > 0 {
+            tracing::info!("CO-193: seeded default general room for {n} universe(s)");
         }
     }
 

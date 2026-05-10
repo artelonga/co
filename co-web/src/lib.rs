@@ -8,6 +8,7 @@ pub mod baseline;
 pub mod blob_routes;
 pub mod branch_routes;
 pub mod cache;
+pub mod chat_routes;
 pub mod config;
 pub mod dev_board;
 pub mod doc_gen;
