@@ -125,6 +125,7 @@ pub(crate) mod data_migrate;
 pub(crate) mod invitations;
 pub(crate) mod log_drain;
 pub mod migrations;
+pub(crate) mod onboarding;
 pub(crate) mod projects;
 pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
@@ -134,6 +135,8 @@ pub(crate) mod subscriptions;
 pub(crate) mod tasks;
 pub(crate) mod universe;
 pub(crate) mod users;
+
+pub use onboarding::derive_usuario_from_email;
 
 pub use invitations::Invitation;
 

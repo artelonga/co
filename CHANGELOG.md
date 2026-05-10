@@ -5,6 +5,140 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.97.0] — 2026-05-10
+
+### Added — CO-190: Passwordless onboarding via email (magic-code sign-in or signup)
+
+Single "Continuar com email" entry point: user types their email, receives a
+6-digit code, and on verify either logs in (existing account) or gets a new
+account auto-provisioned (derived `usuario` from email local-part). Slack/
+Notion/Linear-style flow — no separate sign-up vs sign-in decision required.
+
+- **Migration v41**: `onboarding_codes` table + index keyed by `email_lookup_hash`.
+- **`POST /api/v1/auth/onboard-with-email`**: validates email, rate-limits
+  (5/email/hour, 20/IP/hour), determines intent (`login`|`create`), mints
+  6-digit Argon2id-hashed code, sends via Resend → SMTP → log cascade, returns
+  202 `{sent: true, expires_at}` (always, even for unknown emails).
+- **`POST /api/v1/auth/onboard-with-email/verify`**: looks up active code,
+  enforces 5-wrong-attempt lockout, branches on intent — login mints session
+  for existing user, create provisions `users` row (no password yet), runs
+  CO-184 reverse bridge, runs `ensure_email_recovery_channel`, mints session.
+  Returns 200 `{user_id, email, display_name, expires_at, return_to}` or 410
+  when code is locked, expired, or consumed.
+- **Storage `onboarding.rs`**: `create_onboarding_code`, `get_onboarding_code`,
+  `consume_onboarding_code`, `increment_onboarding_attempts`,
+  `cleanup_expired_onboarding_codes`, `count_onboarding_codes_for_email/ip`,
+  `record_ip_onboarding_request`, plus `derive_usuario_from_email` helper with
+  `-N` suffix dedup chain.
+- **UI**: "Continuar com email" is now the **first** affordance in the login
+  modal; password form is collapsible via "Já tem usuário e senha? ▼". Code-
+  entry step shows "Reenviar" (disabled 60s) and "Editar email" links.
+- **i18n**: all new keys in PT and EN.
+- **Tests**: 10 covering happy login/create intents, rate-limit, wrong-code
+  lockout (5 attempts), consumed code, expired code, missing code, invalid
+  email, and `derive_usuario_from_email` with collision suffix.
+
+## [1.96.2] — 2026-05-10
+
+### Added — Per-step trace logging in `find_user_for_recovery`
+
+Each step now emits a `tracing::info!` line so operators can see from
+`flyctl logs` exactly which lookup branch matched, missed, or was skipped:
+
+- `input=<redacted> (len=N)` at entry
+- `matched CO users.usuario → <co_id>`
+- `matched linked quilombo usuario → <co_id>`
+- `matched unlinked quilombo usuario → q_id=…, bridging` then `bridge complete → co_id=…`
+- `matched quilombo email → q_id=…, bridging` then `bridge complete via email → co_id=…`
+- `no quilombo_usuarios row with email=<redacted>`
+- `all paths exhausted, returning None`
+
+Pure observability — no behavior change.
+
+## [1.96.1] — 2026-05-10
+
+### Fixed — Forgot-password now lazy-bridges legacy quilombo users by usuario AND by email field
+
+Two gaps in `find_user_for_recovery_pair` meant that a legacy quilombo user
+(no `linked_co_user_id` yet) could request a password reset, type their
+quilombo usuario + email, and silently hit the no-match path. Resend was
+never asked to send anything. Surfaced testing `retrocore` /
+`retrocore@artelonga.com.br` after 1.95.1.
+
+**Path 1 (added):** `find_user_for_recovery` now also walks
+`quilombo_usuarios.usuario` rows where `linked_co_user_id IS NULL` (the
+existing branch only matched `IS NOT NULL`), runs `ensure_co_user_for_quilombo`
++ `link_quilombo_to_co`, and returns the freshly-bridged CO user id.
+
+**Path 2 (added):** When the primary identifier lookup misses but the
+caller supplied a separate `email` field that contains `@`,
+`find_user_for_recovery_pair` retries the lookup using the email. This
+chains into the existing email-based lazy-bridge, so a user who typed the
+right email but the wrong (or empty) usuario still resolves.
+
+**Channel bootstrap:** Once a user_id is resolved AND the caller supplied
+an email, `find_user_for_recovery_pair` always calls
+`ensure_email_recovery_channel(user_id, email)`. Idempotent for existing
+channels; for freshly-bridged users this guarantees they have a verified
+channel to receive the code on. Without it, the bridge would succeed and
+the handler would still send no email.
+
+**Logging:** the no-match log now shows the redacted email field too, not
+just whether one was supplied:
+`Recovery request no-match: ... identifier=*** email=r***@artelonga.com.br`
+
+Tests: 1 new — `test_forgot_password_lazy_bridges_legacy_quilombo_by_email`.
+All 25 recovery-route tests pass.
+
+## [1.96.0] — 2026-05-10
+
+### Added — Change-password flow can attach an email
+
+`POST /api/v1/auth/change-password` now accepts an optional `email` field.
+When present (typically a quilombo user adding an email for the first time
+via the security modal), the server:
+
+1. Validates the email format and uniqueness across `users.email`.
+2. Calls `set_user_email` — fails 409 if the address is already used by a
+   different account; otherwise updates `users.email` for the current user.
+3. Calls `ensure_email_recovery_channel` to promote the address to a
+   verified recovery channel (forgot-password works immediately).
+4. Calls `mirror_email_to_quilombo` to copy the new address onto any
+   linked `quilombo_usuarios` row that lacks one.
+5. Mirrors the new password hash to linked quilombo rows via
+   `mirror_password_to_quilombo` (already in 1.83.0 for the recovery flow,
+   now also for change-password — keeping the two paths symmetric).
+
+**Username is never touched.** A signed-in quilombo user clicking
+"Mudar senha" and adding `name@example.com` keeps `quilombo_usuarios.usuario`
+and `users.usuario` unchanged; only the email + recovery channel are
+attached.
+
+UI: `index.html` security modal grew an optional "Adicionar/atualizar email"
+input. `login.js::btn-change-password` sends `email` when filled and surfaces
+the 409-conflict / generic error states distinctly. PT + EN i18n strings
+added: `change_password_attach_email`, `change_password_attach_email_hint`,
+`change_password_success_with_email`, `change_password_email_conflict`.
+
+Tests: 2 new — `test_change_password_attaches_new_email`,
+`test_change_password_email_conflict_returns_409`. All 4 change-password
+tests pass clean.
+
+## [1.95.1] — 2026-05-10
+
+### Added — Recovery diagnostic logging
+
+`forgot_password_handler` now emits `tracing::info!` on the no-match and
+no-channel paths so operators can tell from `flyctl logs` whether a request
+silently dropped (no user, no verified channel, or wrong pair) versus
+actually attempting delivery. Response shape is unchanged — caller still
+gets the same 202 with empty `sent_to` (no enumeration leak); the new
+information goes only to server logs.
+
+Surfaced when triaging a password-reset attempt for `retro-core@artelonga.com.br`
+that produced no Resend log entry. Previously you couldn't distinguish
+"no account exists" from "delivery failed" without DB inspection.
+
 ## [1.95.0] — 2026-05-10
 
 ### Added — CO-188: Universe invitation tokens

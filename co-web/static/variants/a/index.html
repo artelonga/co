@@ -344,20 +344,17 @@
                 <p class="login-subtitle" data-i18n="login_subtitle">Acesse seu quadro de projetos</p>
             </div>
 
-            <div id="login-step-password">
+            <!-- CO-190: Primary email onboarding step (shown first) -->
+            <div id="login-step-email">
                 <div class="form-group">
-                    <label for="login-usuario" data-i18n="email_or_user">Email ou usuário</label>
-                    <input type="text" id="login-usuario" autocomplete="username" data-i18n-placeholder="username_placeholder" placeholder="email@exemplo.com">
-                </div>
-                <div class="form-group">
-                    <label for="login-senha" data-i18n="password">Senha</label>
-                    <input type="password" id="login-senha" autocomplete="current-password" placeholder="••••••••">
+                    <label for="onboard-email" data-i18n="onboard_email_label">Email</label>
+                    <input type="email" id="onboard-email" autocomplete="email" data-i18n-placeholder="onboard_email_placeholder" placeholder="email@exemplo.com">
                 </div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-primary btn-full" id="btn-entrar" data-i18n="sign_in">Entrar</button>
+                    <button type="button" class="btn btn-primary btn-full" id="btn-onboard-continue" data-i18n="onboard_continue">Continuar com email</button>
                 </div>
-                <p id="login-error" class="form-error hidden"></p>
-                <!-- CO-177: Google sign-in. JS hides it via .hidden when /auth/google/status returns configured=false. -->
+                <p id="onboard-email-error" class="form-error hidden"></p>
+                <!-- CO-177: Google sign-in. -->
                 <div id="oauth-providers" class="oauth-providers hidden">
                     <div class="oauth-divider"><span data-i18n="oauth_divider">ou</span></div>
                     <a href="/api/v1/auth/google/start" class="btn btn-secondary btn-full oauth-btn" id="btn-google-signin" rel="noopener">
@@ -373,9 +370,48 @@
                     </a>
                 </div>
                 <div class="login-links" style="text-align:center;margin-top:0.75rem">
+                    <button type="button" class="btn-text-sm" id="btn-show-classic-login" data-i18n="onboard_use_password">Já tem usuário e senha? ▼</button>
+                </div>
+            </div>
+
+            <!-- CO-190: Code verification step -->
+            <div id="login-step-code" class="hidden">
+                <p class="login-subtitle" data-i18n="onboard_check_email">Verifique seu email</p>
+                <p id="onboard-sent-to" class="form-hint" style="text-align:center;margin-bottom:0.75rem"></p>
+                <div class="form-group">
+                    <label for="onboard-code" data-i18n="onboard_code_label">Código (6 dígitos)</label>
+                    <input type="text" id="onboard-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="000000">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-full" id="btn-onboard-verify" data-i18n="onboard_verify">Confirmar</button>
+                </div>
+                <p id="onboard-code-error" class="form-error hidden"></p>
+                <div class="login-links" style="text-align:center;margin-top:0.75rem">
+                    <button type="button" class="btn-text-sm" id="btn-onboard-resend" data-i18n="onboard_resend">Reenviar</button>
+                    <span class="login-link-sep">·</span>
+                    <button type="button" class="btn-text-sm" id="btn-onboard-edit-email" data-i18n="onboard_edit_email">Editar email</button>
+                </div>
+            </div>
+
+            <div id="login-step-password" class="hidden">
+                <div class="form-group">
+                    <label for="login-usuario" data-i18n="email_or_user">Email ou usuário</label>
+                    <input type="text" id="login-usuario" autocomplete="username" data-i18n-placeholder="username_placeholder" placeholder="email@exemplo.com">
+                </div>
+                <div class="form-group">
+                    <label for="login-senha" data-i18n="password">Senha</label>
+                    <input type="password" id="login-senha" autocomplete="current-password" placeholder="••••••••">
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-primary btn-full" id="btn-entrar" data-i18n="sign_in">Entrar</button>
+                </div>
+                <p id="login-error" class="form-error hidden"></p>
+                <div class="login-links" style="text-align:center;margin-top:0.75rem">
                     <button type="button" class="btn-text-sm" id="btn-forgot-password" data-i18n="forgot_password">Esqueci minha senha</button>
                     <span class="login-link-sep">·</span>
                     <button type="button" class="btn-text-sm" id="btn-show-signup" data-i18n="signup_link">Criar conta</button>
+                    <span class="login-link-sep">·</span>
+                    <button type="button" class="btn-text-sm" id="btn-back-to-email" data-i18n="onboard_back_to_email">← Email</button>
                 </div>
             </div>
 
@@ -691,6 +727,10 @@
                     <div class="form-group">
                         <label for="security-new-password" data-i18n="change_password_new">Nova senha</label>
                         <input type="password" id="security-new-password" autocomplete="new-password" placeholder="••••••••">
+                    </div>
+                    <div class="form-group">
+                        <label for="security-attach-email" data-i18n="change_password_attach_email">Adicionar/atualizar email <span class="form-hint-inline" data-i18n="change_password_attach_email_hint">(opcional, para recuperação)</span></label>
+                        <input type="email" id="security-attach-email" autocomplete="email" placeholder="email@exemplo.com">
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-primary btn-full" id="btn-change-password" data-i18n="change_password_save">Salvar senha</button>

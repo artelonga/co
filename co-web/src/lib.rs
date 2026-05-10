@@ -33,6 +33,7 @@ pub mod notification_providers;
 pub mod oauth_google;
 pub mod obsidian_tasks;
 pub mod oidc_routes;
+pub mod onboarding_routes;
 pub mod plugin_loader;
 pub mod processos;
 pub mod proposal_routes;

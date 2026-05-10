@@ -1309,6 +1309,57 @@ impl Storage {
                 .expect("Failed to run migration v40");
         }
 
+        if current_version < 41 {
+            // CO-190: onboarding codes — passwordless sign-in / signup via email.
+            self.conn
+                .execute_batch(
+                    "
+                    CREATE TABLE IF NOT EXISTS onboarding_codes (
+                        id                  TEXT PRIMARY KEY,
+                        email_lookup_hash   TEXT NOT NULL,
+                        intent              TEXT NOT NULL,
+                        code_hash           TEXT NOT NULL,
+                        preferred_usuario   TEXT,
+                        return_to           TEXT,
+                        expires_at          TEXT NOT NULL,
+                        consumed_at         TEXT,
+                        attempts            INTEGER NOT NULL DEFAULT 0,
+                        created_at          TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_onboarding_codes_lookup
+                        ON onboarding_codes(email_lookup_hash, consumed_at);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (41);
+                    ",
+                )
+                .expect("Failed to run migration v41");
+        }
+
+        // CO-190 unconditional backfill — ensures the table exists even if
+        // v41 was partially applied on an older instance.
+        ensure_table(
+            &self.conn,
+            "onboarding_codes",
+            "CREATE TABLE IF NOT EXISTS onboarding_codes (
+                id                  TEXT PRIMARY KEY,
+                email_lookup_hash   TEXT NOT NULL,
+                intent              TEXT NOT NULL,
+                code_hash           TEXT NOT NULL,
+                preferred_usuario   TEXT,
+                return_to           TEXT,
+                expires_at          TEXT NOT NULL,
+                consumed_at         TEXT,
+                attempts            INTEGER NOT NULL DEFAULT 0,
+                created_at          TEXT NOT NULL
+            );",
+        )
+        .expect("CO-190 backfill: onboarding_codes table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_onboarding_codes_lookup
+                     ON onboarding_codes(email_lookup_hash, consumed_at);",
+            )
+            .expect("CO-190 backfill: onboarding_codes index");
+
         // CO-188 unconditional backfill — ensures the table exists even if
         // v40 was partially applied on an older instance.
         ensure_table(

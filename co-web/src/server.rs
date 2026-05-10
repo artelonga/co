@@ -566,6 +566,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest(
             "/api/v1/auth",
             crate::recovery_routes::forgot_password_router(),
+        )
+        // CO-190: passwordless onboarding via email (public — no auth required)
+        .nest(
+            "/api/v1/auth",
+            crate::onboarding_routes::onboarding_router(),
         );
 
     // Mount plugin routes if any plugins were loaded

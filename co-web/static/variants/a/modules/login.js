@@ -25,8 +25,8 @@ export function showLoginModal() {
     if (overlay) {
         overlay.classList.remove('hidden');
         window.setLang(window.currentLang);
-        const usuarioInput = document.getElementById('login-usuario');
-        if (usuarioInput) usuarioInput.focus();
+        const emailInput = document.getElementById('onboard-email');
+        if (emailInput) emailInput.focus();
     }
 }
 
@@ -132,6 +132,176 @@ export function setupLoginModal() {
         if (el) el.addEventListener('keydown', e => { if (e.key === 'Enter') attemptLogin(); });
     });
 
+    // CO-190: Passwordless onboarding via email
+    const btnOnboardContinue = document.getElementById('btn-onboard-continue');
+    const btnOnboardVerify = document.getElementById('btn-onboard-verify');
+    const btnOnboardResend = document.getElementById('btn-onboard-resend');
+    const btnOnboardEditEmail = document.getElementById('btn-onboard-edit-email');
+    const btnShowClassicLogin = document.getElementById('btn-show-classic-login');
+    const btnBackToEmail = document.getElementById('btn-back-to-email');
+
+    let _onboardEmail = '';
+    let _resendCooldownTimer = null;
+
+    function startResendCooldown() {
+        if (!btnOnboardResend) return;
+        btnOnboardResend.disabled = true;
+        let secs = 60;
+        btnOnboardResend.textContent = `${window.t('onboard_resend')} (${secs}s)`;
+        _resendCooldownTimer = setInterval(() => {
+            secs -= 1;
+            if (secs <= 0) {
+                clearInterval(_resendCooldownTimer);
+                btnOnboardResend.disabled = false;
+                btnOnboardResend.textContent = window.t('onboard_resend');
+            } else {
+                btnOnboardResend.textContent = `${window.t('onboard_resend')} (${secs}s)`;
+            }
+        }, 1000);
+    }
+
+    async function sendOnboardCode(email) {
+        const errEl = document.getElementById('onboard-email-error');
+        if (errEl) errEl.classList.add('hidden');
+        if (!email || !email.includes('@')) {
+            if (errEl) { errEl.textContent = window.t('onboard_invalid_email'); errEl.classList.remove('hidden'); }
+            return false;
+        }
+        if (btnOnboardContinue) { btnOnboardContinue.disabled = true; btnOnboardContinue.textContent = window.t('onboard_sending'); }
+        try {
+            const resp = await fetch('/api/v1/auth/onboard-with-email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email }),
+            });
+            if (!resp.ok) {
+                let msg = window.t('onboard_error');
+                try { const j = await resp.json(); msg = j.message || msg; } catch (_) {}
+                if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+                return false;
+            }
+            return true;
+        } catch (_) {
+            if (errEl) { errEl.textContent = window.t('onboard_error'); errEl.classList.remove('hidden'); }
+            return false;
+        } finally {
+            if (btnOnboardContinue) { btnOnboardContinue.disabled = false; btnOnboardContinue.textContent = window.t('onboard_continue'); }
+        }
+    }
+
+    if (btnOnboardContinue) {
+        btnOnboardContinue.addEventListener('click', async () => {
+            const email = (document.getElementById('onboard-email')?.value || '').trim().toLowerCase();
+            const ok = await sendOnboardCode(email);
+            if (ok) {
+                _onboardEmail = email;
+                const sentToEl = document.getElementById('onboard-sent-to');
+                if (sentToEl) sentToEl.textContent = window.t('onboard_sent_to').replace('{email}', email);
+                showLoginStep('login-step-code');
+                document.getElementById('onboard-code')?.focus();
+                startResendCooldown();
+            }
+        });
+    }
+
+    document.getElementById('onboard-email')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && btnOnboardContinue) btnOnboardContinue.click();
+    });
+
+    if (btnOnboardVerify) {
+        btnOnboardVerify.addEventListener('click', async () => {
+            const code = (document.getElementById('onboard-code')?.value || '').trim();
+            const errEl = document.getElementById('onboard-code-error');
+            if (errEl) errEl.classList.add('hidden');
+            if (!code) return;
+            btnOnboardVerify.disabled = true;
+            btnOnboardVerify.textContent = window.t('onboard_verifying');
+            try {
+                const resp = await fetch('/api/v1/auth/onboard-with-email/verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: _onboardEmail, code }),
+                });
+                if (resp.ok) {
+                    const data = await resp.json();
+                    hideLoginModal();
+                    if (data.return_to) {
+                        window.location.href = data.return_to;
+                    } else {
+                        window.location.reload();
+                    }
+                } else {
+                    let msg = window.t('onboard_code_error');
+                    try { const j = await resp.json(); msg = j.message || msg; } catch (_) {}
+                    if (resp.status === 410) {
+                        msg = window.t('onboard_code_locked');
+                    }
+                    if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
+                }
+            } catch (_) {
+                if (errEl) { errEl.textContent = window.t('onboard_code_error'); errEl.classList.remove('hidden'); }
+            } finally {
+                btnOnboardVerify.disabled = false;
+                btnOnboardVerify.textContent = window.t('onboard_verify');
+            }
+        });
+    }
+
+    document.getElementById('onboard-code')?.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && btnOnboardVerify) btnOnboardVerify.click();
+    });
+
+    if (btnOnboardResend) {
+        btnOnboardResend.addEventListener('click', async () => {
+            const ok = await sendOnboardCode(_onboardEmail);
+            if (ok) startResendCooldown();
+        });
+    }
+
+    if (btnOnboardEditEmail) {
+        btnOnboardEditEmail.addEventListener('click', () => {
+            showLoginStep('login-step-email');
+            document.getElementById('onboard-email')?.focus();
+        });
+    }
+
+    if (btnShowClassicLogin) {
+        btnShowClassicLogin.addEventListener('click', () => {
+            showLoginStep('login-step-password');
+            document.getElementById('login-usuario')?.focus();
+        });
+    }
+
+    if (btnBackToEmail) {
+        btnBackToEmail.addEventListener('click', () => {
+            showLoginStep('login-step-email');
+            document.getElementById('onboard-email')?.focus();
+        });
+    }
+
+    // CO-177: probe whether Google OAuth is configured on this deploy.
+    // If yes, reveal both the login + signup OAuth blocks. Stays hidden
+    // (default) when GOOGLE_CLIENT_ID isn't set so users don't click a
+    // button that 503s. Also forwards `?return_to=` from the current URL
+    // so cross-deployment bounces (quilombo SvelteKit, future ArteLonga)
+    // round-trip back to the originating site after auth.
+    (async () => {
+        try {
+            const r = await fetch('/api/v1/auth/google/status');
+            if (!r.ok) return;
+            const { configured } = await r.json();
+            if (!configured) return;
+            const here = new URLSearchParams(window.location.search);
+            const returnTo = here.get('return_to');
+            const startHref = returnTo
+                ? `/api/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`
+                : '/api/v1/auth/google/start';
+            document.querySelectorAll('.oauth-btn').forEach(a => { a.href = startHref; });
+            document.getElementById('oauth-providers')?.classList.remove('hidden');
+            document.getElementById('oauth-providers-signup')?.classList.remove('hidden');
+        } catch (_) { /* leave hidden on any error */ }
+    })();
+
     if (btnLogout) {
         btnLogout.addEventListener('click', async () => {
             await api.logout();
@@ -149,36 +319,89 @@ export function setupLoginModal() {
     const btnResetSubmit = document.getElementById('btn-reset-submit');
 
     function showLoginStep(step) {
-        ['login-step-password', 'login-step-forgot', 'login-step-reset'].forEach(id => {
+        ['login-step-email', 'login-step-code', 'login-step-password', 'login-step-signup', 'login-step-forgot', 'login-step-reset'].forEach(id => {
             const el = document.getElementById(id);
             if (el) el.classList.add('hidden');
         });
         const target = document.getElementById(step);
         if (target) target.classList.remove('hidden');
-        if (btnBackLogin) btnBackLogin.style.display = (step === 'login-step-password') ? 'none' : '';
+        if (btnBackLogin) btnBackLogin.style.display = (step === 'login-step-email' || step === 'login-step-password') ? 'none' : '';
     }
-
-    // CO-172: On quilomboaraucaria.com.br, redirect forgot-password to CO /recover.
-    function buildCoRecoverUrl(params) {
-        const base = 'https://co.artelonga.com.br/recover';
-        const qs = new URLSearchParams(params).toString();
-        return qs ? `${base}?${qs}` : base;
-    }
-
-    const isQuilomboDomain = window.location.hostname === 'quilomboaraucaria.com.br';
 
     if (btnForgot) {
         btnForgot.addEventListener('click', () => {
-            if (isQuilomboDomain) {
-                const identifier = (document.getElementById('login-usuario')?.value || '').trim();
-                const params = { return_to: 'https://quilomboaraucaria.com.br' };
-                if (identifier) params.identifier = identifier;
-                window.location.href = buildCoRecoverUrl(params);
-                return;
-            }
             showLoginStep('login-step-forgot');
             const el = document.getElementById('forgot-identifier');
             if (el) el.focus();
+        });
+    }
+
+    // CO-175 (G3): public signup wiring.
+    const btnShowSignup = document.getElementById('btn-show-signup');
+    const btnBackFromSignup = document.getElementById('btn-back-to-login-from-signup');
+    const btnSignupSubmit = document.getElementById('btn-signup-submit');
+    if (btnShowSignup) {
+        btnShowSignup.addEventListener('click', () => {
+            showLoginStep('login-step-signup');
+            document.getElementById('signup-usuario')?.focus();
+        });
+    }
+
+    // Default: show the email-first step on open
+    showLoginStep('login-step-email');
+    if (btnBackFromSignup) {
+        btnBackFromSignup.addEventListener('click', () => {
+            showLoginStep('login-step-password');
+        });
+    }
+    if (btnSignupSubmit) {
+        btnSignupSubmit.addEventListener('click', async () => {
+            const usuario = (document.getElementById('signup-usuario')?.value || '').trim();
+            const senha = document.getElementById('signup-senha')?.value || '';
+            const email = (document.getElementById('signup-email')?.value || '').trim();
+            const errEl = document.getElementById('signup-error');
+            errEl.classList.add('hidden');
+
+            // Mirror backend validation client-side for fast feedback.
+            if (usuario.length < 3 || usuario.length > 30) {
+                errEl.textContent = window.t('signup_error_usuario_len');
+                errEl.classList.remove('hidden');
+                return;
+            }
+            if (senha.length < 8) {
+                errEl.textContent = window.t('signup_error_senha_len');
+                errEl.classList.remove('hidden');
+                return;
+            }
+
+            btnSignupSubmit.disabled = true;
+            btnSignupSubmit.textContent = window.t('signup_submitting');
+            try {
+                const resp = await fetch('/api/v1/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ usuario, password: senha, email: email || undefined }),
+                });
+                if (!resp.ok) {
+                    let serverMsg = '';
+                    try {
+                        const j = await resp.json();
+                        serverMsg = j.message || j.error || '';
+                    } catch (_) {}
+                    errEl.textContent = serverMsg || window.t('signup_error_generic');
+                    errEl.classList.remove('hidden');
+                    return;
+                }
+                // Server set the session cookie; reload triggers `init()` to
+                // read /me and route the freshly-logged-in user to their hub.
+                window.location.reload();
+            } catch (e) {
+                errEl.textContent = window.t('signup_error_generic');
+                errEl.classList.remove('hidden');
+            } finally {
+                btnSignupSubmit.disabled = false;
+                btnSignupSubmit.textContent = window.t('signup_submit');
+            }
         });
     }
 
@@ -189,20 +412,37 @@ export function setupLoginModal() {
     }
 
     let _forgotIdentifier = '';
+    let _forgotEmail = '';
 
     if (btnForgotSend) {
         btnForgotSend.addEventListener('click', async () => {
-            const identifier = (document.getElementById('forgot-identifier')?.value || '').trim();
+            const usuario = (document.getElementById('forgot-identifier')?.value || '').trim();
+            const email = (document.getElementById('forgot-email')?.value || '').trim();
             const errEl = document.getElementById('forgot-error');
             errEl.classList.add('hidden');
-            if (!identifier) return;
+            // CO-176: both fields are required and must match the same account.
+            if (!usuario) {
+                errEl.textContent = window.t('forgot_password_username_required');
+                errEl.classList.remove('hidden');
+                return;
+            }
+            if (!email || !email.includes('@')) {
+                errEl.textContent = window.t('forgot_password_email_required');
+                errEl.classList.remove('hidden');
+                return;
+            }
             btnForgotSend.disabled = true;
             btnForgotSend.textContent = window.t('forgot_password_sending');
-            _forgotIdentifier = identifier;
+            // Track both for the verify step (server checks the pair again).
+            _forgotIdentifier = usuario;
+            _forgotEmail = email;
             await fetch('/api/v1/auth/forgot-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username_or_channel_value: identifier }),
+                body: JSON.stringify({
+                    username_or_channel_value: usuario,
+                    email,
+                }),
             });
             btnForgotSend.disabled = false;
             btnForgotSend.textContent = window.t('forgot_password_send');
@@ -232,7 +472,11 @@ export function setupLoginModal() {
             const verifyResp = await fetch('/api/v1/auth/forgot-password/verify', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username_or_channel_value: _forgotIdentifier, code }),
+                body: JSON.stringify({
+                    username_or_channel_value: _forgotIdentifier,
+                    email: _forgotEmail,
+                    code,
+                }),
             });
             if (!verifyResp.ok) {
                 errEl.textContent = window.t('forgot_password_error');
@@ -250,10 +494,21 @@ export function setupLoginModal() {
             btnResetSubmit.disabled = false;
             if (resetResp.ok) {
                 // CO-172: redirect back to origin if /recover was loaded with a safelisted return_to
+                // CO-185: when return_to ends in /auth/co-handover, append the short-lived
+                // co_token from the response so the receiving deployment can mint its own
+                // session cookie cross-apex (cookie set here only valid on co.artelonga.com.br).
                 const urlParams = new URLSearchParams(window.location.search);
                 const returnTo = urlParams.get('return_to');
                 if (returnTo && isAllowedReturnTo(returnTo)) {
-                    window.location.href = returnTo;
+                    let final_url = returnTo;
+                    try {
+                        const body = await resetResp.clone().json();
+                        if (body && body.co_token && returnTo.includes('/auth/co-handover')) {
+                            const sep = returnTo.includes('?') ? '&' : '?';
+                            final_url = `${returnTo}${sep}co_token=${encodeURIComponent(body.co_token)}`;
+                        }
+                    } catch (_) { /* fall through with bare returnTo */ }
+                    window.location.href = final_url;
                     return;
                 }
                 hideLoginModal();
@@ -274,6 +529,20 @@ export function setupLoginModal() {
             const el = document.getElementById('forgot-identifier');
             if (el) el.value = prefilledId;
         }
+
+        // CO-176: title + subtitle for the /recover page. Drop the marketing
+        // copy — just say what's happening.
+        const titleEl = document.getElementById('login-modal-title');
+        const subtitleEl = document.querySelector('#login-modal-overlay .login-subtitle');
+        if (titleEl) titleEl.textContent = window.t('recover_title') || 'Recuperar senha';
+        if (subtitleEl) {
+            subtitleEl.textContent = window.t('recover_subtitle') || 'Recupere o acesso à sua conta.';
+        }
+        // The forgot-step subtitle ("Digite seu usuário ou email") becomes
+        // redundant when the modal title already says "Recuperar senha".
+        const forgotSubtitle = document.querySelector('#login-step-forgot .login-subtitle');
+        if (forgotSubtitle) forgotSubtitle.style.display = 'none';
+
         showLoginStep('login-step-forgot');
         showLoginModal();
     }
@@ -302,25 +571,70 @@ export function setupSecurityModal() {
     if (closeBtn) closeBtn.addEventListener('click', closeSecurityModal);
     if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) closeSecurityModal(); });
 
+    /** Channel-type → display affordances (icon + verbose-type label). */
+    function channelDisplay(channelType) {
+        switch (channelType) {
+            case 'email':    return { icon: '✉', label: 'email' };
+            case 'whatsapp': return { icon: '💬', label: 'WhatsApp' };
+            case 'sms':      return { icon: '📱', label: 'SMS' };
+            default:         return { icon: '•', label: channelType };
+        }
+    }
+
     async function loadRecoveryChannels() {
         const listEl = document.getElementById('recovery-channels-list');
         if (!listEl) return;
         try {
             const resp = await apiFetch('/api/v1/auth/recovery/channels', {}, true);
-            if (!resp || !Array.isArray(resp)) { listEl.textContent = ''; return; }
-            if (resp.length === 0) {
+            if (!resp || !Array.isArray(resp) || resp.length === 0) {
                 listEl.textContent = '';
                 return;
             }
-            listEl.innerHTML = resp.map(ch => `
-                <div class="recovery-channel-row" style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.4rem">
-                    <span class="badge" style="font-size:0.75rem">${ch.channel_type}</span>
-                    <span>${ch.masked_value}</span>
-                    <span style="font-size:0.75rem;opacity:0.6">${ch.verified_at ? window.t('recovery_verified') : window.t('recovery_pending')}</span>
-                    <button class="btn-text-sm" data-channel-id="${ch.id}" onclick="window._removeChannel('${ch.id}')">${window.t('recovery_remove')}</button>
-                </div>`).join('');
+            listEl.innerHTML = resp.map(ch => {
+                const d = channelDisplay(ch.channel_type);
+                const verified = !!ch.verified_at;
+                const statusKey = verified ? 'recovery_verified' : 'recovery_pending';
+                return `
+                <div class="recovery-channel-row${verified ? '' : ' unverified'}">
+                    <div class="recovery-channel-meta">
+                        <span class="recovery-channel-icon" aria-hidden="true">${d.icon}</span>
+                        <span class="recovery-channel-value">${ch.masked_value}</span>
+                    </div>
+                    <span class="recovery-channel-status">${window.t(statusKey)}</span>
+                    <button class="btn-text-sm" type="button" data-channel-id="${ch.id}" onclick="window._removeChannel('${ch.id}')">${window.t('recovery_remove')}</button>
+                </div>`;
+            }).join('');
         } catch (_) {}
     }
+
+    /** Update the value-input affordances when channel type changes. */
+    function syncChannelInputForType() {
+        const typeEl = document.getElementById('recovery-channel-type');
+        const valEl = document.getElementById('recovery-channel-value');
+        const hintEl = document.getElementById('recovery-channel-value-hint');
+        if (!typeEl || !valEl) return;
+        const t = typeEl.value;
+        if (t === 'email') {
+            valEl.type = 'email';
+            valEl.inputMode = 'email';
+            valEl.autocomplete = 'email';
+            valEl.placeholder = 'email@exemplo.com';
+            if (hintEl) hintEl.textContent = window.t('recovery_channel_email_hint');
+        } else {
+            // whatsapp / sms — international phone number
+            valEl.type = 'tel';
+            valEl.inputMode = 'tel';
+            valEl.autocomplete = 'tel';
+            valEl.placeholder = '+55 41 99999-9999';
+            if (hintEl) {
+                hintEl.textContent = t === 'whatsapp'
+                    ? window.t('recovery_channel_whatsapp_hint')
+                    : window.t('recovery_channel_sms_hint');
+            }
+        }
+    }
+    document.getElementById('recovery-channel-type')?.addEventListener('change', syncChannelInputForType);
+    syncChannelInputForType();
 
     window._removeChannel = async (channelId) => {
         const pwd = prompt(window.t('change_password_current'));
@@ -382,32 +696,34 @@ export function setupSecurityModal() {
     const btnChangePw = document.getElementById('btn-change-password');
     if (btnChangePw) {
         btnChangePw.addEventListener('click', async () => {
-            // CO-172: On quilomboaraucaria.com.br redirect password change to CO /recover
-            if (window.location.hostname === 'quilomboaraucaria.com.br') {
-                const params = new URLSearchParams({
-                    action: 'change_password',
-                    return_to: 'https://quilomboaraucaria.com.br',
-                });
-                window.location.href = `https://co.artelonga.com.br/recover?${params}`;
-                return;
-            }
             const current = document.getElementById('security-current-password')?.value || '';
             const next = document.getElementById('security-new-password')?.value || '';
+            const emailInput = document.getElementById('security-attach-email');
+            const email = emailInput ? (emailInput.value || '').trim() : '';
             const msgEl = document.getElementById('security-pw-msg');
             if (!current || !next) return;
+            const body = { current_password: current, new_password: next };
+            if (email) body.email = email;
             const resp = await apiFetch('/api/v1/auth/change-password', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ current_password: current, new_password: next }),
+                body: JSON.stringify(body),
             }, true);
             if (msgEl) {
-                msgEl.textContent = resp && resp.ok
-                    ? window.t('change_password_success')
-                    : window.t('change_password_error');
+                if (resp && resp.ok) {
+                    msgEl.textContent = email
+                        ? window.t('change_password_success_with_email')
+                        : window.t('change_password_success');
+                } else if (resp && resp.error === 'conflict') {
+                    msgEl.textContent = window.t('change_password_email_conflict');
+                } else {
+                    msgEl.textContent = window.t('change_password_error');
+                }
             }
             if (resp && resp.ok) {
                 document.getElementById('security-current-password').value = '';
                 document.getElementById('security-new-password').value = '';
+                if (emailInput) emailInput.value = '';
             }
         });
     }
