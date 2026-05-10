@@ -45,6 +45,10 @@ import {
     bootAppForUniverse, renderUniverseHome, bootApp as _bootApp,
     injectBootCallbacks,
 } from './modules/boot.js';
+import {
+    setupInvitationsPage, setupInvitationsPanel,
+    injectInvitationsCallbacks, consumePendingInviteToken,
+} from './modules/invitations.js';
 
 // ===== Tiny helpers that don't belong in any module =====
 
@@ -337,7 +341,23 @@ function wireModules() {
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse });
     setupUniverseInfoModal({});
-    injectLoginCallbacks({ render, bootAppForUniverse, bootApp, renderUserBadge, setUniverseSlugInUrl, hideTemplateBanner, showToast });
+    injectInvitationsCallbacks({ showToast, showLoginModal });
+    injectLoginCallbacks({
+        render,
+        bootAppForUniverse: async (slug) => {
+            const pendingToken = consumePendingInviteToken();
+            if (pendingToken) {
+                window.location.href = `/invitations/${pendingToken}`;
+                return;
+            }
+            return bootAppForUniverse(slug);
+        },
+        bootApp,
+        renderUserBadge,
+        setUniverseSlugInUrl,
+        hideTemplateBanner,
+        showToast,
+    });
     injectOnboardingCallbacks({ render, showLoginModal, showToast, setUniverseSlugInUrl, bootAppForUniverse, hideTemplateBanner, renderUsageCount });
     injectYggdrasilCallbacks({ hideLoading, hideLoginModal, renderUserBadge });
 }
@@ -425,8 +445,13 @@ async function init() {
     setupCriarModal();
     setupUsageLimitModal();
     setupSettingsPanel();
+    setupInvitationsPanel();
     initFooter();
     bindStaticEvents();
+
+    // CO-189: Handle /invitations/:token SPA route before normal boot
+    const isInvitePage = await setupInvitationsPage();
+    if (isInvitePage) return;
 
     const slug = readUniverseSlugFromUrl();
     state.currentUniverseSlug = slug;

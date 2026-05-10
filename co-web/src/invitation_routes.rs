@@ -33,7 +33,12 @@ use crate::storage::Storage;
 
 /// Routes that nest under /api/v1/universes/:slug (require auth from universe_api layer).
 pub fn universe_invitation_router() -> Router<AppState> {
-    Router::new().route("/{slug}/invitations", post(create_invitation_handler))
+    Router::new()
+        .route("/{slug}/invitations", post(create_invitation_handler))
+        .route(
+            "/{slug}/invitations",
+            get(list_universe_invitations_handler),
+        )
 }
 
 /// Standalone invitation routes (public preview + auth-per-route accept).
@@ -44,6 +49,13 @@ pub fn invitation_router() -> Router<AppState> {
             "/{token}/accept",
             post(accept_invitation_handler).layer(middleware::from_fn(crate::auth::require_auth)),
         )
+}
+
+/// Routes that nest under /api/v1/me (auth required).
+pub fn me_invitations_router() -> Router<AppState> {
+    Router::new()
+        .route("/invitations", get(me_invitations_handler))
+        .layer(middleware::from_fn(crate::auth::require_auth))
 }
 
 // ---------------------------------------------------------------------------
@@ -450,6 +462,118 @@ pub async fn accept_invitation_handler(
     let universe_key = inv.universe_key.clone();
 
     Ok(axum::Json(AcceptInvitationResponse { universe_key, role }))
+}
+
+// ---------------------------------------------------------------------------
+// List universe invitations
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct InvitationListItem {
+    pub recipient: String,
+    pub role: String,
+    pub expires_at: String,
+    pub created_at: String,
+    pub consumed_at: Option<String>,
+}
+
+fn invitation_to_list_item(inv: &crate::storage::invitations::Invitation) -> InvitationListItem {
+    let recipient = inv
+        .invited_email
+        .as_deref()
+        .map(redact_email)
+        .or_else(|| {
+            inv.invited_user_id
+                .as_deref()
+                .map(|id| format!("user:{id}"))
+        })
+        .unwrap_or_else(|| "unknown".into());
+    InvitationListItem {
+        recipient,
+        role: inv.role.clone(),
+        expires_at: inv.expires_at.to_rfc3339(),
+        created_at: inv.created_at.to_rfc3339(),
+        consumed_at: inv.consumed_at.map(|t| t.to_rfc3339()),
+    }
+}
+
+/// GET /api/v1/universes/:slug/invitations — list pending invitations (owner/admin only).
+pub async fn list_universe_invitations_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+) -> Result<impl IntoResponse, AppError> {
+    let storage = lock_storage(&state)?;
+
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+
+    let caller_role = storage.universe_member_role(&slug, &user_id.0);
+    let authorized = universe.owner_id == user_id.0
+        || matches!(caller_role.as_deref(), Some("owner") | Some("admin"));
+    if !authorized {
+        return Err(AppError::Forbidden(
+            "Only the universe owner or admin members can list invitations".into(),
+        ));
+    }
+
+    let invitations = storage.list_invitations_for_universe(&slug);
+    let items: Vec<InvitationListItem> = invitations
+        .iter()
+        .filter(|inv| inv.revoked_at.is_none())
+        .map(invitation_to_list_item)
+        .collect();
+
+    Ok(axum::Json(items))
+}
+
+// ---------------------------------------------------------------------------
+// Me invitations (inbox)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct MeInvitationItem {
+    pub universe_key: String,
+    pub universe_name: String,
+    pub invited_by_name: String,
+    pub role: String,
+    pub expires_at: String,
+    pub created_at: String,
+}
+
+/// GET /api/v1/me/invitations — list pending invitations for the current user.
+pub async fn me_invitations_handler(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<impl IntoResponse, AppError> {
+    let storage = lock_storage(&state)?;
+
+    let user = storage
+        .get_user_by_id(&user_id.0)
+        .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+
+    let invitations = storage.list_invitations_for_me(&user_id.0, &user.email);
+    let items: Vec<MeInvitationItem> = invitations
+        .iter()
+        .filter_map(|inv| {
+            let universe = storage.get_universe(&inv.universe_key)?;
+            let invited_by_name = storage
+                .get_user_by_id(&inv.invited_by)
+                .map(|u| u.display_name)
+                .unwrap_or_default();
+            Some(MeInvitationItem {
+                universe_key: universe.key,
+                universe_name: universe.name,
+                invited_by_name,
+                role: inv.role.clone(),
+                expires_at: inv.expires_at.to_rfc3339(),
+                created_at: inv.created_at.to_rfc3339(),
+            })
+        })
+        .collect();
+
+    Ok(axum::Json(items))
 }
 
 // ---------------------------------------------------------------------------

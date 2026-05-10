@@ -132,6 +132,25 @@ impl Storage {
             .collect()
     }
 
+    /// List pending invitations for a user matched by user_id OR email.
+    /// Returns non-consumed, non-revoked, non-expired invitations only.
+    pub fn list_invitations_for_me(&self, user_id: &str, email: &str) -> Vec<Invitation> {
+        let now = Utc::now().to_rfc3339();
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT {SELECT_COLS} FROM universe_invitations \
+                 WHERE (invited_user_id = ?1 OR LOWER(invited_email) = LOWER(?2)) \
+                 AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3 \
+                 ORDER BY created_at DESC"
+            ))
+            .expect("prepare list_invitations_for_me");
+        stmt.query_map(params![user_id, email, now], row_to_invitation)
+            .expect("list_invitations_for_me query")
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
     /// Hash a raw token the same way create_invitation does — for lookups from URL paths.
     pub fn hash_invitation_token(raw_token: &str) -> String {
         sha256_hex(raw_token)

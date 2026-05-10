@@ -3020,6 +3020,182 @@ body {
     .co-dados-panel { width: 100%; }
 }
 
+/* CO-177: Google OAuth button + "ou" divider on the login + signup forms. */
+.oauth-providers {
+    margin-top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.oauth-providers.hidden { display: none; }
+
+.oauth-divider {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted, rgba(241, 245, 249, 0.4));
+    font-size: 0.8em;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.oauth-divider::before,
+.oauth-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border, rgba(255, 255, 255, 0.12));
+}
+
+.oauth-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    text-decoration: none;
+}
+.oauth-btn .oauth-icon {
+    display: inline-flex;
+    align-items: center;
+}
+
+/* CO-175 (G3): subtle dot separator between login-modal links. */
+.login-link-sep {
+    color: var(--text-muted);
+    margin: 0 0.5rem;
+    font-size: 0.85em;
+}
+
+/* ===== Security modal (CO-165 / CO-172) — borrows the login-card vibe but
+   stays inside the standard `.modal` overlay so it composes with other
+   modals. The earlier inline-style-driven layout had no body padding,
+   leaving labels flush to the modal edge. ===== */
+
+.security-modal {
+    width: 100%;
+    max-width: 480px;
+    padding-bottom: 0;
+}
+
+.security-modal-body {
+    padding: 0 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+}
+
+.security-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.security-section + .security-section {
+    border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+    padding-top: 24px;
+}
+
+.security-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.security-section-header h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.security-section-header .form-hint {
+    margin: 0;
+}
+
+.security-modal-body .form-group {
+    margin-bottom: 0;
+}
+
+.recovery-channel-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.recovery-channel-list:empty {
+    display: none;
+}
+
+.recovery-channel-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+    border-radius: 8px;
+    font-size: 0.875rem;
+}
+
+.recovery-channel-row .recovery-channel-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+}
+
+.recovery-channel-row .recovery-channel-icon {
+    flex: 0 0 auto;
+    font-size: 1rem;
+}
+
+.recovery-channel-row .recovery-channel-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.recovery-channel-row .recovery-channel-status {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    flex: 0 0 auto;
+}
+
+.recovery-channel-row.unverified .recovery-channel-status {
+    color: var(--accent, #f59e0b);
+}
+
+.recovery-add summary {
+    cursor: pointer;
+    user-select: none;
+    padding: 8px 0;
+    list-style: none;
+}
+
+.recovery-add summary::-webkit-details-marker { display: none; }
+
+.recovery-add summary::before {
+    content: '+ ';
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+.recovery-add[open] summary::before {
+    content: '− ';
+}
+
+.recovery-add-form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 8px;
+}
+
+.recovery-verify {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding-top: 8px;
+}
+
 /* ===== Login Screen ===== */
 /* ===== Login Screen ===== */
 .login-screen {
@@ -4935,4 +5111,104 @@ body {
     text-align: center;
     color: var(--text-muted);
     font-size: 14px;
+}
+
+/* ===== CO-189: Invitations ===== */
+
+.settings-invite-section {
+    border-top: 1px solid var(--border, rgba(0, 0, 0, 0.08));
+    padding: 20px 24px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.settings-invite-section .settings-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 4px;
+}
+
+.settings-invite-section .settings-section-header h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.invite-pending-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.invite-pending-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg-hover, rgba(0, 0, 0, 0.03));
+    border-radius: 6px;
+    font-size: 0.8125rem;
+    flex-wrap: wrap;
+}
+
+.invite-recipient {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary, #111);
+}
+
+.invite-role-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: var(--surface, #f3f4f6);
+    font-size: 0.75rem;
+    color: var(--text-secondary, #6b7280);
+    white-space: nowrap;
+}
+
+.invite-status-badge {
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    white-space: nowrap;
+}
+
+.invite-status-pending {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.invite-status-done {
+    background: #d1fae5;
+    color: #065f46;
+}
+
+.invite-cancel-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* Public invite accept page */
+.invite-preview-meta {
+    padding: 12px 0 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.invite-preview-meta p {
+    margin: 0;
+    font-size: 0.9375rem;
+    color: var(--text-primary, #111);
+}
+
+.invite-page-msg {
+    min-height: 1.2em;
+    padding-top: 4px;
 }

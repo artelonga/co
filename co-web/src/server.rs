@@ -434,6 +434,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // 400 server-side instead of reaching the SPA — closes the open-redirect-
         // -looking phishing vector flagged in CO-172 review.
         .route("/recover", get(serve_recover))
+        // CO-189: /invitations/:token — SPA accept page (no server-side auth).
+        .route("/invitations/{token}", get(serve_co_index))
         // CO-170: friendly aliases for the timeline composite view that the
         // SPA renders from the bundled `tempo`, `universo`, `humanity`
         // universes. The actual page is `/shared/timeline.html`; both
@@ -511,6 +513,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/universes", universe_invitation_api)
         // CO-188: invitation preview + accept (public preview, per-route auth on accept)
         .nest("/api/v1/invitations", invitation_api)
+        // CO-189: me/invitations inbox (auth required)
+        .nest(
+            "/api/v1/me",
+            crate::invitation_routes::me_invitations_router(),
+        )
         // CO-161: all universe-content routes under a single visibility + writer gate.
         .nest("/api/v1/universes", universe_content_api)
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
