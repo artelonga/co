@@ -1559,5 +1559,38 @@ impl Storage {
                  ON process_runs(universe_key, created_at DESC);",
             )
             .expect("CO-144 backfill: idx_process_runs_universe_time");
+
+        // CO-183: leads intake — public form submissions + admin queue.
+        ensure_table(
+            &self.conn,
+            "leads",
+            "CREATE TABLE IF NOT EXISTS leads (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                nome            TEXT,
+                email           TEXT,
+                telefone        TEXT,
+                mensagem        TEXT NOT NULL,
+                servico_titulo  TEXT,
+                parceiro_handle TEXT,
+                status          TEXT NOT NULL DEFAULT 'new',
+                priority        TEXT DEFAULT 'normal',
+                assignee_handle TEXT,
+                notes           TEXT,
+                closed_reason   TEXT,
+                promoted_to_al  INTEGER,
+                ip_hash         TEXT,
+                user_agent      TEXT
+            );",
+        )
+        .expect("CO-183: leads table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+                 CREATE INDEX IF NOT EXISTS idx_leads_created_at ON leads(created_at);
+                 CREATE INDEX IF NOT EXISTS idx_leads_assignee ON leads(assignee_handle);",
+            )
+            .expect("CO-183: leads indexes");
     }
 }

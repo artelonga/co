@@ -27,6 +27,7 @@ pub mod iceberg;
 pub mod index_manager;
 pub mod invitation_routes;
 pub mod job_queue;
+pub mod lead_routes;
 pub mod log_drain_routes;
 pub mod models;
 pub mod notification_providers;

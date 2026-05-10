@@ -420,6 +420,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/", get(serve_co_index))
         // CO-105: /admin page — server-side auth.
         .route("/admin", get(crate::admin_routes::serve_admin_page))
+        // CO-183: leads admin page — server-side auth.
+        .route(
+            "/admin/leads.html",
+            get(crate::lead_routes::serve_leads_page),
+        )
         // Telemetry admin dashboard for the `co` universe (dogfooding).
         .route(
             "/co/telemetria",
@@ -476,6 +481,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     // --- CO-105: Admin dashboard API + static page ---
     let admin_dashboard_api = crate::admin_routes::api_router();
+
+    // --- CO-183: leads intake (public) + admin queue ---
+    let leads_public_api = crate::lead_routes::public_router();
+    let leads_admin_api = crate::lead_routes::admin_router();
 
     let mut router = Router::new()
         .merge(ws_route)
@@ -543,6 +552,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/cache", cache_api)
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
         .nest("/api/v1/admin", admin_dashboard_api)
+        // CO-183: public leads intake + admin queue API
+        .nest("/api/v1", leads_public_api)
+        .nest("/api/v1/admin", leads_admin_api)
         // CO-144 Phase C: process model — first process is alterar-pagina-na-web
         .nest("/api/v1/processos", crate::processos::router())
         // CO-166: OIDC authorization code flow + userinfo
@@ -1149,6 +1161,9 @@ pub async fn start_server(config: WebConfig) {
     Arc::clone(&state.embeddings).load_deferred(model_dir);
     // CO-168: spawn outbound webhook delivery worker.
     crate::webhook_worker::spawn_worker(Arc::clone(&state));
+
+    // CO-183: daily LGPD lead retention purge (24-month closed leads).
+    tokio::spawn(crate::lead_routes::retention_task(Arc::clone(&state)));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.

@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO Admin — Leads</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--blue:#4fc3f7;--red:#e57373;--green:#81c784;--yellow:#ffb74d}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif;padding:20px}
+h1{font-size:1.4rem;margin-bottom:4px;color:var(--accent)}
+.ts{font-size:.7rem;color:var(--dim);margin-bottom:14px}
+.strip{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:12px 18px;min-width:110px;flex:1;text-align:center}
+.stat span{display:block;font-size:1.8rem;font-weight:700;color:var(--accent);line-height:1.1}
+.stat label{font-size:.7rem;color:var(--dim);margin-top:3px;display:block}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+select,input[type=date],input[type=text]{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:5px 8px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:5px 8px;border-bottom:1px solid var(--border);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr:last-child td{border:none}
+tr[data-id]:hover{cursor:pointer;background:rgba(124,111,205,.06)}
+tr.selected{background:rgba(124,111,205,.13)}
+.chip{display:inline-block;border-radius:10px;padding:1px 7px;font-size:.7rem;font-weight:600}
+.chip-new{background:#1e2a3a;color:var(--blue)}
+.chip-triaged{background:#2a2a1a;color:var(--yellow)}
+.chip-in_progress{background:#1a2a1a;color:var(--green)}
+.chip-closed{background:#2a1a1a;color:var(--red)}
+.detail{position:fixed;right:0;top:0;width:380px;height:100vh;background:var(--card);border-left:1px solid var(--border);padding:20px 16px;overflow-y:auto;display:none;z-index:100}
+.detail.open{display:block}
+.d-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.d-hdr h2{color:var(--accent);font-size:1rem}
+.btn-close{background:none;border:none;color:var(--dim);cursor:pointer;font-size:1.1rem;padding:2px 6px}
+.field{margin-bottom:8px}
+.field label{display:block;font-size:.68rem;color:var(--dim);margin-bottom:2px}
+.field .val{color:var(--text);word-break:break-word;white-space:pre-wrap;font-size:12px}
+.sep{border:none;border-top:1px solid var(--border);margin:12px 0}
+.form-row{margin-bottom:8px}
+.form-row label{display:block;font-size:.68rem;color:var(--dim);margin-bottom:2px}
+.frm{width:100%;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:12px}
+textarea.frm{resize:vertical;min-height:70px}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;cursor:pointer;margin-top:4px}
+.btn:hover{opacity:.85}
+.msg{font-size:12px;margin-top:6px}
+.msg.ok{color:var(--green)}.msg.err{color:var(--red)}
+a.back{color:var(--dim);text-decoration:none;font-size:.75rem;margin-right:12px}
+a.back:hover{color:var(--text)}
+</style>
+</head>
+<body>
+<h1>CO Admin — Leads</h1>
+<div class="ts" id="last-refresh">Carregando…</div>
+
+<div class="strip">
+  <div class="stat"><span id="cnt-new">—</span><label>Novos</label></div>
+  <div class="stat"><span id="cnt-triaged">—</span><label>Triados</label></div>
+  <div class="stat"><span id="cnt-in_progress">—</span><label>Em andamento</label></div>
+  <div class="stat"><span id="cnt-closed">—</span><label>Fechados</label></div>
+</div>
+
+<div class="filters">
+  <a class="back" href="/admin">← Dashboard</a>
+  <select id="f-status" onchange="load()">
+    <option value="">Todos os status</option>
+    <option value="new">new</option>
+    <option value="triaged">triaged</option>
+    <option value="in_progress">in_progress</option>
+    <option value="closed">closed</option>
+  </select>
+  <input type="date" id="f-since" onchange="load()" title="Desde">
+  <input type="text" id="f-assignee" onchange="load()" placeholder="Assignee" style="width:120px">
+</div>
+
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>#</th><th>Data</th><th>Nome</th><th>Email</th>
+      <th>Status</th><th>Prioridade</th><th>Assignee</th><th>Mensagem</th>
+    </tr></thead>
+    <tbody id="tbl"></tbody>
+  </table>
+</div>
+
+<!-- Detail panel -->
+<div class="detail" id="detail">
+  <div class="d-hdr">
+    <h2 id="d-title">Lead #—</h2>
+    <button class="btn-close" onclick="closeDetail()" title="Fechar">✕</button>
+  </div>
+  <div class="field"><label>Data</label><div class="val" id="d-created"></div></div>
+  <div class="field"><label>Nome</label><div class="val" id="d-nome"></div></div>
+  <div class="field"><label>Email</label><div class="val" id="d-email"></div></div>
+  <div class="field"><label>Telefone</label><div class="val" id="d-telefone"></div></div>
+  <div class="field"><label>Serviço</label><div class="val" id="d-servico"></div></div>
+  <div class="field"><label>Parceiro</label><div class="val" id="d-parceiro"></div></div>
+  <div class="field"><label>Mensagem</label><div class="val" id="d-mensagem" style="max-height:120px;overflow-y:auto"></div></div>
+  <hr class="sep">
+  <div class="form-row"><label>Status</label>
+    <select class="frm" id="p-status">
+      <option value="new">new</option>
+      <option value="triaged">triaged</option>
+      <option value="in_progress">in_progress</option>
+      <option value="closed">closed</option>
+    </select>
+  </div>
+  <div class="form-row"><label>Prioridade</label>
+    <select class="frm" id="p-priority">
+      <option value="low">low</option>
+      <option value="normal">normal</option>
+      <option value="high">high</option>
+      <option value="urgent">urgent</option>
+    </select>
+  </div>
+  <div class="form-row"><label>Assignee</label>
+    <input type="text" class="frm" id="p-assignee" placeholder="handle">
+  </div>
+  <div class="form-row"><label>Motivo de fechamento</label>
+    <select class="frm" id="p-closed-reason">
+      <option value="">—</option>
+      <option value="won">won</option>
+      <option value="lost">lost</option>
+      <option value="spam">spam</option>
+      <option value="duplicate">duplicate</option>
+    </select>
+  </div>
+  <div class="form-row"><label>Notas internas</label>
+    <textarea class="frm" id="p-notes" placeholder="Observações sobre este lead…"></textarea>
+  </div>
+  <button class="btn" onclick="savePatch()">Salvar alterações</button>
+  <div id="d-msg" class="msg"></div>
+</div>
+
+<script>
+let currentId = null;
+
+function chip(s){
+  return `<span class="chip chip-${s}">${s}</span>`;
+}
+function fmt(d){
+  if(!d)return'—';
+  return new Date(d).toLocaleString('pt-BR',{timeZone:'America/Sao_Paulo',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function trunc(s,n=55){if(!s)return'';return s.length>n?s.slice(0,n)+'…':s;}
+function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+async function load(){
+  const status=document.getElementById('f-status').value;
+  const since=document.getElementById('f-since').value;
+  const assignee=document.getElementById('f-assignee').value;
+  let url='/api/v1/admin/leads?limit=200';
+  if(status)url+=`&status=${encodeURIComponent(status)}`;
+  if(since)url+=`&since=${encodeURIComponent(since)}`;
+  if(assignee)url+=`&assignee=${encodeURIComponent(assignee)}`;
+
+  const res=await fetch(url);
+  if(!res.ok){
+    document.getElementById('tbl').innerHTML=`<tr><td colspan="8" style="color:var(--red)">Erro ${res.status} ao carregar leads</td></tr>`;
+    return;
+  }
+  const data=await res.json();
+  const counts={new:0,triaged:0,in_progress:0,closed:0};
+  data.leads.forEach(l=>{if(counts[l.status]!==undefined)counts[l.status]++;});
+  Object.keys(counts).forEach(k=>{
+    const el=document.getElementById('cnt-'+k);
+    if(el)el.textContent=counts[k];
+  });
+
+  const rows=data.leads.map(l=>`
+    <tr data-id="${l.id}" onclick="openDetail(${JSON.stringify(JSON.stringify(l))})"
+        class="${currentId===l.id?'selected':''}">
+      <td>${l.id}</td>
+      <td>${fmt(l.created_at)}</td>
+      <td>${esc(l.nome)||'—'}</td>
+      <td>${esc(l.email)||'—'}</td>
+      <td>${chip(l.status)}</td>
+      <td>${esc(l.priority||'normal')}</td>
+      <td>${esc(l.assignee_handle)||'—'}</td>
+      <td>${esc(trunc(l.mensagem))}</td>
+    </tr>`).join('');
+  document.getElementById('tbl').innerHTML=rows||'<tr><td colspan="8" style="color:var(--dim)">Nenhum lead encontrado</td></tr>';
+  document.getElementById('last-refresh').textContent='Atualizado: '+new Date().toLocaleString('pt-BR');
+
+  // Keep detail panel in sync if it's open
+  if(currentId!==null){
+    const cur=data.leads.find(l=>l.id===currentId);
+    if(cur)populateDetail(cur);
+  }
+}
+
+function populateDetail(l){
+  document.getElementById('d-title').textContent=`Lead #${l.id}`;
+  document.getElementById('d-created').textContent=fmt(l.created_at);
+  document.getElementById('d-nome').textContent=l.nome||'—';
+  document.getElementById('d-email').textContent=l.email||'—';
+  document.getElementById('d-telefone').textContent=l.telefone||'—';
+  document.getElementById('d-servico').textContent=l.servico_titulo||'—';
+  document.getElementById('d-parceiro').textContent=l.parceiro_handle||'—';
+  document.getElementById('d-mensagem').textContent=l.mensagem;
+  document.getElementById('p-status').value=l.status;
+  document.getElementById('p-priority').value=l.priority||'normal';
+  document.getElementById('p-assignee').value=l.assignee_handle||'';
+  document.getElementById('p-closed-reason').value=l.closed_reason||'';
+  document.getElementById('p-notes').value=l.notes||'';
+  document.getElementById('detail').setAttribute('data-id',l.id);
+}
+
+function openDetail(jsonStr){
+  const l=JSON.parse(jsonStr);
+  currentId=l.id;
+  populateDetail(l);
+  document.getElementById('d-msg').textContent='';
+  document.getElementById('detail').classList.add('open');
+  document.querySelectorAll('tr[data-id]').forEach(r=>r.classList.toggle('selected',r.dataset.id==l.id));
+  // Scroll anchor on page reload
+  location.hash=`lead-${l.id}`;
+}
+
+function closeDetail(){
+  document.getElementById('detail').classList.remove('open');
+  currentId=null;
+  history.replaceState(null,'',location.pathname+location.search);
+}
+
+async function savePatch(){
+  const id=document.getElementById('detail').getAttribute('data-id');
+  const body={
+    status:document.getElementById('p-status').value||undefined,
+    priority:document.getElementById('p-priority').value||undefined,
+    assignee_handle:document.getElementById('p-assignee').value||undefined,
+    closed_reason:document.getElementById('p-closed-reason').value||undefined,
+    notes:document.getElementById('p-notes').value||undefined,
+  };
+  const res=await fetch(`/api/v1/admin/leads/${id}`,{
+    method:'PATCH',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(body),
+  });
+  const msg=document.getElementById('d-msg');
+  if(res.ok){
+    msg.className='msg ok';
+    msg.textContent='Salvo ✓';
+    await load();
+    setTimeout(()=>msg.textContent='',3000);
+  }else{
+    const err=await res.json().catch(()=>({error:'erro desconhecido'}));
+    msg.className='msg err';
+    msg.textContent=err.error||'Erro ao salvar';
+  }
+}
+
+document.addEventListener('DOMContentLoaded',()=>{
+  load();
+  setInterval(load,60000);
+  // Open detail from URL hash (#lead-N)
+  const m=location.hash.match(/^#lead-(\d+)$/);
+  if(m){
+    const targetId=parseInt(m[1],10);
+    setTimeout(async()=>{
+      const res=await fetch(`/api/v1/admin/leads`);
+      if(!res.ok)return;
+      const data=await res.json();
+      const l=data.leads.find(x=>x.id===targetId);
+      if(l)openDetail(JSON.stringify(l));
+    },300);
+  }
+});
+</script>
+</body>
+</html>
