@@ -247,6 +247,61 @@ pub fn run(config: AutoConfig) -> Result<()> {
                     review.total
                 );
                 tracker.tasks_completed.push(task.key.clone());
+
+                // CO-197: After a successful task in classic mode (no worktree),
+                // fast-forward main to the feat-branch tip so the NEXT task
+                // branches from current state. Without this, the next ticket's
+                // `git checkout main && git checkout -b ...` at auto.rs:1092
+                // silently resets the working tree to a stale main tip, losing
+                // every prior task's work. Worktree mode is unaffected (merges
+                // happen externally via PR / co-auto orchestrator).
+                if !use_worktree {
+                    let on_main = Command::new("git")
+                        .args(["checkout", "main"])
+                        .current_dir(&base_workdir)
+                        .output();
+                    if on_main.is_ok() {
+                        let ff = Command::new("git")
+                            .args(["merge", "--ff-only", &branch_name])
+                            .current_dir(&base_workdir)
+                            .output();
+                        match ff {
+                            Ok(o) if o.status.success() => {
+                                println!(
+                                    "  {} main fast-forwarded → {}",
+                                    "◆".dimmed(),
+                                    branch_name.cyan()
+                                );
+                                // Delete the now-merged feature branch.
+                                let _ = Command::new("git")
+                                    .args(["branch", "-d", &branch_name])
+                                    .current_dir(&base_workdir)
+                                    .output();
+                            }
+                            Ok(o) => {
+                                let stderr = String::from_utf8_lossy(&o.stderr);
+                                eprintln!(
+                                    "  {} Could not fast-forward main to {} ({}). \
+                                     Staying on feat-branch — resolve manually before next task.",
+                                    "!".yellow(),
+                                    branch_name,
+                                    stderr.trim()
+                                );
+                                let _ = Command::new("git")
+                                    .args(["checkout", &branch_name])
+                                    .current_dir(&base_workdir)
+                                    .output();
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "  {} git merge invocation failed: {}",
+                                    "!".yellow(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                }
             } else {
                 update_task_status(&task, "review")?;
                 println!(
