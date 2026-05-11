@@ -5,31 +5,98 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.3.0] — 2026-05-11 — Notification engine (CO-199)
+## [2.3.0] — 2026-05-11 — Phase 5 Notifications complete (CO-199 → CO-202)
 
-### Notification engine + preferences + 4 event types (Phase 5 slice 1)
+Closes the async-communication loop opened by Phase 4 chat. Universe rooms
++ DMs (live since 2.2.0) plus the engine + email digests + browser push +
+in-app bell — users learn about messages without having CO open.
 
-- **CO-199** — Notification engine (Phase 5 slice 1). Schema: new
-  `user_notifications` append-only log table and `notification_preferences`
-  per-user settings table. Boot-time backfill inserts default preferences for
-  every existing user.
+### CO-199 — Notification engine + preferences + 4 event types
 
-  Event capture wired into 3 existing producers: `post_message_handler` emits
-  `chat.message` for every room member except the author (`in_app_chat_message`
-  preference), `chat.dm` for the other party in DM rooms, and `chat.mention`
-  for `@usuario` references that resolve to room members. `create_invitation_handler`
-  emits `universe.invitation` for the invitee when they already have a CO
-  account.
+Schema: new `user_notifications` append-only log table and
+`notification_preferences` per-user settings table. Boot-time backfill
+inserts default preferences for every existing user.
 
-  REST endpoints under `/api/v1/me/`: `GET /notifications` (paginated with
-  `since` cursor + `unread_count`), `POST /notifications/:id/read` (idempotent
-  mark-read), `POST /notifications/read-all`, `GET /notification-preferences`,
-  `PUT /notification-preferences` (partial update, validates `email_digest_freq`
-  enum and `HH:MM` quiet-hours format).
+Event capture wired into 3 existing producers: `post_message_handler`
+emits `chat.message` for every room member except the author
+(`in_app_chat_message` preference), `chat.dm` for the other party in DM
+rooms, and `chat.mention` for `@usuario` references that resolve to room
+members. `create_invitation_handler` emits `universe.invitation` for the
+invitee when they already have a CO account.
 
-  Idempotency: duplicate `(user_id, event_type, object_id)` within 5 s produces
-  one row. Quiet-hours enforcement and delivery (email/push) deferred to
-  CO-200/CO-201.
+REST endpoints under `/api/v1/me/`: `GET /notifications` (paginated with
+`since` cursor + `unread_count`), `POST /notifications/:id/read`,
+`POST /notifications/read-all`, `GET /notification-preferences`,
+`PUT /notification-preferences` (partial update, validates
+`email_digest_freq` enum and `HH:MM` quiet-hours format).
+
+Idempotency: duplicate `(user_id, event_type, object_id)` within 5 s
+produces one row.
+
+### CO-200 — Email digest delivery (instant/hourly/daily/weekly + quiet hours)
+
+New `notification_email_worker` background task. 60-second tick loop:
+queries users with pending undelivered notifications, applies the
+frequency gate, checks quiet hours with timezone-aware offset lookup,
+filters per the user's per-event-type email toggles, sends via the
+Resend → SMTP → log cascade. Per-user consecutive failure tracking
+(cap 5 → skip until prefs change). On success,
+`notifications.delivered_email_at` is populated.
+
+Email subject + body localized via the new `users.language` column
+(default `pt`). HTML template renders relative time, body preview, and
+deep-links per event type. Sender defaults to
+`notificacoes@seguranca.artelonga.com.br` (configurable via
+`NOTIF_FROM_EMAIL`).
+
+### CO-201 — Web push notifications via Push API + service worker
+
+New `push_subscriptions` table; new `notification_push_worker` ticks
+every 10 s. Payload encrypted AES-128-GCM per RFC 8188/8291 using the
+subscription's `p256dh` + `auth` keys and ECDH; VAPID JWT signed with
+ES256/P-256. 410 Gone → subscription deleted. 5xx → `failure_count++`;
+at 5 the subscription is pruned. On success, `delivered_push_at` is
+populated.
+
+Service worker `push-sw.js` shows the system notification;
+`notificationclick` focuses an existing tab on the target URL or opens
+a new one. `tag` field coalesces multiple notifs from the same thread.
+
+REST endpoints: `GET /api/v1/notifications/vapid-public-key` (anonymous),
+`POST /api/v1/me/push-subscriptions` (upsert by endpoint, idempotent),
+`GET /api/v1/me/push-subscriptions`, `DELETE /api/v1/me/push-subscriptions/:id`.
+
+**Production setup required:** `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+and `VAPID_SUBJECT` must be set as Fly secrets for push to actually fire.
+Without them the worker degrades to log-only mode (no crash, no fan-out).
+
+### CO-202 — In-app 🔔 notification center + settings
+
+`modules/notifications.js` mounts a bell button with a red-dot badge.
+Click opens a dropdown showing recent notifications rendered by i18n
+key + params with relative time. Click a row → marks read + navigates
+to deep-link. "Marcar todas" calls `/read-all`.
+
+Real-time bumping: `chat.js` calls `window.coOnChatMessageArrived` from
+its WS handler; if the message is for a room not currently visible, the
+bell increments without polling. Fallback poll every 30 s catches
+invitations and other non-WS events.
+
+Full-page view at `/notifications` with filters (event type,
+all/unread) and `?since=` pagination.
+
+Settings section in the security modal: 4×3 channel/event toggle matrix
+(in-app × email × push), email frequency radio (instant/hourly/daily/
+weekly/never), quiet-hours `HH:MM` + timezone, "Ativar notificações"
+button kicking off the CO-201 subscribe flow, registered-devices list
+with per-device revoke. 34 new i18n keys PT + EN.
+
+### Operational notes
+
+Schema additions all idempotent via `CREATE TABLE IF NOT EXISTS` — no
+version-slot migration. Boot adds 2 spawned workers: notif email (60 s
+tick), notif push (10 s tick). Tests: 15 (CO-199) + 12 (CO-200) + 10
+(CO-201) = 37 new passing.
 
 ## [2.2.0] — 2026-05-11 — Private DMs (CO-198)
 
