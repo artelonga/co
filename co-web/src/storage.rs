@@ -126,6 +126,7 @@ pub(crate) mod data_migrate;
 pub(crate) mod invitations;
 pub(crate) mod log_drain;
 pub mod migrations;
+pub mod notifications;
 pub(crate) mod onboarding;
 pub(crate) mod projects;
 pub(crate) mod quilombo_bridge;

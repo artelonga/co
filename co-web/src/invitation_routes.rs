@@ -304,6 +304,20 @@ pub async fn create_invitation_handler(
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
+        // CO-199: notification for invited user if they have a CO account
+        if let Some(ref invited_uid) = invited_user_id {
+            let _ = storage.create_notification(
+                invited_uid,
+                "universe.invitation",
+                Some(&slug),
+                None,
+                &user_id.0,
+                &token_hash,
+                "notif.universe.invitation",
+                serde_json::json!({"name": inviter_name, "universe": universe_name}),
+            );
+        }
+
         (
             invited_email,
             invited_user_id,

@@ -345,6 +345,83 @@ pub async fn post_message_handler(
             .post_chat_message(&room.id, &user_id.0, &trimmed, body.reply_to_id.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
+        // CO-199: create notifications for room members
+        {
+            let actor_display = storage
+                .get_user_display_info(&user_id.0)
+                .map(|(dn, _)| dn)
+                .unwrap_or_else(|| user_id.0.clone());
+
+            let other_members: Vec<String> = {
+                let mut stmt = storage
+                    .conn()
+                    .prepare(
+                        "SELECT user_id FROM chat_room_members \
+                         WHERE room_id = ?1 AND user_id != ?2",
+                    )
+                    .expect("prepare room members for notif");
+                stmt.query_map(rusqlite::params![room.id, user_id.0], |r| r.get(0))
+                    .expect("query room members for notif")
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
+
+            let is_dm = room.kind == "dm";
+            let universe_key_opt: Option<&str> = if is_dm { None } else { Some(&slug) };
+
+            for member_id in &other_members {
+                let prefs = storage.get_preferences(member_id);
+                if is_dm {
+                    if prefs.in_app_chat_dm {
+                        let _ = storage.create_notification(
+                            member_id,
+                            "chat.dm",
+                            None,
+                            Some(&room.id),
+                            &user_id.0,
+                            &msg_id,
+                            "notif.chat.dm",
+                            serde_json::json!({"name": actor_display}),
+                        );
+                    }
+                } else if prefs.in_app_chat_message {
+                    let _ = storage.create_notification(
+                        member_id,
+                        "chat.message",
+                        universe_key_opt,
+                        Some(&room.id),
+                        &user_id.0,
+                        &msg_id,
+                        "notif.chat.message",
+                        serde_json::json!({"universe": slug}),
+                    );
+                }
+            }
+
+            // CO-199: @mention notifications
+            let mentions = crate::storage::notifications::parse_mentions(&trimmed);
+            for mention in &mentions {
+                if let Some(mentioned_user) = storage.get_user_by_usuario(mention) {
+                    let mentioned_id = mentioned_user.id.clone();
+                    if mentioned_id != user_id.0 && other_members.contains(&mentioned_id) {
+                        let prefs = storage.get_preferences(&mentioned_id);
+                        if prefs.in_app_mention {
+                            let _ = storage.create_notification(
+                                &mentioned_id,
+                                "chat.mention",
+                                universe_key_opt,
+                                Some(&room.id),
+                                &user_id.0,
+                                &msg_id,
+                                "notif.chat.mention",
+                                serde_json::json!({"name": actor_display, "room": room.name}),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         let full_msg = storage.get_chat_message_by_id(&msg_id);
         let room_id = room.id.clone();
         (msg_id, full_msg.map(|m| (m, room_id)))

@@ -556,6 +556,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/api/v1/me",
             crate::invitation_routes::me_invitations_router(),
         )
+        // CO-199: me/notifications + notification-preferences (auth required)
+        .nest(
+            "/api/v1/me",
+            crate::notification_routes::me_notifications_router(),
+        )
         // CO-191: me/universes bucketed endpoint (auth required)
         .route(
             "/api/v1/me/universes",
@@ -1096,6 +1101,9 @@ pub async fn start_server(config: WebConfig) {
         // CO-198: backfill chat_room_members from universe_members.
         let n_members = chat_storage.backfill_chat_room_members_from_universe_members();
         tracing::info!("CO-198: chat_room_members backfill: {n_members} row(s) total");
+        // CO-199: backfill default notification_preferences for every existing user.
+        let n_prefs = chat_storage.backfill_default_preferences();
+        tracing::info!("CO-199: notification_preferences backfill: {n_prefs} row(s) inserted");
     }
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.

@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0] — 2026-05-11 — Notification engine (CO-199)
+
+### Notification engine + preferences + 4 event types (Phase 5 slice 1)
+
+- **CO-199** — Notification engine (Phase 5 slice 1). Schema: new
+  `user_notifications` append-only log table and `notification_preferences`
+  per-user settings table. Boot-time backfill inserts default preferences for
+  every existing user.
+
+  Event capture wired into 3 existing producers: `post_message_handler` emits
+  `chat.message` for every room member except the author (`in_app_chat_message`
+  preference), `chat.dm` for the other party in DM rooms, and `chat.mention`
+  for `@usuario` references that resolve to room members. `create_invitation_handler`
+  emits `universe.invitation` for the invitee when they already have a CO
+  account.
+
+  REST endpoints under `/api/v1/me/`: `GET /notifications` (paginated with
+  `since` cursor + `unread_count`), `POST /notifications/:id/read` (idempotent
+  mark-read), `POST /notifications/read-all`, `GET /notification-preferences`,
+  `PUT /notification-preferences` (partial update, validates `email_digest_freq`
+  enum and `HH:MM` quiet-hours format).
+
+  Idempotency: duplicate `(user_id, event_type, object_id)` within 5 s produces
+  one row. Quiet-hours enforcement and delivery (email/push) deferred to
+  CO-200/CO-201.
+
 ## [2.2.0] — 2026-05-11 — Private DMs (CO-198)
 
 ### Private 1:1 DMs with inbox, unread counts, and privacy controls

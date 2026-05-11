@@ -1595,5 +1595,8 @@ impl Storage {
 
         // CO-193: per-universe chat — rooms + messages tables.
         self.ensure_chat_tables();
+
+        // CO-199: user notifications + preferences tables.
+        self.ensure_notification_tables();
     }
 }
