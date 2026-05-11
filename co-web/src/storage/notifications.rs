@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::Storage;
-use super::schema::ensure_table;
+use super::schema::{ensure_column, ensure_table};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NotificationWithActor {
@@ -122,6 +122,9 @@ impl Storage {
             );",
         )
         .expect("CO-199: notification_preferences table");
+
+        ensure_column(&self.conn, "users", "language", "TEXT DEFAULT 'pt'")
+            .expect("CO-200: users.language column");
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -555,6 +558,34 @@ impl Storage {
             )?;
         }
         Ok(())
+    }
+
+    /// CO-200: find users with at least one unread, undelivered-by-email notification.
+    /// Returns Vec<(user_id, email, display_name, language)>.
+    pub fn list_users_with_pending_email_notifications(
+        &self,
+    ) -> Vec<(String, String, String, String)> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT n.user_id, COALESCE(u.email, ''), u.display_name, \
+                 COALESCE(u.language, 'pt') \
+                 FROM user_notifications n \
+                 JOIN users u ON n.user_id = u.id \
+                 WHERE n.delivered_email_at IS NULL AND n.read_at IS NULL",
+            )
+            .expect("prepare list_users_with_pending_email_notifications");
+        stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })
+        .expect("query list_users_with_pending_email_notifications")
+        .filter_map(|r| r.ok())
+        .collect()
     }
 }
 

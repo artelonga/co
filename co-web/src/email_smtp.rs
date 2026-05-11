@@ -91,3 +91,46 @@ pub async fn send_recovery_code(to: &str, code: &str) -> anyhow::Result<bool> {
         .map(|_| true)
         .map_err(|e| anyhow::anyhow!("SMTP send failed: {e}"))
 }
+
+/// Send an HTML digest email via SMTP.
+///
+/// Returns `Ok(true)` when SMTP is configured and accepted, `Ok(false)` when not
+/// configured, and `Err` on delivery failure.
+pub async fn send_html_email(
+    to: &str,
+    from: &str,
+    subject: &str,
+    body_html: &str,
+) -> anyhow::Result<bool> {
+    let cfg = match SmtpConfig::from_env() {
+        Some(c) => c,
+        None => return Ok(false),
+    };
+
+    let from_addr: lettre::message::Mailbox = from
+        .parse()
+        .unwrap_or_else(|_| cfg.from.parse().expect("SMTP from is invalid"));
+
+    let email = lettre::Message::builder()
+        .from(from_addr)
+        .to(to.parse()?)
+        .subject(subject)
+        .header(lettre::message::header::ContentType::TEXT_HTML)
+        .body(body_html.to_string())?;
+
+    let creds = lettre::transport::smtp::authentication::Credentials::new(
+        cfg.username.clone(),
+        cfg.password.clone(),
+    );
+    let mailer: lettre::AsyncSmtpTransport<lettre::Tokio1Executor> =
+        lettre::AsyncSmtpTransport::<lettre::Tokio1Executor>::starttls_relay(&cfg.host)?
+            .port(cfg.port)
+            .credentials(creds)
+            .build();
+
+    mailer
+        .send(email)
+        .await
+        .map(|_| true)
+        .map_err(|e| anyhow::anyhow!("SMTP HTML send failed: {e}"))
+}

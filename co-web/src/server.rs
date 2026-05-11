@@ -1218,6 +1218,8 @@ pub async fn start_server(config: WebConfig) {
     Arc::clone(&state.embeddings).load_deferred(model_dir);
     // CO-168: spawn outbound webhook delivery worker.
     crate::webhook_worker::spawn_worker(Arc::clone(&state));
+    // CO-200: email digest delivery worker.
+    tokio::spawn(crate::notification_email_worker::run(Arc::clone(&state)));
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(Arc::clone(&state)));

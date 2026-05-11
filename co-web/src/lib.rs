@@ -33,6 +33,7 @@ pub mod job_queue;
 pub mod lead_routes;
 pub mod log_drain_routes;
 pub mod models;
+pub mod notification_email_worker;
 pub mod notification_providers;
 pub mod notification_routes;
 pub mod oauth_google;
