@@ -129,6 +129,7 @@ pub mod migrations;
 pub mod notifications;
 pub(crate) mod onboarding;
 pub(crate) mod projects;
+pub mod push_subscriptions;
 pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
 pub(crate) mod schema;

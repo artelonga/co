@@ -1598,5 +1598,8 @@ impl Storage {
 
         // CO-199: user notifications + preferences tables.
         self.ensure_notification_tables();
+
+        // CO-201: push subscription endpoints table.
+        self.ensure_push_subscriptions_table();
     }
 }

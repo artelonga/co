@@ -561,6 +561,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/api/v1/me",
             crate::notification_routes::me_notifications_router(),
         )
+        // CO-201: VAPID public key endpoint (anonymous)
+        .merge(crate::push_routes::vapid_router())
+        // CO-201: push subscription management (auth required)
+        .nest("/api/v1/me", crate::push_routes::me_push_router())
         // CO-191: me/universes bucketed endpoint (auth required)
         .route(
             "/api/v1/me/universes",
@@ -1104,6 +1108,8 @@ pub async fn start_server(config: WebConfig) {
         // CO-199: backfill default notification_preferences for every existing user.
         let n_prefs = chat_storage.backfill_default_preferences();
         tracing::info!("CO-199: notification_preferences backfill: {n_prefs} row(s) inserted");
+        // CO-201: create push_subscriptions table if not yet present.
+        chat_storage.ensure_push_subscriptions_table();
     }
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
@@ -1220,6 +1226,8 @@ pub async fn start_server(config: WebConfig) {
     crate::webhook_worker::spawn_worker(Arc::clone(&state));
     // CO-200: email digest delivery worker.
     tokio::spawn(crate::notification_email_worker::run(Arc::clone(&state)));
+    // CO-201: web push delivery worker (10-second tick).
+    tokio::spawn(crate::notification_push_worker::run(Arc::clone(&state)));
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(Arc::clone(&state)));
