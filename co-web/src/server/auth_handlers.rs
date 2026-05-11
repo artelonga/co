@@ -204,6 +204,16 @@ pub(super) async fn verify_handler(
     let cookie =
         crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
+    // CO-184 reverse bridge — best-effort.
+    {
+        let storage = lock_storage(&state)?;
+        if let Err(e) = storage.ensure_quilombo_user_for_co(&user_id) {
+            tracing::warn!(
+                "CO-184 ensure_quilombo_user_for_co failed for {user_id} (magic-link continues): {e}"
+            );
+        }
+    }
+
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
         &state,
@@ -243,15 +253,22 @@ pub(super) async fn me_handler(
 
     // Check board users table first, then fall back to quilombo users.
     if let Some(user) = storage.get_user_by_id(&user_id.0) {
+        // CO-173: include per-universe metadata for the authenticated user.
+        let universes = storage.list_universes_with_metadata_for_user(&user.id);
         return Ok(Json(MeResponse {
             user_id: user.id,
             email: user.email,
             display_name: user.display_name,
             tier: user.tier,
+            universes,
         }));
     }
 
     if let Some(u) = crate::quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0) {
+        // CO-173: even when the principal is a quilombo user (no CO link yet),
+        // surface the universes list — typically empty for unlinked quilombo
+        // users, but a follow-up `linked_co_user_id` set will populate it.
+        let universes = storage.list_universes_with_metadata_for_user(&u.id);
         return Ok(Json(MeResponse {
             user_id: u.id,
             email: String::new(),
@@ -261,6 +278,7 @@ pub(super) async fn me_handler(
                 u.nome
             },
             tier: u.papel.to_string(),
+            universes,
         }));
     }
 
@@ -414,6 +432,17 @@ pub(super) async fn password_login_handler(
     let cookie =
         crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
 
+    // CO-184 reverse bridge — best-effort.
+    {
+        let storage = lock_storage(&state)?;
+        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
+            tracing::warn!(
+                "CO-184 ensure_quilombo_user_for_co failed for {} (password-login continues): {e}",
+                user.id
+            );
+        }
+    }
+
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
         &state,
@@ -421,6 +450,163 @@ pub(super) async fn password_login_handler(
             kind: "auth.login",
             universe: String::new(),
             list: Some("password".to_string()),
+            key: Some(user.id.clone()),
+            actor: Some(user.id.clone()),
+            session_id: None,
+            extra: None,
+        },
+    );
+
+    Ok((
+        StatusCode::OK,
+        [(header::SET_COOKIE, cookie)],
+        Json(VerifyResponse {
+            user_id: user.id,
+            email: user.email,
+            display_name: user.display_name,
+            expires_at,
+        }),
+    )
+        .into_response())
+}
+
+// --- Public signup (CO-175 / G3) ---
+
+/// Request body for public signup. Username + password are required; email is
+/// optional per `feedback_auth_email.md` — never harvested at signup, only
+/// when the user opts into account recovery.
+#[derive(serde::Deserialize)]
+pub(super) struct SignupRequest {
+    usuario: String,
+    password: String,
+    #[serde(default)]
+    email: String,
+}
+
+/// CO-175 (G3): public signup quota — 100 new accounts per rolling 24h.
+/// Caps abuse without further infra (CAPTCHA / IP throttling can ride later).
+const SIGNUP_DAILY_CAP: i64 = 100;
+const SIGNUP_WINDOW_SECONDS: i64 = 24 * 60 * 60;
+
+/// POST /api/v1/auth/signup — create a new CO account.
+///
+/// Validation (rejects with 400 on failure):
+/// - `usuario`: 3-30 chars, `[a-z0-9_-]`, lowercased before persist.
+/// - `password`: ≥8 chars (no upper bound enforced — Argon2id handles long inputs).
+/// - `email`: optional, validated `local@host.tld` shape if present.
+///
+/// Conflicts (409): usuario or email already taken.
+/// Rate-limit (429): more than 100 signups in the last 24h cluster-wide.
+/// Success (200): writes `users` row with Argon2id hash + auto-promotes the
+/// email (when supplied) as a verified recovery channel, and issues a session
+/// cookie identical to `password-login`.
+pub(super) async fn signup_handler(
+    State(state): State<AppState>,
+    Json(req): Json<SignupRequest>,
+) -> Result<Response, AppError> {
+    let usuario = req.usuario.trim().to_lowercase();
+    let password = req.password;
+    let email_opt = {
+        let trimmed = req.email.trim().to_lowercase();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    };
+
+    // --- validation ---
+    if usuario.len() < 3 || usuario.len() > 30 {
+        return Err(AppError::BadRequest(
+            "Usuário deve ter entre 3 e 30 caracteres.".into(),
+        ));
+    }
+    if !usuario
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    {
+        return Err(AppError::BadRequest(
+            "Usuário aceita apenas letras minúsculas, dígitos, '-' e '_'.".into(),
+        ));
+    }
+    if password.len() < 8 {
+        return Err(AppError::BadRequest(
+            "Senha deve ter pelo menos 8 caracteres.".into(),
+        ));
+    }
+    if let Some(ref e) = email_opt {
+        let parts: Vec<&str> = e.splitn(2, '@').collect();
+        if parts.len() != 2 || parts[0].is_empty() || !parts[1].contains('.') {
+            return Err(AppError::BadRequest("Email inválido.".into()));
+        }
+    }
+
+    // --- rate limit (cluster-wide rolling window) ---
+    {
+        let storage = lock_storage(&state)?;
+        let count = storage.count_users_created_since(SIGNUP_WINDOW_SECONDS);
+        if count >= SIGNUP_DAILY_CAP {
+            return Err(AppError::TooManyRequests(format!(
+                "Limite diário de {SIGNUP_DAILY_CAP} contas atingido. Tente novamente em algumas horas."
+            )));
+        }
+    }
+
+    // --- Argon2id hash (CPU-bound, blocking) ---
+    let password_hash = tokio::task::spawn_blocking(move || -> Result<String, AppError> {
+        use argon2::Argon2;
+        use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+        let salt = SaltString::generate(&mut OsRng);
+        Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .map(|h| h.to_string())
+            .map_err(|e| AppError::Internal(format!("argon2: {e}")))
+    })
+    .await
+    .map_err(|_| AppError::Internal("Task join error".into()))??;
+
+    // --- create user ---
+    let user = {
+        let mut storage = lock_storage(&state)?;
+        match storage.create_user_with_password(&usuario, &password_hash, email_opt.as_deref()) {
+            Ok(u) => u,
+            Err(crate::storage::users::SignupError::UsuarioTaken) => {
+                return Err(AppError::Conflict("Esse usuário já existe.".into()));
+            }
+            Err(crate::storage::users::SignupError::EmailTaken) => {
+                return Err(AppError::Conflict("Esse email já está em uso.".into()));
+            }
+            Err(crate::storage::users::SignupError::Internal(msg)) => {
+                return Err(AppError::Internal(msg));
+            }
+        }
+    };
+
+    // --- session cookie ---
+    let jwt_secret = crate::auth::jwt_secret();
+    let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let cookie =
+        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+
+    // CO-184 reverse bridge — best-effort.
+    {
+        let storage = lock_storage(&state)?;
+        if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
+            tracing::warn!(
+                "CO-184 ensure_quilombo_user_for_co failed for {} (signup continues): {e}",
+                user.id
+            );
+        }
+    }
+
+    // --- telemetry ---
+    crate::telemetry::emit_crud_event(
+        &state,
+        crate::telemetry::CrudEvent {
+            kind: "auth.signup",
+            universe: String::new(),
+            list: Some("public".to_string()),
             key: Some(user.id.clone()),
             actor: Some(user.id.clone()),
             session_id: None,
@@ -453,4 +639,14 @@ pub(super) async fn uat_login_handler(
         return Err(AppError::NotFound("Not found".into()));
     }
     password_login_handler(State(state), Json(req)).await
+}
+
+/// CO-177: tells the UI whether Google OAuth is configured on this deploy.
+/// Lets the login modal hide the "Continuar com Google" button when the
+/// `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env vars aren't set —
+/// avoids a button that lands on 503.
+pub(super) async fn google_status_handler() -> Json<serde_json::Value> {
+    let configured =
+        std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
+    Json(serde_json::json!({ "configured": configured }))
 }

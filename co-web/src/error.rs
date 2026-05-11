@@ -13,6 +13,8 @@ pub enum AppError {
     Forbidden(String),
     Gone(String),
     TooManyRequests(String),
+    /// CO-177: provider unavailable (e.g. Google OAuth not configured).
+    ServiceUnavailable(String),
     UsageLimitExceeded {
         current: i64,
     },
@@ -40,6 +42,7 @@ impl std::fmt::Display for AppError {
             AppError::Forbidden(msg) => write!(f, "Forbidden: {msg}"),
             AppError::Gone(msg) => write!(f, "Gone: {msg}"),
             AppError::TooManyRequests(msg) => write!(f, "Too many requests: {msg}"),
+            AppError::ServiceUnavailable(msg) => write!(f, "Service unavailable: {msg}"),
             AppError::UsageLimitExceeded { current } => {
                 write!(f, "Usage limit exceeded: {current}/100")
             }
@@ -127,6 +130,9 @@ impl IntoResponse for AppError {
             AppError::Gone(msg) => (StatusCode::GONE, "gone", msg),
             AppError::TooManyRequests(msg) => {
                 (StatusCode::TOO_MANY_REQUESTS, "too_many_requests", msg)
+            }
+            AppError::ServiceUnavailable(msg) => {
+                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable", msg)
             }
             AppError::UsageLimitExceeded { .. }
             | AppError::RateLimited { .. }

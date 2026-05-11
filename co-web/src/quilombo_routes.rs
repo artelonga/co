@@ -257,14 +257,32 @@ async fn cadastro_handler(
     let user = quilombo_storage::criar_usuario(storage.conn(), &id, &usuario, &nome, &senha_hash)
         .map_err(AppError::Internal)?;
 
-    // CO-172 Phase 1: mirror quilombo signup into CO users
-    match storage.ensure_co_user_for_quilombo(&user.id) {
-        Ok(co_user_id) => {
-            let _ = storage.link_quilombo_to_co(&user.id, &co_user_id);
-        }
-        Err(e) => {
-            tracing::warn!("ensure_co_user_for_quilombo failed for {}: {e}", user.id);
-        }
+    // CO-172 Phase 1: mirror quilombo signup into CO users.
+    //
+    // CO-176 deployment-readiness: the bridge is **mandatory**. If
+    // `ensure_co_user_for_quilombo` or the link fails we can't proceed —
+    // the quilombo row would be orphaned and the user would never be able
+    // to recover their password. Roll back the quilombo row so the caller
+    // can retry without hitting the username-taken check, then return 500
+    // with a clear error.
+    let bridge_result = storage
+        .ensure_co_user_for_quilombo(&user.id)
+        .and_then(|co_user_id| {
+            storage.link_quilombo_to_co(&user.id, &co_user_id)?;
+            Ok(co_user_id)
+        });
+    if let Err(e) = bridge_result {
+        tracing::error!(
+            "CO-176 bridge failure on cadastro for quilombo user {}: {e}; rolling back",
+            user.id
+        );
+        let _ = storage.conn().execute(
+            "DELETE FROM quilombo_usuarios WHERE id = ?1",
+            rusqlite::params![user.id],
+        );
+        return Err(AppError::Internal(format!(
+            "Falha ao vincular sua conta ao CO. Tente novamente. ({e})"
+        )));
     }
 
     // Sign JWT

@@ -5,6 +5,78 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] — 2026-05-10 — Identity + Phase 4 Foundation
+
+Major release closing the multi-day identity / SSO / membership / chat-foundation
+arc that ran from 1.95.0 (CO-188) through the chat backend (CO-193). Functionally
+includes the work that already shipped to prod in 1.95.0 → 1.99.0 plus two
+additional tickets (CO-187 cleanup, CO-193 chat backend) that landed without
+intermediate version bumps. Cutting 2.0.0 to mark the coherent feature set and
+to reset the release cadence from ticket-per-bump to theme-per-release.
+
+### Phase 3 complete — identity + access for everyone
+
+- **CO-172 / CO-184** — Bidirectional identity bridge. Quilombo signups create
+  CO accounts; CO signups create quilombo identities. Lazy-bridge for legacy
+  unlinked rows (by usuario AND by email).
+- **CO-176 + diagnostic logging** — `/forgot-password` enforces usuario+email
+  pair, no-enumeration; per-step trace logs make ops actually debuggable.
+- **CO-175 / CO-177** — Public username+password signup and Google OAuth.
+- **CO-186** — Handover tokens migrated to ES256 + JWKS (`/.well-known/jwks.json`),
+  eliminating per-universe shared secret distribution.
+- **CO-187** — Removed legacy HS256 handover signer now that ES256 transition
+  is complete. Cleanup only — zero callers, no behavior change.
+- **CO-188 / CO-189** — Universe invitations backend + UI. Single-use 14-day
+  tokens, public preview, accept gating with identity match.
+- **CO-190** — Passwordless onboarding via email. Single "Continuar com email"
+  entry point that logs in OR creates accounts via 6-digit magic code,
+  auto-derives usuario from email local-part with collision suffix.
+- **CO-191 / CO-192** — Unified `GET /api/v1/me/universes` bucketed shape
+  (owned/member/subscribed/invited/discoverable). Sidebar renders sections
+  semantically with role chips, 🎁 invite badge + inline accept/decline,
+  collapsible Discover section.
+
+### Lead capture pipeline
+
+- **CO-183** — `POST /api/v1/leads` + admin queue. Replaces the artelonga
+  `/contato/` mailto with persisted, queryable leads. Bot filter, IP-hash,
+  rate-limit (5/IP/24h), Resend email notification, admin SPA at
+  `/admin/leads.html`, LGPD 24-month retention task. AL-4 in the artelonga
+  repo flips the form to use this endpoint.
+
+### Phase 4 foundation — chat backend
+
+- **CO-193** — Chat schema (`chat_rooms`, `chat_messages`) + REST endpoints.
+  Every universe auto-seeds a `general` room (boot-time backfill for
+  pre-existing universes). Per-room paginated history. Role-gated:
+  owner/admin can create rooms; member+ can post; viewer/subscriber are
+  read-only; anonymous has no access. Rate-limited 20 messages/user/min.
+  17 tests cover every auth gate, slug collision, pagination, tombstone.
+
+CO-194 (WebSocket live updates) + CO-195 (yggdrasil lobby UI) + CO-196
+(moderation) will land as a single 2.1.0 cycle.
+
+### Operational improvements
+
+- Diagnostic logging across `forgot_password_handler` and
+  `find_user_for_recovery` so silent no-match paths emit structured
+  trace lines (`identifier=*** email=r***@artelonga.com.br`,
+  `find_user_for_recovery: matched ... → co_id=...`,
+  `all paths exhausted, returning None`). No enumeration leak — logs
+  only, response shapes unchanged.
+- `change-password` flow accepts optional `email` field for users who
+  want to attach/update their recovery address without changing
+  username. Mirrors to linked `quilombo_usuarios` row when present.
+
+### Workflow change
+
+Going forward, release cadence is **theme-per-release**, not
+ticket-per-bump. Related tickets bundle into a single semver-meaningful
+version. Patch bumps reserved for actual bugfixes / hotfixes between
+themes. Major bumps when a coherent multi-day arc closes.
+
+---
+
 ## [1.99.0] — 2026-05-10
 
 ### Added — CO-192: Sidebar consumes unified /me/universes shape

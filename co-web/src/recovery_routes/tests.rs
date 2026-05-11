@@ -592,6 +592,87 @@ async fn test_change_password_correct() {
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
+// --- 12b. change_password attaches new email + recovery channel ---
+
+#[tokio::test]
+async fn test_change_password_attaches_new_email() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    // User starts with empty email (legacy quilombo bridge case).
+    let user_id = insert_test_user(dir.path(), "", Some("oldpass"));
+    let token = make_jwt(&user_id);
+    let app = build_test_router(dir.path());
+
+    let body = r#"{"current_password":"oldpass","new_password":"newpass123","email":"newly-attached@example.com"}"#;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/change-password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // users.email should now be set, username preserved.
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let row: (String, Option<String>) = storage
+        .conn()
+        .query_row(
+            "SELECT email, usuario FROM users WHERE id = ?1",
+            rusqlite::params![user_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(row.0, "newly-attached@example.com");
+
+    // A verified email recovery channel must exist for the new email.
+    let count: i64 = storage
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM user_recovery_channels \
+             WHERE user_id = ?1 AND channel_type = 'email' AND verified_at IS NOT NULL",
+            rusqlite::params![user_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(count, 1);
+}
+
+// --- 12c. change_password rejects email already used by another user ---
+
+#[tokio::test]
+async fn test_change_password_email_conflict_returns_409() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let _other = insert_test_user(dir.path(), "taken@example.com", Some("pass"));
+    let user_id = insert_test_user(dir.path(), "", Some("oldpass"));
+    let token = make_jwt(&user_id);
+    let app = build_test_router(dir.path());
+
+    let body =
+        r#"{"current_password":"oldpass","new_password":"newpass123","email":"taken@example.com"}"#;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/change-password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+}
+
 // --- 13. change_password_wrong_current → 401 ---
 
 #[tokio::test]
@@ -1063,6 +1144,80 @@ async fn test_email_set_links_existing_co_user() {
     assert_eq!(co_id, co_id_pre, "should link to the pre-existing CO user");
 }
 
+// --- 20b. forgot-password lazy-bridges legacy quilombo user via email ---
+//
+// A quilombo user pre-dating CO-172 has a `quilombo_usuarios` row with
+// email but no `linked_co_user_id` and no CO recovery channel. They click
+// "Esqueci minha senha", type their quilombo usuario + email. The handler
+// must lazy-bridge them to a CO account, attach the email as a verified
+// recovery channel, and proceed to send a code.
+
+#[tokio::test]
+async fn test_forgot_password_lazy_bridges_legacy_quilombo_by_email() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let hash = argon2_hash("secret");
+    let qid = insert_quilombo_user(dir.path(), "retrocore", &hash);
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    storage
+        .conn()
+        .execute(
+            "UPDATE quilombo_usuarios SET email = 'retrocore@artelonga.com.br' WHERE id = ?1",
+            rusqlite::params![qid],
+        )
+        .unwrap();
+    drop(storage);
+
+    let app = build_test_router(dir.path());
+
+    // Pair: usuario + email. Identifier matches the quilombo username; the
+    // email matches the quilombo email. No CO account exists yet.
+    let body = r#"{"username_or_channel_value":"retrocore","email":"retrocore@artelonga.com.br"}"#;
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/forgot-password")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let body = body_str(resp.into_body()).await;
+    assert!(
+        body.contains("retrocore@artelonga.com.br") || body.contains("r***@artelonga.com.br"),
+        "expected sent_to to mask the bridged email; got: {body}"
+    );
+
+    // Bridge effects: linked_co_user_id is now set, and a verified email
+    // recovery channel exists for the bridged CO user id.
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let co_id: String = storage
+        .conn()
+        .query_row(
+            "SELECT linked_co_user_id FROM quilombo_usuarios WHERE id = ?1",
+            rusqlite::params![qid],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(!co_id.is_empty(), "linked_co_user_id should be populated");
+
+    let channel_count: i64 = storage
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM user_recovery_channels \
+             WHERE user_id = ?1 AND channel_type = 'email' AND verified_at IS NOT NULL",
+            rusqlite::params![co_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(channel_count, 1);
+}
+
 // --- 21. reset-password propagates hash to quilombo_usuarios ---
 
 #[tokio::test]
@@ -1194,6 +1349,11 @@ fn test_return_to_safelist() {
     assert!(is_allowed_return_to(
         "https://quilomboaraucaria.com.br/login"
     ));
+    // CO-176: production quilombo also serves on .org.
+    assert!(is_allowed_return_to("https://quilomboaraucaria.org"));
+    assert!(is_allowed_return_to(
+        "https://quilomboaraucaria.org/auth/co-handover"
+    ));
     assert!(is_allowed_return_to("https://co.artelonga.com.br"));
     assert!(is_allowed_return_to("https://artelonga.com.br"));
     assert!(is_allowed_return_to("https://quilombo.artelonga.com.br"));
@@ -1201,6 +1361,9 @@ fn test_return_to_safelist() {
     assert!(!is_allowed_return_to("https://evil.com"));
     assert!(!is_allowed_return_to("https://notartelonga.com.br"));
     assert!(!is_allowed_return_to("https://artelonga.com.br.evil.com"));
+    assert!(!is_allowed_return_to(
+        "https://quilomboaraucaria.org.evil.com"
+    ));
     assert!(!is_allowed_return_to("not-a-url"));
     assert!(!is_allowed_return_to(""));
     assert!(!is_allowed_return_to("https://fakeartelonga.com.br"));

@@ -88,7 +88,16 @@ struct DeleteChannelRequest {
 
 #[derive(Debug, Deserialize)]
 struct ForgotPasswordRequest {
+    /// Primary identifier — usuario, email, or phone-as-channel-value.
+    /// Existing API consumers may still send only this field.
     username_or_channel_value: String,
+    /// CO-176: when provided, both `username_or_channel_value` and `email`
+    /// must resolve to the **same** user — otherwise the request silently
+    /// returns `sent_to: []`. UI sends both since 1.91.3 to disambiguate
+    /// quilombo users (one email may exist on CO + quilombo with different
+    /// usernames).
+    #[serde(default)]
+    email: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -99,6 +108,8 @@ struct ForgotPasswordResponse {
 #[derive(Debug, Deserialize)]
 struct ForgotPasswordVerifyRequest {
     username_or_channel_value: String,
+    #[serde(default)]
+    email: String,
     code: String,
 }
 
@@ -118,6 +129,13 @@ struct ResetPasswordRequest {
 struct ChangePasswordRequest {
     current_password: String,
     new_password: String,
+    /// Optional. When a quilombo user (or any signed-in user) has no email
+    /// on file and wants to add one as part of the change-password flow,
+    /// they pass it here. Server validates uniqueness, sets `users.email`,
+    /// promotes the address to a verified recovery channel, and mirrors it
+    /// to any linked `quilombo_usuarios` row. Username is NEVER touched.
+    #[serde(default)]
+    email: String,
 }
 
 // -------------------------------------------------------------------------
@@ -126,7 +144,8 @@ struct ChangePasswordRequest {
 
 /// Validate a `return_to` URL for the `/recover` redirect.
 /// Only `*.artelonga.com.br` and `quilomboaraucaria.com.br` are accepted.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Called server-side from `server::serve_recover` and mirrored client-side
+/// in `login.js::isAllowedReturnTo`.
 pub(crate) fn is_allowed_return_to(url: &str) -> bool {
     fn extract_host(url: &str) -> Option<&str> {
         let rest = url
@@ -139,6 +158,7 @@ pub(crate) fn is_allowed_return_to(url: &str) -> bool {
         return false;
     };
     host == "quilomboaraucaria.com.br"
+        || host == "quilomboaraucaria.org"
         || host == "artelonga.com.br"
         || host.ends_with(".artelonga.com.br")
 }
@@ -580,16 +600,32 @@ async fn forgot_password_handler(
     Json(req): Json<ForgotPasswordRequest>,
 ) -> Result<Response, AppError> {
     let identifier = req.username_or_channel_value.trim().to_string();
+    let email_companion = req.email.trim().to_lowercase();
     let mut sent_to = Vec::new();
 
-    // Try to find the user by username or by a verified channel value.
-    let user_opt = find_user_for_recovery(&state, &identifier).await;
+    // CO-176: when both `username_or_channel_value` and `email` are sent
+    // (1.91.3 UI), both must resolve to the **same** user. Otherwise the
+    // request returns 202 with `sent_to: []` — same shape as "user not
+    // found", so callers can't distinguish a wrong-pair attempt from a
+    // non-existent account.
+    let user_opt = find_user_for_recovery_pair(&state, &identifier, &email_companion).await;
 
     if let Some(user_id) = user_opt {
         let channels = {
             let storage = lock_storage(&state)?;
             storage.get_recovery_channels_for_user(&user_id)
         };
+
+        let verified_count = channels.iter().filter(|c| c.verified_at.is_some()).count();
+        if verified_count == 0 {
+            tracing::info!(
+                "Recovery request matched user {} but no verified channel; \
+                 silent 202 (no enumeration). identifier={} email_supplied={}",
+                user_id,
+                redact_email(&identifier),
+                !email_companion.is_empty(),
+            );
+        }
 
         for ch in channels.iter().filter(|c| c.verified_at.is_some()) {
             let code = crate::auth::generate_code();
@@ -626,6 +662,17 @@ async fn forgot_password_handler(
             send_verification_code(&ch.channel_type, &value_str, &code);
             sent_to.push(masked);
         }
+    } else {
+        tracing::info!(
+            "Recovery request no-match: silent 202 (no enumeration). \
+             identifier={} email={}",
+            redact_email(&identifier),
+            if email_companion.is_empty() {
+                "<none>".to_string()
+            } else {
+                redact_email(&email_companion)
+            },
+        );
     }
 
     // Always 202 — no enumeration.
@@ -642,9 +689,12 @@ async fn forgot_password_verify_handler(
     Json(req): Json<ForgotPasswordVerifyRequest>,
 ) -> Result<Response, AppError> {
     let identifier = req.username_or_channel_value.trim().to_string();
+    let email_companion = req.email.trim().to_lowercase();
 
-    // Find the user.
-    let user_id = find_user_for_recovery(&state, &identifier)
+    // CO-176: pair lookup so the verify step honours the same identity gate
+    // as forgot-password — a code intercepted with a *different* identifier
+    // can't be used to reset another account.
+    let user_id = find_user_for_recovery_pair(&state, &identifier, &email_companion)
         .await
         .ok_or_else(|| AppError::Unauthorized("Invalid or expired code".into()))?;
 
@@ -771,10 +821,21 @@ async fn reset_password_handler(
 
     let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
 
+    // CO-186: short-lived (60s) ES256-signed handover token in the body.
+    // SPA appends it to the redirect when `return_to` ends in
+    // `/auth/co-handover`, letting the receiving deployment mint its own
+    // session cookie cross-apex. Validated via CO's JWKS — no shared secret.
+    let co_token =
+        crate::auth::sign_handover_jwt_es256(&state.jwt_key, &user.id, &user.email, &user.tier)
+            .ok();
+
     Ok((
         StatusCode::OK,
         [(header::SET_COOKIE, cookie)],
-        axum::Json(serde_json::json!({"ok": true})),
+        axum::Json(serde_json::json!({
+            "ok": true,
+            "co_token": co_token,
+        })),
     )
         .into_response())
 }
@@ -804,6 +865,35 @@ async fn change_password_handler(
         return Err(AppError::Unauthorized("Invalid current password".into()));
     }
 
+    // Optionally attach (or update) the user's email — typically a
+    // quilombo user who never had one and is adding it as part of this
+    // change-password flow. Username is preserved.
+    let email_to_attach = req.email.trim().to_lowercase();
+    if !email_to_attach.is_empty() {
+        if !email_to_attach.contains('@') || email_to_attach.len() > 254 {
+            return Err(AppError::BadRequest("Invalid email format".into()));
+        }
+        let storage = lock_storage(&state)?;
+        match storage.set_user_email(&user_id, &email_to_attach) {
+            Ok(_) => {
+                let _ = storage.ensure_email_recovery_channel(&user_id, &email_to_attach);
+                let _ = storage.mirror_email_to_quilombo(&user_id, &email_to_attach);
+                tracing::info!(
+                    "change-password: attached email {} to user {} (recovery channel + quilombo mirror)",
+                    redact_email(&email_to_attach),
+                    user_id,
+                );
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("already in use") {
+                    return Err(AppError::Conflict("Email já em uso por outra conta".into()));
+                }
+                return Err(AppError::Internal(format!("Failed to set email: {msg}")));
+            }
+        }
+    }
+
     // Hash the new password.
     let new_password = req.new_password.clone();
     let new_hash = tokio::task::spawn_blocking(move || hash_code(&new_password))
@@ -814,6 +904,9 @@ async fn change_password_handler(
     {
         let storage = lock_storage(&state)?;
         storage.update_password_hash(&user_id, &new_hash)?;
+        // Also propagate to any linked quilombo rows so the user keeps a
+        // single canonical password across both identities.
+        let _ = storage.mirror_password_to_quilombo(&user_id, &new_hash);
     }
 
     // Issue a refreshed JWT.
@@ -843,27 +936,193 @@ async fn change_password_handler(
 // Lookup helper
 // -------------------------------------------------------------------------
 
-/// Find a user_id for password recovery by:
-///   1. Exact `usuario` match in the users table.
-///   2. Verified recovery channel with matching lookup hash (email/sms/whatsapp).
+/// CO-176 paired lookup. When `email` is non-empty: resolves the user via
+/// `find_user_for_recovery(identifier)`, verifies that user has a verified
+/// email channel matching `email` (or a `users.email` matching `email`),
+/// and returns `Some(user_id)` only when both match. When `email` is empty,
+/// falls back to the legacy single-identifier lookup so older API consumers
+/// keep working.
+async fn find_user_for_recovery_pair(
+    state: &AppState,
+    identifier: &str,
+    email: &str,
+) -> Option<String> {
+    // Primary: try the identifier (could be CO usuario, quilombo usuario,
+    // verified email channel, or trigger a lazy-bridge by email).
+    let mut user_id = find_user_for_recovery(state, identifier).await;
+
+    // Fallback: if the identifier didn't resolve and the caller separately
+    // supplied an email, run the lazy-bridge through that email. This lets
+    // a legacy quilombo user with a quilombo email but no CO account / no
+    // CO recovery channel get their CO identity provisioned just by typing
+    // the email in the email field.
+    if user_id.is_none() && email.contains('@') && !email.is_empty() {
+        user_id = find_user_for_recovery(state, email).await;
+    }
+
+    let user_id = user_id?;
+
+    // Whenever a user_id is resolved AND the caller supplied an email,
+    // ensure that email exists as a verified recovery channel for them.
+    // This covers two important cases:
+    //   - lazy-bridge by usuario succeeded but the bridge didn't propagate
+    //     a recovery channel (the quilombo row may have empty email);
+    //   - the user typed an email different from the one already on file —
+    //     they want to recover via the new one going forward.
+    // Idempotent for already-existing channels.
+    if !email.is_empty()
+        && email.contains('@')
+        && let Ok(storage) = state.storage.lock()
+    {
+        let _ = storage.ensure_email_recovery_channel(&user_id, email);
+    }
+
+    if email.is_empty() {
+        return Some(user_id);
+    }
+
+    // Hash the supplied email and compare against any verified email
+    // channel for this user. Quilombo users get a verified channel via the
+    // boot-time backfill or lazy-bridge step, so this catches both paths.
+    let email_lookup = crate::recovery_crypto::compute_lookup_hash(
+        &crate::recovery_crypto::normalize_channel_value("email", email),
+    );
+
+    let storage = state.storage.lock().ok()?;
+    let channels = storage.get_recovery_channels_for_user(&user_id);
+    let channel_match = channels
+        .iter()
+        .filter(|c| c.channel_type == "email" && c.verified_at.is_some())
+        .any(|c| c.value_lookup_hash == email_lookup);
+    if channel_match {
+        return Some(user_id);
+    }
+
+    // Fallback: if the user has `users.email` set and matches what was typed,
+    // accept it. Belt-and-suspenders for the brief window between bridge
+    // creation and recovery-channel auto-promotion.
+    if let Some(user) = storage.get_user_by_id(&user_id)
+        && !user.email.is_empty()
+        && user.email.eq_ignore_ascii_case(email)
+    {
+        return Some(user_id);
+    }
+
+    None
+}
+
 async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<String> {
     let storage = state.storage.lock().ok()?;
+    let trimmed = identifier.trim();
+    tracing::info!(
+        "find_user_for_recovery: input={} (len={})",
+        redact_email(trimmed),
+        trimmed.len()
+    );
 
-    // Try username first.
-    if let Some(user) = storage.get_user_by_usuario(identifier) {
+    // Try CO username first.
+    if let Some(user) = storage.get_user_by_usuario(trimmed) {
+        tracing::info!(
+            "find_user_for_recovery: matched CO users.usuario → {}",
+            user.id
+        );
         return Some(user.id);
     }
 
-    // Try as email.
-    let email_normalized = crate::recovery_crypto::normalize_channel_value("email", identifier);
+    // CO-172/QB-9 follow-up: also try quilombo username. A quilombo user
+    // might have a different `usuario` in `quilombo_usuarios` than in
+    // `users` (the bridge in `quilombo_bridge.rs` falls back to NULL on
+    // unique-index collision), so hitting only `users.usuario` would miss
+    // them. The lookup walks `quilombo_usuarios.usuario` and resolves
+    // through `linked_co_user_id` to the canonical CO user id.
+    let normalized = trimmed.to_lowercase();
+    if let Ok(linked) = storage.conn().query_row(
+        "SELECT linked_co_user_id FROM quilombo_usuarios \
+         WHERE usuario = ?1 AND linked_co_user_id IS NOT NULL",
+        rusqlite::params![normalized],
+        |row| row.get::<_, Option<String>>(0),
+    ) && let Some(co_id) = linked
+    {
+        tracing::info!("find_user_for_recovery: matched linked quilombo usuario → {co_id}");
+        return Some(co_id);
+    }
+
+    // Lazy bridge for unlinked legacy quilombo users by usuario. A quilombo
+    // user who pre-dates CO-172 — or whose bridge silently failed at
+    // signup — has a `quilombo_usuarios` row with no `linked_co_user_id`,
+    // so the linked-only query above misses them. Provision the CO side on
+    // demand using the same chain CO-172 Phase 1 runs at signup.
+    if let Ok(q_id) = storage.conn().query_row(
+        "SELECT id FROM quilombo_usuarios \
+         WHERE usuario = ?1 AND (linked_co_user_id IS NULL OR linked_co_user_id = '')",
+        rusqlite::params![normalized],
+        |row| row.get::<_, String>(0),
+    ) {
+        tracing::info!(
+            "find_user_for_recovery: matched unlinked quilombo usuario → q_id={q_id}, bridging"
+        );
+        if let Ok(co_id) = storage.ensure_co_user_for_quilombo(&q_id) {
+            let _ = storage.link_quilombo_to_co(&q_id, &co_id);
+            tracing::info!("find_user_for_recovery: bridge complete → co_id={co_id}");
+            return Some(co_id);
+        } else {
+            tracing::warn!(
+                "find_user_for_recovery: ensure_co_user_for_quilombo failed for q_id={q_id}"
+            );
+        }
+    }
+
+    // Try as email through CO's verified-channel index (post-bridge users).
+    let email_normalized = crate::recovery_crypto::normalize_channel_value("email", trimmed);
     let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
     if let Some(ch) = storage.find_verified_channel_by_lookup_hash("email", &email_hash) {
         return Some(ch.user_id);
     }
 
+    // CO-176: lazy bridge for legacy quilombo users. A quilombo user who
+    // signed up before CO-172 (or whose bridge silently failed at email-set
+    // time) may have `quilombo_usuarios.email` populated but no
+    // `linked_co_user_id` and no CO recovery channel — typing their email
+    // would have hit a dead end. Bridge them on demand: lookup by
+    // `quilombo_usuarios.email`, run the same `ensure_co_user_for_quilombo`
+    // → `link_quilombo_to_co` → `ensure_email_recovery_channel` chain that
+    // CO-172 Phase 1 runs at signup time, then return the new CO user id.
+    // Idempotent: if the bridge already happened, the lookup above caught
+    // it and we never reach here.
+    if !email_normalized.is_empty() && email_normalized.contains('@') {
+        let q_user_id: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT id FROM quilombo_usuarios WHERE email = ?1",
+                rusqlite::params![email_normalized],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(q_id) = q_user_id {
+            tracing::info!(
+                "find_user_for_recovery: matched quilombo email → q_id={q_id}, bridging"
+            );
+            if let Ok(co_id) = storage.ensure_co_user_for_quilombo(&q_id) {
+                let _ = storage.link_quilombo_to_co(&q_id, &co_id);
+                let _ = storage.ensure_email_recovery_channel(&co_id, &email_normalized);
+                tracing::info!("find_user_for_recovery: bridge complete via email → co_id={co_id}");
+                return Some(co_id);
+            } else {
+                tracing::warn!(
+                    "find_user_for_recovery: ensure_co_user_for_quilombo failed for q_id={q_id}"
+                );
+            }
+        } else {
+            tracing::info!(
+                "find_user_for_recovery: no quilombo_usuarios row with email={}",
+                redact_email(&email_normalized)
+            );
+        }
+    }
+
     // Try as phone (SMS or WhatsApp).
     for ct in ["sms", "whatsapp"] {
-        let phone_normalized = crate::recovery_crypto::normalize_channel_value(ct, identifier);
+        let phone_normalized = crate::recovery_crypto::normalize_channel_value(ct, trimmed);
         if !phone_normalized.is_empty() {
             let phone_hash = crate::recovery_crypto::compute_lookup_hash(&phone_normalized);
             if let Some(ch) = storage.find_verified_channel_by_lookup_hash(ct, &phone_hash) {
@@ -872,6 +1131,7 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
         }
     }
 
+    tracing::info!("find_user_for_recovery: all paths exhausted, returning None");
     None
 }
 

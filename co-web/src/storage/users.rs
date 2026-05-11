@@ -33,6 +33,72 @@ impl Storage {
         })
     }
 
+    /// CO-175 (G3): public signup — create a new user with usuario + Argon2id
+    /// password hash, optionally an email. Idempotent in the sense that
+    /// already-taken usuario or email returns a structured error the caller
+    /// can map to 409. Auto-promotes the email (if provided) to a verified
+    /// recovery channel via the same path the seed admin uses.
+    pub fn create_user_with_password(
+        &mut self,
+        usuario: &str,
+        password_hash: &str,
+        email: Option<&str>,
+    ) -> Result<crate::models::User, SignupError> {
+        let usuario_norm = usuario.trim().to_lowercase();
+        let email_norm = email
+            .map(|e| e.trim().to_lowercase())
+            .filter(|e| !e.is_empty());
+
+        // Reject taken usuario.
+        if self.get_user_by_usuario(&usuario_norm).is_some() {
+            return Err(SignupError::UsuarioTaken);
+        }
+        // Reject taken email (when supplied).
+        if let Some(ref e) = email_norm
+            && self.get_user_by_email(e).is_some()
+        {
+            return Err(SignupError::EmailTaken);
+        }
+
+        let id = format!("usr_{}", nanoid::nanoid!(10));
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // Tier `player` for self-service signups; admin is reserved for the
+        // env-seeded operator account.
+        self.conn
+            .execute(
+                "INSERT INTO users (id, usuario, email, display_name, tier, created_at, password_hash) \
+                 VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5)",
+                params![id, usuario_norm, email_norm, now_str, password_hash],
+            )
+            .map_err(|e| SignupError::Internal(format!("INSERT users: {e}")))?;
+
+        if let Err(e) = self.subscribe_user_to_default_universes(&id) {
+            tracing::warn!("create_user_with_password: default subscriptions failed for {id}: {e}");
+        }
+
+        // Auto-promote the email as a verified recovery channel — same
+        // contract as the admin seed (1.85.0): forgot-password Just Works
+        // for anyone with `users.email` set.
+        if let Some(ref e) = email_norm
+            && let Err(err) = self.ensure_email_recovery_channel(&id, e)
+        {
+            tracing::warn!(
+                "create_user_with_password: ensure_email_recovery_channel failed for {id}: {err}"
+            );
+        }
+
+        Ok(crate::models::User {
+            id,
+            email: email_norm.unwrap_or_default(),
+            display_name: usuario_norm.clone(),
+            tier: "player".to_string(),
+            created_at: now,
+            usuario: Some(usuario_norm),
+        })
+    }
+
     pub fn get_user_by_email(&self, email: &str) -> Option<crate::models::User> {
         self.conn
             .query_row(
@@ -127,6 +193,39 @@ impl Storage {
             params![hash, user_id],
         )?;
         Ok(())
+    }
+
+    /// Set `users.email` for a signed-in user adding (or updating) their
+    /// email — typically from the change-password flow. Username is left
+    /// untouched. Returns:
+    ///   `Ok(true)`  → email was set/updated for `user_id`
+    ///   `Ok(false)` → user already has this exact email (no-op)
+    ///   `Err(...)`  → email is taken by another user, or DB error
+    pub fn set_user_email(&self, user_id: &str, email: &str) -> anyhow::Result<bool> {
+        let normalized = email.trim().to_lowercase();
+        if normalized.is_empty() {
+            return Err(anyhow::anyhow!("email cannot be empty"));
+        }
+
+        let owner: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM users WHERE LOWER(email) = ?1",
+                params![normalized],
+                |row| row.get(0),
+            )
+            .ok();
+        match owner {
+            Some(ref existing_id) if existing_id == user_id => return Ok(false),
+            Some(_) => return Err(anyhow::anyhow!("email already in use by another account")),
+            None => {}
+        }
+
+        self.conn.execute(
+            "UPDATE users SET email = ?1 WHERE id = ?2",
+            params![normalized, user_id],
+        )?;
+        Ok(true)
     }
 
     // --- UAT-specific methods (CO-44) ---
@@ -714,5 +813,122 @@ impl Storage {
         }
     }
 
+    /// CO-177: find an existing CO user by Google `sub`, or by email if no
+    /// `sub` matches yet, or insert a new `users` row. Returns the canonical
+    /// user record. Side-effects:
+    /// - Always sets `users.google_sub` on the matching row (links email-only
+    ///   accounts to their Google identity on first Google sign-in).
+    /// - Auto-promotes the email as a verified recovery channel when newly
+    ///   linked, mirroring the cadastro path.
+    pub fn find_or_create_user_by_google(
+        &mut self,
+        google_sub: &str,
+        email: &str,
+        google_name: &str,
+    ) -> anyhow::Result<crate::models::User> {
+        let email = email.trim().to_lowercase();
+        let now = chrono::Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // 1. Match by google_sub.
+        let by_sub: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM users WHERE google_sub = ?1",
+                rusqlite::params![google_sub],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = by_sub
+            && let Some(u) = self.get_user_by_id(&id)
+        {
+            return Ok(u);
+        }
+
+        // 2. Match by email — link Google sub to the existing CO user.
+        let by_email: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM users WHERE email = ?1",
+                rusqlite::params![email],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = by_email {
+            self.conn.execute(
+                "UPDATE users SET google_sub = ?1 WHERE id = ?2",
+                rusqlite::params![google_sub, id],
+            )?;
+            let _ = self.ensure_email_recovery_channel(&id, &email);
+            if let Some(u) = self.get_user_by_id(&id) {
+                return Ok(u);
+            }
+        }
+
+        // 3. Insert a new user. Pick a unique `usuario` from the email
+        //    local-part with a `-N` suffix on collision (mirrors migration v37).
+        let local = email.split('@').next().unwrap_or("user");
+        let mut candidate = local.to_lowercase();
+        let mut n = 2;
+        while self.get_user_by_usuario(&candidate).is_some() {
+            candidate = format!("{}-{}", local.to_lowercase(), n);
+            n += 1;
+            if n > 100 {
+                candidate = format!("{}-{}", local.to_lowercase(), nanoid::nanoid!(6));
+                break;
+            }
+        }
+
+        let id = format!("usr_{}", nanoid::nanoid!(10));
+        let display = if google_name.trim().is_empty() {
+            candidate.clone()
+        } else {
+            google_name.trim().to_string()
+        };
+        self.conn.execute(
+            "INSERT INTO users \
+             (id, usuario, email, display_name, tier, created_at, google_sub) \
+             VALUES (?1, ?2, ?3, ?4, 'player', ?5, ?6)",
+            rusqlite::params![id, candidate, email, display, now_str, google_sub],
+        )?;
+        if let Err(e) = self.subscribe_user_to_default_universes(&id) {
+            tracing::warn!(
+                "find_or_create_user_by_google: default subscriptions failed for {id}: {e}"
+            );
+        }
+        let _ = self.ensure_email_recovery_channel(&id, &email);
+
+        Ok(crate::models::User {
+            id,
+            email,
+            display_name: display,
+            tier: "player".to_string(),
+            created_at: now,
+            usuario: Some(candidate),
+        })
+    }
+
+    /// CO-175 (G3): count users created in the last `seconds` interval.
+    /// Used to enforce the public-signup rate cap (100 / day for now).
+    pub fn count_users_created_since(&self, seconds: i64) -> i64 {
+        let cutoff = (Utc::now() - chrono::Duration::seconds(seconds)).to_rfc3339();
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) FROM users WHERE created_at >= ?1",
+                params![cutoff],
+                |row| row.get(0),
+            )
+            .unwrap_or(0)
+    }
+
     // --- Universes ---
+}
+
+/// CO-175 (G3): structured signup failure modes so the route can map each to
+/// the right HTTP status without exposing the literal SQL error.
+#[derive(Debug)]
+pub enum SignupError {
+    UsuarioTaken,
+    EmailTaken,
+    Internal(String),
 }
