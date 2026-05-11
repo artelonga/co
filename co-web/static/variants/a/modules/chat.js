@@ -552,6 +552,10 @@ function _handleWsEvent(evt) {
 function _onMessageCreated(msg) {
     if (!_state) return;
     if (_state.messages.find(m => m.id === msg.id)) return; // dedupe
+    // CO-202: notify bell badge via hook
+    if (typeof window.coOnChatMessageArrived === 'function') {
+        window.coOnChatMessageArrived(msg, _state.currentRoom?.id);
+    }
     const box = _state.container?.querySelector('#chat-scrollback');
     const wasAtBottom = box ? (box.scrollHeight - box.scrollTop - box.clientHeight < 60) : false;
     _state.messages.push(msg);

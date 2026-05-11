@@ -52,6 +52,8 @@ import {
 } from './modules/invitations.js';
 import { mountChat, destroyChat } from './modules/chat.js';
 import { mountDmInbox, destroyDmInbox, openDmWith, updateDmBadge } from './modules/dm.js';
+import { setupNotifications, teardownNotifications, bumpUnreadCount, renderNotificationsPage } from './modules/notifications.js';
+import { renderNotificationSettings } from './modules/notification-settings.js';
 
 // ===== CO-191: Bucketed universe loader =====
 async function loadMeUniverses() {
@@ -88,7 +90,7 @@ function hideTemplateBanner() {
 }
 
 function readUniverseSlugFromUrl() {
-    const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app'];
+    const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications'];
     if (window.location.pathname.match(/^\/yggdrasil\/[a-z0-9-]+/)) return 'yggdrasil';
     const m = window.location.pathname.match(/^\/([a-z0-9-]+)(\/|$)/);
     if (m && !RESERVED.includes(m[1])) return m[1];
@@ -448,7 +450,17 @@ function _updateChatButton(me) {
                 .catch(() => {});
         }
     }
+
+    // CO-202: show/hide notification bell
+    const notifWrap = document.getElementById('notif-wrap');
+    if (notifWrap) notifWrap.classList.toggle('hidden', !me);
+    if (me && !_notifSetupDone) {
+        _notifSetupDone = true;
+        setupNotifications();
+    }
 }
+
+let _notifSetupDone = false;
 
 // ---------------------------------------------------------------------------
 
@@ -519,6 +531,15 @@ function bindStaticEvents() {
     document.addEventListener('co:langchange', () => { rebuildI18nConstants(); render(); });
 }
 
+// CO-202: WS chat hook — called by chat.js when a message arrives in any room.
+// Bumps the bell badge if the chat drawer is not currently open.
+window.coOnChatMessageArrived = (_msg, _roomId) => {
+    const chatDrawer = document.getElementById('chat-drawer');
+    if (!chatDrawer || chatDrawer.classList.contains('hidden')) {
+        bumpUnreadCount();
+    }
+};
+
 // ===== Entry point =====
 async function init() {
     window.setLang(window.currentLang);
@@ -532,6 +553,10 @@ async function init() {
     setupHamburgerMenu();
     setupLoginModal();
     setupSecurityModal();
+    // CO-202: render notification settings when security modal opens
+    document.getElementById('btn-security')?.addEventListener('click', () => {
+        renderNotificationSettings(document.getElementById('notif-settings-content'));
+    });
     setupCriarModal();
     setupUsageLimitModal();
     setupSettingsPanel();
@@ -553,6 +578,34 @@ async function init() {
         state.gameView = readGameFromUrl();
         showLoading();
         await bootYggdrasil();
+        return;
+    }
+
+    // CO-202: /notifications full-page SPA route
+    if (slug === 'notifications') {
+        const me = await api.me();
+        if (me) {
+            hideLoginModal();
+            renderUserBadge(me);
+            state.me = me;
+            _updateChatButton(me);
+            await loadMeUniverses();
+            renderSidebar();
+            renderHeader();
+            const content = document.querySelector('#content');
+            if (content) {
+                content.className = 'content';
+                renderNotificationsPage(content);
+            }
+        } else {
+            showLoginModal();
+            state.currentUniverseSlug = 'template';
+            state.isTemplate = true;
+            setUniverseSlugInUrl('template');
+            showTemplateBanner();
+            setupOnboarding();
+            await bootAppForUniverse('template');
+        }
         return;
     }
 

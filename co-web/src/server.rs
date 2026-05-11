@@ -458,6 +458,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/settings/sync", get(serve_sync_settings))
         // CO-38: Yggdrasil game view — served by the SPA.
         .route("/yggdrasil/{game}", get(serve_co_index))
+        // CO-202: /notifications full-page view — served by the SPA.
+        .route("/notifications", get(serve_co_index))
         // CO-172: /recover — serves the SPA pinned to the forgot-password step.
         // Goes through `serve_recover` so a malformed `?return_to=` rejects with
         // 400 server-side instead of reaching the SPA — closes the open-redirect-
