@@ -82,6 +82,8 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
             let (tx, _) = co_web::embedding_worker::channel();
             tx
         },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
     build_router(state, None)
 }

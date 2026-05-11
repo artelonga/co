@@ -58,6 +58,8 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
         embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
         embedding_tx,
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
     build_router(state, None)
 }

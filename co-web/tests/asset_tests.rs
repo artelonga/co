@@ -67,6 +67,8 @@ fn build_test_app(dir: &std::path::Path) -> (axum::Router, AppState) {
             let (tx, _) = co_web::embedding_worker::channel();
             tx
         },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
     let router = build_router(state.clone(), None);
     (router, state)

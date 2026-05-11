@@ -120,6 +120,8 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
             let (tx, _) = co_web::embedding_worker::channel();
             tx
         },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     build_router(state, None)
@@ -220,6 +222,8 @@ async fn test_owner_on_private_universe_gets_200() {
             let (tx, _) = co_web::embedding_worker::channel();
             tx
         },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     let app = build_router(state, None);
@@ -291,6 +295,8 @@ async fn test_non_member_on_private_universe_gets_403() {
             let (tx, _) = co_web::embedding_worker::channel();
             tx
         },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     let app = build_router(state, None);

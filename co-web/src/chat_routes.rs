@@ -265,28 +265,44 @@ pub async fn post_message_handler(
         }
     }
 
-    let storage = lock_storage(&state)?;
+    // Insert the message and collect the data needed for the WS broadcast.
+    let (msg_id, broadcast_payload) = {
+        let storage = lock_storage(&state)?;
 
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-    let role = resolve_role(&storage, &slug, &user_id.0)
-        .ok_or_else(|| AppError::Forbidden("Chat is only available to universe members".into()))?;
+        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+            AppError::Forbidden("Chat is only available to universe members".into())
+        })?;
 
-    if !can_post(&role) {
-        return Err(AppError::Forbidden(
-            "Viewers and subscribers cannot post messages".into(),
-        ));
+        if !can_post(&role) {
+            return Err(AppError::Forbidden(
+                "Viewers and subscribers cannot post messages".into(),
+            ));
+        }
+
+        let room = storage
+            .get_chat_room_by_slug(&slug, &room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+
+        let msg_id = storage
+            .post_chat_message(&room.id, &user_id.0, &trimmed, body.reply_to_id.as_deref())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let full_msg = storage.get_chat_message_by_id(&msg_id);
+        let room_id = room.id.clone();
+        (msg_id, full_msg.map(|m| (m, room_id)))
+    }; // storage lock released
+
+    // Fan out to WS subscribers (best-effort: no error if no subscribers).
+    if let Some((msg, room_id)) = broadcast_payload
+        && let Ok(map) = state.chat_rooms_broadcast.lock()
+        && let Some(tx) = map.get(&room_id)
+    {
+        let _ = tx.send(crate::chat_ws::ChatEvent::MessageCreated { message: msg });
     }
-
-    let room = storage
-        .get_chat_room_by_slug(&slug, &room_slug)
-        .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
-
-    let msg_id = storage
-        .post_chat_message(&room.id, &user_id.0, &trimmed, body.reply_to_id.as_deref())
-        .map_err(|e| AppError::Internal(e.to_string()))?;
 
     Ok((
         StatusCode::CREATED,
@@ -366,6 +382,8 @@ mod tests {
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
             embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
             embedding_tx,
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
         crate::server::build_router(state, None)
     }

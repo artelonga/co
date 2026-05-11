@@ -662,6 +662,8 @@ mod tests {
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
             embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
             embedding_tx,
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
 
         let app = build_router(state, None);
@@ -812,6 +814,8 @@ mod tests {
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
             embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
             embedding_tx,
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
         let app = build_router(state.clone(), None);
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

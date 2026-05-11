@@ -321,6 +321,59 @@ impl Storage {
         Ok(id)
     }
 
+    /// Fetch a single message with its author, used by the WS broadcast path.
+    pub fn get_chat_message_by_id(&self, msg_id: &str) -> Option<ChatMessageWithAuthor> {
+        let cols = "m.id, m.author_id, COALESCE(u.display_name, m.author_id), \
+                    COALESCE(u.usuario, ''), m.body, m.created_at, m.edited_at, \
+                    m.deleted_at, m.reply_to_id \
+                    FROM chat_messages m LEFT JOIN users u ON m.author_id = u.id";
+        let sql = format!("SELECT {cols} WHERE m.id = ?1");
+        self.conn
+            .query_row(&sql, params![msg_id], |row| {
+                let deleted_at: Option<String> = row.get(7)?;
+                let raw_body: String = row.get(4)?;
+                let body = if deleted_at.is_some() {
+                    "[mensagem removida]".to_string()
+                } else {
+                    raw_body
+                };
+                let usuario_raw: String = row.get(3)?;
+                Ok(ChatMessageWithAuthor {
+                    id: row.get(0)?,
+                    author: ChatAuthor {
+                        user_id: row.get(1)?,
+                        display_name: row.get(2)?,
+                        usuario: if usuario_raw.is_empty() {
+                            None
+                        } else {
+                            Some(usuario_raw)
+                        },
+                    },
+                    body,
+                    created_at: row.get(5)?,
+                    edited_at: row.get(6)?,
+                    deleted_at,
+                    reply_to_id: row.get(8)?,
+                })
+            })
+            .ok()
+    }
+
+    /// Return `(display_name, usuario)` for a user, used for WS presence events.
+    pub fn get_user_display_info(&self, user_id: &str) -> Option<(String, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT display_name, usuario FROM users WHERE id = ?1",
+                params![user_id],
+                |row| {
+                    let display_name: String = row.get(0)?;
+                    let usuario: Option<String> = row.get(1)?;
+                    Ok((display_name, usuario.filter(|s| !s.is_empty())))
+                },
+            )
+            .ok()
+    }
+
     /// Insert a `general` room for every universe that lacks one. Returns the number inserted.
     pub fn backfill_default_rooms(&self) -> usize {
         let keys: Vec<String> = {

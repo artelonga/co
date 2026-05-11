@@ -663,6 +663,8 @@ mod tests {
                 let (tx, _) = crate::embedding_worker::channel();
                 tx
             },
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
 
         let app = build_router(state, None);
@@ -749,6 +751,8 @@ mod tests {
                 let (tx, _) = crate::embedding_worker::channel();
                 tx
             },
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });
 
         let app = build_router(state.clone(), None);

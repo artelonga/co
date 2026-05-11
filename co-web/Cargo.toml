@@ -67,3 +67,4 @@ tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 serde_urlencoded = "0.7"
+tokio = { workspace = true, features = ["test-util"] }

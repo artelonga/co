@@ -69,6 +69,16 @@ pub struct AppStateInner {
     pub embeddings: Arc<crate::embedding::EmbeddingService>,
     /// CO-164: channel to send embedding jobs to the background worker.
     pub embedding_tx: crate::embedding_worker::EmbeddingSender,
+    /// CO-194: per-room broadcast channels for chat WebSocket fan-out.
+    pub chat_rooms_broadcast: std::sync::Mutex<
+        std::collections::HashMap<
+            String,
+            tokio::sync::broadcast::Sender<crate::chat_ws::ChatEvent>,
+        >,
+    >,
+    /// CO-194: per-room presence refcounts (room_id → user_id → connection count).
+    pub chat_presence:
+        std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, u32>>>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -411,6 +421,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let sync_ws_route =
         Router::new().route("/api/v1/sync/ws", get(crate::sync_ws::sync_ws_handler));
 
+    // --- CO-194: Chat WebSocket (auth done inside handler, no middleware needed) ---
+    let chat_ws_route = Router::new().route(
+        "/api/v1/universes/{slug}/chat/rooms/{room_slug}/ws",
+        get(crate::chat_ws::chat_ws_handler),
+    );
+
     // --- SPA routes (serve index.html for client-side routing) ---
     //
     // The `/co` URL prefix was dropped: the platform is hosted at the root,
@@ -493,6 +509,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let mut router = Router::new()
         .merge(ws_route)
         .merge(sync_ws_route)
+        .merge(chat_ws_route)
         .merge(co_routes)
         .nest("/api", board_public)
         .nest("/api", board_protected)
@@ -1162,6 +1179,8 @@ pub async fn start_server(config: WebConfig) {
         jwt_key,
         embeddings,
         embedding_tx,
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
