@@ -12,7 +12,7 @@ use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::get,
+    routing::{get, patch},
 };
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +33,10 @@ pub fn chat_router() -> Router<AppState> {
         .route(
             "/{slug}/chat/rooms/{room_slug}/messages",
             get(list_messages_handler).post(post_message_handler),
+        )
+        .route(
+            "/{slug}/chat/rooms/{room_slug}/messages/{msg_id}",
+            patch(edit_message_handler).delete(delete_message_handler),
         )
 }
 
@@ -72,6 +76,16 @@ pub struct ListMessagesResponse {
 #[derive(Debug, Serialize)]
 pub struct PostMessageResponse {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EditMessageRequest {
+    pub body: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeleteMessageResponse {
+    pub deleted_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +322,141 @@ pub async fn post_message_handler(
         StatusCode::CREATED,
         axum::Json(PostMessageResponse { id: msg_id }),
     ))
+}
+
+/// PATCH /api/v1/universes/:slug/chat/rooms/:room_slug/messages/:msg_id
+pub async fn edit_message_handler(
+    State(state): State<AppState>,
+    Path((slug, room_slug, msg_id)): Path<(String, String, String)>,
+    user_id: UserId,
+    axum::Json(body): axum::Json<EditMessageRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let (updated_msg, room_id) = {
+        let storage = lock_storage(&state)?;
+
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+
+        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+            AppError::Forbidden("Chat is only available to universe members".into())
+        })?;
+
+        if !can_read(&role) {
+            return Err(AppError::Forbidden(
+                "Insufficient role to access chat".into(),
+            ));
+        }
+
+        let room = storage
+            .get_chat_room_by_slug(&slug, &room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+        let room_id = room.id.clone();
+
+        let msg = storage
+            .edit_chat_message(
+                &msg_id,
+                &user_id.0,
+                &body.body,
+                chrono::Duration::minutes(15),
+            )
+            .map_err(|e| match e {
+                crate::storage::chat::EditError::NotFound => {
+                    AppError::NotFound("Message not found".into())
+                }
+                crate::storage::chat::EditError::NotAuthor => {
+                    AppError::Forbidden("You can only edit your own messages".into())
+                }
+                crate::storage::chat::EditError::AlreadyDeleted => {
+                    AppError::Gone("Message has been deleted".into())
+                }
+                crate::storage::chat::EditError::EditWindowExpired => {
+                    AppError::Forbidden("edit_window_expired".into())
+                }
+                crate::storage::chat::EditError::BodyEmpty => {
+                    AppError::BadRequest("Message body cannot be empty".into())
+                }
+                crate::storage::chat::EditError::BodyTooLong => {
+                    AppError::BadRequest("Message body must be 4000 characters or fewer".into())
+                }
+                crate::storage::chat::EditError::Db(e) => AppError::Internal(e.to_string()),
+            })?;
+
+        (msg, room_id)
+    };
+
+    if let Ok(map) = state.chat_rooms_broadcast.lock()
+        && let Some(tx) = map.get(&room_id)
+    {
+        let _ = tx.send(crate::chat_ws::ChatEvent::MessageEdited {
+            message: updated_msg.clone(),
+        });
+    }
+
+    Ok(axum::Json(updated_msg))
+}
+
+/// DELETE /api/v1/universes/:slug/chat/rooms/:room_slug/messages/:msg_id
+pub async fn delete_message_handler(
+    State(state): State<AppState>,
+    Path((slug, room_slug, msg_id)): Path<(String, String, String)>,
+    user_id: UserId,
+) -> Result<impl IntoResponse, AppError> {
+    let (deleted_at, room_id) = {
+        let storage = lock_storage(&state)?;
+
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+
+        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+            AppError::Forbidden("Chat is only available to universe members".into())
+        })?;
+
+        if !can_read(&role) {
+            return Err(AppError::Forbidden(
+                "Insufficient role to access chat".into(),
+            ));
+        }
+
+        let room = storage
+            .get_chat_room_by_slug(&slug, &room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+        let room_id = room.id.clone();
+
+        let caller_can_moderate = matches!(role.as_str(), "owner" | "admin");
+        let deleted_at = storage
+            .delete_chat_message(&msg_id, &user_id.0, caller_can_moderate)
+            .map_err(|e| match e {
+                crate::storage::chat::DeleteError::NotFound => {
+                    AppError::NotFound("Message not found".into())
+                }
+                crate::storage::chat::DeleteError::NotAuthorAndNotMod => {
+                    AppError::Forbidden("You can only delete your own messages".into())
+                }
+                crate::storage::chat::DeleteError::AlreadyDeleted => {
+                    AppError::Gone("Message has already been deleted".into())
+                }
+                crate::storage::chat::DeleteError::Db(e) => AppError::Internal(e.to_string()),
+            })?;
+
+        (deleted_at, room_id)
+    };
+
+    let deleted_at_str = deleted_at.to_rfc3339();
+
+    if let Ok(map) = state.chat_rooms_broadcast.lock()
+        && let Some(tx) = map.get(&room_id)
+    {
+        let _ = tx.send(crate::chat_ws::ChatEvent::MessageDeleted {
+            message_id: msg_id.clone(),
+            deleted_at: deleted_at_str.clone(),
+        });
+    }
+
+    Ok(axum::Json(DeleteMessageResponse {
+        deleted_at: deleted_at_str,
+    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1007,6 +1156,38 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
     }
 
+    fn make_state_inner(dir: &std::path::Path) -> crate::server::AppState {
+        let config = test_config(dir);
+        let storage = Storage::new(&config.data_dir);
+        let experiment = ExperimentStore::new(&config.data_dir);
+        let auth_store = crate::auth::AuthStore::new(dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_db_path = dir.join("game_test.db");
+        let game_storage = Arc::new(
+            game_core::storage::Storage::open(&game_db_path).expect("open test game storage"),
+        );
+        let (embedding_tx, _rx) = crate::embedding_worker::channel();
+        Arc::new(crate::server::AppStateInner {
+            storage: Mutex::new(storage),
+            experiment: Mutex::new(experiment),
+            config,
+            auth_store: Mutex::new(auth_store),
+            mail,
+            game_storage,
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: crate::sync_ws::new_sync_room_manager(),
+            cache: crate::cache::CacheLayer::new(),
+            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+            wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+            embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
+    }
+
     // --- 17. POST /messages — rate limit 429 ---
 
     #[tokio::test]
@@ -1038,5 +1219,669 @@ mod tests {
         }
 
         assert_eq!(last_status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    // =========================================================================
+    // CO-196 — message edit + delete moderation
+    // =========================================================================
+
+    // --- 18. PATCH within edit window by author → 200 ---
+
+    #[tokio::test]
+    async fn test_edit_within_window_by_author_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner18@example.com");
+        insert_universe(dir.path(), "uni18", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni18", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "original", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni18/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"edited text"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["body"], "edited text");
+        assert!(json["edited_at"].is_string());
+    }
+
+    // --- 19. PATCH outside edit window → 403 ---
+
+    #[tokio::test]
+    async fn test_edit_outside_window_403() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner19@example.com");
+        insert_universe(dir.path(), "uni19", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni19", "general")
+                .expect("room");
+            let mid = storage
+                .post_chat_message(&room.id, &owner_id, "old msg", None)
+                .unwrap();
+            let old_ts = (chrono::Utc::now() - chrono::Duration::minutes(16)).to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "UPDATE chat_messages SET created_at = ?1 WHERE id = ?2",
+                    rusqlite::params![old_ts, mid],
+                )
+                .unwrap();
+            mid
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni19/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"try edit"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    // --- 20. PATCH by non-author → 403 ---
+
+    #[tokio::test]
+    async fn test_edit_by_non_author_403() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner20@example.com");
+        let member_id = insert_user(dir.path(), "member20@example.com");
+        insert_universe(dir.path(), "uni20", &owner_id);
+        add_member(dir.path(), "uni20", &member_id, "member");
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni20", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "owner msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&member_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni20/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"hacked edit"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    // --- 21. PATCH on deleted message → 410 ---
+
+    #[tokio::test]
+    async fn test_edit_deleted_message_410() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner21@example.com");
+        insert_universe(dir.path(), "uni21", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni21", "general")
+                .expect("room");
+            let mid = storage
+                .post_chat_message(&room.id, &owner_id, "msg", None)
+                .unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "UPDATE chat_messages SET deleted_at = ?1 WHERE id = ?2",
+                    rusqlite::params![now, mid],
+                )
+                .unwrap();
+            mid
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni21/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"edit deleted"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::GONE);
+    }
+
+    // --- 22. PATCH with empty body → 400 ---
+
+    #[tokio::test]
+    async fn test_edit_empty_body_400() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner22@example.com");
+        insert_universe(dir.path(), "uni22", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni22", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni22/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"   "}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // --- 23. DELETE by author → 200 ---
+
+    #[tokio::test]
+    async fn test_delete_by_author_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner23@example.com");
+        insert_universe(dir.path(), "uni23", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni23", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "my msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni23/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert!(json["deleted_at"].is_string());
+    }
+
+    // --- 24. DELETE by owner of other member's msg → 200 ---
+
+    #[tokio::test]
+    async fn test_delete_by_owner_of_other_msg_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner24@example.com");
+        let member_id = insert_user(dir.path(), "member24@example.com");
+        insert_universe(dir.path(), "uni24", &owner_id);
+        add_member(dir.path(), "uni24", &member_id, "member");
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni24", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &member_id, "member msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni24/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- 25. DELETE by admin of other member's msg → 200 ---
+
+    #[tokio::test]
+    async fn test_delete_by_admin_of_other_msg_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner25@example.com");
+        let admin_id = insert_user(dir.path(), "admin25@example.com");
+        let member_id = insert_user(dir.path(), "member25@example.com");
+        insert_universe(dir.path(), "uni25", &owner_id);
+        add_member(dir.path(), "uni25", &admin_id, "admin");
+        add_member(dir.path(), "uni25", &member_id, "member");
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni25", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &member_id, "member msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&admin_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni25/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+
+    // --- 26. DELETE by member of someone else's msg → 403 ---
+
+    #[tokio::test]
+    async fn test_delete_by_member_of_other_msg_403() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner26@example.com");
+        let member_id = insert_user(dir.path(), "member26@example.com");
+        insert_universe(dir.path(), "uni26", &owner_id);
+        add_member(dir.path(), "uni26", &member_id, "member");
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni26", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "owner msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&member_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni26/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    // --- 27. DELETE by viewer of someone else's msg → 403 ---
+
+    #[tokio::test]
+    async fn test_delete_by_viewer_of_other_msg_403() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner27@example.com");
+        let viewer_id = insert_user(dir.path(), "viewer27@example.com");
+        insert_universe(dir.path(), "uni27", &owner_id);
+        add_member(dir.path(), "uni27", &viewer_id, "viewer");
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni27", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "owner msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&viewer_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni27/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    // --- 28. DELETE on already-deleted message → 410 ---
+
+    #[tokio::test]
+    async fn test_delete_already_deleted_410() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner28@example.com");
+        insert_universe(dir.path(), "uni28", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni28", "general")
+                .expect("room");
+            let mid = storage
+                .post_chat_message(&room.id, &owner_id, "msg", None)
+                .unwrap();
+            let now = chrono::Utc::now().to_rfc3339();
+            storage
+                .conn()
+                .execute(
+                    "UPDATE chat_messages SET deleted_at = ?1 WHERE id = ?2",
+                    rusqlite::params![now, mid],
+                )
+                .unwrap();
+            mid
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni28/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::GONE);
+    }
+
+    // --- 29. PATCH broadcasts message.edited ---
+
+    #[tokio::test]
+    async fn test_edit_broadcasts_message_edited_event() {
+        use tokio::sync::broadcast;
+        use tokio::time::Duration;
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner29@example.com");
+        insert_universe(dir.path(), "uni29", &owner_id);
+
+        let state = make_state_inner(dir.path());
+
+        let (msg_id, room_id) = {
+            let storage = state.storage.lock().unwrap();
+            let room = storage
+                .get_chat_room_by_slug("uni29", "general")
+                .expect("room");
+            let mid = storage
+                .post_chat_message(&room.id, &owner_id, "original", None)
+                .unwrap();
+            (mid, room.id.clone())
+        };
+
+        let (tx, mut rx) = broadcast::channel::<crate::chat_ws::ChatEvent>(64);
+        {
+            let mut map = state.chat_rooms_broadcast.lock().unwrap();
+            map.insert(room_id.clone(), tx);
+        }
+
+        let app = crate::server::build_router(Arc::clone(&state), None);
+        let token = make_jwt(&owner_id);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri(format!(
+                        "/api/v1/universes/uni29/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"body":"edited!"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let evt = tokio::time::timeout(Duration::from_millis(200), rx.recv())
+            .await
+            .expect("timeout waiting for broadcast")
+            .unwrap();
+
+        assert!(
+            matches!(evt, crate::chat_ws::ChatEvent::MessageEdited { .. }),
+            "expected MessageEdited, got {evt:?}"
+        );
+    }
+
+    // --- 30. DELETE broadcasts message.deleted ---
+
+    #[tokio::test]
+    async fn test_delete_broadcasts_message_deleted_event() {
+        use tokio::sync::broadcast;
+        use tokio::time::Duration;
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner30@example.com");
+        insert_universe(dir.path(), "uni30", &owner_id);
+
+        let state = make_state_inner(dir.path());
+
+        let (msg_id, room_id) = {
+            let storage = state.storage.lock().unwrap();
+            let room = storage
+                .get_chat_room_by_slug("uni30", "general")
+                .expect("room");
+            let mid = storage
+                .post_chat_message(&room.id, &owner_id, "to delete", None)
+                .unwrap();
+            (mid, room.id.clone())
+        };
+
+        let (tx, mut rx) = broadcast::channel::<crate::chat_ws::ChatEvent>(64);
+        {
+            let mut map = state.chat_rooms_broadcast.lock().unwrap();
+            map.insert(room_id.clone(), tx);
+        }
+
+        let app = crate::server::build_router(Arc::clone(&state), None);
+        let token = make_jwt(&owner_id);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni30/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let evt = tokio::time::timeout(Duration::from_millis(200), rx.recv())
+            .await
+            .expect("timeout waiting for broadcast")
+            .unwrap();
+
+        assert!(
+            matches!(evt, crate::chat_ws::ChatEvent::MessageDeleted { .. }),
+            "expected MessageDeleted, got {evt:?}"
+        );
+    }
+
+    // --- 31. GET messages returns tombstone after DELETE ---
+
+    #[tokio::test]
+    async fn test_get_messages_returns_tombstone_for_deleted() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner31@example.com");
+        insert_universe(dir.path(), "uni31", &owner_id);
+
+        let msg_id = {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            let room = storage
+                .get_chat_room_by_slug("uni31", "general")
+                .expect("room");
+            storage
+                .post_chat_message(&room.id, &owner_id, "secret msg", None)
+                .unwrap()
+        };
+
+        let token = make_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+
+        let del_resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri(format!(
+                        "/api/v1/universes/uni31/chat/rooms/general/messages/{msg_id}"
+                    ))
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(del_resp.status(), StatusCode::OK);
+
+        let get_resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/universes/uni31/chat/rooms/general/messages")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(get_resp.status(), StatusCode::OK);
+        let json = body_json(get_resp.into_body()).await;
+        let msgs = json["messages"].as_array().unwrap();
+        let msg = msgs
+            .iter()
+            .find(|m| m["id"] == msg_id)
+            .expect("msg in list");
+        assert_eq!(msg["body"], "[mensagem removida]");
+        assert!(msg["deleted_at"].is_string());
     }
 }

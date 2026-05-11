@@ -5,6 +5,33 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] — 2026-05-11 — Phase 4 chat complete (CO-194 + CO-195 + CO-196)
+
+### Phase 4 chat — live updates + UI + moderation
+
+- **CO-194** — WebSocket live updates + presence. Per-room broadcast channel
+  (`message.created`, `message.edited`, `message.deleted`, `presence.join/leave`,
+  `typing.start/stop`). Multi-tab dedup via refcount. Keep-alive ping/pong.
+  11 tests cover auth gates, rate limits, broadcast isolation, presence, typing.
+
+- **CO-195** — Chat UI sidebar drawer + Yggdrasil lobby panel. New
+  `modules/chat.js` module with room rail, scrollback, live composer,
+  WS reconnect with exponential backoff, presence list. Sidebar `💬 Chat`
+  button visible when logged in; closes and tears down on universe switch.
+
+- **CO-196** — Chat moderation: edit/delete own, admin delete any.
+  - `PATCH /api/v1/.../messages/:id` — author-only edit within 15-min window;
+    403 `edit_window_expired` after; 410 on deleted message.
+  - `DELETE /api/v1/.../messages/:id` — author or owner/admin can soft-delete;
+    410 if already deleted. Body preserved in DB; clients see `[mensagem removida]`.
+  - Both endpoints broadcast `message.edited` / `message.deleted` WS events.
+  - UI: hover shows ✏️ (own, within 15 min) and 🗑️ (own or mod); inline
+    textarea edit flow (Enter/Esc); delete confirm popover with optimistic
+    tombstone + rollback on error; `(editado)` tag after successful edit.
+  - 14 tests: every auth gate (author/owner/admin/member/viewer), edit window,
+    empty body, already-deleted, and WS broadcast verification.
+  - i18n PT + EN for all chat strings.
+
 ## [2.0.0] — 2026-05-10 — Identity + Phase 4 Foundation
 
 Major release closing the multi-day identity / SSO / membership / chat-foundation

@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Duration, Utc};
 use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
@@ -34,6 +34,25 @@ pub struct ChatMessageWithAuthor {
     pub edited_at: Option<String>,
     pub deleted_at: Option<String>,
     pub reply_to_id: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum EditError {
+    NotFound,
+    NotAuthor,
+    AlreadyDeleted,
+    EditWindowExpired,
+    BodyTooLong,
+    BodyEmpty,
+    Db(rusqlite::Error),
+}
+
+#[derive(Debug)]
+pub enum DeleteError {
+    NotFound,
+    NotAuthorAndNotMod,
+    AlreadyDeleted,
+    Db(rusqlite::Error),
 }
 
 fn slugify(name: &str) -> String {
@@ -372,6 +391,107 @@ impl Storage {
                 },
             )
             .ok()
+    }
+
+    /// Edit a chat message body. Enforces authorship and edit-window checks.
+    pub fn edit_chat_message(
+        &self,
+        message_id: &str,
+        author_id: &str,
+        new_body: &str,
+        edit_window: Duration,
+    ) -> Result<ChatMessageWithAuthor, EditError> {
+        let trimmed = new_body.trim();
+        if trimmed.is_empty() {
+            return Err(EditError::BodyEmpty);
+        }
+        if trimmed.len() > 4000 {
+            return Err(EditError::BodyTooLong);
+        }
+
+        let raw = self
+            .conn
+            .query_row(
+                "SELECT author_id, created_at, deleted_at FROM chat_messages WHERE id = ?1",
+                params![message_id],
+                |row| {
+                    let a: String = row.get(0)?;
+                    let c: String = row.get(1)?;
+                    let d: Option<String> = row.get(2)?;
+                    Ok((a, c, d))
+                },
+            )
+            .optional()
+            .map_err(EditError::Db)?;
+
+        let (stored_author, created_at, deleted_at) = raw.ok_or(EditError::NotFound)?;
+
+        if deleted_at.is_some() {
+            return Err(EditError::AlreadyDeleted);
+        }
+        if stored_author != author_id {
+            return Err(EditError::NotAuthor);
+        }
+
+        let created = chrono::DateTime::parse_from_rfc3339(&created_at)
+            .map(|dt| dt.with_timezone(&Utc))
+            .unwrap_or_else(|_| Utc::now());
+        if Utc::now() - created > edit_window {
+            return Err(EditError::EditWindowExpired);
+        }
+
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "UPDATE chat_messages SET body = ?1, edited_at = ?2 WHERE id = ?3",
+                params![trimmed, now, message_id],
+            )
+            .map_err(EditError::Db)?;
+
+        self.get_chat_message_by_id(message_id)
+            .ok_or(EditError::NotFound)
+    }
+
+    /// Soft-delete a chat message. Returns the `deleted_at` timestamp.
+    pub fn delete_chat_message(
+        &self,
+        message_id: &str,
+        caller_id: &str,
+        caller_can_moderate: bool,
+    ) -> Result<DateTime<Utc>, DeleteError> {
+        let raw = self
+            .conn
+            .query_row(
+                "SELECT author_id, deleted_at FROM chat_messages WHERE id = ?1",
+                params![message_id],
+                |row| {
+                    let a: String = row.get(0)?;
+                    let d: Option<String> = row.get(1)?;
+                    Ok((a, d))
+                },
+            )
+            .optional()
+            .map_err(DeleteError::Db)?;
+
+        let (stored_author, deleted_at) = raw.ok_or(DeleteError::NotFound)?;
+
+        if deleted_at.is_some() {
+            return Err(DeleteError::AlreadyDeleted);
+        }
+        if stored_author != caller_id && !caller_can_moderate {
+            return Err(DeleteError::NotAuthorAndNotMod);
+        }
+
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn
+            .execute(
+                "UPDATE chat_messages SET deleted_at = ?1 WHERE id = ?2",
+                params![now_str, message_id],
+            )
+            .map_err(DeleteError::Db)?;
+
+        Ok(now)
     }
 
     /// Insert a `general` room for every universe that lacks one. Returns the number inserted.

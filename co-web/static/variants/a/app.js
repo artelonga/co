@@ -49,6 +49,7 @@ import {
     setupInvitationsPage, setupInvitationsPanel,
     injectInvitationsCallbacks, consumePendingInviteToken,
 } from './modules/invitations.js';
+import { mountChat, destroyChat } from './modules/chat.js';
 
 // ===== CO-191: Bucketed universe loader =====
 async function loadMeUniverses() {
@@ -341,7 +342,14 @@ function wireModules() {
     injectApiCallbacks(showLoginModal, showUsageLimitModal, showToast);
     injectSwitchView(switchView);
     injectBootCallbacks({ showLoading, hideLoading, render, selectProject, removeManifestViewTabs, injectManifestViewTabs, switchView });
-    injectSidebarCallbacks({ bootAppForUniverse, selectProject, renderContent, showTemplateBanner, hideTemplateBanner, loadMeUniverses, renderSidebar, showToast });
+    injectSidebarCallbacks({
+        bootAppForUniverse: async (slug) => {
+            destroyChat();
+            document.getElementById('chat-drawer')?.classList.add('hidden');
+            return bootAppForUniverse(slug);
+        },
+        selectProject, renderContent, showTemplateBanner, hideTemplateBanner, loadMeUniverses, renderSidebar, showToast,
+    });
     injectSetUniverseSlugInUrl(setUniverseSlugInUrl);
     injectScrollToDate((dateStr) => scrollToDate(dateStr));
     injectSidebarShowLogin(showLoginModal);
@@ -375,6 +383,42 @@ function wireModules() {
     injectOnboardingCallbacks({ render, showLoginModal, showToast, setUniverseSlugInUrl, bootAppForUniverse, hideTemplateBanner, renderUsageCount, loadMeUniverses });
     injectYggdrasilCallbacks({ hideLoading, hideLoginModal, renderUserBadge });
 }
+
+// ===== CO-195/196: Chat panel =====
+function _setupChatTrigger() {
+    const drawer = document.getElementById('chat-drawer');
+    if (!drawer) return;
+
+    // Inject chat button into sidebar footer
+    const sidebarFooter = document.querySelector('.sidebar-footer');
+    if (sidebarFooter) {
+        const chatBtn = document.createElement('button');
+        chatBtn.id = 'btn-open-chat';
+        chatBtn.className = 'chat-sidebar-toggle hidden';
+        chatBtn.setAttribute('data-i18n', 'chat.open');
+        chatBtn.textContent = window.t ? window.t('chat.open') : '💬 Chat';
+        sidebarFooter.insertBefore(chatBtn, sidebarFooter.firstChild);
+
+        chatBtn.addEventListener('click', () => {
+            drawer.classList.remove('hidden');
+            const me = state.me || null;
+            mountChat({
+                universeSlug: state.currentUniverseSlug || 'template',
+                mode: 'drawer',
+                container: drawer,
+                me,
+            });
+        });
+    }
+}
+
+// Show/hide the chat button based on login state
+function _updateChatButton(me) {
+    const btn = document.getElementById('btn-open-chat');
+    if (btn) btn.classList.toggle('hidden', !me);
+}
+
+// ---------------------------------------------------------------------------
 
 // ===== Static DOM event bindings =====
 function bindStaticEvents() {
@@ -460,6 +504,7 @@ async function init() {
     setupUsageLimitModal();
     setupSettingsPanel();
     setupInvitationsPanel();
+    _setupChatTrigger();
     initFooter();
     bindStaticEvents();
 
@@ -484,6 +529,8 @@ async function init() {
         if (me) {
             hideLoginModal();
             renderUserBadge(me);
+            state.me = me;
+            _updateChatButton(me);
             await loadMeUniverses();
             const mine = state.userUniverses.filter(u => !u.is_template);
             if (mine.length > 0) {
@@ -507,6 +554,8 @@ async function init() {
     if (me) {
         hideLoginModal();
         renderUserBadge(me);
+        state.me = me;
+        _updateChatButton(me);
         await loadMeUniverses();
         await bootAppForUniverse(slug);
         await maybeOpenEntryFromUrl(slug);
