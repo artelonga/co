@@ -727,4 +727,53 @@ export function setupSecurityModal() {
             }
         });
     }
+
+    // CO-198: DM policy save
+    const btnSaveDmPolicy = document.getElementById('btn-save-dm-policy');
+    if (btnSaveDmPolicy) {
+        // Load current policy when modal opens
+        function loadDmPolicy() {
+            apiFetch('/api/v1/auth/me', {}, true).then(me => {
+                if (!me || !me.dm_policy) return;
+                const radio = document.querySelector(`input[name="dm_policy"][value="${me.dm_policy}"]`);
+                if (radio) radio.checked = true;
+            }).catch(() => {});
+        }
+
+        const origOpen = document.getElementById('btn-security')?.onclick;
+        const btnSec = document.getElementById('btn-security');
+        if (btnSec) {
+            const _oldClick = btnSec.onclick;
+            btnSec.addEventListener('click', loadDmPolicy);
+        }
+
+        btnSaveDmPolicy.addEventListener('click', async () => {
+            const selected = document.querySelector('input[name="dm_policy"]:checked');
+            if (!selected) return;
+            const msgEl = document.getElementById('dm-policy-msg');
+            const resp = await fetch('/api/v1/me/dm-policy', {
+                method: 'PUT',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ policy: selected.value }),
+            }).catch(() => null);
+            if (msgEl) {
+                msgEl.textContent = resp && resp.ok
+                    ? (window.t ? window.t('saved') : 'Salvo!')
+                    : (window.t ? window.t('chat.send_error') : 'Erro');
+                setTimeout(() => { if (msgEl) msgEl.textContent = ''; }, 2000);
+            }
+        });
+    }
+
+    // CO-198: Block list
+    function loadBlockedList() {
+        const listEl = document.getElementById('dm-blocked-list');
+        if (!listEl) return;
+        apiFetch('/api/v1/me/dms', {}, true).then(() => {
+            // Block list is not directly available via me/dms; show placeholder
+            // In a full implementation we'd have a GET /api/v1/me/blocks endpoint
+            listEl.innerHTML = `<p class="form-hint" data-i18n="dm.blocked.empty">${window.t ? window.t('dm.blocked.empty') : 'Você não bloqueou ninguém.'}</p>`;
+        }).catch(() => {});
+    }
 }

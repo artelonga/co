@@ -48,8 +48,10 @@ import {
 import {
     setupInvitationsPage, setupInvitationsPanel,
     injectInvitationsCallbacks, consumePendingInviteToken,
+    injectOpenDmWith,
 } from './modules/invitations.js';
 import { mountChat, destroyChat } from './modules/chat.js';
+import { mountDmInbox, destroyDmInbox, openDmWith, updateDmBadge } from './modules/dm.js';
 
 // ===== CO-191: Bucketed universe loader =====
 async function loadMeUniverses() {
@@ -363,6 +365,7 @@ function wireModules() {
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse });
     setupUniverseInfoModal({});
     injectInvitationsCallbacks({ showToast, showLoginModal, loadMeUniverses });
+    injectOpenDmWith((userId, drawerContainer) => openDmWith(userId, drawerContainer));
     injectLoginCallbacks({
         render,
         bootAppForUniverse: async (slug) => {
@@ -409,6 +412,22 @@ function _setupChatTrigger() {
                 me,
             });
         });
+
+        // CO-198: DM inbox button (below chat button)
+        const dmDrawer = document.getElementById('dm-drawer');
+        if (dmDrawer) {
+            const dmBtn = document.createElement('button');
+            dmBtn.id = 'btn-open-dm';
+            dmBtn.className = 'chat-sidebar-toggle hidden';
+            dmBtn.setAttribute('aria-label', window.t ? window.t('dm.title') : 'Mensagens');
+            dmBtn.innerHTML = `📩 ${window.t ? window.t('dm.title') : 'Mensagens'} <span id="dm-sidebar-badge" class="dm-badge hidden">0</span>`;
+            sidebarFooter.insertBefore(dmBtn, chatBtn.nextSibling);
+
+            dmBtn.addEventListener('click', () => {
+                dmDrawer.classList.remove('hidden');
+                mountDmInbox({ container: dmDrawer, me: state.me || null });
+            });
+        }
     }
 }
 
@@ -416,6 +435,19 @@ function _setupChatTrigger() {
 function _updateChatButton(me) {
     const btn = document.getElementById('btn-open-chat');
     if (btn) btn.classList.toggle('hidden', !me);
+
+    // CO-198: show/hide DM button
+    const dmBtn = document.getElementById('btn-open-dm');
+    if (dmBtn) {
+        dmBtn.classList.toggle('hidden', !me);
+        if (me) {
+            // Fetch inbox unread count for the badge
+            fetch('/api/v1/me/dms', { credentials: 'include' })
+                .then(r => r.ok ? r.json() : null)
+                .then(d => { if (d) updateDmBadge(d.total_unread || 0); })
+                .catch(() => {});
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

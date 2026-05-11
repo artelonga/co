@@ -12,6 +12,7 @@ pub mod chat_routes;
 pub mod chat_ws;
 pub mod config;
 pub mod dev_board;
+pub mod dm_routes;
 pub mod doc_gen;
 pub mod email_smtp;
 pub mod embedding;

@@ -10,13 +10,13 @@ const EDIT_WINDOW_MS = 15 * 60 * 1000; // 15 min
 // State
 // ---------------------------------------------------------------------------
 
-let _state = null; // { universeSlug, mode, container, me, role, rooms, currentRoom, messages, ws, wsRetryMs, presence, destroyed }
+let _state = null; // { universeSlug, mode, container, me, role, rooms, currentRoom, messages, ws, wsRetryMs, presence, destroyed, dmSlug, dmOtherName }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export function mountChat({ universeSlug, mode = 'drawer', container, me }) {
+export function mountChat({ universeSlug, mode = 'drawer', container, me, dmSlug, dmOtherName }) {
     if (_state && !_state.destroyed) destroyChat();
     _state = {
         universeSlug,
@@ -32,9 +32,16 @@ export function mountChat({ universeSlug, mode = 'drawer', container, me }) {
         presence: [],
         destroyed: false,
         editingMsgId: null,
+        dmSlug: dmSlug || null,
+        dmOtherName: dmOtherName || null,
     };
     _render();
-    _loadRooms();
+    // CO-198: in DM mode skip room list and go directly to the DM thread
+    if (mode === 'dm' && dmSlug) {
+        _switchToDmRoom(dmSlug);
+    } else {
+        _loadRooms();
+    }
 }
 
 export function destroyChat() {
@@ -59,14 +66,18 @@ function t(key, vars = {}) {
 function _render() {
     if (!_state || !_state.container) return;
     const c = _state.container;
+    const isDm = _state.mode === 'dm';
+    const titleText = isDm && _state.dmOtherName
+        ? `📩 ${_state.dmOtherName}`
+        : t('chat.title', { universe: _state.universeSlug });
     c.innerHTML = `
 <div class="chat-inner">
   <header class="chat-header">
-    <span class="chat-title" id="chat-title">${esc(t('chat.title', { universe: _state.universeSlug }))}</span>
+    <span class="chat-title" id="chat-title">${esc(titleText)}</span>
     <button class="chat-close-btn" id="chat-close-btn" aria-label="Fechar chat">&times;</button>
   </header>
   <div class="chat-body">
-    <nav class="chat-rail" id="chat-rail">
+    <nav class="chat-rail${isDm ? ' hidden' : ''}" id="chat-rail">
       <ul class="chat-room-list" id="chat-room-list"></ul>
       <button class="chat-new-room-btn hidden" id="chat-new-room-btn">${esc(t('chat.new_room'))}</button>
       <div class="chat-presence" id="chat-presence"></div>
@@ -263,7 +274,8 @@ async function _submitEdit(msgId, newBody) {
     const trimmed = newBody.trim();
     if (!trimmed) return;
 
-    const { universeSlug, currentRoom } = _state;
+    const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
+    const { currentRoom } = _state;
     const resp = await fetch(
         `/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(currentRoom.slug)}/messages/${encodeURIComponent(msgId)}`,
         {
@@ -325,7 +337,8 @@ function _startDelete(msgId) {
 
 async function _submitDelete(msgId) {
     if (!_state || !_state.currentRoom) return;
-    const { universeSlug, currentRoom } = _state;
+    const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
+    const { currentRoom } = _state;
 
     // Optimistic: flip to tombstone immediately
     const idx = _state.messages.findIndex(m => m.id === msgId);
@@ -395,9 +408,25 @@ async function _switchRoom(slug) {
     _openWs(room.slug);
 }
 
+// CO-198: switch into a DM room directly (bypassing room list)
+async function _switchToDmRoom(dmSlug) {
+    if (!_state) return;
+    _closeWs();
+    // Build a synthetic room object for the DM
+    _state.currentRoom = { id: null, slug: dmSlug, name: _state.dmOtherName || dmSlug };
+    _state.messages = [];
+    _state.presence = [];
+    _state.editingMsgId = null;
+    _renderMessages();
+    _renderComposer();
+    await _loadMessages();
+    _openWs(dmSlug);
+}
+
 async function _loadMessages() {
     if (!_state || !_state.currentRoom) return;
-    const { universeSlug, currentRoom } = _state;
+    const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
+    const { currentRoom } = _state;
     const data = await apiFetch(
         `/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(currentRoom.slug)}/messages?limit=50`,
         {},
@@ -424,7 +453,8 @@ async function _sendMessage() {
     input.value = '';
     input.focus();
 
-    const { universeSlug, currentRoom } = _state;
+    const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
+    const { currentRoom } = _state;
     const resp = await fetch(
         `/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(currentRoom.slug)}/messages`,
         {
@@ -446,7 +476,7 @@ async function _sendMessage() {
 
 function _openWs(roomSlug) {
     if (!_state || _state.destroyed) return;
-    const { universeSlug } = _state;
+    const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(roomSlug)}/ws`;
 

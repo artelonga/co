@@ -3,7 +3,7 @@ use rusqlite::{OptionalExtension, params};
 use serde::Serialize;
 
 use super::Storage;
-use super::schema::ensure_table;
+use super::schema::{ensure_column, ensure_table};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ChatRoom {
@@ -16,6 +16,47 @@ pub struct ChatRoom {
     pub created_by: String,
     pub created_at: String,
     pub archived_at: Option<String>,
+    pub kind: String,
+}
+
+// ---------------------------------------------------------------------------
+// CO-198: DM types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DmRoom {
+    pub room_id: String,
+    pub slug: String,
+    pub other_user: ChatAuthor,
+    pub created: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DmLastMessage {
+    pub id: String,
+    pub author_id: String,
+    pub body_preview: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DmThreadPreview {
+    pub room_id: String,
+    pub slug: String,
+    pub other_user: ChatAuthor,
+    pub last_message: Option<DmLastMessage>,
+    pub unread_count: i64,
+    pub last_read_at: Option<String>,
+    pub muted_until: Option<String>,
+}
+
+#[derive(Debug)]
+pub enum DmError {
+    SelfDm,
+    Blocked,
+    PolicyDenied,
+    UserNotFound,
+    Db(rusqlite::Error),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -121,6 +162,79 @@ impl Storage {
                      ON chat_messages(room_id, deleted_at);",
             )
             .expect("CO-193: chat_messages indexes");
+
+        // CO-198: add `kind` column to chat_rooms (universe | dm).
+        ensure_column(
+            &self.conn,
+            "chat_rooms",
+            "kind",
+            "TEXT NOT NULL DEFAULT 'universe'",
+        )
+        .expect("CO-198: chat_rooms.kind");
+
+        // CO-198: generic membership table (subsumes universe + dm read-state).
+        ensure_table(
+            &self.conn,
+            "chat_room_members",
+            "CREATE TABLE IF NOT EXISTS chat_room_members (
+                room_id      TEXT NOT NULL,
+                user_id      TEXT NOT NULL,
+                last_read_at TEXT,
+                muted_until  TEXT,
+                joined_at    TEXT NOT NULL,
+                PRIMARY KEY (room_id, user_id),
+                FOREIGN KEY (room_id) REFERENCES chat_rooms(id)
+            );",
+        )
+        .expect("CO-198: chat_room_members table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_chat_room_members_user
+                     ON chat_room_members(user_id);",
+            )
+            .expect("CO-198: chat_room_members index");
+
+        // CO-198: dm_policy column on users.
+        ensure_column(
+            &self.conn,
+            "users",
+            "dm_policy",
+            "TEXT NOT NULL DEFAULT 'shared-universe'",
+        )
+        .expect("CO-198: users.dm_policy");
+
+        // CO-198: user_blocks table.
+        ensure_table(
+            &self.conn,
+            "user_blocks",
+            "CREATE TABLE IF NOT EXISTS user_blocks (
+                blocker_id TEXT NOT NULL,
+                blocked_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                reason     TEXT,
+                PRIMARY KEY (blocker_id, blocked_id)
+            );",
+        )
+        .expect("CO-198: user_blocks table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_user_blocks_blocked
+                     ON user_blocks(blocked_id);",
+            )
+            .expect("CO-198: user_blocks index");
+
+        // CO-198: seed sentinel rows needed for the FK chain
+        // chat_rooms.universe_key='dm' → universes.key='dm' → users.id='system'.
+        // These are stable no-op anchors: INSERT OR IGNORE means they only insert once.
+        // email is NULL (not '') to avoid the UNIQUE users.email constraint.
+        self.conn
+            .execute_batch(
+                "INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at) \
+                 VALUES ('system', NULL, 'System', 'admin', '2020-01-01T00:00:00Z');
+                 INSERT OR IGNORE INTO universes (key, name, description, owner_id, created_at) \
+                 VALUES ('dm', '', '', 'system', '2020-01-01T00:00:00Z');",
+            )
+            .expect("CO-198: sentinel user+universe for DM FK anchor");
     }
 
     /// Insert a `general` room for `universe_key` if one does not exist yet.
@@ -147,8 +261,8 @@ impl Storage {
                 .unwrap_or_else(|_| "system".to_string());
             self.conn.execute(
                 "INSERT OR IGNORE INTO chat_rooms \
-                 (id, universe_key, name, slug, description, created_by, created_at, is_default) \
-                 VALUES (?1, ?2, 'Geral', 'general', NULL, ?3, ?4, 1)",
+                 (id, universe_key, name, slug, description, created_by, created_at, is_default, kind) \
+                 VALUES (?1, ?2, 'Geral', 'general', NULL, ?3, ?4, 1, 'universe')",
                 params![id, universe_key, created_by, now],
             )?;
         }
@@ -158,12 +272,13 @@ impl Storage {
     pub fn list_chat_rooms(&self, universe_key: &str, include_archived: bool) -> Vec<ChatRoom> {
         let sql = if include_archived {
             "SELECT id, universe_key, name, slug, description, is_default, created_by, \
-             created_at, archived_at FROM chat_rooms WHERE universe_key = ?1 \
-             ORDER BY is_default DESC, created_at ASC"
+             created_at, archived_at, COALESCE(kind,'universe') FROM chat_rooms \
+             WHERE universe_key = ?1 ORDER BY is_default DESC, created_at ASC"
         } else {
             "SELECT id, universe_key, name, slug, description, is_default, created_by, \
-             created_at, archived_at FROM chat_rooms WHERE universe_key = ?1 \
-             AND archived_at IS NULL ORDER BY is_default DESC, created_at ASC"
+             created_at, archived_at, COALESCE(kind,'universe') FROM chat_rooms \
+             WHERE universe_key = ?1 AND archived_at IS NULL \
+             ORDER BY is_default DESC, created_at ASC"
         };
         let mut stmt = self.conn.prepare(sql).expect("prepare list_chat_rooms");
         stmt.query_map(params![universe_key], |row| {
@@ -177,6 +292,7 @@ impl Storage {
                 created_by: row.get(6)?,
                 created_at: row.get(7)?,
                 archived_at: row.get(8)?,
+                kind: row.get(9)?,
             })
         })
         .expect("list_chat_rooms query")
@@ -199,8 +315,8 @@ impl Storage {
         let now = Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO chat_rooms \
-             (id, universe_key, name, slug, description, created_by, created_at, is_default) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)",
+             (id, universe_key, name, slug, description, created_by, created_at, is_default, kind) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0, 'universe')",
             params![id, universe_key, name, slug, description, created_by, now],
         )?;
         Ok(ChatRoom {
@@ -213,6 +329,7 @@ impl Storage {
             created_by: created_by.to_string(),
             created_at: now,
             archived_at: None,
+            kind: "universe".to_string(),
         })
     }
 
@@ -220,7 +337,7 @@ impl Storage {
         self.conn
             .query_row(
                 "SELECT id, universe_key, name, slug, description, is_default, created_by, \
-                 created_at, archived_at FROM chat_rooms \
+                 created_at, archived_at, COALESCE(kind,'universe') FROM chat_rooms \
                  WHERE universe_key = ?1 AND slug = ?2",
                 params![universe_key, slug],
                 |row| {
@@ -234,6 +351,33 @@ impl Storage {
                         created_by: row.get(6)?,
                         created_at: row.get(7)?,
                         archived_at: row.get(8)?,
+                        kind: row.get(9)?,
+                    })
+                },
+            )
+            .ok()
+    }
+
+    /// Resolve a DM room by its canonical slug (kind='dm').
+    pub fn get_dm_room_by_slug(&self, slug: &str) -> Option<ChatRoom> {
+        self.conn
+            .query_row(
+                "SELECT id, universe_key, name, slug, description, is_default, created_by, \
+                 created_at, archived_at, COALESCE(kind,'universe') FROM chat_rooms \
+                 WHERE kind = 'dm' AND slug = ?1",
+                params![slug],
+                |row| {
+                    Ok(ChatRoom {
+                        id: row.get(0)?,
+                        universe_key: row.get(1)?,
+                        name: row.get(2)?,
+                        slug: row.get(3)?,
+                        description: row.get(4)?,
+                        is_default: row.get::<_, i64>(5)? != 0,
+                        created_by: row.get(6)?,
+                        created_at: row.get(7)?,
+                        archived_at: row.get(8)?,
+                        kind: row.get(9)?,
                     })
                 },
             )
@@ -492,6 +636,396 @@ impl Storage {
             .map_err(DeleteError::Db)?;
 
         Ok(now)
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-198: DM methods
+    // -----------------------------------------------------------------------
+
+    fn dm_canonical_slug(a: &str, b: &str) -> String {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        format!("dm-{lo}-{hi}")
+    }
+
+    /// Returns true if either user has blocked the other.
+    pub fn is_blocked_either_way(&self, user_a: &str, user_b: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM user_blocks \
+                 WHERE (blocker_id = ?1 AND blocked_id = ?2) \
+                    OR (blocker_id = ?2 AND blocked_id = ?1)",
+                params![user_a, user_b],
+                |_| Ok(true),
+            )
+            .optional()
+            .unwrap_or(None)
+            .unwrap_or(false)
+    }
+
+    /// Returns true if the caller is blocked by the target (target blocked caller).
+    fn is_blocked_by(&self, target_id: &str, caller_id: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM user_blocks WHERE blocker_id = ?1 AND blocked_id = ?2",
+                params![target_id, caller_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .unwrap_or(None)
+            .unwrap_or(false)
+    }
+
+    /// Check whether sender_id can open a DM with target_id.
+    pub fn can_dm(&self, sender_id: &str, target_id: &str) -> bool {
+        if sender_id == target_id {
+            return false;
+        }
+        if self.is_blocked_by(target_id, sender_id) {
+            return false;
+        }
+        let policy: String = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(dm_policy,'shared-universe') FROM users WHERE id = ?1",
+                params![target_id],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| "shared-universe".to_string());
+
+        match policy.as_str() {
+            "everyone" => true,
+            "nobody" => false,
+            _ => {
+                // shared-universe: check if they share at least one universe_members row
+                self.conn
+                    .query_row(
+                        "SELECT 1 FROM universe_members a \
+                         JOIN universe_members b ON a.universe_key = b.universe_key \
+                         WHERE a.user_id = ?1 AND b.user_id = ?2 LIMIT 1",
+                        params![sender_id, target_id],
+                        |_| Ok(true),
+                    )
+                    .optional()
+                    .unwrap_or(None)
+                    .unwrap_or(false)
+            }
+        }
+    }
+
+    /// Returns `(dm_policy, display_name, usuario)` for a user.
+    fn get_user_dm_info(&self, user_id: &str) -> Option<(String, String, Option<String>)> {
+        self.conn
+            .query_row(
+                "SELECT COALESCE(dm_policy,'shared-universe'), \
+                        COALESCE(display_name,id), \
+                        usuario \
+                 FROM users WHERE id = ?1",
+                params![user_id],
+                |row| {
+                    let policy: String = row.get(0)?;
+                    let display_name: String = row.get(1)?;
+                    let usuario: Option<String> = row.get(2)?;
+                    Ok((policy, display_name, usuario.filter(|s| !s.is_empty())))
+                },
+            )
+            .ok()
+    }
+
+    /// Idempotent: open (or return existing) DM room between caller and other.
+    pub fn open_dm(&self, caller_id: &str, other_user_id: &str) -> Result<DmRoom, DmError> {
+        if caller_id == other_user_id {
+            return Err(DmError::SelfDm);
+        }
+
+        let (policy, other_display, other_usuario) = self
+            .get_user_dm_info(other_user_id)
+            .ok_or(DmError::UserNotFound)?;
+
+        // Block check (target blocked caller)
+        if self.is_blocked_by(other_user_id, caller_id) {
+            return Err(DmError::Blocked);
+        }
+
+        match policy.as_str() {
+            "nobody" => return Err(DmError::PolicyDenied),
+            "shared-universe" => {
+                let shared: bool = self
+                    .conn
+                    .query_row(
+                        "SELECT 1 FROM universe_members a \
+                         JOIN universe_members b ON a.universe_key = b.universe_key \
+                         WHERE a.user_id = ?1 AND b.user_id = ?2 LIMIT 1",
+                        params![caller_id, other_user_id],
+                        |_| Ok(true),
+                    )
+                    .optional()
+                    .unwrap_or(None)
+                    .unwrap_or(false);
+                if !shared {
+                    return Err(DmError::PolicyDenied);
+                }
+            }
+            _ => {} // "everyone" — allow
+        }
+
+        let slug = Self::dm_canonical_slug(caller_id, other_user_id);
+        let other_author = ChatAuthor {
+            user_id: other_user_id.to_string(),
+            display_name: other_display,
+            usuario: other_usuario,
+        };
+
+        // Check if room already exists
+        if let Some(room) = self.get_dm_room_by_slug(&slug) {
+            return Ok(DmRoom {
+                room_id: room.id,
+                slug,
+                other_user: other_author,
+                created: false,
+            });
+        }
+
+        // Create new DM room + 2 membership rows
+        let room_id = format!("room_dm_{}", nanoid::nanoid!(10));
+        let now = Utc::now().to_rfc3339();
+        self.conn
+            .execute(
+                "INSERT INTO chat_rooms \
+                 (id, universe_key, name, slug, description, created_by, created_at, is_default, kind) \
+                 VALUES (?1, 'dm', '', ?2, NULL, ?3, ?4, 0, 'dm')",
+                params![room_id, slug, caller_id, now],
+            )
+            .map_err(DmError::Db)?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO chat_room_members (room_id, user_id, joined_at) \
+                 VALUES (?1, ?2, ?3)",
+                params![room_id, caller_id, now],
+            )
+            .map_err(DmError::Db)?;
+        self.conn
+            .execute(
+                "INSERT OR IGNORE INTO chat_room_members (room_id, user_id, joined_at) \
+                 VALUES (?1, ?2, ?3)",
+                params![room_id, other_user_id, now],
+            )
+            .map_err(DmError::Db)?;
+
+        Ok(DmRoom {
+            room_id,
+            slug,
+            other_user: other_author,
+            created: true,
+        })
+    }
+
+    /// Returns all DM threads for a user, ordered by last message desc.
+    pub fn list_my_dms(&self, user_id: &str) -> Vec<DmThreadPreview> {
+        // Find all DM rooms where user is a member
+        let room_rows: Vec<(String, String, Option<String>, Option<String>)> = {
+            let mut stmt = self
+                .conn
+                .prepare(
+                    "SELECT r.id, r.slug, crm.last_read_at, crm.muted_until \
+                     FROM chat_rooms r \
+                     JOIN chat_room_members crm ON crm.room_id = r.id \
+                     WHERE crm.user_id = ?1 AND r.kind = 'dm'",
+                )
+                .expect("prepare list_my_dms rooms");
+            stmt.query_map(params![user_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .expect("list_my_dms rooms query")
+            .filter_map(|r| r.ok())
+            .collect()
+        };
+
+        let mut previews: Vec<DmThreadPreview> = room_rows
+            .into_iter()
+            .filter_map(|(room_id, slug, last_read_at, muted_until)| {
+                // Determine the other user from the slug pattern or members table
+                let other_user_id: Option<String> = self
+                    .conn
+                    .query_row(
+                        "SELECT user_id FROM chat_room_members \
+                         WHERE room_id = ?1 AND user_id != ?2 LIMIT 1",
+                        params![room_id, user_id],
+                        |row| row.get(0),
+                    )
+                    .ok();
+
+                let other_user_id = other_user_id?;
+                let (_, other_display, other_usuario) = self.get_user_dm_info(&other_user_id)?;
+
+                // Last message
+                let last_message: Option<DmLastMessage> = self
+                    .conn
+                    .query_row(
+                        "SELECT id, author_id, body, created_at FROM chat_messages \
+                         WHERE room_id = ?1 AND deleted_at IS NULL \
+                         ORDER BY created_at DESC LIMIT 1",
+                        params![room_id],
+                        |row| {
+                            let body: String = row.get(2)?;
+                            let preview = body.chars().take(80).collect();
+                            Ok(DmLastMessage {
+                                id: row.get(0)?,
+                                author_id: row.get(1)?,
+                                body_preview: preview,
+                                created_at: row.get(3)?,
+                            })
+                        },
+                    )
+                    .ok();
+
+                // Unread count
+                let unread_count: i64 = if let Some(ref lra) = last_read_at {
+                    self.conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM chat_messages \
+                             WHERE room_id = ?1 AND deleted_at IS NULL \
+                             AND author_id != ?2 AND created_at > ?3",
+                            params![room_id, user_id, lra],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0)
+                } else {
+                    self.conn
+                        .query_row(
+                            "SELECT COUNT(*) FROM chat_messages \
+                             WHERE room_id = ?1 AND deleted_at IS NULL AND author_id != ?2",
+                            params![room_id, user_id],
+                            |row| row.get(0),
+                        )
+                        .unwrap_or(0)
+                };
+
+                Some(DmThreadPreview {
+                    room_id,
+                    slug,
+                    other_user: ChatAuthor {
+                        user_id: other_user_id,
+                        display_name: other_display,
+                        usuario: other_usuario,
+                    },
+                    last_message,
+                    unread_count,
+                    last_read_at,
+                    muted_until,
+                })
+            })
+            .collect();
+
+        // Order by last_message.created_at DESC (rooms with no messages go last)
+        previews.sort_by(|a, b| {
+            let a_ts = a
+                .last_message
+                .as_ref()
+                .map(|m| m.created_at.as_str())
+                .unwrap_or("");
+            let b_ts = b
+                .last_message
+                .as_ref()
+                .map(|m| m.created_at.as_str())
+                .unwrap_or("");
+            b_ts.cmp(a_ts)
+        });
+
+        previews
+    }
+
+    /// Mark DM thread as read for the caller (sets last_read_at = now).
+    pub fn mark_dm_read(&self, room_id: &str, user_id: &str) -> anyhow::Result<String> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE chat_room_members SET last_read_at = ?1 WHERE room_id = ?2 AND user_id = ?3",
+            params![now, room_id, user_id],
+        )?;
+        Ok(now)
+    }
+
+    /// Mute or unmute a DM thread for the caller.
+    pub fn mute_dm(&self, room_id: &str, user_id: &str, until: Option<&str>) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE chat_room_members SET muted_until = ?1 WHERE room_id = ?2 AND user_id = ?3",
+            params![until, room_id, user_id],
+        )?;
+        Ok(())
+    }
+
+    /// Update the caller's DM policy.
+    pub fn set_dm_policy(&self, user_id: &str, policy: &str) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE users SET dm_policy = ?1 WHERE id = ?2",
+            params![policy, user_id],
+        )?;
+        Ok(())
+    }
+
+    /// Block a user. Returns true if a new block was created.
+    pub fn block_user(
+        &self,
+        blocker_id: &str,
+        blocked_id: &str,
+        reason: Option<&str>,
+    ) -> anyhow::Result<bool> {
+        let now = Utc::now().to_rfc3339();
+        let rows = self.conn.execute(
+            "INSERT OR IGNORE INTO user_blocks (blocker_id, blocked_id, created_at, reason) \
+             VALUES (?1, ?2, ?3, ?4)",
+            params![blocker_id, blocked_id, now, reason],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Unblock a user. Returns true if a block was removed.
+    pub fn unblock_user(&self, blocker_id: &str, blocked_id: &str) -> anyhow::Result<bool> {
+        let rows = self.conn.execute(
+            "DELETE FROM user_blocks WHERE blocker_id = ?1 AND blocked_id = ?2",
+            params![blocker_id, blocked_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    /// Returns true if the caller is a member of the DM room (via chat_room_members).
+    pub fn is_dm_member(&self, room_id: &str, user_id: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM chat_room_members WHERE room_id = ?1 AND user_id = ?2",
+                params![room_id, user_id],
+                |_| Ok(true),
+            )
+            .optional()
+            .unwrap_or(None)
+            .unwrap_or(false)
+    }
+
+    /// Boot-time backfill: insert a chat_room_members row for every universe_members row.
+    pub fn backfill_chat_room_members_from_universe_members(&self) -> usize {
+        // For each universe room, insert membership rows for all universe_members
+        // who don't yet have a chat_room_members row.
+        let result = self.conn.execute_batch(
+            "INSERT OR IGNORE INTO chat_room_members (room_id, user_id, joined_at)
+             SELECT cr.id, um.user_id, COALESCE(um.joined_at, DATETIME('now'))
+             FROM chat_rooms cr
+             JOIN universe_members um ON um.universe_key = cr.universe_key
+             WHERE cr.kind = 'universe' OR cr.kind IS NULL",
+        );
+        if let Err(e) = result {
+            tracing::warn!("CO-198: backfill chat_room_members: {e}");
+            return 0;
+        }
+        // Count inserted rows (approximate: count distinct room/user pairs now)
+        self.conn
+            .query_row("SELECT COUNT(*) FROM chat_room_members", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap_or(0) as usize
     }
 
     /// Insert a `general` room for every universe that lacks one. Returns the number inserted.

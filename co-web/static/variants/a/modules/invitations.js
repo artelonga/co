@@ -1,4 +1,8 @@
 // ===== CO-189: Invitations module =====
+// CO-198: openDmWith imported lazily to avoid circular deps
+let _openDmWithFn = null;
+export function injectOpenDmWith(fn) { _openDmWithFn = fn; }
+
 // A. Public /invitations/:token accept page
 // B. Settings panel "Convidar pessoas" form + pending list
 
@@ -215,8 +219,46 @@ export function setupInvitationsPanel() {
             if (!overlay.classList.contains('hidden')) {
                 _updateInviteSectionVisibility();
                 _refreshPendingList();
+                _refreshMembersList();
             }
         }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    }
+}
+
+async function _refreshMembersList() {
+    const listEl = document.getElementById('universe-members-list');
+    if (!listEl) return;
+    const slug = state.currentUniverseSlug;
+    if (!slug || slug === 'template') { listEl.innerHTML = ''; return; }
+
+    try {
+        const resp = await fetch(`/api/v1/universes/${encodeURIComponent(slug)}/members`, {
+            credentials: 'include',
+        });
+        if (!resp.ok) { listEl.innerHTML = ''; return; }
+        const members = await resp.json();
+        if (!Array.isArray(members) || !members.length) { listEl.innerHTML = ''; return; }
+
+        listEl.innerHTML = `<p class="form-hint" style="margin-top:0.5rem">${members.length} membro(s)</p>` +
+            members.map(m => {
+                const name = _esc(m.display_name || m.usuario || m.user_id || '?');
+                return `<div class="invite-pending-row" style="display:flex;align-items:center;gap:0.5rem">
+                    <span style="flex:1">${name}</span>
+                    <span class="invite-role-badge">${_esc(m.role || '')}</span>
+                    <button class="btn-text-sm dm-member-btn" data-user-id="${_esc(m.user_id)}" title="${window.t ? window.t('dm.start_dm') : 'Enviar mensagem'}">📩</button>
+                </div>`;
+            }).join('');
+
+        listEl.querySelectorAll('.dm-member-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (_openDmWithFn) {
+                    document.getElementById('settings-modal-overlay')?.classList.add('hidden');
+                    _openDmWithFn(btn.dataset.userId, document.getElementById('chat-drawer'));
+                }
+            });
+        });
+    } catch (_) {
+        listEl.innerHTML = '';
     }
 }
 

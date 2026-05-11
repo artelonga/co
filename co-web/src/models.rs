@@ -589,6 +589,9 @@ pub struct MeResponse {
     /// working.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub universes: Vec<UserUniverseEntry>,
+    /// CO-198: DM privacy policy (everyone | shared-universe | nobody).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dm_policy: Option<String>,
 }
 
 /// CO-173: per-universe metadata bag for the authenticated user.

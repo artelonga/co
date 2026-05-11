@@ -255,12 +255,22 @@ pub(super) async fn me_handler(
     if let Some(user) = storage.get_user_by_id(&user_id.0) {
         // CO-173: include per-universe metadata for the authenticated user.
         let universes = storage.list_universes_with_metadata_for_user(&user.id);
+        // CO-198: include dm_policy so the frontend can pre-populate the privacy radio.
+        let dm_policy: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT COALESCE(dm_policy,'shared-universe') FROM users WHERE id = ?1",
+                rusqlite::params![user.id],
+                |row| row.get(0),
+            )
+            .ok();
         return Ok(Json(MeResponse {
             user_id: user.id,
             email: user.email,
             display_name: user.display_name,
             tier: user.tier,
             universes,
+            dm_policy,
         }));
     }
 
@@ -279,6 +289,7 @@ pub(super) async fn me_handler(
             },
             tier: u.papel.to_string(),
             universes,
+            dm_policy: None,
         }));
     }
 

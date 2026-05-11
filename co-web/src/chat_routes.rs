@@ -222,20 +222,32 @@ pub async fn list_messages_handler(
 
     let storage = lock_storage(&state)?;
 
-    storage
-        .get_universe(&slug)
-        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+    // CO-198: "dm" sentinel slug — resolve via DM room table
+    let room = if slug == "dm" {
+        let room = storage
+            .get_dm_room_by_slug(&room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("DM room '{room_slug}' not found")))?;
+        if !storage.is_dm_member(&room.id, &user_id.0) {
+            return Err(AppError::Forbidden("Not a member of this DM".into()));
+        }
+        room
+    } else {
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-    let role = resolve_role(&storage, &slug, &user_id.0)
-        .ok_or_else(|| AppError::Forbidden("Chat is only available to universe members".into()))?;
+        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+            AppError::Forbidden("Chat is only available to universe members".into())
+        })?;
 
-    if !can_read(&role) {
-        return Err(AppError::Forbidden("Insufficient role to read chat".into()));
-    }
+        if !can_read(&role) {
+            return Err(AppError::Forbidden("Insufficient role to read chat".into()));
+        }
 
-    let room = storage
-        .get_chat_room_by_slug(&slug, &room_slug)
-        .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+        storage
+            .get_chat_room_by_slug(&slug, &room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?
+    };
 
     // Fetch limit + 1 to detect has_more
     let mut messages = storage.list_chat_messages(&room.id, query.before.as_deref(), limit + 1);
@@ -283,23 +295,51 @@ pub async fn post_message_handler(
     let (msg_id, broadcast_payload) = {
         let storage = lock_storage(&state)?;
 
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        // CO-198: "dm" sentinel slug — use DM auth instead of universe membership.
+        let room = if slug == "dm" {
+            let room = storage
+                .get_dm_room_by_slug(&room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("DM room '{room_slug}' not found")))?;
+            if !storage.is_dm_member(&room.id, &user_id.0) {
+                return Err(AppError::Forbidden("Not a member of this DM".into()));
+            }
+            // Determine the other member for block check
+            let other_member_id: Option<String> = storage
+                .conn()
+                .query_row(
+                    "SELECT user_id FROM chat_room_members \
+                     WHERE room_id = ?1 AND user_id != ?2 LIMIT 1",
+                    rusqlite::params![room.id, user_id.0],
+                    |row| row.get(0),
+                )
+                .ok();
+            if let Some(ref other_id) = other_member_id
+                && storage.is_blocked_either_way(&user_id.0, other_id)
+            {
+                return Err(AppError::Forbidden(
+                    "dm.error.blocked: cannot message this user".into(),
+                ));
+            }
+            room
+        } else {
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
-            AppError::Forbidden("Chat is only available to universe members".into())
-        })?;
+            let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+                AppError::Forbidden("Chat is only available to universe members".into())
+            })?;
 
-        if !can_post(&role) {
-            return Err(AppError::Forbidden(
-                "Viewers and subscribers cannot post messages".into(),
-            ));
-        }
+            if !can_post(&role) {
+                return Err(AppError::Forbidden(
+                    "Viewers and subscribers cannot post messages".into(),
+                ));
+            }
 
-        let room = storage
-            .get_chat_room_by_slug(&slug, &room_slug)
-            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+            storage
+                .get_chat_room_by_slug(&slug, &room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?
+        };
 
         let msg_id = storage
             .post_chat_message(&room.id, &user_id.0, &trimmed, body.reply_to_id.as_deref())
@@ -334,23 +374,34 @@ pub async fn edit_message_handler(
     let (updated_msg, room_id) = {
         let storage = lock_storage(&state)?;
 
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        // CO-198: DM path
+        let room = if slug == "dm" {
+            let r = storage
+                .get_dm_room_by_slug(&room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("DM room '{room_slug}' not found")))?;
+            if !storage.is_dm_member(&r.id, &user_id.0) {
+                return Err(AppError::Forbidden("Not a member of this DM".into()));
+            }
+            r
+        } else {
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
-            AppError::Forbidden("Chat is only available to universe members".into())
-        })?;
+            let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+                AppError::Forbidden("Chat is only available to universe members".into())
+            })?;
 
-        if !can_read(&role) {
-            return Err(AppError::Forbidden(
-                "Insufficient role to access chat".into(),
-            ));
-        }
+            if !can_read(&role) {
+                return Err(AppError::Forbidden(
+                    "Insufficient role to access chat".into(),
+                ));
+            }
 
-        let room = storage
-            .get_chat_room_by_slug(&slug, &room_slug)
-            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+            storage
+                .get_chat_room_by_slug(&slug, &room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?
+        };
         let room_id = room.id.clone();
 
         let msg = storage
@@ -405,26 +456,37 @@ pub async fn delete_message_handler(
     let (deleted_at, room_id) = {
         let storage = lock_storage(&state)?;
 
-        storage
-            .get_universe(&slug)
-            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        // CO-198: DM path — caller can only delete own messages (no moderation role)
+        let (room, caller_can_moderate) = if slug == "dm" {
+            let r = storage
+                .get_dm_room_by_slug(&room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("DM room '{room_slug}' not found")))?;
+            if !storage.is_dm_member(&r.id, &user_id.0) {
+                return Err(AppError::Forbidden("Not a member of this DM".into()));
+            }
+            (r, false)
+        } else {
+            storage
+                .get_universe(&slug)
+                .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-        let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
-            AppError::Forbidden("Chat is only available to universe members".into())
-        })?;
+            let role = resolve_role(&storage, &slug, &user_id.0).ok_or_else(|| {
+                AppError::Forbidden("Chat is only available to universe members".into())
+            })?;
 
-        if !can_read(&role) {
-            return Err(AppError::Forbidden(
-                "Insufficient role to access chat".into(),
-            ));
-        }
+            if !can_read(&role) {
+                return Err(AppError::Forbidden(
+                    "Insufficient role to access chat".into(),
+                ));
+            }
 
-        let room = storage
-            .get_chat_room_by_slug(&slug, &room_slug)
-            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+            let can_mod = matches!(role.as_str(), "owner" | "admin");
+            let r = storage
+                .get_chat_room_by_slug(&slug, &room_slug)
+                .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?;
+            (r, can_mod)
+        };
         let room_id = room.id.clone();
-
-        let caller_can_moderate = matches!(role.as_str(), "owner" | "admin");
         let deleted_at = storage
             .delete_chat_message(&msg_id, &user_id.0, caller_can_moderate)
             .map_err(|e| match e {

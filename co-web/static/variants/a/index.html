@@ -148,6 +148,10 @@
     <aside id="chat-drawer" class="chat-drawer hidden" data-mode="drawer" aria-label="Chat">
     </aside>
 
+    <!-- CO-198: DM inbox drawer -->
+    <aside id="dm-drawer" class="chat-drawer hidden" data-mode="dm" aria-label="Mensagens Privadas">
+    </aside>
+
     <!-- Activity Panel -->
         <aside class="activity-panel hidden" id="activity-panel">
             <div class="activity-panel-header">
@@ -564,6 +568,8 @@
                 </div>
                 <p id="invite-msg" class="form-hint"></p>
                 <div id="invite-pending-list" class="invite-pending-list"></div>
+                <!-- CO-198: universe members list with DM icons -->
+                <div id="universe-members-list" class="universe-members-list" style="margin-top:0.75rem"></div>
             </div>
         </div>
     </div>
@@ -741,6 +747,30 @@
                         <button type="button" class="btn btn-primary btn-full" id="btn-change-password" data-i18n="change_password_save">Salvar senha</button>
                     </div>
                     <p id="security-pw-msg" class="form-hint"></p>
+                </section>
+
+                <!-- CO-198: DM privacy section -->
+                <section class="security-section" id="dm-privacy-section">
+                    <header class="security-section-header">
+                        <h3 data-i18n="dm.policy.title">Quem pode te enviar mensagens privadas?</h3>
+                    </header>
+                    <div class="form-group">
+                        <label><input type="radio" name="dm_policy" value="everyone"> <span data-i18n="dm.policy.everyone">Qualquer pessoa</span></label>
+                        <label><input type="radio" name="dm_policy" value="shared-universe"> <span data-i18n="dm.policy.shared">Apenas pessoas com quem você compartilha um universo</span></label>
+                        <label><input type="radio" name="dm_policy" value="nobody"> <span data-i18n="dm.policy.nobody">Ninguém</span></label>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-primary btn-sm" id="btn-save-dm-policy" data-i18n="action.save">Salvar</button>
+                    </div>
+                    <p id="dm-policy-msg" class="form-hint"></p>
+                </section>
+
+                <!-- CO-198: Block list section -->
+                <section class="security-section" id="dm-blocked-section">
+                    <header class="security-section-header">
+                        <h3 data-i18n="dm.blocked.title">Pessoas bloqueadas</h3>
+                    </header>
+                    <div id="dm-blocked-list"><p class="form-hint" data-i18n="dm.blocked.empty">Você não bloqueou ninguém.</p></div>
                 </section>
             </div>
         </div>

@@ -356,6 +356,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let chat_api = crate::chat_routes::chat_router()
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
+    // --- CO-198: Private DMs (inbox, policy, blocks) ---
+    let dm_api =
+        crate::dm_routes::dm_router().layer(axum::middleware::from_fn(crate::auth::require_auth));
+
     // --- Theme tier routes ---
     let themes_api = crate::universe_routes::themes_router();
 
@@ -545,6 +549,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/invitations", invitation_api)
         // CO-193: per-universe chat (auth required on all chat endpoints)
         .nest("/api/v1/universes", chat_api)
+        // CO-198: private DMs — inbox + policy + blocks
+        .nest("/api/v1", dm_api)
         // CO-189: me/invitations inbox (auth required)
         .nest(
             "/api/v1/me",
@@ -1087,6 +1093,9 @@ pub async fn start_server(config: WebConfig) {
         if n > 0 {
             tracing::info!("CO-193: seeded default general room for {n} universe(s)");
         }
+        // CO-198: backfill chat_room_members from universe_members.
+        let n_members = chat_storage.backfill_chat_room_members_from_universe_members();
+        tracing::info!("CO-198: chat_room_members backfill: {n_members} row(s) total");
     }
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.

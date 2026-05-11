@@ -5,6 +5,34 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0] — 2026-05-11 — Private DMs (CO-198)
+
+### Private 1:1 DMs with inbox, unread counts, and privacy controls
+
+- **CO-198** — Private DMs (Phase 4 slice 5). Schema: `kind` column on
+  `chat_rooms`, new `chat_room_members` table (read-state + mute), `dm_policy`
+  on `users`, and `user_blocks` table. Boot-time sentinel rows anchor the DM FK
+  chain and backfill existing universe member rows into `chat_room_members`.
+
+  REST endpoints: `POST /api/v1/dms/with/:user_id` (idempotent open-DM with
+  policy + block checks), `GET /api/v1/me/dms` (inbox with unread counts +
+  preview, ordered by last message), `POST /api/v1/dms/:room_id/read`,
+  `POST /api/v1/dms/:room_id/mute`, `PUT /api/v1/me/dm-policy`,
+  `POST/DELETE /api/v1/users/:user_id/block`.
+
+  Existing message endpoints reuse `slug="dm"` sentinel to serve DM rooms —
+  `chat_room_members` membership + block check replace universe-role auth for
+  that path.
+
+  Frontend: `modules/dm.js` DM inbox drawer; `📩 Mensagens` sidebar button
+  with red-dot unread badge; DM mode in existing chat drawer (no room rail);
+  universe member list DM icon (invitations panel); DM privacy radio +
+  block-list manager in security settings modal. i18n: 24 new keys PT+EN.
+
+  17 backend tests cover all acceptance criteria (idempotency, canonical pair
+  ordering, policy gates, block enforcement, unread counting, mark-read,
+  backfill).
+
 ## [2.1.0] — 2026-05-11 — Phase 4 chat complete (CO-194 + CO-195 + CO-196)
 
 ### Phase 4 chat — live updates + UI + moderation
