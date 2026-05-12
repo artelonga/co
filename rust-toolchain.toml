@@ -1,0 +1,12 @@
+[toolchain]
+# Pin to a specific Rust version so dev + CI run the same clippy
+# lints. Without this, CI's `rustup update stable` pulls a newer
+# release and adds lints we haven't seen locally → red CI for
+# lint-only reasons (2026-05-12 incident, the
+# collapsible_if + stable_sort_primitive cascade).
+#
+# Bump intentionally when you want the lint changes, not as a side
+# effect of a CI re-run.
+channel = "1.94.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

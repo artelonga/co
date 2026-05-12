@@ -33,10 +33,11 @@ jobs:
             protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
 
       - name: Setup Rust
-        run: |
-          rustup update stable
-          rustup default stable
-          rustup component add clippy rustfmt
+        # rust-toolchain.toml at repo root pins the channel + components,
+        # so any cargo invocation auto-installs the pinned version.
+        # No `rustup update stable` here — that would race with the
+        # toolchain file and risk pulling lints we haven't tested.
+        run: rustc --version && cargo --version && cargo clippy --version
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -78,9 +79,7 @@ jobs:
             protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
 
       - name: Setup Rust
-        run: |
-          rustup update stable
-          rustup default stable
+        run: rustc --version && cargo --version
 
       - name: Cache cargo
         uses: actions/cache@v4
