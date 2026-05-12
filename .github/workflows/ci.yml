@@ -22,8 +22,15 @@ jobs:
       # workspace build since the proto-using deps landed (2026-04-30) has
       # failed here with "Could not find `protoc` installation". Install
       # it explicitly. Fix surfaced 2026-05-12 after CI was 100/100 red.
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # System deps for cargo build --workspace. Mirrors the Dockerfile
+      # builder stage + libdbus-1-dev for keyring/dbus-secret-service
+      # which are pulled by co-cli / dev tools (not co-web itself, hence
+      # the Dockerfile didn't need it).
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
 
       - name: Setup Rust
         run: |
@@ -60,8 +67,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install protoc
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      # System deps for cargo build --workspace. Mirrors the Dockerfile
+      # builder stage + libdbus-1-dev for keyring/dbus-secret-service
+      # which are pulled by co-cli / dev tools (not co-web itself, hence
+      # the Dockerfile didn't need it).
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
 
       - name: Setup Rust
         run: |
