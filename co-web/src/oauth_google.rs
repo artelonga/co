@@ -44,12 +44,16 @@ struct StateClaims {
     return_to: String,
     nonce: String,
     exp: u64,
+    #[serde(default)]
+    origin: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct StartParams {
     #[serde(default)]
     pub return_to: String,
+    #[serde(default)]
+    pub origin: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,16 +126,18 @@ async fn start_handler(
         ));
     }
 
-    // Sign a state JWT carrying return_to + nonce + short expiry. The
-    // callback verifies + extracts return_to from this — never trusts the
-    // raw query param at callback time.
+    // Sign a state JWT carrying return_to + nonce + origin + short expiry.
+    // The callback verifies + extracts fields from this — never trusts raw
+    // query params at callback time.
     let exp =
         (chrono::Utc::now() + chrono::Duration::seconds(STATE_TTL_SECS as i64)).timestamp() as u64;
+    let origin = crate::auth::sanitize_origin(params.origin);
     let claims = StateClaims {
         kind: "google_oauth_state".into(),
         return_to: return_to.to_string(),
         nonce: nanoid::nanoid!(16),
         exp,
+        origin,
     };
     let secret = crate::auth::jwt_secret();
     let token = jsonwebtoken::encode(
@@ -245,7 +251,12 @@ async fn callback_handler(
     // 4. Find or create CO user.
     let user = {
         let mut storage = state.storage.lock();
-        storage.find_or_create_user_by_google(&userinfo.sub, &userinfo.email, &userinfo.name)
+        storage.find_or_create_user_by_google(
+            &userinfo.sub,
+            &userinfo.email,
+            &userinfo.name,
+            claims.origin.as_deref(),
+        )
     };
     let user = user.map_err(|e| AppError::Internal(format!("link google user: {e}")))?;
 

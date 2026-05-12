@@ -389,8 +389,74 @@ const ADMIN_PAGE_HTML: &str = include_str!("../static/variants/a/admin.html");
 // Router
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// CO-205: origin breakdown
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct OriginRow {
+    pub origin: Option<String>,
+    pub user_count: i64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct OriginBreakdown {
+    pub origins: Vec<OriginRow>,
+    pub total_users: i64,
+}
+
+/// GET /api/v1/admin/users/origin-breakdown — count of users per signup origin.
+pub async fn origin_breakdown_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<OriginBreakdown>, Response> {
+    let claims = extract_claims(&headers).map_err(|status| {
+        (status, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
+    })?;
+
+    if !check_admin_email(&claims.email) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Forbidden"})),
+        )
+            .into_response());
+    }
+
+    let storage = state.storage.lock();
+    let conn = storage.conn();
+
+    let total_users: i64 = conn
+        .query_row("SELECT COUNT(*) FROM users", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    let origins: Vec<OriginRow> = conn
+        .prepare(
+            "SELECT origin, COUNT(*) AS user_count \
+             FROM users \
+             GROUP BY origin \
+             ORDER BY user_count DESC",
+        )
+        .and_then(|mut stmt| {
+            stmt.query_map([], |row| {
+                Ok(OriginRow {
+                    origin: row.get(0)?,
+                    user_count: row.get(1)?,
+                })
+            })
+            .map(|rows| rows.flatten().collect())
+        })
+        .unwrap_or_default();
+
+    Ok(Json(OriginBreakdown {
+        origins,
+        total_users,
+    }))
+}
+
 pub fn api_router() -> Router<AppState> {
-    Router::new().route("/dashboard", get(dashboard_handler))
+    Router::new()
+        .route("/dashboard", get(dashboard_handler))
+        .route("/users/origin-breakdown", get(origin_breakdown_handler))
 }
 
 // ---------------------------------------------------------------------------

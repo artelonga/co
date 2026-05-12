@@ -289,8 +289,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     // Middleware stack
+    // CO-205: allow_credentials enables cross-origin cookie sharing (e.g.
+    // artelonga.com.br signup form → co.artelonga.com.br). mirror_request()
+    // echoes the caller's Origin so `credentials: 'include'` works for any
+    // safelisted origin without hard-coding them here.
     let cors = CorsLayer::new()
         .allow_origin(AllowOrigin::mirror_request())
+        .allow_credentials(true)
         .allow_methods([
             Method::GET,
             Method::POST,

@@ -213,7 +213,15 @@ async fn test_verify_consumed_code_returns_410() {
 
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
     storage
-        .create_onboarding_code(&email_hash, "create", "fakehash", None, None, &expires_at)
+        .create_onboarding_code(
+            &email_hash,
+            "create",
+            "fakehash",
+            None,
+            None,
+            None,
+            &expires_at,
+        )
         .unwrap();
 
     // Mark consumed manually.
@@ -247,7 +255,15 @@ async fn test_verify_expired_code_returns_410() {
     // Expire immediately (in the past).
     let expires_at = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
     storage
-        .create_onboarding_code(&email_hash, "create", "fakehash", None, None, &expires_at)
+        .create_onboarding_code(
+            &email_hash,
+            "create",
+            "fakehash",
+            None,
+            None,
+            None,
+            &expires_at,
+        )
         .unwrap();
 
     let router = build_test_router(dir.path());
@@ -285,7 +301,15 @@ async fn test_wrong_code_lockout_after_5_attempts() {
             .to_string()
     };
     storage
-        .create_onboarding_code(&email_hash, "create", &code_hash, None, None, &expires_at)
+        .create_onboarding_code(
+            &email_hash,
+            "create",
+            &code_hash,
+            None,
+            None,
+            None,
+            &expires_at,
+        )
         .unwrap();
 
     let router = build_test_router(dir.path());
@@ -394,7 +418,15 @@ async fn test_email_rate_limit() {
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
     for _ in 0..5 {
         storage
-            .create_onboarding_code(&email_hash, "create", "fakehash", None, None, &expires_at)
+            .create_onboarding_code(
+                &email_hash,
+                "create",
+                "fakehash",
+                None,
+                None,
+                None,
+                &expires_at,
+            )
             .unwrap();
     }
 
@@ -426,4 +458,301 @@ async fn test_invalid_email_returns_400() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+// =========================================================================
+// CO-205 tests
+// =========================================================================
+
+// -------------------------------------------------------------------------
+// Test CO-205-1: sanitize_origin — valid values pass through
+// -------------------------------------------------------------------------
+#[test]
+fn test_sanitize_origin_valid() {
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("artelonga".to_string())),
+        Some("artelonga".to_string())
+    );
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("co".to_string())),
+        Some("co".to_string())
+    );
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("quilombo-araucaria".to_string())),
+        Some("quilombo-araucaria".to_string())
+    );
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("a".repeat(32))),
+        Some("a".repeat(32))
+    );
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-2: sanitize_origin — malformed values return None
+// -------------------------------------------------------------------------
+#[test]
+fn test_sanitize_origin_invalid() {
+    // Too long
+    assert_eq!(crate::auth::sanitize_origin(Some("a".repeat(33))), None);
+    // Contains spaces
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("hello world".to_string())),
+        None
+    );
+    // Contains underscore
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("hello_world".to_string())),
+        None
+    );
+    // Contains special chars
+    assert_eq!(
+        crate::auth::sanitize_origin(Some("hello<script>".to_string())),
+        None
+    );
+    // Empty string
+    assert_eq!(crate::auth::sanitize_origin(Some(String::new())), None);
+    // None passthrough
+    assert_eq!(crate::auth::sanitize_origin(None), None);
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-3: onboard-with-email stores origin in onboarding_codes
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_onboard_stores_origin_in_code_row() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path());
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/onboard-with-email",
+            serde_json::json!({ "email": "origin-test@test.co", "origin": "artelonga" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let origin: Option<String> = storage
+        .conn()
+        .query_row(
+            "SELECT origin FROM onboarding_codes WHERE intent = 'create' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok();
+    assert_eq!(origin, Some("artelonga".to_string()));
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-4: onboard-with-email rejects malformed origin (stores NULL)
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_onboard_rejects_malformed_origin() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path());
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/onboard-with-email",
+            serde_json::json!({ "email": "bad-origin@test.co", "origin": "evil<script>" }),
+        ))
+        .await
+        .unwrap();
+    // Request succeeds — bad origin is silently sanitized to NULL
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let origin: Option<String> = storage
+        .conn()
+        .query_row(
+            "SELECT origin FROM onboarding_codes WHERE intent = 'create' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    assert_eq!(origin, None, "malformed origin should be stored as NULL");
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-5: POST /api/v1/auth/signup persists valid origin
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_signup_persists_origin() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path());
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/signup",
+            serde_json::json!({
+                "usuario": "originuser",
+                "password": "strongpassword1",
+                "origin": "artelonga"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "signup must succeed");
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let origin: Option<String> = storage
+        .conn()
+        .query_row(
+            "SELECT origin FROM users WHERE usuario = 'originuser'",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    assert_eq!(origin, Some("artelonga".to_string()));
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-6: POST /api/v1/auth/signup sanitizes bad origin → NULL
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_signup_sanitizes_bad_origin() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path());
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/signup",
+            serde_json::json!({
+                "usuario": "badoriginuser",
+                "password": "strongpassword2",
+                "origin": "bad origin!"
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "signup must succeed");
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let origin: Option<String> = storage
+        .conn()
+        .query_row(
+            "SELECT origin FROM users WHERE usuario = 'badoriginuser'",
+            [],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten();
+    assert_eq!(origin, None, "malformed origin must be stored as NULL");
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-7: admin origin breakdown query returns correct per-origin counts
+// -------------------------------------------------------------------------
+#[test]
+fn test_admin_origin_breakdown_direct() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let conn = storage.conn();
+    let now = chrono::Utc::now().to_rfc3339();
+    // Use IDs that won't collide with any seed users.
+    conn.execute_batch(&format!(
+        "INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at, origin) \
+         VALUES ('co205_u1', 'co205_a@test.co', 'A', 'player', '{now}', 'artelonga');
+         INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at, origin) \
+         VALUES ('co205_u2', 'co205_b@test.co', 'B', 'player', '{now}', 'artelonga');
+         INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at, origin) \
+         VALUES ('co205_u3', 'co205_c@test.co', 'C', 'player', '{now}', 'co');
+         INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at, origin) \
+         VALUES ('co205_u4', 'co205_d@test.co', 'D', 'player', '{now}', NULL);",
+    ))
+    .unwrap();
+
+    // Verify per-origin counts using the same query as the admin handler.
+    let rows: Vec<(Option<String>, i64)> = conn
+        .prepare(
+            "SELECT origin, COUNT(*) FROM users \
+             WHERE id LIKE 'co205_%' \
+             GROUP BY origin ORDER BY COUNT(*) DESC",
+        )
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .flatten()
+        .collect();
+
+    let artelonga = rows
+        .iter()
+        .find(|(o, _)| o.as_deref() == Some("artelonga"))
+        .unwrap();
+    assert_eq!(artelonga.1, 2, "artelonga should have 2 users");
+    let co = rows
+        .iter()
+        .find(|(o, _)| o.as_deref() == Some("co"))
+        .unwrap();
+    assert_eq!(co.1, 1, "co should have 1 user");
+    let null_row = rows.iter().find(|(o, _)| o.is_none()).unwrap();
+    assert_eq!(null_row.1, 1, "null origin should have 1 user");
+
+    // total users in our test set
+    let test_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM users WHERE id LIKE 'co205_%'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(test_count, 4);
+}
+
+// -------------------------------------------------------------------------
+// Test CO-205-8: CORS preflight on auth endpoint returns allow-credentials
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_cors_preflight_returns_allow_credentials() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path());
+
+    let resp = router
+        .oneshot(
+            axum::http::Request::builder()
+                .method("OPTIONS")
+                .uri("/api/v1/auth/signup")
+                .header("origin", "https://artelonga.com.br")
+                .header("access-control-request-method", "POST")
+                .header("access-control-request-headers", "content-type")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Preflight must succeed
+    assert!(
+        resp.status().is_success() || resp.status() == StatusCode::OK,
+        "preflight status: {}",
+        resp.status()
+    );
+
+    let allow_credentials = resp
+        .headers()
+        .get("access-control-allow-credentials")
+        .and_then(|v| v.to_str().ok());
+    assert_eq!(
+        allow_credentials,
+        Some("true"),
+        "access-control-allow-credentials must be 'true'"
+    );
+
+    let allow_origin = resp
+        .headers()
+        .get("access-control-allow-origin")
+        .and_then(|v| v.to_str().ok());
+    assert_eq!(
+        allow_origin,
+        Some("https://artelonga.com.br"),
+        "origin must be mirrored back"
+    );
 }

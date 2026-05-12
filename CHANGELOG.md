@@ -5,6 +5,35 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.0] — 2026-05-12 — CO-205: Artelonga signup backend — CORS + origin tracking
+
+Cross-domain signup from artelonga.com.br to co.artelonga.com.br. Visitors
+on artelonga.com.br can now POST to CO auth endpoints and get a session
+cookie that works across the `.artelonga.com.br` subdomain.
+
+### Added
+
+- `users.origin TEXT` column (migration v42) — tracks signup entry point
+  (`'artelonga'`, `'co'`, `'quilombo'`, `'yggdrasil'`, etc.) for all new
+  users; existing users keep `NULL`.
+- `onboarding_codes.origin TEXT` column — carries the origin through the
+  two-step passwordless onboarding flow.
+- `GET /api/v1/admin/users/origin-breakdown` — admin-gated telemetry
+  endpoint returning user counts grouped by signup origin.
+- `crate::auth::sanitize_origin` — rejects strings with non-alphanumeric/
+  hyphen characters or length > 32; stores `NULL` instead of echoing junk.
+
+### Changed
+
+- CORS layer now sets `Access-Control-Allow-Credentials: true` globally;
+  `mirror_request()` echoes the caller's `Origin` so cross-origin requests
+  with `credentials: 'include'` work from any subdomain.
+- `POST /api/v1/auth/onboard-with-email` — accepts optional `origin` field,
+  stored in `onboarding_codes`, applied to `users.origin` on account create.
+- `POST /api/v1/auth/signup` — accepts optional `origin` field.
+- `GET /api/v1/auth/google/start` — accepts optional `origin` query param,
+  carried through the state JWT to `find_or_create_user_by_google`.
+
 ## [2.3.4] — 2026-05-12 — CO-203: parking_lot::Mutex eliminates storage-lock poison cascade
 
 **Closes the incident family** that produced 2.3.1 + 2.3.2 hotfixes

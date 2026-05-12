@@ -11,6 +11,7 @@ pub struct OnboardingCode {
     pub code_hash: String,
     pub preferred_usuario: Option<String>,
     pub return_to: Option<String>,
+    pub origin: Option<String>,
     pub expires_at: String,
     pub consumed_at: Option<String>,
     pub attempts: i64,
@@ -18,6 +19,7 @@ pub struct OnboardingCode {
 }
 
 impl Storage {
+    #[allow(clippy::too_many_arguments)]
     pub fn create_onboarding_code(
         &self,
         email_lookup_hash: &str,
@@ -25,15 +27,16 @@ impl Storage {
         code_hash: &str,
         preferred_usuario: Option<&str>,
         return_to: Option<&str>,
+        origin: Option<&str>,
         expires_at: &str,
     ) -> anyhow::Result<()> {
         let id = format!("ob_{}", nanoid::nanoid!(16));
         let now = Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO onboarding_codes \
-             (id, email_lookup_hash, intent, code_hash, preferred_usuario, return_to, \
+             (id, email_lookup_hash, intent, code_hash, preferred_usuario, return_to, origin, \
               expires_at, consumed_at, attempts, created_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL, 0, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, 0, ?9)",
             params![
                 id,
                 email_lookup_hash,
@@ -41,6 +44,7 @@ impl Storage {
                 code_hash,
                 preferred_usuario,
                 return_to,
+                origin,
                 expires_at,
                 now,
             ],
@@ -53,7 +57,7 @@ impl Storage {
         self.conn
             .query_row(
                 "SELECT id, email_lookup_hash, intent, code_hash, preferred_usuario, return_to, \
-                 expires_at, consumed_at, attempts, created_at \
+                 origin, expires_at, consumed_at, attempts, created_at \
                  FROM onboarding_codes \
                  WHERE email_lookup_hash = ?1 \
                    AND consumed_at IS NULL \
@@ -69,10 +73,11 @@ impl Storage {
                         code_hash: row.get(3)?,
                         preferred_usuario: row.get(4)?,
                         return_to: row.get(5)?,
-                        expires_at: row.get(6)?,
-                        consumed_at: row.get(7)?,
-                        attempts: row.get(8)?,
-                        created_at: row.get(9)?,
+                        origin: row.get(6)?,
+                        expires_at: row.get(7)?,
+                        consumed_at: row.get(8)?,
+                        attempts: row.get(9)?,
+                        created_at: row.get(10)?,
                     })
                 },
             )

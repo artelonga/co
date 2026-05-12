@@ -43,6 +43,7 @@ impl Storage {
         usuario: &str,
         password_hash: &str,
         email: Option<&str>,
+        origin: Option<&str>,
     ) -> Result<crate::models::User, SignupError> {
         let usuario_norm = usuario.trim().to_lowercase();
         let email_norm = email
@@ -68,9 +69,10 @@ impl Storage {
         // env-seeded operator account.
         self.conn
             .execute(
-                "INSERT INTO users (id, usuario, email, display_name, tier, created_at, password_hash) \
-                 VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5)",
-                params![id, usuario_norm, email_norm, now_str, password_hash],
+                "INSERT INTO users \
+                 (id, usuario, email, display_name, tier, created_at, password_hash, origin) \
+                 VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5, ?6)",
+                params![id, usuario_norm, email_norm, now_str, password_hash, origin],
             )
             .map_err(|e| SignupError::Internal(format!("INSERT users: {e}")))?;
 
@@ -825,6 +827,7 @@ impl Storage {
         google_sub: &str,
         email: &str,
         google_name: &str,
+        origin: Option<&str>,
     ) -> anyhow::Result<crate::models::User> {
         let email = email.trim().to_lowercase();
         let now = chrono::Utc::now();
@@ -887,9 +890,9 @@ impl Storage {
         };
         self.conn.execute(
             "INSERT INTO users \
-             (id, usuario, email, display_name, tier, created_at, google_sub) \
-             VALUES (?1, ?2, ?3, ?4, 'player', ?5, ?6)",
-            rusqlite::params![id, candidate, email, display, now_str, google_sub],
+             (id, usuario, email, display_name, tier, created_at, google_sub, origin) \
+             VALUES (?1, ?2, ?3, ?4, 'player', ?5, ?6, ?7)",
+            rusqlite::params![id, candidate, email, display, now_str, google_sub, origin],
         )?;
         if let Err(e) = self.subscribe_user_to_default_universes(&id) {
             tracing::warn!(

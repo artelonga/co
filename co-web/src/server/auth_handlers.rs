@@ -492,6 +492,8 @@ pub(super) struct SignupRequest {
     password: String,
     #[serde(default)]
     email: String,
+    #[serde(default)]
+    origin: Option<String>,
 }
 
 /// CO-175 (G3): public signup quota — 100 new accounts per rolling 24h.
@@ -525,6 +527,7 @@ pub(super) async fn signup_handler(
             Some(trimmed)
         }
     };
+    let origin = crate::auth::sanitize_origin(req.origin);
 
     // --- validation ---
     if usuario.len() < 3 || usuario.len() > 30 {
@@ -579,7 +582,12 @@ pub(super) async fn signup_handler(
     // --- create user ---
     let user = {
         let mut storage = lock_storage(&state);
-        match storage.create_user_with_password(&usuario, &password_hash, email_opt.as_deref()) {
+        match storage.create_user_with_password(
+            &usuario,
+            &password_hash,
+            email_opt.as_deref(),
+            origin.as_deref(),
+        ) {
             Ok(u) => u,
             Err(crate::storage::users::SignupError::UsuarioTaken) => {
                 return Err(AppError::Conflict("Esse usuário já existe.".into()));

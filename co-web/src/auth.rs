@@ -529,6 +529,20 @@ impl AuthStore {
     }
 }
 
+/// CO-205: sanitize an origin string — only ASCII letters, digits, and hyphens,
+/// max 32 characters. Returns `None` for empty or malformed values so junk is
+/// never echoed into `users.origin`.
+pub fn sanitize_origin(origin: Option<String>) -> Option<String> {
+    let s = origin?.trim().to_string();
+    if s.is_empty() || s.len() > 32 {
+        return None;
+    }
+    if !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return None;
+    }
+    Some(s)
+}
+
 /// Generates a random 6-digit numeric code.
 pub fn generate_code() -> String {
     let bytes = Uuid::new_v4();

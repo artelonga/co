@@ -39,6 +39,8 @@ struct OnboardRequest {
     preferred_usuario: Option<String>,
     #[serde(default)]
     return_to: Option<String>,
+    #[serde(default)]
+    origin: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -244,6 +246,7 @@ async fn onboard_handler(
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string());
+    let origin = crate::auth::sanitize_origin(req.origin);
 
     {
         let storage = lock_storage(&state);
@@ -253,6 +256,7 @@ async fn onboard_handler(
             &code_hash,
             preferred_usuario.as_deref(),
             return_to.as_deref(),
+            origin.as_deref(),
             &expires_at,
         )?;
     }
@@ -384,9 +388,9 @@ async fn onboard_verify_handler(
                     .conn()
                     .execute(
                         "INSERT INTO users \
-                         (id, usuario, email, display_name, tier, created_at) \
-                         VALUES (?1, ?2, ?3, ?2, 'player', ?4)",
-                        rusqlite::params![id, usuario, email_normalized, now_str],
+                         (id, usuario, email, display_name, tier, created_at, origin) \
+                         VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5)",
+                        rusqlite::params![id, usuario, email_normalized, now_str, oc.origin],
                     )
                     .map_err(|e| AppError::Internal(format!("INSERT users: {e}")))?;
 

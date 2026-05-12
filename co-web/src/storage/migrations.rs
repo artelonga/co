@@ -1334,6 +1334,18 @@ impl Storage {
                 .expect("Failed to run migration v41");
         }
 
+        if current_version < 42 {
+            // CO-205: origin column on users — tracks where each signup came from.
+            ensure_column(&self.conn, "users", "origin", "TEXT")
+                .expect("migration v42: users.origin");
+            self.conn
+                .execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_users_origin ON users(origin);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (42);",
+                )
+                .expect("migration v42: idx_users_origin + schema_version");
+        }
+
         // CO-190 unconditional backfill — ensures the table exists even if
         // v41 was partially applied on an older instance.
         ensure_table(
@@ -1601,5 +1613,15 @@ impl Storage {
 
         // CO-201: push subscription endpoints table.
         self.ensure_push_subscriptions_table();
+
+        // CO-205 unconditional backfill — ensures users.origin and
+        // onboarding_codes.origin exist even if v42 was partially applied.
+        ensure_column(&self.conn, "users", "origin", "TEXT")
+            .expect("CO-205 backfill: users.origin");
+        self.conn
+            .execute_batch("CREATE INDEX IF NOT EXISTS idx_users_origin ON users(origin);")
+            .expect("CO-205 backfill: idx_users_origin");
+        ensure_column(&self.conn, "onboarding_codes", "origin", "TEXT")
+            .expect("CO-205 backfill: onboarding_codes.origin");
     }
 }
