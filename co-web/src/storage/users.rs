@@ -911,6 +911,31 @@ impl Storage {
         })
     }
 
+    /// CO-206: look up a CO user's linked yggdrasil user id.
+    pub fn get_yggdrasil_user_id(&self, co_user_id: &str) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT yggdrasil_user_id FROM users WHERE id = ?1",
+                params![co_user_id],
+                |row| row.get(0),
+            )
+            .ok()
+            .flatten()
+    }
+
+    /// CO-206: store the yggdrasil-local user id for a CO user.
+    pub fn set_yggdrasil_user_id(
+        &self,
+        co_user_id: &str,
+        yggdrasil_user_id: &str,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE users SET yggdrasil_user_id = ?1 WHERE id = ?2",
+            params![yggdrasil_user_id, co_user_id],
+        )?;
+        Ok(())
+    }
+
     /// CO-175 (G3): count users created in the last `seconds` interval.
     /// Used to enforce the public-signup rate cap (100 / day for now).
     pub fn count_users_created_since(&self, seconds: i64) -> i64 {

@@ -161,6 +161,8 @@ pub(crate) fn is_allowed_return_to(url: &str) -> bool {
         || host == "quilomboaraucaria.org"
         || host == "artelonga.com.br"
         || host.ends_with(".artelonga.com.br")
+        || host == "yggdrasil-artelonga.fly.dev"
+        || host == "yggdrasil.artelonga.com.br"
 }
 
 // -------------------------------------------------------------------------

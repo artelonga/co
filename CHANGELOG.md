@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.5.0] — 2026-05-12 — CO-206: Yggdrasil verifies CO JWKS — centralized SSO
+
+CO is now the single identity authority for the entire artelonga stack.
+Yggdrasil users are redirected to CO for login; CO issues a short-lived
+(60s) ES256 handover token that yggdrasil validates via JWKS — no shared
+secret required.
+
+**CO-side changes:**
+- `GET /auth/co-handover?return_to=<url>` — new server-side redirect that
+  issues a `co_token` JWT and bounces to the receiver. Requires auth;
+  rejects `return_to` hosts not on the safelist.
+- `is_allowed_return_to` safelist now includes `yggdrasil-artelonga.fly.dev`
+  and `yggdrasil.artelonga.com.br` (future custom domain).
+- Migration v43: `users.yggdrasil_user_id` column for round-trip identity
+  bridging (CO-207 will use this). Idempotent boot migration.
+- Storage helpers `get_yggdrasil_user_id` / `set_yggdrasil_user_id`.
+
 ## [2.4.1] — 2026-05-12 — Hotfix: CSRF middleware trust list out of sync with CORS
 
 `POST /api/v1/auth/logout` (and other non-safe methods) from

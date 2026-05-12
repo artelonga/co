@@ -1623,5 +1623,29 @@ impl Storage {
             .expect("CO-205 backfill: idx_users_origin");
         ensure_column(&self.conn, "onboarding_codes", "origin", "TEXT")
             .expect("CO-205 backfill: onboarding_codes.origin");
+
+        if current_version < 43 {
+            // CO-206: yggdrasil bridge — links a CO user to their yggdrasil-local identity.
+            ensure_column(&self.conn, "users", "yggdrasil_user_id", "TEXT")
+                .expect("migration v43: users.yggdrasil_user_id");
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_yggdrasil \
+                     ON users(yggdrasil_user_id) WHERE yggdrasil_user_id IS NOT NULL;
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (43);",
+                )
+                .expect("migration v43: idx_users_yggdrasil + schema_version");
+        }
+
+        // CO-206 unconditional backfill — ensures users.yggdrasil_user_id exists
+        // even if v43 was partially applied on an older instance.
+        ensure_column(&self.conn, "users", "yggdrasil_user_id", "TEXT")
+            .expect("CO-206 backfill: users.yggdrasil_user_id");
+        self.conn
+            .execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_yggdrasil \
+                 ON users(yggdrasil_user_id) WHERE yggdrasil_user_id IS NOT NULL;",
+            )
+            .expect("CO-206 backfill: idx_users_yggdrasil");
     }
 }

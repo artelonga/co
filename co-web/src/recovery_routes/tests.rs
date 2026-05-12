@@ -1359,6 +1359,13 @@ fn test_return_to_safelist() {
     assert!(is_allowed_return_to("https://co.artelonga.com.br"));
     assert!(is_allowed_return_to("https://artelonga.com.br"));
     assert!(is_allowed_return_to("https://quilombo.artelonga.com.br"));
+    // CO-206: yggdrasil on Fly.io and future custom domain.
+    assert!(is_allowed_return_to(
+        "https://yggdrasil-artelonga.fly.dev/auth/co-handover"
+    ));
+    assert!(is_allowed_return_to(
+        "https://yggdrasil.artelonga.com.br/auth/co-handover"
+    ));
 
     assert!(!is_allowed_return_to("https://evil.com"));
     assert!(!is_allowed_return_to("https://notartelonga.com.br"));
@@ -1369,4 +1376,104 @@ fn test_return_to_safelist() {
     assert!(!is_allowed_return_to("not-a-url"));
     assert!(!is_allowed_return_to(""));
     assert!(!is_allowed_return_to("https://fakeartelonga.com.br"));
+    // CO-206: *.fly.dev is NOT covered by *.artelonga.com.br.
+    assert!(!is_allowed_return_to("https://evil-artelonga.fly.dev"));
+    assert!(!is_allowed_return_to(
+        "https://yggdrasil-artelonga.fly.dev.evil.com"
+    ));
+}
+
+// --- 23. GET /auth/co-handover — CO-206 handover token flow ---
+
+#[tokio::test]
+async fn test_co_handover_authenticated_yggdrasil() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let user_id = insert_test_user(dir.path(), "handover@example.com", None);
+    let token = make_jwt(&user_id);
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/co-handover?return_to=https://yggdrasil-artelonga.fly.dev/auth/co-handover")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::SEE_OTHER,
+        "expected 303 redirect, got: {}",
+        resp.status()
+    );
+    let location = resp
+        .headers()
+        .get("location")
+        .expect("Location header must be present")
+        .to_str()
+        .unwrap();
+    assert!(
+        location.contains("co_token="),
+        "Location must include co_token param; got: {location}"
+    );
+    assert!(
+        location.starts_with("https://yggdrasil-artelonga.fly.dev/auth/co-handover"),
+        "Location must redirect to yggdrasil; got: {location}"
+    );
+}
+
+#[tokio::test]
+async fn test_co_handover_evil_return_to_rejected() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let user_id = insert_test_user(dir.path(), "handover2@example.com", None);
+    let token = make_jwt(&user_id);
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/co-handover?return_to=https://evil.example.com/steal")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "evil return_to must be rejected"
+    );
+}
+
+#[tokio::test]
+async fn test_co_handover_unauthenticated_returns_401() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/auth/co-handover?return_to=https://yggdrasil-artelonga.fly.dev/auth/co-handover")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "unauthenticated request must return 401"
+    );
 }

@@ -669,3 +669,50 @@ pub(super) async fn google_status_handler() -> Json<serde_json::Value> {
         std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
     Json(serde_json::json!({ "configured": configured }))
 }
+
+// --- CO-206: cross-apex SSO handover ---
+
+#[derive(serde::Deserialize)]
+pub(super) struct CoHandoverQuery {
+    pub return_to: Option<String>,
+}
+
+/// CO-206: `GET /auth/co-handover?return_to=<receiver_url>`
+///
+/// Issues a short-lived (60s) ES256-signed handover token and redirects to
+/// `<receiver_url>?co_token=<jwt>`. The receiver validates the token via CO's
+/// JWKS at `/.well-known/jwks.json` — no shared secret required.
+///
+/// Route is behind `require_auth`, so unauthenticated requests return 401.
+/// An `return_to` host not on the safelist returns 400.
+pub(super) async fn co_handover_handler(
+    State(state): State<AppState>,
+    crate::auth::UserId(user_id): crate::auth::UserId,
+    Query(params): Query<CoHandoverQuery>,
+) -> Result<Response, AppError> {
+    let return_to = params.return_to.as_deref().unwrap_or("");
+    if return_to.is_empty() || !crate::recovery_routes::is_allowed_return_to(return_to) {
+        return Err(AppError::BadRequest(
+            "return_to is missing or not in the safelist".into(),
+        ));
+    }
+    let user = {
+        let storage = state.storage.lock();
+        storage
+            .get_user_by_id(&user_id)
+            .ok_or_else(|| AppError::Internal("User not found".into()))?
+    };
+    let redirect_url = crate::auth::maybe_attach_co_handover_token(
+        return_to,
+        &user.id,
+        &user.email,
+        &user.tier,
+        &state.jwt_key,
+    );
+    Ok((
+        StatusCode::SEE_OTHER,
+        [(header::LOCATION, redirect_url)],
+        (),
+    )
+        .into_response())
+}

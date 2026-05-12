@@ -467,6 +467,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // 400 server-side instead of reaching the SPA — closes the open-redirect-
         // -looking phishing vector flagged in CO-172 review.
         .route("/recover", get(serve_recover))
+        // CO-206: /auth/co-handover — server-side redirect that issues a short-lived
+        // ES256 handover token for cross-apex SSO (quilombo, yggdrasil, artelonga.com.br).
+        // Requires authentication; rejects return_to hosts not on the safelist.
+        .route(
+            "/auth/co-handover",
+            get(co_handover_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
         // CO-189: /invitations/:token — SPA accept page (no server-side auth).
         .route("/invitations/{token}", get(serve_co_index))
         // CO-170: friendly aliases for the timeline composite view that the
