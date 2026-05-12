@@ -5,6 +5,33 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.2] — 2026-05-12 — Hotfix #2: same poison pattern in CO-191 universe-list methods
+
+After 2.3.1 deployed, the storage mutex got poisoned again — this time
+from `Storage::list_subscribed_universes` at `universe.rs:440`. The
+panic site was a `.expect("list_subscribed_universes")` on the
+`query_map` result. Triggered when yuri's Google sign-in hit
+`/api/v1/me/universes`, which calls all four CO-191 list methods.
+
+Same pattern as 2.3.1 (panicking under `Mutex<Storage>`), different
+storage methods. Fix is the same shape: prepare + query_map both
+match on Err, log `tracing::error!`, return `Vec::new()` so the
+endpoint degrades to a 200 with empty buckets instead of poisoning
+the lock.
+
+Four methods patched: `list_owned_universes`, `list_member_universes`,
+`list_subscribed_universes`, `list_discoverable_universes`.
+
+Recovery executed: `flyctl machine restart` once more. After deploy
+the pattern can no longer recur from this code path.
+
+**Triage findings:** roughly 30 other `.expect()` calls in storage
+methods (chat, invitations, notifications, push, etc.) carry the same
+landmine. Whack-a-mole won't scale. Filing CO-204 for a systemic fix:
+swap `std::sync::Mutex` for `parking_lot::Mutex`, which doesn't poison
+on panic — then existing `.expect()` calls become safe (or at worst
+return a 500 for one request, not site-wide).
+
 ## [2.3.1] — 2026-05-12 — Hotfix: storage lock poisoning from worker panics
 
 **Incident summary:** All authenticated requests on prod returned

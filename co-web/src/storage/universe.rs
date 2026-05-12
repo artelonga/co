@@ -369,11 +369,13 @@ impl Storage {
             .collect()
     }
 
+    // CO-191 list methods — all four must be panic-free under the storage
+    // mutex (see feedback_no_panic_under_mutex memory + 2026-05-12 incident).
+    // On any SQLite error, log + return empty so /me/universes degrades to a
+    // 200 with empty buckets rather than poisoning the lock site-wide.
     pub fn list_owned_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+        let mut stmt = match self.conn.prepare(
+            "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
              u.is_template, u.is_public, u.content_count, \
              COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
              'owner' AS role \
@@ -381,21 +383,28 @@ impl Storage {
              WHERE u.owner_id = ?1 AND COALESCE(u.hidden, 0) = 0 \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
-            )
-            .expect("prepare list_owned_universes");
-        let rows: Vec<_> = stmt
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_owned_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        let rows: Vec<_> = match stmt
             .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
-            .expect("list_owned_universes")
-            .filter_map(|r| r.ok())
-            .collect();
+        {
+            Ok(r) => r.filter_map(|x| x.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_owned_universes query: {e}");
+                return Vec::new();
+            }
+        };
         self.attach_parent_key(rows)
     }
 
     pub fn list_member_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+        let mut stmt = match self.conn.prepare(
+            "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
              u.is_template, u.is_public, u.content_count, \
              COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
              um.role \
@@ -405,21 +414,28 @@ impl Storage {
                AND COALESCE(u.hidden, 0) = 0 \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
-            )
-            .expect("prepare list_member_universes");
-        let rows: Vec<_> = stmt
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_member_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        let rows: Vec<_> = match stmt
             .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
-            .expect("list_member_universes")
-            .filter_map(|r| r.ok())
-            .collect();
+        {
+            Ok(r) => r.filter_map(|x| x.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_member_universes query: {e}");
+                return Vec::new();
+            }
+        };
         self.attach_parent_key(rows)
     }
 
     pub fn list_subscribed_universes(&self, user_id: &str) -> Vec<crate::models::UniverseWithRole> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+        let mut stmt = match self.conn.prepare(
+            "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
              u.is_template, u.is_public, u.content_count, \
              COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
              'subscriber' AS role \
@@ -431,15 +447,22 @@ impl Storage {
                AND COALESCE(u.hidden, 0) = 0 \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
-            )
-            .expect("prepare list_subscribed_universes");
-        let rows: Vec<_> = stmt
-            .query_map(params![user_id, user_id, user_id], |row| {
-                self.row_to_universe_with_role(row)
-            })
-            .expect("list_subscribed_universes")
-            .filter_map(|r| r.ok())
-            .collect();
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_subscribed_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        let rows: Vec<_> = match stmt.query_map(params![user_id, user_id, user_id], |row| {
+            self.row_to_universe_with_role(row)
+        }) {
+            Ok(r) => r.filter_map(|x| x.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_subscribed_universes query: {e}");
+                return Vec::new();
+            }
+        };
         self.attach_parent_key(rows)
     }
 
@@ -448,10 +471,8 @@ impl Storage {
         excluded_keys: &std::collections::HashSet<String>,
         limit: usize,
     ) -> Vec<crate::models::UniverseWithRole> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
+        let mut stmt = match self.conn.prepare(
+            "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
              u.is_template, u.is_public, u.content_count, \
              COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
              NULL AS role \
@@ -460,15 +481,24 @@ impl Storage {
                AND u.is_template = 0 \
                AND COALESCE(u.hidden, 0) = 0 \
              ORDER BY u.content_count DESC, u.name ASC",
-            )
-            .expect("prepare list_discoverable_universes");
-        let rows: Vec<_> = stmt
-            .query_map([], |row| self.row_to_universe_with_role(row))
-            .expect("list_discoverable_universes")
-            .filter_map(|r| r.ok())
-            .filter(|(u, _)| !excluded_keys.contains(&u.key))
-            .take(limit)
-            .collect();
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_discoverable_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        let rows: Vec<_> = match stmt.query_map([], |row| self.row_to_universe_with_role(row)) {
+            Ok(r) => r
+                .filter_map(|x| x.ok())
+                .filter(|(u, _)| !excluded_keys.contains(&u.key))
+                .take(limit)
+                .collect(),
+            Err(e) => {
+                tracing::error!("list_discoverable_universes query: {e}");
+                return Vec::new();
+            }
+        };
         self.attach_parent_key(rows)
     }
 
