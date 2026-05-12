@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.4.1] — 2026-05-12 — Hotfix: CSRF middleware trust list out of sync with CORS
+
+`POST /api/v1/auth/logout` (and other non-safe methods) from
+artelonga.com.br returned `403 CSRF: Origin not allowed` even though
+the CORS preflight succeeded. Surfaced as "sair on artelonga doesn't
+work" right after AL-50 landed.
+
+**Root cause:** `csrf_middleware` in `quilombo_telemetria.rs` reads
+allowed origins from the `ALLOWED_ORIGINS` env var, which doesn't
+include artelonga.com.br. CO-205 updated the CORS layer's
+`mirror_request()` but the CSRF middleware's origin check was a
+separate, env-driven list.
+
+**Fix:** added a hardcoded `TRUSTED_HOSTS` list inside `csrf_middleware`
+mirroring the cross-domain hosts the CORS layer allows
+(`artelonga.com.br`, `co.artelonga.com.br`, `yggdrasil.artelonga.com.br`,
+`quilomboaraucaria.com.br`, `quilomboaraucaria.org`). Now in sync.
+`ALLOWED_ORIGINS` env var is still honored as an additive override
+for ad-hoc dev hosts.
+
 ## [2.4.0] — 2026-05-12 — CO-205: Artelonga signup backend — CORS + origin tracking
 
 Cross-domain signup from artelonga.com.br to co.artelonga.com.br. Visitors

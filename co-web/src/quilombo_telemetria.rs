@@ -334,11 +334,25 @@ pub async fn csrf_middleware(req: Request<Body>, next: Next) -> Response<Body> {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
+    // Hardcoded trust list mirrors the CORS layer's allowlist (CO-205).
+    // Origins legitimately allowed to POST cross-domain to this server.
+    // Without this, CSRF rejected logout/onboard calls from
+    // artelonga.com.br even though CORS preflight succeeded (2026-05-12
+    // bug — "sair on artelonga doesn't work").
+    const TRUSTED_HOSTS: &[&str] = &[
+        "artelonga.com.br",
+        "co.artelonga.com.br",
+        "yggdrasil.artelonga.com.br",
+        "quilomboaraucaria.com.br",
+        "quilomboaraucaria.org",
+    ];
+
     let is_allowed = origin.contains(request_host) && !request_host.is_empty()
         || allowed_origins
             .iter()
             .any(|o| !o.is_empty() && origin.contains(o))
         || (!canonical.is_empty() && origin.contains(&canonical))
+        || TRUSTED_HOSTS.iter().any(|h| origin.contains(h))
         || origin.contains("localhost")
         || origin.contains("127.0.0.1");
 
