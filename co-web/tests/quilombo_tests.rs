@@ -534,5 +534,9 @@ async fn test_admin_resumo_includes_email_stats() {
         "resumo should include vinculados_co"
     );
     assert_eq!(stats["com_email"], 0);
-    assert_eq!(stats["vinculados_co"], 0);
+    // CO-184 reverse bridge auto-links every quilombo signup to a fresh
+    // CO user, so vinculados_co counts the one user just created.
+    // Previously this asserted 0 (pre-CO-184). The test's intent is
+    // "stat field exists and is sensible," not a specific count.
+    assert_eq!(stats["vinculados_co"], 1);
 }
