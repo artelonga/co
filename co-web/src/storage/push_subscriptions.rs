@@ -234,22 +234,30 @@ impl Storage {
     /// Returns (user_id, display_name) for users with pending push notifications
     /// and at least one active push subscription.
     pub fn list_users_with_pending_push_notifications(&self) -> Vec<(String, String)> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT DISTINCT n.user_id, COALESCE(u.display_name, '') \
-                 FROM user_notifications n \
-                 JOIN users u ON n.user_id = u.id \
-                 JOIN push_subscriptions ps ON n.user_id = ps.user_id \
-                 WHERE n.delivered_push_at IS NULL AND n.read_at IS NULL",
-            )
-            .expect("prepare list_users_with_pending_push_notifications");
-        stmt.query_map([], |row| {
+        // Never panic — runs inside the storage mutex held by the push worker.
+        // Log + return empty so the next tick retries (see incident 2026-05-12).
+        let mut stmt = match self.conn.prepare(
+            "SELECT DISTINCT n.user_id, COALESCE(u.display_name, '') \
+             FROM user_notifications n \
+             JOIN users u ON n.user_id = u.id \
+             JOIN push_subscriptions ps ON n.user_id = ps.user_id \
+             WHERE n.delivered_push_at IS NULL AND n.read_at IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_users_with_pending_push_notifications: prepare failed: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })
-        .expect("list_users_with_pending_push_notifications query")
-        .filter_map(|r| r.ok())
-        .collect()
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_users_with_pending_push_notifications: query failed: {e}");
+                Vec::new()
+            }
+        }
     }
 
     pub fn increment_push_failure_count(&self, sub_id: &str) -> anyhow::Result<i64> {

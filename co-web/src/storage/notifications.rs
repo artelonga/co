@@ -565,27 +565,37 @@ impl Storage {
     pub fn list_users_with_pending_email_notifications(
         &self,
     ) -> Vec<(String, String, String, String)> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT DISTINCT n.user_id, COALESCE(u.email, ''), u.display_name, \
-                 COALESCE(u.language, 'pt') \
-                 FROM user_notifications n \
-                 JOIN users u ON n.user_id = u.id \
-                 WHERE n.delivered_email_at IS NULL AND n.read_at IS NULL",
-            )
-            .expect("prepare list_users_with_pending_email_notifications");
-        stmt.query_map([], |row| {
+        // Never panic in this code path. The notif email worker holds the
+        // storage mutex across this call; a panic would poison it for the
+        // entire app (incident 2026-05-12). If the schema or rows are off,
+        // log + return empty so the worker waits one tick and retries.
+        let mut stmt = match self.conn.prepare(
+            "SELECT DISTINCT n.user_id, COALESCE(u.email, ''), u.display_name, \
+             COALESCE(u.language, 'pt') \
+             FROM user_notifications n \
+             JOIN users u ON n.user_id = u.id \
+             WHERE n.delivered_email_at IS NULL AND n.read_at IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_users_with_pending_email_notifications: prepare failed: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
                 row.get::<_, String>(3)?,
             ))
-        })
-        .expect("query list_users_with_pending_email_notifications")
-        .filter_map(|r| r.ok())
-        .collect()
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_users_with_pending_email_notifications: query failed: {e}");
+                Vec::new()
+            }
+        }
     }
 }
 

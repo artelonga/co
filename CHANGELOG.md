@@ -5,6 +5,52 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.1] — 2026-05-12 — Hotfix: storage lock poisoning from worker panics
+
+**Incident summary:** All authenticated requests on prod returned
+`{"error":"internal_error","message_en":"storage lock"}` after some
+trigger panicked inside the new notification workers while holding
+the storage mutex. Anonymous reads partially worked; logged-in
+content and Google sign-in were blocked.
+
+**Root cause:** Inside `Storage::list_users_with_pending_email_notifications`
+and the sibling push helper, `.prepare(...).expect("…")` would panic
+on any SQLite error. Those methods are invoked from
+`notification_email_worker::tick` (CO-200) and `notification_push_worker::tick`
+(CO-201) *while the storage `Mutex<Storage>` is held* — so any panic
+poisons the lock and every subsequent acquisition across the app
+fails. Pattern previously documented in
+`feedback_migration_column_reads.md` (2026-04-30 prod incident,
+CO 1.22.4).
+
+**Fixes:**
+
+1. `list_users_with_pending_email_notifications` and
+   `list_users_with_pending_push_notifications` no longer panic on
+   prepare/query errors. They log via `tracing::error!` and return
+   `Vec::new()` so the worker simply waits one tick and retries.
+2. All `state.storage.lock().unwrap()` call sites in the two notif
+   workers (7 total: 3 in email worker, 4 in push worker) replaced
+   with `.lock().unwrap_or_else(|p| p.into_inner())`. Even if some
+   future panic does occur with the lock held, the app keeps running
+   instead of cascading into universal 500s.
+
+**Recovery executed:** Restarted the prod machine
+(`flyctl machine restart 1850920b111d38`) to clear the poisoned
+in-memory state. Storage worked again for ~minutes. This hotfix
+prevents the failure mode from recurring.
+
+**Operational lesson:** Long-running workers MUST never panic while
+holding a shared `Mutex<T>`. Either:
+- Use non-panicking storage methods (log + return empty/None), or
+- Drop the lock before any path that can fail, or
+- Use parking_lot::Mutex (which doesn't poison; not in tree yet).
+
+The standard pattern adopted across notif workers:
+```rust
+let storage = state.storage.lock().unwrap_or_else(|p| p.into_inner());
+```
+
 ## [2.3.0] — 2026-05-11 — Phase 5 Notifications complete (CO-199 → CO-202)
 
 Closes the async-communication loop opened by Phase 4 chat. Universe rooms

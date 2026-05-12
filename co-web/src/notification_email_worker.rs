@@ -29,7 +29,7 @@ async fn tick(state: &AppState, failure_counts: &mut HashMap<String, u32>) -> an
     let now = Utc::now();
 
     let users = {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.storage.lock().unwrap_or_else(|p| p.into_inner());
         storage.list_users_with_pending_email_notifications()
     };
 
@@ -44,7 +44,7 @@ async fn tick(state: &AppState, failure_counts: &mut HashMap<String, u32>) -> an
         }
 
         let (prefs, batch) = {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.storage.lock().unwrap_or_else(|p| p.into_inner());
             let prefs = storage.get_preferences(&user_id);
             let batch = storage.list_pending_email_notifications(&user_id, MAX_PER_DIGEST);
             (prefs, batch)
@@ -74,7 +74,7 @@ async fn tick(state: &AppState, failure_counts: &mut HashMap<String, u32>) -> an
         match send_digest_email(&email, &display_name, &filtered, &lang).await {
             Ok(()) => {
                 failure_counts.remove(&user_id);
-                let storage = state.storage.lock().unwrap();
+                let storage = state.storage.lock().unwrap_or_else(|p| p.into_inner());
                 if let Err(e) = storage.mark_notifications_email_delivered(&ids) {
                     tracing::warn!("mark_delivered for {user_id}: {e}");
                 }
