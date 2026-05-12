@@ -193,15 +193,27 @@ fn test_cleanup_anon_universes() {
     assert_eq!(removed, 1, "should have removed the anon-* universe");
 
     // Verify only the regular universe remains.
-    let remaining: i64 = storage
+    // Exclude system-seeded universes that get inserted at boot
+    // (template, default, yggdrasil, etc.); only the test-inserted
+    // 'usr-kept' should remain after anon cleanup.
+    let kept: i64 = storage
         .conn()
         .query_row(
-            "SELECT COUNT(*) FROM universes WHERE key NOT IN ('template', 'default')",
+            "SELECT COUNT(*) FROM universes WHERE key = 'usr-kept'",
             [],
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(remaining, 1, "non-anon universe should remain");
+    assert_eq!(kept, 1, "usr-kept universe should remain");
+    let anon_left: i64 = storage
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM universes WHERE key LIKE 'anon-%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(anon_left, 0, "anon universes should be gone");
 }
 
 #[test]
@@ -213,6 +225,7 @@ fn test_get_all_users_with_hashes_and_restore() {
     storage.seed_uat_user(hash).unwrap();
 
     let backup = storage.get_all_users_with_hashes();
+    let backup_count = backup.len();
     assert!(!backup.is_empty());
 
     // Clear users.
@@ -223,13 +236,15 @@ fn test_get_all_users_with_hashes_and_restore() {
         .unwrap();
     assert_eq!(count_after_delete, 0);
 
-    // Restore.
+    // Restore — count should match the backup count (don't pin to 1
+    // because boot-time auto-seeded users like a yggdrasil bot or
+    // system user may be present in addition to the UAT user).
     storage.restore_users_with_hashes(&backup);
     let count_after_restore: i64 = storage
         .conn()
         .query_row("SELECT COUNT(*) FROM users", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count_after_restore, 1);
+    assert_eq!(count_after_restore, backup_count as i64);
 }
 
 // ---------------------------------------------------------------------------
