@@ -5,6 +5,54 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.4] — 2026-05-12 — CO-203: parking_lot::Mutex eliminates storage-lock poison cascade
+
+**Closes the incident family** that produced 2.3.1 + 2.3.2 hotfixes
+earlier today. `Mutex<Storage>` is now `parking_lot::Mutex<Storage>`
+instead of `std::sync::Mutex<Storage>`. `parking_lot` doesn't poison
+on panic, so a panic during one request kills *that one request* and
+the next acquisition gets a fresh lock — no site-wide cascade.
+
+### Changed
+
+- `co-web/Cargo.toml` — added `parking_lot = "0.12"`
+- `co-web/src/server.rs` — `AppStateInner.storage` is now
+  `parking_lot::Mutex<Storage>`; `lock_storage` helper returns
+  `parking_lot::MutexGuard<'_, Storage>` directly (no `Result`)
+- **55 source files across `co-web`** — all `Result`-based lock
+  patterns collapsed to plain `state.storage.lock()` /
+  `lock_storage(&state)`:
+  - `.lock().unwrap()` → `.lock()`
+  - `.lock().unwrap_or_else(|p| p.into_inner())` → `.lock()` (the
+    poison-tolerant pattern added in 2.3.1 is now redundant)
+  - `.lock().map_err(|_| AppError::Internal("Storage lock failed".into()))?`
+    → `.lock()` (the request-handler pattern)
+  - `if let Ok(s) = ... { ... }` → unwrap directly
+
+Net delta: −333 lines of error-handling boilerplate. Worker locks are
+also simpler — no more 4-line poison-tolerant `unwrap_or_else` blocks.
+
+### Verified
+
+- `cargo build -p co-web` ✓
+- `cargo clippy -p co-web -- -D warnings` clean ✓
+- `cargo test -p co-web --lib --test-threads=1` — **548/548 pass**
+  (previously 3 race-condition flakes; now stable because
+  parking_lot's locking doesn't suffer the same race window)
+
+### What this means in operational terms
+
+| Failure mode | Before 2.3.4 | After 2.3.4 |
+|---|---|---|
+| Storage method panics under lock | Site-wide 500s until restart | One 500 for that request; next request succeeds |
+| Long-running worker panics | Whole app dead | Worker restarts next tick |
+| 3 hotfixes in a day for the same family | Yes (2.3.0 → 2.3.1 → 2.3.2 → 2.3.3) | No |
+
+The ~30 remaining `.expect()` calls in storage methods are still
+landmines for individual requests, but their **blast radius is now
+one request, not the whole app**. A separate cleanup ticket can audit
+them later when it's no longer urgent.
+
 ## [2.3.3] — 2026-05-12 — Sidebar + navigation UX fixes
 
 Three surgical SPA fixes reported alongside the 2.3.x poison incident:

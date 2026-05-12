@@ -293,11 +293,7 @@ pub fn run(config: AutoConfig) -> Result<()> {
                                     .output();
                             }
                             Err(e) => {
-                                eprintln!(
-                                    "  {} git merge invocation failed: {}",
-                                    "!".yellow(),
-                                    e
-                                );
+                                eprintln!("  {} git merge invocation failed: {}", "!".yellow(), e);
                             }
                         }
                     }
