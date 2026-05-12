@@ -15,6 +15,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # CO-N: Cargo deps (prost-build / tonic-build, transitively pulled by
+      # game-core and other workspace members) require `protoc` at build
+      # time. The Dockerfile installs protobuf-compiler in the builder
+      # stage, but CI's plain ubuntu-latest runner doesn't have it — every
+      # workspace build since the proto-using deps landed (2026-04-30) has
+      # failed here with "Could not find `protoc` installation". Install
+      # it explicitly. Fix surfaced 2026-05-12 after CI was 100/100 red.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Setup Rust
         run: |
           rustup update stable
@@ -49,6 +59,9 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Setup Rust
         run: |
