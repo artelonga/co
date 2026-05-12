@@ -71,11 +71,44 @@ async function loadMeUniverses() {
 // ===== Tiny helpers that don't belong in any module =====
 
 function setUniverseSlugInUrl(slug) {
-    window.history.pushState({}, '', slug === 'template' ? '/' : `/${slug}`);
+    // Store the universe slug in history state so popstate (browser back/
+    // forward) can read it. Without this, back-button changes the URL but
+    // no JS reacts and the user stays on the current universe. Bug
+    // reported 2026-05-12.
+    window.history.pushState(
+        { universeSlug: slug },
+        '',
+        slug === 'template' ? '/' : `/${slug}`,
+    );
     if (slug && slug !== 'template') {
         try { localStorage.setItem('co_preferred_universe', slug); } catch (_) {}
     }
 }
+
+// Wire browser back/forward to actually load the universe in the URL.
+// One-time install at module load; the handler reads from window.state
+// (set up by bootApp) and dispatches to the existing bootAppForUniverse.
+window.addEventListener('popstate', async (event) => {
+    const fromState = event.state && event.state.universeSlug;
+    const fromUrl = readUniverseSlugFromUrl();
+    const target = fromState || fromUrl;
+    if (!target) return;
+    if (state.currentUniverseSlug === target) return;
+    if (state.switchingUniverse) return;
+    try {
+        state.switchingUniverse = true;
+        state.currentUniverseSlug = target;
+        state.isTemplate = target === 'template';
+        if (target === 'template') {
+            showTemplateBanner();
+        } else {
+            hideTemplateBanner();
+        }
+        await bootAppForUniverse(target);
+    } finally {
+        state.switchingUniverse = false;
+    }
+});
 
 function showTemplateBanner() {
     const b = document.getElementById('template-banner');

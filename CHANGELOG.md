@@ -5,6 +5,40 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.3] — 2026-05-12 — Sidebar + navigation UX fixes
+
+Three surgical SPA fixes reported alongside the 2.3.x poison incident:
+
+### Fixed — Header showed "Selecione um projeto" instead of the universe name
+
+`renderHeader` defaulted to the i18n placeholder `select_project` whenever
+no project was pinned, even when the user was clearly inside a universe
+context (e.g., "Comunicação", "RFQ"). New precedence:
+
+1. Project name (if a project is selected)
+2. Universe name (we're in a universe but no project yet)
+3. `select_project` placeholder (no universe context at all)
+
+### Fixed — Browser back/forward did nothing
+
+`setUniverseSlugInUrl` was `pushState`'ing without a `popstate` handler.
+Back-button rewrote the URL but no JS reacted, leaving the user on the
+current universe. Added a one-time `window.addEventListener('popstate',
+...)` that reads the universe slug from `event.state` (or falls back to
+URL parsing) and dispatches to `bootAppForUniverse`. Browser nav now
+works across universe switches.
+
+### Fixed — Subuniverses collapsed by default when on the parent
+
+In the sidebar tree (e.g., when the user navigated to `tempo`),
+descendant universes stayed collapsed unless the *current* universe
+matched one of the *descendants*. So users on the parent saw an
+unhelpful chevron with no children visible.
+
+Default-expand logic now triggers when EITHER the current universe is
+the parent itself OR one of its descendants. localStorage override
+still respected.
+
 ## [2.3.2] — 2026-05-12 — Hotfix #2: same poison pattern in CO-191 universe-list methods
 
 After 2.3.1 deployed, the storage mutex got poisoned again — this time

@@ -50,8 +50,16 @@ function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip) {
     const hasKids = !!(kids && kids.length);
     const expandKey = `co_universe_tree_${u.key}`;
     const stored = localStorage.getItem(expandKey);
+    // Default-expand the tree when EITHER the current universe is this
+    // parent (so a user on "tempo" sees its subuniverses below) OR the
+    // current universe is one of the descendants. Previously only the
+    // descendant case was handled, so navigating to the parent left its
+    // children collapsed and looking absent.
+    const isSelfActive = u.key === state.currentUniverseSlug;
     const containsActive = hasKids && kids.some(k => k.key === state.currentUniverseSlug);
-    const expanded = stored !== null ? (stored === '1') : containsActive;
+    const expanded = stored !== null
+        ? (stored === '1')
+        : (isSelfActive || containsActive);
     const indent = 12 + depth * 16;
     const chevron = hasKids
         ? `<span class="sidebar-universe-chevron" data-toggle="${esc(u.key)}" style="display:inline-block;width:14px;text-align:center;cursor:pointer;user-select:none">${expanded ? '▾' : '▸'}</span>`
@@ -299,8 +307,26 @@ export function renderSidebar() {
 
 export function renderHeader() {
     const p = state.currentProject;
-    document.querySelector('#project-name').textContent = p ? p.name : (window.t ? window.t('select_project') : 'Selecione um projeto');
-    document.querySelector('#project-desc').textContent = p ? (p.description || '') : '';
+    // Header precedence: project name (if a project is selected) →
+    // universe name (we're in a universe but no project yet) →
+    // generic "select project" placeholder (no universe context at all).
+    // Surfaced when "Comunicação" / "RFQ" universes loaded a board view
+    // without a project pinned, showing the wrong "Selecione um projeto"
+    // string in the H1 instead of the universe name.
+    const t = window.t || (k => k);
+    const u = state.universeInfo;
+    let title;
+    if (p) {
+        title = p.name;
+    } else if (u && u.name) {
+        title = u.name;
+    } else {
+        title = t('select_project');
+    }
+    document.querySelector('#project-name').textContent = title;
+    document.querySelector('#project-desc').textContent = p
+        ? (p.description || '')
+        : (u && u.description) || '';
     renderUsageCount();
 }
 
