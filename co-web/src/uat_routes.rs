@@ -227,10 +227,7 @@ async fn changes_handler(
     let (snapshot_label, since_id) = resolve_since(data_dir, q.since.as_deref());
 
     let mutations = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.get_uat_mutations_since(since_id)
     };
 
@@ -266,10 +263,7 @@ async fn export_patch_handler(
     let (snapshot_label, since_id) = resolve_since(&data_dir, None);
 
     let mutations: Vec<UatMutation> = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.get_uat_mutations_since(since_id)
     };
 

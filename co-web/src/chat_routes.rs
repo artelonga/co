@@ -92,13 +92,8 @@ pub struct DeleteMessageResponse {
 // Helper
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 /// Resolve the effective role of a caller for a universe.
@@ -149,7 +144,7 @@ pub async fn list_rooms_handler(
         .map(|v| v == "true" || v == "1")
         .unwrap_or(false);
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     storage
         .get_universe(&slug)
@@ -183,7 +178,7 @@ pub async fn create_room_handler(
         ));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     storage
         .get_universe(&slug)
@@ -220,7 +215,7 @@ pub async fn list_messages_handler(
 ) -> Result<impl IntoResponse, AppError> {
     let limit = query.limit.unwrap_or(50).clamp(1, 200);
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // CO-198: "dm" sentinel slug — resolve via DM room table
     let room = if slug == "dm" {
@@ -293,7 +288,7 @@ pub async fn post_message_handler(
 
     // Insert the message and collect the data needed for the WS broadcast.
     let (msg_id, broadcast_payload) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
 
         // CO-198: "dm" sentinel slug — use DM auth instead of universe membership.
         let room = if slug == "dm" {
@@ -449,7 +444,7 @@ pub async fn edit_message_handler(
     axum::Json(body): axum::Json<EditMessageRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let (updated_msg, room_id) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
 
         // CO-198: DM path
         let room = if slug == "dm" {
@@ -531,7 +526,7 @@ pub async fn delete_message_handler(
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
     let (deleted_at, room_id) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
 
         // CO-198: DM path — caller can only delete own messages (no moderation role)
         let (room, caller_can_moderate) = if slug == "dm" {
@@ -655,7 +650,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),
@@ -1307,7 +1302,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),
@@ -1856,7 +1851,7 @@ mod tests {
         let state = make_state_inner(dir.path());
 
         let (msg_id, room_id) = {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.storage.lock();
             let room = storage
                 .get_chat_room_by_slug("uni29", "general")
                 .expect("room");
@@ -1917,7 +1912,7 @@ mod tests {
         let state = make_state_inner(dir.path());
 
         let (msg_id, room_id) = {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.storage.lock();
             let room = storage
                 .get_chat_room_by_slug("uni30", "general")
                 .expect("room");

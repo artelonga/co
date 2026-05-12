@@ -390,15 +390,14 @@ impl Storage {
                 return Vec::new();
             }
         };
-        let rows: Vec<_> = match stmt
-            .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
-        {
-            Ok(r) => r.filter_map(|x| x.ok()).collect(),
-            Err(e) => {
-                tracing::error!("list_owned_universes query: {e}");
-                return Vec::new();
-            }
-        };
+        let rows: Vec<_> =
+            match stmt.query_map(params![user_id], |row| self.row_to_universe_with_role(row)) {
+                Ok(r) => r.filter_map(|x| x.ok()).collect(),
+                Err(e) => {
+                    tracing::error!("list_owned_universes query: {e}");
+                    return Vec::new();
+                }
+            };
         self.attach_parent_key(rows)
     }
 
@@ -421,15 +420,14 @@ impl Storage {
                 return Vec::new();
             }
         };
-        let rows: Vec<_> = match stmt
-            .query_map(params![user_id], |row| self.row_to_universe_with_role(row))
-        {
-            Ok(r) => r.filter_map(|x| x.ok()).collect(),
-            Err(e) => {
-                tracing::error!("list_member_universes query: {e}");
-                return Vec::new();
-            }
-        };
+        let rows: Vec<_> =
+            match stmt.query_map(params![user_id], |row| self.row_to_universe_with_role(row)) {
+                Ok(r) => r.filter_map(|x| x.ok()).collect(),
+                Err(e) => {
+                    tracing::error!("list_member_universes query: {e}");
+                    return Vec::new();
+                }
+            };
         self.attach_parent_key(rows)
     }
 

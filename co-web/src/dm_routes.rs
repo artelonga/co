@@ -81,13 +81,8 @@ pub struct BlockRequest {
 // Helper
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +103,7 @@ pub async fn open_dm_handler(
         ));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     match storage.open_dm(&user_id.0, &other_user_id) {
         Ok(dm) => Ok((
@@ -133,7 +128,7 @@ pub async fn list_dms_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let threads = storage.list_my_dms(&user_id.0);
     let total_unread: i64 = threads.iter().map(|t| t.unread_count).sum();
     Ok(axum::Json(ListDmsResponse {
@@ -148,7 +143,7 @@ pub async fn mark_read_handler(
     Path(room_id): Path<String>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // Verify membership
     if !storage.is_dm_member(&room_id, &user_id.0) {
@@ -169,7 +164,7 @@ pub async fn mute_handler(
     user_id: UserId,
     axum::Json(body): axum::Json<MuteRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     if !storage.is_dm_member(&room_id, &user_id.0) {
         return Err(AppError::Forbidden("Not a member of this DM".into()));
@@ -195,7 +190,7 @@ pub async fn set_dm_policy_handler(
         ));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     storage
         .set_dm_policy(&user_id.0, policy)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -215,7 +210,7 @@ pub async fn block_user_handler(
     }
 
     let reason = body.and_then(|b| b.reason.clone());
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     storage
         .block_user(&user_id.0, &target_id, reason.as_deref())
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -229,7 +224,7 @@ pub async fn unblock_user_handler(
     Path(target_id): Path<String>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     storage
         .unblock_user(&user_id.0, &target_id)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -294,7 +289,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

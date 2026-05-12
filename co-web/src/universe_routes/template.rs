@@ -38,7 +38,7 @@ pub async fn submit_doc_gen_job(
         return Err(AppError::BadRequest("source_dir cannot be empty".into()));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -87,7 +87,7 @@ pub async fn get_doc_gen_last_error(
     let caller_id = extract_optional_user_id(&headers, &state)
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -161,7 +161,7 @@ pub async fn apply_template(
     use std::collections::HashSet;
 
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -202,7 +202,7 @@ pub async fn apply_template(
 
     // --- 3. Gather universe metadata for template rendering ---
     let (universe_name, universe_desc) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let u = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -240,7 +240,7 @@ pub async fn apply_template(
 
         {
             let uc = {
-                let storage = lock_storage(&state)?;
+                let storage = lock_storage(&state);
                 storage.universe_conn(&slug)
             };
             let guard = uc
@@ -252,7 +252,7 @@ pub async fn apply_template(
         }
 
         {
-            let mut storage = lock_storage(&state)?;
+            let mut storage = lock_storage(&state);
             storage.increment_universe_content_count(&slug);
         }
 
@@ -262,7 +262,7 @@ pub async fn apply_template(
     // --- 5. Type audit ---
     let type_errors = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let guard = uc
@@ -442,7 +442,7 @@ pub async fn apply_template_all(
 
     // Collect universes owned by this user.
     let owned: Vec<crate::models::Universe> = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .list_universes_for_user(&user_id.0)
             .into_iter()
@@ -455,7 +455,7 @@ pub async fn apply_template_all(
     for universe in &owned {
         let slug = &universe.key.clone();
         let universe_root = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_root(slug)
         };
 
@@ -511,13 +511,14 @@ pub async fn apply_template_all(
             let entry = crate::entry_index::make_entry(rel, fm, body_text);
             if co::write_entry(&universe_root, &entry).is_ok() {
                 let uc = {
-                    let s = lock_storage(&state)?;
+                    let s = lock_storage(&state);
                     s.universe_conn(slug)
                 };
                 if let Ok(g) = uc.lock() {
                     let _ = crate::entry_index::EntryIndex::new(&g).upsert(slug, &entry);
                 }
-                if let Ok(mut s) = state.storage.lock() {
+                {
+                    let mut s = state.storage.lock();
                     s.increment_universe_content_count(slug);
                 }
                 created.push(rel.to_string());
@@ -527,7 +528,7 @@ pub async fn apply_template_all(
         // --- type check ---
         let type_error_count = {
             let uc = {
-                let s = lock_storage(&state)?;
+                let s = lock_storage(&state);
                 s.universe_conn(slug)
             };
             uc.lock()
@@ -551,7 +552,7 @@ pub async fn apply_template_all(
     let hub_slug = body.hub_universe.trim().to_string();
     let hub_entry_path = if !hub_slug.is_empty() {
         let hub_root = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             if storage.get_universe(&hub_slug).is_none() {
                 return Err(AppError::NotFound(format!(
                     "Hub universe '{hub_slug}' not found"
@@ -587,7 +588,7 @@ pub async fn apply_template_all(
         co::write_entry(&hub_root, &entry)
             .map_err(|e| AppError::Internal(format!("write hub: {e}")))?;
         let uc = {
-            let s = lock_storage(&state)?;
+            let s = lock_storage(&state);
             s.universe_conn(&hub_slug)
         };
         if let Ok(g) = uc.lock() {
@@ -671,7 +672,7 @@ pub async fn reindex(
     Path(slug): Path<String>,
 ) -> Result<axum::Json<ReindexResponse>, AppError> {
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -682,7 +683,7 @@ pub async fn reindex(
         .map_err(|e| AppError::Internal(format!("scan_entries: {e}")))?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let guard = uc
@@ -700,7 +701,8 @@ pub async fn reindex(
     }
 
     // Sync content_count to on-disk reality.
-    if let Ok(storage) = state.storage.lock() {
+    {
+        let storage = state.storage.lock();
         let _ = storage.conn().execute(
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",
             rusqlite::params![disk_entries.len() as i64, &slug],

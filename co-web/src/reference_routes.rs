@@ -390,13 +390,8 @@ pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 fn require_writer(
@@ -406,7 +401,7 @@ fn require_writer(
 ) -> Result<String, AppError> {
     let user_id = resolve_user_id(state, headers)
         .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
-    let storage = lock_storage(state)?;
+    let storage = lock_storage(state);
     let universe = storage
         .get_universe(universe_key)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -492,7 +487,7 @@ pub async fn list_references(
 ) -> Result<Json<Vec<ReferenceCard>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -571,7 +566,7 @@ pub async fn orphan_blobs(
 ) -> Result<Json<Vec<OrphanBlob>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -617,7 +612,7 @@ pub async fn broken_cards(
 ) -> Result<Json<Vec<BrokenCard>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let (conn, universe_root) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -674,7 +669,7 @@ pub async fn get_reference(
 ) -> Result<Json<ReferenceCard>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -732,7 +727,7 @@ pub async fn create_reference(
     }
 
     let (universe_root, universe_conn) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         (
             storage.universe_root(&universe_key),
             storage.universe_conn(&universe_key),
@@ -777,7 +772,7 @@ pub async fn create_reference(
     );
 
     // Update content count
-    lock_storage(&state)?.increment_universe_content_count(&universe_key);
+    lock_storage(&state).increment_universe_content_count(&universe_key);
 
     Ok((
         StatusCode::CREATED,
@@ -802,7 +797,7 @@ pub async fn update_reference(
     let user_id = require_writer(&state, &headers, &universe_key)?;
 
     let (universe_root, universe_conn) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -866,7 +861,7 @@ pub async fn update_reference(
 
     // Return the canonical (first) edition of the updated card.
     let conn = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -902,7 +897,7 @@ pub async fn delete_reference(
     let user_id = require_writer(&state, &headers, &universe_key)?;
 
     let (universe_root, universe_conn) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -925,7 +920,7 @@ pub async fn delete_reference(
         remove_reference_meta(&guard, &universe_key, &path);
     }
 
-    lock_storage(&state)?.decrement_universe_content_count(&universe_key, 1);
+    lock_storage(&state).decrement_universe_content_count(&universe_key, 1);
 
     let session_id = extract_session_id(&headers);
     emit_crud_event(
@@ -953,7 +948,7 @@ pub async fn list_works(
 ) -> Result<Json<Vec<String>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;

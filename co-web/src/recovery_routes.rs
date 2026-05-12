@@ -343,13 +343,8 @@ fn redact_email(email: &str) -> String {
     }
 }
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 // -------------------------------------------------------------------------
@@ -381,7 +376,7 @@ async fn add_channel_handler(
         .map_err(AppError::Internal)?;
 
     let channel_id = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
 
         // Rate-limit: at most 5 add_channel verifications per hour for this
         // user (across all channels of same type to prevent enumeration).
@@ -417,7 +412,7 @@ async fn add_channel_handler(
     let expires_at = (Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.create_recovery_verification(
             &channel_id,
             &user_id,
@@ -447,7 +442,7 @@ async fn verify_channel_handler(
     Json(req): Json<VerifyChannelRequest>,
 ) -> Result<Response, AppError> {
     let channel = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_recovery_channel(&req.channel_id)
             .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
@@ -468,7 +463,7 @@ async fn verify_channel_handler(
     }
 
     let verification = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_active_verification(&req.channel_id, "add_channel")
             .ok_or_else(|| AppError::Gone("Verification code expired".into()))?
@@ -483,16 +478,16 @@ async fn verify_channel_handler(
 
     if !code_ok {
         let attempts = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.increment_verification_attempts(&verification.id)?
         };
 
         if attempts >= 5 {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.expire_verification(&verification.id)?;
         } else if attempts >= 3 {
             let lockout = (Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.set_channel_lockout(&req.channel_id, &lockout)?;
         }
 
@@ -501,7 +496,7 @@ async fn verify_channel_handler(
 
     let now = Utc::now().to_rfc3339();
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.consume_verification(&verification.id)?;
         storage.verify_recovery_channel(&req.channel_id, &now)?;
     }
@@ -519,7 +514,7 @@ async fn list_channels_handler(
     UserId(user_id): UserId,
 ) -> Result<Response, AppError> {
     let channels = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.get_recovery_channels_for_user(&user_id)
     };
 
@@ -552,7 +547,7 @@ async fn delete_channel_handler(
 ) -> Result<Response, AppError> {
     // Verify current password.
     let hash = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let (_, hash_opt) = storage
             .get_user_by_id_with_hash(&user_id)
             .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
@@ -571,7 +566,7 @@ async fn delete_channel_handler(
 
     // Check ownership and delete.
     let channel = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_recovery_channel(&channel_id)
             .ok_or_else(|| AppError::NotFound("Channel not found".into()))?
@@ -582,7 +577,7 @@ async fn delete_channel_handler(
     }
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.delete_recovery_channel(&channel_id, &user_id)?;
     }
 
@@ -612,7 +607,7 @@ async fn forgot_password_handler(
 
     if let Some(user_id) = user_opt {
         let channels = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.get_recovery_channels_for_user(&user_id)
         };
 
@@ -640,7 +635,7 @@ async fn forgot_password_handler(
             let expires_at = (Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
 
             {
-                let storage = lock_storage(&state)?;
+                let storage = lock_storage(&state);
                 let _ = storage.create_recovery_verification(
                     &ch.id,
                     &user_id,
@@ -700,7 +695,7 @@ async fn forgot_password_verify_handler(
 
     // Find active reset_password verifications for any of the user's channels.
     let (verification, channel_id) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let channels = storage.get_recovery_channels_for_user(&user_id);
         let mut found = None;
         for ch in channels.iter().filter(|c| c.verified_at.is_some()) {
@@ -720,7 +715,7 @@ async fn forgot_password_verify_handler(
         .map_err(|_| AppError::Internal("Task join error".into()))?;
 
     if !code_ok {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let attempts = storage.increment_verification_attempts(&verification.id)?;
         if attempts >= 5 {
             storage.expire_verification(&verification.id)?;
@@ -730,7 +725,7 @@ async fn forgot_password_verify_handler(
 
     // Consume verification and issue reset token.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.consume_verification(&verification.id)?;
     }
 
@@ -740,7 +735,7 @@ async fn forgot_password_verify_handler(
     let expires_at = (Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.create_reset_token(&token_hash, &user_id, &channel_id, &expires_at)?;
     }
 
@@ -762,7 +757,7 @@ async fn reset_password_handler(
     let token_hash = sha256_hex(&req.reset_token);
 
     let reset_token = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_reset_token(&token_hash)
             .ok_or_else(|| AppError::Unauthorized("Invalid or expired reset token".into()))?
@@ -785,7 +780,7 @@ async fn reset_password_handler(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.update_password_hash(&reset_token.user_id, &new_hash)?;
         storage.consume_reset_token(&token_hash)?;
         // CO-172 Phase 4: propagate new hash to all linked quilombo users
@@ -808,7 +803,7 @@ async fn reset_password_handler(
 
     // Issue a new session JWT.
     let user = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_user_by_id(&reset_token.user_id)
             .ok_or_else(|| AppError::Internal("User not found".into()))?
@@ -847,7 +842,7 @@ async fn change_password_handler(
     Json(req): Json<ChangePasswordRequest>,
 ) -> Result<Response, AppError> {
     let hash = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let (_, hash_opt) = storage
             .get_user_by_id_with_hash(&user_id)
             .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
@@ -873,7 +868,7 @@ async fn change_password_handler(
         if !email_to_attach.contains('@') || email_to_attach.len() > 254 {
             return Err(AppError::BadRequest("Invalid email format".into()));
         }
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         match storage.set_user_email(&user_id, &email_to_attach) {
             Ok(_) => {
                 let _ = storage.ensure_email_recovery_channel(&user_id, &email_to_attach);
@@ -902,7 +897,7 @@ async fn change_password_handler(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.update_password_hash(&user_id, &new_hash)?;
         // Also propagate to any linked quilombo rows so the user keeps a
         // single canonical password across both identities.
@@ -911,7 +906,7 @@ async fn change_password_handler(
 
     // Issue a refreshed JWT.
     let user = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_user_by_id(&user_id)
             .ok_or_else(|| AppError::Internal("User not found".into()))?
@@ -970,10 +965,8 @@ async fn find_user_for_recovery_pair(
     //   - the user typed an email different from the one already on file —
     //     they want to recover via the new one going forward.
     // Idempotent for already-existing channels.
-    if !email.is_empty()
-        && email.contains('@')
-        && let Ok(storage) = state.storage.lock()
-    {
+    if !email.is_empty() && email.contains('@') {
+        let storage = state.storage.lock();
         let _ = storage.ensure_email_recovery_channel(&user_id, email);
     }
 
@@ -988,7 +981,7 @@ async fn find_user_for_recovery_pair(
         &crate::recovery_crypto::normalize_channel_value("email", email),
     );
 
-    let storage = state.storage.lock().ok()?;
+    let storage = state.storage.lock();
     let channels = storage.get_recovery_channels_for_user(&user_id);
     let channel_match = channels
         .iter()
@@ -1012,7 +1005,7 @@ async fn find_user_for_recovery_pair(
 }
 
 async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<String> {
-    let storage = state.storage.lock().ok()?;
+    let storage = state.storage.lock();
     let trimmed = identifier.trim();
     tracing::info!(
         "find_user_for_recovery: input={} (len={})",

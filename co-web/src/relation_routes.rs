@@ -49,13 +49,8 @@ pub struct OutboundRelation {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +69,7 @@ pub async fn get_inbound_relations(
 ) -> Result<Json<Vec<InboundRelation>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let (all_keys, pool): (Vec<String>, Arc<UniversePool>) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let keys = storage.all_universe_keys();
         let pool = Arc::clone(&storage.universe_pool);
         (keys, pool)
@@ -145,7 +140,7 @@ pub async fn get_outbound_relations(
 ) -> Result<Json<Vec<OutboundRelation>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let conn = uc

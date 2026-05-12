@@ -15,11 +15,8 @@ use crate::webhook;
 
 use rusqlite;
 
-fn lock_storage(state: &AppState) -> Result<std::sync::MutexGuard<'_, Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
+    state.storage.lock()
 }
 
 fn relatos_dir() -> String {
@@ -143,7 +140,7 @@ async fn login_handler(
         auth.record_request(&usuario)?;
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let (user, senha_hash) = quilombo_storage::obter_usuario_por_nome(storage.conn(), &usuario)
         .ok_or_else(|| AppError::Unauthorized("Invalid credentials".into()))?;
 
@@ -247,7 +244,7 @@ async fn cadastro_handler(
 
     let id = uuid::Uuid::new_v4().to_string();
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // Check uniqueness
     if quilombo_storage::obter_usuario_por_nome(storage.conn(), &usuario).is_some() {
@@ -517,7 +514,7 @@ async fn publicacoes_por_tag_handler(
 async fn listar_eventos_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Evento>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(quilombo_storage::listar_eventos(storage.conn())))
 }
 
@@ -525,7 +522,7 @@ async fn obter_evento_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<Evento>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     quilombo_storage::obter_evento(storage.conn(), id)
         .map(Json)
         .ok_or_else(|| AppError::NotFound("Event not found".into()))
@@ -536,7 +533,7 @@ async fn criar_evento_handler(
     user_id: UserId,
     Json(body): Json<CriarEvento>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "evento:criar") {
@@ -578,7 +575,7 @@ async fn atualizar_evento_handler(
     Path(id): Path<i64>,
     Json(body): Json<AtualizarEvento>,
 ) -> Result<Json<Evento>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "evento:editar") {
@@ -596,7 +593,7 @@ async fn excluir_evento_handler(
     user_id: UserId,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "evento:excluir") {
@@ -613,7 +610,7 @@ async fn excluir_evento_handler(
 async fn listar_missoes_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Missao>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(quilombo_storage::listar_missoes(storage.conn())))
 }
 
@@ -621,7 +618,7 @@ async fn obter_missao_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let missao = quilombo_storage::obter_missao(storage.conn(), id)
         .ok_or_else(|| AppError::NotFound("Mission not found".into()))?;
     let participacoes = quilombo_storage::listar_participacoes(storage.conn(), id);
@@ -642,7 +639,7 @@ async fn criar_missao_handler(
     user_id: UserId,
     Json(body): Json<CriarMissao>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "missao:criar") {
@@ -669,7 +666,7 @@ async fn participar_missao_handler(
     user_id: UserId,
     Path(id): Path<i64>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // Verify mission exists
     quilombo_storage::obter_missao(storage.conn(), id)
@@ -699,7 +696,7 @@ async fn atualizar_participacao_handler(
     Path((id, uid)): Path<(i64, String)>,
     Json(body): Json<AtualizarParticipacao>,
 ) -> Result<StatusCode, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     // Check: must be mission creator or admin
@@ -724,7 +721,7 @@ async fn atualizar_participacao_handler(
 async fn listar_membros_handler(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Membro>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(quilombo_storage::listar_membros(storage.conn())))
 }
 
@@ -732,7 +729,7 @@ async fn obter_membro_handler(
     State(state): State<AppState>,
     Path(usuario): Path<String>,
 ) -> Result<Json<Membro>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let (user, _) = quilombo_storage::obter_usuario_por_nome(storage.conn(), &usuario)
         .ok_or_else(|| AppError::NotFound("Member not found".into()))?;
 
@@ -752,7 +749,7 @@ async fn listar_comentarios_handler(
     State(state): State<AppState>,
     Query(query): Query<ComentarioQuery>,
 ) -> Result<Json<Vec<Comentario>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(quilombo_storage::listar_comentarios(
         storage.conn(),
         &query,
@@ -764,7 +761,7 @@ async fn criar_comentario_handler(
     Json(body): Json<CriarComentario>,
 ) -> Result<impl IntoResponse, AppError> {
     // Comments are public — no auth required
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let comentario = quilombo_storage::criar_comentario(storage.conn(), &body, None)
         .map_err(AppError::BadRequest)?;
 
@@ -777,7 +774,7 @@ async fn contato_handler(
     State(state): State<AppState>,
     Json(body): Json<CriarMensagem>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let msg = quilombo_storage::criar_mensagem(storage.conn(), &body, None)
         .map_err(AppError::BadRequest)?;
 
@@ -799,7 +796,7 @@ async fn obter_perfil_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<Json<Usuario>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0)
         .map(Json)
         .ok_or_else(|| AppError::NotFound("Profile not found".into()))
@@ -818,7 +815,7 @@ async fn atualizar_perfil_handler(
     user_id: UserId,
     Json(body): Json<AtualizarPerfil>,
 ) -> Result<Json<Usuario>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let email_being_set = body.email.as_ref().map(|e| e.trim().to_lowercase());
 
@@ -866,7 +863,7 @@ async fn listar_mensagens_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<Json<Vec<Mensagem>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(quilombo_storage::listar_mensagens(
         storage.conn(),
         &user_id.0,
@@ -878,7 +875,7 @@ async fn criar_mensagem_handler(
     user_id: UserId,
     Json(body): Json<CriarMensagem>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let msg = quilombo_storage::criar_mensagem(storage.conn(), &body, Some(&user_id.0))
         .map_err(AppError::BadRequest)?;
 
@@ -905,7 +902,7 @@ async fn listar_atividades_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<Json<Vec<Atividade>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "admin:atividades") {
@@ -924,7 +921,7 @@ async fn obter_evento_por_slug_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<Evento>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     quilombo_storage::obter_evento_por_slug(storage.conn(), &slug)
         .map(Json)
         .ok_or_else(|| AppError::NotFound("Event not found".into()))
@@ -947,7 +944,7 @@ async fn admin_telemetria_handler(
     user_id: UserId,
     Query(query): Query<TelemetriaQuery>,
 ) -> Result<Json<Vec<Telemetria>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "admin:painel") {
@@ -965,7 +962,7 @@ async fn admin_resumo_handler(
     user_id: UserId,
     Query(query): Query<TelemetriaQuery>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "admin:painel") {
@@ -982,7 +979,7 @@ async fn admin_listar_usuarios_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<Json<Vec<Usuario>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "admin:usuarios") {
@@ -1091,7 +1088,7 @@ async fn admin_atualizar_usuario_handler(
     Path(target_id): Path<String>,
     Json(body): Json<AtualizarPapelBody>,
 ) -> Result<Json<Usuario>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
     if !tem_permissao(&user.papel, "admin:usuarios") {
@@ -1132,7 +1129,7 @@ async fn link_co_account_handler(
         return Err(AppError::BadRequest("co_user_id is required".into()));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // Verify the quilombo user exists.
     quilombo_storage::obter_usuario_por_id(storage.conn(), &user_id.0)

@@ -46,7 +46,7 @@ fn resolve_asset(embed_path: &str, fs_path: Option<&std::path::Path>) -> Option<
 // --- App State ---
 
 pub struct AppStateInner {
-    pub storage: Mutex<Storage>,
+    pub storage: parking_lot::Mutex<Storage>,
     pub experiment: Mutex<ExperimentStore>,
     pub config: WebConfig,
     pub auth_store: Mutex<AuthStore>,
@@ -83,11 +83,8 @@ pub struct AppStateInner {
 
 pub type AppState = Arc<AppStateInner>;
 
-fn lock_storage(state: &AppState) -> Result<std::sync::MutexGuard<'_, Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
+    state.storage.lock()
 }
 
 fn lock_experiment(
@@ -1189,7 +1186,7 @@ pub async fn start_server(config: WebConfig) {
     let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
 
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config: config.clone(),
         auth_store: Mutex::new(auth_store),
@@ -1319,22 +1316,20 @@ async fn health_check() -> Json<HealthResponse> {
 }
 
 async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
-    let (db_status, disk_status) = match lock_storage(&state) {
-        Err(_) => ("lock failed".to_string(), "lock failed".to_string()),
-        Ok(storage) => {
-            let db = match storage.conn().execute_batch(
-                "SAVEPOINT health_deep; ROLLBACK TO SAVEPOINT health_deep; RELEASE SAVEPOINT health_deep;",
-            ) {
-                Ok(_) => "ok".to_string(),
-                Err(e) => format!("error: {e}"),
-            };
-            let disk = if storage.data_dir.exists() {
-                "ok".to_string()
-            } else {
-                "missing".to_string()
-            };
-            (db, disk)
-        }
+    let (db_status, disk_status) = {
+        let storage = lock_storage(&state);
+        let db = match storage.conn().execute_batch(
+            "SAVEPOINT health_deep; ROLLBACK TO SAVEPOINT health_deep; RELEASE SAVEPOINT health_deep;",
+        ) {
+            Ok(_) => "ok".to_string(),
+            Err(e) => format!("error: {e}"),
+        };
+        let disk = if storage.data_dir.exists() {
+            "ok".to_string()
+        } else {
+            "missing".to_string()
+        };
+        (db, disk)
     };
 
     let all_ok = db_status == "ok" && disk_status == "ok";

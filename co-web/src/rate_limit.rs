@@ -247,7 +247,7 @@ pub fn extract_auth_identity_with_token(
         .map(|s| s.to_string())
         .or_else(|| extract_session_cookie(headers))?;
 
-    let storage = state.storage.lock().ok()?;
+    let storage = state.storage.lock();
     let api_token = storage.get_api_token_by_value(&token).ok().flatten()?;
     let user = storage.get_user_by_id(&api_token.user_id)?;
     Some((api_token.user_id, Tier::parse(&user.tier)))

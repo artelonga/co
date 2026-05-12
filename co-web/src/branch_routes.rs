@@ -116,10 +116,7 @@ pub async fn create_branch(
     // Verify the head_state actually exists in this universe.
     {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             if storage.get_universe(&slug).is_none() {
                 return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
             }
@@ -203,10 +200,7 @@ pub async fn advance_branch(
     // Read existing branch entry (if any) to preserve created_at + default flag.
     let (existing_created_at, existing_default) = {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             if storage.get_universe(&slug).is_none() {
                 return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
             }

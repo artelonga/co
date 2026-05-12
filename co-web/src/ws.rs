@@ -450,8 +450,7 @@ async fn get_or_create_room(
     let content = state
         .storage
         .lock()
-        .ok()
-        .and_then(|s| s.get_entry_body(slug, doc_id))
+        .get_entry_body(slug, doc_id)
         .unwrap_or_default();
 
     let doc = Doc::new();
@@ -517,9 +516,8 @@ async fn save_room(doc_arc: &Arc<Mutex<Doc>>, slug: &str, doc_id: &str, state: &
         let txn = doc.transact();
         text.get_string(&txn)
     };
-    if let Ok(storage) = state.storage.lock()
-        && let Err(e) = storage.update_entry_body(slug, doc_id, &content)
-    {
+    let storage = state.storage.lock();
+    if let Err(e) = storage.update_entry_body(slug, doc_id, &content) {
         warn!("ws persist failed for {slug}/{doc_id}: {e}");
     }
 }
@@ -629,7 +627,7 @@ mod tests {
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
         let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: StdMutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: StdMutex::new(experiment),
             config: WebConfig {
                 port: 0,
@@ -717,7 +715,7 @@ mod tests {
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
         let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: StdMutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: StdMutex::new(experiment),
             config: WebConfig {
                 port: 0,

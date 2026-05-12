@@ -127,10 +127,7 @@ fn require_writer(
 ) -> Result<String, AppError> {
     let user_id = resolve_user_id(state, headers)
         .ok_or_else(|| AppError::Unauthorized("Login required".into()))?;
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
     let universe = storage
         .get_universe(universe_key)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -194,10 +191,7 @@ pub async fn upload_asset(
     let mime = detect_mime(&body, content_type);
 
     let (universe_dir, conn) = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         (
             storage.universe_pool.universe_dir(&universe_key),
             storage.universe_conn(&universe_key),
@@ -322,10 +316,7 @@ pub async fn get_asset(
     let etag = format!("\"{sha256}\"");
 
     let (universe_dir, conn) = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         (
             storage.universe_pool.universe_dir(&universe_key),
             storage.universe_conn(&universe_key),
@@ -503,10 +494,7 @@ pub async fn delete_asset(
     require_writer(&state, &headers, &universe_key)?;
 
     let (universe_dir, conn) = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         (
             storage.universe_pool.universe_dir(&universe_key),
             storage.universe_conn(&universe_key),
@@ -603,10 +591,7 @@ pub async fn list_assets(
     // Visibility gate enforced by universe_visibility_gate middleware (CO-161).
 
     let conn = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -683,10 +668,7 @@ pub async fn list_tags(
 ) -> Result<Json<Vec<TagCount>>, AppError> {
     // Visibility gate enforced by universe_visibility_gate middleware (CO-161).
     let conn = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -728,10 +710,7 @@ pub async fn add_tags(
     require_writer(&state, &headers, &universe_key)?;
 
     let conn = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -777,10 +756,7 @@ pub async fn remove_tag(
     require_writer(&state, &headers, &universe_key)?;
 
     let conn = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage.universe_conn(&universe_key)
     };
     let guard = conn
@@ -838,10 +814,7 @@ pub async fn get_raw_blob(
     axum::extract::Path((slug, path)): axum::extract::Path<(String, String)>,
 ) -> Result<axum::response::Response, AppError> {
     let universe_root = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock".into()))?;
+        let storage = state.storage.lock();
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;

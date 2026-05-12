@@ -55,9 +55,7 @@ async fn vercel_drain_handler(
 ) -> StatusCode {
     // 1. Look up the per-universe drain secret.
     let secret = {
-        let Ok(storage) = state.storage.lock() else {
-            return StatusCode::INTERNAL_SERVER_ERROR;
-        };
+        let storage = state.storage.lock();
         match storage.get_log_drain_secret(&universe_id) {
             Ok(Some(s)) if !s.is_empty() => s,
             Ok(_) => return StatusCode::NOT_FOUND,
@@ -87,9 +85,7 @@ async fn vercel_drain_handler(
 
     // 4. Persist events — deduplicated by event_id via INSERT OR IGNORE.
     let received_at = Utc::now().to_rfc3339();
-    let Ok(storage) = state.storage.lock() else {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    };
+    let storage = state.storage.lock();
     for event in &events {
         let event_id = if event.id.is_empty() {
             uuid::Uuid::new_v4().to_string()
@@ -184,7 +180,7 @@ mod tests {
             Arc::new(game_core::storage::Storage::open(&game_db_path).expect("open game storage"));
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: AppState = Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

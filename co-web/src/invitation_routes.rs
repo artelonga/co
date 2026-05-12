@@ -116,11 +116,8 @@ pub struct AcceptInvitationResponse {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(state: &AppState) -> Result<std::sync::MutexGuard<'_, Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
+    state.storage.lock()
 }
 
 fn redact_email(email: &str) -> String {
@@ -227,7 +224,7 @@ pub async fn create_invitation_handler(
 
     // Resolve recipient identity and check authorization together (single lock).
     let (invited_email, invited_user_id, universe_name, inviter_name, token_hash, raw_token) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
 
         // Universe must exist.
         let universe = storage
@@ -358,7 +355,7 @@ pub async fn preview_invitation_handler(
     Path(raw_token): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     let token_hash = Storage::hash_invitation_token(&raw_token);
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let inv = storage
         .get_invitation_by_token(&token_hash)
@@ -419,7 +416,7 @@ pub async fn accept_invitation_handler(
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
     let token_hash = Storage::hash_invitation_token(&raw_token);
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let inv = storage
         .get_invitation_by_token(&token_hash)
@@ -518,7 +515,7 @@ pub async fn list_universe_invitations_handler(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let universe = storage
         .get_universe(&slug)
@@ -570,7 +567,7 @@ pub async fn me_accept_invitation_handler(
     user_id: UserId,
     axum::Json(body): axum::Json<MeAcceptInvitationBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let user = storage
         .get_user_by_id(&user_id.0)
@@ -615,7 +612,7 @@ pub async fn me_invitations_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let user = storage
         .get_user_by_id(&user_id.0)
@@ -701,7 +698,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

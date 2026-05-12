@@ -274,7 +274,7 @@ fn make_universe_router(
         Arc::new(game_core::storage::Storage::open(&game_db_path).expect("game storage"));
     let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),

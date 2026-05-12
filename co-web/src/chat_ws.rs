@@ -225,10 +225,7 @@ pub async fn chat_ws_handler(
 
     // 3. Membership + room check (all reads under one storage lock).
     let (room_id, your_role, author) = {
-        let storage = match state.storage.lock() {
-            Ok(s) => s,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
+        let storage = state.storage.lock();
 
         if storage.get_universe(&slug).is_none() {
             return StatusCode::NOT_FOUND.into_response();
@@ -303,7 +300,7 @@ async fn handle_ws(
 
     // 2. Build current presence list for the `ready` event.
     let presence_list = {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.storage.lock();
         current_presence(&state, &room_id, &storage)
     };
 
@@ -505,7 +502,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),
@@ -803,7 +800,7 @@ mod tests {
         // Pre-register a broadcast channel for the general room so we can
         // subscribe before the REST POST.
         let room_id = {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.storage.lock();
             storage
                 .get_chat_room_by_slug("ws6", "general")
                 .expect("general room")
@@ -871,7 +868,7 @@ mod tests {
 
         // Get room A (general) and create room B
         let (room_a_id, room_b_id) = {
-            let storage = state.storage.lock().unwrap();
+            let storage = state.storage.lock();
             let room_a = storage
                 .get_chat_room_by_slug("ws7", "general")
                 .expect("general room");

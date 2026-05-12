@@ -307,7 +307,7 @@ pub fn resolve_user_id(
     }
 
     // Fall back to API token via storage.
-    let storage = state.storage.lock().ok()?;
+    let storage = state.storage.lock();
     storage
         .get_api_token_by_value(&bearer)
         .ok()
@@ -399,10 +399,7 @@ pub async fn require_auth_with_token(
 
     // Lookup + immediately drop the lock before the next.run().await below.
     let user_id = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| unauthorized("Storage lock failed"))?;
+        let storage = state.storage.lock();
         match storage.get_api_token_by_value(&token) {
             Ok(Some(tok)) => tok.user_id.clone(),
             _ => return Err(unauthorized("Invalid or expired token")),
@@ -712,13 +709,7 @@ pub async fn universe_visibility_gate(
     };
 
     let universe = {
-        let storage = state.storage.lock().map_err(|_| {
-            err_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                "Storage lock failed",
-            )
-        })?;
+        let storage = state.storage.lock();
         match storage.get_universe(&slug) {
             Some(u) => u,
             None => {
@@ -739,13 +730,7 @@ pub async fn universe_visibility_gate(
         .ok_or_else(|| err_response(StatusCode::UNAUTHORIZED, "unauthorized", "Login required"))?;
 
     let is_allowed = {
-        let storage = state.storage.lock().map_err(|_| {
-            err_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                "Storage lock failed",
-            )
-        })?;
+        let storage = state.storage.lock();
         let universe = storage.get_universe(&slug).ok_or_else(|| {
             err_response(
                 StatusCode::NOT_FOUND,
@@ -805,13 +790,7 @@ pub async fn universe_writer_gate(
         .ok_or_else(|| err_response(StatusCode::UNAUTHORIZED, "unauthorized", "Login required"))?;
 
     let is_allowed = {
-        let storage = state.storage.lock().map_err(|_| {
-            err_response(
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "internal_error",
-                "Storage lock failed",
-            )
-        })?;
+        let storage = state.storage.lock();
         let universe = storage.get_universe(&slug).ok_or_else(|| {
             err_response(
                 StatusCode::NOT_FOUND,

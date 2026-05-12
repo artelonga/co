@@ -208,10 +208,7 @@ fn validate_vault_auth(
     }
 
     // Try API token
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
     match storage.get_api_token_by_value(&bearer) {
         Ok(Some(tok)) => Ok((tok.user_id, Some(tok.id))),
         Ok(None) => Err(AppError::Unauthorized("Invalid or expired token".into())),
@@ -233,10 +230,9 @@ fn vault_auth(state: &AppState, headers: &HeaderMap) -> Result<String, AppError>
     if let Some(ref tid) = token_id {
         // Look up the token's owner tier; admin-tier owners bypass the limit.
         let is_admin = {
-            let storage = state.storage.lock().ok();
+            let storage = state.storage.lock();
             storage
-                .as_ref()
-                .and_then(|s| s.get_user_by_id(&user_id))
+                .get_user_by_id(&user_id)
                 .map(|u| u.tier == "admin")
                 .unwrap_or(false)
         };
@@ -253,13 +249,8 @@ fn vault_auth(state: &AppState, headers: &HeaderMap) -> Result<String, AppError>
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 /// Build a VaultStat from optional ISO-8601 datetime strings and body size.
@@ -334,7 +325,7 @@ fn write_raw_vault_file(
     body: &str,
 ) -> Result<(), AppError> {
     let universe_root = {
-        let storage = lock_storage(state)?;
+        let storage = lock_storage(state);
         storage
             .get_universe(universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -362,7 +353,7 @@ fn index_raw_vault_file(
 ) -> Result<crate::entry_index::EntryRow, AppError> {
     let entry = make_entry(path, JsonValue::Object(Default::default()), body);
     let uc = {
-        let storage = lock_storage(state)?;
+        let storage = lock_storage(state);
         storage.universe_conn(universe_key)
     };
     let uc_guard = uc
@@ -377,10 +368,11 @@ fn index_raw_vault_file(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::Internal("raw entry vanished after upsert".into()))?;
     // 1.71.0 (Phase 8 step 2): same CAS dual-write for raw YAML files.
-    if let Ok(meta) = state.storage.lock()
-        && let Err(e) = meta.put_blob(body.as_bytes())
     {
-        tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+        let meta = state.storage.lock();
+        if let Err(e) = meta.put_blob(body.as_bytes()) {
+            tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+        }
     }
     Ok(row)
 }
@@ -394,7 +386,7 @@ pub(crate) fn write_vault_entry(
     body: &str,
 ) -> Result<crate::entry_index::EntryRow, AppError> {
     let universe_root = {
-        let storage = lock_storage(state)?;
+        let storage = lock_storage(state);
         storage
             .get_universe(universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -416,7 +408,7 @@ pub(crate) fn write_vault_entry(
     let now = Utc::now().to_rfc3339();
     {
         let uc = {
-            let storage = lock_storage(state)?;
+            let storage = lock_storage(state);
             storage.universe_conn(universe_key)
         };
         let uc_guard = uc
@@ -459,10 +451,11 @@ pub(crate) fn write_vault_entry(
         // Phase 8 step 4 will read historical bytes via this on pin
         // rewind. Errors are logged but non-fatal — the vault write is
         // already durable in the on-disk file + entries index.
-        if let Ok(meta) = state.storage.lock()
-            && let Err(e) = meta.put_blob(body.as_bytes())
         {
-            tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+            let meta = state.storage.lock();
+            if let Err(e) = meta.put_blob(body.as_bytes()) {
+                tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
+            }
         }
 
         // 1.67.0: refresh content_count from the actual entry-index row
@@ -478,9 +471,8 @@ pub(crate) fn write_vault_entry(
                 |row| row.get(0),
             )
             .ok();
-        if let Some(n) = actual_count
-            && let Ok(meta) = state.storage.lock()
-        {
+        if let Some(n) = actual_count {
+            let meta = state.storage.lock();
             let _ = meta.conn().execute(
                 "UPDATE universes SET content_count = ?1 WHERE key = ?2",
                 rusqlite::params![n, universe_key],
@@ -519,7 +511,7 @@ pub async fn list_vault_files(
     vault_auth(&state, &headers)?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -562,7 +554,7 @@ pub async fn get_vault_file(
     vault_auth(&state, &headers)?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -657,9 +649,9 @@ pub async fn put_vault_file(
     if path == co::manifest::MANIFEST_FILENAME {
         // CO-79: invalidate manifest cache so the next read picks up the new schema.
         state.cache.invalidate_universe(&slug);
-        let db_path = state.storage.lock().ok().map(|s| s.data_dir.join("co.db"));
-        let universe_root = lock_storage(&state).ok().map(|s| s.universe_root(&slug));
-        let universe_pool = state.storage.lock().ok().map(|s| s.universe_pool.clone());
+        let db_path = Some(state.storage.lock().data_dir.join("co.db"));
+        let universe_root = Some(lock_storage(&state).universe_root(&slug));
+        let universe_pool = Some(state.storage.lock().universe_pool.clone());
         if let (Some(db_path), Some(universe_root)) = (db_path, universe_root) {
             let manifest_path = universe_root.join(co::manifest::MANIFEST_FILENAME);
             if let Ok(bytes) = std::fs::read(&manifest_path)
@@ -723,7 +715,7 @@ pub async fn post_vault_file(
 
     let (existing_fm, existing_body) = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage
                 .get_universe(&slug)
                 .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -783,7 +775,7 @@ pub async fn patch_vault_file(
 
     let (existing_fm, existing_body) = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage
                 .get_universe(&slug)
                 .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -951,7 +943,7 @@ pub async fn delete_vault_file(
 
     let (universe_root, entry_exists) = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage
                 .get_universe(&slug)
                 .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -966,7 +958,7 @@ pub async fn delete_vault_file(
             .map_err(|e| AppError::Internal(e.to_string()))?
             .is_some();
         let universe_root = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_root(&slug)
         };
         (universe_root, exists)
@@ -997,7 +989,7 @@ pub async fn delete_vault_file(
     // Remove from index
     {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -1013,7 +1005,7 @@ pub async fn delete_vault_file(
         crate::reference_routes::remove_reference_meta(&uc_guard, &slug, &path);
     }
 
-    let _ = lock_storage(&state).map(|mut s| s.decrement_universe_content_count(&slug, 1));
+    lock_storage(&state).decrement_universe_content_count(&slug, 1);
 
     // CO-156: emit entry.delete telemetry
     crate::telemetry::emit_crud_event(
@@ -1050,7 +1042,7 @@ pub async fn search_vault(
     vault_auth(&state, &headers)?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -1123,7 +1115,7 @@ pub async fn vault_tags(
     vault_auth(&state, &headers)?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -1160,7 +1152,7 @@ pub async fn vault_tree(
     vault_auth(&state, &headers)?;
 
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -1329,7 +1321,7 @@ pub async fn vault_clip(
     }
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
@@ -1381,7 +1373,7 @@ pub async fn create_api_token(
     user_id: crate::auth::UserId,
     Json(req): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let tok = storage
         .create_api_token(&user_id.0, &req.name)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1404,7 +1396,7 @@ pub async fn list_api_tokens(
     State(state): State<AppState>,
     user_id: crate::auth::UserId,
 ) -> Result<Json<Vec<TokenInfo>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let tokens = storage
         .list_api_tokens(&user_id.0)
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1430,7 +1422,7 @@ pub async fn revoke_api_token(
     user_id: crate::auth::UserId,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let deleted = storage
         .delete_api_token(&id, &user_id.0)
         .map_err(|e| AppError::Internal(e.to_string()))?;

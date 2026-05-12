@@ -294,10 +294,7 @@ pub async fn register_oauth_client(
     };
 
     {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         insert_oauth_client(storage.conn(), &client)
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
@@ -321,10 +318,7 @@ pub async fn list_oauth_clients_handler(
     State(state): State<AppState>,
     _admin: GitHubAdmin,
 ) -> Result<axum::Json<Vec<RegisterClientResponse>>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
     let clients = list_oauth_clients(storage.conn());
     let resp: Vec<RegisterClientResponse> = clients
         .into_iter()
@@ -424,10 +418,7 @@ pub async fn authorize_handler(
 
     // Look up client.
     let client = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         get_oauth_client_by_client_id(storage.conn(), &params.client_id)
             .ok_or_else(|| AppError::BadRequest("Unknown client_id".into()))?
     };
@@ -454,10 +445,7 @@ pub async fn authorize_handler(
     let expires_at = (now + chrono::Duration::seconds(300)).to_rfc3339();
 
     {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         insert_auth_code(
             storage.conn(),
             &AuthCodeRow {
@@ -523,10 +511,7 @@ pub async fn token_handler(
 
     // Fetch and consume the auth code.
     let code_row = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
 
         // Validate client credentials.
         let client = get_oauth_client_by_client_id(storage.conn(), &params.client_id)
@@ -572,10 +557,7 @@ pub async fn token_handler(
     let at_expires_at = (now + chrono::Duration::seconds(3600)).to_rfc3339();
 
     {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         insert_access_token(
             storage.conn(),
             &access_token,
@@ -591,10 +573,7 @@ pub async fn token_handler(
     // Mint ES256 ID token.
     let id_token = {
         let user_email = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+            let storage = state.storage.lock();
             storage
                 .get_user_by_id(&code_row.user_id)
                 .map(|u| u.email)
@@ -641,10 +620,7 @@ pub async fn userinfo_handler(
 
     // Validate access token and look up user.
     let (user_id, _scope, _client_id, expires_at_str) = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         get_access_token_row(storage.conn(), token)
             .ok_or_else(|| AppError::Unauthorized("Invalid access token".into()))?
     };
@@ -659,10 +635,7 @@ pub async fn userinfo_handler(
 
     // Fetch user.
     let user = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+        let storage = state.storage.lock();
         storage
             .get_user_by_id(&user_id)
             .ok_or_else(|| AppError::NotFound("User not found".into()))?
@@ -742,7 +715,7 @@ mod tests {
                 .expect("Failed to open test game storage"),
         );
         let state: AppState = Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),
@@ -1016,7 +989,7 @@ mod tests {
                 .expect("Failed to open test game storage"),
         );
         let state: AppState = Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

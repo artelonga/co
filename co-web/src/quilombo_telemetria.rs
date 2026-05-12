@@ -228,30 +228,29 @@ pub async fn telemetry_middleware(
     let path_clone = path;
     let user_agent_clone = user_agent;
     tokio::spawn(async move {
-        if let Ok(storage) = state.storage.lock() {
-            // Filter internal referrers
-            let filtered_referrer = referrer.as_deref().and_then(|r| {
-                if r.contains("quilomboaraucaria.org")
-                    || r.contains("quilombo-araucaria")
-                    || r.contains("localhost")
-                {
-                    None
-                } else {
-                    Some(r)
-                }
-            });
+        let storage = state.storage.lock();
+        // Filter internal referrers
+        let filtered_referrer = referrer.as_deref().and_then(|r| {
+            if r.contains("quilomboaraucaria.org")
+                || r.contains("quilombo-araucaria")
+                || r.contains("localhost")
+            {
+                None
+            } else {
+                Some(r)
+            }
+        });
 
-            quilombo_storage::registrar_visita(
-                storage.conn(),
-                Some(&token),
-                None, // user_id extracted at request level, not here
-                &path_clone,
-                filtered_referrer,
-                Some(&user_agent_clone),
-                Some(&ip_hash),
-                Some(duration_ms),
-            );
-        }
+        quilombo_storage::registrar_visita(
+            storage.conn(),
+            Some(&token),
+            None, // user_id extracted at request level, not here
+            &path_clone,
+            filtered_referrer,
+            Some(&user_agent_clone),
+            Some(&ip_hash),
+            Some(duration_ms),
+        );
     });
 
     response

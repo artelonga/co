@@ -58,13 +58,8 @@ pub struct ReadAllResponse {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +73,7 @@ async fn list_notifications_handler(
     Query(q): Query<ListNotificationsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let (notifications, has_more) =
         storage.list_my_notifications(&user_id.0, q.since.as_deref(), limit);
     let unread_count = storage.get_unread_count(&user_id.0);
@@ -94,7 +89,7 @@ async fn read_all_notifications_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let count = storage.mark_all_read(&user_id.0)?;
     Ok(axum::Json(ReadAllResponse { count }))
 }
@@ -105,7 +100,7 @@ async fn mark_notification_read_handler(
     Path(id): Path<String>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     storage
         .mark_notification_read(&id, &user_id.0)
         .map_err(|e| {
@@ -131,7 +126,7 @@ async fn get_preferences_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let prefs = storage.get_preferences(&user_id.0);
     Ok(axum::Json(prefs))
 }
@@ -174,7 +169,7 @@ async fn put_preferences_handler(
         }
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     storage
         .update_preferences(&user_id.0, &body)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
@@ -249,7 +244,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

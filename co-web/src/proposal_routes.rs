@@ -141,10 +141,7 @@ pub async fn create_proposal(
 
     // Verify target universe + source universe + source state all exist.
     {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+        let storage = state.storage.lock();
         if storage.get_universe(&target_slug).is_none() {
             return Err(AppError::NotFound(format!(
                 "Target universe '{target_slug}' not found"
@@ -159,10 +156,7 @@ pub async fn create_proposal(
     }
     {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             storage.universe_conn(&req.source_universe)
         };
         let uc_guard = uc
@@ -264,10 +258,7 @@ pub async fn merge_proposal(
 
     let (source_universe, source_state, target_branch, current_status, prop_title, prop_desc) = {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             if storage.get_universe(&target_slug).is_none() {
                 return Err(AppError::NotFound(format!(
                     "Universe '{target_slug}' not found"
@@ -333,10 +324,7 @@ pub async fn merge_proposal(
 
     let source_entries = {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             if storage.get_universe(&source_universe).is_none() {
                 return Err(AppError::BadRequest(format!(
                     "Source universe '{source_universe}' no longer exists"
@@ -389,10 +377,7 @@ pub async fn merge_proposal(
     let branch_path = format!("branches/{target_branch}.md");
     let branch_advanced = {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             storage.universe_conn(&target_slug)
         };
         let uc_guard = uc
@@ -542,10 +527,7 @@ fn take_state_for_merge(
 
     let (state_lines, parent_path) = {
         let uc = {
-            let storage = state
-                .storage
-                .lock()
-                .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+            let storage = state.storage.lock();
             storage.universe_conn(slug)
         };
         let uc_guard = uc

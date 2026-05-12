@@ -212,9 +212,8 @@ pub fn emit_crud_event(state: &crate::server::AppState, ev: CrudEvent) {
         ua_os: None,
     };
     tokio::spawn(async move {
-        if let Ok(storage) = state_clone.storage.lock() {
-            insert_event(storage.conn(), &row);
-        }
+        let storage = state_clone.storage.lock();
+        insert_event(storage.conn(), &row);
     });
 }
 
@@ -604,9 +603,8 @@ pub async fn telemetry_middleware(
     // OLTP write (primary store — CO-46)
     let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
-        if let Ok(storage) = state_clone.storage.lock() {
-            insert_event(storage.conn(), &ev);
-        }
+        let storage = state_clone.storage.lock();
+        insert_event(storage.conn(), &ev);
     });
 
     // CO-118: parallel WAE write (fire-and-forget, no-op when not configured)
@@ -680,9 +678,8 @@ pub async fn track_event_handler(
 
     let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
-        if let Ok(storage) = state_clone.storage.lock() {
-            insert_event(storage.conn(), &ev);
-        }
+        let storage = state_clone.storage.lock();
+        insert_event(storage.conn(), &ev);
     });
 
     StatusCode::ACCEPTED
@@ -823,10 +820,9 @@ pub async fn marketing_events_handler(
 
     let state_clone = Arc::clone(&state);
     tokio::spawn(async move {
-        if let Ok(storage) = state_clone.storage.lock() {
-            for row in &rows {
-                insert_event(storage.conn(), row);
-            }
+        let storage = state_clone.storage.lock();
+        for row in &rows {
+            insert_event(storage.conn(), row);
         }
     });
 
@@ -853,18 +849,15 @@ fn derive_event_type_from_marketing(name: &str) -> String {
 
 /// GET /api/v1/admin/telemetry/summary — aggregated analytics dashboard data.
 pub async fn summary_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.storage.lock() {
-        Ok(storage) => Json(telemetry_summary(storage.conn())).into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    let storage = state.storage.lock();
+    Json(telemetry_summary(storage.conn())).into_response()
 }
 
 /// GET /api/v1/admin/telemetry/export — last 10 000 events as CSV.
 pub async fn export_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let csv = match state.storage.lock() {
-        Ok(storage) => build_csv(storage.conn()),
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let storage = state.storage.lock();
+    let csv = build_csv(storage.conn());
+    drop(storage);
 
     (
         StatusCode::OK,
@@ -1118,10 +1111,8 @@ pub fn router() -> Router<AppState> {
 
 /// GET /api/v1/admin/telemetry/crud-summary — CRUD events in last 24 hours.
 pub async fn crud_summary_handler(State(state): State<AppState>) -> impl IntoResponse {
-    match state.storage.lock() {
-        Ok(storage) => Json(crud_event_summary_24h(storage.conn())).into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
+    let storage = state.storage.lock();
+    Json(crud_event_summary_24h(storage.conn())).into_response()
 }
 
 /// Admin-only telemetry endpoints.

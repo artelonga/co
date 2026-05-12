@@ -244,10 +244,7 @@ async fn callback_handler(
 
     // 4. Find or create CO user.
     let user = {
-        let mut storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("storage lock".into()))?;
+        let mut storage = state.storage.lock();
         storage.find_or_create_user_by_google(&userinfo.sub, &userinfo.email, &userinfo.name)
     };
     let user = user.map_err(|e| AppError::Internal(format!("link google user: {e}")))?;
@@ -255,10 +252,7 @@ async fn callback_handler(
     // CO-184 reverse bridge: ensure a quilombo identity exists too. Best-effort —
     // a failure here doesn't block sign-in (user can still use CO routes).
     {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| AppError::Internal("storage lock".into()))?;
+        let storage = state.storage.lock();
         if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {} (sign-in continues): {e}",

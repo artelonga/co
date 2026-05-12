@@ -78,21 +78,11 @@ pub fn spawn(rx: EmbeddingReceiver, state: AppState) {
 /// then enqueue them. Runs as an async background task (non-blocking).
 pub fn boot_scan(state: AppState) {
     tokio::spawn(async move {
-        let universe_keys = {
-            match state.storage.lock() {
-                Ok(s) => s.all_universe_keys(),
-                Err(_) => return,
-            }
-        };
+        let universe_keys = { state.storage.lock().all_universe_keys() };
 
         let mut queued = 0usize;
         for key in universe_keys {
-            let uc = {
-                match state.storage.lock() {
-                    Ok(s) => s.universe_conn(&key),
-                    Err(_) => continue,
-                }
-            };
+            let uc = { state.storage.lock().universe_conn(&key) };
             let conn = match uc.lock() {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -153,11 +143,11 @@ fn run_worker(rx: EmbeddingReceiver, state: AppState) {
 fn process_batch(batch: &[EmbeddingJob], state: &AppState) {
     // --- Handle deletes first ---
     for job in batch {
-        if let EmbeddingJob::Delete { universe_key, path } = job
-            && let Ok(uc) = state.storage.lock().map(|s| s.universe_conn(universe_key))
-            && let Ok(conn) = uc.lock()
-        {
-            let _ = EmbeddingIndex::new(&conn).remove(universe_key, path);
+        if let EmbeddingJob::Delete { universe_key, path } = job {
+            let uc = state.storage.lock().universe_conn(universe_key);
+            if let Ok(conn) = uc.lock() {
+                let _ = EmbeddingIndex::new(&conn).remove(universe_key, path);
+            }
         }
     }
 
@@ -213,10 +203,7 @@ fn process_batch(batch: &[EmbeddingJob], state: &AppState) {
     // Write each embedding to the per-universe DB.
     for ((universe_key, path, _body, body_hash), embedding) in upserts.iter().zip(embeddings.iter())
     {
-        let uc = match state.storage.lock().map(|s| s.universe_conn(universe_key)) {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
+        let uc = state.storage.lock().universe_conn(universe_key);
         let conn = match uc.lock() {
             Ok(c) => c,
             Err(_) => continue,

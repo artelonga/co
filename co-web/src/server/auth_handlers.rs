@@ -90,7 +90,7 @@ pub(super) async fn login_handler(
 
     // Look up user — new emails auto-register on verify, so always send code.
     let user_id = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.get_user_by_email(&email).map(|u| u.id)
     };
 
@@ -165,7 +165,7 @@ pub(super) async fn verify_handler(
     // Code matches — resolve or create user.
     let (user_id, display_name, tier) = match entry.user_id {
         Some(ref id) => {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             let u = storage
                 .get_user_by_id(id)
                 .unwrap_or_else(|| crate::models::User {
@@ -182,7 +182,7 @@ pub(super) async fn verify_handler(
             // First-time user — auto-register.
             let display_name = email.split('@').next().unwrap_or("user").to_string();
             let user = {
-                let mut storage = lock_storage(&state)?;
+                let mut storage = lock_storage(&state);
                 storage
                     .create_user(&email, &display_name)
                     .map_err(|e| AppError::Internal(e.to_string()))?
@@ -206,7 +206,7 @@ pub(super) async fn verify_handler(
 
     // CO-184 reverse bridge — best-effort.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if let Err(e) = storage.ensure_quilombo_user_for_co(&user_id) {
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {user_id} (magic-link continues): {e}"
@@ -249,7 +249,7 @@ pub(super) async fn me_handler(
     State(state): State<AppState>,
     user_id: crate::auth::UserId,
 ) -> Result<Json<MeResponse>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // Check board users table first, then fall back to quilombo users.
     if let Some(user) = storage.get_user_by_id(&user_id.0) {
@@ -301,7 +301,7 @@ pub(super) async fn user_stats_handler(
     State(state): State<AppState>,
     user_id: crate::auth::UserId,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let universes = storage.list_universes_for_user(&user_id.0);
 
     let mut stats = Vec::new();
@@ -400,7 +400,7 @@ pub(super) async fn password_login_handler(
     Json(req): Json<PasswordLoginRequest>,
 ) -> Result<Response, AppError> {
     let (user, hash_opt) = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if !req.email.is_empty() {
             let email = req.email.trim().to_lowercase();
             storage
@@ -445,7 +445,7 @@ pub(super) async fn password_login_handler(
 
     // CO-184 reverse bridge — best-effort.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {} (password-login continues): {e}",
@@ -554,7 +554,7 @@ pub(super) async fn signup_handler(
 
     // --- rate limit (cluster-wide rolling window) ---
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let count = storage.count_users_created_since(SIGNUP_WINDOW_SECONDS);
         if count >= SIGNUP_DAILY_CAP {
             return Err(AppError::TooManyRequests(format!(
@@ -578,7 +578,7 @@ pub(super) async fn signup_handler(
 
     // --- create user ---
     let user = {
-        let mut storage = lock_storage(&state)?;
+        let mut storage = lock_storage(&state);
         match storage.create_user_with_password(&usuario, &password_hash, email_opt.as_deref()) {
             Ok(u) => u,
             Err(crate::storage::users::SignupError::UsuarioTaken) => {
@@ -602,7 +602,7 @@ pub(super) async fn signup_handler(
 
     // CO-184 reverse bridge — best-effort.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {} (signup continues): {e}",

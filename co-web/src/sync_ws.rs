@@ -180,10 +180,7 @@ pub async fn sync_ws_handler(
                 uid
             } else {
                 // Fall back to long-lived API token (CO-35).
-                let storage = match state.storage.lock() {
-                    Ok(s) => s,
-                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-                };
+                let storage = state.storage.lock();
                 match storage.get_api_token_by_value(t) {
                     Ok(Some(tok)) => tok.user_id,
                     _ => return StatusCode::UNAUTHORIZED.into_response(),
@@ -398,9 +395,7 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
     use crate::entry_index::{EntryIndex, make_entry};
     use co::proto::sync::sync_delta::{Body, Kind};
 
-    let Ok(storage) = state.storage.lock() else {
-        return;
-    };
+    let storage = state.storage.lock();
     let universe_root = storage.universe_root(universe_key);
     let conn_arc = storage.universe_conn(universe_key);
     drop(storage); // free the meta lock before per-universe work
@@ -482,9 +477,8 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
             None
         }
     };
-    if let Some(n) = actual
-        && let Ok(storage) = state.storage.lock()
-    {
+    if let Some(n) = actual {
+        let storage = state.storage.lock();
         let _ = storage.conn().execute(
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",
             rusqlite::params![n, universe_key],
@@ -647,7 +641,7 @@ mod tests {
 
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config: test_config(tmp.path()),
             auth_store: Mutex::new(auth_store),
@@ -799,7 +793,7 @@ mod tests {
 
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config: test_config(&data_dir),
             auth_store: Mutex::new(auth_store),
@@ -837,7 +831,7 @@ mod tests {
 
         // 1. Disk: file should exist.
         let universe_root = {
-            let s = state.storage.lock().unwrap();
+            let s = state.storage.lock();
             s.universe_root(universe)
         };
         let on_disk = universe_root.join("notes/hello.md");
@@ -851,7 +845,7 @@ mod tests {
 
         // 2. Per-universe DB: row should be indexed.
         let conn_arc = {
-            let s = state.storage.lock().unwrap();
+            let s = state.storage.lock();
             s.universe_conn(universe)
         };
         let count: i64 = {

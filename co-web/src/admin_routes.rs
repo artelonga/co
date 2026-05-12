@@ -331,10 +331,7 @@ pub async fn dashboard_handler(
 
     // Query fresh aggregates
     let data = {
-        let storage = state
-            .storage
-            .lock()
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())?;
+        let storage = state.storage.lock();
         query_admin_dashboard(storage.conn())
     };
 
@@ -668,7 +665,7 @@ mod tests {
         );
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: StdMutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: StdMutex::new(experiment),
             config,
             auth_store: StdMutex::new(auth_store),

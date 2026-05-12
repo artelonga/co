@@ -244,10 +244,7 @@ pub async fn submit_lead(
 
     // 5. Rate limit — 5 leads per IP-hash per 24 h
     let rate_exceeded = {
-        let storage = match state.storage.lock() {
-            Ok(g) => g,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
+        let storage = state.storage.lock();
         let count: i64 = storage
             .conn()
             .query_row(
@@ -302,10 +299,7 @@ pub async fn submit_lead(
     // 7. Persist
     let now = chrono::Utc::now().to_rfc3339();
     let (id, insert_ok) = {
-        let storage = match state.storage.lock() {
-            Ok(g) => g,
-            Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-        };
+        let storage = state.storage.lock();
         let res = storage.conn().execute(
             "INSERT INTO leads
              (created_at, updated_at, nome, email, telefone, mensagem,
@@ -361,10 +355,7 @@ pub async fn list_leads(
         return err;
     }
 
-    let storage = match state.storage.lock() {
-        Ok(g) => g,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let storage = state.storage.lock();
 
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
 
@@ -448,10 +439,7 @@ pub async fn patch_lead(
         return err;
     }
 
-    let storage = match state.storage.lock() {
-        Ok(g) => g,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
+    let storage = state.storage.lock();
 
     // Read current status
     let current_status: Option<String> = storage
@@ -584,21 +572,18 @@ const LEADS_PAGE_HTML: &str = include_str!("../static/variants/a/leads.html");
 pub async fn retention_task(state: Arc<crate::server::AppStateInner>) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 3600)).await;
-        if let Ok(storage) = state.storage.lock() {
-            match storage.conn().execute(
-                "DELETE FROM leads \
-                 WHERE created_at < datetime('now', '-24 months') \
-                 AND status = 'closed'",
-                [],
-            ) {
-                Ok(n) if n > 0 => {
-                    tracing::info!(
-                        "Leads retention: purged {n} closed lead(s) older than 24 months"
-                    )
-                }
-                Ok(_) => {}
-                Err(e) => tracing::warn!("Leads retention task failed: {e}"),
+        let storage = state.storage.lock();
+        match storage.conn().execute(
+            "DELETE FROM leads \
+             WHERE created_at < datetime('now', '-24 months') \
+             AND status = 'closed'",
+            [],
+        ) {
+            Ok(n) if n > 0 => {
+                tracing::info!("Leads retention: purged {n} closed lead(s) older than 24 months")
             }
+            Ok(_) => {}
+            Err(e) => tracing::warn!("Leads retention task failed: {e}"),
         }
     }
 }
@@ -657,7 +642,7 @@ mod tests {
             Arc::new(game_core::storage::Storage::open(&game_db_path).expect("game storage"));
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

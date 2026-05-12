@@ -64,13 +64,8 @@ pub struct SearchQuery {
     pub q: String,
 }
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 fn validate_universe_key(key: &str) -> Result<(), AppError> {
@@ -99,7 +94,7 @@ pub async fn me_universes_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<axum::Json<crate::models::MeUniversesResponse>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     let user = storage
         .get_user_by_id(&user_id.0)
@@ -162,7 +157,7 @@ pub async fn list_universes(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<Json<Vec<Universe>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let universes = storage.list_universes_for_user(&user_id.0);
     Ok(Json(universes))
 }
@@ -173,7 +168,7 @@ pub async fn list_universes(
 pub async fn list_public_universes(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<Universe>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let mut stmt = storage
         .conn()
         .prepare(
@@ -239,7 +234,7 @@ pub async fn create_universe(
             "Universe name must be 100 characters or fewer".into(),
         ));
     }
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     if storage.get_universe(&body.key).is_some() {
         return Err(AppError::Conflict(format!(
             "Universe key '{}' is already taken",
@@ -255,7 +250,7 @@ pub async fn create_universe(
     crate::rate_limit::check_universe_quota(&storage, &user_id.0, tier, &headers)?;
     drop(storage);
 
-    let mut storage = lock_storage(&state)?;
+    let mut storage = lock_storage(&state);
     let universe = storage.create_universe(body, &user_id.0)?;
     Ok((StatusCode::CREATED, Json(universe)))
 }
@@ -266,7 +261,7 @@ pub async fn list_members(
     Path(key): Path<String>,
     user_id: UserId,
 ) -> Result<Json<Vec<UniverseMember>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     if storage.get_universe(&key).is_none() {
         return Err(AppError::NotFound(format!("Universe '{}' not found", key)));
     }
@@ -299,12 +294,12 @@ pub async fn add_member(
         )));
     }
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if !storage.is_universe_member(&key, &user_id.0) {
             return Err(AppError::Forbidden("Not a member of this universe".into()));
         }
     }
-    let member = lock_storage(&state)?.add_universe_member(&key, &body.user_id, &body.role)?;
+    let member = lock_storage(&state).add_universe_member(&key, &body.user_id, &body.role)?;
     Ok((StatusCode::CREATED, Json(member)))
 }
 
@@ -315,12 +310,12 @@ pub async fn remove_member(
     user_id: UserId,
 ) -> Result<StatusCode, AppError> {
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if !storage.is_universe_member(&key, &user_id.0) {
             return Err(AppError::Forbidden("Not a member of this universe".into()));
         }
     }
-    lock_storage(&state)?.remove_universe_member(&key, &member_id)?;
+    lock_storage(&state).remove_universe_member(&key, &member_id)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -330,7 +325,7 @@ pub async fn list_universe_projects(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<Project>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
 
     // First try public access (template or public universes)
     match storage.list_projects_for_public_universe(&slug) {
@@ -368,7 +363,7 @@ pub async fn update_universe(
     let _caller_id = extract_optional_user_id(&headers, &state)
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let _universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -380,7 +375,7 @@ pub async fn update_universe(
         if name.is_empty() || name.len() > 100 {
             return Err(AppError::BadRequest("Name must be 1-100 characters".into()));
         }
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .conn()
             .execute(
@@ -391,7 +386,7 @@ pub async fn update_universe(
     }
 
     if let Some(desc) = body.get("description").and_then(|v| v.as_str()) {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .conn()
             .execute(
@@ -416,7 +411,7 @@ pub async fn update_universe(
                 )));
             }
         };
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .conn()
             .execute(
@@ -427,7 +422,7 @@ pub async fn update_universe(
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let updated = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::Internal("Universe disappeared".into()))?;
@@ -465,7 +460,7 @@ pub async fn delete_universe(
         ));
     }
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     if storage.get_universe(&slug).is_none() {
         return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
     }
@@ -535,7 +530,7 @@ pub async fn duplicate_universe(
     // Verify source exists and caller has read access (owner, member,
     // template, or public-subscribable).
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let source = storage
             .get_universe(&source_slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", source_slug)))?;
@@ -556,7 +551,7 @@ pub async fn duplicate_universe(
         }
     }
 
-    let universe = lock_storage(&state)?.clone_universe(
+    let universe = lock_storage(&state).clone_universe(
         &source_slug,
         &body.key,
         &body.name,
@@ -586,7 +581,7 @@ pub async fn clone_universe(
 
     // Verify source universe exists and is clonable (must be public or template)
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         match storage.get_universe(&source_slug) {
             None => {
                 return Err(AppError::NotFound(format!(
@@ -607,7 +602,7 @@ pub async fn clone_universe(
     let anon_id = format!("anon-{}", nanoid::nanoid!(10));
     let owner_id = maybe_auth_id.unwrap_or_else(|| anon_id.clone());
 
-    let universe = lock_storage(&state)?.clone_universe(
+    let universe = lock_storage(&state).clone_universe(
         &source_slug,
         &body.key,
         &body.name,
@@ -646,7 +641,7 @@ pub async fn search_universes(
     State(state): State<AppState>,
     Query(params): Query<SearchQuery>,
 ) -> Result<Json<Vec<Universe>>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     Ok(Json(storage.search_public_universes(&params.q)))
 }
 
@@ -656,7 +651,7 @@ pub async fn subscribe_universe(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<StatusCode, AppError> {
-    lock_storage(&state)?
+    lock_storage(&state)
         .subscribe_universe(&user_id.0, &slug)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -668,7 +663,7 @@ pub async fn unsubscribe_universe(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<StatusCode, AppError> {
-    lock_storage(&state)?
+    lock_storage(&state)
         .unsubscribe_universe(&user_id.0, &slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -697,7 +692,7 @@ pub async fn pin_subscription(
     // Verify the state exists in the universe before pinning to it.
     {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             if storage.get_universe(&slug).is_none() {
                 return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
             }
@@ -723,7 +718,7 @@ pub async fn pin_subscription(
             )));
         }
     }
-    lock_storage(&state)?
+    lock_storage(&state)
         .pin_subscription(&user_id.0, &slug, Some(&req.state))
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -737,7 +732,7 @@ pub async fn unpin_subscription(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<StatusCode, AppError> {
-    lock_storage(&state)?
+    lock_storage(&state)
         .pin_subscription(&user_id.0, &slug, None)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
@@ -757,7 +752,7 @@ pub async fn get_my_subscription(
     Path(slug): Path<String>,
     user_id: UserId,
 ) -> Result<Json<SubscriptionStatus>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let subscribed = storage.is_subscribed(&user_id.0, &slug);
     let pinned_state = storage.get_subscription_pin(&user_id.0, &slug);
     Ok(Json(SubscriptionStatus {
@@ -775,7 +770,7 @@ pub async fn list_subscribers(
     // 1.45.0 model: any authenticated user can list subscribers of any
     // universe. The `user_id` extractor still gates anonymous callers.
     let _ = user_id;
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let _universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -795,7 +790,7 @@ pub async fn get_universe_info(
 
     // For anonymous universes (owned by anon-*), we still use the cookie gate
     // because those don't have a visibility flag yet — they're always private.
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -862,7 +857,7 @@ pub async fn claim_universe(
     let anon_id = extract_cookie(&headers, "co_universe_owner")
         .ok_or_else(|| AppError::BadRequest("Missing co_universe_owner cookie".into()))?;
 
-    let universe = lock_storage(&state)?
+    let universe = lock_storage(&state)
         .claim_universe(&slug, &user_id.0, &anon_id)
         .map_err(|e| AppError::Forbidden(e.to_string()))?;
 
@@ -934,7 +929,7 @@ fn extract_optional_claims(headers: &HeaderMap) -> Option<crate::auth::Claims> {
 pub async fn quilombo_stats(
     State(state): State<AppState>,
 ) -> Result<Json<crate::models::QuilomboStats>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let stats = storage.quilombo_stats();
     Ok(Json(stats))
 }
@@ -944,7 +939,7 @@ pub async fn get_universe_config(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<Json<UniverseFormConfig>, AppError> {
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     let config = storage
         .get_universe_form_config(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -960,7 +955,7 @@ pub async fn update_universe_config(
 ) -> Result<Json<UniverseFormConfig>, AppError> {
     // Verify universe exists and caller is the owner.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -1006,7 +1001,7 @@ pub async fn update_universe_config(
         }
     }
 
-    let config = lock_storage(&state)?
+    let config = lock_storage(&state)
         .update_universe_form_config(&slug, body)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
@@ -1108,14 +1103,7 @@ pub async fn get_universe_theme_css(
     headers: HeaderMap,
 ) -> impl IntoResponse {
     let config = {
-        let Ok(storage) = lock_storage(&state) else {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                [(header::CONTENT_TYPE, "text/plain")],
-                "Storage error".to_string(),
-            )
-                .into_response();
-        };
+        let storage = lock_storage(&state);
         match storage.get_universe_form_config(&slug) {
             Some(c) => c,
             None => {

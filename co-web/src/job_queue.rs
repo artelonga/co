@@ -29,7 +29,7 @@ use std::time::Duration;
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
-use tracing::{error, info, warn};
+use tracing::{info, warn};
 
 use crate::doc_gen::{DocFormat, ResourceLimits, run_adapter};
 use crate::entry_index::make_entry;
@@ -350,13 +350,8 @@ pub fn spawn_worker(state: AppState) {
             tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
 
             let job = {
-                match state.storage.lock() {
-                    Ok(s) => claim_next_job(s.conn()),
-                    Err(e) => {
-                        error!("job_queue: storage lock poisoned: {e}");
-                        continue;
-                    }
-                }
+                let s = state.storage.lock();
+                claim_next_job(s.conn())
             };
 
             let Some(job) = job else {
@@ -379,9 +374,9 @@ pub fn spawn_worker(state: AppState) {
 
             let result = tokio::time::timeout(
                 Duration::from_secs(ResourceLimits::default().wall_time_secs),
-                tokio::task::spawn_blocking(move || match state_clone.storage.lock() {
-                    Ok(s) => process_job(&job_clone, &s),
-                    Err(e) => Err(format!("storage lock: {e}")),
+                tokio::task::spawn_blocking(move || {
+                    let s = state_clone.storage.lock();
+                    process_job(&job_clone, &s)
                 }),
             )
             .await;
@@ -398,7 +393,8 @@ pub fn spawn_worker(state: AppState) {
             match outcome {
                 Ok(()) => {
                     info!(job_id = %job.id, universe = %job.universe_key, "job_queue: done");
-                    if let Ok(s) = state.storage.lock() {
+                    {
+                        let s = state.storage.lock();
                         mark_done(s.conn(), &job.id);
                         clear_universe_doc_gen_error(s.conn(), &job.universe_key);
                     }
@@ -412,7 +408,8 @@ pub fn spawn_worker(state: AppState) {
                         error = %err,
                         "job_queue: failed"
                     );
-                    if let Ok(s) = state.storage.lock() {
+                    {
+                        let s = state.storage.lock();
                         mark_failed(s.conn(), &job.id, attempts, &err);
                         set_universe_doc_gen_error(s.conn(), &job.universe_key, &err);
                     }

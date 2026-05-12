@@ -86,10 +86,7 @@ async fn register_handler(
         ));
     }
 
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     let wh = webhook::create_webhook(storage.conn(), &body.url, &body.events)?;
 
@@ -110,10 +107,7 @@ async fn list_handler(
     State(state): State<AppState>,
     _admin: GitHubAdmin,
 ) -> Result<Json<Vec<webhook::Webhook>>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     Ok(Json(webhook::list_webhooks(storage.conn())?))
 }
@@ -133,10 +127,7 @@ async fn update_handler(
         ));
     }
 
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     webhook::update_webhook(
         storage.conn(),
@@ -154,10 +145,7 @@ async fn delete_handler(
     _admin: GitHubAdmin,
     Path(id): Path<String>,
 ) -> Result<StatusCode, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     webhook::delete_webhook(storage.conn(), &id)?;
 
@@ -169,10 +157,7 @@ async fn deliveries_handler(
     _admin: GitHubAdmin,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<webhook::Notification>>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     Ok(Json(webhook::list_deliveries(storage.conn(), &id)?))
 }

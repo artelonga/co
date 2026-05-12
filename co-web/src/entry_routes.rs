@@ -160,13 +160,8 @@ pub struct EntryWithRelations {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 fn accept_protobuf(headers: &HeaderMap) -> bool {
@@ -193,7 +188,7 @@ pub async fn list_entries(
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -270,7 +265,7 @@ pub async fn list_entries(
         let allowed_paths: std::collections::HashSet<&str> =
             manifest.iter().map(|(p, _, _)| p.as_str()).collect();
 
-        let storage_for_blobs = lock_storage(&state)?;
+        let storage_for_blobs = lock_storage(&state);
         entries
             .into_iter()
             .filter(|e| allowed_paths.contains(e.path.as_str()))
@@ -323,7 +318,7 @@ pub async fn list_entry_tags(
 ) -> Result<Json<Vec<TagCount>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -344,7 +339,7 @@ pub async fn entry_tree(
 ) -> Result<Json<Vec<TreeNode>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -381,7 +376,7 @@ pub async fn get_entry(
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -439,7 +434,7 @@ pub async fn create_entry(
     }
 
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -479,7 +474,7 @@ pub async fn create_entry(
     // Index into universe data.db
     let relation_count = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -563,7 +558,7 @@ pub async fn create_entry(
     }
 
     // Update universe content_count
-    let mut storage = lock_storage(&state)?;
+    let mut storage = lock_storage(&state);
     storage.increment_universe_content_count(&slug);
 
     // CO-45: log mutation on UAT before body values are moved into the response
@@ -613,7 +608,7 @@ pub async fn update_entry(
     Json(body): Json<UpdateEntryBody>,
 ) -> Result<Json<EntryRow>, AppError> {
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -623,7 +618,7 @@ pub async fn update_entry(
     // Read existing entry from universe data.db
     let existing = {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -659,7 +654,7 @@ pub async fn update_entry(
 
     {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -718,7 +713,7 @@ pub async fn update_entry(
         },
     );
 
-    let storage = lock_storage(&state)?;
+    let storage = lock_storage(&state);
     // CO-45: log mutation on UAT
     if state.config.is_uat() {
         let before_val = serde_json::to_string(&existing).unwrap_or_default();
@@ -762,7 +757,7 @@ pub async fn get_manifest(
 ) -> Result<Json<co::manifest::Manifest>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_root(&slug)
     };
     // CO-79: serve from L1 manifest cache (singleflight on miss).
@@ -780,7 +775,7 @@ pub async fn delete_entry(
     Path((slug, path)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
     let universe_root = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
@@ -790,7 +785,7 @@ pub async fn delete_entry(
     // CO-45: capture before_value on UAT before deletion
     let before_val = if state.config.is_uat() {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -810,7 +805,7 @@ pub async fn delete_entry(
 
     {
         let uc = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.universe_conn(&slug)
         };
         let uc_guard = uc
@@ -833,7 +828,7 @@ pub async fn delete_entry(
     }
     // CO-164: enqueue delete (async cleanup, belt-and-suspenders with the sync remove above)
     crate::embedding_worker::enqueue_delete(&state, &slug, &path);
-    let mut storage = lock_storage(&state)?;
+    let mut storage = lock_storage(&state);
     storage.decrement_universe_content_count(&slug, 1);
 
     // CO-45: log mutation on UAT
@@ -898,7 +893,7 @@ pub async fn query_handler(
 ) -> Result<Json<EntryListResponse>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let uc_guard = uc
@@ -954,7 +949,7 @@ pub(crate) async fn list_references(
 ) -> Result<Json<ReferencesResponse>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let conn = uc
@@ -983,7 +978,7 @@ pub(crate) async fn list_orphan_wikilinks(
 ) -> Result<Json<Vec<String>>, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let conn = uc
@@ -1085,7 +1080,7 @@ pub async fn similar_entries(
     let k = q.k.unwrap_or(10).min(200);
     let path = q.path;
     let uc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.universe_conn(&slug)
     };
     let conn = uc

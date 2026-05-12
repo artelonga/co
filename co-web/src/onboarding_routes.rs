@@ -66,13 +66,8 @@ struct OnboardVerifyResponse {
 // Helpers
 // -------------------------------------------------------------------------
 
-fn lock_storage(
-    state: &AppState,
-) -> Result<std::sync::MutexGuard<'_, crate::storage::Storage>, AppError> {
-    state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))
+fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
+    state.storage.lock()
 }
 
 fn hash_code(code: &str) -> anyhow::Result<String> {
@@ -182,7 +177,7 @@ async fn onboard_handler(
     // 2. Rate limit: 5 codes per email per hour.
     let one_hour_ago = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let count = storage.count_onboarding_codes_for_email(&email_hash, &one_hour_ago);
         if count >= 5 {
             return Err(AppError::TooManyRequests(
@@ -206,7 +201,7 @@ async fn onboard_handler(
         format!("ip:{hex}")
     };
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let count = storage.count_onboarding_codes_for_ip(&ip_hash, &one_hour_ago);
         if count >= 20 {
             return Err(AppError::TooManyRequests(
@@ -217,7 +212,7 @@ async fn onboard_handler(
 
     // 3. Determine intent: login (known email) or create (unknown).
     let intent = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         if storage.get_user_by_email(&email_normalized).is_some() {
             "login"
         } else {
@@ -251,7 +246,7 @@ async fn onboard_handler(
         .map(|s| s.to_string());
 
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.create_onboarding_code(
             &email_hash,
             intent,
@@ -264,7 +259,7 @@ async fn onboard_handler(
 
     // Record IP rate-limit sentinel.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         let _ = storage.record_ip_onboarding_request(&ip_hash);
     }
 
@@ -309,7 +304,7 @@ async fn onboard_verify_handler(
 
     // 1. Look up active code.
     let oc = {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.get_onboarding_code(&email_hash).ok_or_else(|| {
             AppError::Gone("Código não encontrado, expirado ou já utilizado.".into())
         })?
@@ -331,7 +326,7 @@ async fn onboard_verify_handler(
 
     if !code_ok {
         let attempts = {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage.increment_onboarding_attempts(&oc.id)?
         };
         if attempts >= 5 {
@@ -345,7 +340,7 @@ async fn onboard_verify_handler(
     // 4. Branch on intent.
     let user = match oc.intent.as_str() {
         "login" => {
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage
                 .get_user_by_email(&email_normalized)
                 .ok_or_else(|| AppError::Internal("User not found for login intent".into()))?
@@ -355,7 +350,7 @@ async fn onboard_verify_handler(
 
             // Check global signup rate cap (100 new accounts / 24h).
             {
-                let storage = lock_storage(&state)?;
+                let storage = lock_storage(&state);
                 let count = storage.count_users_created_since(24 * 60 * 60);
                 if count >= 100 {
                     return Err(AppError::TooManyRequests(
@@ -367,7 +362,7 @@ async fn onboard_verify_handler(
 
             // Derive usuario.
             let usuario = {
-                let storage = lock_storage(&state)?;
+                let storage = lock_storage(&state);
                 if let Some(ref preferred) = oc.preferred_usuario {
                     let p = preferred.trim().to_lowercase();
                     if !p.is_empty() && storage.get_user_by_usuario(&p).is_none() {
@@ -384,7 +379,7 @@ async fn onboard_verify_handler(
             let id = format!("usr_{}", nanoid::nanoid!(10));
             let now_str = Utc::now().to_rfc3339();
             {
-                let storage = lock_storage(&state)?;
+                let storage = lock_storage(&state);
                 storage
                     .conn()
                     .execute(
@@ -432,7 +427,7 @@ async fn onboard_verify_handler(
                 },
             );
 
-            let storage = lock_storage(&state)?;
+            let storage = lock_storage(&state);
             storage
                 .get_user_by_id(&id)
                 .ok_or_else(|| AppError::Internal("User not found after insert".into()))?
@@ -441,7 +436,7 @@ async fn onboard_verify_handler(
 
     // 5. Mark code consumed.
     {
-        let storage = lock_storage(&state)?;
+        let storage = lock_storage(&state);
         storage.consume_onboarding_code(&oc.id)?;
     }
 

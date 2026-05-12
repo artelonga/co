@@ -63,13 +63,8 @@ pub fn spawn_worker(state: AppState) {
 
             // --- claim one pending notification ---
             let notification = {
-                match state.storage.lock() {
-                    Ok(s) => claim_next_notification(s.conn()),
-                    Err(e) => {
-                        error!("webhook_worker: storage lock poisoned: {e}");
-                        continue;
-                    }
-                }
+                let s = state.storage.lock();
+                claim_next_notification(s.conn())
             };
 
             let Some(notif) = notification else {
@@ -83,7 +78,8 @@ pub fn spawn_worker(state: AppState) {
                 Some("email") => {
                     let Some(provider) = &email_provider else {
                         // Provider was not configured at startup; mark dead.
-                        if let Ok(s) = state.storage.lock() {
+                        {
+                            let s = state.storage.lock();
                             mark_notification_failed(
                                 s.conn(),
                                 &notif.id,
@@ -101,13 +97,13 @@ pub fn spawn_worker(state: AppState) {
                     );
                     match provider.send(&client, recipient, &notif.payload).await {
                         Ok(()) => {
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_sent(s.conn(), &notif.id);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_sent(s.conn(), &notif.id);
                         }
                         Err(e) => {
                             warn!(notification_id = %notif.id, error = %e, "webhook_worker: email failed");
-                            if let Ok(s) = state.storage.lock() {
+                            {
+                                let s = state.storage.lock();
                                 mark_notification_failed(s.conn(), &notif.id, new_attempts, &e);
                             }
                         }
@@ -115,7 +111,8 @@ pub fn spawn_worker(state: AppState) {
                 }
                 Some("whatsapp") => {
                     let Some(provider) = &whatsapp_provider else {
-                        if let Ok(s) = state.storage.lock() {
+                        {
+                            let s = state.storage.lock();
                             mark_notification_failed(
                                 s.conn(),
                                 &notif.id,
@@ -133,15 +130,13 @@ pub fn spawn_worker(state: AppState) {
                     );
                     match provider.send(&client, recipient, &notif.payload).await {
                         Ok(()) => {
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_sent(s.conn(), &notif.id);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_sent(s.conn(), &notif.id);
                         }
                         Err(e) => {
                             warn!(notification_id = %notif.id, error = %e, "webhook_worker: WhatsApp failed");
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_failed(s.conn(), &notif.id, new_attempts, &e);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_failed(s.conn(), &notif.id, new_attempts, &e);
                         }
                     }
                 }
@@ -149,13 +144,8 @@ pub fn spawn_worker(state: AppState) {
                 _ => {
                     // --- look up the webhook config (secret needed for signing) ---
                     let webhook = {
-                        match state.storage.lock() {
-                            Ok(s) => get_webhook_with_secret(s.conn(), &notif.webhook_id),
-                            Err(e) => {
-                                error!("webhook_worker: storage lock poisoned: {e}");
-                                continue;
-                            }
-                        }
+                        let s = state.storage.lock();
+                        get_webhook_with_secret(s.conn(), &notif.webhook_id)
                     };
 
                     let Some(webhook) = webhook else {
@@ -200,9 +190,8 @@ pub fn spawn_worker(state: AppState) {
                                 status = %resp.status(),
                                 "webhook_worker: delivered"
                             );
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_sent(s.conn(), &notif.id);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_sent(s.conn(), &notif.id);
                         }
                         Ok(resp) => {
                             let err = format!("HTTP {}", resp.status());
@@ -212,9 +201,8 @@ pub fn spawn_worker(state: AppState) {
                                 error = %err,
                                 "webhook_worker: delivery failed"
                             );
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
                         }
                         Err(e) => {
                             let err = e.to_string();
@@ -224,9 +212,8 @@ pub fn spawn_worker(state: AppState) {
                                 error = %err,
                                 "webhook_worker: network error"
                             );
-                            if let Ok(s) = state.storage.lock() {
-                                mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
-                            }
+                            let s = state.storage.lock();
+                            mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
                         }
                     }
                 }

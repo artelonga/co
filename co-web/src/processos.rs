@@ -237,10 +237,7 @@ pub async fn preview_alterar_pagina(
         .to_string();
 
     // Step 2: Source — read the current entry from filesystem (source of truth).
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
 
     // Access check.
     let access = storage.check_universe_access(Some(&user_id.0), &body.universe);
@@ -263,10 +260,7 @@ pub async fn preview_alterar_pagina(
         .unwrap_or(serde_json::Value::Null);
 
     // Step 3: Review — record the diff, compute proposed version.
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
     let current_version = read_content_version(storage.conn(), &body.universe)
         .map_err(|e| AppError::Internal(format!("read content_version: {e}")))?;
     let proposed_version = next_semver(&current_version, &bump_level);
@@ -311,10 +305,7 @@ pub async fn approve_alterar_pagina(
     user_id: UserId,
     Path(run_id): Path<String>,
 ) -> Result<Json<RunResponse>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
     let row: Option<(String, String, String, String)> = storage
         .conn()
         .query_row(
@@ -359,10 +350,7 @@ pub async fn approve_alterar_pagina(
         .to_string();
 
     // Re-acquire and run the full sink+telemetry inside one critical section.
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
 
     // Re-check access.
     let access = storage.check_universe_access(Some(&user_id.0), &universe_key);
@@ -466,10 +454,7 @@ pub async fn revert_alterar_pagina(
     user_id: UserId,
     Json(body): Json<RevertRequest>,
 ) -> Result<Json<RunResponse>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
 
     let access = storage.check_universe_access(Some(&user_id.0), &body.universe);
     if !matches!(access, crate::models::UniverseAccess::ReadWrite) {
@@ -647,10 +632,7 @@ pub async fn list_runs(
     State(state): State<AppState>,
     Query(q): Query<RunsQuery>,
 ) -> Result<Json<Vec<RunRow>>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock poisoned".into()))?;
+    let storage = state.storage.lock();
     let limit = q.limit.unwrap_or(20).clamp(1, 200);
 
     fn map_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<RunRow> {

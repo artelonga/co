@@ -50,6 +50,7 @@ aes-gcm = "0.10"
 hkdf = "0.12"
 base64 = "0.22"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder"] }
+parking_lot = "0.12"
 
 [[bin]]
 name = "migrate_quilombo"

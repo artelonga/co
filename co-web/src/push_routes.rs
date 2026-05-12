@@ -91,10 +91,7 @@ async fn subscribe_handler(
         .map(|s| &s[..s.len().min(256)])
         .map(|s| s.to_string());
 
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     let id = storage
         .upsert_push_subscription(
@@ -115,10 +112,7 @@ async fn delete_subscription_handler(
     Path(id): Path<String>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     let deleted = storage
         .delete_push_subscription(&id, &user_id.0)
@@ -136,10 +130,7 @@ async fn list_subscriptions_handler(
     State(state): State<AppState>,
     user_id: UserId,
 ) -> Result<impl IntoResponse, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
 
     let subscriptions = storage.list_push_subscriptions_for_user(&user_id.0);
 
@@ -207,7 +198,7 @@ mod tests {
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: Mutex::new(storage),
+            storage: parking_lot::Mutex::new(storage),
             experiment: Mutex::new(experiment),
             config,
             auth_store: Mutex::new(auth_store),

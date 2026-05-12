@@ -763,10 +763,7 @@ async fn schema_check_handler(
     State(state): State<AppState>,
     _admin: GitHubAdmin,
 ) -> Result<Json<SchemaCheckResponse>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("Storage lock failed".into()))?;
+    let storage = state.storage.lock();
     let conn = storage.conn();
 
     let mut stmt = conn

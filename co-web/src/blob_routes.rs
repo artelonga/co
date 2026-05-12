@@ -50,10 +50,7 @@ pub async fn get_blob(
             "hash must be 64 hex chars (sha256)".into(),
         ));
     }
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+    let storage = state.storage.lock();
     let bytes = storage
         .get_blob(&hash)
         .ok_or_else(|| AppError::NotFound(format!("blob '{hash}' not found")))?;
@@ -81,10 +78,7 @@ pub async fn head_blob(
             "hash must be 64 hex chars (sha256)".into(),
         ));
     }
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+    let storage = state.storage.lock();
     if storage.has_blob(&hash) {
         Ok(StatusCode::OK)
     } else {
@@ -99,10 +93,7 @@ pub async fn post_blob(
     _user: UserId,
     body: Bytes,
 ) -> Result<Json<PutBlobResponse>, AppError> {
-    let storage = state
-        .storage
-        .lock()
-        .map_err(|_| AppError::Internal("storage lock failed".into()))?;
+    let storage = state.storage.lock();
     let hash = storage
         .put_blob(&body)
         .map_err(|e| AppError::Internal(e.to_string()))?;

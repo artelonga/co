@@ -63,9 +63,8 @@ pub(super) async fn serve_co_index(
         let state_clone = Arc::clone(&state);
         let uid = visitor_token.clone();
         tokio::spawn(async move {
-            if let Ok(storage) = state_clone.storage.lock()
-                && let Ok(Some(ab_variant)) =
-                    crate::ab::assign(storage.conn(), &uid, "home_v2_layout")
+            let storage = state_clone.storage.lock();
+            if let Ok(Some(ab_variant)) = crate::ab::assign(storage.conn(), &uid, "home_v2_layout")
             {
                 let _ =
                     crate::ab::expose(storage.conn(), &uid, "home_v2_layout", &ab_variant, None);
@@ -142,10 +141,7 @@ pub(super) async fn serve_sync_settings(
     };
 
     let token = {
-        let storage = match state.storage.lock() {
-            Ok(s) => s,
-            Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Storage error").into_response(),
-        };
+        let storage = state.storage.lock();
         match storage.create_api_token(&user_id, "co-sync") {
             Ok(t) => t.token,
             Err(e) => {
