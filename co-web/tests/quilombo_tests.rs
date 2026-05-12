@@ -46,7 +46,7 @@ fn build_quilombo_app(dir: &std::path::Path) -> axum::Router {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: co_web::server::AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),

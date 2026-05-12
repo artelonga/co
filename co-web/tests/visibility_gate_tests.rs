@@ -102,7 +102,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
@@ -204,7 +204,7 @@ async fn test_owner_on_private_universe_gets_200() {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
@@ -277,7 +277,7 @@ async fn test_non_member_on_private_universe_gets_403() {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),

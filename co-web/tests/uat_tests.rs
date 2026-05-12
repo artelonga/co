@@ -64,7 +64,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
     let game_db = dir.join("game_test.db");
     let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).expect("game storage"));
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),

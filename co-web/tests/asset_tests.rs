@@ -49,7 +49,7 @@ fn build_test_app(dir: &std::path::Path) -> (axum::Router, AppState) {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
@@ -86,7 +86,7 @@ fn user_bearer(user_id: &str) -> String {
 }
 
 fn make_universe(state: &AppState, key: &str, owner: &str, public: bool) {
-    let mut storage = state.storage.lock().unwrap();
+    let mut storage = state.storage.lock();
     storage
         .create_universe(
             co_web::models::CreateUniverse {
@@ -197,7 +197,7 @@ async fn upload_dedupes_by_sha256() {
 
     // Exactly one row in the assets table for this content.
     let conn_arc = {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.storage.lock();
         storage.universe_conn("u1")
     };
     let conn = conn_arc.lock().unwrap();
@@ -399,7 +399,7 @@ async fn blob_on_disk_is_ciphertext() {
         .unwrap();
 
     let universe_dir = {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.storage.lock();
         storage.universe_pool.universe_dir("u1")
     };
     let blob_root = universe_dir.join("blobs");

@@ -60,7 +60,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
@@ -1074,7 +1074,7 @@ fn build_blank_test_router(dir: &std::path::Path) -> (axum::Router, AppState) {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = Arc::new(AppStateInner {
-        storage: Mutex::new(storage),
+        storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
         config,
         auth_store: Mutex::new(auth_store),
@@ -1126,14 +1126,14 @@ async fn test_usage_gate_anon_blocked_at_101() {
 
     // Set up: create a universe owned by "anon-test", one project
     {
-        let mut storage = state.storage.lock().unwrap();
+        let mut storage = state.storage.lock();
         // Seed template universe so clone works
         storage.seed_template_universe();
     }
 
     // Set up anonymous universe + project directly in storage
     {
-        let mut storage = state.storage.lock().unwrap();
+        let mut storage = state.storage.lock();
         storage
             .create_universe(
                 co_web::models::CreateUniverse {
@@ -1219,7 +1219,7 @@ async fn test_usage_gate_anon_blocked_at_101() {
 
     // After claiming the universe (set owner to real user), writes should succeed
     {
-        let storage = state.storage.lock().unwrap();
+        let storage = state.storage.lock();
         // Claim: set owner_id to real-user
         storage
             .conn()
