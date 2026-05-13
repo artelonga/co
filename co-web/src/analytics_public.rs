@@ -442,7 +442,6 @@ pub async fn recent_handler(
 // Router
 // ---------------------------------------------------------------------------
 
-
 // ===========================================================================
 // CO-180: popularity endpoint
 // ===========================================================================
@@ -635,8 +634,6 @@ pub async fn popularity_handler(
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
-
-
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -875,6 +872,7 @@ mod tests {
             wae_endpoint: None,
             cookie_domain: None,
             quilombo_legacy_login: true,
+            bypass_rate_limit: false,
         };
         let storage = crate::storage::Storage::new(&config.data_dir);
         let experiment = crate::experiment::ExperimentStore::new(&config.data_dir);

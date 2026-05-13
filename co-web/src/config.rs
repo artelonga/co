@@ -62,6 +62,10 @@ pub struct WebConfig {
     /// CO-166: When false, `POST /api/v1/quilombo/auth/login` returns 410 Gone.
     /// Default: true (legacy login enabled). Set via `CO_QUILOMBO_LEGACY_LOGIN=false`.
     pub quilombo_legacy_login: bool,
+    /// CO-208: when true AND `co_env == "test"`, the token-bucket rate-limit
+    /// middleware passes every request through unconditionally. Set via
+    /// `CO_BYPASS_RATE_LIMIT=1`. Has no effect outside `CO_ENV=test`.
+    pub bypass_rate_limit: bool,
 }
 
 impl WebConfig {
@@ -97,6 +101,9 @@ impl From<Args> for WebConfig {
             quilombo_legacy_login: std::env::var("CO_QUILOMBO_LEGACY_LOGIN")
                 .map(|v| v != "false")
                 .unwrap_or(true),
+            bypass_rate_limit: std::env::var("CO_BYPASS_RATE_LIMIT")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
         }
     }
 }

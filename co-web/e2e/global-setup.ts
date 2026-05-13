@@ -54,7 +54,14 @@ async function globalSetup(): Promise<void> {
     {
       cwd: projectRoot,
       stdio: "pipe",
-      env: { ...process.env, RUST_LOG: "co_web=info" },
+      env: {
+        ...process.env,
+        RUST_LOG: "co_web=info",
+        // CO-208: disable token-bucket rate limiting so fixture project/universe
+        // POSTs don't exhaust the anonymous 5-writes/min cap during e2e runs.
+        CO_ENV: process.env.CO_ENV ?? "test",
+        CO_BYPASS_RATE_LIMIT: "1",
+      },
       detached: true,
     },
   );

@@ -265,6 +265,7 @@ fn make_universe_router(
         wae_api_key: None,
         cookie_domain: None,
         quilombo_legacy_login: true,
+        bypass_rate_limit: false,
     };
     let experiment = ExperimentStore::new(dir);
     let auth_store = crate::auth::AuthStore::new(dir).unwrap();

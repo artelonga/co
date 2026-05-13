@@ -632,6 +632,7 @@ mod tests {
             wae_endpoint: None,
             cookie_domain: None,
             quilombo_legacy_login: true,
+            bypass_rate_limit: false,
         };
         let storage = crate::storage::Storage::new(&config.data_dir);
         let experiment = crate::experiment::ExperimentStore::new(&config.data_dir);

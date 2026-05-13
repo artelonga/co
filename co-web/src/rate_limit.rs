@@ -291,6 +291,13 @@ pub async fn rate_limit_middleware(
     let path = req.uri().path();
     let method = req.method().clone();
 
+    // CO-208: test-only bypass — lets e2e fixtures create projects/universes
+    // without depleting the anonymous token buckets. Only active when both
+    // CO_ENV=test and CO_BYPASS_RATE_LIMIT=1 are set; no-op in prod/uat.
+    if state.config.bypass_rate_limit && state.config.co_env == "test" {
+        return Ok(next.run(req).await);
+    }
+
     // Skip: non-API routes, CORS preflight, health endpoints.
     if !path.starts_with("/api/") || method == Method::OPTIONS || path.starts_with("/api/health") {
         return Ok(next.run(req).await);

@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.1] — 2026-05-13 — CO-208: Playwright e2e maintenance — rate-limit bypass + API drift fixes
+
+### CO-208 — Unwind 12 days of e2e drift + rate-limit collisions
+
+- **`CO_BYPASS_RATE_LIMIT=1`**: new env flag. When set alongside `CO_ENV=test`,
+  the token-bucket rate-limit middleware passes every request through
+  unconditionally. No effect outside `CO_ENV=test` — prod and UAT behaviour
+  unchanged.
+- **`is_anonymous` assertion fixed**: `clone_universe` returns `Universe`
+  (no `is_anonymous` field since CO-170/CO-184). Tests in `auth-crdt.spec.ts`
+  and `usage-gate.spec.ts` now check `owner_id` matches `^anon-` instead.
+- **`global-setup.ts`** forwards `CO_ENV=test` and `CO_BYPASS_RATE_LIMIT=1` to
+  the spawned co-web process so local `npx playwright test` runs also benefit.
+- **CI e2e job**: `continue-on-error: true` removed; job is now a real gate.
+  `CO_ENV=test` and `CO_BYPASS_RATE_LIMIT=1` added to the step environment.
+
 ## [2.6.0] — 2026-05-13 — Analytics ingestion + geo + public endpoints (CO-177 → CO-180)
 
 Closes the artelonga.com.br analytics chain end-to-end. AL-48 (the bake

@@ -29,8 +29,9 @@ test.describe("Usage gate: API contract", () => {
     expect([200, 201]).toContain(res.status());
     const body = await res.json();
     expect(body.key).toBe(slug);
-    // After clone, is_anonymous should be true (owner is anon-)
-    expect(body.is_anonymous).toBe(true);
+    // is_anonymous was removed in CO-170/CO-184; anonymous ownership is now
+    // indicated by owner_id starting with "anon-".
+    expect(body.owner_id).toMatch(/^anon-/);
   });
 
   test("clone returns a session cookie for the anonymous owner", async ({

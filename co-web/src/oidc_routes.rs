@@ -704,6 +704,7 @@ mod tests {
             wae_api_key: None,
             cookie_domain: None,
             quilombo_legacy_login: true,
+            bypass_rate_limit: false,
         };
         let storage = Storage::new(&config.data_dir);
         let experiment = ExperimentStore::new(&config.data_dir);
@@ -979,6 +980,7 @@ mod tests {
             wae_api_key: None,
             cookie_domain: None,
             quilombo_legacy_login: false, // <-- disabled
+            bypass_rate_limit: false,
         };
         let storage = Storage::new(&config.data_dir);
         let experiment = ExperimentStore::new(&config.data_dir);

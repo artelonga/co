@@ -625,6 +625,7 @@ mod tests {
             wae_api_key: None,
             cookie_domain: None,
             quilombo_legacy_login: true,
+            bypass_rate_limit: false,
         }
     }
 
