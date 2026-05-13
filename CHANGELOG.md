@@ -5,6 +5,27 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-05-13 — CO-180: Popularity endpoint pra ranking de serviços
+
+New read-only endpoint that powers the daily popularity bake for artelonga.com.br:
+
+`GET /api/v1/analytics/public/popularity?prefix=/servicos/&days=30`
+
+Returns page-view counts for paths matching a given prefix, ordered by
+`views DESC, path ASC` (stable, deterministic). Designed for a GH Action
+in `artelonga/ArteLonga` that commits `assets/popularity.json` daily —
+static site gets empirical ranking with no runtime API dependency.
+
+- `prefix` validation: required, must start with `/`, no `..`, max 64 chars → 400 on violation.
+- `days` clamped to `[1, 365]`, default 30.
+- Response shape: `{ as_of, window_days, prefix, items: [{ path, slug, views, visitors }] }`.
+- `slug` derived: strip `prefix` + trailing `/` from path.
+- 5-minute in-memory cache per `(prefix, days)`.
+- CORS inherited from global mirror_request layer.
+- Bot filter applied upstream (CO-46) — bot UAs never reach `telemetry_events`.
+- `docs/analytics-api.md` documents endpoint shape and the bake GH Action.
+- 19 tests (unit + HTTP integration).
+
 ## [2.5.0] — 2026-05-12 — CO-206: Yggdrasil verifies CO JWKS — centralized SSO
 
 CO is now the single identity authority for the entire artelonga stack.

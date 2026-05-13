@@ -514,6 +514,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // --- CO-166: OIDC OAuth endpoints (authorization, token, userinfo) ---
     let oauth_api = crate::oidc_routes::oauth_router();
 
+    // --- CO-180: Public analytics popularity endpoint ---
+    let analytics_public_api = crate::analytics_public::router();
+
     // --- CO-105: Admin dashboard API + static page ---
     let admin_dashboard_api = crate::admin_routes::api_router();
 
@@ -607,6 +610,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/cache", cache_api)
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
         .nest("/api/v1/admin", admin_dashboard_api)
+        // CO-180: public popularity endpoint (no auth, artelonga universe, 5-min cache)
+        .nest("/api/v1/analytics/public", analytics_public_api)
         // CO-183: public leads intake + admin queue API
         .nest("/api/v1", leads_public_api)
         .nest("/api/v1/admin", leads_admin_api)

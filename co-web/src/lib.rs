@@ -1,6 +1,7 @@
 pub mod ab;
 pub mod ab_routes;
 pub mod admin_routes;
+pub mod analytics_public;
 pub mod asset_crypto;
 pub mod asset_routes;
 pub mod auth;
