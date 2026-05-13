@@ -667,6 +667,7 @@ mod tests {
             embedding_tx,
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
         });
         crate::server::build_router(state, None)
     }
@@ -1319,6 +1320,7 @@ mod tests {
             embedding_tx,
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
         })
     }
 

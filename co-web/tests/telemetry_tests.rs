@@ -69,6 +69,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
         },
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
     });
     build_router(state, None)
 }
@@ -100,6 +101,8 @@ fn test_simulate_user_flow_events_recorded() {
             ua_device: Some("desktop".to_string()),
             ua_browser: Some("chrome".to_string()),
             ua_os: Some("mac".to_string()),
+            country: Some("BR".to_string()),
+            city: Some("São Paulo".to_string()),
         },
     );
 
@@ -121,6 +124,8 @@ fn test_simulate_user_flow_events_recorded() {
             ua_device: Some("desktop".to_string()),
             ua_browser: Some("chrome".to_string()),
             ua_os: Some("mac".to_string()),
+            country: None,
+            city: None,
         },
     );
 
@@ -142,6 +147,8 @@ fn test_simulate_user_flow_events_recorded() {
             ua_device: Some("mobile".to_string()),
             ua_browser: Some("safari".to_string()),
             ua_os: Some("ios".to_string()),
+            country: None,
+            city: None,
         },
     );
 
@@ -183,6 +190,8 @@ fn test_error_events_counted() {
                 ua_device: None,
                 ua_browser: None,
                 ua_os: None,
+                country: None,
+                city: None,
             },
         );
     }
@@ -215,6 +224,8 @@ fn test_retention_cleanup_removes_old_events() {
             ua_device: None,
             ua_browser: None,
             ua_os: None,
+            country: None,
+            city: None,
         },
     );
 

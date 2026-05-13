@@ -735,6 +735,7 @@ mod tests {
             },
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
         });
         build_router(state, None)
     }
@@ -1009,6 +1010,7 @@ mod tests {
             },
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
         });
         let app = build_router(state, None);
 

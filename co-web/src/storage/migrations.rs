@@ -1658,5 +1658,43 @@ impl Storage {
                  ON users(yggdrasil_user_id) WHERE yggdrasil_user_id IS NOT NULL;",
             )
             .expect("CO-206 backfill: idx_users_yggdrasil");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 44 {
+            // CO-178: geo enrichment — country + city columns on telemetry_events.
+            // Nullable: private/internal IPs and rows predating this migration stay NULL.
+            ensure_column(&self.conn, "telemetry_events", "country", "TEXT")
+                .expect("migration v44: telemetry_events.country");
+            ensure_column(&self.conn, "telemetry_events", "city", "TEXT")
+                .expect("migration v44: telemetry_events.city");
+            self.conn
+                .execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_telemetry_country \
+                     ON telemetry_events(country);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (44);",
+                )
+                .expect("migration v44: country index + schema_version");
+        }
+
+        // CO-178 unconditional backfill — ensures country/city exist even if v44
+        // was partially applied on an older instance.
+        ensure_column(&self.conn, "telemetry_events", "country", "TEXT")
+            .expect("CO-178 backfill: country");
+        ensure_column(&self.conn, "telemetry_events", "city", "TEXT")
+            .expect("CO-178 backfill: city");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_telemetry_country \
+                 ON telemetry_events(country);",
+            )
+            .expect("CO-178 backfill: country index");
     }
 }

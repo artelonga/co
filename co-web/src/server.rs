@@ -79,6 +79,8 @@ pub struct AppStateInner {
     /// CO-194: per-room presence refcounts (room_id → user_id → connection count).
     pub chat_presence:
         std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, u32>>>,
+    /// CO-178: in-process MaxMind GeoLite2 database for country+city enrichment.
+    pub geo: std::sync::Arc<crate::geo::GeoDb>,
 }
 
 pub type AppState = Arc<AppStateInner>;
@@ -1197,6 +1199,12 @@ pub async fn start_server(config: WebConfig) {
     let embeddings = Arc::new(crate::embedding::EmbeddingService::disabled());
     let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
 
+    let geo = {
+        let path = std::env::var("GEOIP_DB_PATH")
+            .unwrap_or_else(|_| "/data/GeoLite2-City.mmdb".to_string());
+        std::sync::Arc::new(crate::geo::GeoDb::open(&path))
+    };
+
     let state: AppState = Arc::new(AppStateInner {
         storage: parking_lot::Mutex::new(storage),
         experiment: Mutex::new(experiment),
@@ -1215,6 +1223,7 @@ pub async fn start_server(config: WebConfig) {
         embedding_tx,
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo,
     });
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState

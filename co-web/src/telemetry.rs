@@ -198,6 +198,8 @@ pub fn emit_crud_event(state: &crate::server::AppState, ev: CrudEvent) {
         session_id: ev.session_id,
         event_type: "crud".to_string(),
         event_name: ev.kind.to_string(),
+        country: None,
+        city: None,
         universe_key: if ev.universe.is_empty() {
             None
         } else {
@@ -296,6 +298,10 @@ pub struct EventRow {
     pub ua_device: Option<String>,
     pub ua_browser: Option<String>,
     pub ua_os: Option<String>,
+    /// ISO 3166-1 alpha-2 country code derived server-side from IP (CO-178).
+    pub country: Option<String>,
+    /// City name derived server-side from IP (CO-178).
+    pub city: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -311,8 +317,9 @@ pub fn insert_event(conn: &Connection, ev: &EventRow) {
     let _ = conn.execute(
         "INSERT INTO telemetry_events \
          (timestamp, visitor_token, user_id, session_id, event_type, event_name, \
-          universe_key, path, properties, duration_ms, ip_hash, ua_device, ua_browser, ua_os) \
-         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",
+          universe_key, path, properties, duration_ms, ip_hash, ua_device, ua_browser, ua_os, \
+          country, city) \
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
         params![
             ev.timestamp,
             ev.visitor_token,
@@ -328,6 +335,8 @@ pub fn insert_event(conn: &Connection, ev: &EventRow) {
             ev.ua_device,
             ev.ua_browser,
             ev.ua_os,
+            ev.country,
+            ev.city,
         ],
     );
 }
@@ -561,6 +570,8 @@ pub async fn telemetry_middleware(
         .filter(|s| !s.is_empty() && !RESERVED_TOP.contains(s))
         .map(String::from);
 
+    let (country, city) = crate::geo::geo_lookup(&state.geo, &ip);
+
     let start = Instant::now();
     let mut response = next.run(req).await;
     let duration_ms = start.elapsed().as_millis() as i64;
@@ -598,6 +609,8 @@ pub async fn telemetry_middleware(
         ua_device: Some(parse_ua_device(&ua).to_string()),
         ua_browser: Some(parse_ua_browser(&ua).to_string()),
         ua_os: Some(parse_ua_os(&ua).to_string()),
+        country,
+        city,
     };
 
     // OLTP write (primary store — CO-46)
@@ -657,7 +670,9 @@ pub async fn track_event_handler(
         .to_string();
 
     let visitor_token = get_visitor_token(&headers);
-    let ip_hash = hash_ip_daily(&extract_ip_from_headers(&headers));
+    let raw_ip = extract_ip_from_headers(&headers);
+    let (country, city) = crate::geo::geo_lookup(&state.geo, &raw_ip);
+    let ip_hash = hash_ip_daily(&raw_ip);
 
     let ev = EventRow {
         timestamp: chrono::Utc::now().to_rfc3339(),
@@ -674,6 +689,8 @@ pub async fn track_event_handler(
         ua_device: Some(parse_ua_device(&ua).to_string()),
         ua_browser: Some(parse_ua_browser(&ua).to_string()),
         ua_os: Some(parse_ua_os(&ua).to_string()),
+        country,
+        city,
     };
 
     let state_clone = Arc::clone(&state);
@@ -746,7 +763,9 @@ pub async fn marketing_events_handler(
         return StatusCode::NO_CONTENT;
     }
 
-    let ip_hash = hash_ip_daily(&extract_ip_from_headers(&headers));
+    let raw_ip = extract_ip_from_headers(&headers);
+    let (country, city) = crate::geo::geo_lookup(&state.geo, &raw_ip);
+    let ip_hash = hash_ip_daily(&raw_ip);
     let ua_device = parse_ua_device(&ua).to_string();
     let ua_browser = parse_ua_browser(&ua).to_string();
     let ua_os = parse_ua_os(&ua).to_string();
@@ -818,6 +837,8 @@ pub async fn marketing_events_handler(
             ua_device: Some(ua_device.clone()),
             ua_browser: Some(ua_browser.clone()),
             ua_os: Some(ua_os.clone()),
+            country: country.clone(),
+            city: city.clone(),
         });
     }
 
@@ -1250,6 +1271,8 @@ mod tests {
                 ua_device: Some("desktop".to_string()),
                 ua_browser: Some("chrome".to_string()),
                 ua_os: Some("mac".to_string()),
+                country: Some("BR".to_string()),
+                city: Some("São Paulo".to_string()),
             },
         );
 
@@ -1270,6 +1293,8 @@ mod tests {
                 ua_device: Some("mobile".to_string()),
                 ua_browser: Some("safari".to_string()),
                 ua_os: Some("ios".to_string()),
+                country: None,
+                city: None,
             },
         );
 
@@ -1319,7 +1344,9 @@ mod tests {
                 ip_hash TEXT,
                 ua_device TEXT,
                 ua_browser TEXT,
-                ua_os TEXT
+                ua_os TEXT,
+                country TEXT,
+                city TEXT
             );",
         )
         .unwrap();
