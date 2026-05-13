@@ -38,6 +38,12 @@ const SEED_SEGURANCA_CENARIOS_MD: &str = include_str!("../seed/template/seguranc
 const SEED_SEGURANCA_VAPID_MD: &str = include_str!("../seed/template/seguranca-vapid.md");
 const SEED_LICENSA_MD: &str = include_str!("../seed/template/licensa.md");
 const SEED_RENDERERS_MD: &str = include_str!("../seed/template/renderers.md");
+const SEED_INFRA_MD: &str = include_str!("../seed/template/infra.md");
+const SEED_INFRA_CO_MD: &str = include_str!("../seed/template/infra-co.md");
+const SEED_INFRA_YGGDRASIL_MD: &str = include_str!("../seed/template/infra-yggdrasil.md");
+const SEED_INFRA_QUILOMBO_MD: &str =
+    include_str!("../seed/template/infra-quilomboaraucaria.md");
+const SEED_INFRA_RFQ_MD: &str = include_str!("../seed/template/infra-rfq-gateway.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
 // each backed by a JSON event manifest + a markdown index/front page. Loaded

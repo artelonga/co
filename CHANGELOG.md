@@ -5,6 +5,45 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.2] — 2026-05-13 — Infra catalog in template + cross-universe wiki-links
+
+The compute portfolio for ArteLonga (Fly.io tasks, sizing, costs, comms
+topology) is now visible to anon visitors as readable markdown inside
+the template universe — content mirrored from `/projects/infra/`.
+
+Five new template pages:
+
+- `content/infra.md` — overview, inventory table, costs AS IS / TO BE
+- `content/infra-co.md` — co-artelonga prod/uat + planned CO-143/CO-123 tasks
+- `content/infra-yggdrasil.md` — yggdrasil-artelonga (game lobby)
+- `content/infra-quilomboaraucaria.md` — quilombo-araucaria (media-heavy)
+- `content/infra-rfq-gateway.md` — staging+smoke-staging+prod tier split
+
+Each page is taggable (frontmatter `tags: [infra, fly, compute, ...]`)
+and cross-linked via `?page=infra-X` anchors. Backlinks to existing
+security/dependencies pages preserved.
+
+### Cross-universe wiki-links
+
+Wiki-link syntax now supports a leading slash for cross-universe targets:
+
+- `[[/template/infra]]` — points at the catalog page in `template`
+- `[[/template/seguranca]]` — points at the security page in `template`
+
+Falls through to a normal SPA 404 if the target universe is private or
+the entry doesn't exist — same auth path as direct URL navigation, no
+new info disclosure. Bare `[[path]]` syntax (resolved within current
+universe) is unchanged.
+
+Orphan detector (`orphan_wikilinks`) skips cross-universe targets so
+they don't pollute the per-universe orphan list.
+
+Anchored to user request: "include the infra from the projects/infra
+documentation and this should be indexable and taggable (direct links,
+eg `[[link]]` from all universes since template is general public.
+This logic should work recursively with a universe for which a user
+doesnt have permission link would return 404."
+
 ## [2.7.1] — 2026-05-13 — Transparency pages seeded into template universe
 
 Six new content pages added to the template universe seed so anon

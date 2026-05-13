@@ -343,6 +343,19 @@
     let result = html.replace(/\[\[([^\]|<]+?)(?:\|([^\]<]+?))?\]\]/g, (_, target, label) => {
       const rawTarget = target.trim();
       const display = _escHtml(label ? label.trim() : rawTarget);
+      // Cross-universe form: [[/<universe>/<path>]] — leading slash routes
+      // to a different universe. Falls through to 404 (handled by the SPA
+      // viewer) if the target universe is private or the entry is absent.
+      if (rawTarget.startsWith('/')) {
+        const stripped = rawTarget.slice(1).replace(/\.md$/i, '');
+        const slash = stripped.indexOf('/');
+        if (slash > 0) {
+          const otherUniv = stripped.slice(0, slash);
+          const entryPath = stripped.slice(slash + 1);
+          const href = _entryHref(otherUniv, entryPath);
+          return `<a href="${href}" class="wikilink wikilink-cross" data-wikilink="${_escHtml(rawTarget)}" data-universe="${_escHtml(otherUniv)}">${display}</a>`;
+        }
+      }
       const cleanPath = rawTarget.replace(/\.md$/i, '');
       const href = _entryHref(universeSlug, cleanPath);
       return `<a href="${href}" class="wikilink" data-wikilink="${_escHtml(rawTarget)}">${display}</a>`;

@@ -288,6 +288,9 @@ impl<'a> ReferenceIndex<'a> {
         let mut orphans: std::collections::BTreeSet<String> = Default::default();
         for body in &bodies {
             for link in extract_wikilinks(body) {
+                if link.starts_with('/') {
+                    continue;
+                }
                 let exists: bool = self
                     .conn
                     .query_row(
