@@ -1647,5 +1647,14 @@ impl Storage {
                  ON users(yggdrasil_user_id) WHERE yggdrasil_user_id IS NOT NULL;",
             )
             .expect("CO-206 backfill: idx_users_yggdrasil");
+
+        // CO-179: composite index for public analytics queries filtered by
+        // (universe_key, timestamp). Cheap to create if already present.
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_telemetry_universe_time \
+                 ON telemetry_events(universe_key, timestamp);",
+            )
+            .expect("CO-179: idx_telemetry_universe_time");
     }
 }
