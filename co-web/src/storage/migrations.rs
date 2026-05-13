@@ -1637,6 +1637,17 @@ impl Storage {
                 .expect("migration v43: idx_users_yggdrasil + schema_version");
         }
 
+        if current_version < 44 {
+            // CO-177: universe-scoped telemetry queries (CO-179/CO-180 consumers).
+            self.conn
+                .execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_telemetry_universe_time \
+                     ON telemetry_events(universe_key, timestamp);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (44);",
+                )
+                .expect("migration v44: idx_telemetry_universe_time");
+        }
+
         // CO-206 unconditional backfill — ensures users.yggdrasil_user_id exists
         // even if v43 was partially applied on an older instance.
         ensure_column(&self.conn, "users", "yggdrasil_user_id", "TEXT")

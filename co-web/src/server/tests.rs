@@ -504,3 +504,122 @@ async fn test_admin_override_quota_bypasses_universe_quota() {
         resp.status()
     );
 }
+
+// ---------------------------------------------------------------------------
+// CO-177: CORS + universe_key for artelonga.com.br analytics events
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_telemetry_events_preflight_artelonga() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("OPTIONS")
+                .uri("/api/v1/telemetry/events")
+                .header("origin", "https://artelonga.com.br")
+                .header("access-control-request-method", "POST")
+                .header("access-control-request-headers", "content-type")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status() == StatusCode::OK || resp.status() == StatusCode::NO_CONTENT,
+        "preflight must return 200 or 204, got: {}",
+        resp.status()
+    );
+    let acao = resp
+        .headers()
+        .get("access-control-allow-origin")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    assert_eq!(
+        acao, "https://artelonga.com.br",
+        "ACAO header must echo artelonga.com.br origin"
+    );
+}
+
+#[tokio::test]
+async fn test_telemetry_events_post_populates_universe_key() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let batch = serde_json::json!({
+        "schema": 1,
+        "batch": [{
+            "s": 1,
+            "site": "artelonga",
+            "name": "page_view",
+            "sid": "sess-001",
+            "vid": "vis-001",
+            "path": "/blog/post"
+        }]
+    });
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/telemetry/events")
+                .header("content-type", "application/json")
+                .header("origin", "https://artelonga.com.br")
+                .body(Body::from(batch.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NO_CONTENT,
+        "POST /api/v1/telemetry/events must return 204"
+    );
+
+    // Give the spawned task time to write before we check the DB.
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let storage = crate::storage::Storage::new(dir.path().to_str().unwrap());
+    let universe_key: Option<String> = storage
+        .conn()
+        .query_row(
+            "SELECT universe_key FROM telemetry_events WHERE event_name = 'page_view' LIMIT 1",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap_or(None);
+    assert_eq!(
+        universe_key.as_deref(),
+        Some("artelonga"),
+        "universe_key must be 'artelonga' from site field"
+    );
+}
+
+#[tokio::test]
+async fn test_telemetry_admin_requires_auth_no_cors_bypass() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // Admin endpoint must be blocked by auth even with artelonga.com.br origin.
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/api/v1/admin/telemetry/summary")
+                .header("origin", "https://artelonga.com.br")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        resp.status() == StatusCode::UNAUTHORIZED || resp.status() == StatusCode::FORBIDDEN,
+        "admin telemetry must reject unauthenticated request, got: {}",
+        resp.status()
+    );
+}

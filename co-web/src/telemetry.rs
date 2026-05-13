@@ -803,7 +803,14 @@ pub async fn marketing_events_handler(
             session_id: Some(ev.sid),
             event_type: derive_event_type_from_marketing(&ev.name),
             event_name: ev.name,
-            universe_key: None,
+            universe_key: {
+                let s = ev.site.trim().to_string();
+                if !s.is_empty() && s.len() <= 64 {
+                    Some(s)
+                } else {
+                    None
+                }
+            },
             path: ev.path,
             properties: Some(serde_json::Value::Object(props_obj)),
             duration_ms: None,
