@@ -122,6 +122,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         },
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
     });
 
     build_router(state, None)
@@ -224,6 +225,7 @@ async fn test_owner_on_private_universe_gets_200() {
         },
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
     });
 
     let app = build_router(state, None);
@@ -297,6 +299,7 @@ async fn test_non_member_on_private_universe_gets_403() {
         },
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
     });
 
     let app = build_router(state, None);

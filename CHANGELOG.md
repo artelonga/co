@@ -5,6 +5,28 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.6.0] — 2026-05-13 — CO-178: Geo enrichment server-side (country + city)
+
+Each telemetry event is now enriched with `country` (ISO 3166-1 α-2) and
+`city` derived server-side from the request IP via MaxMind GeoLite2, before
+the IP is hashed and discarded. Raw IPs are never stored.
+
+**Changes:**
+- Migration v44: `country TEXT` + `city TEXT` columns on `telemetry_events`,
+  plus `idx_telemetry_country` index. Nullable — old rows and private IPs stay NULL.
+- `co-web/src/geo.rs`: `GeoDb` + `geo_lookup(db, ip) -> (Option<String>, Option<String>)`.
+  Reads `GeoLite2-City.mmdb` from `GEOIP_DB_PATH` (default `/data/GeoLite2-City.mmdb`).
+  Disabled gracefully when file is absent.
+- `telemetry_middleware`, `track_event_handler`, `marketing_events_handler`:
+  all now call `geo_lookup` before `hash_ip_daily` so the raw IP never outlives
+  the lookup scope.
+- `AppStateInner.geo: Arc<GeoDb>` — shared, read-only, < 1 ms per lookup.
+- `docs/analytics-api.md`: documents geo lifecycle, GeoLite2 attribution, schema.
+
+**Attribution:**
+This product includes GeoLite2 data created by MaxMind, available from
+<https://www.maxmind.com>.
+
 ## [2.5.0] — 2026-05-12 — CO-206: Yggdrasil verifies CO JWKS — centralized SSO
 
 CO is now the single identity authority for the entire artelonga stack.

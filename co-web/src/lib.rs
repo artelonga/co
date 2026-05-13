@@ -24,6 +24,7 @@ pub mod error;
 pub mod experiment;
 pub mod game_models;
 pub mod game_routes;
+pub mod geo;
 pub mod gestao_routes;
 pub mod github_auth;
 pub mod iceberg;
