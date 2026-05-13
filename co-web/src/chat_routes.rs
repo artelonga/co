@@ -31,6 +31,10 @@ pub fn chat_router() -> Router<AppState> {
             get(list_rooms_handler).post(create_room_handler),
         )
         .route(
+            "/{slug}/chat/rooms/{room_slug}/members",
+            get(list_room_members_handler),
+        )
+        .route(
             "/{slug}/chat/rooms/{room_slug}/messages",
             get(list_messages_handler).post(post_message_handler),
         )
@@ -159,6 +163,41 @@ pub async fn list_rooms_handler(
 
     let rooms = storage.list_chat_rooms(&slug, include_archived);
     Ok(axum::Json(ListRoomsResponse { rooms }))
+}
+
+/// GET /api/v1/universes/:slug/chat/rooms/:room_slug/members (CO-209)
+pub async fn list_room_members_handler(
+    State(state): State<AppState>,
+    Path((slug, room_slug)): Path<(String, String)>,
+    user_id: UserId,
+) -> Result<axum::Json<Vec<crate::storage::chat::ChatRoomMemberInfo>>, AppError> {
+    let storage = lock_storage(&state);
+
+    let room = if slug == "dm" {
+        storage
+            .get_dm_room_by_slug(&room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("DM room '{room_slug}' not found")))?
+    } else {
+        storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+        let role = resolve_role(&storage, &slug, &user_id.0)
+            .ok_or_else(|| AppError::Forbidden("Not a member of this universe".into()))?;
+        if !can_read(&role) {
+            return Err(AppError::Forbidden("Insufficient role to read chat".into()));
+        }
+        storage
+            .get_chat_room_by_slug(&slug, &room_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?
+    };
+
+    // For DMs, verify caller is a participant.
+    if slug == "dm" && !storage.is_dm_member(&room.id, &user_id.0) {
+        return Err(AppError::Forbidden("Not a member of this DM".into()));
+    }
+
+    let members = storage.list_chat_room_members(&room.id);
+    Ok(axum::Json(members))
 }
 
 /// POST /api/v1/universes/:slug/chat/rooms

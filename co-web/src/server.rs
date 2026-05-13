@@ -1126,6 +1126,17 @@ pub async fn start_server(config: WebConfig) {
         // CO-199: backfill default notification_preferences for every existing user.
         let n_prefs = chat_storage.backfill_default_preferences();
         tracing::info!("CO-199: notification_preferences backfill: {n_prefs} row(s) inserted");
+        // CO-209: rename the CO universe's default room to 'CO-geral'.
+        let co_rename = chat_storage.conn().execute(
+            "UPDATE chat_rooms SET name = 'CO-geral' \
+             WHERE universe_key = 'co' AND slug = 'general' AND is_default = 1 AND name != 'CO-geral'",
+            [],
+        );
+        if let Ok(n) = co_rename
+            && n > 0
+        {
+            tracing::info!("CO-209: renamed CO universe general room to 'CO-geral'");
+        }
         // CO-201: create push_subscriptions table if not yet present.
         chat_storage.ensure_push_subscriptions_table();
     }

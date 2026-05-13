@@ -20,6 +20,17 @@ pub struct ChatRoom {
 }
 
 // ---------------------------------------------------------------------------
+// CO-209: Room member info
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ChatRoomMemberInfo {
+    pub user_id: String,
+    pub display_name: String,
+    pub joined_at: String,
+}
+
+// ---------------------------------------------------------------------------
 // CO-198: DM types
 // ---------------------------------------------------------------------------
 
@@ -259,11 +270,16 @@ impl Storage {
                     |row| row.get(0),
                 )
                 .unwrap_or_else(|_| "system".to_string());
+            let default_name = if universe_key == "co" {
+                "CO-geral"
+            } else {
+                "geral"
+            };
             self.conn.execute(
                 "INSERT OR IGNORE INTO chat_rooms \
                  (id, universe_key, name, slug, description, created_by, created_at, is_default, kind) \
-                 VALUES (?1, ?2, 'Geral', 'general', NULL, ?3, ?4, 1, 'universe')",
-                params![id, universe_key, created_by, now],
+                 VALUES (?1, ?2, ?3, 'general', NULL, ?4, ?5, 1, 'universe')",
+                params![id, universe_key, default_name, created_by, now],
             )?;
         }
         Ok(())
@@ -1063,5 +1079,57 @@ impl Storage {
             }
         }
         count
+    }
+
+    /// CO-209: List members of a specific chat room with display names.
+    pub fn list_chat_room_members(&self, room_id: &str) -> Vec<ChatRoomMemberInfo> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT crm.user_id, COALESCE(u.display_name, crm.user_id), crm.joined_at \
+             FROM chat_room_members crm \
+             LEFT JOIN users u ON u.id = crm.user_id \
+             WHERE crm.room_id = ?1 \
+             ORDER BY crm.joined_at ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![room_id], |row| {
+            Ok(ChatRoomMemberInfo {
+                user_id: row.get(0)?,
+                display_name: row.get(1)?,
+                joined_at: row.get(2)?,
+            })
+        })
+        .into_iter()
+        .flatten()
+        .filter_map(|r| r.ok())
+        .collect()
+    }
+
+    /// CO-209: Get a chat room by its ID.
+    pub fn get_chat_room_by_id(&self, room_id: &str) -> Option<ChatRoom> {
+        self.conn
+            .query_row(
+                "SELECT id, universe_key, name, slug, description, is_default, created_by, \
+                 created_at, archived_at, COALESCE(kind,'universe') FROM chat_rooms \
+                 WHERE id = ?1",
+                params![room_id],
+                |row| {
+                    Ok(ChatRoom {
+                        id: row.get(0)?,
+                        universe_key: row.get(1)?,
+                        name: row.get(2)?,
+                        slug: row.get(3)?,
+                        description: row.get(4)?,
+                        is_default: row.get::<_, i64>(5)? != 0,
+                        created_by: row.get(6)?,
+                        created_at: row.get(7)?,
+                        archived_at: row.get(8)?,
+                        kind: row.get(9)?,
+                    })
+                },
+            )
+            .optional()
+            .unwrap_or(None)
     }
 }

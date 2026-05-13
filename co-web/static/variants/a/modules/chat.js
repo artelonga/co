@@ -16,7 +16,7 @@ let _state = null; // { universeSlug, mode, container, me, role, rooms, currentR
 // Public API
 // ---------------------------------------------------------------------------
 
-export function mountChat({ universeSlug, mode = 'drawer', container, me, dmSlug, dmOtherName }) {
+export function mountChat({ universeSlug, mode = 'drawer', container, me, dmSlug, dmOtherName, onRoomSelected }) {
     if (_state && !_state.destroyed) destroyChat();
     _state = {
         universeSlug,
@@ -34,6 +34,7 @@ export function mountChat({ universeSlug, mode = 'drawer', container, me, dmSlug
         editingMsgId: null,
         dmSlug: dmSlug || null,
         dmOtherName: dmOtherName || null,
+        onRoomSelected: onRoomSelected || null,
     };
     _render();
     // CO-198: in DM mode skip room list and go directly to the DM thread
@@ -199,10 +200,17 @@ function _tombstoneHtml(msg) {
 function _renderPresence() {
     if (!_state) return;
     const el = _state.container?.querySelector('#chat-presence');
-    if (!el) return;
-    if (!_state.presence.length) { el.innerHTML = ''; return; }
-    el.innerHTML = `<div class="chat-presence-label">${esc(t('chat.presence', { n: _state.presence.length }))}</div>`
-        + _state.presence.map(u => `<div class="chat-presence-item online">${esc(u.display_name)}</div>`).join('');
+    if (el) {
+        if (!_state.presence.length) { el.innerHTML = ''; }
+        else {
+            el.innerHTML = `<div class="chat-presence-label">${esc(t('chat.presence', { n: _state.presence.length }))}</div>`
+                + _state.presence.map(u => `<div class="chat-presence-item online">${esc(u.display_name)}</div>`).join('');
+        }
+    }
+    // CO-209: notify conversas member rail about presence changes
+    if (typeof window.coOnChatPresenceChanged === 'function') {
+        window.coOnChatPresenceChanged(_state.presence);
+    }
 }
 
 function _renderComposer() {
@@ -406,6 +414,7 @@ async function _switchRoom(slug) {
 
     await _loadMessages();
     _openWs(room.slug);
+    if (_state?.onRoomSelected) _state.onRoomSelected(room);
 }
 
 // CO-198: switch into a DM room directly (bypassing room list)

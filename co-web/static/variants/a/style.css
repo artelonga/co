@@ -5568,3 +5568,226 @@ body {
 .notif-device-row { display: flex; align-items: center; gap: 8px; font-size: 12px; margin-top: 6px; flex-wrap: wrap; }
 .notif-device-name { color: var(--text-primary, #111); overflow: hidden; text-overflow: ellipsis; }
 .notif-device-date { color: var(--text-muted, #9ca3af); }
+
+/* ===== CO-209: Conversas unified drawer ===== */
+.conversas-drawer {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 600px;
+    background: var(--card-bg, #1e1e2e);
+    border-left: 1px solid var(--border, rgba(255,255,255,.1));
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    box-shadow: -4px 0 24px rgba(0,0,0,.3);
+}
+.conversas-drawer.hidden { display: none; }
+@media (max-width: 767px) { .conversas-drawer { width: 100%; } }
+@media (max-width: 1023px) { .conversas-drawer { width: 480px; } }
+
+.conversas-inner { display: flex; flex-direction: column; height: 100%; }
+
+.conversas-body {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    flex: 1;
+    min-height: 0;
+}
+
+/* Left rail */
+.conversas-rail {
+    background: rgba(0,0,0,.15);
+    border-right: 1px solid var(--border, rgba(255,255,255,.08));
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+#conversas-rail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 4px;
+}
+.conversas-section { margin-bottom: 4px; }
+.conversas-section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    opacity: .5;
+    padding: 8px 8px 4px;
+    text-transform: uppercase;
+}
+.conversas-dm-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+.conversas-dm-toggle:hover { opacity: .8; }
+.conversas-universe-list,
+.conversas-dm-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.conversas-universe-item,
+.conversas-dm-item {
+    padding: 6px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    opacity: .75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.conversas-universe-item:hover,
+.conversas-dm-item:hover { opacity: 1; background: rgba(255,255,255,.07); }
+.conversas-universe-item.active,
+.conversas-dm-item.active { opacity: 1; background: rgba(255,255,255,.12); font-weight: 600; }
+.conversas-universe-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.conversas-empty-hint { font-size: 12px; opacity: .4; padding: 6px 8px; font-style: italic; list-style: none; }
+.conversas-loading { font-size: 12px; opacity: .4; padding: 12px 8px; }
+
+/* Member rail (bottom of left rail) */
+.conversas-member-rail {
+    border-top: 1px solid var(--border, rgba(255,255,255,.08));
+    padding: 6px 4px;
+    flex-shrink: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    font-size: 12px;
+}
+.conversas-members-header {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    opacity: .5;
+    padding: 4px 8px 6px;
+    text-transform: uppercase;
+}
+.conversas-member-filter {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255,255,255,.08);
+    border: 1px solid var(--border, rgba(255,255,255,.12));
+    border-radius: 6px;
+    color: inherit;
+    font-size: 12px;
+    padding: 4px 8px;
+    margin-bottom: 4px;
+    font-family: inherit;
+}
+.conversas-member-filter:focus { outline: none; border-color: var(--accent, #6366f1); }
+.conversas-member-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.conversas-member-item {
+    padding: 4px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: .75;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+}
+.conversas-member-item:hover { opacity: 1; background: rgba(255,255,255,.07); }
+.conversas-presence-dot {
+    font-size: 9px;
+    flex-shrink: 0;
+    color: rgba(255,255,255,.3);
+}
+.conversas-member-item.online .conversas-presence-dot { color: #22c55e; }
+
+/* Right pane */
+.conversas-pane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.conversas-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    opacity: .4;
+    padding: 24px;
+}
+/* When mountChat renders into conversas-pane, inherit its full height */
+.conversas-pane .chat-inner { height: 100%; }
+
+/* Welcome modal overlay */
+.conversas-welcome-overlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    backdrop-filter: blur(2px);
+}
+.conversas-welcome-card {
+    background: var(--card-bg, #1e1e2e);
+    border: 1px solid var(--border, rgba(255,255,255,.15));
+    border-radius: 12px;
+    padding: 28px 32px;
+    max-width: 360px;
+    width: 90%;
+    position: relative;
+    box-shadow: 0 8px 32px rgba(0,0,0,.4);
+    color: inherit;
+}
+.conversas-welcome-close {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: none;
+    border: none;
+    font-size: 22px;
+    cursor: pointer;
+    color: inherit;
+    opacity: .5;
+    line-height: 1;
+    padding: 0 4px;
+}
+.conversas-welcome-close:hover { opacity: 1; }
+.conversas-welcome-title {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 12px;
+    opacity: .95;
+}
+.conversas-welcome-headline {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 8px;
+    opacity: .9;
+}
+.conversas-welcome-body {
+    font-size: 13px;
+    line-height: 1.6;
+    opacity: .8;
+    margin: 0 0 10px;
+}
+.conversas-welcome-hint {
+    font-size: 12px;
+    opacity: .6;
+    margin: 0 0 16px;
+    font-style: italic;
+}
+.conversas-welcome-dismiss-hint {
+    font-size: 12px;
+    opacity: .35;
+    text-align: center;
+    letter-spacing: .1em;
+}

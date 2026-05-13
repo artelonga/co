@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.0] — 2026-05-13 — CO-209: Conversas — unified chat surface with first-time welcome + member rail
+
+### CO-209 — Unified Conversas surface
+
+- **Unified drawer**: single `💬 Conversas` button replaces separate `💬 Chat` + `📩 Mensagens` buttons.
+  Drawer shows two left-rail sections: "Universos" (universe chats) and "Mensagens privadas" (DMs).
+- **First-time welcome modal**: privacy disclosure shown once per browser profile (localStorage flag
+  `co_chat_welcome_seen`). Dismissal via `Enter`, click outside, or `×` button. PT and EN support.
+- **Member rail**: bottom of the left rail shows all members of the current conversation with
+  presence dots (● online / ○ offline). Filter input appears when count > 10. Click a member to open a DM.
+- **DM section collapsible**: "Mensagens privadas" section can be collapsed with a toggle.
+- **Backend**: `ensure_default_room` now seeds new universes with name `'geral'` (PT); CO universe's
+  default room renamed to `'CO-geral'` on startup. New endpoint
+  `GET /api/v1/universes/:slug/chat/rooms/:room_slug/members` returns room members with display names.
+
 ## [2.6.1] — 2026-05-13 — CO-208: Playwright e2e maintenance — rate-limit bypass + API drift fixes
 
 ### CO-208 — Unwind 12 days of e2e drift + rate-limit collisions

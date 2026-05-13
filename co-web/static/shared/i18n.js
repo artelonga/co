@@ -338,6 +338,17 @@
             'notif.chat.dm': '{name} te enviou uma mensagem',
             'notif.universe.invitation': '{name} te convidou para {universe}',
             'notif.chat.mention': '{name} mencionou você em {room}',
+            // CO-209: Conversas unified surface
+            'conversas.title': 'Conversas',
+            'conversas.welcome.headline': 'Sua autonomia para o futuro',
+            'conversas.welcome.body': 'Seus dados são seus. Mensagens só podem ser lidas pelos membros de um Universo — privacidade e segurança.',
+            'conversas.welcome.members_hint': 'Veja todos os membros no menu lateral.',
+            'conversas.section.universos': 'Universos',
+            'conversas.section.mensagens_privadas': 'Mensagens privadas',
+            'conversas.members_header': 'Membros ({n})',
+            'conversas.empty': 'Selecione uma conversa.',
+            'conversas.dm_button': '📩 Enviar mensagem',
+            'conversas.filter_members': 'Filtrar membros…',
         },
         en: {
             // Spec-defined dot-notation keys
@@ -661,6 +672,17 @@
             'notif.chat.dm': '{name} sent you a message',
             'notif.universe.invitation': '{name} invited you to {universe}',
             'notif.chat.mention': '{name} mentioned you in {room}',
+            // CO-209: Conversas unified surface
+            'conversas.title': 'Conversations',
+            'conversas.welcome.headline': 'Your autonomy for the future',
+            'conversas.welcome.body': 'Your data is yours. Messages can only be read by members of a Universe — privacy and security.',
+            'conversas.welcome.members_hint': 'See all members in the sidebar.',
+            'conversas.section.universos': 'Universes',
+            'conversas.section.mensagens_privadas': 'Direct messages',
+            'conversas.members_header': 'Members ({n})',
+            'conversas.empty': 'Select a conversation.',
+            'conversas.dm_button': '📩 Send message',
+            'conversas.filter_members': 'Filter members…',
         },
     };
 

@@ -52,6 +52,7 @@ import {
 } from './modules/invitations.js';
 import { mountChat, destroyChat } from './modules/chat.js';
 import { mountDmInbox, destroyDmInbox, openDmWith, updateDmBadge } from './modules/dm.js';
+import { openConversas, destroyConversas, injectOpenDmWithForConversas } from './modules/conversas.js';
 import { setupNotifications, teardownNotifications, bumpUnreadCount, renderNotificationsPage } from './modules/notifications.js';
 import { renderNotificationSettings } from './modules/notification-settings.js';
 
@@ -381,8 +382,8 @@ function wireModules() {
     injectBootCallbacks({ showLoading, hideLoading, render, selectProject, removeManifestViewTabs, injectManifestViewTabs, switchView });
     injectSidebarCallbacks({
         bootAppForUniverse: async (slug) => {
-            destroyChat();
-            document.getElementById('chat-drawer')?.classList.add('hidden');
+            destroyConversas();
+            document.getElementById('conversas-drawer')?.classList.add('hidden');
             return bootAppForUniverse(slug);
         },
         selectProject, renderContent, showTemplateBanner, hideTemplateBanner, loadMeUniverses, renderSidebar, showToast,
@@ -422,67 +423,33 @@ function wireModules() {
     injectYggdrasilCallbacks({ hideLoading, hideLoginModal, renderUserBadge });
 }
 
-// ===== CO-195/196: Chat panel =====
-function _setupChatTrigger() {
-    const drawer = document.getElementById('chat-drawer');
+// ===== CO-209: Conversas unified panel =====
+function _setupConversasTrigger() {
+    const drawer = document.getElementById('conversas-drawer');
     if (!drawer) return;
 
-    // Inject chat button into sidebar footer
+    // Inject single 💬 Conversas button into sidebar footer
     const sidebarFooter = document.querySelector('.sidebar-footer');
     if (sidebarFooter) {
-        const chatBtn = document.createElement('button');
-        chatBtn.id = 'btn-open-chat';
-        chatBtn.className = 'chat-sidebar-toggle hidden';
-        chatBtn.setAttribute('data-i18n', 'chat.open');
-        chatBtn.textContent = window.t ? window.t('chat.open') : '💬 Chat';
-        sidebarFooter.insertBefore(chatBtn, sidebarFooter.firstChild);
+        const conversasBtn = document.createElement('button');
+        conversasBtn.id = 'btn-open-conversas';
+        conversasBtn.className = 'chat-sidebar-toggle hidden';
+        conversasBtn.textContent = `💬 ${window.t ? window.t('conversas.title') : 'Conversas'}`;
+        sidebarFooter.insertBefore(conversasBtn, sidebarFooter.firstChild);
 
-        chatBtn.addEventListener('click', () => {
-            drawer.classList.remove('hidden');
-            const me = state.me || null;
-            mountChat({
-                universeSlug: state.currentUniverseSlug || 'template',
-                mode: 'drawer',
-                container: drawer,
-                me,
-            });
+        conversasBtn.addEventListener('click', () => {
+            openConversas(drawer, state.me || null);
         });
-
-        // CO-198: DM inbox button (below chat button)
-        const dmDrawer = document.getElementById('dm-drawer');
-        if (dmDrawer) {
-            const dmBtn = document.createElement('button');
-            dmBtn.id = 'btn-open-dm';
-            dmBtn.className = 'chat-sidebar-toggle hidden';
-            dmBtn.setAttribute('aria-label', window.t ? window.t('dm.title') : 'Mensagens');
-            dmBtn.innerHTML = `📩 ${window.t ? window.t('dm.title') : 'Mensagens'} <span id="dm-sidebar-badge" class="dm-badge hidden">0</span>`;
-            sidebarFooter.insertBefore(dmBtn, chatBtn.nextSibling);
-
-            dmBtn.addEventListener('click', () => {
-                dmDrawer.classList.remove('hidden');
-                mountDmInbox({ container: dmDrawer, me: state.me || null });
-            });
-        }
     }
+
+    // Wire openDmWith into conversas so member rail DM links work
+    injectOpenDmWithForConversas((userId, pane) => openDmWith(userId, pane || drawer));
 }
 
-// Show/hide the chat button based on login state
+// Show/hide the Conversas button based on login state
 function _updateChatButton(me) {
-    const btn = document.getElementById('btn-open-chat');
+    const btn = document.getElementById('btn-open-conversas');
     if (btn) btn.classList.toggle('hidden', !me);
-
-    // CO-198: show/hide DM button
-    const dmBtn = document.getElementById('btn-open-dm');
-    if (dmBtn) {
-        dmBtn.classList.toggle('hidden', !me);
-        if (me) {
-            // Fetch inbox unread count for the badge
-            fetch('/api/v1/me/dms', { credentials: 'include' })
-                .then(r => r.ok ? r.json() : null)
-                .then(d => { if (d) updateDmBadge(d.total_unread || 0); })
-                .catch(() => {});
-        }
-    }
 
     // CO-202: show/hide notification bell
     const notifWrap = document.getElementById('notif-wrap');
@@ -567,8 +534,8 @@ function bindStaticEvents() {
 // CO-202: WS chat hook — called by chat.js when a message arrives in any room.
 // Bumps the bell badge if the chat drawer is not currently open.
 window.coOnChatMessageArrived = (_msg, _roomId) => {
-    const chatDrawer = document.getElementById('chat-drawer');
-    if (!chatDrawer || chatDrawer.classList.contains('hidden')) {
+    const conversasDrawer = document.getElementById('conversas-drawer');
+    if (!conversasDrawer || conversasDrawer.classList.contains('hidden')) {
         bumpUnreadCount();
     }
 };
@@ -594,7 +561,7 @@ async function init() {
     setupUsageLimitModal();
     setupSettingsPanel();
     setupInvitationsPanel();
-    _setupChatTrigger();
+    _setupConversasTrigger();
     initFooter();
     bindStaticEvents();
 
