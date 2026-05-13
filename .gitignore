@@ -44,3 +44,6 @@ data/
 backups/
 co-backups/
 *.tar.gz
+
+# MaxMind GeoLite2 data — required attribution, large binary
+GeoLite2-*.mmdb
