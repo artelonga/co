@@ -18,7 +18,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::server::AppState;
@@ -442,13 +442,208 @@ pub async fn recent_handler(
 // Router
 // ---------------------------------------------------------------------------
 
+
+// ===========================================================================
+// CO-180: popularity endpoint
+// ===========================================================================
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PopularityItem {
+    pub path: String,
+    pub slug: String,
+    pub views: i64,
+    pub visitors: i64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct PopularityResponse {
+    pub as_of: String,
+    pub window_days: u32,
+    pub prefix: String,
+    pub items: Vec<PopularityItem>,
+}
+
+// ---------------------------------------------------------------------------
+// Cache — 5-minute TTL per (prefix, days)
+// ---------------------------------------------------------------------------
+
+#[derive(Hash, PartialEq, Eq, Clone)]
+struct CacheKey {
+    prefix: String,
+    days: u32,
+}
+
+struct CacheEntry {
+    data: PopularityResponse,
+    fetched_at: Instant,
+}
+
+static POPULARITY_CACHE: OnceLock<Mutex<HashMap<CacheKey, CacheEntry>>> = OnceLock::new();
+
+fn popularity_cache() -> &'static Mutex<HashMap<CacheKey, CacheEntry>> {
+    POPULARITY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+// ---------------------------------------------------------------------------
+// Query params
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct PopularityParams {
+    pub prefix: Option<String>,
+    pub days: Option<u32>,
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+fn validate_prefix(prefix: &str) -> Result<(), &'static str> {
+    if !prefix.starts_with('/') {
+        return Err("prefix must start with /");
+    }
+    if prefix.contains("..") {
+        return Err("prefix must not contain ..");
+    }
+    if prefix.len() > 64 {
+        return Err("prefix must be at most 64 characters");
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Query helper
+// ---------------------------------------------------------------------------
+
+pub fn query_popularity(
+    conn: &rusqlite::Connection,
+    prefix: &str,
+    days: u32,
+) -> Vec<PopularityItem> {
+    let days_str = format!("-{days} days");
+    let prefix_pattern = format!("{prefix}%");
+
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
+         FROM telemetry_events \
+         WHERE universe_key = ?1 \
+           AND event_name = 'page_view' \
+           AND path LIKE ?2 \
+           AND timestamp >= datetime('now', ?3) \
+         GROUP BY path \
+         ORDER BY views DESC, path ASC \
+         LIMIT 200",
+    ) else {
+        return vec![];
+    };
+
+    stmt.query_map(params![UNIVERSE_KEY, prefix_pattern, days_str], |r| {
+        let path: String = r.get(0)?;
+        let views: i64 = r.get(1)?;
+        let visitors: i64 = r.get(2)?;
+        let slug = path
+            .strip_prefix(prefix)
+            .unwrap_or(&path)
+            .trim_end_matches('/')
+            .to_string();
+        Ok(PopularityItem {
+            path,
+            slug,
+            views,
+            visitors,
+        })
+    })
+    .ok()
+    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// Handler
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/analytics/public/popularity?prefix=<path>&days=<n>
+///
+/// `prefix` is required, must start with `/`, no `..`, max 64 chars.
+/// `days` is clamped to [1, 365], default 30.
+pub async fn popularity_handler(
+    State(state): State<AppState>,
+    Query(params): Query<PopularityParams>,
+) -> Result<Json<PopularityResponse>, Response> {
+    let prefix = match params.prefix {
+        Some(p) => p,
+        None => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "prefix is required"})),
+            )
+                .into_response());
+        }
+    };
+
+    if let Err(msg) = validate_prefix(&prefix) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": msg})),
+        )
+            .into_response());
+    }
+
+    let days = params.days.unwrap_or(30).clamp(1, 365);
+
+    let cache_key = CacheKey {
+        prefix: prefix.clone(),
+        days,
+    };
+
+    {
+        let cache = popularity_cache().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = cache.get(&cache_key)
+            && entry.fetched_at.elapsed() < CACHE_TTL
+        {
+            return Ok(Json(entry.data.clone()));
+        }
+    }
+
+    let items = {
+        let storage = state.storage.lock();
+        query_popularity(storage.conn(), &prefix, days)
+    };
+
+    let data = PopularityResponse {
+        as_of: chrono::Utc::now().to_rfc3339(),
+        window_days: days,
+        prefix: prefix.clone(),
+        items,
+    };
+
+    {
+        let mut cache = popularity_cache().lock().unwrap_or_else(|e| e.into_inner());
+        cache.insert(
+            cache_key,
+            CacheEntry {
+                data: data.clone(),
+                fetched_at: Instant::now(),
+            },
+        );
+    }
+
+    Ok(Json(data))
+}
+
+// ---------------------------------------------------------------------------
+// Router
+// ---------------------------------------------------------------------------
+
+
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/summary", get(summary_handler))
         .route("/recent", get(recent_handler))
+        .route("/popularity", get(popularity_handler))
 }
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -707,6 +902,7 @@ mod tests {
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
             embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
             embedding_tx,
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });

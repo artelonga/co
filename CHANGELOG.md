@@ -5,27 +5,85 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.6.0] — 2026-05-13 — CO-178: Geo enrichment server-side (country + city)
+## [2.6.0] — 2026-05-13 — Analytics ingestion + geo + public endpoints (CO-177 → CO-180)
 
-Each telemetry event is now enriched with `country` (ISO 3166-1 α-2) and
-`city` derived server-side from the request IP via MaxMind GeoLite2, before
-the IP is hashed and discarded. Raw IPs are never stored.
+Closes the artelonga.com.br analytics chain end-to-end. AL-48 (the bake
+workflow shipped under the assumption this backend existed) is now
+unblocked.
 
-**Changes:**
-- Migration v44: `country TEXT` + `city TEXT` columns on `telemetry_events`,
-  plus `idx_telemetry_country` index. Nullable — old rows and private IPs stay NULL.
-- `co-web/src/geo.rs`: `GeoDb` + `geo_lookup(db, ip) -> (Option<String>, Option<String>)`.
-  Reads `GeoLite2-City.mmdb` from `GEOIP_DB_PATH` (default `/data/GeoLite2-City.mmdb`).
-  Disabled gracefully when file is absent.
-- `telemetry_middleware`, `track_event_handler`, `marketing_events_handler`:
-  all now call `geo_lookup` before `hash_ip_daily` so the raw IP never outlives
-  the lookup scope.
-- `AppStateInner.geo: Arc<GeoDb>` — shared, read-only, < 1 ms per lookup.
-- `docs/analytics-api.md`: documents geo lifecycle, GeoLite2 attribution, schema.
+### CO-177 — Accept events from artelonga.com.br via CORS + populate universe_key
 
-**Attribution:**
-This product includes GeoLite2 data created by MaxMind, available from
-<https://www.maxmind.com>.
+`marketing_events_handler` now sets `telemetry_events.universe_key` from
+`ev.site` (trimmed, non-empty, ≤ 64 chars; else NULL). Previously
+hardcoded to None — universe-scoped queries always returned empty.
+
+CORS is handled by the existing global `mirror_request()` layer (CO-205)
+so artelonga.com.br is already permitted; admin telemetry endpoints
+remain protected by GitHub admin auth.
+
+### CO-178 — Geo enrichment server-side (country + city)
+
+Each event is enriched with `country` (ISO 3166-1 α-2) and `city` derived
+from the request IP via MaxMind GeoLite2, before the IP is hashed and
+discarded. Raw IPs are never stored.
+
+- `co-web/src/geo.rs`: `GeoDb` + `geo_lookup(db, ip)`. Reads
+  `GeoLite2-City.mmdb` from `GEOIP_DB_PATH` (default
+  `/data/GeoLite2-City.mmdb`). Disabled gracefully when file is absent.
+- Three handlers updated: `telemetry_middleware`, `track_event_handler`,
+  `marketing_events_handler` all call `geo_lookup` before `hash_ip_daily`.
+- `AppStateInner.geo: Arc<GeoDb>` — shared, read-only.
+
+Migration v44: `country TEXT` + `city TEXT` columns plus
+`idx_telemetry_country`. Nullable — old rows and private IPs stay NULL.
+
+Attribution: This product includes GeoLite2 data created by MaxMind,
+available from <https://www.maxmind.com>.
+
+### CO-179 — Public analytics endpoints (`/summary`, `/recent`)
+
+Read-only aggregates feeding artelonga's analytics dashboard:
+
+- `GET /api/v1/analytics/public/summary?days=N` — views, visitors,
+  returning, sessions, timeseries, top_pages, geo array. `days` clamped
+  to `[1, 365]`, default 30. `days=0` returns 400.
+- `GET /api/v1/analytics/public/recent?limit=N` — most recent events
+  DESC, `limit` clamped to `[1, 200]`, default 50.
+
+PII stripped: no `visitor_token`, no `ip_hash`, no raw `properties`.
+5-minute in-memory cache per (endpoint, query params) via
+`OnceLock<Mutex<HashMap>>`. CORS inherited from the global
+`mirror_request` layer. Geo array hydrated by CO-178 once GeoLite2 is
+present.
+
+Index added: `idx_telemetry_universe_time` on
+`(universe_key, timestamp)` — universe-scoped time-range queries are
+now O(events_for_universe).
+
+### CO-180 — Popularity endpoint for service ranking
+
+`GET /api/v1/analytics/public/popularity?prefix=/servicos/&days=30` —
+page-view counts for paths matching a prefix, ordered by
+`views DESC, path ASC` (stable, deterministic). Designed for a GH
+Action in `artelonga/ArteLonga` that commits `assets/popularity.json`
+daily — the static site gets empirical ranking with no runtime API
+dependency.
+
+- `prefix` validation: required, starts with `/`, no `..`, max 64 chars
+  → 400 on violation.
+- `days` clamped to `[1, 365]`, default 30.
+- Response shape: `{ as_of, window_days, prefix, items: [{ path, slug,
+  views, visitors }] }`. `slug` derived: strip prefix + trailing `/`.
+- 5-minute in-memory cache per `(prefix, days)`.
+
+### Operational notes
+
+- All four migrations are idempotent — runs every boot, no-op once
+  applied.
+- Total new tests: 35+ (CORS preflight, sanitize, persist, clamp, PII
+  absence, shape, popularity validation, popularity ordering).
+- AL-48's bake workflow can now be re-enabled; expect first popularity
+  bake within 24 h of artelonga seeing real traffic.
 
 ## [2.5.0] — 2026-05-12 — CO-206: Yggdrasil verifies CO JWKS — centralized SSO
 
