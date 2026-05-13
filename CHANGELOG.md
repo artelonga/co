@@ -5,6 +5,28 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.1] — 2026-05-13 — Transparency pages seeded into template universe
+
+Six new content pages added to the template universe seed so anon
+visitors land with readable docs about the security model, dependencies,
+red-team scenarios, VAPID threat model, license (AGPL v3), and
+markdown renderer options.
+
+- `content/seguranca.md` — security overview (entry point)
+- `content/seguranca-dependencias.md` — deps catalog + decisions
+- `content/seguranca-cenarios.md` — red-team scenarios + playbook
+- `content/seguranca-vapid.md` — VAPID threat model deep-dive
+- `content/licensa.md` — AGPL v3 explanation in PT
+- `content/renderers.md` — markdown renderer options
+
+All cross-linked via `?page=<slug>` template-internal anchors.
+Canonical versions in `docs/security/*.md` + `docs/licensa.md` +
+`docs/markdown-renderers.md` remain the source of truth; the template
+versions are condensed for end-user reading.
+
+Reseed runs unconditionally on every boot (`reseed_template_content_pages`)
+— `upsert_entry_row` makes it idempotent.
+
 ## [2.7.0] — 2026-05-13 — CO-209: Conversas — unified chat surface with first-time welcome + member rail
 
 ### CO-209 — Unified Conversas surface

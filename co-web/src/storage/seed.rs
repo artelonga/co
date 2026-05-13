@@ -8,8 +8,10 @@ use super::Storage;
 use super::schema::{seed_page_body, seed_page_frontmatter, upsert_entry_row};
 
 use super::{
-    SEED_CO_PLATAFORMA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_LINHAS_DO_TEMPO_MD,
-    SEED_PRIVACIDADE_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD,
+    SEED_CO_PLATAFORMA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_LICENSA_MD,
+    SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD,
+    SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD,
+    SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD,
 };
 
 impl Storage {
@@ -269,6 +271,15 @@ impl Storage {
             ("content/linhas-do-tempo.md", SEED_LINHAS_DO_TEMPO_MD),
             ("content/co-plataforma.md", SEED_CO_PLATAFORMA_MD),
             ("content/guia.md", SEED_GUIA_MD),
+            // 2026-05-13: transparency pages anchored in the template
+            // so anon users see the security model + dependencies +
+            // license + renderer options as readable content.
+            ("content/seguranca.md", SEED_SEGURANCA_MD),
+            ("content/seguranca-dependencias.md", SEED_SEGURANCA_DEPS_MD),
+            ("content/seguranca-cenarios.md", SEED_SEGURANCA_CENARIOS_MD),
+            ("content/seguranca-vapid.md", SEED_SEGURANCA_VAPID_MD),
+            ("content/licensa.md", SEED_LICENSA_MD),
+            ("content/renderers.md", SEED_RENDERERS_MD),
         ] {
             let entry = make_entry(
                 path,

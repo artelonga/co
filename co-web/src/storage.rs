@@ -32,6 +32,12 @@ const SEED_DADOS_RASTREADOS_MD: &str = include_str!("../seed/template/dados-rast
 const SEED_LINHAS_DO_TEMPO_MD: &str = include_str!("../seed/template/linhas-do-tempo.md");
 const SEED_CO_PLATAFORMA_MD: &str = include_str!("../seed/template/co-plataforma.md");
 const SEED_GUIA_MD: &str = include_str!("../seed/template/guia.md");
+const SEED_SEGURANCA_MD: &str = include_str!("../seed/template/seguranca.md");
+const SEED_SEGURANCA_DEPS_MD: &str = include_str!("../seed/template/seguranca-dependencias.md");
+const SEED_SEGURANCA_CENARIOS_MD: &str = include_str!("../seed/template/seguranca-cenarios.md");
+const SEED_SEGURANCA_VAPID_MD: &str = include_str!("../seed/template/seguranca-vapid.md");
+const SEED_LICENSA_MD: &str = include_str!("../seed/template/licensa.md");
+const SEED_RENDERERS_MD: &str = include_str!("../seed/template/renderers.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
 // each backed by a JSON event manifest + a markdown index/front page. Loaded
