@@ -27,6 +27,21 @@ async function waitForServer(): Promise<void> {
 }
 
 async function globalSetup(): Promise<void> {
+  // If BASE_URL points at an external host (e.g. UAT or prod), skip
+  // the local-server bootstrap entirely. The tests will hit the
+  // external host directly.
+  const baseUrl = process.env.BASE_URL || "";
+  const isExternalBase =
+    baseUrl &&
+    !baseUrl.includes("localhost") &&
+    !baseUrl.includes("127.0.0.1") &&
+    !baseUrl.includes(`:${SERVER_PORT}`);
+  if (isExternalBase) {
+    console.log(`Using external base URL: ${baseUrl} (skipping local bootstrap)`);
+    process.env.CO_WEB_EXTERNAL = "true";
+    return;
+  }
+
   // Check if a healthy server is already running
   if (await isServerHealthy()) {
     console.log("co-web server already running on port", SERVER_PORT);

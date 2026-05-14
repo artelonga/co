@@ -70,6 +70,8 @@ test.describe("Seed page links resolve", () => {
     const ctx = await request.newContext({ baseURL: base });
 
     // 1. Pull each seed page body via the public entries API.
+    //    Throttle gently to stay under the prod rate limiter.
+    const sleepMs = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const bodies = new Map<string, string>();
     for (const slug of SEED_PAGE_SLUGS) {
       const apiPath = `/api/v1/universes/template/entries/content/${slug}.md`;
@@ -77,6 +79,7 @@ test.describe("Seed page links resolve", () => {
       expect(res.status(), `entry ${slug} should be 200`).toBe(200);
       const json = await res.json();
       bodies.set(slug, json.body || "");
+      await sleepMs(40);
     }
     // Index lives at index.md, not content/index.md.
     const idxRes = await ctx.get("/api/v1/universes/template/entries/index.md");
@@ -98,8 +101,17 @@ test.describe("Seed page links resolve", () => {
     //    links use a HEAD with redirect-follow.
     const failures: string[] = [];
 
+    // De-duplicate URLs so we don't re-fetch the same link 5x just because
+    // 5 pages reference it. Cuts request volume by ~5x and avoids hitting
+    // the rate limiter on prod.
+    const seenUrls = new Set<string>();
+
     for (const ref of refs) {
       if (ref.kind === "anchor" || ref.kind === "other") continue;
+      if (seenUrls.has(ref.url)) continue;
+      seenUrls.add(ref.url);
+      // Throttle to stay under the rate-limit (CO-80 default: 1000/min).
+      await sleepMs(40);
 
       if (ref.kind === "internal") {
         // Two internal shapes today:
