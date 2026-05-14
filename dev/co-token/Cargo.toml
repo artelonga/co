@@ -3,7 +3,7 @@ name = "co-token"
 version = "0.1.0"
 edition = "2024"
 description = "co-token — encrypted token storage via OS keychain (dev tool, not part of CO scaffold)"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/artelonga/co"
 publish = false
 

@@ -5,6 +5,36 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.3] — 2026-05-14 — License flip MIT → AGPL v3
+
+Project license changed from MIT to **GNU AGPL v3 or later** to match
+the `/co/template?page=licensa` page shipped in 2.7.1. The mismatch
+existed for ~24h between the storefront (AGPL) and the code (MIT).
+
+Files updated:
+- `LICENSE` → AGPL v3 canonical text (661 lines)
+- `Cargo.toml` (workspace) `license = "AGPL-3.0-or-later"`
+- `co-cli/Cargo.toml`, `game-core/Cargo.toml` (explicit, not workspace-inherited)
+- `dev/co-auto`, `dev/co-token`, `dev/co-pwhash` (explicit)
+- `README.md` license section
+
+Crates that inherit from workspace (`co-web`, `co`, `core`, `co-agent`)
+automatically pick up the new license via `license.workspace = true`.
+
+**`co-obsidian/` (the Obsidian plugin) stays MIT** — it's a client tool,
+not a network service, and the Obsidian plugin ecosystem expects
+permissive licenses. The AGPL network clause has no purchase on a
+client-side plugin.
+
+**Implications acknowledged before the flip:**
+- AGPL bites on the *server* (modified deployments must offer source).
+- Closed-source forks become impossible. Anyone forking and running
+  CO as SaaS must release modifications.
+- Re-licensing later requires every contributor's consent. Tonight
+  trivial (1 contributor); growing friction over time.
+- No CLA introduced — contributors implicitly license under AGPL.
+  Can revisit if dual-licensing for enterprise tier ever matters.
+
 ## [2.7.2] — 2026-05-13 — Infra catalog in template + cross-universe wiki-links
 
 The compute portfolio for ArteLonga (Fly.io tasks, sizing, costs, comms

@@ -146,4 +146,13 @@ All contributions are welcome — bug reports, feature requests, documentation, 
 
 ## License
 
-[MIT](LICENSE) — Copyright (c) 2025 Institutional PointSet
+[GNU AGPL v3 or later](LICENSE) — Copyright (c) 2025–2026 Institutional PointSet / ArteLonga.
+
+The AGPL network clause applies: if you run a modified version of CO as a
+network service, you must offer its source to users of that service.
+See [`/co/template?page=licensa`](https://co.artelonga.com.br/co/template?page=licensa)
+for a plain-language explanation.
+
+The Obsidian plugin (`co-obsidian/`) remains MIT — it's a client tool, not
+a network service, and Obsidian's plugin ecosystem expects permissive
+licenses.

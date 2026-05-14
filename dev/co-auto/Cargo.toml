@@ -3,7 +3,7 @@ name = "co-auto"
 version = "0.1.0"
 edition = "2024"
 description = "co-auto — automated task execution pipeline (developer tooling, NOT part of the CO scaffold)"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/artelonga/co"
 publish = false
 

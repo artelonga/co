@@ -23,9 +23,9 @@ default-members = [
 
 [workspace.package]
 
-version = "2.7.2"
+version = "2.7.3"
 edition = "2024"
-license = "MIT"
+license = "AGPL-3.0-or-later"
 repository = "https://github.com/artelonga/co"
 description = "Graph-based content management platform — CLI, web server, kanban board"
 keywords = ["content-management", "kanban", "markdown", "graph", "cli"]
