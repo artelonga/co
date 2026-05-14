@@ -2597,10 +2597,79 @@ body {
 .conteudo-list.conteudo-with-readme { max-width: 1400px; }
 
 .conteudo-split {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 28px;
-    align-items: start;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    --split-pct: 50%;
+}
+
+/* Left = detail pane (default). The percentage is driven by the
+   draggable splitter and persisted in localStorage. */
+.conteudo-detail-pane {
+    flex: 0 0 calc(var(--split-pct) - 14px);
+    padding-right: 14px;
+}
+.conteudo-sections-pane {
+    flex: 1 1 auto;
+    padding-left: 14px;
+    position: relative;
+}
+
+/* Splitter handle — thin draggable bar between panes. */
+.conteudo-splitter {
+    flex: 0 0 6px;
+    cursor: ew-resize;
+    background: transparent;
+    border-left: 1px solid var(--border, #e5e5e0);
+    border-right: 1px solid transparent;
+    margin: 0 0;
+    align-self: stretch;
+    transition: background 0.12s ease;
+}
+.conteudo-splitter:hover,
+.conteudo-split.dragging .conteudo-splitter {
+    background: var(--accent-soft, rgba(99,102,241,0.18));
+    border-left-color: var(--accent, #6366f1);
+}
+
+/* Obsidian mode: tree pane on the left (narrow), detail pane on the
+   right takes the remainder. Same draggable bar; just reordered. */
+.conteudo-split.obsidian-mode {
+    flex-direction: row-reverse;
+}
+.conteudo-split.obsidian-mode .conteudo-sections-pane {
+    flex: 0 0 280px;
+    padding-left: 0;
+    padding-right: 14px;
+    border-right: 1px solid var(--border, #e5e5e0);
+}
+.conteudo-split.obsidian-mode .conteudo-detail-pane {
+    flex: 1 1 auto;
+    padding-right: 0;
+    padding-left: 14px;
+}
+.conteudo-split.obsidian-mode .conteudo-splitter {
+    border-left-color: transparent;
+}
+
+/* Layout-mode toggle pinned to the top-right corner of the sections pane. */
+.conteudo-layout-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: transparent;
+    border: 1px solid var(--border, #e5e5e0);
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: var(--text-muted, #6b7280);
+    line-height: 1;
+    z-index: 1;
+}
+.conteudo-layout-toggle:hover {
+    background: var(--surface-2, #ececea);
+    color: var(--text, #111);
 }
 
 .conteudo-detail-pane {
@@ -2710,10 +2779,19 @@ body {
 }
 
 @media (max-width: 900px) {
-    .conteudo-split {
-        grid-template-columns: 1fr;
+    .conteudo-split,
+    .conteudo-split.obsidian-mode {
+        flex-direction: column;
         gap: 20px;
     }
+    .conteudo-detail-pane,
+    .conteudo-split.obsidian-mode .conteudo-detail-pane,
+    .conteudo-split.obsidian-mode .conteudo-sections-pane {
+        flex: 1 1 auto;
+        padding: 0;
+        border-right: none;
+    }
+    .conteudo-splitter { display: none; }
     .conteudo-list.conteudo-with-readme { max-width: 800px; }
 }
 

@@ -975,11 +975,25 @@ export async function renderConteudo() {
     } catch (_) {}
 
     if (initialDetailEntry) {
+        // Restore persisted layout: split percentage + Obsidian-mode flag.
+        let splitPct = 50;
+        try {
+            const v = parseInt(localStorage.getItem('co_conteudo_split_pct') || '', 10);
+            if (Number.isFinite(v) && v >= 15 && v <= 85) splitPct = v;
+        } catch (_) {}
+        let obsidianMode = false;
+        try { obsidianMode = localStorage.getItem('co_conteudo_layout_mode') === 'obsidian'; } catch (_) {}
+
         content.innerHTML = `<div class="conteudo-list conteudo-with-readme">
             ${statsHtml}
-            <div class="conteudo-split">
+            <div class="conteudo-split${obsidianMode ? ' obsidian-mode' : ''}"
+                 id="conteudo-split"
+                 style="--split-pct:${splitPct}%">
                 <div class="conteudo-detail-pane" id="conteudo-detail-pane"></div>
-                <div class="conteudo-sections-pane">${sectionsHtml}</div>
+                <div class="conteudo-splitter" id="conteudo-splitter"
+                     role="separator" aria-orientation="vertical"
+                     title="Arraste para redimensionar"></div>
+                <div class="conteudo-sections-pane" id="conteudo-sections-pane">${sectionsHtml}</div>
             </div>
         </div>`;
         const detailContainer = content.querySelector('#conteudo-detail-pane');
@@ -993,6 +1007,65 @@ export async function renderConteudo() {
             esc,
             selectionKey: SELECTION_KEY,
         });
+
+        // Wire the splitter drag handler.
+        const splitEl = content.querySelector('#conteudo-split');
+        const splitter = content.querySelector('#conteudo-splitter');
+        if (splitter && splitEl) {
+            let dragging = false;
+            const onDown = (e) => {
+                dragging = true;
+                splitEl.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+                e.preventDefault();
+            };
+            const onMove = (e) => {
+                if (!dragging) return;
+                const rect = splitEl.getBoundingClientRect();
+                const pct = ((e.clientX - rect.left) / rect.width) * 100;
+                const clamped = Math.max(15, Math.min(85, pct));
+                splitEl.style.setProperty('--split-pct', `${clamped}%`);
+                try { localStorage.setItem('co_conteudo_split_pct', String(Math.round(clamped))); } catch (_) {}
+            };
+            const onUp = () => {
+                if (!dragging) return;
+                dragging = false;
+                splitEl.classList.remove('dragging');
+                document.body.style.userSelect = '';
+            };
+            splitter.addEventListener('mousedown', onDown);
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+            // Touch
+            splitter.addEventListener('touchstart', (e) => {
+                if (e.touches[0]) onDown({ clientX: e.touches[0].clientX, preventDefault: () => e.preventDefault() });
+            }, { passive: false });
+            window.addEventListener('touchmove', (e) => {
+                if (e.touches[0] && dragging) onMove({ clientX: e.touches[0].clientX });
+            });
+            window.addEventListener('touchend', onUp);
+        }
+
+        // Layout-mode toggle (Obsidian = narrow tree pane on the left,
+        // content takes the remainder). Surfaced as a small button in
+        // the sections pane toolbar so it's discoverable without
+        // crowding the detail-pane toolbar.
+        const sectionsPane = content.querySelector('#conteudo-sections-pane');
+        if (sectionsPane) {
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'conteudo-layout-toggle';
+            toggleBtn.setAttribute('title', 'Modo Obsidian (árvore à esquerda)');
+            toggleBtn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">${obsidianMode ? 'dock_to_right' : 'dock_to_left'}</span>`;
+            sectionsPane.appendChild(toggleBtn);
+            toggleBtn.addEventListener('click', () => {
+                const split = content.querySelector('#conteudo-split');
+                if (!split) return;
+                const wasObsidian = split.classList.toggle('obsidian-mode');
+                try { localStorage.setItem('co_conteudo_layout_mode', wasObsidian ? 'obsidian' : 'default'); } catch (_) {}
+                toggleBtn.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">${wasObsidian ? 'dock_to_right' : 'dock_to_left'}</span>`;
+            });
+        }
     } else {
         content.innerHTML = `<div class="conteudo-list">${statsHtml}${sectionsHtml}</div>`;
     }

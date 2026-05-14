@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.9] — 2026-05-14 — Resizable splitter + Obsidian-mode layout
+
+Conteúdo view now has:
+
+- **Draggable splitter** between detail pane (left) and sections pane
+  (right). Drag to set any 15–85% split. Position persisted in
+  localStorage (`co_conteudo_split_pct`).
+- **Obsidian mode toggle** (icon button top-right of sections pane).
+  Re-layouts to tree-on-left/content-on-right, with the tree pane
+  fixed at 280px — classic Obsidian / IDE-style sidebar. Toggle
+  state persisted in `co_conteudo_layout_mode`.
+- Touch-friendly: splitter responds to touchstart/touchmove/touchend
+  in addition to mouse events.
+- Mobile (<= 900px): both modes collapse to stacked vertical layout
+  with the splitter hidden — same as before.
+
 ## [2.7.8] — 2026-05-14 — Pretty URLs for seed pages + link-audit E2E
 
 ### Pretty URLs
