@@ -559,22 +559,33 @@ impl Storage {
             params![now_str],
         );
         tracing::info!("Yggdrasil universe seeded (public-subscribable, default-for-new-users)");
+    }
 
-        // Seed the index page so anon visitors land with readable content
-        // rather than an empty universe. Idempotent via upsert_entry_row.
-        let yggdrasil_root = self.universe_root("yggdrasil");
-        let entry = make_entry(
-            "index.md",
-            seed_page_frontmatter(super::SEED_YGGDRASIL_INDEX_MD, &now_str),
-            seed_page_body(super::SEED_YGGDRASIL_INDEX_MD),
-        );
-        if let Err(e) = co::entry::write_entry(&yggdrasil_root, &entry) {
-            tracing::warn!("Failed to write yggdrasil/index.md: {e}");
+    /// Idempotent reseed of the yggdrasil universe's content pages.
+    /// Mirrors `reseed_template_content_pages` shape: runs on every boot
+    /// so content updates land for existing installs without a manual
+    /// migration.
+    pub fn reseed_yggdrasil_content_pages(&mut self) {
+        if self.get_universe("yggdrasil").is_none() {
+            return;
         }
-        let yggdrasil_uc = self.universe_pool.get_or_open("yggdrasil");
-        let uc_guard = yggdrasil_uc.lock().expect("yggdrasil universe conn lock");
-        if let Err(e) = upsert_entry_row(&uc_guard, "yggdrasil", &entry) {
-            tracing::warn!("Failed to upsert yggdrasil/index.md: {e}");
+        let now_str = Utc::now().to_rfc3339();
+        let yggdrasil_root = self.universe_root("yggdrasil");
+
+        for (path, md) in [("index.md", super::SEED_YGGDRASIL_INDEX_MD)] {
+            let entry = make_entry(
+                path,
+                seed_page_frontmatter(md, &now_str),
+                seed_page_body(md),
+            );
+            if let Err(e) = co::entry::write_entry(&yggdrasil_root, &entry) {
+                tracing::warn!("Failed to write yggdrasil/{path}: {e}");
+            }
+            let yggdrasil_uc = self.universe_pool.get_or_open("yggdrasil");
+            let uc_guard = yggdrasil_uc.lock().expect("yggdrasil universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "yggdrasil", &entry) {
+                tracing::warn!("Failed to upsert yggdrasil/{path}: {e}");
+            }
         }
     }
 

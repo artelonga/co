@@ -773,6 +773,7 @@ fn uat_startup(config: &WebConfig) -> bool {
         if !storage.yggdrasil_universe_exists() {
             storage.seed_yggdrasil_universe();
         }
+        storage.reseed_yggdrasil_content_pages();
 
         drop(storage);
 
@@ -897,6 +898,9 @@ pub async fn start_server(config: WebConfig) {
             tracing::info!("Seeding Yggdrasil universe...");
             storage.seed_yggdrasil_universe();
         }
+        // Always reseed yggdrasil content pages so updates land for
+        // existing installs (mirrors reseed_template_content_pages).
+        storage.reseed_yggdrasil_content_pages();
         // CO-142 Phase C: hard-delete deprecated co-dev / co-experience rows on every boot.
         storage.delete_deprecated_universes();
         // CO-170: soft-hide empty parent placeholders + pre-merge mbya from
