@@ -652,13 +652,6 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         router = router.nest("/api/v1/plugins", plugin_router);
     }
 
-    // Pretty-URL redirects for known seed pages: `/seguranca` etc. land
-    // on `/template/seguranca` so the SPA can resolve the entry via its
-    // existing universe routing. Hardcoded list — short, predictable,
-    // no DB lookup per request, and avoids accidentally shadowing
-    // existing universe slugs like `/co` or `/template`.
-    router = router.merge(crate::pretty_urls::router());
-
     // CO-80: rate limiting applied after ALL routes are registered so the layer
     // covers every endpoint, including universe_api, entry_api, and vault_api.
     router = router.layer(axum::middleware::from_fn_with_state(

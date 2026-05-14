@@ -36,6 +36,22 @@ pub(super) async fn serve_co_index(
         return serve_variant_file(headers, uri, State(state)).await;
     }
 
+    // Pretty URLs: `/seguranca` → 307 → `/template/seguranca` when the
+    // first path segment matches a known seed page slug. Lets the
+    // marketing surface hand out short URLs without touching the
+    // universe routing. Falls through to the regular SPA serve when
+    // the slug isn't on the list.
+    if let Some(slug) = uri.path().strip_prefix('/').and_then(|p| {
+        if p.is_empty() || p.contains('/') {
+            None
+        } else {
+            Some(p)
+        }
+    }) && crate::pretty_urls::is_seed_page_slug(slug)
+    {
+        return axum::response::Redirect::temporary(&format!("/template/{}", slug)).into_response();
+    }
+
     let variant = extract_variant(&headers, &state.config);
     let embed_path = format!("variants/{}/index.html", variant);
     let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);

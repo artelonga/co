@@ -1,27 +1,15 @@
-//! Pretty-URL redirects for known template seed pages.
+//! Pretty-URL slug registry for seeded template pages.
 //!
-//! Maps `GET /<slug>` to `GET /template/<slug>` via 302 redirect when
-//! `slug` is one of the seeded template pages. The browser ends up on
-//! the canonical `/template/<slug>` URL and the SPA resolves the entry
-//! via its existing routing.
+//! `/<slug>` short URLs (e.g. `/seguranca`, `/licensa`) 307-redirect to
+//! `/template/<slug>` so the SPA can resolve the entry via its existing
+//! universe routing. The redirect itself lives in
+//! `crate::server::static_files::serve_co_index` — this module just
+//! owns the canonical slug list so adding a new seed page is a
+//! single-place edit.
 //!
-//! The slug list is hardcoded to keep this layer fast and predictable
-//! and to avoid shadowing real universe slugs (`co`, `template`,
-//! `yggdrasil`, etc.) on routes that happen to share a name.
+//! Keep `SEED_PAGE_SLUGS` in sync with
+//! `reseed_template_content_pages` in `co-web/src/storage/seed.rs`.
 
-use axum::{
-    Router,
-    extract::Path,
-    response::{IntoResponse, Redirect},
-    routing::get,
-};
-
-use crate::server::AppState;
-
-/// Seed page slugs eligible for pretty-URL redirect.
-///
-/// Keep in sync with `reseed_template_content_pages` in
-/// `co-web/src/storage/seed.rs`.
 const SEED_PAGE_SLUGS: &[&str] = &[
     // Welcome / intro
     "sobre",
@@ -47,20 +35,9 @@ const SEED_PAGE_SLUGS: &[&str] = &[
     "infra-rfq-gateway",
 ];
 
-async fn maybe_redirect(Path(slug): Path<String>) -> impl IntoResponse {
-    if SEED_PAGE_SLUGS.contains(&slug.as_str()) {
-        Redirect::temporary(&format!("/template/{}", slug)).into_response()
-    } else {
-        // Not a known pretty URL — fall through to the SPA fallback
-        // by returning 404 here; axum will hand off to the fallback
-        // chain. Returning Redirect on every miss would clash with
-        // existing universe routes.
-        axum::http::StatusCode::NOT_FOUND.into_response()
-    }
-}
-
-pub fn router() -> Router<AppState> {
-    Router::new().route("/{slug}", get(maybe_redirect))
+/// True when `slug` matches one of the seeded template page slugs.
+pub fn is_seed_page_slug(slug: &str) -> bool {
+    SEED_PAGE_SLUGS.contains(&slug)
 }
 
 #[cfg(test)]
@@ -88,5 +65,13 @@ mod tests {
         for slug in SEED_PAGE_SLUGS {
             assert!(seen.insert(slug), "duplicate slug: {}", slug);
         }
+    }
+
+    #[test]
+    fn is_seed_page_slug_works() {
+        assert!(is_seed_page_slug("seguranca"));
+        assert!(is_seed_page_slug("licensa"));
+        assert!(!is_seed_page_slug("not-a-page"));
+        assert!(!is_seed_page_slug(""));
     }
 }
