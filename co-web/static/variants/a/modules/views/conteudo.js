@@ -78,6 +78,190 @@ export function buildPdfViewerHtml(pdfUrl, filename) {
 </div>`;
 }
 
+/**
+ * Inline detail pane controller: renders the currently selected entry
+ * in the Conteúdo split layout. Master-detail with single-click-to-edit:
+ *
+ *   - render(): re-renders the current entry in read or edit mode
+ *   - select(entry): swap to a different entry (resets to read mode)
+ *   - enterEdit(): mount the CodeMirror editor in-place
+ *
+ * Full-screen reading routes through openZoomModal (existing zoom UI).
+ * Editing is available both inline (single click on the rendered body)
+ * and from the full-screen modal (its own edit button). Both edits
+ * land at the same PUT endpoint, so they stay consistent.
+ */
+function createDetailController(container, initialEntry, deps) {
+    const {
+        universeSlug, allEntries, isTemplate, openZoomModal: openModal,
+        showToast, entryTitle, esc, selectionKey,
+    } = deps;
+
+    let current = initialEntry;
+    let editing = false;
+    let editorInstance = null;
+    let draftTimer = null;
+
+    function draftKeyFor(entry) {
+        return `co_draft_page_${encodeURIComponent(entry.path || '')}`;
+    }
+
+    function renderRead() {
+        const md = window.CoMarkdown;
+        let html = md ? md.renderMarkdown(current.body || '') : esc(current.body || '');
+        if (md && md.resolveWikilinks) html = md.resolveWikilinks(html, universeSlug);
+
+        container.innerHTML = `
+            <div class="conteudo-detail-toolbar">
+                <span class="conteudo-detail-title">${esc(entryTitle(current))}</span>
+                <div class="conteudo-detail-actions">
+                    <button class="conteudo-detail-btn" type="button"
+                            data-detail-fullscreen title="Tela cheia">
+                        <span class="material-symbols-outlined" style="font-size:18px">open_in_full</span>
+                    </button>
+                </div>
+            </div>
+            <article class="conteudo-readme md-body" data-detail-body>${html}</article>
+        `;
+
+        const body = container.querySelector('[data-detail-body]');
+        if (body) {
+            body.querySelectorAll('table').forEach(tbl => {
+                const wrap = document.createElement('div');
+                wrap.className = 'co-table-wrap';
+                tbl.parentNode.insertBefore(wrap, tbl);
+                wrap.appendChild(tbl);
+            });
+            const md2 = window.CoMarkdown;
+            if (md2 && md2.enableImageZoom) md2.enableImageZoom(body);
+            if (md2 && md2.highlightCode) md2.highlightCode(body);
+            if (md2 && md2.renderMermaidBlocks) md2.renderMermaidBlocks(body);
+
+            // Single click on rendered content → inline edit. Skip when
+            // the user clicked something interactive (link, image, etc.)
+            // or when no text is selected (allows copy-on-select gestures).
+            body.addEventListener('click', (e) => {
+                if (e.target.closest('a, img, button, input, textarea, select')) return;
+                const sel = window.getSelection && window.getSelection();
+                if (sel && sel.toString().length > 0) return;
+                enterEdit();
+            });
+        }
+
+        const fsBtn = container.querySelector('[data-detail-fullscreen]');
+        if (fsBtn) fsBtn.addEventListener('click', () => openModal(current, false));
+    }
+
+    function renderEdit() {
+        container.innerHTML = `
+            <div class="conteudo-detail-toolbar">
+                <span class="conteudo-detail-title">${esc(entryTitle(current))} <em style="color:var(--text-muted,#6b7280);font-style:italic;font-size:12px">(editando)</em></span>
+                <div class="conteudo-detail-actions">
+                    <button class="btn btn-primary btn-sm" type="button" data-detail-save>Salvar</button>
+                    <button class="btn btn-secondary btn-sm" type="button" data-detail-cancel>Cancelar</button>
+                </div>
+            </div>
+            <textarea class="content-editor-textarea" data-detail-textarea>${esc(current.body || '')}</textarea>
+        `;
+
+        if (window.CoEditor) {
+            const ta = container.querySelector('[data-detail-textarea]');
+            if (ta) ta.style.display = 'none';
+            const cmDiv = document.createElement('div');
+            cmDiv.className = 'content-editor-cm conteudo-detail-cm';
+            container.appendChild(cmDiv);
+            editorInstance = window.CoEditor.initEditor(cmDiv, {
+                content: current.body || '',
+                onChange: (val) => { if (ta) ta.value = val; },
+                readOnly: false,
+            });
+
+            if (draftTimer) clearInterval(draftTimer);
+            draftTimer = setInterval(() => {
+                try {
+                    const val = editorInstance ? editorInstance.getValue() : '';
+                    localStorage.setItem(draftKeyFor(current), val);
+                } catch (_) {}
+            }, 5000);
+        }
+
+        container.querySelector('[data-detail-cancel]').addEventListener('click', () => {
+            teardownEditor();
+            editing = false;
+            renderRead();
+        });
+
+        container.querySelector('[data-detail-save]').addEventListener('click', async () => {
+            const saveBtn = container.querySelector('[data-detail-save]');
+            const ta = container.querySelector('[data-detail-textarea]');
+            const newBody = editorInstance && editorInstance.getContent
+                ? editorInstance.getContent()
+                : (ta ? ta.value : (current.body || ''));
+
+            if (isTemplate) {
+                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+                teardownEditor();
+                editing = false;
+                renderRead();
+                return;
+            }
+
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
+            try {
+                const result = await window.fetch(
+                    `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${(current.path || '').split('/').map(encodeURIComponent).join('/')}`,
+                    {
+                        method: 'PUT',
+                        credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ body: newBody }),
+                    }
+                ).then(r => r.ok ? r.json() : null);
+
+                if (result) {
+                    current = { ...current, body: newBody };
+                    try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
+                    showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+                    teardownEditor();
+                    editing = false;
+                    renderRead();
+                } else {
+                    showToast('Erro ao salvar', 'error');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
+                }
+            } catch (_) {
+                showToast('Erro ao salvar', 'error');
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
+            }
+        });
+    }
+
+    function teardownEditor() {
+        if (draftTimer) { clearInterval(draftTimer); draftTimer = null; }
+        if (editorInstance) {
+            try { editorInstance.destroy(); } catch (_) {}
+            editorInstance = null;
+        }
+    }
+
+    function enterEdit() {
+        if (editing) return;
+        editing = true;
+        renderEdit();
+    }
+
+    function select(entry) {
+        if (editing) teardownEditor();
+        editing = false;
+        current = entry;
+        try { localStorage.setItem(selectionKey, entry.path || ''); } catch (_) {}
+        renderRead();
+    }
+
+    renderRead();
+    return { select, enterEdit, getCurrent: () => current };
+}
+
 export async function openZoomModal(entry, startInEditMode) {
     const existing = document.getElementById('co-zoom-overlay');
     if (existing) existing.remove();
@@ -698,48 +882,44 @@ export async function renderConteudo() {
             ${lastUpdatedRel ? `<div class="conteudo-stat conteudo-stat-meta"><span class="conteudo-stat-label">Última edição</span><span class="conteudo-stat-value-meta">${esc(lastUpdatedRel)}</span></div>` : ''}
         </div>`;
 
-    const readmeBodyHtml = (() => {
-        if (!readmeEntry) return '';
-        const md = window.CoMarkdown;
-        let html = md ? md.renderMarkdown(readmeEntry.body || '') : esc(readmeEntry.body || '');
-        if (md && md.resolveWikilinks) html = md.resolveWikilinks(html, slug);
-        return html;
-    })();
+    // Master-detail: left pane renders the currently *selected* entry
+    // (right pane = list of cards). On desktop, clicking a card switches
+    // the left pane to that entry. On mobile, clicking a card opens the
+    // full-screen modal (existing behavior) — the left pane is on top
+    // and stays anchored to the README/last selection.
+    //
+    // Selection is persisted per-universe in localStorage so refreshes
+    // resume where you left off.
+    const SELECTION_KEY = `co_conteudo_selected_${slug}`;
+    let initialDetailEntry = readmeEntry;
+    try {
+        const remembered = localStorage.getItem(SELECTION_KEY);
+        if (remembered) {
+            const candidate = pageEntries.find(e => e.path === remembered)
+                || allEntries.find(e => e.path === remembered);
+            if (candidate) initialDetailEntry = candidate;
+        }
+    } catch (_) {}
 
-    if (readmeEntry) {
+    if (initialDetailEntry) {
         content.innerHTML = `<div class="conteudo-list conteudo-with-readme">
             ${statsHtml}
             <div class="conteudo-split">
-                <article class="conteudo-readme md-body"
-                         data-entry-path="${esc(readmeEntry.path)}"
-                         data-entry-title="${esc(entryTitle(readmeEntry))}">
-                    ${readmeBodyHtml}
-                </article>
+                <div class="conteudo-detail-pane" id="conteudo-detail-pane"></div>
                 <div class="conteudo-sections-pane">${sectionsHtml}</div>
             </div>
         </div>`;
-
-        // Apply the same post-render passes that openZoomModal uses so
-        // tables wrap, images are zoomable, code blocks highlight, and
-        // mermaid diagrams render.
-        const readmeEl = content.querySelector('.conteudo-readme');
-        if (readmeEl) {
-            readmeEl.querySelectorAll('table').forEach(tbl => {
-                const wrap = document.createElement('div');
-                wrap.className = 'co-table-wrap';
-                tbl.parentNode.insertBefore(wrap, tbl);
-                wrap.appendChild(tbl);
-            });
-            const md2 = window.CoMarkdown;
-            if (md2 && md2.enableImageZoom) md2.enableImageZoom(readmeEl);
-            if (md2 && md2.highlightCode) md2.highlightCode(readmeEl);
-            if (md2 && md2.renderMermaidBlocks) md2.renderMermaidBlocks(readmeEl);
-
-            // Double-click to open the README in the editor (mirrors page cards).
-            readmeEl.addEventListener('dblclick', () => {
-                _openZoomModal(readmeEntry, true);
-            });
-        }
+        const detailContainer = content.querySelector('#conteudo-detail-pane');
+        content._detailController = createDetailController(detailContainer, initialDetailEntry, {
+            universeSlug: slug,
+            allEntries: pageEntries,
+            isTemplate: state.isTemplate,
+            openZoomModal: _openZoomModal,
+            showToast: _showToast,
+            entryTitle,
+            esc,
+            selectionKey: SELECTION_KEY,
+        });
     } else {
         content.innerHTML = `<div class="conteudo-list">${statsHtml}${sectionsHtml}</div>`;
     }
@@ -782,7 +962,15 @@ export async function renderConteudo() {
                 const entryPath = card.dataset.entryPath;
                 const entry = (content._pageEntries || []).find(en => en.path === entryPath)
                     || { path: entryPath, title: card.dataset.entryTitle || entryPath, body: '' };
-                _openZoomModal(entry, false);
+                // Desktop split: click swaps the detail pane. Mobile (or
+                // when no detail pane is present): open the full-screen
+                // modal as before.
+                const isDesktop = window.matchMedia('(min-width: 901px)').matches;
+                if (isDesktop && content._detailController) {
+                    content._detailController.select(entry);
+                } else {
+                    _openZoomModal(entry, false);
+                }
             }, 220);
         });
         card.addEventListener('dblclick', () => {

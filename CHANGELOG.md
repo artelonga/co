@@ -5,6 +5,31 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.5] — 2026-05-14 — Master-detail Conteúdo + click-to-edit inline
+
+Refactor the Conteúdo split so the left pane is a live viewer for the
+currently *selected* entry, not a hardcoded README pin. The right pane
+is the master list; clicks on a page card update the left pane.
+
+- **Left pane**: renders the selected entry. Single click anywhere on
+  the rendered body → switches to inline edit (CodeMirror, same
+  bundle the modal uses). Save / Cancel actions in the toolbar.
+- **Right pane**: list of pages, tasks, events, clips. Click on a
+  page card → swaps the left pane to that entry on desktop; opens
+  full-screen modal on mobile.
+- **Toolbar button** (`open_in_full`): escalates to full-screen mode
+  via the existing zoom modal — useful for long reads.
+- **Full-screen modal** still edits via its existing button, so both
+  surfaces route the same PUT endpoint and stay consistent.
+- **Selection persists** per-universe via `localStorage` — refresh
+  resumes on the last viewed entry.
+- **Initial selection** defaults to `index.md` / `README.md`; falls
+  back to the first page entry; if nothing matches, the view falls
+  back to the prior single-column section list.
+
+Selection-driven model retires the prior "README pinned to left"
+behavior shipped in 2.7.4.
+
 ## [2.7.4] — 2026-05-14 — Content-first default + README split layout
 
 Universe entry point is now **Conteúdo** instead of Kanban. The README

@@ -2603,12 +2603,78 @@ body {
     align-items: start;
 }
 
+.conteudo-detail-pane {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.conteudo-detail-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    background: var(--surface-1, #f8f8f6);
+    border: 1px solid var(--border, #e5e5e0);
+    border-radius: 8px;
+    min-height: 38px;
+}
+
+.conteudo-detail-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text, #111);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1 1 auto;
+}
+
+.conteudo-detail-actions {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.conteudo-detail-btn {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: var(--text-muted, #6b7280);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.conteudo-detail-btn:hover {
+    background: var(--surface-2, #ececea);
+    color: var(--text, #111);
+}
+
 .conteudo-readme {
     min-width: 0;
     padding: 4px 0;
+    cursor: text;
 }
 
 .conteudo-readme.md-body :first-child { margin-top: 0; }
+
+/* Hover affordance: tells the user the body is clickable to edit
+   without competing with link/image cursors. */
+.conteudo-readme[data-detail-body]:hover {
+    background: var(--surface-1, #f8f8f6);
+    border-radius: 8px;
+}
+
+.conteudo-detail-cm {
+    border: 1px solid var(--border, #e5e5e0);
+    border-radius: 8px;
+    min-height: 320px;
+}
 
 .conteudo-sections-pane { min-width: 0; }
 
