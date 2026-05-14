@@ -49,7 +49,12 @@ pub(super) async fn serve_co_index(
         }
     }) && crate::pretty_urls::is_seed_page_slug(slug)
     {
-        return axum::response::Redirect::temporary(&format!("/template/{}", slug)).into_response();
+        // Redirect to the canonical entry path (`content/<slug>.md`)
+        // rather than `/template/<slug>` — the SPA's entry-from-URL
+        // resolver matches the path against `<universe>/<entry-path>`,
+        // and seed pages live at `content/<slug>.md` not the root.
+        return axum::response::Redirect::temporary(&format!("/template/content/{}", slug))
+            .into_response();
     }
 
     let variant = extract_variant(&headers, &state.config);

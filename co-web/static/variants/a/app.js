@@ -261,7 +261,17 @@ async function maybeOpenEntryFromUrl(universeSlug) {
     let entryPath = readEntryPathFromUrl(universeSlug);
     if (!entryPath) { maybeOpenPageFromUrl(universeSlug); return; }
     if (entryPath.startsWith('entries/')) entryPath = entryPath.slice('entries/'.length);
-    for (const p of [entryPath + '.md', entryPath]) {
+    // Try the literal entry path, then the canonical seed-page location
+    // `content/<slug>.md` — most public seed pages (seguranca, licensa,
+    // infra, etc.) live under `content/` so a bare `/template/seguranca`
+    // URL needs to fall through to `content/seguranca.md`.
+    const candidates = [
+        entryPath + '.md',
+        entryPath,
+        `content/${entryPath}.md`,
+        `content/${entryPath}`,
+    ];
+    for (const p of candidates) {
         try {
             const encodedPath = p.split('/').map(encodeURIComponent).join('/');
             const entry = await apiFetch(`/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${encodedPath}`);

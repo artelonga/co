@@ -5,6 +5,38 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.10] — 2026-05-14 — Fullscreen on click + /template/<slug> resolves
+
+### Inline fullscreen button: immediate OS fullscreen
+
+The fullscreen icon in the detail-pane toolbar now calls
+`requestFullscreen()` on the detail pane itself, synchronously inside
+the click handler. Previous version routed through `openZoomModal`
+which awaits the editor bundle — the user-gesture trust window
+expires after the first await, so the browser silently refused the
+fullscreen request. Direct call preserves the gesture.
+
+CSS `:fullscreen` styling centers the content at ~820px with
+comfortable padding so the pane looks like a reading view, not a
+floating overflow block.
+
+### /template/<slug> URL resolves to content/<slug>.md
+
+`/template/seguranca` returned the universe but didn't open the
+seguranca entry — the SPA's entry-from-URL resolver only tried
+`seguranca.md` / `seguranca` at the universe root and fell through
+to a stem search that returned 0 hits (search index doesn't index
+seed pages by stem alone).
+
+Two fixes:
+- Server: pretty-URL redirect now lands on
+  `/template/content/<slug>` (the canonical path) instead of
+  `/template/<slug>`. `/seguranca` → 307 → `/template/content/seguranca`
+  → SPA resolves `content/seguranca.md` directly.
+- Client: `maybeOpenEntryFromUrl` also tries `content/<entryPath>.md`
+  before the stem-search fallback. Direct `/template/seguranca` URLs
+  typed by users now open the right entry.
+
 ## [2.7.9] — 2026-05-14 — Resizable splitter + Obsidian-mode layout
 
 Conteúdo view now has:

@@ -171,7 +171,19 @@ function createDetailController(container, initialEntry, deps) {
         }
 
         const fsBtn = container.querySelector('[data-detail-fullscreen]');
-        if (fsBtn) fsBtn.addEventListener('click', () => openModal(current, false));
+        if (fsBtn) {
+            fsBtn.addEventListener('click', () => {
+                // Synchronous fullscreen request on the detail pane itself
+                // — the browser only honors requestFullscreen when called
+                // from a user-gesture handler with no intervening await,
+                // so we can't route through openZoomModal (it's async).
+                if (document.fullscreenElement) {
+                    document.exitFullscreen?.();
+                } else {
+                    container.requestFullscreen?.().catch(() => {});
+                }
+            });
+        }
     }
 
     function renderEdit() {
