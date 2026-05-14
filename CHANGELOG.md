@@ -5,6 +5,35 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.8] — 2026-05-14 — Pretty URLs for seed pages + link-audit E2E
+
+### Pretty URLs
+
+`/<slug>` now 307-redirects to `/template/<slug>` when slug is one of
+the seeded template pages. Lets you hand out short URLs like
+`co.artelonga.com.br/seguranca` instead of the canonical
+`/co/template?page=seguranca`. Slug list lives in `co-web/src/pretty_urls.rs`
+and must stay in sync with `reseed_template_content_pages`.
+
+The universe slug stays `template` for now (user OK'd the URL ending
+on `/template/seguranca`). Renaming the slug to a Portuguese word
+(`modelo` or similar) is deferred — it's a multi-place change
+(DB row + entries table + filesystem path + many code literals) that
+deserves its own patch.
+
+### E2E link audit
+
+`co-web/e2e/seed-links.spec.ts` crawls every seeded template page via
+the public entries API, extracts markdown links + autolinks, and
+asserts each resolves:
+- Internal links via the universes/entries API
+- External links via HEAD (with GET fallback) and follow redirects
+- Pretty-URL redirects land on `/template/<slug>` with 301/302/307
+
+This would have caught the Fly DPA 404 fixed in 2.7.7. Run against
+prod with `BASE_URL=https://co-artelonga.fly.dev npx playwright test
+e2e/seed-links.spec.ts`.
+
 ## [2.7.7] — 2026-05-14 — UX cleanup + yggdrasil seed + broken link fix
 
 Five fixes batched together from rapid user feedback on 2.7.5/2.7.6:

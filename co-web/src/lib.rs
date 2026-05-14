@@ -44,6 +44,7 @@ pub mod obsidian_tasks;
 pub mod oidc_routes;
 pub mod onboarding_routes;
 pub mod plugin_loader;
+pub mod pretty_urls;
 pub mod processos;
 pub mod proposal_routes;
 pub mod push_routes;
