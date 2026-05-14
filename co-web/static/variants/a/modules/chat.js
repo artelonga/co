@@ -483,8 +483,28 @@ async function _sendMessage() {
 // WebSocket
 // ---------------------------------------------------------------------------
 
+function _hasSessionCookie() {
+    // Cheap auth check: the session JWT lives in a cookie named `session`.
+    // If absent, skip the WS handshake — the server will 401 us anyway,
+    // which triggers the reconnect-loop banner and looks like a bug.
+    try {
+        return /(^|;\s*)session=/.test(document.cookie || '');
+    } catch (_) {
+        return false;
+    }
+}
+
 function _openWs(roomSlug) {
     if (!_state || _state.destroyed) return;
+    if (!_hasSessionCookie()) {
+        // Anonymous users can read the room history but can't hold an
+        // authed WebSocket. Hide the connection banner so they don't see
+        // a perpetual "Conexão perdida. Reconectando…" loop and surface
+        // a one-time hint inviting them to log in.
+        _hideBanner();
+        _showAuthHint();
+        return;
+    }
     const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(roomSlug)}/ws`;
@@ -620,6 +640,13 @@ function _showBanner() {
 
 function _hideBanner() {
     _state?.container?.querySelector('#chat-conn-banner')?.classList.add('hidden');
+}
+
+function _showAuthHint() {
+    const banner = _state?.container?.querySelector('#chat-conn-banner');
+    if (!banner) return;
+    banner.classList.remove('hidden');
+    banner.textContent = 'Entre para participar do chat.';
 }
 
 function _showToast(msg, type = 'info') {

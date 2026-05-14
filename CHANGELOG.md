@@ -5,6 +5,50 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.7] — 2026-05-14 — UX cleanup + yggdrasil seed + broken link fix
+
+Five fixes batched together from rapid user feedback on 2.7.5/2.7.6:
+
+### Inline editor: Esc to exit + clearer mode
+
+The inline edit toolbar shows "editando · Esc para cancelar" and the
+header turns amber while editing so the mode shift is obvious. Esc
+key cancels and reverts to read mode. The read toolbar shows a "clique
+para editar" hint so users discover the click-to-edit interaction.
+
+### Real OS fullscreen on the zoom modal
+
+The `fullscreen` button in the zoom modal toolbar now calls the
+browser Fullscreen API on the container. Pressing `F` toggles. Esc
+exits fullscreen (browser native), Esc again closes the modal.
+CSS: container expands to 100vw/100vh and the body gets 32×48 padding
+in fullscreen for readability. The toolbar button icon flips between
+`fullscreen` ↔ `fullscreen_exit` to track state.
+
+### Yggdrasil: seed an index page
+
+The yggdrasil universe shipped with content_count=1 (one state file),
+so anon visitors saw an empty universe. Added `index.md` describing
+the games hub (Tetris/Snake/2048), the sementes currency, and the
+build-time relationship with `co/game-core`. Idempotent seed runs on
+boot via `upsert_entry_row`.
+
+### Chat: skip WS for anonymous visitors
+
+`/api/v1/universes/.../chat/rooms/.../ws` requires a session JWT and
+returns 401 to anons. The client opened it anyway, got `onclose`, and
+showed "Conexão perdida. Reconectando…" in a perpetual reconnect loop.
+Now the client checks for a `session` cookie before opening the WS
+and surfaces "Entre para participar do chat." instead. Authed users
+are unaffected.
+
+### Fly DPA link 404 → privacy policy
+
+`https://fly.io/legal/dpa/` started returning 404. Updated both
+`privacidade.md` and `dados-rastreados.md` to point at
+`https://fly.io/legal/privacy-policy/` (verified 200) with a note
+that the DPA is available on request for corporate clients.
+
 ## [2.7.6] — 2026-05-14 — Conteúdo as universal entry view (fix)
 
 2.7.5 made Conteúdo the default for the template universe, but switching

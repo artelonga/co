@@ -43,6 +43,7 @@ const SEED_INFRA_CO_MD: &str = include_str!("../seed/template/infra-co.md");
 const SEED_INFRA_YGGDRASIL_MD: &str = include_str!("../seed/template/infra-yggdrasil.md");
 const SEED_INFRA_QUILOMBO_MD: &str = include_str!("../seed/template/infra-quilomboaraucaria.md");
 const SEED_INFRA_RFQ_MD: &str = include_str!("../seed/template/infra-rfq-gateway.md");
+const SEED_YGGDRASIL_INDEX_MD: &str = include_str!("../seed/yggdrasil/index.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
 // each backed by a JSON event manifest + a markdown index/front page. Loaded

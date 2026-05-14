@@ -120,7 +120,7 @@ Para exercer: yuri@artelonga.com.br — resposta em até 15 dias.
 ## 9. Compartilhamento
 
 A Arte Longa **não compartilha dados com terceiros**, exceto:
-- **Provedor de infraestrutura:** Fly.io (hospedagem). Sujeito ao [DPA da Fly.io](https://fly.io/legal/dpa/).
+- **Provedor de infraestrutura:** Fly.io (hospedagem). Sujeito à [política de privacidade da Fly.io](https://fly.io/legal/privacy-policy/) e ao DPA correspondente, disponível mediante solicitação por se tratar de cliente corporativo.
 - **Obrigação legal:** mediante ordem judicial fundamentada, conforme legislação brasileira.
 
 Não usamos: Google Analytics, Facebook Pixel, Hotjar, Sentry remoto, intercom de chat, nem qualquer outro tracker de terceiros.

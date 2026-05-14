@@ -101,23 +101,45 @@ function createDetailController(container, initialEntry, deps) {
     let editing = false;
     let editorInstance = null;
     let draftTimer = null;
+    let escHandler = null;
 
     function draftKeyFor(entry) {
         return `co_draft_page_${encodeURIComponent(entry.path || '')}`;
     }
 
+    function bindEscapeExit(action) {
+        if (escHandler) document.removeEventListener('keydown', escHandler);
+        escHandler = (e) => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                action();
+            }
+        };
+        document.addEventListener('keydown', escHandler);
+    }
+    function unbindEscape() {
+        if (escHandler) {
+            document.removeEventListener('keydown', escHandler);
+            escHandler = null;
+        }
+    }
+
     function renderRead() {
+        container.classList.remove('conteudo-detail-pane-editing');
         const md = window.CoMarkdown;
         let html = md ? md.renderMarkdown(current.body || '') : esc(current.body || '');
         if (md && md.resolveWikilinks) html = md.resolveWikilinks(html, universeSlug);
 
         container.innerHTML = `
             <div class="conteudo-detail-toolbar">
-                <span class="conteudo-detail-title">${esc(entryTitle(current))}</span>
+                <span class="conteudo-detail-title">
+                    ${esc(entryTitle(current))}
+                    <em class="conteudo-detail-hint">clique para editar</em>
+                </span>
                 <div class="conteudo-detail-actions">
                     <button class="conteudo-detail-btn" type="button"
-                            data-detail-fullscreen title="Tela cheia">
-                        <span class="material-symbols-outlined" style="font-size:18px">open_in_full</span>
+                            data-detail-fullscreen title="Tela cheia (F)">
+                        <span class="material-symbols-outlined" style="font-size:18px">fullscreen</span>
                     </button>
                 </div>
             </div>
@@ -153,9 +175,13 @@ function createDetailController(container, initialEntry, deps) {
     }
 
     function renderEdit() {
+        container.classList.add('conteudo-detail-pane-editing');
         container.innerHTML = `
-            <div class="conteudo-detail-toolbar">
-                <span class="conteudo-detail-title">${esc(entryTitle(current))} <em style="color:var(--text-muted,#6b7280);font-style:italic;font-size:12px">(editando)</em></span>
+            <div class="conteudo-detail-toolbar conteudo-detail-toolbar-editing">
+                <span class="conteudo-detail-title">
+                    ${esc(entryTitle(current))}
+                    <em class="conteudo-detail-mode">editando · Esc para cancelar</em>
+                </span>
                 <div class="conteudo-detail-actions">
                     <button class="btn btn-primary btn-sm" type="button" data-detail-save>Salvar</button>
                     <button class="btn btn-secondary btn-sm" type="button" data-detail-cancel>Cancelar</button>
@@ -185,11 +211,14 @@ function createDetailController(container, initialEntry, deps) {
             }, 5000);
         }
 
-        container.querySelector('[data-detail-cancel]').addEventListener('click', () => {
+        const cancelInlineEdit = () => {
             teardownEditor();
+            unbindEscape();
             editing = false;
             renderRead();
-        });
+        };
+        bindEscapeExit(cancelInlineEdit);
+        container.querySelector('[data-detail-cancel]').addEventListener('click', cancelInlineEdit);
 
         container.querySelector('[data-detail-save]').addEventListener('click', async () => {
             const saveBtn = container.querySelector('[data-detail-save]');
@@ -201,6 +230,7 @@ function createDetailController(container, initialEntry, deps) {
             if (isTemplate) {
                 showToast(window.t ? window.t('saved') : 'Salvo', 'success');
                 teardownEditor();
+                unbindEscape();
                 editing = false;
                 renderRead();
                 return;
@@ -223,6 +253,7 @@ function createDetailController(container, initialEntry, deps) {
                     try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
                     showToast(window.t ? window.t('saved') : 'Salvo', 'success');
                     teardownEditor();
+                    unbindEscape();
                     editing = false;
                     renderRead();
                 } else {
@@ -299,6 +330,9 @@ export async function openZoomModal(entry, startInEditMode) {
                     </button>
                     <button class="co-zoom-action" id="co-zoom-print" title="Imprimir">
                         <span class="material-symbols-outlined" style="font-size:18px">print</span>
+                    </button>
+                    <button class="co-zoom-action" id="co-zoom-fullscreen" title="Tela cheia (F)">
+                        <span class="material-symbols-outlined" style="font-size:18px">fullscreen</span>
                     </button>
                 </div>
             </div>
@@ -425,10 +459,13 @@ export async function openZoomModal(entry, startInEditMode) {
         }
     }
 
+    const _zoomCleanupFns = [];
     function closeZoom() {
         if (_zoomDraftInterval) { clearInterval(_zoomDraftInterval); _zoomDraftInterval = null; }
         if (_zoomEditorInstance) { _zoomEditorInstance.destroy(); _zoomEditorInstance = null; }
         document.removeEventListener('keydown', onEsc);
+        for (const fn of _zoomCleanupFns) { try { fn(); } catch (_) {} }
+        if (document.fullscreenElement) { try { document.exitFullscreen(); } catch (_) {} }
         const dadosOverlay = document.getElementById('co-dados-overlay');
         if (dadosOverlay) dadosOverlay.remove();
         overlay.remove();
@@ -449,6 +486,42 @@ export async function openZoomModal(entry, startInEditMode) {
     });
 
     document.getElementById('co-zoom-print').addEventListener('click', () => window.print());
+
+    // Real fullscreen toggle: drives the browser Fullscreen API on the
+    // zoom container. Esc / pressing the button again exits.
+    const container = document.getElementById('co-zoom-container');
+    function toggleFullscreen() {
+        const fsEl = document.fullscreenElement;
+        if (fsEl) {
+            document.exitFullscreen?.();
+        } else if (container && container.requestFullscreen) {
+            container.requestFullscreen().catch(() => {});
+        }
+    }
+    document.getElementById('co-zoom-fullscreen').addEventListener('click', toggleFullscreen);
+    const onFsKey = (e) => {
+        if (e.key.toLowerCase() === 'f' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            const tag = (e.target && e.target.tagName) || '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+            // Block when inline-editing within the zoom (CodeMirror handles its own keys)
+            if (zoomBody.classList.contains('co-zoom-edit-container')) return;
+            e.preventDefault();
+            toggleFullscreen();
+        }
+    };
+    document.addEventListener('keydown', onFsKey);
+
+    const onFsChange = () => {
+        const inFs = !!document.fullscreenElement;
+        container?.classList.toggle('co-zoom-fs', inFs);
+        const icon = document.getElementById('co-zoom-fullscreen')?.querySelector('.material-symbols-outlined');
+        if (icon) icon.textContent = inFs ? 'fullscreen_exit' : 'fullscreen';
+    };
+    document.addEventListener('fullscreenchange', onFsChange);
+    _zoomCleanupFns.push(() => {
+        document.removeEventListener('keydown', onFsKey);
+        document.removeEventListener('fullscreenchange', onFsChange);
+    });
 
     if (startInEditMode) { enterEditMode(); } else { renderView(); }
 }

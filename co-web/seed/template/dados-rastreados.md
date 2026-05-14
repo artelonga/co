@@ -143,7 +143,7 @@ Coletada apenas se você não habilitou Do Not Track e aceitou o banner.
 
 | Provedor | O que recebe | Por quê | DPA |
 |----------|--------------|---------|-----|
-| **Fly.io** | Tudo que está no banco (criptografado em trânsito) | Hospedagem | <https://fly.io/legal/dpa/> |
+| **Fly.io** | Tudo que está no banco (criptografado em trânsito) | Hospedagem | <https://fly.io/legal/privacy-policy/> |
 
 **Apenas isso.** Sem Google Analytics, Mixpanel, Amplitude, Segment, Hotjar, Sentry remoto, FullStory, LogRocket, etc.
 
