@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.6] — 2026-05-14 — Conteúdo as universal entry view (fix)
+
+2.7.5 made Conteúdo the default for the template universe, but switching
+to a user-owned universe still landed on Kanban because
+`applyUniverseConfig` mapped the stored `layout='board'` (migration
+default for non-template universes) to the kanban view.
+
+Fix: hard-default the entry view to Conteúdo regardless of stored
+layout. Kanban / Tabela / Calendário / Timeline / Painel remain one
+click away in the tab strip. Per-universe layout preference can come
+back later with a settings UI that distinguishes explicit user choice
+from the migration default.
+
 ## [2.7.5] — 2026-05-14 — Master-detail Conteúdo + click-to-edit inline
 
 Refactor the Conteúdo split so the left pane is a live viewer for the

@@ -144,15 +144,14 @@ export function applyUniverseConfig(config) {
 
     loadCustomFonts(config);
 
-    const layoutToView = {
-        'board': 'kanban',
-        'table': 'table',
-        'timeline': 'timeline',
-        'calendar': 'calendar',
-        'dashboard': 'dashboard',
-        'conteudo': 'conteudo',
-    };
-    const defaultView = layoutToView[config.layout] || 'conteudo';
+    // Content-first as universal entry view. The stored `config.layout`
+    // ('board' for everyone created before this change) is no longer
+    // used to pick the initial view — Conteúdo is always the entry
+    // surface, and Kanban / Tabela / etc. are one click away in the
+    // tab strip. Per-universe layout preference can come back later
+    // with a real settings UI that distinguishes explicit user choice
+    // from the migration default.
+    const defaultView = 'conteudo';
     if (state.view !== defaultView) {
         _switchView(defaultView);
     }
