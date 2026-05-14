@@ -597,8 +597,23 @@ export async function renderConteudo() {
         return html;
     }
 
-    const pagesBodyHtml = pageEntries.length
-        ? renderFolderNode(buildFolderTree(pageEntries), 0)
+    // README/index: render as the primary content pane. Search a small
+    // priority list so universes that follow different conventions
+    // (index.md, README.md) all light up. Strip it from the Páginas
+    // listing so it doesn't appear twice.
+    const README_PATHS = ['index.md', 'README.md', 'readme.md', 'content/index.md'];
+    let readmeEntry = null;
+    for (const p of README_PATHS) {
+        readmeEntry = pageEntries.find(e => (e.path || '') === p)
+                   || allEntries.find(e => (e.path || '') === p);
+        if (readmeEntry) break;
+    }
+    const pagesForList = readmeEntry
+        ? pageEntries.filter(e => e.path !== readmeEntry.path)
+        : pageEntries;
+
+    const pagesBodyHtml = pagesForList.length
+        ? renderFolderNode(buildFolderTree(pagesForList), 0)
         : '<p class="conteudo-empty">Nenhuma página</p>';
 
     const tasksBodyHtml = taskEntries.length
@@ -683,7 +698,51 @@ export async function renderConteudo() {
             ${lastUpdatedRel ? `<div class="conteudo-stat conteudo-stat-meta"><span class="conteudo-stat-label">Última edição</span><span class="conteudo-stat-value-meta">${esc(lastUpdatedRel)}</span></div>` : ''}
         </div>`;
 
-    content.innerHTML = `<div class="conteudo-list">${statsHtml}${sectionsHtml}</div>`;
+    const readmeBodyHtml = (() => {
+        if (!readmeEntry) return '';
+        const md = window.CoMarkdown;
+        let html = md ? md.renderMarkdown(readmeEntry.body || '') : esc(readmeEntry.body || '');
+        if (md && md.resolveWikilinks) html = md.resolveWikilinks(html, slug);
+        return html;
+    })();
+
+    if (readmeEntry) {
+        content.innerHTML = `<div class="conteudo-list conteudo-with-readme">
+            ${statsHtml}
+            <div class="conteudo-split">
+                <article class="conteudo-readme md-body"
+                         data-entry-path="${esc(readmeEntry.path)}"
+                         data-entry-title="${esc(entryTitle(readmeEntry))}">
+                    ${readmeBodyHtml}
+                </article>
+                <div class="conteudo-sections-pane">${sectionsHtml}</div>
+            </div>
+        </div>`;
+
+        // Apply the same post-render passes that openZoomModal uses so
+        // tables wrap, images are zoomable, code blocks highlight, and
+        // mermaid diagrams render.
+        const readmeEl = content.querySelector('.conteudo-readme');
+        if (readmeEl) {
+            readmeEl.querySelectorAll('table').forEach(tbl => {
+                const wrap = document.createElement('div');
+                wrap.className = 'co-table-wrap';
+                tbl.parentNode.insertBefore(wrap, tbl);
+                wrap.appendChild(tbl);
+            });
+            const md2 = window.CoMarkdown;
+            if (md2 && md2.enableImageZoom) md2.enableImageZoom(readmeEl);
+            if (md2 && md2.highlightCode) md2.highlightCode(readmeEl);
+            if (md2 && md2.renderMermaidBlocks) md2.renderMermaidBlocks(readmeEl);
+
+            // Double-click to open the README in the editor (mirrors page cards).
+            readmeEl.addEventListener('dblclick', () => {
+                _openZoomModal(readmeEntry, true);
+            });
+        }
+    } else {
+        content.innerHTML = `<div class="conteudo-list">${statsHtml}${sectionsHtml}</div>`;
+    }
 
     content.querySelectorAll('[data-section-toggle]').forEach(header => {
         header.addEventListener('click', () => {

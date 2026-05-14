@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.4] — 2026-05-14 — Content-first default + README split layout
+
+Universe entry point is now **Conteúdo** instead of Kanban. The README
+(`index.md` / `README.md`) is rendered as the primary surface:
+
+- **Desktop:** README occupies the left half; Páginas + Tarefas +
+  Eventos + Clipes sections occupy the right half.
+- **Mobile:** README full-width on top, sections stacked below.
+
+Markdown rendering for the README pane applies the same passes as the
+zoom modal (wikilink resolution, table wrap, image zoom, code
+highlight, mermaid). Double-click opens the README in the editor.
+
+The README is stripped from the Páginas list so it doesn't appear
+twice. If a universe has no `index.md` / `README.md`, the view falls
+back to the single-column section list (prior behavior).
+
+### Template universe layout
+
+Seed default flipped from `'board'` to `'conteudo'`. Idempotent UPDATE
+runs on boot to migrate existing template rows (e.g. prod) that were
+seeded with `'board'` before this change.
+
+User-owned universes are untouched — their layout reflects whatever
+the owner set in settings.
+
 ## [2.7.3] — 2026-05-14 — License flip MIT → AGPL v3
 
 Project license changed from MIT to **GNU AGPL v3 or later** to match

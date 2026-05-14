@@ -20,15 +20,23 @@ impl Storage {
         let now = Utc::now();
         let now_str = now.to_rfc3339();
 
-        // Template universe with Modern theme (default) + board layout.
+        // Template universe with Modern theme (default) + conteudo layout
+        // (content-first: README on entry, kanban one click away).
         let _ = self.conn.execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, description, owner_id, created_at, is_template, is_public, \
               visibility, theme_preset, layout) \
              VALUES ('template', 'Co', \
              'Aprenda a usar o Co — arraste, crie e explore', \
-             'system', ?1, 1, 1, 'template', 'modern', 'board')",
+             'system', ?1, 1, 1, 'template', 'modern', 'conteudo')",
             params![now_str],
+        );
+        // Idempotent flip for installs predating the conteudo-as-default
+        // change: existing template rows were created with layout='board'.
+        let _ = self.conn.execute(
+            "UPDATE universes SET layout = 'conteudo' \
+             WHERE key = 'template' AND is_template = 1 AND layout = 'board'",
+            [],
         );
         // Ensure form config YAML is written for the template.
         if let Some(config) = self.get_universe_form_config("template") {

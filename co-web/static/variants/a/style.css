@@ -2591,6 +2591,35 @@ body {
 /* ===== Conteúdo List (CO-42) ===== */
 .conteudo-list { max-width: 800px; }
 
+/* Content-first layout: README on the left half, sections on the right
+   half (desktop). Mobile stacks vertically with README on top.
+   Stats stay full-width above the split. */
+.conteudo-list.conteudo-with-readme { max-width: 1400px; }
+
+.conteudo-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 28px;
+    align-items: start;
+}
+
+.conteudo-readme {
+    min-width: 0;
+    padding: 4px 0;
+}
+
+.conteudo-readme.md-body :first-child { margin-top: 0; }
+
+.conteudo-sections-pane { min-width: 0; }
+
+@media (max-width: 900px) {
+    .conteudo-split {
+        grid-template-columns: 1fr;
+        gap: 20px;
+    }
+    .conteudo-list.conteudo-with-readme { max-width: 800px; }
+}
+
 .conteudo-stats {
     display: flex;
     flex-wrap: wrap;
