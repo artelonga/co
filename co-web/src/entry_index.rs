@@ -22,6 +22,7 @@
 use std::path::Path;
 
 use rusqlite::{Connection, params};
+use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
 use chrono::Utc;
@@ -58,6 +59,28 @@ pub struct EntryRow {
     pub _score: Option<f32>,
 }
 
+/// One row from the per-universe `entry_events` append-only log.
+///
+/// Maps 1:1 to the future `co.v1.EntryEvent` protobuf — see
+/// `co::public/transaction-log.md` for the lakehouse trajectory
+/// (Kafka, Iceberg, Pinot, Flink). The body itself is intentionally
+/// omitted from this struct so listing history doesn't load N body
+/// blobs into memory; fetch the body via `current_body_hash` +
+/// `put_blob`/`get_blob`, or include it explicitly in a future
+/// dedicated reader if needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntryEventRow {
+    pub seq: i64,
+    pub ts_micros: i64,
+    pub op: String,
+    pub path: String,
+    pub body_hash: Option<String>,
+    pub prev_body_hash: Option<String>,
+    pub frontmatter_json: Option<String>,
+    pub author_id: Option<String>,
+    pub request_id: Option<String>,
+}
+
 /// SQLite-backed index over Entry files.
 ///
 /// All methods take `&Connection` — callers manage the connection lifecycle.
@@ -82,6 +105,99 @@ impl<'a> EntryIndex<'a> {
             self.upsert(universe_key, &entry)?;
         }
         Ok(count)
+    }
+
+    /// Look up the current `body_hash` for an entry without loading the
+    /// body. Used by the event-log writer to record `prev_body_hash`
+    /// on an update. Returns None if the entry doesn't exist yet.
+    pub fn current_body_hash(
+        &self,
+        universe_key: &str,
+        path: &str,
+    ) -> Option<String> {
+        self.conn
+            .query_row(
+                "SELECT body_hash FROM entries WHERE universe_key = ?1 AND path = ?2",
+                params![universe_key, path],
+                |r| r.get::<_, String>(0),
+            )
+            .ok()
+    }
+
+    /// Append a row to `entry_events` — the per-universe append-only
+    /// transaction log. See `co::public/transaction-log.md` for the
+    /// design + the trajectory toward Kafka/Iceberg/Pinot/Flink.
+    ///
+    /// `op` must be `"put"` or `"delete"`. For deletes, `body`,
+    /// `body_hash`, and `frontmatter_json` describe the entry as it
+    /// was just before deletion (so replay can reconstruct it).
+    ///
+    /// `request_id` is the idempotency key; when present, the unique
+    /// index on `entry_events.request_id` rejects a retried write.
+    #[allow(clippy::too_many_arguments)]
+    pub fn log_event(
+        &self,
+        path: &str,
+        op: &str,
+        body_hash: Option<&str>,
+        prev_body_hash: Option<&str>,
+        body: Option<&str>,
+        frontmatter_json: Option<&str>,
+        author_id: Option<&str>,
+        request_id: Option<&str>,
+    ) -> anyhow::Result<i64> {
+        let ts_micros = chrono::Utc::now().timestamp_micros();
+        self.conn.execute(
+            "INSERT INTO entry_events
+                (ts_micros, op, path, body_hash, prev_body_hash,
+                 body, frontmatter_json, author_id, request_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                ts_micros,
+                op,
+                path,
+                body_hash,
+                prev_body_hash,
+                body,
+                frontmatter_json,
+                author_id,
+                request_id,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Read the event log for one entry (path), newest first.
+    pub fn list_events_for_path(
+        &self,
+        path: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<EntryEventRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash,
+                    frontmatter_json, author_id, request_id
+             FROM entry_events
+             WHERE path = ?1
+             ORDER BY ts_micros DESC, seq DESC
+             LIMIT ?2",
+        )?;
+        let rows = stmt
+            .query_map(params![path, limit as i64], |row| {
+                Ok(EntryEventRow {
+                    seq: row.get(0)?,
+                    ts_micros: row.get(1)?,
+                    op: row.get(2)?,
+                    path: row.get(3)?,
+                    body_hash: row.get(4)?,
+                    prev_body_hash: row.get(5)?,
+                    frontmatter_json: row.get(6)?,
+                    author_id: row.get(7)?,
+                    request_id: row.get(8)?,
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
+        Ok(rows)
     }
 
     /// Upsert a single entry into the index.

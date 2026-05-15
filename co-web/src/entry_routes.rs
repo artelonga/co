@@ -768,9 +768,27 @@ pub async fn update_entry(
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
         let index = crate::entry_index::EntryIndex::new(&uc_guard);
+        // 2.7.25: capture prev body_hash for the event log.
+        let prev_hash = index.current_body_hash(&slug, &path);
         index
             .upsert(&slug, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // 2.7.25: append to entry_events. See vault_routes::write_vault_entry
+        // for the parallel hook on the other write path.
+        if let Ok(fm_json) = serde_json::to_string(&new_fm) {
+            if let Err(e) = index.log_event(
+                &path,
+                "put",
+                Some(&entry.body_hash),
+                prev_hash.as_deref(),
+                Some(&new_body),
+                Some(&fm_json),
+                None,
+                None,
+            ) {
+                tracing::warn!("entry_events log failed for {slug}/{path}: {e}");
+            }
+        }
         // CO-73: index semantic date fields (reuse cached manifest)
         index
             .upsert_dates(&slug, &entry, manifest_arc.as_deref())
@@ -1226,6 +1244,45 @@ pub async fn similar_entries(
 // Router
 // ---------------------------------------------------------------------------
 
+/// `GET /api/v1/universes/{slug}/entries/history?path=<entry-path>&limit=<N>`
+///
+/// Returns the per-entry transaction log, newest first. Each row maps to
+/// the future `co.v1.EntryEvent` protobuf (see
+/// `co::public/transaction-log.md` for the lakehouse trajectory).
+///
+/// Public — any caller who can read the entry can read its history.
+/// Future iteration may add audit-tier filtering (hide author_id from
+/// anon callers).
+#[derive(Debug, serde::Deserialize)]
+pub struct EntryHistoryQuery {
+    pub path: String,
+    pub limit: Option<usize>,
+}
+
+pub async fn entry_history_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EntryHistoryQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let uc = {
+        let storage = lock_storage(&state);
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let limit = q.limit.unwrap_or(100).min(1000);
+    let events = index
+        .list_events_for_path(&q.path, limit)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok(Json(serde_json::json!({
+        "path": q.path,
+        "events": events,
+        "total": events.len(),
+    })))
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         // Specific paths must come before wildcard
@@ -1237,6 +1294,9 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/entries", get(list_entries).post(create_entry))
         // CO-164: similar entries — uses ?path= query param to avoid catch-all conflict
         .route("/{slug}/entries/similar", get(similar_entries))
+        // 2.7.25: per-entry transaction log — newest first. Uses ?path= to
+        // avoid catching the `/entries/{*path}` wildcard.
+        .route("/{slug}/entries/history", get(entry_history_handler))
         .route(
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),

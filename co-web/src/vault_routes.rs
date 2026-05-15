@@ -415,9 +415,35 @@ pub(crate) fn write_vault_entry(
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
         let index = EntryIndex::new(&uc_guard);
+        // 2.7.25: capture prev body_hash BEFORE upsert so the event
+        // log row carries the delta. None means "no prior version"
+        // (creation event).
+        let prev_hash = index.current_body_hash(universe_key, path);
         index
             .upsert(universe_key, &entry)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // 2.7.25: append to the per-universe entry_events log. Same
+        // SQLite connection, immediately after the upsert — fails
+        // independently (logged) so a corrupted log doesn't block the
+        // write. The log is the source of truth for time-travel and
+        // the future Kafka/Iceberg export; see
+        // co::public/transaction-log.md.
+        if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter) {
+            if let Err(e) = index.log_event(
+                path,
+                "put",
+                Some(&entry.body_hash),
+                prev_hash.as_deref(),
+                Some(body),
+                Some(&fm_json),
+                None,
+                None,
+            ) {
+                tracing::warn!(
+                    "entry_events log failed for {universe_key}/{path}: {e}",
+                );
+            }
+        }
         // CO-73: index semantic date fields (reuse cached manifest)
         index
             .upsert_dates(universe_key, &entry, manifest_arc.as_deref())
@@ -996,9 +1022,25 @@ pub async fn delete_vault_file(
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
         let index = EntryIndex::new(&uc_guard);
+        // 2.7.25: capture pre-delete body_hash for the event log.
+        let prev_hash = index.current_body_hash(&slug, &path);
         index
             .remove(&slug, &path)
             .map_err(|e| AppError::Internal(e.to_string()))?;
+        // 2.7.25: append delete event. No body kept (the deleted body
+        // is recoverable from the prior `put` event in the log).
+        if let Err(e) = index.log_event(
+            &path,
+            "delete",
+            None,
+            prev_hash.as_deref(),
+            None,
+            None,
+            None,
+            None,
+        ) {
+            tracing::warn!("entry_events delete log failed for {slug}/{path}: {e}");
+        }
         // CO-74: remove outbound FK relations
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
         // CO-156: remove references_meta (idempotent)

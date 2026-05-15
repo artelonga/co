@@ -396,6 +396,56 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
         conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
             .expect("universe schema_version v10");
     }
+    if v < 11 {
+        // 2.7.25: append-only event log per universe. Every PUT/DELETE
+        // becomes an immutable row here, written in the same SQLite
+        // transaction as the `entries` upsert. Source of truth for
+        // time-travel queries; future Kafka/Iceberg exporters read
+        // from this table (or pump it through a worker).
+        //
+        // Schema designed to map 1:1 to a `co.v1.EntryEvent` protobuf:
+        //   seq            — strictly monotonic per universe
+        //   ts_micros      — Unix epoch in microseconds (orderable across replicas)
+        //   op             — 'put' | 'delete'
+        //   path           — entry path
+        //   body_hash      — BLAKE3 of new body; NULL on delete
+        //   prev_body_hash — BLAKE3 of old body (NULL on first write or delete-of-absent)
+        //   body           — snapshot of body bytes (for replay without blob lookup)
+        //   frontmatter_json — snapshot of frontmatter at write time
+        //   author_id      — user_id when authed, NULL for anon writes
+        //   request_id     — idempotency key supplied by caller; UNIQUE when non-null
+        //   exported_at    — set by Kafka/Iceberg worker when it has shipped this event
+        //
+        // request_id is INDEXED unique only when non-null (SQLite partial index).
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS entry_events (
+                seq               INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts_micros         INTEGER NOT NULL,
+                op                TEXT NOT NULL CHECK(op IN ('put','delete')),
+                path              TEXT NOT NULL,
+                body_hash         TEXT,
+                prev_body_hash    TEXT,
+                body              BLOB,
+                frontmatter_json  TEXT,
+                author_id         TEXT,
+                request_id        TEXT,
+                exported_at       TEXT
+            );
+             CREATE INDEX IF NOT EXISTS idx_entry_events_path_ts
+                ON entry_events(path, ts_micros DESC);
+             CREATE INDEX IF NOT EXISTS idx_entry_events_ts
+                ON entry_events(ts_micros);
+             CREATE UNIQUE INDEX IF NOT EXISTS idx_entry_events_request_id
+                ON entry_events(request_id)
+                WHERE request_id IS NOT NULL;
+             CREATE INDEX IF NOT EXISTS idx_entry_events_unexported
+                ON entry_events(seq)
+                WHERE exported_at IS NULL;",
+        )
+        .expect("universe schema v11: entry_events");
+        conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
+            .expect("universe schema_version v11");
+    }
 }
 
 #[cfg(test)]

@@ -5,6 +5,102 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.25] — 2026-05-15 — Transaction log: append-only event store + history API
+
+Phase 1 of the lakehouse trajectory. The atomic primitives for
+content are now **logged before they're applied**: every PUT/DELETE
+appends an immutable row to a per-universe `entry_events` table.
+Source of truth for time-travel, undo, audit, and the future
+Kafka/Iceberg/Pinot/Flink export. Full design doc at
+`co::public/transaction-log.md`.
+
+### Per-universe `entry_events` table (schema v11)
+
+```
+seq               INTEGER PRIMARY KEY AUTOINCREMENT
+ts_micros         INTEGER NOT NULL           -- Unix epoch micros, orderable
+op                TEXT     NOT NULL          -- 'put' | 'delete'
+path              TEXT     NOT NULL
+body_hash         TEXT                       -- SHA-256 of new body; NULL on delete
+prev_body_hash    TEXT                       -- SHA-256 of old body; NULL on create
+body              BLOB                       -- snapshot for replay
+frontmatter_json  TEXT                       -- snapshot
+author_id         TEXT                       -- NULL today; threaded later
+request_id        TEXT                       -- UNIQUE (partial index) for idempotency
+exported_at       TEXT                       -- set by Kafka/Iceberg worker
+```
+
+Designed to map 1:1 to a future `co.v1.EntryEvent` protobuf —
+schema evolution + monotonic ordering + idempotency are the
+contract for downstream consumers.
+
+### Hooks
+
+Two write paths recorded:
+- `vault_routes::write_vault_entry` — the canonical upsert (used by
+  vault PUT, inline proposals, state captures, merges, seed reseeds)
+- `entry_routes::update_entry` — the entries-API PUT
+- `vault_routes::delete_vault_file` — the entries/vault DELETE
+
+Each captures `prev_body_hash` from `entries.body_hash` BEFORE the
+upsert, then appends the event after. Same `uc_guard` lock means
+writes are serialized; a separate-statement design (no explicit
+BEGIN/COMMIT) means a crash between upsert and event-insert leaves
+a one-event gap. Acceptable for v1; explicit transactions are a
+follow-up if/when that gap matters.
+
+### `GET /api/v1/universes/{slug}/entries/history?path=<entry-path>`
+
+Returns the per-entry event log, newest first:
+
+```json
+{
+  "path": "sobre.md",
+  "events": [
+    {
+      "seq": 3,
+      "ts_micros": 1747325432123456,
+      "op": "put",
+      "path": "sobre.md",
+      "body_hash": "abc…",
+      "prev_body_hash": "def…",
+      "frontmatter_json": "{…}",
+      "author_id": null,
+      "request_id": null
+    },
+    …
+  ],
+  "total": 3
+}
+```
+
+Public-readable; visibility gate covers access. `body` is not
+returned in the listing (omits the blob to keep responses small —
+fetch via the per-entry GET or a dedicated future reader).
+
+### Tests
+
+`co-web/tests/entry_events_tests.rs` — 3 pass:
+- `put_appends_event_with_body_and_hash`
+- `second_put_records_prev_hash` (chain: each event's `prev` equals
+  the previous event's `body_hash`)
+- `delete_appends_delete_event_with_prev_hash`
+
+### Trajectory (full design in `co::public/transaction-log.md`)
+
+| Phase | Status |
+|---|---|
+| 1. `entry_events` table + history endpoint | **shipped (this release)** |
+| 2. Per-entry undo endpoint | follow-up |
+| 3. `co.v1.EntryEvent` protobuf + `EventSink` trait | follow-up |
+| 4. `KafkaSink` (rdkafka) + async export worker | follow-up |
+| 5. `IcebergSink` (Parquet + catalog) | follow-up |
+| 6. Pinot / Flink connectors | depends on 4+5 |
+
+The local log IS the contract. Kafka/Iceberg consume the same
+logical event shape; switching sinks doesn't require schema
+changes.
+
 ## [2.7.24] — 2026-05-15 — Inline proposals: notify + decide + inbox
 
 Three follow-ups on top of the inline-proposal endpoint shipped in
