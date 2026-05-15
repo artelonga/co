@@ -608,7 +608,16 @@ export function initEditor(container, {
   // Preview
   let previewVisible = true;
   const isMobile = () => window.innerWidth < 768;
+  // Render markdown to the preview pane. Debounced via _scheduleUpdatePreview
+  // for keystrokes so we don't reparse the whole document on every
+  // character — typing felt laggy on big docs (~7KB+) when the
+  // markdown parse + innerHTML swap ran on every input event.
   function updatePreview(text) { rightPane.innerHTML = renderMarkdown(text); }
+  let _previewTimer = null;
+  function scheduleUpdatePreview(text) {
+    if (_previewTimer) clearTimeout(_previewTimer);
+    _previewTimer = setTimeout(() => updatePreview(text), 180);
+  }
 
   // Collab status badge
   const badge = document.createElement('span');
@@ -669,7 +678,10 @@ export function initEditor(container, {
   const onChangeExt = EditorView.updateListener.of(update => {
     if (update.docChanged) {
       const value = update.state.doc.toString();
-      updatePreview(value);
+      // Debounce preview rendering — keeps typing latency at the
+      // speed of CodeMirror's own input handling regardless of
+      // document size.
+      scheduleUpdatePreview(value);
       if (onChange) onChange(value);
     }
   });

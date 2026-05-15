@@ -5,6 +5,36 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.12] — 2026-05-15 — Editor typing lag + server-side draft backup
+
+### Typing lag fixed
+
+CodeMirror's onChange ran a full markdown re-render of the preview
+pane on every keystroke. On a ~7KB seguranca page that meant a
+marked.js parse + DOM swap per character — sub-second perceived
+delay. Now the preview is debounced 180ms, so typing latency drops
+to CodeMirror's own input handling regardless of document size.
+
+Also removed the per-keystroke `textarea.value = val` sync in the
+inline detail controller — the save handler reads from
+`editorInstance.getValue()` directly, so the hidden textarea was
+just extra DOM reflow per character.
+
+### Server-side draft backup every 5s
+
+Drafts now back up to the server (in addition to localStorage) at
+the path `_drafts/<entry-path>`. Runs every 5s while editing.
+Fire-and-forget — a network blip falls back to localStorage. Skipped
+for template universe (anon visitors can't write). Draft deleted on
+successful save.
+
+`_drafts/` paths are filtered from page/task/event/clip listings
+in `renderConteudo` so they don't appear as ghost entries.
+
+Save semantics unchanged: full PUT to the canonical path only when
+the user clicks Salvar. Auto-save on every keystroke is explicitly
+out of scope ("save necessary when user clicks").
+
 ## [2.7.11] — 2026-05-15 — Theme-aware CSS vars + template URL resolves anon
 
 ### Template URL on anon visits

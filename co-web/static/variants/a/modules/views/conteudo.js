@@ -210,16 +210,35 @@ function createDetailController(container, initialEntry, deps) {
             container.appendChild(cmDiv);
             editorInstance = window.CoEditor.initEditor(cmDiv, {
                 content: current.body || '',
-                onChange: (val) => { if (ta) ta.value = val; },
+                // Don't sync to the hidden textarea on every keystroke —
+                // it triggers DOM reflow per character. Read the value
+                // from editorInstance.getValue() at save/draft time instead.
+                onChange: undefined,
                 readOnly: false,
             });
 
             if (draftTimer) clearInterval(draftTimer);
-            draftTimer = setInterval(() => {
+            // Save drafts every 5s. localStorage first (always cheap +
+            // works offline), then fire-and-forget POST to the server
+            // for the durable cross-device backup (skipped for template
+            // since anon visitors can't write there).
+            const draftPath = `_drafts/${current.path || ''}`;
+            draftTimer = setInterval(async () => {
+                if (!editorInstance) return;
+                const val = editorInstance.getValue();
+                try { localStorage.setItem(draftKeyFor(current), val); } catch (_) {}
+                if (isTemplate) return;
                 try {
-                    const val = editorInstance ? editorInstance.getValue() : '';
-                    localStorage.setItem(draftKeyFor(current), val);
-                } catch (_) {}
+                    await window.fetch(
+                        `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${draftPath.split('/').map(encodeURIComponent).join('/')}`,
+                        {
+                            method: 'PUT',
+                            credentials: 'same-origin',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ body: val }),
+                        }
+                    );
+                } catch (_) { /* network blip — localStorage covers it */ }
             }, 5000);
         }
 
@@ -263,6 +282,14 @@ function createDetailController(container, initialEntry, deps) {
                 if (result) {
                     current = { ...current, body: newBody };
                     try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
+                    // Fire-and-forget delete of the server-side draft.
+                    if (!isTemplate) {
+                        const draftPath = `_drafts/${current.path || ''}`;
+                        window.fetch(
+                            `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${draftPath.split('/').map(encodeURIComponent).join('/')}`,
+                            { method: 'DELETE', credentials: 'same-origin' }
+                        ).catch(() => {});
+                    }
                     showToast(window.t ? window.t('saved') : 'Salvo', 'success');
                     teardownEditor();
                     unbindEscape();
@@ -729,6 +756,16 @@ export async function renderConteudo() {
         api.getUniverseEntries(slug, 'clip'),
         api.getUniverseEntries(slug),
     ]);
+
+    // Hide draft scratch files (`_drafts/<entry-path>`) from every
+    // section — they're a write-ahead-log for the editor, not user
+    // content. See createDetailController.renderEdit for the writer.
+    const isDraftPath = (p) => (p || '').startsWith('_drafts/');
+    for (const arr of [taskEntries, eventEntries, pageEntries, clipEntries, allEntries]) {
+        for (let i = arr.length - 1; i >= 0; i--) {
+            if (isDraftPath(arr[i].path)) arr.splice(i, 1);
+        }
+    }
 
     const knownPaths = new Set([
         ...taskEntries.map(e => e.path),
