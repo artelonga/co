@@ -989,7 +989,16 @@ export async function renderConteudo() {
             const status = fm.status || 'todo';
             const priority = fm.priority || 'medium';
             const tags = entryTags(e);
-            return `<div class="conteudo-card conteudo-card-clickable" data-task-id="${taskId}">
+            // 2.7.26: route through the same `data-entry-path` flow as
+            // page cards so the inline detail pane + click-to-edit
+            // works for tasks too. The old `data-task-id` path went
+            // through openContentEditor → state.tasks.find which is
+            // empty on Conteúdo (state.tasks is the project-board
+            // cache, never populated on the universe home view).
+            return `<div class="conteudo-card conteudo-card-clickable co-page-card"
+                        data-entry-path="${esc(e.path)}"
+                        data-entry-title="${esc(entryTitle(e))}"
+                        data-task-id="${taskId}">
                 <div class="conteudo-card-meta">${esc(status)} · ${esc(priority)}</div>
                 <div class="conteudo-card-title">${esc(entryTitle(e))}</div>
                 ${cardBodyHtml(e.body, entryFm(e))}
@@ -1215,8 +1224,11 @@ export async function renderConteudo() {
             clearTimeout(clickTimer);
             clickTimer = setTimeout(() => {
                 const entryPath = card.dataset.entryPath;
-                const entry = (content._pageEntries || []).find(en => en.path === entryPath)
-                    || { path: entryPath, title: card.dataset.entryTitle || entryPath, body: '' };
+                // 2.7.26: lookup spans pages + tasks (both are .co-page-card
+                // after the task-card unification). Falls back to a synthetic
+                // entry with body undefined so openZoomModal re-fetches.
+                const entry = (content._clickableEntries || []).find(en => en.path === entryPath)
+                    || { path: entryPath, title: card.dataset.entryTitle || entryPath };
                 // Desktop split: click swaps the detail pane. Mobile (or
                 // when no detail pane is present): open the full-screen
                 // modal as before.
@@ -1231,20 +1243,19 @@ export async function renderConteudo() {
         card.addEventListener('dblclick', () => {
             clearTimeout(clickTimer);
             const entryPath = card.dataset.entryPath;
-            const entry = (content._pageEntries || []).find(en => en.path === entryPath)
-                || { path: entryPath, title: card.dataset.entryTitle || entryPath, body: '' };
+            const entry = (content._clickableEntries || []).find(en => en.path === entryPath)
+                || { path: entryPath, title: card.dataset.entryTitle || entryPath };
             _openZoomModal(entry, true);
         });
     });
 
-    content.querySelectorAll('[data-task-id]').forEach(card => {
-        card.addEventListener('click', () => {
-            const taskId = parseInt(card.dataset.taskId);
-            if (taskId) _openContentEditor(taskId);
-        });
-    });
+    // 2.7.26: removed the data-task-id click handler. It routed through
+    // openContentEditor → state.tasks.find, which is empty on the
+    // Conteúdo home view (state.tasks is the project-board cache).
+    // Tasks now go through the same data-entry-path flow as pages.
 
     content._pageEntries = pageEntries;
+    content._clickableEntries = [...pageEntries, ...taskEntries];
 
     const addBtn = document.getElementById('btn-add-content');
     if (addBtn) {

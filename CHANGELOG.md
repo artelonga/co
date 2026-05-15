@@ -5,6 +5,30 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.26] — 2026-05-15 — Fix task edit on Conteúdo home view
+
+Bug: clicking a task card in the Tarefas section of the Conteúdo
+view silently no-op'd. Root cause: task cards routed through
+`openContentEditor(taskId)` → `state.tasks.find(t => t.id === taskId)`
+→ `if (!task) return`. But `state.tasks` is the project-board cache,
+only populated by `selectProject()`. On the universe home view no
+project is selected, so the array is empty and the click bailed.
+
+Fix: unify task and page cards. Both now use `data-entry-path` and
+route through the same master-detail flow (click → select in detail
+pane on desktop; modal on mobile). The `[data-task-id]` click
+handler was removed — it was dead code on Conteúdo. Tasks still
+work in the Kanban / board view through the existing project-task
+edit flow; that path is unaffected.
+
+Also:
+- `content._clickableEntries` (pages + tasks) is the unified lookup
+  for click handlers; falls back to a synthetic entry without `body`
+  so `openZoomModal` re-fetches.
+- Task cards keep `data-task-id` (informational; no longer
+  click-triggered) so the existing CSS / archive flows still find
+  them by selector if needed.
+
 ## [2.7.25] — 2026-05-15 — Transaction log: append-only event store + history API
 
 Phase 1 of the lakehouse trajectory. The atomic primitives for
