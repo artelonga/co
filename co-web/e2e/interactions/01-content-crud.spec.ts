@@ -1,27 +1,27 @@
 import { test, expect, request, APIRequestContext } from "@playwright/test";
 
 /**
- * INTERACTION-01..04: Content CRUD primitives
+ * Content interactions — full CRUD cycle on the `entry` resource.
  *
- * The atomic interactions are the four CRUD operations on a content
- * entry. Content (paths, bodies, frontmatter) is RUNTIME DATA — this
- * test passes opaque fixture data through each primitive to verify
- * the contract. No business meaning is implied by the fixture
- * values.
+ * The atomic interaction is one resource (`entry`) with four
+ * operations defined by HTTP verb. Operation IDs match the canonical
+ * OpenAPI 3.1 doc in `registry.yaml`:
  *
- * Each operation has its own GIVEN/WHEN/THEN block from
- * registry.yaml. This spec runs the full cycle so a failure points
- * at the broken primitive by name:
+ *   putEntry      PUT    /api/v1/universes/{universe}/entries/{path}
+ *   getEntry      GET    /api/v1/universes/{universe}/entries/{path}
+ *   deleteEntry   DELETE /api/v1/universes/{universe}/entries/{path}
+ *   listEntries   GET    /api/v1/universes/{universe}/entries
  *
- *   1. entryWrite   → PUT entry, then expect 200 on read
- *   2. entryRead    → GET entry, expect body + path match
- *   3. entryList    → GET listing, expect created entry present
- *   4. entryDelete  → DELETE entry, expect 404 on read after
+ * `{universe}` is a path parameter — the spec runs unchanged
+ * against any universe by setting `CO_TEST_UNIVERSE`.
  *
- * SAFETY: the fixture entry lives under a sandbox path
- * `e2e/sandbox/<random-id>.md` so even if cleanup is skipped the
- * write doesn't collide with any user-authored content. Cleanup in
- * `afterEach` deletes it idempotently.
+ * Content (paths, bodies, frontmatter) is RUNTIME DATA — fixtures
+ * here carry no business meaning. The test verifies the
+ * postconditions documented as `x-postconditions` in registry.yaml.
+ *
+ * SAFETY: the fixture entry lives at `e2e/sandbox/<random>.md` so a
+ * skipped cleanup can never overwrite user content. `afterEach`
+ * deletes idempotently.
  */
 
 const BASE = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
@@ -46,7 +46,7 @@ function randomSandboxPath(): string {
   return `e2e/sandbox/${suffix}.md`;
 }
 
-test.describe("Content CRUD primitives (entryWrite/Read/List/Delete)", () => {
+test.describe("entry resource — full CRUD cycle", () => {
   test.skip(
     !USER_EMAIL || !USER_PASSWORD,
     "Set CO_TEST_USER_EMAIL + CO_TEST_USER_PASSWORD to run."
@@ -77,10 +77,10 @@ test.describe("Content CRUD primitives (entryWrite/Read/List/Delete)", () => {
     await ctx.dispose();
   });
 
-  test("entryWrite → entryRead → entryList → entryWrite (update) → entryDelete", async () => {
+  test("putEntry → getEntry → listEntries → putEntry (update) → deleteEntry", async () => {
     const url = `/api/v1/universes/${encodeURIComponent(TARGET_UNIVERSE)}/entries/${encodePath(sandboxPath)}`;
 
-    // --- 01. entryWrite (create) ------------------------------------------
+    // --- 01. putEntry (create) ------------------------------------------
     const initialBody = "# Sandbox\n\nopaque fixture content " + Date.now();
     const initialFrontmatter = {
       type: "page",
@@ -93,58 +93,58 @@ test.describe("Content CRUD primitives (entryWrite/Read/List/Delete)", () => {
     });
     expect(
       writeRes.status(),
-      "entryWrite (create): PUT returns < 400"
+      "putEntry (create): PUT returns < 400"
     ).toBeLessThan(400);
 
-    // --- 02. entryRead ----------------------------------------------------
+    // --- 02. getEntry ----------------------------------------------------
     const readRes = await ctx.get(url);
-    expect(readRes.status(), "entryRead: GET returns 200").toBe(200);
+    expect(readRes.status(), "getEntry: GET returns 200").toBe(200);
     const readJson = await readRes.json();
     expect(
       readJson.body,
-      "entryRead postcondition: body matches what entryWrite sent"
+      "getEntry postcondition: body matches what putEntry sent"
     ).toBe(initialBody);
     expect(
       readJson.path,
-      "entryRead postcondition: response.path === request path"
+      "getEntry postcondition: response.path === request path"
     ).toBe(sandboxPath);
     // Frontmatter preservation — keys we sent should be present.
     const readFm = readJson.frontmatter ?? {};
     expect(
       readFm.type,
-      "entryWrite postcondition: frontmatter.type preserved"
+      "putEntry postcondition: frontmatter.type preserved"
     ).toBe(initialFrontmatter.type);
     expect(
       readFm.title,
-      "entryWrite postcondition: frontmatter.title preserved"
+      "putEntry postcondition: frontmatter.title preserved"
     ).toBe(initialFrontmatter.title);
 
-    // --- 03. entryList ----------------------------------------------------
+    // --- 03. listEntries ----------------------------------------------------
     const listRes = await ctx.get(
       `/api/v1/universes/${encodeURIComponent(TARGET_UNIVERSE)}/entries?limit=500`
     );
-    expect(listRes.status(), "entryList: GET returns 200").toBe(200);
+    expect(listRes.status(), "listEntries: GET returns 200").toBe(200);
     const listJson = await listRes.json();
     const entries: Array<{ path: string; title?: string }> =
       listJson.entries ?? listJson ?? [];
     expect(
       Array.isArray(entries),
-      "entryList postcondition: entries is an array"
+      "listEntries postcondition: entries is an array"
     ).toBe(true);
     expect(
       entries.some((e) => e.path === sandboxPath),
-      "entryList postcondition: sandbox entry appears in listing"
+      "listEntries postcondition: sandbox entry appears in listing"
     ).toBe(true);
     if (entries.length > 0) {
       for (const e of entries.slice(0, 10)) {
         expect(
           typeof e.path,
-          "entryList postcondition: each item has a path"
+          "listEntries postcondition: each item has a path"
         ).toBe("string");
       }
     }
 
-    // --- 01. entryWrite (update) — same primitive, second invocation ------
+    // --- 01. putEntry (update) — same primitive, second invocation ------
     const updatedBody = initialBody + "\n\nappended " + Date.now();
     const updateRes = await ctx.put(url, {
       headers: { "content-type": "application/json" },
@@ -152,24 +152,24 @@ test.describe("Content CRUD primitives (entryWrite/Read/List/Delete)", () => {
     });
     expect(
       updateRes.status(),
-      "entryWrite (update): PUT returns < 400"
+      "putEntry (update): PUT returns < 400"
     ).toBeLessThan(400);
     const readAfterUpdate = await ctx.get(url);
     expect(
       (await readAfterUpdate.json()).body,
-      "entryWrite (update) postcondition: body reflects new content"
+      "putEntry (update) postcondition: body reflects new content"
     ).toBe(updatedBody);
 
-    // --- 04. entryDelete --------------------------------------------------
+    // --- 04. deleteEntry --------------------------------------------------
     const delRes = await ctx.delete(url);
     expect(
       delRes.status(),
-      "entryDelete: DELETE returns < 400"
+      "deleteEntry: DELETE returns < 400"
     ).toBeLessThan(400);
     const readAfterDelete = await ctx.get(url);
     expect(
       readAfterDelete.status(),
-      "entryDelete postcondition: subsequent entryRead returns 404"
+      "deleteEntry postcondition: subsequent getEntry returns 404"
     ).toBe(404);
 
     // Mark cleanup as a no-op — entry is already gone.

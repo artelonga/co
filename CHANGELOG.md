@@ -5,6 +5,58 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.17] — 2026-05-15 — Interactions: one `entry` resource, HTTP verbs
+
+Pivot continues. 2.7.16 had four parallel "primitives" with names
+like `entryWrite`/`entryRead`/`entryDelete`/`entryList`. That's
+suboptimal: the HTTP verbs (PUT/GET/DELETE/GET) are the
+differentiator. One resource is enough.
+
+### Registry IS the OpenAPI doc
+
+`registry.yaml` is now a canonical OpenAPI 3.1 document, no custom
+shape. One resource (`entry`) with two paths and four operations:
+
+| operationId | method | path |
+|---|---|---|
+| `getEntry`    | GET    | `/api/v1/universes/{universe}/entries/{path}` |
+| `putEntry`    | PUT    | `/api/v1/universes/{universe}/entries/{path}` |
+| `deleteEntry` | DELETE | `/api/v1/universes/{universe}/entries/{path}` |
+| `listEntries` | GET    | `/api/v1/universes/{universe}/entries` |
+
+Pre/postconditions live in `x-preconditions` / `x-postconditions`
+(standard OpenAPI vendor extensions); safety classification in
+`x-safety`. `{universe}` is a path parameter — the contract is
+universe-agnostic and works for every universe the caller has
+access to.
+
+### `co-web/src/interactions.rs`
+
+Now embeds the OpenAPI doc directly, parses to `serde_json::Value`,
+and discovers operations by walking `paths × methods`. No custom
+struct shape — the doc IS the source.
+
+Endpoints unchanged externally; payload shape now reflects OpenAPI:
+
+```
+GET  /api/v1/interactions/               list operations
+GET  /api/v1/interactions/openapi.json   the doc, as-is
+GET  /api/v1/interactions/{operationId}  operation block (incl. x-conds)
+POST /api/v1/interactions/{operationId}  reserved (501)
+```
+
+Tests: `openapi_parses`, `four_operations_under_entry_resource`,
+`every_operation_has_pre_and_post_conditions`,
+`universe_is_a_path_parameter` (verifies the every-universe
+contract — every path template must reference `{universe}`).
+
+### Test spec
+
+`01-content-crud.spec.ts` rebadged to the new operation IDs
+(`putEntry`/`getEntry`/`listEntries`/`deleteEntry`). Universe is
+controlled by `CO_TEST_UNIVERSE` (default `artelonga`) — the same
+spec runs against any universe by changing the env var.
+
 ## [2.7.16] — 2026-05-15 — Interactions: pivot to generic CRUD primitives
 
 The interaction layer was over-baked in 2.7.13–2.7.15: it documented

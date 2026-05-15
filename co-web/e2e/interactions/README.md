@@ -2,16 +2,16 @@
 
 Atomic platform **primitives** for content, exposed as typed RPCs with machine-checkable pre/postconditions. Content (paths, bodies, frontmatter) is **runtime data** — the primitives are the contract; specific business operations like "switch IG links to wikilinks" are clients of those primitives, not part of the contract itself.
 
-## The atomic actions
+## The atomic action
 
-Four CRUD primitives on universe entries, mapped 1:1 to the entries API:
+One resource: **`entry`**. Four operations defined by HTTP verb. `{universe}` is a path parameter — the same primitives work for every universe the caller can access.
 
-| Primitive | HTTP | Path |
+| Operation     | HTTP     | Path |
 |---|---|---|
-| `entryWrite`  | `PUT`    | `/api/v1/universes/{universe}/entries/{path}` |
-| `entryRead`   | `GET`    | `/api/v1/universes/{universe}/entries/{path}` |
-| `entryDelete` | `DELETE` | `/api/v1/universes/{universe}/entries/{path}` |
-| `entryList`   | `GET`    | `/api/v1/universes/{universe}/entries` |
+| `getEntry`    | `GET`    | `/api/v1/universes/{universe}/entries/{path}` |
+| `putEntry`    | `PUT`    | `/api/v1/universes/{universe}/entries/{path}` |
+| `deleteEntry` | `DELETE` | `/api/v1/universes/{universe}/entries/{path}` |
+| `listEntries` | `GET`    | `/api/v1/universes/{universe}/entries` |
 
 These are the contract. Anything else is a composition of these.
 
@@ -36,35 +36,32 @@ One spec exercises all four primitives back-to-back so a failure points at the b
 
 ### `registry.yaml`
 
-Machine-readable index — every spec file must have a matching entry. Lets `co-auto` (or any other agent) enumerate, filter by tag, and dispatch interactions without parsing TypeScript:
+The registry **is** a canonical OpenAPI 3.1 document — `paths` × `methods`, exactly the shape REST clients already understand. No flat operation list, no custom schema. Pre/postconditions live in `x-preconditions` / `x-postconditions` extensions per operation; safety classification in `x-safety`.
 
 ```bash
-# List all interactions
-yq '.interactions[] | .id + " — " + .title' e2e/interactions/registry.yaml
+# Every operationId in the doc
+yq '.paths[][] | select(.operationId) | .operationId' e2e/interactions/registry.yaml
 
-# Only interactions that mutate the artelonga universe
-yq '.interactions[] | select(.universe == "artelonga") | .id' e2e/interactions/registry.yaml
+# Find the path + method for getEntry
+yq '.paths | to_entries | .[] | .key as $p | .value | to_entries | .[] | select(.value.operationId == "getEntry") | {path: $p, method: .key}' e2e/interactions/registry.yaml
 
-# Spec file for interaction 01
-yq '.interactions[] | select(.id == "01") | .spec' e2e/interactions/registry.yaml
+# All destructive operations
+yq '.paths[][] | select(."x-safety" == "destructive") | .operationId' e2e/interactions/registry.yaml
 ```
 
-Fields per interaction:
+OpenAPI fields used per operation:
 
 | Field | Meaning |
 |---|---|
-| `id` | Stable two-digit id |
-| `operationId` | camelCase RPC name — URL slug at `/api/v1/interactions/{operationId}` |
-| `title` | One-line human label |
-| `method` | HTTP verb the primitive maps to |
-| `path` | URL template on the entries API |
-| `spec` | Test file that exercises the primitive |
-| `parameters` | JSON-Schema for the typed input body |
-| `preconditions` | Rules that must hold before the call (id + rule template) |
-| `postconditions` | Rules that must hold after the call |
-| `auth` | `{ required: bool, scope: string }` |
-| `safety` | `snapshot-restore`, `dry-run`, or `destructive` |
-| `tags` | Free-form labels for filtering |
+| `operationId` | Stable RPC name — URL slug at `/api/v1/interactions/{operationId}` |
+| `summary` | One-line human label |
+| `parameters` | OpenAPI parameters (path / query / header) |
+| `requestBody` | For PUT/POST — JSON-Schema |
+| `responses` | Status code → description + schema |
+| `tags` | OpenAPI tag grouping (currently just `entry`) |
+| `x-preconditions` | Rules that must hold before the call |
+| `x-postconditions` | Rules that must hold after the call |
+| `x-safety` | `snapshot-restore` / `dry-run` / `destructive` |
 
 ### Served endpoints
 

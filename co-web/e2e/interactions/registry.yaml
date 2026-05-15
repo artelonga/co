@@ -1,179 +1,178 @@
-# CO Interactions Registry — single source of truth
+# CO Content Interactions — canonical OpenAPI 3.1 document.
 #
-# Atomic platform primitives for content (entries). Each interaction
-# documents one CRUD operation that's already exposed by the CO API.
-# Content — the actual markdown, frontmatter, paths — is RUNTIME DATA
-# passed in by the caller. The contract is the primitive, not any
-# specific application use-case.
+# One resource: `entry`. The HTTP verb is the operation. `{universe}`
+# is a path parameter — the same primitives work for every universe
+# the caller can access.
 #
-# Derivations from this file:
-#   - OpenAPI 3.1 JSON at  GET /api/v1/interactions/openapi.json
-#   - Interaction list at  GET /api/v1/interactions
-#   - Single spec at       GET /api/v1/interactions/{operationId}
-#   - (Future) executable  POST /api/v1/interactions/{operationId}
+# This file IS the OpenAPI doc. The server embeds it via
+# include_str!, parses it once at startup, and serves it as-is at
+# GET /api/v1/interactions/openapi.json. No transformation.
 #
-# Schema (per interaction):
+# Pre/postconditions live in OpenAPI vendor extensions:
+#   x-preconditions  — rules that must hold before the call
+#   x-postconditions — rules that must hold after the call
 #
-#   id           Stable two-digit id
-#   operationId  camelCase RPC name (URL slug)
-#   title        One-line human label
-#   method       HTTP verb the primitive maps to
-#   path         URL template on the actual entries API
-#   spec         Test file that exercises the primitive
-#   parameters   JSON-Schema for typed inputs
-#   preconditions  Rules that must hold before the call
-#   postconditions Rules that must hold after the call
-#   auth         { required: bool, scope: string }
-#   safety       snapshot-restore | dry-run | destructive
-#   tags         free-form labels
+# `x-safety` (snapshot-restore | dry-run | destructive) tells test
+# harnesses what cleanup discipline a primitive requires.
 
 openapi: "3.1.0"
 info:
-  title: "CO Content Interactions"
-  version: "1.0"
+  title: "CO Content"
+  version: "1.0.0"
   description: |
-    Atomic CRUD primitives on universe content entries.
-    Content is runtime data — the primitives are the contract.
+    CRUD primitives on universe content entries.
 
-interactions:
-  # ---------------------------------------------------------------
-  # WRITE  (PUT — upserts; create or update is one operation in REST)
-  # ---------------------------------------------------------------
-  - id: "01"
-    operationId: entryWrite
-    title: "Create or update a content entry (upsert)"
-    method: PUT
-    path: "/api/v1/universes/{universe}/entries/{path}"
-    spec: 01-content-crud.spec.ts
+    These four operations are the atomic platform interactions for
+    content. `{universe}` is a path parameter — they work uniformly
+    across every universe the caller has access to. Specific
+    business operations (e.g. "switch IG links to internal wikilinks")
+    are clients of these primitives, not part of the contract.
 
-    parameters:
+servers:
+  - url: "https://co.artelonga.com.br"
+  - url: "https://co-artelonga.fly.dev"
+
+components:
+  schemas:
+    Entry:
+      type: object
+      required: [path]
+      properties:
+        path: { type: string }
+        title: { type: string, nullable: true }
+        body: { type: string }
+        frontmatter: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    EntryList:
       type: object
       properties:
-        universe:
-          type: string
-          description: "Universe key (e.g. 'artelonga', 'template')."
-        path:
-          type: string
-          description: "Entry path within the universe (e.g. 'sobre.md', 'comunidades/falcao.md')."
-        body:
-          type: string
-          description: "Markdown body. Content is opaque to the primitive."
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/Entry" }
+        total: { type: integer }
+    EntryWriteBody:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, description: "Markdown body. Opaque to the primitive." }
         frontmatter:
           type: object
-          description: "YAML frontmatter as a JSON object. Optional."
-      required: [universe, path, body]
+          additionalProperties: true
+          description: "YAML frontmatter as a JSON object."
 
-    preconditions:
-      - id: "pre.auth"
-        rule: "Caller is authenticated and has write scope on {universe}."
-
-    postconditions:
-      - id: "post.entry_readable"
-        rule: "entryRead on the same {universe}::{path} returns 200 with the supplied body."
-      - id: "post.frontmatter_preserved"
-        rule: "If frontmatter was supplied, entryRead returns the same keys."
-
-    auth: { required: true, scope: "write:universe" }
-    safety: snapshot-restore
-    tags: [content, crud, write]
-
-  # ---------------------------------------------------------------
-  # READ
-  # ---------------------------------------------------------------
-  - id: "02"
-    operationId: entryRead
-    title: "Read a content entry"
-    method: GET
-    path: "/api/v1/universes/{universe}/entries/{path}"
-    spec: 01-content-crud.spec.ts
-
+paths:
+  /api/v1/universes/{universe}/entries/{path}:
     parameters:
-      type: object
-      properties:
-        universe: { type: string }
-        path:     { type: string }
-      required: [universe, path]
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
+        description: "Universe key. Works for all universes the caller can access."
+      - name: path
+        in: path
+        required: true
+        schema: { type: string }
+        description: "Entry path within the universe (e.g. `sobre.md`, `comunidades/falcao.md`)."
 
-    preconditions:
-      - id: "pre.universe_readable"
-        rule: "{universe} is public OR caller has read scope on it."
+    get:
+      operationId: getEntry
+      summary: "Read an entry"
+      tags: [entry]
+      responses:
+        '200':
+          description: "Entry found"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Entry" }
+        '404': { description: "Entry not found" }
+      x-preconditions:
+        - id: pre.universe_readable
+          rule: "{universe} is public OR caller has read scope on it."
+      x-postconditions:
+        - id: post.path_matches
+          rule: "response.path == request {path}."
+        - id: post.body_present
+          rule: "response.body key exists (may be empty string)."
+      x-safety: dry-run
 
-    postconditions:
-      - id: "post.body_present"
-        rule: "Response includes the entry's body (may be empty string but key exists)."
-      - id: "post.path_matches"
-        rule: "Response.path == request {path}."
+    put:
+      operationId: putEntry
+      summary: "Create or update an entry (upsert)"
+      tags: [entry]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EntryWriteBody" }
+      responses:
+        '200': { description: "Upserted" }
+        '201': { description: "Created" }
+        '401': { description: "Auth required" }
+        '403': { description: "Insufficient scope" }
+      x-preconditions:
+        - id: pre.auth
+          rule: "Caller authenticated with write scope on {universe}."
+      x-postconditions:
+        - id: post.readable
+          rule: "Subsequent GET on the same {universe} + {path} returns 200."
+        - id: post.body_persisted
+          rule: "Subsequent GET returns response.body == request.body."
+        - id: post.frontmatter_persisted
+          rule: "If frontmatter was sent, subsequent GET returns the same keys."
+      x-safety: snapshot-restore
 
-    auth: { required: false, scope: "read:universe" }
-    safety: dry-run
-    tags: [content, crud, read]
+    delete:
+      operationId: deleteEntry
+      summary: "Delete an entry"
+      tags: [entry]
+      responses:
+        '200': { description: "Deleted (or already absent)" }
+        '401': { description: "Auth required" }
+        '403': { description: "Insufficient scope" }
+      x-preconditions:
+        - id: pre.auth
+          rule: "Caller authenticated with write scope on {universe}."
+      x-postconditions:
+        - id: post.gone
+          rule: "Subsequent GET on the same {universe} + {path} returns 404."
+      x-safety: destructive
 
-  # ---------------------------------------------------------------
-  # DELETE
-  # ---------------------------------------------------------------
-  - id: "03"
-    operationId: entryDelete
-    title: "Delete a content entry"
-    method: DELETE
-    path: "/api/v1/universes/{universe}/entries/{path}"
-    spec: 01-content-crud.spec.ts
-
+  /api/v1/universes/{universe}/entries:
     parameters:
-      type: object
-      properties:
-        universe: { type: string }
-        path:     { type: string }
-      required: [universe, path]
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
 
-    preconditions:
-      - id: "pre.auth"
-        rule: "Caller has write scope on {universe}."
-      - id: "pre.entry_exists"
-        rule: "entryRead on the same {universe}::{path} returns 200."
-
-    postconditions:
-      - id: "post.entry_gone"
-        rule: "entryRead on the same {universe}::{path} returns 404."
-
-    auth: { required: true, scope: "write:universe" }
-    safety: destructive
-    tags: [content, crud, delete]
-
-  # ---------------------------------------------------------------
-  # LIST
-  # ---------------------------------------------------------------
-  - id: "04"
-    operationId: entryList
-    title: "List entries in a universe"
-    method: GET
-    path: "/api/v1/universes/{universe}/entries"
-    spec: 01-content-crud.spec.ts
-
-    parameters:
-      type: object
-      properties:
-        universe: { type: string }
-        type:
-          type: string
-          description: "Optional frontmatter.type filter (page, task, event, clip, ...)."
-        limit:
-          type: integer
-          default: 100
-        q:
-          type: string
-          description: "Optional substring search across title/body/path."
-      required: [universe]
-
-    preconditions:
-      - id: "pre.universe_readable"
-        rule: "{universe} is public OR caller has read scope on it."
-
-    postconditions:
-      - id: "post.listing_shape"
-        rule: "Response.entries is an array; each item has at minimum {path, title}."
-      - id: "post.respects_limit"
-        rule: "len(response.entries) <= request.limit."
-
-    auth: { required: false, scope: "read:universe" }
-    safety: dry-run
-    tags: [content, crud, list]
+    get:
+      operationId: listEntries
+      summary: "List entries in a universe"
+      tags: [entry]
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string }
+          description: "Filter by frontmatter.type (page, task, event, clip…)."
+        - name: q
+          in: query
+          schema: { type: string }
+          description: "Substring search across title/body/path."
+        - name: limit
+          in: query
+          schema: { type: integer, default: 100 }
+      responses:
+        '200':
+          description: "Listing"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EntryList" }
+      x-preconditions:
+        - id: pre.universe_readable
+          rule: "{universe} is public OR caller has read scope on it."
+      x-postconditions:
+        - id: post.shape
+          rule: "response.entries is an array; each item has at minimum {path}."
+        - id: post.respects_limit
+          rule: "len(response.entries) <= request.limit."
+      x-safety: dry-run
