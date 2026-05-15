@@ -5,6 +5,43 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.11] — 2026-05-15 — Theme-aware CSS vars + template URL resolves anon
+
+### Template URL on anon visits
+
+`/template/seguranca` was landing on the universe home (index README)
+instead of the seguranca page. The anon-on-template boot path only
+called `maybeOpenPageFromUrl` (which reads `?page=` query) — never
+`maybeOpenEntryFromUrl` (which reads the URL path). Fixed: anon flow
+now routes through `maybeOpenEntryFromUrl`, which falls back to
+`maybeOpenPageFromUrl` when no path is present, so both shapes work.
+
+### Stats bar + new detail UI used undefined CSS vars
+
+`conteudo-stats`, `conteudo-detail-toolbar`, `conteudo-readme`,
+`conteudo-detail-btn`, splitter hover, and the editing-toolbar amber
+state all referenced CSS custom properties that themes don't define:
+`--surface-1`, `--surface-2`, `--accent-soft`, `--text`. The
+hardcoded fallback colors (`#f8f8f6`, `#ececea`, `#fef3c7`, `#111`)
+rendered identically on every theme — stats bar was always pale white
+even in dark themes (relic, matrix, terminal, scholarly-dark…).
+
+Migrated to theme-defined variables:
+- `--surface-1` → `--bg-hover`
+- `--surface-2` → `--card-bg`
+- `--accent-soft` → `--accent-light`
+- `--text` → `--text-primary`
+
+### Theme coverage E2E (`e2e/theme-coverage.spec.ts`)
+
+New Playwright spec walks all 12 themes (default + 11 palettes),
+applies `data-palette` to `<html>`, screenshots the conteúdo view, and
+asserts the stats bar isn't transparent. Dark themes get an extra
+assertion that the computed background sum is < 384 (average RGB
+< 128), catching white-on-dark regressions like this one. Run with
+`BASE_URL=https://co-artelonga.fly.dev npx playwright test
+e2e/theme-coverage.spec.ts`.
+
 ## [2.7.10] — 2026-05-14 — Fullscreen on click + /template/<slug> resolves
 
 ### Inline fullscreen button: immediate OS fullscreen

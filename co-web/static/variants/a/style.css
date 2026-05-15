@@ -2629,7 +2629,7 @@ body {
 }
 .conteudo-splitter:hover,
 .conteudo-split.dragging .conteudo-splitter {
-    background: var(--accent-soft, rgba(99,102,241,0.18));
+    background: var(--accent-light, rgba(99,102,241,0.18));
     border-left-color: var(--accent, #6366f1);
 }
 
@@ -2668,8 +2668,8 @@ body {
     z-index: 1;
 }
 .conteudo-layout-toggle:hover {
-    background: var(--surface-2, #ececea);
-    color: var(--text, #111);
+    background: var(--card-bg, #ececea);
+    color: var(--text-primary, #111);
 }
 
 .conteudo-detail-pane {
@@ -2685,7 +2685,7 @@ body {
     justify-content: space-between;
     gap: 12px;
     padding: 6px 10px;
-    background: var(--surface-1, #f8f8f6);
+    background: var(--bg-hover, #f8f8f6);
     border: 1px solid var(--border, #e5e5e0);
     border-radius: 8px;
     min-height: 38px;
@@ -2694,7 +2694,7 @@ body {
 .conteudo-detail-title {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text, #111);
+    color: var(--text-primary, #111);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -2720,8 +2720,8 @@ body {
     justify-content: center;
 }
 .conteudo-detail-btn:hover {
-    background: var(--surface-2, #ececea);
-    color: var(--text, #111);
+    background: var(--card-bg, #ececea);
+    color: var(--text-primary, #111);
 }
 
 .conteudo-readme {
@@ -2735,7 +2735,7 @@ body {
 /* Hover affordance: tells the user the body is clickable to edit
    without competing with link/image cursors. */
 .conteudo-readme[data-detail-body]:hover {
-    background: var(--surface-1, #f8f8f6);
+    background: var(--bg-hover, #f8f8f6);
     border-radius: 8px;
 }
 
@@ -2746,7 +2746,7 @@ body {
 }
 
 .conteudo-detail-pane-editing .conteudo-detail-toolbar-editing {
-    background: var(--accent-soft, #fef3c7);
+    background: var(--accent-light, #fef3c7);
     border-color: var(--accent, #f59e0b);
 }
 
@@ -2782,7 +2782,7 @@ body {
    doesn't look like a stranded floating block. */
 .conteudo-detail-pane:fullscreen {
     background: var(--bg, #fff);
-    color: var(--text, #111);
+    color: var(--text-primary, #111);
     padding: 28px 40px;
     overflow-y: auto;
 }
@@ -2818,7 +2818,7 @@ body {
     flex-wrap: wrap;
     gap: 0;
     align-items: stretch;
-    background: var(--surface-1, #f8f8f6);
+    background: var(--bg-hover, #f8f8f6);
     border: 1px solid var(--border, #e5e5e0);
     border-radius: 8px;
     padding: 0;
@@ -2840,7 +2840,7 @@ body {
     font-size: 20px;
     font-weight: 600;
     line-height: 1.1;
-    color: var(--text, #1a1a1a);
+    color: var(--text-primary, #1a1a1a);
     font-variant-numeric: tabular-nums;
 }
 .conteudo-stat-label {
@@ -2854,7 +2854,7 @@ body {
 .conteudo-stat-meta .conteudo-stat-value-meta {
     font-size: 13px;
     font-weight: 500;
-    color: var(--text, #1a1a1a);
+    color: var(--text-primary, #1a1a1a);
 }
 @media (max-width: 600px) {
     .conteudo-stat { padding: 8px 12px; min-width: 60px; }

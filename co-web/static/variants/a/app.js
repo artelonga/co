@@ -641,7 +641,11 @@ async function init() {
         showTemplateBanner();
         setupOnboarding();
         await bootAppForUniverse('template');
-        maybeOpenPageFromUrl('template');
+        // Resolve URL-path-based entries (`/template/seguranca`) AND
+        // query-param fallback (`?page=seguranca`). The Entry resolver
+        // delegates to Page resolver when no path is present, so this
+        // covers both shapes.
+        await maybeOpenEntryFromUrl('template');
         return;
     }
 
