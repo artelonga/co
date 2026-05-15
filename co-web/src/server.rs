@@ -448,6 +448,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/", get(serve_co_index))
         // CO-105: /admin page — server-side auth.
         .route("/admin", get(crate::admin_routes::serve_admin_page))
+        // REPL shell over the entries API (interactions OpenAPI surface).
+        // Public — no auth on the page itself; commands carry the user's
+        // session cookie when calling write endpoints.
+        .route("/repl", get(crate::repl_routes::serve_repl_page))
         // CO-183: leads admin page — server-side auth.
         .route(
             "/admin/leads.html",

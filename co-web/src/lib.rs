@@ -60,6 +60,7 @@ pub mod recovery_crypto;
 pub mod recovery_routes;
 pub mod reference_index;
 pub mod reference_routes;
+pub mod repl_routes;
 pub mod relation_index;
 pub mod relation_routes;
 pub mod search_routes;

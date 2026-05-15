@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CO — REPL</title>
+<style>
+  :root {
+    --bg: #0d0e10;
+    --panel: #16181c;
+    --border: #2a2d33;
+    --text: #e6e7eb;
+    --text-muted: #8b8d95;
+    --accent: #7c83f7;
+    --ok: #6ee7a5;
+    --warn: #f4cf63;
+    --err: #f47171;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  header .meta {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: var(--mono);
+  }
+  header .meta a { color: var(--accent); text-decoration: none; }
+  header label {
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+  header input, header select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  header .spacer { flex: 1; }
+  header button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 5px 12px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  header button.ghost {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+  }
+  header button:hover { filter: brightness(1.1); }
+
+  main {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  #transcript {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .cell {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 12px;
+    overflow: hidden;
+  }
+  .cell-input {
+    padding: 8px 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .cell-input::before {
+    content: "co> ";
+    color: var(--accent);
+  }
+  .cell-output {
+    padding: 8px 12px;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .cell-output.err { color: var(--err); }
+  .cell-output.ok { color: var(--ok); }
+  .cell-output.muted { color: var(--text-muted); }
+
+  footer {
+    border-top: 1px solid var(--border);
+    background: var(--panel);
+    padding: 8px 12px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  #prompt {
+    flex: 1;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 12px;
+    font-family: var(--mono);
+    font-size: 13px;
+    resize: vertical;
+    min-height: 44px;
+  }
+  footer button {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 14px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+
+  .help {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+  .help b { color: var(--text); }
+</style>
+</head>
+<body>
+<header>
+  <h1>co repl</h1>
+  <span class="meta">shell over <a href="/api/v1/interactions" target="_blank">/api/v1/interactions</a></span>
+  <span class="spacer"></span>
+  <label>universe</label>
+  <input id="universe" value="template" autocomplete="off">
+  <button id="save-btn" class="ghost" title="Save transcript as markdown entry">save</button>
+  <button id="clear-btn" class="ghost">clear</button>
+</header>
+
+<main>
+  <div id="transcript">
+    <div class="help">
+<b>commands</b> — universe::path notation (universe defaults to header field)
+  <b>list</b> [universe] [--type=task] [--q=...] [--limit=100]
+  <b>get</b> &lt;path-or-universe::path&gt;
+  <b>put</b> &lt;path-or-universe::path&gt; &lt;body&gt;  [--fm=<i>json</i>]
+  <b>delete</b> &lt;path-or-universe::path&gt;
+
+  <b>help</b>     — show this
+  <b>clear</b>    — clear transcript
+  <b>save</b> &lt;path&gt;  — write transcript to &lt;universe&gt;::notebooks/&lt;path&gt;.md
+
+Hit shift+enter to run. Output is wrapped in <code>```co</code> / <code>```output</code> fences when saved.
+    </div>
+  </div>
+</main>
+
+<footer>
+  <textarea id="prompt" placeholder="list template --type=page --limit=5"></textarea>
+  <button id="run-btn">run</button>
+</footer>
+
+<script>
+(function () {
+  const transcript = document.getElementById('transcript');
+  const promptEl   = document.getElementById('prompt');
+  const universeEl = document.getElementById('universe');
+  const runBtn     = document.getElementById('run-btn');
+  const saveBtn    = document.getElementById('save-btn');
+  const clearBtn   = document.getElementById('clear-btn');
+
+  /** in-memory session for save */
+  const session = []; // [{input, output, status: 'ok'|'err'}]
+
+  function appendCell(input, output, status) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    const inp = document.createElement('div');
+    inp.className = 'cell-input';
+    inp.textContent = input;
+    const out = document.createElement('div');
+    out.className = 'cell-output ' + (status || '');
+    out.textContent = output;
+    cell.appendChild(inp);
+    cell.appendChild(out);
+    transcript.appendChild(cell);
+    transcript.scrollTop = transcript.scrollHeight;
+    session.push({ input, output, status });
+  }
+
+  // --- Tokenizer ----------------------------------------------------------
+  // Supports: `cmd arg1 arg2 --flag=value "quoted body"` — keeps quoted
+  // strings as one token, splits on whitespace otherwise.
+  function tokenize(line) {
+    const out = [];
+    let buf = "", inQ = null;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (inQ) {
+        if (c === inQ) { inQ = null; out.push(buf); buf = ""; }
+        else if (c === "\\" && i + 1 < line.length) { buf += line[++i]; }
+        else buf += c;
+      } else if (c === '"' || c === "'") {
+        if (buf.length) { out.push(buf); buf = ""; }
+        inQ = c;
+      } else if (/\s/.test(c)) {
+        if (buf.length) { out.push(buf); buf = ""; }
+      } else {
+        buf += c;
+      }
+    }
+    if (buf.length) out.push(buf);
+    return out;
+  }
+
+  function parseFlags(tokens) {
+    const positional = [];
+    const flags = {};
+    for (const t of tokens) {
+      if (t.startsWith('--')) {
+        const [k, ...rest] = t.slice(2).split('=');
+        flags[k] = rest.length ? rest.join('=') : true;
+      } else {
+        positional.push(t);
+      }
+    }
+    return { positional, flags };
+  }
+
+  // entry ref: "universe::path" or just "path" (universe inferred from header)
+  function resolveRef(ref) {
+    if (ref.includes('::')) {
+      const idx = ref.indexOf('::');
+      return { universe: ref.slice(0, idx), path: ref.slice(idx + 2) };
+    }
+    return { universe: universeEl.value.trim(), path: ref };
+  }
+
+  function encodePath(p) {
+    return p.split('/').map(encodeURIComponent).join('/');
+  }
+
+  async function call(method, url, body) {
+    const opts = { method, credentials: 'same-origin', headers: {} };
+    if (body !== undefined) {
+      opts.headers['content-type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+    const res = await fetch(url, opts);
+    const ct = res.headers.get('content-type') || '';
+    const payload = ct.includes('application/json')
+      ? await res.json()
+      : await res.text();
+    return { status: res.status, payload };
+  }
+
+  function format(payload) {
+    if (typeof payload === 'string') return payload;
+    return JSON.stringify(payload, null, 2);
+  }
+
+  // --- Command dispatch ---------------------------------------------------
+  const commands = {
+    async help() {
+      return [
+        "list [universe] [--type=...] [--q=...] [--limit=N]",
+        "get <ref>            — ref is `path` or `universe::path`",
+        "put <ref> <body> [--fm=<json>]",
+        "delete <ref>",
+        "save <path>          — write transcript to notebooks/<path>.md in active universe",
+        "clear, help",
+      ].join('\n');
+    },
+
+    async list(positional, flags) {
+      const universe = positional[0] || universeEl.value.trim();
+      const params = new URLSearchParams();
+      for (const k of ['type', 'q', 'limit']) {
+        if (flags[k] !== undefined) params.set(k, String(flags[k]));
+      }
+      const qs = params.toString();
+      const url = `/api/v1/universes/${encodeURIComponent(universe)}/entries${qs ? '?' + qs : ''}`;
+      const { status, payload } = await call('GET', url);
+      if (status >= 400) throw new Error(`HTTP ${status}: ${format(payload)}`);
+      const entries = payload.entries || payload || [];
+      if (!entries.length) return '(no entries)';
+      const limit = parseInt(flags.limit ?? entries.length, 10);
+      const lines = entries.slice(0, limit).map(e => {
+        const t = (e.frontmatter && e.frontmatter.type) || '';
+        return `  ${e.path}${t ? `  [${t}]` : ''}${e.title ? `  — ${e.title}` : ''}`;
+      });
+      return `${entries.length} entries\n${lines.join('\n')}`;
+    },
+
+    async get(positional) {
+      const ref = positional[0];
+      if (!ref) throw new Error('usage: get <ref>');
+      const { universe, path } = resolveRef(ref);
+      const url = `/api/v1/universes/${encodeURIComponent(universe)}/entries/${encodePath(path)}`;
+      const { status, payload } = await call('GET', url);
+      if (status === 404) return `(not found: ${universe}::${path})`;
+      if (status >= 400) throw new Error(`HTTP ${status}: ${format(payload)}`);
+      return format(payload);
+    },
+
+    async put(positional, flags) {
+      const ref = positional[0];
+      const body = positional[1];
+      if (!ref || body === undefined) throw new Error('usage: put <ref> <body> [--fm=<json>]');
+      const { universe, path } = resolveRef(ref);
+      const url = `/api/v1/universes/${encodeURIComponent(universe)}/entries/${encodePath(path)}`;
+      let frontmatter;
+      if (flags.fm) {
+        try { frontmatter = JSON.parse(flags.fm); }
+        catch (e) { throw new Error(`--fm is not valid JSON: ${e.message}`); }
+      }
+      const { status, payload } = await call('PUT', url, { body, frontmatter });
+      if (status >= 400) throw new Error(`HTTP ${status}: ${format(payload)}`);
+      return `wrote ${universe}::${path} (${body.length} chars)`;
+    },
+
+    async delete(positional) {
+      const ref = positional[0];
+      if (!ref) throw new Error('usage: delete <ref>');
+      const { universe, path } = resolveRef(ref);
+      const url = `/api/v1/universes/${encodeURIComponent(universe)}/entries/${encodePath(path)}`;
+      const { status, payload } = await call('DELETE', url);
+      if (status >= 400) throw new Error(`HTTP ${status}: ${format(payload)}`);
+      return `deleted ${universe}::${path}`;
+    },
+
+    async save(positional) {
+      const target = positional[0];
+      if (!target) throw new Error('usage: save <path>  (writes notebooks/<path>.md)');
+      const universe = universeEl.value.trim();
+      const fullPath = `notebooks/${target}${target.endsWith('.md') ? '' : '.md'}`;
+      const md = renderTranscriptMarkdown();
+      const url = `/api/v1/universes/${encodeURIComponent(universe)}/entries/${encodePath(fullPath)}`;
+      const fm = {
+        type: 'page',
+        title: `REPL — ${target}`,
+        tags: ['repl', 'notebook'],
+      };
+      const { status, payload } = await call('PUT', url, { body: md, frontmatter: fm });
+      if (status >= 400) throw new Error(`HTTP ${status}: ${format(payload)}`);
+      return `saved ${universe}::${fullPath}`;
+    },
+
+    async clear() {
+      transcript.querySelectorAll('.cell').forEach(c => c.remove());
+      session.length = 0;
+      return '';
+    },
+  };
+
+  function renderTranscriptMarkdown() {
+    const lines = [
+      `# REPL transcript`,
+      ``,
+      `*Recorded ${new Date().toISOString()}.*`,
+      ``,
+    ];
+    for (const c of session) {
+      lines.push('```co');
+      lines.push(c.input);
+      lines.push('```');
+      if (c.output) {
+        lines.push('```output');
+        lines.push(c.output);
+        lines.push('```');
+      }
+      lines.push('');
+    }
+    return lines.join('\n');
+  }
+
+  async function runLine(line) {
+    line = line.trim();
+    if (!line) return;
+    const tokens = tokenize(line);
+    const verb = tokens.shift();
+    const { positional, flags } = parseFlags(tokens);
+    const handler = commands[verb];
+    if (!handler) {
+      appendCell(line, `unknown command: ${verb}\n(type 'help')`, 'err');
+      return;
+    }
+    try {
+      const out = await handler(positional, flags);
+      appendCell(line, out || '', 'ok');
+    } catch (e) {
+      appendCell(line, String(e.message || e), 'err');
+    }
+  }
+
+  runBtn.addEventListener('click', () => {
+    const v = promptEl.value;
+    promptEl.value = '';
+    runLine(v);
+  });
+  promptEl.addEventListener('keydown', (e) => {
+    // Shift+Enter runs; plain Enter inserts newline
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault();
+      runBtn.click();
+    }
+  });
+
+  saveBtn.addEventListener('click', () => {
+    const name = prompt('save transcript as (filename, without .md):');
+    if (!name) return;
+    runLine(`save ${name}`);
+  });
+  clearBtn.addEventListener('click', () => runLine('clear'));
+  promptEl.focus();
+})();
+</script>
+</body>
+</html>

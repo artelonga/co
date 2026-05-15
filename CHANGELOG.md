@@ -5,6 +5,53 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.18] — 2026-05-15 — REPL shell at /repl (Step 1: shell-DSL + save)
+
+New page at **`/repl`**. Single-file HTML + inline JS that runs a
+shell-style command interpreter on top of the entries API (the same
+contract documented under `/api/v1/interactions/openapi.json`).
+
+### Commands
+
+Mirror the four operations on the `entry` resource:
+
+```
+list [universe] [--type=...] [--q=...] [--limit=N]
+get  <ref>                    ref = path OR universe::path
+put  <ref> <body> [--fm=<json>]
+delete <ref>
+save <name>                   write transcript to notebooks/<name>.md
+help, clear
+```
+
+The universe is taken from the header field (default `template`).
+The `universe::path` notation from the interactions registry works
+here too.
+
+### Saved transcripts
+
+`save <name>` writes a markdown entry to
+`notebooks/<name>.md` in the active universe. Commands land in
+```` ```co ```` fenced blocks, outputs in ```` ```output ```` fences.
+The doc is opaque markdown today — the next milestone wires the
+viewer to detect `co` fences and offer a "Run" button so saved
+transcripts become replayable cells ("include as code").
+
+### Trajectory
+
+| Step | Status |
+|---|---|
+| 1. Shell DSL (`list`/`get`/`put`/`delete`/`save`) | shipped (this release) |
+| 2. Python kernel (Pyodide, lazy-loaded ~10MB) | next |
+| 3. R kernel (WebR, lazy-loaded ~20MB) | follow-up |
+| 4. Protobuf-typed query helpers wrapping the entries API | with kernels |
+| 5. "Include as code" — markdown viewer detects `co` fences, offers Run | follow-up |
+
+The shell is the architecture. Pyodide/WebR are language facades
+that wrap the same `co.*` calls. The savedness of transcripts as
+markdown entries (which themselves can be re-run) is the loop that
+makes interactions iterative.
+
 ## [2.7.17] — 2026-05-15 — Interactions: one `entry` resource, HTTP verbs
 
 Pivot continues. 2.7.16 had four parallel "primitives" with names
