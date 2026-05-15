@@ -652,6 +652,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         router = router.nest("/api/v1/plugins", plugin_router);
     }
 
+    // E2E interactions registry — discover/inspect via OpenAPI 3.1
+    // derived from co-web/e2e/interactions/registry.yaml. Execution
+    // (POST handlers) is reserved (501) until the runtime is wired.
+    router = router.nest("/api/v1/interactions", crate::interactions::router());
+
     // CO-80: rate limiting applied after ALL routes are registered so the layer
     // covers every endpoint, including universe_api, entry_api, and vault_api.
     router = router.layer(axum::middleware::from_fn_with_state(

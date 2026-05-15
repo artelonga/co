@@ -47,15 +47,50 @@ Fields per interaction:
 
 | Field | Meaning |
 |---|---|
-| `id` | Two-digit string matching the spec filename prefix |
+| `id` | Two-digit stable id matching the spec filename prefix |
+| `operationId` | camelCase RPC name — URL slug at `/api/v1/interactions/{operationId}` |
 | `title` | One-line human label |
 | `spec` | Relative path under `e2e/interactions/` |
 | `universe` | The universe key the interaction primarily touches |
-| `refs` | Entries the interaction reads/edits (`universe::path`) |
-| `produces` | Entries the interaction creates |
-| `requires` | Env vars that must be set; missing → test skips |
-| `tags` | Free-form labels for filtering |
+| `parameters` | JSON-Schema for the typed input body |
+| `preconditions` | Rules that must hold before WHEN runs (id + rule template) |
+| `postconditions` | Rules that must hold after WHEN runs |
+| `produces` | Entries the interaction creates or updates |
+| `auth` | `{ required: bool, scope: string }` |
 | `safety` | `snapshot-restore`, `dry-run`, or `destructive` |
+| `tags` | Free-form labels for filtering |
+
+### Served endpoints
+
+The registry is parsed once at server startup and exposed under `/api/v1/interactions/`:
+
+```
+GET  /api/v1/interactions/                  list interactions (id + summary)
+GET  /api/v1/interactions/openapi.json      derived OpenAPI 3.1 paths
+GET  /api/v1/interactions/{operationId}     single interaction spec
+POST /api/v1/interactions/{operationId}     execute (reserved — 501 today)
+```
+
+The OpenAPI doc is generated from the YAML at request time — no
+build step, no codegen lag. Plug it into Swagger UI, generate a
+client with `openapi-generator`, or hand it to an agent SDK.
+
+The POST runtime is reserved (returns `501 Not Implemented` with a
+message pointing to the Playwright command). Adding it is the next
+step: a Rust handler that authenticates the caller, executes the
+WHEN logic via existing entry API calls, then returns
+`{ operationId, criteria: [{id, rule, passed, evidence}], produced: [...] }`.
+
+Once the runtime is wired, calling an interaction becomes:
+
+```bash
+curl -X POST https://co.artelonga.com.br/api/v1/interactions/artelongaSwitchSocialToProfiles \
+  -H 'Content-Type: application/json' -b cookies.txt \
+  -d '{"universe":"artelonga","targetEntry":"sobre.md"}'
+```
+
+Equivalent to running the Playwright spec — same pre/postcondition
+contract, same produced entries.
 
 ## Required spec shape
 

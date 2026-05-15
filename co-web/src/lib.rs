@@ -30,6 +30,7 @@ pub mod gestao_routes;
 pub mod github_auth;
 pub mod iceberg;
 pub mod index_manager;
+pub mod interactions;
 pub mod invitation_routes;
 pub mod job_queue;
 pub mod lead_routes;

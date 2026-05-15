@@ -5,6 +5,56 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.15] — 2026-05-15 — Interactions: derived OpenAPI 3.1 + RPC contract
+
+Step 1 of the "interactions as API calls" trajectory. The
+`registry.yaml` is now an OpenAPI-shaped source of truth and the
+server derives + serves it.
+
+### Enriched registry schema
+
+Each interaction now carries:
+- `operationId` (camelCase RPC name)
+- `parameters` (JSON-Schema for typed input)
+- `preconditions` + `postconditions` (id + rule template each)
+- `produces` (entries created/updated, with frontmatter expectations)
+- `auth` (`{ required, scope }`)
+- `safety`, `tags`
+
+### `co-web/src/interactions.rs` module
+
+Parses `registry.yaml` once at startup (embedded via `include_str!`)
+and exposes:
+
+- `GET  /api/v1/interactions/` — list with id, operationId, title,
+  universe, tags, safety
+- `GET  /api/v1/interactions/openapi.json` — full OpenAPI 3.1 derived
+  from the registry; each interaction maps to one path with both a
+  GET (fetch spec) and a POST (execute, currently 501)
+- `GET  /api/v1/interactions/{operationId}` — full spec for one
+  interaction
+- `POST /api/v1/interactions/{operationId}` — reserved (501 with
+  pointer to the Playwright command); becomes the executable RPC
+  in the next step
+
+4 unit tests cover: registry parses, first interaction shape matches,
+operationIds unique, OpenAPI emits one path per interaction.
+
+### Trajectory
+
+- **Now (this release)**: contract published. Agents (co-auto,
+  claude-code) can `GET /api/v1/interactions/openapi.json`, discover
+  available interactions, and read pre/postconditions without
+  parsing TypeScript.
+- **Next**: POST handler that executes interactions server-side —
+  authenticates the caller, runs the WHEN via existing entry write
+  endpoints, checks postconditions, returns
+  `{operationId, criteria: [{id, rule, passed, evidence}], produced}`.
+  Equivalent to running the Playwright spec; one call replaces an
+  npm-test-with-creds invocation.
+- **Eventually**: client codegen (TS, Rust, Python) directly from the
+  derived OpenAPI. Interactions become first-class platform APIs.
+
 ## [2.7.14] — 2026-05-15 — Interactions: stub + registry + idempotency
 
 Three improvements on the e2e interactions framework shipped in

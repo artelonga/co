@@ -1,38 +1,112 @@
-# E2E Interactions Registry
+# CO Interactions Registry — single source of truth
 #
-# Machine-readable index of interactions defined under e2e/interactions/.
-# Lets co-auto (and any other agent) enumerate, filter, and dispatch them
-# without parsing TypeScript. Keep in sync with the spec files: each
-# interaction must have one entry here AND one `.spec.ts` file under the
-# same id.
+# Each interaction is an atomic user-level CRUD flow with typed
+# inputs and machine-checkable pre/postconditions. This YAML is the
+# source from which we derive:
 #
-# Schema:
-#   id:          two-digit string matching the spec filename prefix
-#   title:       one-line human label
-#   spec:        relative path under e2e/interactions/
-#   universe:    the universe key the interaction primarily touches
-#   refs:        list of universe::path entries the interaction reads/edits
-#   produces:    list of universe::path entries the interaction creates
-#   requires:    env vars that must be set; missing → test skips
-#   tags:        free-form labels for filtering
-#   safety:      one of: snapshot-restore | dry-run | destructive
+#   - OpenAPI 3.1 JSON, served at  GET /api/v1/interactions/openapi.json
+#   - The interaction list,        GET /api/v1/interactions/
+#   - (Future) executable handler, POST /api/v1/interactions/{operationId}
+#
+# Schema (per interaction):
+#
+#   id           Two-digit stable id (matches spec filename prefix)
+#   operationId  camelCase RPC name — used as the OpenAPI operationId
+#                and the URL slug in /api/v1/interactions/{operationId}
+#   title        One-line human label
+#   spec         Relative path under e2e/interactions/
+#   universe     Universe key the interaction primarily touches
+#   parameters   Typed inputs (JSON-Schema subset)
+#   preconditions  Rules that must hold before WHEN runs
+#   postconditions Rules that must hold after WHEN runs
+#   produces     Entries the interaction creates or updates
+#   auth         { required: bool, scope: string }
+#   safety       snapshot-restore | dry-run | destructive
+#   tags         free-form labels for filtering
+
+openapi: "3.1.0"
+info:
+  title: "CO Interactions"
+  version: "1.0"
+  description: |
+    Atomic user-level CRUD flows on the CO platform.
+    Each interaction is callable as a typed RPC and has
+    machine-checkable pre/postconditions.
 
 interactions:
   - id: "01"
+    operationId: "artelongaSwitchSocialToProfiles"
     title: "ArteLonga social → internal profile wikilinks"
     spec: 01-artelonga-social-to-profiles.spec.ts
     universe: artelonga
-    refs:
-      - artelonga::sobre.md
+
+    parameters:
+      type: object
+      properties:
+        universe:
+          type: string
+          default: artelonga
+          description: "Universe key holding the entry to edit."
+        targetEntry:
+          type: string
+          default: sobre.md
+          description: "Entry path within the universe."
+        profileFolder:
+          type: string
+          default: "comunidades/"
+          description: "Folder under which to materialize new profile stubs."
+        taskProject:
+          type: string
+          default: AL
+          description: "Project key under which the follow-up task is filed."
+      required: []
+
+    preconditions:
+      - id: "pre.has_external_links"
+        rule: "{universe}::{targetEntry} body contains substring 'instagram.com/'"
+      - id: "pre.has_falcao_wikilink"
+        rule: "{universe}::{targetEntry} body contains substring '[[falcao]]'"
+
+    postconditions:
+      - id: "post.no_external_links"
+        rule: "{universe}::{targetEntry} body contains zero 'instagram.com/' substrings"
+      - id: "post.handles_become_wikilinks"
+        rule: "every IG handle in the original body has a [[handle]] or [[handle|alias]] in the new body"
+      - id: "post.falcao_preserved"
+        rule: "{universe}::{targetEntry} body still contains '[[falcao]]'"
+      - id: "post.task_created"
+        rule: "entry at {universe}::projects/{taskProject}/<next>.md exists with frontmatter type=task, status=todo, title containing 'falcao'"
+      - id: "post.profile_stub_created"
+        rule: "entry at {universe}::{profileFolder}falcao.md exists with frontmatter stub=true"
+      - id: "post.all_listed"
+        rule: "{universe}::{targetEntry}, the task entry, and {profileFolder}falcao.md all appear in /api/v1/universes/{universe}/entries"
+
     produces:
-      - artelonga::projects/AL/<next>.md          # follow-up task (status: todo)
-      - artelonga::comunidades/falcao.md          # profile stub
-    requires:
-      - CO_TEST_USER_EMAIL
-      - CO_TEST_USER_PASSWORD
+      - kind: entry.update
+        universe: "{universe}"
+        path: "{targetEntry}"
+      - kind: entry.create
+        universe: "{universe}"
+        path: "projects/{taskProject}/<next>.md"
+        frontmatter:
+          type: task
+          status: todo
+      - kind: entry.create
+        universe: "{universe}"
+        path: "{profileFolder}falcao.md"
+        frontmatter:
+          type: page
+          stub: true
+        skip_if_exists: true
+
+    auth:
+      required: true
+      scope: "write:universe"
+
+    safety: snapshot-restore
+
     tags:
       - content-crud
       - wikilink
       - follow-up-task
       - profile-stub
-    safety: snapshot-restore
