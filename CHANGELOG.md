@@ -5,6 +5,40 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.14] — 2026-05-15 — Interactions: stub + registry + idempotency
+
+Three improvements on the e2e interactions framework shipped in
+2.7.13:
+
+### Profile stub creation in INTERACTION-01
+
+`artelonga::comunidades/falcao.md` is now created by the interaction
+itself (with `stub: true` in frontmatter) so the wikilink `[[falcao]]`
+in `sobre.md` resolves to a real page instead of 404ing. The follow-
+up task tracks the human work of fleshing it out. New criterion 5
+asserts the stub exists + is flagged as a stub. Existing stub /
+real profile is **not** overwritten — GET-first, only PUT on 404.
+afterEach only deletes the stub if this run created it.
+
+### registry.yaml — machine-readable index
+
+`co-web/e2e/interactions/registry.yaml` lists every interaction with
+metadata (id, title, spec path, universe touched, entries read +
+produced, required env vars, tags, safety mode). Lets co-auto or any
+agent enumerate / filter / dispatch interactions via `yq` without
+parsing TypeScript. Spec files and registry entries must stay in
+sync — adding a new interaction means adding both.
+
+### Idempotent re-run contract
+
+Specs detect the post-state at start. If the WHEN action has already
+happened (Instagram links already gone from `sobre.md`), the test
+skips with an explicit message — never restores garbage in place of
+the canonical baseline. afterEach cleanup is conditional: only
+restores the snapshot if precondition succeeded, only deletes
+entries it actually created. Stuck runs, successful runs, and
+partial runs all converge safely. Documented in README.md.
+
 ## [2.7.13] — 2026-05-15 — E2E interactions framework + first interaction
 
 New `co-web/e2e/interactions/` test layer. Each interaction is a

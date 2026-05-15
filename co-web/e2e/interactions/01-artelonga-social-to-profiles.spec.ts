@@ -31,15 +31,24 @@ import { test, expect, request, APIRequestContext } from "@playwright/test";
  *      `artelonga::projects/AL/<next-id>.md` with frontmatter
  *      `type: task`, `status: todo`, and a title referencing
  *      "criar perfil falcao".
- *   5. Both entries (the edited `sobre.md` and the new task) are
- *      visible via the public entries API.
+ *   5. A profile **stub** exists at
+ *      `artelonga::comunidades/falcao.md` (`type: page`,
+ *      `stub: true` in frontmatter) — the link target now resolves
+ *      to a real entry, while the open task tracks the human work
+ *      of filling it in.
+ *   6. Both `sobre.md`, the new task, and the new stub are visible
+ *      via the public entries API.
  *
  * SAFETY:
- *   - The original `sobre.md` body is snapshotted before mutation
- *     and restored in `afterEach`.
- *   - The new task entry is deleted in `afterEach`.
+ *   - Original `sobre.md` body is snapshotted before mutation and
+ *     restored in `afterEach`.
+ *   - New task entry + falcao stub are deleted in `afterEach`.
  *   - If `CO_TEST_USER_EMAIL` / `CO_TEST_USER_PASSWORD` are not set,
  *     the test is skipped — a CI without secrets should not go red.
+ *   - **Idempotent re-run**: if the precondition is already broken
+ *     (e.g. a previous `afterEach` failed and `sobre.md` still has
+ *     the post-state), the test skips with a clear message instead
+ *     of overwriting state with garbage.
  */
 
 const BASE = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
@@ -105,6 +114,8 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
   let ctx: APIRequestContext;
   let originalBody = "";
   let newTaskPath = "";
+  const FALCAO_PROFILE_PATH = "comunidades/falcao.md";
+  let falcaoStubCreated = false;
 
   test.beforeEach(async () => {
     ctx = await request.newContext({
@@ -115,6 +126,19 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
   });
 
   test.afterEach(async () => {
+    const safeDelete = async (path: string) => {
+      try {
+        await ctx.delete(
+          `/api/v1/universes/artelonga/entries/${path
+            .split("/")
+            .map(encodeURIComponent)
+            .join("/")}`
+        );
+      } catch (_) {
+        /* best-effort cleanup */
+      }
+    };
+
     // Restore original sobre.md body
     if (originalBody) {
       try {
@@ -126,23 +150,15 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
         /* best-effort cleanup */
       }
     }
-    // Delete the new task entry
-    if (newTaskPath) {
-      try {
-        await ctx.delete(
-          `/api/v1/universes/artelonga/entries/${newTaskPath
-            .split("/")
-            .map(encodeURIComponent)
-            .join("/")}`
-        );
-      } catch (_) {
-        /* best-effort cleanup */
-      }
-    }
+    if (newTaskPath) await safeDelete(newTaskPath);
+    // Only delete the falcao stub if WE created it this run — never
+    // wipe a stub a human/agent had legitimately filled out between
+    // the spec creating it and afterEach running.
+    if (falcaoStubCreated) await safeDelete(FALCAO_PROFILE_PATH);
     await ctx.dispose();
   });
 
-  test("edit sobre.md + create falcao profile task; both open", async () => {
+  test("edit sobre.md + create falcao profile task + stub; all open", async () => {
     // GIVEN: snapshot current sobre.md body
     const fetched = await ctx.get(
       "/api/v1/universes/artelonga/entries/sobre.md"
@@ -154,10 +170,23 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
       originalBody.length,
       "precondition: sobre.md has content"
     ).toBeGreaterThan(0);
-    expect(
-      originalBody.includes("https://www.instagram.com/"),
-      "precondition: sobre.md contains at least one Instagram external link"
-    ).toBe(true);
+
+    // Idempotent re-run guard: if the universe is already in the
+    // post-state (no IG links remain), the previous afterEach probably
+    // didn't fully restore. Skip with an explicit message instead of
+    // writing nonsense in a body we don't recognise as the baseline.
+    const hasIgLinks = originalBody.includes("https://www.instagram.com/");
+    if (!hasIgLinks) {
+      // Don't leave originalBody set — we'd "restore" garbage into prod.
+      originalBody = "";
+      test.skip(
+        true,
+        "Interaction state already mutated (no Instagram URLs found in sobre.md). " +
+          "A prior run's afterEach did not restore the baseline. " +
+          "Restore sobre.md manually (or via git history of the universe) before re-running."
+      );
+      return;
+    }
     expect(
       originalBody.includes("[[falcao]]"),
       "precondition: bare [[falcao]] wikilink is present"
@@ -212,6 +241,57 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
     );
     expect(putTask.status(), "PUT new task").toBeLessThan(400);
 
+    // AND: stub the falcao profile so [[falcao]] resolves to a real
+    // page. The task created above tracks the human work of filling
+    // out this stub; the stub itself flags `stub: true` so the
+    // platform UI (or a future agent) can recognise it as
+    // intentionally-incomplete.
+    //
+    // Only create the stub if it doesn't already exist — a real
+    // profile someone wrote earlier must NOT be overwritten by a
+    // test run.
+    const existingStub = await ctx.get(
+      `/api/v1/universes/artelonga/entries/${FALCAO_PROFILE_PATH
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`
+    );
+    if (existingStub.status() === 404) {
+      const stubFrontmatter = {
+        type: "page",
+        slug: "falcao",
+        title: "Falcão",
+        stub: true,
+        tags: ["perfis", "comunidades", "stub:interaction-01"],
+      };
+      const stubBody = [
+        "# Falcão",
+        "",
+        "*Esta página é um stub criado automaticamente pela INTERACTION-01.*",
+        "",
+        "**A completar** — ver task aberta em `projects/AL/" +
+          String(nextId) +
+          ".md`.",
+        "",
+        "Funções conhecidas:",
+        "- skateboard",
+        "- direção de ESG e transparência na ArteLonga",
+        "",
+      ].join("\n");
+      const putStub = await ctx.put(
+        `/api/v1/universes/artelonga/entries/${FALCAO_PROFILE_PATH
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+        {
+          headers: { "content-type": "application/json" },
+          data: { body: stubBody, frontmatter: stubFrontmatter },
+        }
+      );
+      expect(putStub.status(), "PUT falcao stub").toBeLessThan(400);
+      falcaoStubCreated = true;
+    }
+
     // THEN — one assertion per acceptance criterion ----------------
 
     // 1. sobre.md no longer contains Instagram external URLs
@@ -261,7 +341,25 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
       "criterion 4d: title references falcao"
     ).toContain("falcao");
 
-    // 5. Both entries appear in the public entries listing
+    // 5. falcao profile stub exists, flagged as a stub
+    const stubRes = await ctx.get(
+      `/api/v1/universes/artelonga/entries/${FALCAO_PROFILE_PATH
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")}`
+    );
+    expect(
+      stubRes.status(),
+      "criterion 5a: falcao stub GET 200"
+    ).toBe(200);
+    const stubEntry = await stubRes.json();
+    expect(
+      stubEntry.frontmatter?.stub === true ||
+        String(stubEntry.body || "").toLowerCase().includes("stub"),
+      "criterion 5b: stub flagged via frontmatter or body marker"
+    ).toBe(true);
+
+    // 6. All three entries appear in the public entries listing
     const list = await ctx.get(
       `/api/v1/universes/artelonga/entries?limit=500`
     );
@@ -269,7 +367,10 @@ test.describe("INTERACTION-01: ArteLonga social → internal profile wikilinks",
     const paths: string[] = (listJson.entries ?? listJson ?? []).map(
       (e: any) => e.path
     );
-    expect(paths, "criterion 5a: sobre.md listed").toContain("sobre.md");
-    expect(paths, "criterion 5b: task listed").toContain(newTaskPath);
+    expect(paths, "criterion 6a: sobre.md listed").toContain("sobre.md");
+    expect(paths, "criterion 6b: task listed").toContain(newTaskPath);
+    expect(paths, "criterion 6c: falcao stub listed").toContain(
+      FALCAO_PROFILE_PATH
+    );
   });
 });

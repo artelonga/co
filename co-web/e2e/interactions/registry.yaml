@@ -1,0 +1,38 @@
+# E2E Interactions Registry
+#
+# Machine-readable index of interactions defined under e2e/interactions/.
+# Lets co-auto (and any other agent) enumerate, filter, and dispatch them
+# without parsing TypeScript. Keep in sync with the spec files: each
+# interaction must have one entry here AND one `.spec.ts` file under the
+# same id.
+#
+# Schema:
+#   id:          two-digit string matching the spec filename prefix
+#   title:       one-line human label
+#   spec:        relative path under e2e/interactions/
+#   universe:    the universe key the interaction primarily touches
+#   refs:        list of universe::path entries the interaction reads/edits
+#   produces:    list of universe::path entries the interaction creates
+#   requires:    env vars that must be set; missing → test skips
+#   tags:        free-form labels for filtering
+#   safety:      one of: snapshot-restore | dry-run | destructive
+
+interactions:
+  - id: "01"
+    title: "ArteLonga social → internal profile wikilinks"
+    spec: 01-artelonga-social-to-profiles.spec.ts
+    universe: artelonga
+    refs:
+      - artelonga::sobre.md
+    produces:
+      - artelonga::projects/AL/<next>.md          # follow-up task (status: todo)
+      - artelonga::comunidades/falcao.md          # profile stub
+    requires:
+      - CO_TEST_USER_EMAIL
+      - CO_TEST_USER_PASSWORD
+    tags:
+      - content-crud
+      - wikilink
+      - follow-up-task
+      - profile-stub
+    safety: snapshot-restore
