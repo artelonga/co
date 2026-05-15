@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.19] — 2026-05-15 — Template URL on logged-in + template→co hierarchy
+
+### Bug: /template/<entry> redirected logged-in users away
+
+A logged-in user hitting `/template/content/seguranca` (or via the
+pretty-URL redirect from `/seguranca`) got auto-switched to their
+own universe before the entry could open — the boot path's
+"jump to your own universe" logic ignored the URL path.
+
+Fix: detect a requested entry (via `readEntryPathFromUrl` or
+`?page=` query) before the auto-redirect; when present, stay on
+template and open the entry. Anon visitors are unaffected.
+
+### Hierarchy: template is a subuniverse of `co`
+
+Seeded `template.parent_key = 'co'` idempotently (only updates rows
+where it's currently NULL). Records the relationship the user wants
+explicit: `co` is the dev board (parent); `template` is its public-
+facing subuniverse — the surface anon visitors see.
+
+This release records the parent link in the DB; deeper restructure
+(making `co` private, surfacing co's content through template) is
+a follow-up that needs design — currently the two universes have
+independent content trees, so "template = public view of co" needs
+a publication mechanism.
+
 ## [2.7.18] — 2026-05-15 — REPL shell at /repl (Step 1: shell-DSL + save)
 
 New page at **`/repl`**. Single-file HTML + inline JS that runs a

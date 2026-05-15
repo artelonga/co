@@ -38,6 +38,16 @@ impl Storage {
              WHERE key = 'template' AND is_template = 1 AND layout = 'board'",
             [],
         );
+        // Hierarchy: template is the public-facing subuniverse of `co`.
+        // The `co` universe owns the dev board; `template` is its public
+        // window — the surface anon visitors see. Setting parent_key
+        // here makes the relationship explicit + idempotent (only
+        // updates when parent_key is currently NULL).
+        let _ = self.conn.execute(
+            "UPDATE universes SET parent_key = 'co' \
+             WHERE key = 'template' AND parent_key IS NULL",
+            [],
+        );
         // Ensure form config YAML is written for the template.
         if let Some(config) = self.get_universe_form_config("template") {
             let _ = self.write_universo_yaml("template", &config);

@@ -620,6 +620,15 @@ async function init() {
     }
 
     if (state.isTemplate) {
+        // If the URL points at a specific entry within the template
+        // (`/template/content/seguranca`, `?page=seguranca`, etc.), the
+        // visitor came for that entry — keep them on template and open
+        // it. Without this guard, logged-in users get auto-redirected
+        // to their own universe and the targeted entry never opens.
+        const requestedEntry = readEntryPathFromUrl('template');
+        const requestedPage = new URLSearchParams(window.location.search).get('page');
+        const stayOnTemplate = !!(requestedEntry || requestedPage);
+
         const me = await api.me();
         if (me) {
             hideLoginModal();
@@ -628,7 +637,7 @@ async function init() {
             _updateChatButton(me);
             await loadMeUniverses();
             const mine = state.userUniverses.filter(u => !u.is_template);
-            if (mine.length > 0) {
+            if (mine.length > 0 && !stayOnTemplate) {
                 const preferred = (() => { try { return localStorage.getItem('co_preferred_universe'); } catch (_) { return null; } })();
                 const target = (preferred && mine.find(u => u.key === preferred)) ? preferred : mine[0].key;
                 state.currentUniverseSlug = target;
@@ -638,8 +647,10 @@ async function init() {
                 return;
             }
         }
-        showTemplateBanner();
-        setupOnboarding();
+        if (!me) {
+            showTemplateBanner();
+            setupOnboarding();
+        }
         await bootAppForUniverse('template');
         // Resolve URL-path-based entries (`/template/seguranca`) AND
         // query-param fallback (`?page=seguranca`). The Entry resolver
