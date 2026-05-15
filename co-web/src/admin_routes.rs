@@ -85,7 +85,7 @@ pub fn is_admin_email(caller_email: &str, admin_email: &str) -> bool {
 }
 
 /// Reads CO_SEED_ADMIN_EMAIL from env (no caching) and checks the caller.
-fn check_admin_email(caller_email: &str) -> bool {
+pub fn check_admin_email(caller_email: &str) -> bool {
     let admin_email = std::env::var("CO_SEED_ADMIN_EMAIL").unwrap_or_default();
     is_admin_email(caller_email, &admin_email)
 }
@@ -281,7 +281,7 @@ pub fn query_admin_dashboard(conn: &Connection) -> AdminDashboard {
 // JWT extraction helper
 // ---------------------------------------------------------------------------
 
-fn extract_claims(headers: &HeaderMap) -> Result<crate::auth::Claims, StatusCode> {
+pub fn extract_claims(headers: &HeaderMap) -> Result<crate::auth::Claims, StatusCode> {
     let token = headers
         .get(header::AUTHORIZATION)
         .and_then(|v| v.to_str().ok())

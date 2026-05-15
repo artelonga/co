@@ -632,6 +632,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/cache", cache_api)
         // CO-105: admin dashboard JSON endpoint (JWT + email gate, no GitHub auth)
         .nest("/api/v1/admin", admin_dashboard_api)
+        // 2.7.27: per-universe storage dashboard (admin-only).
+        .nest("/api/v1/admin", crate::storage_dashboard::router())
         // CO-179 + CO-180: public analytics (summary, recent, popularity)
         .nest("/api/v1/analytics/public", analytics_public_api)
         // CO-183: public leads intake + admin queue API

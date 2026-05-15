@@ -67,6 +67,7 @@ pub mod search_routes;
 pub mod server;
 pub mod state_routes;
 pub mod storage;
+pub mod storage_dashboard;
 pub mod sync_ws;
 pub mod telemetry;
 pub mod theme_engine;

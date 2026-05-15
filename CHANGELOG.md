@@ -5,6 +5,82 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.27] — 2026-05-15 — Per-universe storage dashboard (admin)
+
+New endpoint `GET /api/v1/admin/storage` returns a snapshot of every
+universe's disk + table footprint. Admin-only (JWT + email match
+against `CO_SEED_ADMIN_EMAIL`). Cached 60s in-memory to avoid
+filesystem hammering on dashboard refresh.
+
+### Response shape
+
+```
+{
+  "generated_at": "2026-05-15T…",
+  "host": { "data_dir": "/data", "data_dir_used_bytes": … },
+  "totals": { "universes": N, "md_bytes": …, "data_db_bytes": … },
+  "universes": [
+    {
+      "key": "artelonga",
+      "owner_id": "…",
+      "is_public": true,
+      "is_template": false,
+      "visibility": "public-subscribable",
+      "content_count": 312,
+      "md_bytes": …,          // sum of *.md files in universes/<key>/
+      "data_db_bytes": …,     // size of universes/<key>/data.db on disk
+      "tables": {
+        "entries":          { "rows": 312 },
+        "entry_events":     { "rows": 487 },   // ← transaction log growth
+        "entry_relations":  { "rows":  89 },
+        "references_meta":  { "rows":  14 }
+      }
+    }
+  ]
+}
+```
+
+### What this surfaces
+
+- **`entry_events` growth** — the append-only log from 2.7.25 now
+  carries every write's full body. A universe edited heavily over a
+  year will have thousands of rows here. The dashboard makes that
+  visible; compaction / Iceberg export becomes the natural follow-up
+  when this row gets uncomfortable.
+- **Stale data.db** — universes nobody's touched in months still
+  pin a per-universe SQLite file. Dashboard tells you which to
+  consider archiving.
+- **Md vs DB ratio** — `data_db_bytes` should be ~2-3× `md_bytes`
+  for a healthy universe (entries + indices). A bigger ratio
+  hints at index bloat (FTS or embeddings).
+
+### Implementation notes
+
+- New module `co-web/src/storage_dashboard.rs` (~250 lines)
+- `walk_bytes` recurses the universe dir summing files matching a
+  predicate (`.md` filter for `md_bytes`, everything for host total)
+- Table row counts use `SELECT COUNT(*)` per universe DB —
+  cheap on the indexed per-universe SQLite
+- Bytes-per-table omitted in v1 — would need the SQLite DBSTAT
+  virtual table (compile flag not on by default for rusqlite-bundled).
+  Row counts already point to hotspots clearly enough.
+- Volume `total_bytes` / `available_bytes` omitted in v1 — would
+  need a `libc::statvfs` binding we don't currently depend on. Add
+  later via `nix::sys::statvfs` if precise volume telemetry needed.
+
+### Trajectory
+
+The dashboard is the visibility layer that lets us decide *when* to
+implement the Kafka/Iceberg export from the transaction-log doc
+(`co::public/transaction-log.md`). Until the dashboard turns red,
+the local log stays the source of truth.
+
+### Tests
+
+`co-web/tests/storage_dashboard_tests.rs` — 2 pass:
+- `storage_dashboard_requires_admin` (no-auth → 401, non-admin → 403)
+- `storage_dashboard_returns_shape` (admin → 200 + expected fields)
+
 ## [2.7.26] — 2026-05-15 — Fix task edit on Conteúdo home view
 
 Bug: clicking a task card in the Tarefas section of the Conteúdo
