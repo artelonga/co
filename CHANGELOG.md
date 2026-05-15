@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.22] — 2026-05-15 — Anon edits on template: honest prompt + login
+
+The inline editor and zoom modal both had an `if (state.isTemplate)`
+short-circuit that showed a fake "Salvo" toast and silently dropped
+the write. Anon visitors who edited the template universe lost their
+changes on refresh without warning — the toast was a lie.
+
+Now: anon save attempts surface an honest message ("Faça login para
+salvar." / "Sign in to save.") with `warning` severity, then open the
+login modal. The editor stays open so the user's text is preserved
+if they choose to sign in; cancelling the login modal returns to the
+edit view unchanged.
+
+- `conteudo.js` `createDetailController.renderEdit` save handler
+- `conteudo.js` `openZoomModal.enterEditMode` save handler
+- `i18n.js` `save_requires_login` key added (pt + en)
+
+Authenticated users on owned universes are unaffected — they fall
+through to the normal PUT path. Authenticated non-owners on
+public universes still get the standard 403 → "Erro ao salvar" toast
+(scenario 3 in the editing matrix; a propose-change flow is the
+next milestone for that case).
+
 ## [2.7.21] — 2026-05-15 — Cache + rate limit for anon public content
 
 `/template` was returning 429 (Too Many Requests) on second SPA load

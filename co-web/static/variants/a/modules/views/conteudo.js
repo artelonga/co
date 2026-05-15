@@ -258,12 +258,21 @@ function createDetailController(container, initialEntry, deps) {
                 ? editorInstance.getContent()
                 : (ta ? ta.value : (current.body || ''));
 
+            // 2.7.22: on the public template universe, anon visitors
+            // can edit locally but can't persist server-side. The old
+            // behavior showed a fake "Salvo" toast and silently
+            // dropped the write — misleading, the edit was lost on
+            // refresh. Now: show an honest message, open the login
+            // modal, and *keep the editor open* so the user's text
+            // isn't gone if they choose to sign in.
             if (isTemplate) {
-                showToast(window.t ? window.t('saved') : 'Salvo', 'success');
-                teardownEditor();
-                unbindEscape();
-                editing = false;
-                renderRead();
+                showToast(
+                    window.t
+                        ? window.t('save_requires_login')
+                        : 'Faça login para salvar.',
+                    'warning'
+                );
+                _showLoginModal();
                 return;
             }
 
@@ -452,8 +461,16 @@ export async function openZoomModal(entry, startInEditMode) {
                 ? _zoomEditorInstance.getContent()
                 : (ta ? ta.value : (fullEntry.body || ''));
 
+            // 2.7.22: anon visitors get an honest prompt instead of a
+            // fake-success toast (see createDetailController.renderEdit).
             if (state.isTemplate) {
-                _showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+                _showToast(
+                    window.t
+                        ? window.t('save_requires_login')
+                        : 'Faça login para salvar.',
+                    'warning'
+                );
+                _showLoginModal();
                 return;
             }
 
