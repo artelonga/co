@@ -596,6 +596,17 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         )
         // CO-161: all universe-content routes under a single visibility + writer gate.
         .nest("/api/v1/universes", universe_content_api)
+        // 2.7.23: inline proposals — authed non-owners can submit a
+        // proposed change to a public universe. Mounted OUTSIDE the
+        // writer gate (the whole point is to bypass it). The handler
+        // enforces its own auth + path/frontmatter constraints.
+        // Visibility is implicit: the universe must exist + be
+        // visible (the handler's `get_universe` check returns 404
+        // otherwise, same shape as a deny).
+        .nest(
+            "/api/v1/universes",
+            crate::proposal_routes::inline_router(),
+        )
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
         // Accepts JWT or long-lived API token via require_auth_with_token.
         .nest(

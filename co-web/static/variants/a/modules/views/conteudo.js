@@ -278,7 +278,7 @@ function createDetailController(container, initialEntry, deps) {
 
             if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
             try {
-                const result = await window.fetch(
+                const putRes = await window.fetch(
                     `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${(current.path || '').split('/').map(encodeURIComponent).join('/')}`,
                     {
                         method: 'PUT',
@@ -286,9 +286,8 @@ function createDetailController(container, initialEntry, deps) {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ body: newBody }),
                     }
-                ).then(r => r.ok ? r.json() : null);
-
-                if (result) {
+                );
+                if (putRes.ok) {
                     current = { ...current, body: newBody };
                     try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
                     // Fire-and-forget delete of the server-side draft.
@@ -304,10 +303,51 @@ function createDetailController(container, initialEntry, deps) {
                     unbindEscape();
                     editing = false;
                     renderRead();
-                } else {
-                    showToast('Erro ao salvar', 'error');
-                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
+                    return;
                 }
+
+                // 2.7.23: 403 on a write means the caller isn't allowed
+                // to write to this universe — but they're authed, so
+                // offer to submit the body as an inline proposal that
+                // lands in the target universe's _proposals/ inbox.
+                if (putRes.status === 403) {
+                    const accept = window.confirm(
+                        'Você não tem permissão para escrever em "' + universeSlug +
+                        '". Enviar essa mudança como proposta para revisão?'
+                    );
+                    if (accept) {
+                        const propRes = await window.fetch(
+                            `/api/v1/universes/${encodeURIComponent(universeSlug)}/proposals/inline`,
+                            {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    target_path: current.path || '',
+                                    body: newBody,
+                                }),
+                            }
+                        );
+                        if (propRes.ok) {
+                            const payload = await propRes.json().catch(() => ({}));
+                            showToast(
+                                'Proposta enviada (' + (payload.proposal_path || 'ok') + ')',
+                                'success'
+                            );
+                            teardownEditor();
+                            unbindEscape();
+                            editing = false;
+                            renderRead();
+                            return;
+                        }
+                        showToast('Falha ao enviar proposta', 'error');
+                    }
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
+                    return;
+                }
+
+                showToast('Erro ao salvar', 'error');
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
             } catch (_) {
                 showToast('Erro ao salvar', 'error');
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
@@ -774,13 +814,16 @@ export async function renderConteudo() {
         api.getUniverseEntries(slug),
     ]);
 
-    // Hide draft scratch files (`_drafts/<entry-path>`) from every
-    // section — they're a write-ahead-log for the editor, not user
-    // content. See createDetailController.renderEdit for the writer.
-    const isDraftPath = (p) => (p || '').startsWith('_drafts/');
+    // Hide editor scratch files from every section:
+    //   `_drafts/<entry-path>`     — write-ahead-log (createDetailController.renderEdit)
+    //   `_proposals/<id>.md`       — inline-proposal queue (proposal_routes.rs); these
+    //                                show up in a dedicated Inbox view, not the
+    //                                regular content listings.
+    const isHiddenPath = (p) =>
+        (p || '').startsWith('_drafts/') || (p || '').startsWith('_proposals/');
     for (const arr of [taskEntries, eventEntries, pageEntries, clipEntries, allEntries]) {
         for (let i = arr.length - 1; i >= 0; i--) {
-            if (isDraftPath(arr[i].path)) arr.splice(i, 1);
+            if (isHiddenPath(arr[i].path)) arr.splice(i, 1);
         }
     }
 

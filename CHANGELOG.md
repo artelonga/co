@@ -5,6 +5,73 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.23] — 2026-05-15 — Inline proposals for scenario 3 (non-owner edits)
+
+The third editing scenario — logged-in user edits a public universe
+they don't own — used to dead-end at 403 → "Erro ao salvar". Now
+the editor falls through to an inline-proposal flow.
+
+### `POST /api/v1/universes/{slug}/proposals/inline`
+
+New lightweight endpoint, mounted **outside** the writer gate so
+authenticated non-owners can submit a proposed change. The handler
+enforces its own rules:
+
+- Auth required (401 otherwise)
+- `target_path` must not contain `..`
+- Body capped at 1 MB, note at 2 000 chars
+- Path forced under `_proposals/<timestamp>-<author>-<nanoid>.md`
+- Frontmatter is server-controlled — caller can't smuggle `type`,
+  `author`, or `status`
+
+Request:
+```json
+{ "target_path": "public/seguranca.md", "body": "...", "note": "tiny tweak" }
+```
+
+Response:
+```json
+{
+  "proposal_path": "_proposals/2026-05-15T123456Z-uid-abcd1234.md",
+  "target_universe": "<slug>",
+  "target_path": "public/seguranca.md",
+  "author": "<user_id>",
+  "status": "open",
+  "created_at": "..."
+}
+```
+
+### Editor UX
+
+In `createDetailController.renderEdit` save handler:
+- 2xx → "Salvo" (unchanged)
+- 403 → confirm dialog "Enviar como proposta?" → POST to
+  `/proposals/inline` → "Proposta enviada (path)" on success
+- Other failure → "Erro ao salvar" (unchanged)
+
+The dialog is opt-in per save click — no silent fallback. The
+editor stays open until the user confirms or cancels.
+
+### Visibility
+
+- `_proposals/*` paths filtered from page/task/event/clip listings
+  in `renderConteudo` (same shape as `_drafts/` filter)
+- Anon visitors don't see `_proposals/` (the public/ convention
+  only exposes `public/*`; `_proposals/` is invisible by
+  construction in universes adopting the convention)
+- Owners can browse `<universe>/_proposals/` to review inbound
+  proposals; a dedicated inbox view is a follow-up
+
+### Tests
+
+`co-web/tests/inline_proposal_tests.rs`:
+- lands in target's `_proposals/` folder with correct frontmatter
+- requires auth (401)
+- rejects `..` in target_path (400)
+- server overrides smuggled frontmatter (author/status forced)
+
+All 4 pass.
+
 ## [2.7.22] — 2026-05-15 — Anon edits on template: honest prompt + login
 
 The inline editor and zoom modal both had an `if (state.isTemplate)`

@@ -100,10 +100,145 @@ pub struct MergeRequest {
     pub proposal: String,
 }
 
+/// State-snapshot proposals + merges. Mounted inside the
+/// `universe_content_api` group, so it inherits the writer gate
+/// (caller must own or be a member of the target).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/{slug}/proposals", post(create_proposal))
         .route("/{slug}/merges", post(merge_proposal))
+}
+
+/// Lightweight inline proposals (2.7.23). Mounted **outside** the
+/// writer gate so authenticated non-owners can submit a proposed
+/// change. The handler enforces its own constraints:
+///   - auth required
+///   - path forced under `_proposals/`
+///   - frontmatter server-controlled
+pub fn inline_router() -> Router<AppState> {
+    Router::new().route(
+        "/{slug}/proposals/inline",
+        post(create_inline_proposal),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// POST /:slug/proposals/inline — lightweight inline proposal (2.7.23)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct CreateInlineProposalRequest {
+    /// Path of the target entry the proposal is for
+    /// (e.g. `public/seguranca.md`).
+    pub target_path: String,
+    /// Proposed body — the markdown the author wants to land at
+    /// `target_path` after review.
+    pub body: String,
+    /// Optional short note from the author.
+    #[serde(default)]
+    pub note: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InlineProposalResponse {
+    pub proposal_path: String,
+    pub target_universe: String,
+    pub target_path: String,
+    pub author: String,
+    pub status: String,
+    pub created_at: String,
+}
+
+const MAX_INLINE_PROPOSAL_BODY: usize = 1_000_000; // 1 MB
+const MAX_INLINE_NOTE_LEN: usize = 2_000;
+
+/// Anyone authenticated may write an inline proposal **into** the
+/// target universe, even when they don't own it. The path is forced
+/// under `_proposals/`; frontmatter is server-controlled (the caller
+/// can't smuggle a different `type`, `author`, or `status`).
+///
+/// Spam controls: the rate limiter already caps anon/authed writes
+/// per minute, and `_proposals/` paths are filtered from public
+/// listings (see entry_routes::filter_public_for_anon → only
+/// `public/*` is visible to anon on universes adopting the
+/// public/ convention; `_proposals/` is invisible by construction).
+pub async fn create_inline_proposal(
+    State(state): State<AppState>,
+    Path(target_slug): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<CreateInlineProposalRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let author = resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Unauthorized("Authentication required".into()))?;
+
+    if req.target_path.trim().is_empty() {
+        return Err(AppError::BadRequest("target_path is required".into()));
+    }
+    if req.target_path.contains("..") {
+        return Err(AppError::BadRequest(
+            "target_path must not contain ..".into(),
+        ));
+    }
+    if req.body.len() > MAX_INLINE_PROPOSAL_BODY {
+        return Err(AppError::BadRequest("body too large (>1MB)".into()));
+    }
+    if req.note.len() > MAX_INLINE_NOTE_LEN {
+        return Err(AppError::BadRequest("note too long (>2000 chars)".into()));
+    }
+
+    // Verify target universe exists (anyone can see public-subscribable
+    // universes; the visibility gate is enforced at the route layer).
+    {
+        let storage = state.storage.lock();
+        if storage.get_universe(&target_slug).is_none() {
+            return Err(AppError::NotFound(format!(
+                "Universe '{target_slug}' not found"
+            )));
+        }
+    }
+
+    let now = chrono::Utc::now();
+    let now_iso = now.to_rfc3339();
+    let ts = now.format("%Y-%m-%dT%H%M%SZ").to_string();
+    let suffix = nanoid::nanoid!(8);
+    let safe_author: String = author
+        .chars()
+        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .take(40)
+        .collect();
+    let proposal_path = format!("_proposals/{ts}-{safe_author}-{suffix}.md");
+
+    // Server-controlled frontmatter — the caller cannot set `type`,
+    // `author`, or `status` and have them stick.
+    let mut fm = serde_json::json!({
+        "type": "proposal",
+        "kind": "inline",
+        "target_universe": target_slug.clone(),
+        "target_path": req.target_path,
+        "author": author,
+        "status": "open",
+        "created_at": now_iso.clone(),
+    });
+    if !req.note.is_empty() {
+        fm["note"] = serde_json::Value::String(req.note);
+    }
+
+    crate::vault_routes::write_vault_entry(
+        &state,
+        &target_slug,
+        &proposal_path,
+        fm,
+        &req.body,
+    )?;
+
+    Ok(Json(InlineProposalResponse {
+        proposal_path,
+        target_universe: target_slug,
+        target_path: req.target_path,
+        author,
+        status: "open".to_string(),
+        created_at: now_iso,
+    }))
 }
 
 // ---------------------------------------------------------------------------
