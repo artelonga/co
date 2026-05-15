@@ -607,6 +607,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/api/v1/universes",
             crate::proposal_routes::inline_router(),
         )
+        // 2.7.24: inbox — list inbound proposals across owned universes.
+        .nest("/api/v1/me", crate::proposal_routes::inbox_router())
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
         // Accepts JWT or long-lived API token via require_auth_with_token.
         .nest(

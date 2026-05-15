@@ -116,9 +116,28 @@ pub fn router() -> Router<AppState> {
 ///   - path forced under `_proposals/`
 ///   - frontmatter server-controlled
 pub fn inline_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/{slug}/proposals/inline",
+            post(create_inline_proposal),
+        )
+        // 2.7.24: decision endpoint. Only the target universe's
+        // owner (or admin) can decide. Action = merge | reject.
+        // The proposal path travels in the request body so we don't
+        // have to URL-encode `_proposals/<filename>` into the path.
+        .route(
+            "/{slug}/proposals/decide",
+            post(decide_inline_proposal),
+        )
+}
+
+/// Lists open inline proposals across every universe the caller owns.
+/// Mounted on its own (no slug in the URL) so the user can see all
+/// inbound proposals in one place.
+pub fn inbox_router() -> Router<AppState> {
     Router::new().route(
-        "/{slug}/proposals/inline",
-        post(create_inline_proposal),
+        "/inbound-proposals",
+        axum::routing::get(list_inbound_proposals),
     )
 }
 
@@ -230,6 +249,38 @@ pub async fn create_inline_proposal(
         fm,
         &req.body,
     )?;
+
+    // 2.7.24: notify the target universe's owner. The notification
+    // routes through the same machinery as invitations + chat: it
+    // becomes a notification row, surfaces in the bell + /notifications
+    // page, and is delivered by the email worker if preferences allow.
+    let target_universe_for_notif = target_slug.clone();
+    let proposal_path_for_notif = proposal_path.clone();
+    let target_path_for_notif = req.target_path.clone();
+    let author_for_notif = author.clone();
+    {
+        let storage = state.storage.lock();
+        if let Some(universe) = storage.get_universe(&target_universe_for_notif) {
+            // Skip if the proposer is also the owner — they wouldn't
+            // need a notification about their own draft.
+            if universe.owner_id != author_for_notif && universe.owner_id != "system" {
+                let _ = storage.create_notification(
+                    &universe.owner_id,
+                    "universe.proposal",
+                    Some(&target_universe_for_notif),
+                    None,
+                    &author_for_notif,
+                    &proposal_path_for_notif,
+                    "notif.universe.proposal",
+                    serde_json::json!({
+                        "author": author_for_notif,
+                        "universe": target_universe_for_notif,
+                        "target_path": target_path_for_notif,
+                    }),
+                );
+            }
+        }
+    }
 
     Ok(Json(InlineProposalResponse {
         proposal_path,
@@ -640,6 +691,285 @@ pub async fn merge_proposal(
             merged_at: now_iso,
         }),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// POST /:slug/proposals/decide — owner accepts or rejects an inline proposal
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct DecideProposalRequest {
+    /// Path of the proposal entry, e.g. `_proposals/2026-05-15T...md`.
+    pub proposal_path: String,
+    /// `"merge"` writes the proposed body to `target_path` and marks
+    /// the proposal `status: merged`. `"reject"` only flips the status.
+    pub action: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DecideProposalResponse {
+    pub proposal_path: String,
+    pub action: String,
+    pub status: String,
+    pub target_path: Option<String>,
+    pub merged_at: Option<String>,
+}
+
+pub async fn decide_inline_proposal(
+    State(state): State<AppState>,
+    Path(target_slug): Path<String>,
+    headers: HeaderMap,
+    Json(req): Json<DecideProposalRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let caller = resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Unauthorized("Authentication required".into()))?;
+
+    let action = req.action.as_str();
+    if !matches!(action, "merge" | "reject") {
+        return Err(AppError::BadRequest(
+            "action must be 'merge' or 'reject'".into(),
+        ));
+    }
+    if !req.proposal_path.starts_with("_proposals/") {
+        return Err(AppError::BadRequest(
+            "proposal_path must start with '_proposals/'".into(),
+        ));
+    }
+    if req.proposal_path.contains("..") {
+        return Err(AppError::BadRequest(
+            "proposal_path must not contain ..".into(),
+        ));
+    }
+
+    // Authorization: only the target universe's owner may decide.
+    {
+        let storage = state.storage.lock();
+        let universe = storage.get_universe(&target_slug).ok_or_else(|| {
+            AppError::NotFound(format!("Universe '{target_slug}' not found"))
+        })?;
+        if universe.owner_id != caller {
+            return Err(AppError::Forbidden(
+                "Only the universe owner may decide on proposals".into(),
+            ));
+        }
+    }
+
+    // Load the proposal entry (its frontmatter carries target_path + author).
+    let proposal_entry = {
+        let uc = {
+            let storage = state.storage.lock();
+            storage.universe_conn(&target_slug)
+        };
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        crate::entry_index::EntryIndex::new(&uc_guard)
+            .get(&target_slug, &req.proposal_path)
+            .map_err(|e| AppError::Internal(format!("load proposal: {e}")))?
+            .ok_or_else(|| {
+                AppError::NotFound(format!("Proposal '{}' not found", req.proposal_path))
+            })?
+    };
+
+    let fm = &proposal_entry.frontmatter;
+    if fm.get("type").and_then(|v| v.as_str()) != Some("proposal") {
+        return Err(AppError::BadRequest(
+            "Target entry is not a proposal".into(),
+        ));
+    }
+    if fm.get("status").and_then(|v| v.as_str()) != Some("open") {
+        return Err(AppError::BadRequest(
+            "Proposal is already decided".into(),
+        ));
+    }
+    let target_path = fm
+        .get("target_path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::Internal("proposal missing target_path".into()))?
+        .to_string();
+    let author = fm
+        .get("author")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let now = chrono::Utc::now();
+    let now_iso = now.to_rfc3339();
+    let (new_status, merged_at) = if action == "merge" {
+        ("merged".to_string(), Some(now_iso.clone()))
+    } else {
+        ("rejected".to_string(), None)
+    };
+
+    // 1. If merging, write the proposal body to target_path. This is the
+    //    actual content change.
+    if action == "merge" {
+        // Preserve the existing target entry's frontmatter if any —
+        // we only want the body to land. If the target doesn't exist
+        // yet (proposed creation), use a minimal page frontmatter.
+        let target_fm = {
+            let uc = {
+                let storage = state.storage.lock();
+                storage.universe_conn(&target_slug)
+            };
+            let uc_guard = uc
+                .lock()
+                .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+            let index = crate::entry_index::EntryIndex::new(&uc_guard);
+            index
+                .get(&target_slug, &target_path)
+                .map_err(|e| AppError::Internal(format!("load target: {e}")))?
+                .map(|e| e.frontmatter)
+                .unwrap_or_else(|| serde_json::json!({"type": "page"}))
+        };
+        crate::vault_routes::write_vault_entry(
+            &state,
+            &target_slug,
+            &target_path,
+            target_fm,
+            &proposal_entry.body,
+        )?;
+    }
+
+    // 2. Flip the proposal's frontmatter status (preserve body for audit).
+    let mut updated_fm = proposal_entry.frontmatter.clone();
+    updated_fm["status"] = serde_json::Value::String(new_status.clone());
+    updated_fm["decided_by"] = serde_json::Value::String(caller.clone());
+    updated_fm["decided_at"] = serde_json::Value::String(now_iso.clone());
+    crate::vault_routes::write_vault_entry(
+        &state,
+        &target_slug,
+        &req.proposal_path,
+        updated_fm,
+        &proposal_entry.body,
+    )?;
+
+    // 3. Notify the proposer (if they're a registered user, not system).
+    if let Some(author_uid) = author {
+        if author_uid != "system" && author_uid != caller {
+            let storage = state.storage.lock();
+            let summary_key = if action == "merge" {
+                "notif.universe.proposal.merged"
+            } else {
+                "notif.universe.proposal.rejected"
+            };
+            let _ = storage.create_notification(
+                &author_uid,
+                "universe.proposal.decided",
+                Some(&target_slug),
+                None,
+                &caller,
+                &req.proposal_path,
+                summary_key,
+                serde_json::json!({
+                    "universe": target_slug,
+                    "target_path": target_path,
+                    "action": action,
+                }),
+            );
+        }
+    }
+
+    Ok(Json(DecideProposalResponse {
+        proposal_path: req.proposal_path,
+        action: action.to_string(),
+        status: new_status,
+        target_path: Some(target_path),
+        merged_at,
+    }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /me/inbound-proposals — list open proposals across user's owned universes
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+pub struct InboundProposalSummary {
+    pub universe: String,
+    pub proposal_path: String,
+    pub target_path: String,
+    pub author: String,
+    pub status: String,
+    pub created_at: String,
+    pub note: Option<String>,
+}
+
+pub async fn list_inbound_proposals(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let caller = resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Unauthorized("Authentication required".into()))?;
+
+    // Owned universes.
+    let owned: Vec<String> = {
+        let storage = state.storage.lock();
+        let mut stmt = storage
+            .conn()
+            .prepare("SELECT key FROM universes WHERE owner_id = ?1")
+            .map_err(|e| AppError::Internal(format!("list owned: {e}")))?;
+        let rows = stmt
+            .query_map([&caller], |r| r.get::<_, String>(0))
+            .map_err(|e| AppError::Internal(format!("query owned: {e}")))?;
+        rows.filter_map(|r| r.ok()).collect()
+    };
+
+    let mut out: Vec<InboundProposalSummary> = Vec::new();
+    for universe_key in owned {
+        let uc = {
+            let storage = state.storage.lock();
+            storage.universe_conn(&universe_key)
+        };
+        let uc_guard = match uc.lock() {
+            Ok(g) => g,
+            Err(_) => continue,
+        };
+        let entries = crate::entry_index::EntryIndex::new(&uc_guard)
+            .query_with_limit(
+                &universe_key,
+                "proposal",
+                &serde_json::json!({"status": "open"}),
+                Some(500),
+            )
+            .unwrap_or_default();
+        for e in entries {
+            if !e.path.starts_with("_proposals/") {
+                continue;
+            }
+            let fm = &e.frontmatter;
+            out.push(InboundProposalSummary {
+                universe: universe_key.clone(),
+                proposal_path: e.path.clone(),
+                target_path: fm
+                    .get("target_path")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                author: fm
+                    .get("author")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                status: fm
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("open")
+                    .to_string(),
+                created_at: fm
+                    .get("created_at")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string(),
+                note: fm
+                    .get("note")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string()),
+            });
+        }
+    }
+
+    // Newest first.
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    Ok(Json(serde_json::json!({"proposals": out, "total": out.len()})))
 }
 
 // ---------------------------------------------------------------------------

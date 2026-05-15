@@ -338,6 +338,9 @@
             'notif.chat.message': 'Nova mensagem em {universe}',
             'notif.chat.dm': '{name} te enviou uma mensagem',
             'notif.universe.invitation': '{name} te convidou para {universe}',
+            'notif.universe.proposal': '{author} propôs uma mudança em {target_path} no universo {universe}',
+            'notif.universe.proposal.merged': 'Sua proposta em {universe}/{target_path} foi aceita',
+            'notif.universe.proposal.rejected': 'Sua proposta em {universe}/{target_path} foi rejeitada',
             'notif.chat.mention': '{name} mencionou você em {room}',
             // CO-209: Conversas unified surface
             'conversas.title': 'Conversas',
@@ -673,6 +676,9 @@
             'notif.chat.message': 'New message in {universe}',
             'notif.chat.dm': '{name} sent you a message',
             'notif.universe.invitation': '{name} invited you to {universe}',
+            'notif.universe.proposal': '{author} proposed a change to {target_path} in universe {universe}',
+            'notif.universe.proposal.merged': 'Your proposal at {universe}/{target_path} was accepted',
+            'notif.universe.proposal.rejected': 'Your proposal at {universe}/{target_path} was rejected',
             'notif.chat.mention': '{name} mentioned you in {room}',
             // CO-209: Conversas unified surface
             'conversas.title': 'Conversations',

@@ -200,6 +200,238 @@ async fn inline_proposal_rejects_traversal_in_target_path() {
     assert_eq!(res.status(), StatusCode::BAD_REQUEST);
 }
 
+/// Helper: create a user + a universe they own. Required because
+/// `user_notifications` has a FK on `users(id)` — notifications about
+/// the owner silently fail if the user row is missing.
+fn seed_owned_universe(
+    dir: &std::path::Path,
+    owner_id: &str,
+    slug: &str,
+) {
+    let storage = Storage::new(dir);
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO users (id, email, display_name, created_at) \
+             VALUES (?1, ?2, ?3, '2026-01-01')",
+            rusqlite::params![
+                owner_id,
+                format!("{owner_id}@test.local"),
+                format!("Test {owner_id}")
+            ],
+        )
+        .unwrap();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, description, owner_id, created_at, is_public, visibility) \
+             VALUES (?1, ?2, 'owned by test', ?3, '2026-01-01', 1, 'public-subscribable')",
+            rusqlite::params![slug, format!("Owned-{slug}"), owner_id],
+        )
+        .unwrap();
+}
+
+#[tokio::test]
+async fn inline_proposal_notifies_owner() {
+    // Create a universe owned by another user; an authed third party
+    // submits an inline proposal; the owner gets a notification.
+    let dir = tempdir().unwrap();
+    seed_owned_universe(dir.path(), "owner-uid", "owned-universe");
+    let app = build_test_router(dir.path());
+
+    // Test user submits a proposal into "owned-universe".
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/v1/universes/owned-universe/proposals/inline")
+        .header(header::AUTHORIZATION, test_bearer())
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({
+                "target_path": "x.md",
+                "body": "proposed body"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+    let res = app.clone().oneshot(req).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+
+    // Look up the owner's notifications via storage directly (the
+    // notifications API endpoint requires its own auth setup; storage
+    // is sufficient to confirm the row landed).
+    let storage = Storage::new(dir.path());
+    let (notifs, _) = storage.list_my_notifications("owner-uid", None, 10);
+    assert!(
+        notifs.iter().any(|n| n.event_type == "universe.proposal"
+            && n.context.universe_key.as_deref() == Some("owned-universe")),
+        "owner should have received a universe.proposal notification"
+    );
+}
+
+#[tokio::test]
+async fn decide_merge_writes_target_and_flips_status() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+    seed_owned_universe(dir.path(), "test-user", "my-universe");
+
+    // Create a proposal (test-user is also the owner — they decide on their own).
+    let create_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/my-universe/proposals/inline")
+                .header(header::AUTHORIZATION, test_bearer())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"target_path": "merged.md", "body": "the merged body"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let payload = body_to_json(create_res.into_body()).await;
+    let proposal_path = payload["proposal_path"].as_str().unwrap().to_string();
+
+    // Decide: merge.
+    let decide_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/my-universe/proposals/decide")
+                .header(header::AUTHORIZATION, test_bearer())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"proposal_path": proposal_path, "action": "merge"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let decide_status = decide_res.status();
+    let decide_body = body_to_json(decide_res.into_body()).await;
+    assert_eq!(
+        decide_status,
+        StatusCode::OK,
+        "merge should succeed; body: {decide_body}"
+    );
+    assert_eq!(decide_body["status"], "merged");
+
+    // Target entry should now have the merged body.
+    let fetch_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/my-universe/entries/merged.md")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(fetch_res.status(), StatusCode::OK);
+    let entry = body_to_json(fetch_res.into_body()).await;
+    assert_eq!(entry["body"], "the merged body");
+}
+
+#[tokio::test]
+async fn decide_requires_universe_owner() {
+    let dir = tempdir().unwrap();
+    // Universe owned by someone other than test-user.
+    seed_owned_universe(dir.path(), "other-owner", "other-universe");
+    let app = build_test_router(dir.path());
+
+    // test-user proposes (allowed).
+    let create_res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/other-universe/proposals/inline")
+                .header(header::AUTHORIZATION, test_bearer())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"target_path": "x.md", "body": "x"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_res.status(), StatusCode::OK);
+    let proposal_path = body_to_json(create_res.into_body()).await["proposal_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // test-user tries to decide (should fail — not the owner).
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/other-universe/proposals/decide")
+                .header(header::AUTHORIZATION, test_bearer())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"proposal_path": proposal_path, "action": "merge"}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn inbox_lists_proposals_for_owned_universes_only() {
+    let dir = tempdir().unwrap();
+    seed_owned_universe(dir.path(), "test-user", "mine");
+    seed_owned_universe(dir.path(), "other-owner", "theirs");
+    let app = build_test_router(dir.path());
+
+    // Submit one proposal to each universe.
+    for slug in ["mine", "theirs"] {
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/universes/{slug}/proposals/inline"))
+                    .header(header::AUTHORIZATION, test_bearer())
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({"target_path": format!("for-{slug}.md"), "body": "x"}).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+    }
+
+    // Inbox for test-user: only "mine" proposals show up.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me/inbound-proposals")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_to_json(res.into_body()).await;
+    let proposals = body["proposals"].as_array().unwrap();
+    assert_eq!(
+        proposals.len(),
+        1,
+        "inbox should contain only owned-universe proposals; got: {body}"
+    );
+    assert_eq!(proposals[0]["universe"], "mine");
+}
+
 #[tokio::test]
 async fn inline_proposal_server_overrides_smuggled_frontmatter() {
     // The caller can only set body, target_path, and (optional) note.

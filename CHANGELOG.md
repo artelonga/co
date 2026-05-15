@@ -5,6 +5,80 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.24] — 2026-05-15 — Inline proposals: notify + decide + inbox
+
+Three follow-ups on top of the inline-proposal endpoint shipped in
+2.7.23. Editing flow now closes the loop:
+
+### Notification on proposal create
+
+`create_inline_proposal` now fires a `universe.proposal`
+notification to the target universe's owner (unless the proposer
+*is* the owner, or owner is `system`). Routes through the existing
+notification machinery — surfaces in the bell, the
+`/notifications` page, and the email worker per the user's
+preferences.
+
+i18n keys added:
+- `notif.universe.proposal` — "{author} propôs uma mudança em
+  {target_path} no universo {universe}"
+- `notif.universe.proposal.merged`
+- `notif.universe.proposal.rejected`
+
+### `POST /api/v1/universes/{slug}/proposals/decide`
+
+New endpoint. Only the target universe's owner may call it (403
+otherwise). Body: `{ proposal_path, action: "merge" | "reject" }`.
+
+- **merge**: writes the proposal body to the entry at
+  `target_path` (preserving the target's existing frontmatter, or
+  creating with `{type:"page"}` if absent), then flips proposal
+  frontmatter to `status:"merged"`, `decided_by`, `decided_at`.
+- **reject**: only flips proposal status to `"rejected"` +
+  `decided_by` + `decided_at`. No content change.
+
+Both fire a `universe.proposal.decided` notification to the
+original proposer.
+
+### `GET /api/v1/me/inbound-proposals`
+
+New endpoint mounted at `/api/v1/me/inbound-proposals`. Walks every
+universe owned by the caller and returns open inline proposals,
+sorted newest first. Response shape:
+
+```json
+{
+  "proposals": [
+    {
+      "universe": "...",
+      "proposal_path": "_proposals/...",
+      "target_path": "...",
+      "author": "...",
+      "status": "open",
+      "created_at": "...",
+      "note": null
+    }
+  ],
+  "total": N
+}
+```
+
+Owners can poll this to surface a dedicated Inbox view; for now
+proposals are also visible via `<universe>/_proposals/` and via
+the existing notifications page.
+
+### Tests
+
+`co-web/tests/inline_proposal_tests.rs` extended to 8 tests:
+- creates `users` row alongside test universes (FK on
+  `user_notifications.user_id` was silently swallowing notifs)
+- `inline_proposal_notifies_owner`
+- `decide_merge_writes_target_and_flips_status`
+- `decide_requires_universe_owner` (403 for non-owner)
+- `inbox_lists_proposals_for_owned_universes_only`
+
+All 8 pass.
+
 ## [2.7.23] — 2026-05-15 — Inline proposals for scenario 3 (non-owner edits)
 
 The third editing scenario — logged-in user edits a public universe
