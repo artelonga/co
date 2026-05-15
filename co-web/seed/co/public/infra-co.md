@@ -17,9 +17,9 @@ type: page
 
 Repositório: `/Users/artelonga/projects/co` · Stack: Rust + Axum + SQLite (LiteFS) · CLI + servidor web.
 
-> CO é a plataforma central — autenticação, telemetria, universos editáveis, chat. Modelo de ameaças e arquitetura completa em [Segurança](/co/template?page=seguranca). Este documento descreve só as **tasks** que materializam CO em produção.
+> CO é a plataforma central — autenticação, telemetria, universos editáveis, chat. Modelo de ameaças e arquitetura completa em [Segurança](/seguranca). Este documento descreve só as **tasks** que materializam CO em produção.
 
-Voltar ao [Catálogo](/co/template?page=infra).
+Voltar ao [Catálogo](/infra).
 
 ---
 
@@ -59,7 +59,7 @@ Voltar ao [Catálogo](/co/template?page=infra).
   - **Resend** (`RESEND_API_KEY`) — email transacional (`senhas@`, `notificacoes@`).
   - **Google OAuth** (`GOOGLE_CLIENT_ID/SECRET`) — federated login.
   - **MaxMind** geoipupdate (`MAXMIND_LICENSE_KEY`) — atualização semanal do `.mmdb`.
-  - **Web Push** providers (FCM, APNS via VAPID) — `VAPID_*` keys (ver [VAPID](/co/template?page=seguranca-vapid)).
+  - **Web Push** providers (FCM, APNS via VAPID) — `VAPID_*` keys (ver [VAPID](/seguranca-vapid)).
   - **Evolution API** (opcional, WhatsApp) — `EVOLUTION_API_KEY` se configurado.
 
 **Secrets em uso** (digest only, ver `flyctl secrets list -a co-artelonga`):
@@ -76,7 +76,7 @@ Voltar ao [Catálogo](/co/template?page=infra).
 
 **Comms específico de UAT**
 
-- Recebe sync push de prod via secrets `UAT_MIRROR_PROD`, `UAT_PROD_TOKEN`, `UAT_PROD_URL`. **Token estático** — sem rotação. Risk: lacuna conhecida em [Segurança](/co/template?page=seguranca).
+- Recebe sync push de prod via secrets `UAT_MIRROR_PROD`, `UAT_PROD_TOKEN`, `UAT_PROD_URL`. **Token estático** — sem rotação. Risk: lacuna conhecida em [Segurança](/seguranca).
 - Não tem secrets de provedores externos (Resend, Google, MaxMind) — UAT roda em modo "isolado": emails são logados, não enviados; OAuth desabilitado.
 
 **Custo:** ~$2/mês compute + $0,15 volume = **~$2,15/mês**. Sem auto-stop → realizado ≈ upper-bound.
@@ -187,4 +187,4 @@ CO **não chama** nenhuma outra task interna em runtime hoje. As deps planejadas
 
 ---
 
-Voltar ao [Catálogo](/co/template?page=infra) · [Segurança](/co/template?page=seguranca) · [Dependências](/co/template?page=seguranca-dependencias)
+Voltar ao [Catálogo](/infra) · [Segurança](/seguranca) · [Dependências](/seguranca-dependencias)

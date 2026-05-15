@@ -283,6 +283,9 @@ impl Storage {
 
         for (path, md) in [
             ("index.md", SEED_TEMPLATE_INDEX_MD),
+            // Welcome / onboarding pages stay in template (the anon
+            // landing universe). The transparency cluster moved to
+            // `co::public/*` in 2.7.20 — see `reseed_co_public_pages`.
             ("content/sobre.md", SEED_SOBRE_MD),
             ("content/termos.md", SEED_TERMOS_MD),
             ("content/privacidade.md", SEED_PRIVACIDADE_MD),
@@ -290,23 +293,6 @@ impl Storage {
             ("content/linhas-do-tempo.md", SEED_LINHAS_DO_TEMPO_MD),
             ("content/co-plataforma.md", SEED_CO_PLATAFORMA_MD),
             ("content/guia.md", SEED_GUIA_MD),
-            // 2026-05-13: transparency pages anchored in the template
-            // so anon users see the security model + dependencies +
-            // license + renderer options as readable content.
-            ("content/seguranca.md", SEED_SEGURANCA_MD),
-            ("content/seguranca-dependencias.md", SEED_SEGURANCA_DEPS_MD),
-            ("content/seguranca-cenarios.md", SEED_SEGURANCA_CENARIOS_MD),
-            ("content/seguranca-vapid.md", SEED_SEGURANCA_VAPID_MD),
-            ("content/licensa.md", SEED_LICENSA_MD),
-            ("content/renderers.md", SEED_RENDERERS_MD),
-            // 2026-05-13: infra catalog (compute portfolio) mirrored
-            // from /projects/infra/ so the template is the canonical
-            // public-readable description of how ArteLonga deploys.
-            ("content/infra.md", SEED_INFRA_MD),
-            ("content/infra-co.md", SEED_INFRA_CO_MD),
-            ("content/infra-yggdrasil.md", SEED_INFRA_YGGDRASIL_MD),
-            ("content/infra-quilomboaraucaria.md", SEED_INFRA_QUILOMBO_MD),
-            ("content/infra-rfq-gateway.md", SEED_INFRA_RFQ_MD),
         ] {
             let entry = make_entry(
                 path,
@@ -321,6 +307,84 @@ impl Storage {
             if let Err(e) = upsert_entry_row(&uc_guard, "template", &entry) {
                 tracing::warn!("Failed to upsert {path} page: {e}");
             }
+        }
+    }
+
+    /// Reseed the transparency content cluster (security, license,
+    /// infra catalog, renderers) into `co::public/*`. Anon visitors
+    /// only see entries under `public/` in the `co` universe; logged-
+    /// in users see everything they have access to.
+    ///
+    /// Idempotent: writes via `upsert_entry_row`. Runs on every boot.
+    pub fn reseed_co_public_pages(&mut self) {
+        if self.get_universe("co").is_none() {
+            return; // co universe not seeded yet — admin seeder will handle it
+        }
+        let now_str = Utc::now().to_rfc3339();
+        let universe_root = self.universe_root("co");
+
+        for (path, md) in [
+            ("public/seguranca.md", SEED_SEGURANCA_MD),
+            ("public/seguranca-dependencias.md", SEED_SEGURANCA_DEPS_MD),
+            ("public/seguranca-cenarios.md", SEED_SEGURANCA_CENARIOS_MD),
+            ("public/seguranca-vapid.md", SEED_SEGURANCA_VAPID_MD),
+            ("public/licensa.md", SEED_LICENSA_MD),
+            ("public/renderers.md", SEED_RENDERERS_MD),
+            ("public/infra.md", SEED_INFRA_MD),
+            ("public/infra-co.md", SEED_INFRA_CO_MD),
+            ("public/infra-yggdrasil.md", SEED_INFRA_YGGDRASIL_MD),
+            ("public/infra-quilomboaraucaria.md", SEED_INFRA_QUILOMBO_MD),
+            ("public/infra-rfq-gateway.md", SEED_INFRA_RFQ_MD),
+        ] {
+            let entry = make_entry(
+                path,
+                seed_page_frontmatter(md, &now_str),
+                seed_page_body(md),
+            );
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("Failed to write co/{path}: {e}");
+            }
+            let co_uc = self.universe_pool.get_or_open("co");
+            let uc_guard = co_uc.lock().expect("co universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "co", &entry) {
+                tracing::warn!("Failed to upsert co/{path}: {e}");
+            }
+        }
+    }
+
+    /// One-time cleanup: the transparency cluster moved from
+    /// `template::content/*` to `co::public/*` in 2.7.20. Remove the
+    /// stale template entries (file + DB row) so the listing stays
+    /// tidy. Idempotent — no-op once the entries are gone.
+    pub fn cleanup_template_moved_pages(&mut self) {
+        if !self.template_exists() {
+            return;
+        }
+        const MOVED: &[&str] = &[
+            "content/seguranca.md",
+            "content/seguranca-dependencias.md",
+            "content/seguranca-cenarios.md",
+            "content/seguranca-vapid.md",
+            "content/licensa.md",
+            "content/renderers.md",
+            "content/infra.md",
+            "content/infra-co.md",
+            "content/infra-yggdrasil.md",
+            "content/infra-quilomboaraucaria.md",
+            "content/infra-rfq-gateway.md",
+        ];
+        let universe_root = self.universe_root("template");
+        let template_uc = self.universe_pool.get_or_open("template");
+        let uc_guard = template_uc.lock().expect("template universe conn lock");
+        for path in MOVED {
+            let file = universe_root.join(path);
+            if file.exists() {
+                let _ = std::fs::remove_file(&file);
+            }
+            let _ = uc_guard.execute(
+                "DELETE FROM entries WHERE universe_key = 'template' AND path = ?1",
+                params![path],
+            );
         }
     }
 

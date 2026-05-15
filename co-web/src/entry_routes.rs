@@ -176,6 +176,51 @@ fn accept_protobuf(headers: &HeaderMap) -> bool {
 // universe_visibility_gate middleware applied in server::build_router (CO-161).
 
 // ---------------------------------------------------------------------------
+// `public/` convention — anon visibility filter (2.7.20)
+//
+// A universe can opt in to the `public/` convention: anon visitors
+// only see entries whose path starts with `public/`. Authenticated
+// callers see everything they had access to before. The current
+// allowlist is below; future iteration generalizes this to a per-
+// universe flag + recursive subuniverse mapping.
+// ---------------------------------------------------------------------------
+
+const PUBLIC_CONVENTION_UNIVERSES: &[&str] = &["co"];
+
+fn is_public_convention(slug: &str) -> bool {
+    PUBLIC_CONVENTION_UNIVERSES.contains(&slug)
+}
+
+fn caller_is_anon(state: &AppState, headers: &HeaderMap) -> bool {
+    crate::auth::resolve_user_id(state, headers).is_none()
+}
+
+fn is_public_path(path: &str) -> bool {
+    path.starts_with("public/") || path == "public"
+}
+
+/// Strip non-public entries when the caller is anon AND the universe
+/// uses the `public/` convention. Pure function; doesn't touch the DB.
+fn filter_public_for_anon(
+    state: &AppState,
+    headers: &HeaderMap,
+    slug: &str,
+    entries: Vec<EntryRow>,
+) -> Vec<EntryRow> {
+    if !is_public_convention(slug) || !caller_is_anon(state, headers) {
+        return entries;
+    }
+    entries.into_iter().filter(|e| is_public_path(&e.path)).collect()
+}
+
+fn is_public_for_anon(state: &AppState, headers: &HeaderMap, slug: &str, path: &str) -> bool {
+    if !is_public_convention(slug) || !caller_is_anon(state, headers) {
+        return true;
+    }
+    is_public_path(path)
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -287,6 +332,14 @@ pub async fn list_entries(
         entries
     };
 
+    // 2.7.20: anon visibility filter — in universes that adopt the
+    // `public/` folder convention, anon visitors only see entries
+    // under `public/`. Owners/members see everything they always did.
+    // The convention is opt-in per universe via the static list below;
+    // generalizing to a recursive sub-universe mechanism is the next
+    // step.
+    let entries = filter_public_for_anon(&state, &headers, &slug, entries);
+
     if accept_protobuf(&headers) {
         // Encode as protobuf EntryList
         use prost::Message;
@@ -387,6 +440,14 @@ pub async fn get_entry(
         .get(&slug, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", path)))?;
+
+    // 2.7.20: anon visibility filter — universes that adopt the
+    // `public/` convention only expose entries under `public/` to
+    // anon visitors. 404 mimics the not-found shape so we don't
+    // leak the existence of private paths.
+    if !is_public_for_anon(&state, &headers, &slug, &path) {
+        return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
+    }
 
     // CO-150: ?excerpt=true — fast path for board cards; returns frontmatter + 200-char excerpt only.
     if q.excerpt.unwrap_or(false) {

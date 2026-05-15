@@ -468,15 +468,50 @@ pub async fn delete_universe(
 
     // Cascade in the meta DB. Per-universe SQLite files in `universes/<slug>/`
     // are removed when we delete the directory below.
-    storage
-        .conn()
-        .execute_batch(&format!(
-            "DELETE FROM entries WHERE universe_key = '{slug}';
-             DELETE FROM universe_members WHERE universe_key = '{slug}';
-             DELETE FROM subscriptions WHERE universe_key = '{slug}';
-             DELETE FROM universes WHERE key = '{slug}';"
-        ))
-        .map_err(|e| AppError::Internal(format!("delete cascade: {e}")))?;
+    // Cascade order matters: delete child rows before the parent
+    // `universes` row to satisfy FK constraints. Two child tables
+    // (`universe_invitations` from CO-188 and its 1391-backfill twin)
+    // were declared with FKs but without ON DELETE CASCADE, so they
+    // must be deleted explicitly here. Anything declared with
+    // ON DELETE CASCADE (entries, universe_members, subscriptions)
+    // gets implicitly cleaned by the final DELETE on `universes`,
+    // but we still issue the explicit DELETEs for predictability.
+    // Cascade: enumerate every non-universes table that has a
+    // `universe_key` column and DELETE the matching rows before the
+    // parent row. Several FKs in the schema were declared without
+    // ON DELETE CASCADE; introspecting sqlite_master keeps the cascade
+    // honest as new tables get added without remembering to extend a
+    // hardcoded list here.
+    {
+        let conn = storage.conn();
+        let mut tables: Vec<String> = {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT m.name
+                     FROM sqlite_master m
+                     JOIN pragma_table_info(m.name) p
+                     WHERE m.type = 'table'
+                       AND m.name != 'universes'
+                       AND m.name NOT LIKE 'sqlite_%'
+                       AND p.name = 'universe_key'",
+                )
+                .map_err(|e| AppError::Internal(format!("delete cascade prepare: {e}")))?;
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .map_err(|e| AppError::Internal(format!("delete cascade query: {e}")))?;
+            rows.filter_map(|r| r.ok()).collect()
+        };
+        // Deterministic order helps debugging.
+        tables.sort();
+        for table in &tables {
+            let sql = format!("DELETE FROM \"{table}\" WHERE universe_key = ?1");
+            conn.execute(&sql, [&slug]).map_err(|e| {
+                AppError::Internal(format!("delete cascade ({table}): {e}"))
+            })?;
+        }
+        conn.execute("DELETE FROM universes WHERE key = ?1", [&slug])
+            .map_err(|e| AppError::Internal(format!("delete cascade (universes): {e}")))?;
+    }
     drop(storage);
 
     if universe_dir.exists() {

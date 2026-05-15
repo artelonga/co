@@ -5,6 +5,59 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.20] — 2026-05-15 — Transparency content moves to `co::public/*`
+
+### Hard move
+
+Seguranca, licensa, infra catalog (5 pages), renderers all moved
+from `template::content/*` to `co::public/*`. `co` becomes the
+canonical owner of transparency content; `template` keeps welcome /
+onboarding pages (sobre, termos, privacidade, dados-rastreados,
+linhas-do-tempo, co-plataforma, guia, index).
+
+- Seed source files moved: `co-web/seed/template/{seguranca,licensa,
+  infra*,renderers}.md` → `co-web/seed/co/public/`
+- `reseed_co_public_pages` writes them to `co::public/<slug>.md` on
+  every boot (idempotent via `upsert_entry_row`)
+- `cleanup_template_moved_pages` deletes the stale template copies
+  on first boot after upgrade
+- Pretty-URL redirect target updated: `/seguranca` → `/co/public/seguranca`
+- All internal cross-links in the seed pages rewritten from
+  `/co/template?page=<slug>` → `/<slug>` (the pretty form)
+
+### `public/` convention — anon visibility filter
+
+A universe can adopt the `public/` folder convention. Anon visitors
+to that universe only see entries whose path starts with `public/`.
+Logged-in users see everything they already had access to. The
+allowlist is currently a small hardcoded list (`PUBLIC_CONVENTION_UNIVERSES = &["co"]`)
+in `entry_routes.rs`; generalizing to a per-universe flag is the
+next step (mirrors the "recursive subuniverse" concept the user asked
+for).
+
+Filter applied in two places:
+- `list_entries` — strips non-public entries from the listing
+- `get_entry` — returns 404 for non-public paths to anon (404 over
+  403 so we don't leak the existence of private paths)
+
+### `DELETE /api/v1/universes/{slug}` — fixed cascade + tests
+
+Four integration tests now cover the route
+(`co-web/tests/delete_universe_tests.rs`):
+
+- `delete_universe_succeeds_when_authenticated` — full lifecycle
+- `delete_universe_refuses_template` — protected
+- `delete_universe_requires_auth` — 401 without bearer
+- `delete_universe_404_when_absent`
+
+First test surfaced a real bug: the hardcoded DELETE list only
+cleaned `entries`, `universe_members`, `subscriptions` — but FKs
+exist on `universe_invitations`, `chat_rooms`, `projects` (declared
+without `ON DELETE CASCADE`). Fix: enumerate every table with a
+`universe_key` column via `pragma_table_info` at delete time and
+cascade dynamically. New tables that gain a `universe_key` are
+covered automatically — no code change needed.
+
 ## [2.7.19] — 2026-05-15 — Template URL on logged-in + template→co hierarchy
 
 ### Bug: /template/<entry> redirected logged-in users away

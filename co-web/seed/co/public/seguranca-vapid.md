@@ -16,7 +16,7 @@ type: page
 
 O que um vazamento da chave VAPID privada do Co realmente permite, o que **não** permite, e como mitigamos.
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).
 
 ## O que é VAPID
 
@@ -127,4 +127,4 @@ Como notaríamos um compromise:
 
 ---
 
-Voltar para [Segurança](/co/template?page=seguranca) · [Cenários de Red Team](/co/template?page=seguranca-cenarios) · [Dependências](/co/template?page=seguranca-dependencias).
+Voltar para [Segurança](/seguranca) · [Cenários de Red Team](/seguranca-cenarios) · [Dependências](/seguranca-dependencias).

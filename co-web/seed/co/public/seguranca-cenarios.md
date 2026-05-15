@@ -15,7 +15,7 @@ type: page
 
 Lista de cenários de ataque considerados contra Co, com **probabilidade** e **blast radius** estimados, mais o que **fazer** quando cada um acontece.
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).
 
 ## Sumário por severidade
 
@@ -31,7 +31,7 @@ Defense in depth: assumir que eventos catastróficos podem acontecer e otimizar 
 
 ### 1. VAPID private key leak
 
-Ver detalhe completo em [VAPID e segurança](/co/template?page=seguranca-vapid).
+Ver detalhe completo em [VAPID e segurança](/seguranca-vapid).
 
 - **Standalone**: BAIXO — chave alone é inútil sem subscription DB
 - **Combined com push_subscriptions leak**: MÉDIO — phishing push notifications
@@ -193,4 +193,4 @@ Cultura de disclosure honesto constrói confiança. Esconder incidentes custa co
 
 ---
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).

@@ -910,6 +910,13 @@ pub async fn start_server(config: WebConfig) {
         // Always reseed yggdrasil content pages so updates land for
         // existing installs (mirrors reseed_template_content_pages).
         storage.reseed_yggdrasil_content_pages();
+        // 2.7.20: transparency content (seguranca, licensa, infra*, …)
+        // moved from `template::content/*` to `co::public/*`. Reseed
+        // unconditionally on every boot; one-time cleanup removes the
+        // stale template copies. After cleanup runs successfully the
+        // moved-pages list is a no-op.
+        storage.reseed_co_public_pages();
+        storage.cleanup_template_moved_pages();
         // CO-142 Phase C: hard-delete deprecated co-dev / co-experience rows on every boot.
         storage.delete_deprecated_universes();
         // CO-170: soft-hide empty parent placeholders + pre-merge mbya from

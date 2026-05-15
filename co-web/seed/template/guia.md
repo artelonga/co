@@ -159,7 +159,7 @@ Troque o tema no seletor no cabeçalho da página — sem recarregar, instantân
 ## Privacidade e portabilidade
 
 - Todo o conteúdo é armazenado como arquivos `.md` + metadados SQLite. **Nunca fica preso.**
-- A instância oficial coleta apenas o necessário (e-mail para login, interações para melhorar a plataforma). Veja a [política de privacidade](/co/template?page=privacidade).
+- A instância oficial coleta apenas o necessário (e-mail para login, interações para melhorar a plataforma). Veja a [política de privacidade](/privacidade).
 - O Co é **software livre** (MIT). Você pode rodar sua própria instância, migrar dados, auditar o código.
 
 ---

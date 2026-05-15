@@ -152,4 +152,4 @@ Quando esses 4 landam, qualquer Markdown renderer (terceiro, custom, novo viewer
 
 ---
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).

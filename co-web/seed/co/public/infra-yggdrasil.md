@@ -19,7 +19,7 @@ Repositório: `/Users/artelonga/projects/yggdrasil` · Stack: Rust + Axum + SQLi
 
 > Yggdrasil reusa o engine 2D `co/game-core` em **build-time** (path dep). Em runtime, **não fala com `co`**.
 
-Voltar ao [Catálogo](/co/template?page=infra).
+Voltar ao [Catálogo](/infra).
 
 ---
 
@@ -70,8 +70,8 @@ Voltar ao [Catálogo](/co/template?page=infra).
 
 - **SMTP desabilitado** — recuperação por email não funciona em prod até secrets serem populados.
 - **Path-dep com `co/game-core`** — release process frágil (YG-17). Se `co` cortar uma release breaking, yggdrasil quebra silenciosamente até o próximo deploy.
-- **Sem backup** — mesma situação do co antes do CO-143 (ver [infra-co §planejadas](/co/template?page=infra-co)).
+- **Sem backup** — mesma situação do co antes do CO-143 (ver [infra-co §planejadas](/infra-co)).
 
 ---
 
-Voltar ao [Catálogo](/co/template?page=infra) · [Universo co](/co/template?page=infra-co)
+Voltar ao [Catálogo](/infra) · [Universo co](/infra-co)

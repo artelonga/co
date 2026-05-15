@@ -49,11 +49,11 @@ pub(super) async fn serve_co_index(
         }
     }) && crate::pretty_urls::is_seed_page_slug(slug)
     {
-        // Redirect to the canonical entry path (`content/<slug>.md`)
-        // rather than `/template/<slug>` — the SPA's entry-from-URL
-        // resolver matches the path against `<universe>/<entry-path>`,
-        // and seed pages live at `content/<slug>.md` not the root.
-        return axum::response::Redirect::temporary(&format!("/template/content/{}", slug))
+        // 2.7.20: transparency content moved to `co::public/*` so the
+        // canonical landing is `/co/public/<slug>`. Anon visitors only
+        // see entries under `public/` in `co`; the rest of the dev
+        // board is hidden until they log in.
+        return axum::response::Redirect::temporary(&format!("/co/public/{}", slug))
             .into_response();
     }
 

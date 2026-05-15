@@ -12,7 +12,7 @@ type: page
 
 # Sobre o Co
 
-A história curta está em [home](/co/template?page=index) — **Co**nsciência **Co**letiva, três verbos: **Co**criar, **Co**laborar, **Co**nectar.
+A história curta está em [home](/index) — **Co**nsciência **Co**letiva, três verbos: **Co**criar, **Co**laborar, **Co**nectar.
 
 Esta página guarda os detalhes técnicos e de governança.
 

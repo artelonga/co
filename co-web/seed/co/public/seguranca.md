@@ -92,11 +92,11 @@ Email para **yuri@artelonga.com.br** com descrição, passos para reproduzir, e 
 
 ## Páginas relacionadas
 
-- [Dependências](/co/template?page=seguranca-dependencias) — quais bibliotecas e por quê escolhemos cada uma
-- [Cenários de Red Team](/co/template?page=seguranca-cenarios) — ataques considerados + playbook de resposta
-- [VAPID e notificações push](/co/template?page=seguranca-vapid) — modelo de ameaça específico
-- [Licença](/co/template?page=licensa) — AGPL v3 e o que isso significa
-- [Visualizadores de markdown](/co/template?page=renderers) — opções para ler conteúdo Co
+- [Dependências](/seguranca-dependencias) — quais bibliotecas e por quê escolhemos cada uma
+- [Cenários de Red Team](/seguranca-cenarios) — ataques considerados + playbook de resposta
+- [VAPID e notificações push](/seguranca-vapid) — modelo de ameaça específico
+- [Licença](/licensa) — AGPL v3 e o que isso significa
+- [Visualizadores de markdown](/renderers) — opções para ler conteúdo Co
 
 ---
 

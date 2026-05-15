@@ -27,7 +27,7 @@ Repositório: `/Users/artelonga/projects/rfq-gateway` · Stack: Rust + Axum · R
 >
 > O tier `smoke-staging` é apenas tag (`RFQ_ENV`) com cohort SMK*-prefix dispatch — não há binário separado. Ambos os tiers `staging` e `smoke-staging` rodam na mesma máquina; o `PrefixDispatchStrategy` roteia pelo prefixo do ticker.
 
-Voltar ao [Catálogo](/co/template?page=infra).
+Voltar ao [Catálogo](/infra).
 
 ---
 
@@ -142,4 +142,4 @@ Pipeline de release (do runbook): commit → CI → deploy staging (`artelonga-r
 
 ---
 
-Voltar ao [Catálogo](/co/template?page=infra) · [Universo co](/co/template?page=infra-co)
+Voltar ao [Catálogo](/infra) · [Universo co](/infra-co)

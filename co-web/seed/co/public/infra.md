@@ -39,17 +39,17 @@ type: page
 
 | Task (Fly app) | Universo | Env | OS base | Runtime | VM | Mount | Estado | Doc |
 |---|---|---|---|---|---|---|---|---|
-| `co-artelonga` | [co](/co/template?page=infra-co) | prod | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 512 MB | `co_data` 1 GB | running | [infra-co](/co/template?page=infra-co) |
-| `co-artelonga-uat` | [co](/co/template?page=infra-co) | uat | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 256 MB | `co_data` 1 GB | running | [infra-co](/co/template?page=infra-co) |
-| `yggdrasil-artelonga` | [yggdrasil](/co/template?page=infra-yggdrasil) | prod | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 512 MB | `yggdrasil_data` 1 GB | running | [infra-yggdrasil](/co/template?page=infra-yggdrasil) |
-| `quilombo-araucaria` | [quilomboaraucaria](/co/template?page=infra-quilomboaraucaria) | prod | `node:22-alpine` | Node 22 / SvelteKit | shared-cpu-1x · 2 048 MB | `quilombo_data` 10 GB | running | [infra-quilomboaraucaria](/co/template?page=infra-quilomboaraucaria) |
-| `quilombo-araucaria-dev` | quilomboaraucaria | dev | `node:22-alpine` | Node 22 / SvelteKit | shared-cpu-1x · 256 MB | (volume parado) | **parked (suspended)** | [infra-quilomboaraucaria](/co/template?page=infra-quilomboaraucaria) |
+| `co-artelonga` | [co](/infra-co) | prod | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 512 MB | `co_data` 1 GB | running | [infra-co](/infra-co) |
+| `co-artelonga-uat` | [co](/infra-co) | uat | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 256 MB | `co_data` 1 GB | running | [infra-co](/infra-co) |
+| `yggdrasil-artelonga` | [yggdrasil](/infra-yggdrasil) | prod | `debian:trixie-slim` | Rust 1.90 / Axum | shared-cpu-1x · 512 MB | `yggdrasil_data` 1 GB | running | [infra-yggdrasil](/infra-yggdrasil) |
+| `quilombo-araucaria` | [quilomboaraucaria](/infra-quilomboaraucaria) | prod | `node:22-alpine` | Node 22 / SvelteKit | shared-cpu-1x · 2 048 MB | `quilombo_data` 10 GB | running | [infra-quilomboaraucaria](/infra-quilomboaraucaria) |
+| `quilombo-araucaria-dev` | quilomboaraucaria | dev | `node:22-alpine` | Node 22 / SvelteKit | shared-cpu-1x · 256 MB | (volume parado) | **parked (suspended)** | [infra-quilomboaraucaria](/infra-quilomboaraucaria) |
 | ~~`quilombo-araucaria-uat`~~ | quilomboaraucaria | uat | — | — | — | — | **destruído 2026-05-13** (app + 10 vols órfãos + IPs) | — |
-| `artelonga-rfq-gateway` | [rfq-gateway](/co/template?page=infra-rfq-gateway) | **staging** | `debian:bookworm-slim` | Rust 1.91 / Axum | shared-cpu-1x · 256 MB | `rfq_artifacts` 1 GB ×2 | running (1/2) + canário e2e | [infra-rfq-gateway](/co/template?page=infra-rfq-gateway) |
-| `rfq` | rfq-gateway | **production** | `debian:bookworm-slim` | Rust 1.91 / Axum | shared-cpu-1x · 256 MB | `rfq_artifacts` 1 GB | running | [infra-rfq-gateway](/co/template?page=infra-rfq-gateway) |
-| `co-backup-cron` (planejado, CO-143) | co/infra | cron | (Dockerfile próprio) | shell + awscli | shared-cpu-1x · 256 MB | — | **não criado** | [infra-co §planejadas](/co/template?page=infra-co) |
-| `co-clickhouse` (planejado, CO-123) | co/infra | analytics | ClickHouse image | ClickHouse | **performance-cpu · 8 GB / 4 vCPU** | `co_clickhouse_data` 50 GB | **não criado** | [infra-co §planejadas](/co/template?page=infra-co) |
-| `co-clickhouse-export` (planejado, CO-123) | co/infra | cron | (Dockerfile próprio) | shell + http | shared-cpu-1x · 256 MB | — | **não criado** | [infra-co §planejadas](/co/template?page=infra-co) |
+| `artelonga-rfq-gateway` | [rfq-gateway](/infra-rfq-gateway) | **staging** | `debian:bookworm-slim` | Rust 1.91 / Axum | shared-cpu-1x · 256 MB | `rfq_artifacts` 1 GB ×2 | running (1/2) + canário e2e | [infra-rfq-gateway](/infra-rfq-gateway) |
+| `rfq` | rfq-gateway | **production** | `debian:bookworm-slim` | Rust 1.91 / Axum | shared-cpu-1x · 256 MB | `rfq_artifacts` 1 GB | running | [infra-rfq-gateway](/infra-rfq-gateway) |
+| `co-backup-cron` (planejado, CO-143) | co/infra | cron | (Dockerfile próprio) | shell + awscli | shared-cpu-1x · 256 MB | — | **não criado** | [infra-co §planejadas](/infra-co) |
+| `co-clickhouse` (planejado, CO-123) | co/infra | analytics | ClickHouse image | ClickHouse | **performance-cpu · 8 GB / 4 vCPU** | `co_clickhouse_data` 50 GB | **não criado** | [infra-co §planejadas](/infra-co) |
+| `co-clickhouse-export` (planejado, CO-123) | co/infra | cron | (Dockerfile próprio) | shell + http | shared-cpu-1x · 256 MB | — | **não criado** | [infra-co §planejadas](/infra-co) |
 
 ---
 
@@ -105,7 +105,7 @@ Hoje **todas as tasks são ilhas** — não há tráfego direto entre apps Fly. 
 - `co-artelonga` → `co-clickhouse.internal:9000` via 6PN para queries operacionais (CO-123).
 - `co-backup-cron` → S3 externo (`s3://artelonga-co-backups`) + Fly Machines API (precisa de `FLY_API_TOKEN`).
 
-**Princípios de comunicação** (alinhados ao modelo de ameaças em [Segurança](/co/template?page=seguranca)):
+**Princípios de comunicação** (alinhados ao modelo de ameaças em [Segurança](/seguranca)):
 
 - **Ingress público:** somente via Fly LB, sempre TLS 1.2+. HSTS, X-Frame-Options DENY, CSP defaultSrc 'self', CORS por allowlist (`*.artelonga.com.br`).
 - **Inter-app interno:** 6PN (`<app>.internal`). Sem TLS, mas isolado por org. Aceita-se sem TLS para comunicação dentro do datacenter Fly por inspeção do modelo de ameaças.
@@ -169,7 +169,7 @@ ClickHouse é o passo mais caro do roadmap — quase **5× o orçamento mensal a
 - **Apps suspended/sem-máquinas permanecem no catálogo** — desligar não significa apagar, e a documentação ajuda a reativar.
 - **Toda task tem um repo de origem** — se faltar, ou registrar como "não-rastreável" (action item), ou criar.
 - **Mudanças de dimensionamento** (memória, CPU, volume) **devem citar a causa** no `fly.toml` — exemplo de ouro: `quilombo-araucaria` documenta `# 412 MB upload double-buffers during parse — 1 GB OOM'd at 866 MB rss`.
-- **Não duplicar conteúdo de [Segurança](/co/template?page=seguranca)** — referenciar. Este catálogo é sobre máquinas; aquele é sobre o modelo de ameaças.
+- **Não duplicar conteúdo de [Segurança](/seguranca)** — referenciar. Este catálogo é sobre máquinas; aquele é sobre o modelo de ameaças.
 
 ## 7. Template para nova task
 
@@ -214,18 +214,18 @@ ClickHouse é o passo mais caro do roadmap — quase **5× o orçamento mensal a
 4. ~~**`rfq` vs `artelonga-rfq-gateway`**~~ — **clarificado**:
    - `artelonga-rfq-gateway` = **staging** (`RFQ_ENV=staging`) + **smoke-staging** (cohort SMK*-prefix, `RFQ_ENV=smoke-staging`) — lane de validação contra Hedix staging.
    - `rfq` = **production** (`RFQ_ENV=production`) — Hedix prod real, customer flow.
-   Um único codebase, dois deploys, três env-tiers. Detalhes em [infra-rfq-gateway](/co/template?page=infra-rfq-gateway).
-5. **CO-143 backup-cron** — DR daily snapshot. Mecânica em [infra-co §planejadas](/co/template?page=infra-co): cron Alpine + busybox que roda `flyctl ssh` para `sqlite3 .backup` e `tar czf` do diretório `universes/`, e faz upload para S3 (`artelonga-co-backups`). Status: app **não criado em Fly**, mas Dockerfile + entrypoint + script `scripts/backup-prod.sh` prontos. Bloqueio de release stable.
+   Um único codebase, dois deploys, três env-tiers. Detalhes em [infra-rfq-gateway](/infra-rfq-gateway).
+5. **CO-143 backup-cron** — DR daily snapshot. Mecânica em [infra-co §planejadas](/infra-co): cron Alpine + busybox que roda `flyctl ssh` para `sqlite3 .backup` e `tar czf` do diretório `universes/`, e faz upload para S3 (`artelonga-co-backups`). Status: app **não criado em Fly**, mas Dockerfile + entrypoint + script `scripts/backup-prod.sh` prontos. Bloqueio de release stable.
 6. **ADRs formais** — migrar decisões deste catálogo (ex: por que Trixie, por que `auto_stop_machines`) para `docs/decisions/`.
 
 ---
 
 ## Páginas relacionadas
 
-- [Segurança](/co/template?page=seguranca) — modelo de ameaças e camadas de defesa
-- [Dependências](/co/template?page=seguranca-dependencias) — bibliotecas, decisões, custos cripto
-- [Cenários de Red Team](/co/template?page=seguranca-cenarios) — ataques considerados + playbook
-- Tasks por universo: [infra-co](/co/template?page=infra-co) · [infra-yggdrasil](/co/template?page=infra-yggdrasil) · [infra-quilomboaraucaria](/co/template?page=infra-quilomboaraucaria) · [infra-rfq-gateway](/co/template?page=infra-rfq-gateway)
+- [Segurança](/seguranca) — modelo de ameaças e camadas de defesa
+- [Dependências](/seguranca-dependencias) — bibliotecas, decisões, custos cripto
+- [Cenários de Red Team](/seguranca-cenarios) — ataques considerados + playbook
+- Tasks por universo: [infra-co](/infra-co) · [infra-yggdrasil](/infra-yggdrasil) · [infra-quilomboaraucaria](/infra-quilomboaraucaria) · [infra-rfq-gateway](/infra-rfq-gateway)
 
 ## Links cross-universe (novo)
 

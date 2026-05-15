@@ -15,7 +15,7 @@ type: page
 
 Cada biblioteca que Co usa foi escolhida deliberadamente. Esta página lista as **dependências relevantes para segurança** + explica o **por quê** de cada decisão.
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).
 
 ## Sumário
 
@@ -119,7 +119,7 @@ Trade-off: mais código manual. Justificativa: menos opacidade, menos surface de
 
 MIT permite que alguém pegue Co, modifique privadamente, e rode como SaaS sem retornar nada à comunidade. Para uma plataforma de soberania digital, isso é incoerente.
 
-AGPL v3 fecha essa brecha: rodar uma versão modificada como serviço obriga liberação de fonte. Ver [/licensa](/co/template?page=licensa).
+AGPL v3 fecha essa brecha: rodar uma versão modificada como serviço obriga liberação de fonte. Ver [/licensa](/licensa).
 
 ## Lista completa de deps
 
@@ -139,4 +139,4 @@ CVE monitoring: GitHub Dependabot habilitado + `cargo audit` em CI (em implement
 
 ---
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).

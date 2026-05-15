@@ -146,4 +146,4 @@ A licença cobre **código**, não:
 
 **Lembrete**: este documento é uma explicação, não um substituto do texto legal. O texto canônico está em [LICENSE](https://github.com/artelonga/co/blob/main/LICENSE) no repositório.
 
-Voltar para [Segurança](/co/template?page=seguranca).
+Voltar para [Segurança](/seguranca).

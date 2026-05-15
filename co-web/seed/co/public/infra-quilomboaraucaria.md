@@ -19,7 +19,7 @@ Repositório: `/Users/artelonga/projects/quilomboaraucaria` · Stack: SvelteKit 
 
 > Universo de conteúdo "primeiro cliente real" da plataforma. Caso de uso intensivo em upload (fotos raw, vídeos até ~500 MB) — o motivo do dimensionamento atípico.
 
-Voltar ao [Catálogo](/co/template?page=infra).
+Voltar ao [Catálogo](/infra).
 
 ---
 
@@ -61,7 +61,7 @@ Voltar ao [Catálogo](/co/template?page=infra).
 - **Outbound:**
   - Envia eventos para `co-artelonga` via webhook (`SYNC_TOKEN`, `SYNC_ENABLED = "true"`).
   - `ORIGIN` setado em secrets (necessário para SvelteKit form actions atrás de proxy).
-- **Sem secrets de email/OAuth** — quilombo-araucaria autentica via CO handover (JWT ES256 cross-domain, ver [Segurança](/co/template?page=seguranca)).
+- **Sem secrets de email/OAuth** — quilombo-araucaria autentica via CO handover (JWT ES256 cross-domain, ver [Segurança](/seguranca)).
 
 **Secrets em uso:** `ORIGIN`, `SESSION_SECRET`, `SYNC_ENABLED`, `SYNC_TOKEN`.
 
@@ -96,4 +96,4 @@ Voltar ao [Catálogo](/co/template?page=infra).
 
 ---
 
-Voltar ao [Catálogo](/co/template?page=infra) · [Universo co](/co/template?page=infra-co)
+Voltar ao [Catálogo](/infra) · [Universo co](/infra-co)
