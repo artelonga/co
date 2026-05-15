@@ -1,112 +1,179 @@
 # CO Interactions Registry — single source of truth
 #
-# Each interaction is an atomic user-level CRUD flow with typed
-# inputs and machine-checkable pre/postconditions. This YAML is the
-# source from which we derive:
+# Atomic platform primitives for content (entries). Each interaction
+# documents one CRUD operation that's already exposed by the CO API.
+# Content — the actual markdown, frontmatter, paths — is RUNTIME DATA
+# passed in by the caller. The contract is the primitive, not any
+# specific application use-case.
 #
-#   - OpenAPI 3.1 JSON, served at  GET /api/v1/interactions/openapi.json
-#   - The interaction list,        GET /api/v1/interactions/
-#   - (Future) executable handler, POST /api/v1/interactions/{operationId}
+# Derivations from this file:
+#   - OpenAPI 3.1 JSON at  GET /api/v1/interactions/openapi.json
+#   - Interaction list at  GET /api/v1/interactions
+#   - Single spec at       GET /api/v1/interactions/{operationId}
+#   - (Future) executable  POST /api/v1/interactions/{operationId}
 #
 # Schema (per interaction):
 #
-#   id           Two-digit stable id (matches spec filename prefix)
-#   operationId  camelCase RPC name — used as the OpenAPI operationId
-#                and the URL slug in /api/v1/interactions/{operationId}
+#   id           Stable two-digit id
+#   operationId  camelCase RPC name (URL slug)
 #   title        One-line human label
-#   spec         Relative path under e2e/interactions/
-#   universe     Universe key the interaction primarily touches
-#   parameters   Typed inputs (JSON-Schema subset)
-#   preconditions  Rules that must hold before WHEN runs
-#   postconditions Rules that must hold after WHEN runs
-#   produces     Entries the interaction creates or updates
+#   method       HTTP verb the primitive maps to
+#   path         URL template on the actual entries API
+#   spec         Test file that exercises the primitive
+#   parameters   JSON-Schema for typed inputs
+#   preconditions  Rules that must hold before the call
+#   postconditions Rules that must hold after the call
 #   auth         { required: bool, scope: string }
 #   safety       snapshot-restore | dry-run | destructive
-#   tags         free-form labels for filtering
+#   tags         free-form labels
 
 openapi: "3.1.0"
 info:
-  title: "CO Interactions"
+  title: "CO Content Interactions"
   version: "1.0"
   description: |
-    Atomic user-level CRUD flows on the CO platform.
-    Each interaction is callable as a typed RPC and has
-    machine-checkable pre/postconditions.
+    Atomic CRUD primitives on universe content entries.
+    Content is runtime data — the primitives are the contract.
 
 interactions:
+  # ---------------------------------------------------------------
+  # WRITE  (PUT — upserts; create or update is one operation in REST)
+  # ---------------------------------------------------------------
   - id: "01"
-    operationId: "artelongaSwitchSocialToProfiles"
-    title: "ArteLonga social → internal profile wikilinks"
-    spec: 01-artelonga-social-to-profiles.spec.ts
-    universe: artelonga
+    operationId: entryWrite
+    title: "Create or update a content entry (upsert)"
+    method: PUT
+    path: "/api/v1/universes/{universe}/entries/{path}"
+    spec: 01-content-crud.spec.ts
 
     parameters:
       type: object
       properties:
         universe:
           type: string
-          default: artelonga
-          description: "Universe key holding the entry to edit."
-        targetEntry:
+          description: "Universe key (e.g. 'artelonga', 'template')."
+        path:
           type: string
-          default: sobre.md
-          description: "Entry path within the universe."
-        profileFolder:
+          description: "Entry path within the universe (e.g. 'sobre.md', 'comunidades/falcao.md')."
+        body:
           type: string
-          default: "comunidades/"
-          description: "Folder under which to materialize new profile stubs."
-        taskProject:
-          type: string
-          default: AL
-          description: "Project key under which the follow-up task is filed."
-      required: []
+          description: "Markdown body. Content is opaque to the primitive."
+        frontmatter:
+          type: object
+          description: "YAML frontmatter as a JSON object. Optional."
+      required: [universe, path, body]
 
     preconditions:
-      - id: "pre.has_external_links"
-        rule: "{universe}::{targetEntry} body contains substring 'instagram.com/'"
-      - id: "pre.has_falcao_wikilink"
-        rule: "{universe}::{targetEntry} body contains substring '[[falcao]]'"
+      - id: "pre.auth"
+        rule: "Caller is authenticated and has write scope on {universe}."
 
     postconditions:
-      - id: "post.no_external_links"
-        rule: "{universe}::{targetEntry} body contains zero 'instagram.com/' substrings"
-      - id: "post.handles_become_wikilinks"
-        rule: "every IG handle in the original body has a [[handle]] or [[handle|alias]] in the new body"
-      - id: "post.falcao_preserved"
-        rule: "{universe}::{targetEntry} body still contains '[[falcao]]'"
-      - id: "post.task_created"
-        rule: "entry at {universe}::projects/{taskProject}/<next>.md exists with frontmatter type=task, status=todo, title containing 'falcao'"
-      - id: "post.profile_stub_created"
-        rule: "entry at {universe}::{profileFolder}falcao.md exists with frontmatter stub=true"
-      - id: "post.all_listed"
-        rule: "{universe}::{targetEntry}, the task entry, and {profileFolder}falcao.md all appear in /api/v1/universes/{universe}/entries"
+      - id: "post.entry_readable"
+        rule: "entryRead on the same {universe}::{path} returns 200 with the supplied body."
+      - id: "post.frontmatter_preserved"
+        rule: "If frontmatter was supplied, entryRead returns the same keys."
 
-    produces:
-      - kind: entry.update
-        universe: "{universe}"
-        path: "{targetEntry}"
-      - kind: entry.create
-        universe: "{universe}"
-        path: "projects/{taskProject}/<next>.md"
-        frontmatter:
-          type: task
-          status: todo
-      - kind: entry.create
-        universe: "{universe}"
-        path: "{profileFolder}falcao.md"
-        frontmatter:
-          type: page
-          stub: true
-        skip_if_exists: true
-
-    auth:
-      required: true
-      scope: "write:universe"
-
+    auth: { required: true, scope: "write:universe" }
     safety: snapshot-restore
+    tags: [content, crud, write]
 
-    tags:
-      - content-crud
-      - wikilink
-      - follow-up-task
-      - profile-stub
+  # ---------------------------------------------------------------
+  # READ
+  # ---------------------------------------------------------------
+  - id: "02"
+    operationId: entryRead
+    title: "Read a content entry"
+    method: GET
+    path: "/api/v1/universes/{universe}/entries/{path}"
+    spec: 01-content-crud.spec.ts
+
+    parameters:
+      type: object
+      properties:
+        universe: { type: string }
+        path:     { type: string }
+      required: [universe, path]
+
+    preconditions:
+      - id: "pre.universe_readable"
+        rule: "{universe} is public OR caller has read scope on it."
+
+    postconditions:
+      - id: "post.body_present"
+        rule: "Response includes the entry's body (may be empty string but key exists)."
+      - id: "post.path_matches"
+        rule: "Response.path == request {path}."
+
+    auth: { required: false, scope: "read:universe" }
+    safety: dry-run
+    tags: [content, crud, read]
+
+  # ---------------------------------------------------------------
+  # DELETE
+  # ---------------------------------------------------------------
+  - id: "03"
+    operationId: entryDelete
+    title: "Delete a content entry"
+    method: DELETE
+    path: "/api/v1/universes/{universe}/entries/{path}"
+    spec: 01-content-crud.spec.ts
+
+    parameters:
+      type: object
+      properties:
+        universe: { type: string }
+        path:     { type: string }
+      required: [universe, path]
+
+    preconditions:
+      - id: "pre.auth"
+        rule: "Caller has write scope on {universe}."
+      - id: "pre.entry_exists"
+        rule: "entryRead on the same {universe}::{path} returns 200."
+
+    postconditions:
+      - id: "post.entry_gone"
+        rule: "entryRead on the same {universe}::{path} returns 404."
+
+    auth: { required: true, scope: "write:universe" }
+    safety: destructive
+    tags: [content, crud, delete]
+
+  # ---------------------------------------------------------------
+  # LIST
+  # ---------------------------------------------------------------
+  - id: "04"
+    operationId: entryList
+    title: "List entries in a universe"
+    method: GET
+    path: "/api/v1/universes/{universe}/entries"
+    spec: 01-content-crud.spec.ts
+
+    parameters:
+      type: object
+      properties:
+        universe: { type: string }
+        type:
+          type: string
+          description: "Optional frontmatter.type filter (page, task, event, clip, ...)."
+        limit:
+          type: integer
+          default: 100
+        q:
+          type: string
+          description: "Optional substring search across title/body/path."
+      required: [universe]
+
+    preconditions:
+      - id: "pre.universe_readable"
+        rule: "{universe} is public OR caller has read scope on it."
+
+    postconditions:
+      - id: "post.listing_shape"
+        rule: "Response.entries is an array; each item has at minimum {path, title}."
+      - id: "post.respects_limit"
+        rule: "len(response.entries) <= request.limit."
+
+    auth: { required: false, scope: "read:universe" }
+    safety: dry-run
+    tags: [content, crud, list]

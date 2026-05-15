@@ -5,6 +5,44 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.16] — 2026-05-15 — Interactions: pivot to generic CRUD primitives
+
+The interaction layer was over-baked in 2.7.13–2.7.15: it documented
+a *specific* business operation ("ArteLonga social → wikilinks") as
+the atomic unit. That's a client of the platform, not the platform.
+
+Pivoted to four generic CRUD primitives as the atomic interactions:
+
+- `entryWrite`  — PUT  `/api/v1/universes/{u}/entries/{p}`
+- `entryRead`   — GET  `/api/v1/universes/{u}/entries/{p}`
+- `entryDelete` — DELETE `/api/v1/universes/{u}/entries/{p}`
+- `entryList`   — GET  `/api/v1/universes/{u}/entries`
+
+Content (paths, bodies, frontmatter) is runtime data. The primitives
+are the contract; "switch IG links" or any other domain operation
+is a composition of these.
+
+### Refactor
+
+- `registry.yaml` now lists the four primitives with HTTP method,
+  path template, parameters (JSON-Schema), pre/postconditions, auth,
+  safety, tags.
+- `01-artelonga-social-to-profiles.spec.ts` deleted.
+- `01-content-crud.spec.ts` exercises the full cycle:
+  write → read → list → update (write again) → delete →
+  read-expecting-404. One assertion per registry postcondition.
+  Uses `e2e/sandbox/<random>.md` so the test is namespace-safe.
+- `co-web/src/interactions.rs` updated: `Interaction` struct now
+  carries `method` and `path`; `universe` is no longer a top-level
+  field (it's a parameter). Tests assert all four primitives are
+  registered + operationIds unique + OpenAPI emits one path per
+  primitive (5 tests pass).
+- README rewritten to reflect the primitive-first framing.
+
+The pivot keeps the trajectory direction (registry → derived
+OpenAPI → callable RPC) but pins the atomic unit at the right
+level of abstraction.
+
 ## [2.7.15] — 2026-05-15 — Interactions: derived OpenAPI 3.1 + RPC contract
 
 Step 1 of the "interactions as API calls" trajectory. The

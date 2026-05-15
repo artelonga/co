@@ -51,14 +51,20 @@ pub struct Interaction {
     pub operation_id: String,
     pub title: String,
     pub spec: String,
-    pub universe: String,
+    /// HTTP verb the primitive maps to (GET, PUT, DELETE).
+    #[serde(default)]
+    pub method: String,
+    /// URL template on the actual entries API (e.g.
+    /// `/api/v1/universes/{universe}/entries/{path}`). Lets agents
+    /// invoke the primitive directly without going through the
+    /// interactions endpoint.
+    #[serde(default)]
+    pub path: String,
     pub parameters: Value,
     #[serde(default)]
     pub preconditions: Vec<Condition>,
     #[serde(default)]
     pub postconditions: Vec<Condition>,
-    #[serde(default)]
-    pub produces: Vec<Value>,
     #[serde(default)]
     pub auth: Value,
     #[serde(default)]
@@ -183,7 +189,8 @@ async fn list_interactions() -> impl IntoResponse {
             "id": i.id,
             "operationId": i.operation_id,
             "title": i.title,
-            "universe": i.universe,
+            "method": i.method,
+            "path": i.path,
             "tags": i.tags,
             "safety": i.safety,
         })).collect::<Vec<_>>(),
@@ -250,15 +257,27 @@ mod tests {
     }
 
     #[test]
+    fn registry_lists_crud_primitives() {
+        let r = registry();
+        let ops: Vec<&str> = r
+            .interactions
+            .iter()
+            .map(|i| i.operation_id.as_str())
+            .collect();
+        assert!(ops.contains(&"entryWrite"), "entryWrite primitive present");
+        assert!(ops.contains(&"entryRead"), "entryRead primitive present");
+        assert!(ops.contains(&"entryDelete"), "entryDelete primitive present");
+        assert!(ops.contains(&"entryList"), "entryList primitive present");
+    }
+
+    #[test]
     fn first_interaction_has_expected_shape() {
         let r = registry();
         let first = &r.interactions[0];
         assert_eq!(first.id, "01");
-        assert_eq!(first.operation_id, "artelongaSwitchSocialToProfiles");
-        assert_eq!(first.universe, "artelonga");
+        assert_eq!(first.operation_id, "entryWrite");
         assert!(!first.preconditions.is_empty());
         assert!(!first.postconditions.is_empty());
-        assert_eq!(first.safety, "snapshot-restore");
     }
 
     #[test]

@@ -1,14 +1,21 @@
 # E2E Interactions
 
-Atomic user-level interactions with **acceptance criteria** as the executable specification. Mirrors the co-auto pattern: each interaction declares its expected behavior up front, the test body exercises and verifies it.
+Atomic platform **primitives** for content, exposed as typed RPCs with machine-checkable pre/postconditions. Content (paths, bodies, frontmatter) is **runtime data** — the primitives are the contract; specific business operations like "switch IG links to wikilinks" are clients of those primitives, not part of the contract itself.
 
-## What an interaction is
+## The atomic actions
 
-One coherent CRUD chain a user (or agent) would take on the platform:
+Four CRUD primitives on universe entries, mapped 1:1 to the entries API:
 
-- *Alter `artelonga::sobre.md` — replace external Instagram links with internal ArteLonga profile wikilinks. This triggers a sub-task: create a profile page for `falcao` (the one wikilink already pointed at a non-existent profile). Both items remain open until completed.*
+| Primitive | HTTP | Path |
+|---|---|---|
+| `entryWrite`  | `PUT`    | `/api/v1/universes/{universe}/entries/{path}` |
+| `entryRead`   | `GET`    | `/api/v1/universes/{universe}/entries/{path}` |
+| `entryDelete` | `DELETE` | `/api/v1/universes/{universe}/entries/{path}` |
+| `entryList`   | `GET`    | `/api/v1/universes/{universe}/entries` |
 
-The reference notation `<universe>::<path>` is the **universal entry identifier**:
+These are the contract. Anything else is a composition of these.
+
+The reference notation `<universe>::<path>` is the universal entry identifier — useful for documenting fixtures and for agents talking about entries without parsing URLs:
 
 | Form | Meaning |
 |---|---|
@@ -20,13 +27,12 @@ The reference notation `<universe>::<path>` is the **universal entry identifier*
 
 ```
 e2e/interactions/
-├── README.md                                       (this file)
-├── registry.yaml                                   (machine-readable index)
-├── 01-artelonga-social-to-profiles.spec.ts         (first interaction)
-├── 02-...
+├── README.md            (this file)
+├── registry.yaml        (machine-readable index; OpenAPI source)
+├── 01-content-crud.spec.ts  (exercises all four CRUD primitives)
 ```
 
-Each interaction is a single Playwright spec file. The leading `NN-` prefix orders them by progression of the platform's capabilities.
+One spec exercises all four primitives back-to-back so a failure points at the broken primitive by name. Adding a new primitive means a new entry in `registry.yaml` plus a new assertion in the spec (or a new spec file if the operation is too distinct to fit the cycle).
 
 ### `registry.yaml`
 
@@ -47,15 +53,15 @@ Fields per interaction:
 
 | Field | Meaning |
 |---|---|
-| `id` | Two-digit stable id matching the spec filename prefix |
+| `id` | Stable two-digit id |
 | `operationId` | camelCase RPC name — URL slug at `/api/v1/interactions/{operationId}` |
 | `title` | One-line human label |
-| `spec` | Relative path under `e2e/interactions/` |
-| `universe` | The universe key the interaction primarily touches |
+| `method` | HTTP verb the primitive maps to |
+| `path` | URL template on the entries API |
+| `spec` | Test file that exercises the primitive |
 | `parameters` | JSON-Schema for the typed input body |
-| `preconditions` | Rules that must hold before WHEN runs (id + rule template) |
-| `postconditions` | Rules that must hold after WHEN runs |
-| `produces` | Entries the interaction creates or updates |
+| `preconditions` | Rules that must hold before the call (id + rule template) |
+| `postconditions` | Rules that must hold after the call |
 | `auth` | `{ required: bool, scope: string }` |
 | `safety` | `snapshot-restore`, `dry-run`, or `destructive` |
 | `tags` | Free-form labels for filtering |
