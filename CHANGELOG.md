@@ -5,6 +5,45 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.13] — 2026-05-15 — E2E interactions framework + first interaction
+
+New `co-web/e2e/interactions/` test layer. Each interaction is a
+single atomic user-level CRUD flow with acceptance criteria embedded
+as a GIVEN/WHEN/THEN block in the spec's JSDoc — one assertion per
+criterion so a failure points at the violated rule by name.
+
+Notation: `<universe>::<path>` is the universal entry identifier
+(`artelonga::sobre.md`, `artelonga::comunidades` for folders).
+
+### INTERACTION-01: ArteLonga social → internal profile wikilinks
+
+`e2e/interactions/01-artelonga-social-to-profiles.spec.ts`
+
+- GIVEN `artelonga::sobre.md` has external Instagram links for the
+  editorial board, plus a pre-existing bare `[[falcao]]` wikilink
+  that points at a not-yet-existing profile.
+- WHEN the user replaces each Instagram external URL with an
+  internal wikilink (`[[<handle>|<label>]]`).
+- THEN: (1) no IG URLs remain, (2) each handle has a wikilink,
+  (3) `[[falcao]]` is preserved verbatim, (4) a sub-task at
+  `artelonga::projects/AL/<next>.md` is created with `type: task`,
+  `status: todo`, title referencing the falcao profile, (5) both
+  entries are listed via the public entries API.
+
+Spec is safe to run against prod: snapshots `sobre.md` before
+mutating, restores in `afterEach`, deletes the new task entry on
+teardown. Skips entirely if `CO_TEST_USER_EMAIL` +
+`CO_TEST_USER_PASSWORD` aren't set (so CI without secrets stays
+green).
+
+Run with:
+```
+BASE_URL=https://co-artelonga.fly.dev \
+CO_TEST_USER_EMAIL=yuri@artelonga.com.br \
+CO_TEST_USER_PASSWORD=*** \
+npx playwright test e2e/interactions/
+```
+
 ## [2.7.12] — 2026-05-15 — Editor typing lag + server-side draft backup
 
 ### Typing lag fixed
