@@ -266,7 +266,8 @@ fn test_seed_admin_user_from_env_hash_drift_updates() {
 
 // --- CO-80: rate limiting + quota integration tests ---
 
-/// Anonymous user gets HTTP 429 after exhausting the 20-reads/min bucket.
+/// Anonymous user gets HTTP 429 after exhausting the anonymous read bucket
+/// (bumped from 20 to 120 reads/min in 2.7.21 for public-content traffic).
 #[tokio::test]
 async fn test_rate_limit_anonymous_reads_returns_429() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
@@ -282,8 +283,8 @@ async fn test_rate_limit_anonymous_reads_returns_429() {
             .unwrap()
     };
 
-    // First 20 requests: rate limiter allows them (bucket starts full at 20).
-    for i in 0..20 {
+    // First 120 requests: rate limiter allows them (bucket starts full at 120).
+    for i in 0..120 {
         let status = app.clone().oneshot(make_req()).await.unwrap().status();
         assert_ne!(
             status,
@@ -292,12 +293,12 @@ async fn test_rate_limit_anonymous_reads_returns_429() {
         );
     }
 
-    // 21st request: bucket is empty → 429.
+    // 121st request: bucket is empty → 429.
     let status = app.clone().oneshot(make_req()).await.unwrap().status();
     assert_eq!(
         status,
         StatusCode::TOO_MANY_REQUESTS,
-        "21st request should be rate limited"
+        "121st request should be rate limited"
     );
 }
 
@@ -317,8 +318,8 @@ async fn test_rate_limit_429_has_retry_after_header() {
             .unwrap()
     };
 
-    // Exhaust the anonymous read bucket (20 slots).
-    for _ in 0..20 {
+    // Exhaust the anonymous read bucket (120 slots).
+    for _ in 0..120 {
         let _ = app.clone().oneshot(make_req()).await.unwrap();
     }
 

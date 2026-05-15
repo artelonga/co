@@ -5,6 +5,36 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.21] — 2026-05-15 — Cache + rate limit for anon public content
+
+`/template` was returning 429 (Too Many Requests) on second SPA load
+within a minute. Root cause: anonymous read tier capped at 20/min;
+a single SPA load fetches ~10–15 entries (universe meta, project,
+board, dashboard, per-card excerpts), so two refreshes empty the
+bucket.
+
+Two fixes:
+
+### Anon read tier: 20 → 120/min
+
+Generous for normal SPA usage, still rate-limited for scraping.
+Writes stay at 5/min (anon writes are the abuse surface). Tests
+updated.
+
+### `Cache-Control: public, max-age=60, stale-while-revalidate=300`
+
+Added to anon GETs of stable public seed content:
+- Template universe entries (welcome / onboarding cluster)
+- `co::public/*` (transparency cluster)
+
+The content only changes on deploy, so 60s of browser caching with
+300s stale-while-revalidate covers SPA refreshes without 429ing.
+Authed callers get no Cache-Control header (they may be editing).
+
+Combined effect: the second page load served from browser cache, the
+third (post-60s) reuses the 120/min anon bucket which is now ~10x
+the pre-fix budget.
+
 ## [2.7.20] — 2026-05-15 — Transparency content moves to `co::public/*`
 
 ### Hard move

@@ -102,8 +102,14 @@ pub struct TierLimits {
 
 pub fn tier_limits(tier: Tier) -> TierLimits {
     match tier {
+        // Anonymous public-content traffic: bumped 20→120 reads/min in
+        // 2.7.21. A single SPA load against the template universe
+        // fetches ~10–15 entries (universe meta, project, board,
+        // dashboard, per-card excerpts), so the prior 20/min cap
+        // 429'd on the second page load within a minute. 120/min
+        // covers a few SPA loads while still limiting scraping.
         Tier::Anonymous => TierLimits {
-            reads_per_min: Some(20),
+            reads_per_min: Some(120),
             writes_per_min: Some(5),
             storage_entries: Some(100),
             max_universes: Some(1),
@@ -451,7 +457,7 @@ mod tests {
     #[test]
     fn test_tier_limits_anonymous() {
         let lim = tier_limits(Tier::Anonymous);
-        assert_eq!(lim.reads_per_min, Some(20));
+        assert_eq!(lim.reads_per_min, Some(120));
         assert_eq!(lim.writes_per_min, Some(5));
         assert_eq!(lim.storage_entries, Some(100));
         assert_eq!(lim.max_universes, Some(1));

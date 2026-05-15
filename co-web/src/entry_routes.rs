@@ -220,6 +220,36 @@ fn is_public_for_anon(state: &AppState, headers: &HeaderMap, slug: &str, path: &
     is_public_path(path)
 }
 
+/// `Cache-Control` for anon GETs of stable public seed content.
+///
+/// Returns Some(`public, max-age=60`) when the caller is anon AND the
+/// entry is either in the template universe (welcome / onboarding
+/// pages) or under `co::public/*` (transparency cluster). Both
+/// surfaces are reseeded from `include_str!` constants — content only
+/// changes on deploy. 60s strikes a balance: SPA refreshes hit the
+/// browser cache (no 429), but a new deploy is visible within a minute.
+///
+/// Authenticated callers get None — they may be editing.
+fn entry_cache_control(
+    state: &AppState,
+    headers: &HeaderMap,
+    slug: &str,
+    path: &str,
+) -> Option<axum::http::HeaderValue> {
+    if !caller_is_anon(state, headers) {
+        return None;
+    }
+    let is_template_seed = slug == "template";
+    let is_co_public = slug == "co" && is_public_path(path);
+    if is_template_seed || is_co_public {
+        Some(axum::http::HeaderValue::from_static(
+            "public, max-age=60, stale-while-revalidate=300",
+        ))
+    } else {
+        None
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
@@ -459,6 +489,12 @@ pub async fn get_entry(
         .into_response());
     }
 
+    // 2.7.21: cache header for public seed content. Anon GETs of the
+    // template universe and `co::public/*` are stable enough to cache
+    // 60s in the browser — covers the SPA's per-page-load entry
+    // fanout without hitting the rate limiter on every refresh.
+    let cache_header = entry_cache_control(&state, &headers, &slug, &path);
+
     if accept_protobuf(&headers) {
         use prost::Message;
         let proto = entry_row_to_proto(&entry);
@@ -466,12 +502,17 @@ pub async fn get_entry(
         proto
             .encode(&mut buf)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        Ok((
+        let mut resp = (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/x-protobuf")],
             buf,
         )
-            .into_response())
+            .into_response();
+        if let Some(cc) = cache_header {
+            resp.headers_mut()
+                .insert(axum::http::header::CACHE_CONTROL, cc);
+        }
+        Ok(resp)
     } else {
         // CO-74: include outbound FK relations in entry detail for board relation-aware views.
         let relations = {
@@ -479,7 +520,12 @@ pub async fn get_entry(
                 .outbound(&slug, &path)
                 .unwrap_or_default()
         };
-        Ok(Json(EntryWithRelations { entry, relations }).into_response())
+        let mut resp = Json(EntryWithRelations { entry, relations }).into_response();
+        if let Some(cc) = cache_header {
+            resp.headers_mut()
+                .insert(axum::http::header::CACHE_CONTROL, cc);
+        }
+        Ok(resp)
     }
 }
 
