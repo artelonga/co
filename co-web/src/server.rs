@@ -506,8 +506,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // 301 redirect for legacy `/co/{slug}/...` URLs to the new
         // `/{slug}/...` shape. axum picks this over `/{slug}/{*subpath}`
         // because the literal `co` segment is more specific than `{slug}`.
-        .route("/co/{slug}", get(redirect_legacy_co_slug))
-        .route("/co/{slug}/{*subpath}", get(redirect_legacy_co_subpath))
+        // 2.7.20: the legacy `/co/{slug}` redirects (dating from the
+        // v1.43 prefix drop) used to strip the `/co/` prefix. They now
+        // collide with the `co` universe slug: `/co/public/seguranca`
+        // means universe=co + entry-path=public/seguranca, not the
+        // legacy stripped form. Removed.
         // CO-150: asset browser page for universe owners.
         .route("/{slug}/assets", get(serve_assets_page))
         // Universe view (SPA).
@@ -1482,28 +1485,6 @@ fn extract_participant(headers: &HeaderMap) -> Option<String> {
         }
     }
     None
-}
-
-/// 301-redirect legacy `/co/{slug}` to `/{slug}` after the v1.43 prefix drop.
-async fn redirect_legacy_co_slug(Path(slug): Path<String>) -> Response {
-    let target = format!("/{}", slug);
-    (
-        StatusCode::MOVED_PERMANENTLY,
-        [(header::LOCATION, target)],
-        (),
-    )
-        .into_response()
-}
-
-/// 301-redirect legacy `/co/{slug}/{subpath}` to `/{slug}/{subpath}`.
-async fn redirect_legacy_co_subpath(Path((slug, subpath)): Path<(String, String)>) -> Response {
-    let target = format!("/{}/{}", slug, subpath);
-    (
-        StatusCode::MOVED_PERMANENTLY,
-        [(header::LOCATION, target)],
-        (),
-    )
-        .into_response()
 }
 
 pub(crate) mod static_files;
