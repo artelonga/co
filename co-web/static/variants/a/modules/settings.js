@@ -54,18 +54,20 @@ export function withTimeout(promise, ms, label) {
 // ===== Theme loading =====
 export function loadThemeCss(slug) {
     if (!slug) return;
-    let userPalette = null;
+    // 2.7.29: prefer the user's explicit palette pick when set;
+    // otherwise fall back to the universe's stored theme_preset (via
+    // state.universeConfig), then to 'modern'. Previously this
+    // function auto-set localStorage to 'modern' which then shadowed
+    // every universe-level theme choice.
+    let preset = null;
     try {
-        userPalette = localStorage.getItem('co_user_palette');
-        if (!userPalette) {
-            userPalette = 'modern';
-            localStorage.setItem('co_user_palette', 'modern');
-        }
-    } catch (_) {
-        userPalette = 'modern';
+        preset = localStorage.getItem('co_user_palette');
+    } catch (_) {}
+    if (!preset) {
+        preset = state.universeConfig?.theme_preset || 'modern';
     }
     const v = (window._coBootTs ||= Math.floor(Date.now() / 1000));
-    const href = `/api/v1/themes/${encodeURIComponent(userPalette)}?v=${v}`;
+    const href = `/api/v1/themes/${encodeURIComponent(preset)}?v=${v}`;
     let link = document.getElementById('co-theme-css');
     if (link) {
         if (link.href !== new URL(href, document.baseURI).href) {
@@ -124,9 +126,12 @@ export function applyUniverseConfig(config) {
     state.universeConfig = config;
     const slug = state.currentUniverseSlug;
 
-    if (!localStorage.getItem('co_user_palette')) {
-        try { localStorage.setItem('co_user_palette', 'modern'); } catch (_) {}
-    }
+    // 2.7.29: don't auto-set co_user_palette to 'modern' on first load.
+    // The previous behavior shadowed every universe's saved
+    // theme_preset because userPalette was always non-null. Now
+    // userPalette stays null until the user explicitly picks a palette
+    // via the header switcher; the universe's stored theme_preset wins
+    // by default.
     const userPalette = localStorage.getItem('co_user_palette');
 
     localStorage.removeItem('co_named_palette');
@@ -134,7 +139,7 @@ export function applyUniverseConfig(config) {
 
     if (slug) loadThemeCss(slug);
 
-    const effectivePreset = userPalette || config.theme_preset;
+    const effectivePreset = userPalette || config.theme_preset || 'modern';
     const paletteKey = THEME_PALETTE_MAP[effectivePreset] ?? '';
     if (paletteKey) {
         document.documentElement.setAttribute('data-palette', paletteKey);

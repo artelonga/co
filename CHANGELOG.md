@@ -5,6 +5,75 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.29] — 2026-05-16 — Bug fixes + remove admin gate + architecture review
+
+Four threads, one release:
+
+### Fix `+ Nova Tarefa` from the Conteúdo home view
+
+Click silently no-op'd because the handler required
+`state.currentProject` and Conteúdo doesn't auto-select one. Now:
+auto-selects the first project on click; if no project exists, surfaces
+a "Crie um projeto antes" warning toast instead of silently failing.
+
+### Fix theme persistence
+
+User-chosen theme via universe settings was reverting to "modern"
+on next load. Root cause in `settings.js`: `co_user_palette` was
+auto-set to `"modern"` on first load, then shadowed every universe's
+saved `theme_preset` (because `userPalette || config.theme_preset`
+made the localStorage value always win).
+
+Fix: don't auto-set the default. `co_user_palette` stays null until
+the user explicitly picks a palette from the header switcher.
+Universe-level `theme_preset` is now the default winner;
+`loadThemeCss` reads `state.universeConfig.theme_preset` as the
+fallback before the hardcoded "modern".
+
+### Remove admin gate from storage dashboard
+
+Per user direction "remove admin functionality, users are either
+members of or not." The `/storage` page no longer has an Admin tab;
+the `/api/v1/me/storage` endpoint now uses
+`DashboardFilter::AccessibleBy(uid)` which JOINs `universe_members` —
+so an invited member of a private universe sees its stats. The
+per-universe endpoint loosened similarly: owner OR member OR public.
+
+`/api/v1/admin/storage` still exists for legacy; consider removing
+in a future release.
+
+### Invitation flow (verification, no code change)
+
+The flow `Owner invites → invitee accepts → invitee is a member` is
+already shipped via `invitation_routes.rs` + the `universe_members`
+table. Once they're a member of a private universe:
+- Read works via the visibility gate (member branch)
+- Direct write works via the writer gate (member branch)
+- For non-member proposed changes, the inline proposal flow from
+  2.7.23 handles it: PUT 403 → /proposals/inline → owner decides
+
+No new code; documenting the path explicitly.
+
+### Architecture review
+
+New doc at `docs/architecture-review.md`. Inventories
+`co-web/static/variants/a/` (7014 lines across 22 files; app.js is
+705), identifies SRP violations in app.js / modals.js / login.js,
+proposes a target module structure (one file = one user-visible
+thing), and a 6-phase incremental refactor plan that doesn't
+require a stop-the-world rewrite.
+
+Phase 1 (extract URL parsing) + Phase 2 (extract view-router) would
+drop ~150 lines from app.js with zero behavior change. Tell me to
+start and I'll send a PR-shaped patch per phase.
+
+### Tests
+
+4 storage tests still pass after the filter rename
+(`AccessibleBy` replaces `OwnedBy`). The `universe_storage_owner_only`
+test was updated to use a private universe for the negative case,
+since public universes are now visible to any authed user.
+
 ## [2.7.28] — 2026-05-16 — Storage dashboard: UI page + per-user + per-universe
 
 2.7.27 shipped only the admin JSON. This release adds the surfaces

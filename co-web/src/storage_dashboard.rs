@@ -122,11 +122,17 @@ fn host_info(data_dir: &Path) -> HostInfo {
 }
 
 /// Filter governing which universes appear in the dashboard.
+///
+/// 2.7.29: dropped the `OwnedBy`-only variant in favor of
+/// `AccessibleBy`, which covers BOTH ownership and membership.
+/// "Remove admin functionality, users are either members of or not" —
+/// the dashboard surface follows the same rule. A member of a private
+/// universe sees its stats too.
 pub enum DashboardFilter<'a> {
-    /// Every universe (admin-only).
+    /// Every universe — kept for legacy admin endpoint.
     All,
-    /// Universes whose `owner_id` matches the given user id.
-    OwnedBy(&'a str),
+    /// Universes the user owns OR is a member of.
+    AccessibleBy(&'a str),
     /// A single universe by key.
     Single(&'a str),
 }
@@ -147,9 +153,13 @@ pub fn compute_dashboard_filtered(state: &AppState, filter: DashboardFilter<'_>)
              FROM universes ORDER BY key",
             vec![],
         ),
-        DashboardFilter::OwnedBy(uid) => (
-            "SELECT key, owner_id, is_public, is_template, visibility, content_count \
-             FROM universes WHERE owner_id = ?1 ORDER BY key",
+        DashboardFilter::AccessibleBy(uid) => (
+            "SELECT u.key, u.owner_id, u.is_public, u.is_template, u.visibility, u.content_count \
+             FROM universes u \
+             WHERE u.owner_id = ?1 \
+                OR EXISTS (SELECT 1 FROM universe_members m \
+                           WHERE m.universe_key = u.key AND m.user_id = ?1) \
+             ORDER BY u.key",
             vec![uid.to_string()],
         ),
         DashboardFilter::Single(slug) => (
@@ -309,7 +319,7 @@ async fn me_storage_handler(
         )
             .into_response()
     })?;
-    let data = compute_dashboard_filtered(&state, DashboardFilter::OwnedBy(&user_id));
+    let data = compute_dashboard_filtered(&state, DashboardFilter::AccessibleBy(&user_id));
     Ok(Json(data))
 }
 
@@ -327,18 +337,37 @@ async fn universe_storage_handler(
         )
             .into_response()
     })?;
-    // Owner check via the meta DB.
-    let is_owner = {
+    // 2.7.29: owner OR member (no admin tier). "Users are either
+    // members of or not." Public universes are also visible to any
+    // authenticated reader since they're public — same posture as
+    // the entries read API.
+    let allowed = {
         let storage = state.storage.lock();
-        storage
-            .get_universe(&slug)
-            .map(|u| u.owner_id == user_id)
-            .unwrap_or(false)
+        let Some(u) = storage.get_universe(&slug) else {
+            return Err((
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error": "Universe not found"})),
+            )
+                .into_response());
+        };
+        if u.owner_id == user_id || u.is_public {
+            true
+        } else {
+            storage
+                .conn()
+                .query_row(
+                    "SELECT 1 FROM universe_members \
+                     WHERE universe_key = ?1 AND user_id = ?2",
+                    rusqlite::params![&slug, &user_id],
+                    |_| Ok(true),
+                )
+                .unwrap_or(false)
+        }
     };
-    if !is_owner {
+    if !allowed {
         return Err((
             StatusCode::FORBIDDEN,
-            Json(serde_json::json!({"error": "Forbidden — owner only"})),
+            Json(serde_json::json!({"error": "Forbidden — owner/member only"})),
         )
             .into_response());
     }

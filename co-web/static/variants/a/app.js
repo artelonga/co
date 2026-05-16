@@ -493,6 +493,18 @@ function bindStaticEvents() {
 
     document.querySelector('#btn-new-task').addEventListener('click', async () => {
         if (state.isTemplate) { await ensureOwnUniverse(); return; }
+        // 2.7.29: auto-select the first project on the universe when no
+        // current project is set. Previously the click silently no-op'd
+        // on the Conteudo home view because state.currentProject was null
+        // — bootAppForUniverse only auto-selects on initial load, not
+        // after the user navigates between views.
+        if (!state.currentProject) {
+            if (!state.projects || state.projects.length === 0) {
+                showToast(window.t ? window.t('no_projects') : 'Crie um projeto antes', 'warning');
+                return;
+            }
+            await selectProject(state.projects[0].key);
+        }
         if (state.currentProject) openTaskModal(null);
     });
 

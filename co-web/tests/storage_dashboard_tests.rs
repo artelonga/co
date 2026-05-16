@@ -225,12 +225,22 @@ async fn universe_storage_owner_only() {
             [],
         )
         .unwrap();
+    // Private universe so the visibility check exercises the
+    // membership branch (not the is_public=1 short-circuit).
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO users (id, email, display_name, created_at) \
+             VALUES (?1, ?2, ?3, '2026-01-01')",
+            rusqlite::params!["other-user", "o@o", "O"],
+        )
+        .unwrap();
     storage
         .conn()
         .execute(
             "INSERT OR IGNORE INTO universes \
              (key, name, owner_id, created_at, is_public, visibility) \
-             VALUES ('owned-by-other', 'theirs', 'other-user', '2026-01-01', 1, 'public-subscribable')",
+             VALUES ('owned-by-other', 'theirs', 'other-user', '2026-01-01', 0, 'private')",
             [],
         )
         .unwrap();

@@ -145,8 +145,6 @@
   <h1>co · armazenamento</h1>
   <span class="meta" id="generated-at">—</span>
   <span class="spacer"></span>
-  <button id="tab-me" class="active">Meus universos</button>
-  <button id="tab-admin" title="Admin only">Todos (admin)</button>
   <button id="refresh">↻ Atualizar</button>
 </header>
 
@@ -168,7 +166,10 @@
   };
   const fmtNum = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR'));
 
-  // mode: 'me' | 'admin' | 'universe'  (universe via ?universe=<slug>)
+  // mode: 'me' | 'universe' (single universe via ?universe=<slug>).
+  // 2.7.29: dropped 'admin' — every user sees the universes they own
+  // or are members of via /me/storage; drill-in to a single universe
+  // via ?universe=<slug>.
   const urlParams = new URLSearchParams(window.location.search);
   const universeFilter = urlParams.get('universe');
   let mode = universeFilter ? 'universe' : 'me';
@@ -176,11 +177,7 @@
   let sortKey = 'data_db_bytes';
   let sortDesc = true;
 
-  // Hide tabs when in single-universe mode.
   if (mode === 'universe') {
-    $('tab-me').style.display = 'none';
-    $('tab-admin').style.display = 'none';
-    $('tab-me').classList.remove('active');
     document.title = `CO · ${universeFilter}`;
   }
 
@@ -189,9 +186,7 @@
     const url =
       mode === 'universe'
         ? `/api/v1/universes/${encodeURIComponent(universeFilter)}/storage`
-        : mode === 'me'
-          ? '/api/v1/me/storage'
-          : '/api/v1/admin/storage';
+        : '/api/v1/me/storage';
     try {
       const res = await fetch(url, { credentials: 'same-origin' });
       if (res.status === 401) {
@@ -299,18 +294,6 @@
     });
   }
 
-  $('tab-me').addEventListener('click', () => {
-    mode = 'me';
-    $('tab-me').classList.add('active');
-    $('tab-admin').classList.remove('active');
-    load();
-  });
-  $('tab-admin').addEventListener('click', () => {
-    mode = 'admin';
-    $('tab-admin').classList.add('active');
-    $('tab-me').classList.remove('active');
-    load();
-  });
   $('refresh').addEventListener('click', load);
 
   load();
