@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CO — Armazenamento</title>
+<style>
+  :root {
+    --bg: #0d0e10;
+    --panel: #16181c;
+    --border: #2a2d33;
+    --text: #e6e7eb;
+    --text-muted: #8b8d95;
+    --accent: #7c83f7;
+    --ok: #6ee7a5;
+    --warn: #f4cf63;
+    --err: #f47171;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font-family: ui-sans-serif, system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+  }
+  header .meta {
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  header .spacer { flex: 1; }
+  header button {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  header button.active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  main { padding: 20px; max-width: 1200px; margin: 0 auto; }
+  .summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px 16px;
+  }
+  .card .label {
+    color: var(--text-muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 6px;
+  }
+  .card .value {
+    font-size: 22px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .card .sub {
+    color: var(--text-muted);
+    font-size: 12px;
+    margin-top: 4px;
+    font-family: var(--mono);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    font-size: 13px;
+  }
+  th, td {
+    padding: 8px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    background: rgba(255,255,255,0.02);
+    color: var(--text-muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    cursor: pointer;
+    user-select: none;
+  }
+  th:hover { color: var(--text); }
+  tr:last-child td { border-bottom: none; }
+  td.num { text-align: right; font-family: var(--mono); }
+  td.key { font-family: var(--mono); font-weight: 600; }
+  td.muted { color: var(--text-muted); font-family: var(--mono); }
+
+  .badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .badge.public { background: rgba(110,231,165,0.15); color: var(--ok); }
+  .badge.private { background: rgba(244,113,113,0.15); color: var(--err); }
+  .badge.template { background: rgba(124,131,247,0.15); color: var(--accent); }
+
+  .empty { text-align: center; color: var(--text-muted); padding: 40px; font-style: italic; }
+  .error { background: rgba(244,113,113,0.1); border: 1px solid var(--err); color: var(--err); padding: 12px; border-radius: 6px; margin-bottom: 12px; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+<header>
+  <h1>co · armazenamento</h1>
+  <span class="meta" id="generated-at">—</span>
+  <span class="spacer"></span>
+  <button id="tab-me" class="active">Meus universos</button>
+  <button id="tab-admin" title="Admin only">Todos (admin)</button>
+  <button id="refresh">↻ Atualizar</button>
+</header>
+
+<main>
+  <div id="error-msg"></div>
+  <div class="summary" id="summary"></div>
+  <div id="table-wrap"></div>
+</main>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const fmtBytes = (n) => {
+    if (n == null || n === 0) return '0';
+    const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0; let v = n;
+    while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
+    return `${v.toFixed(v < 10 ? 2 : v < 100 ? 1 : 0)} ${u[i]}`;
+  };
+  const fmtNum = (n) => (n == null ? '—' : Number(n).toLocaleString('pt-BR'));
+
+  // mode: 'me' | 'admin' | 'universe'  (universe via ?universe=<slug>)
+  const urlParams = new URLSearchParams(window.location.search);
+  const universeFilter = urlParams.get('universe');
+  let mode = universeFilter ? 'universe' : 'me';
+  let lastData = null;
+  let sortKey = 'data_db_bytes';
+  let sortDesc = true;
+
+  // Hide tabs when in single-universe mode.
+  if (mode === 'universe') {
+    $('tab-me').style.display = 'none';
+    $('tab-admin').style.display = 'none';
+    $('tab-me').classList.remove('active');
+    document.title = `CO · ${universeFilter}`;
+  }
+
+  async function load() {
+    $('error-msg').innerHTML = '';
+    const url =
+      mode === 'universe'
+        ? `/api/v1/universes/${encodeURIComponent(universeFilter)}/storage`
+        : mode === 'me'
+          ? '/api/v1/me/storage'
+          : '/api/v1/admin/storage';
+    try {
+      const res = await fetch(url, { credentials: 'same-origin' });
+      if (res.status === 401) {
+        $('error-msg').innerHTML = '<div class="error">Entre para ver o dashboard.</div>';
+        $('summary').innerHTML = ''; $('table-wrap').innerHTML = '';
+        return;
+      }
+      if (res.status === 403) {
+        $('error-msg').innerHTML = `<div class="error">Sem permissão${mode === 'admin' ? ' (apenas admin)' : ''}.</div>`;
+        $('summary').innerHTML = ''; $('table-wrap').innerHTML = '';
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      lastData = await res.json();
+      render();
+    } catch (e) {
+      $('error-msg').innerHTML = `<div class="error">Erro: ${e.message}</div>`;
+    }
+  }
+
+  function render() {
+    if (!lastData) return;
+    $('generated-at').textContent = `gerado ${new Date(lastData.generated_at).toLocaleTimeString('pt-BR')}`;
+
+    // Summary cards.
+    const t = lastData.totals || {};
+    const host = lastData.host || {};
+    $('summary').innerHTML = `
+      <div class="card">
+        <div class="label">Universos</div>
+        <div class="value">${fmtNum(t.universes)}</div>
+      </div>
+      <div class="card">
+        <div class="label">Markdown</div>
+        <div class="value">${fmtBytes(t.md_bytes)}</div>
+        <div class="sub">.md em disco</div>
+      </div>
+      <div class="card">
+        <div class="label">Bancos SQLite</div>
+        <div class="value">${fmtBytes(t.data_db_bytes)}</div>
+        <div class="sub">data.db por universo</div>
+      </div>
+      <div class="card">
+        <div class="label">Volume usado</div>
+        <div class="value">${fmtBytes(host.data_dir_used_bytes)}</div>
+        <div class="sub">${host.data_dir || '—'}</div>
+      </div>
+    `;
+
+    // Table.
+    const rows = [...(lastData.universes || [])];
+    rows.sort((a, b) => {
+      const av = (a[sortKey] ?? a.tables?.[sortKey]?.rows ?? 0);
+      const bv = (b[sortKey] ?? b.tables?.[sortKey]?.rows ?? 0);
+      if (typeof av === 'string') return sortDesc ? bv.localeCompare(av) : av.localeCompare(bv);
+      return sortDesc ? bv - av : av - bv;
+    });
+
+    if (!rows.length) {
+      $('table-wrap').innerHTML = '<div class="empty">Nenhum universo</div>';
+      return;
+    }
+
+    const headers = [
+      ['key', 'Universo'],
+      ['visibility', 'Visibilidade'],
+      ['content_count', 'Entradas'],
+      ['md_bytes', 'Markdown'],
+      ['data_db_bytes', 'data.db'],
+      ['entry_events', 'Eventos (log)'],
+      ['entries', 'Linhas entries'],
+    ];
+    const head = headers.map(([k, l]) => `<th data-sort="${k}">${l}${sortKey === k ? (sortDesc ? ' ↓' : ' ↑') : ''}</th>`).join('');
+    const body = rows.map(u => {
+      const events = u.tables?.entry_events?.rows ?? 0;
+      const entries = u.tables?.entries?.rows ?? 0;
+      const badges = [];
+      if (u.is_template) badges.push('<span class="badge template">template</span>');
+      else if (u.is_public) badges.push('<span class="badge public">público</span>');
+      else badges.push('<span class="badge private">privado</span>');
+      return `<tr>
+        <td class="key"><a href="/${u.key}">${u.key}</a></td>
+        <td>${badges.join(' ')} <span class="muted">${u.visibility || ''}</span></td>
+        <td class="num">${fmtNum(u.content_count)}</td>
+        <td class="num">${fmtBytes(u.md_bytes)}</td>
+        <td class="num">${fmtBytes(u.data_db_bytes)}</td>
+        <td class="num">${fmtNum(events)}</td>
+        <td class="num">${fmtNum(entries)}</td>
+      </tr>`;
+    }).join('');
+
+    $('table-wrap').innerHTML = `<table>
+      <thead><tr>${head}</tr></thead>
+      <tbody>${body}</tbody>
+    </table>`;
+
+    // Header click → sort.
+    $('table-wrap').querySelectorAll('th').forEach(th => {
+      th.addEventListener('click', () => {
+        const k = th.dataset.sort;
+        if (sortKey === k) sortDesc = !sortDesc;
+        else { sortKey = k; sortDesc = true; }
+        render();
+      });
+    });
+  }
+
+  $('tab-me').addEventListener('click', () => {
+    mode = 'me';
+    $('tab-me').classList.add('active');
+    $('tab-admin').classList.remove('active');
+    load();
+  });
+  $('tab-admin').addEventListener('click', () => {
+    mode = 'admin';
+    $('tab-admin').classList.add('active');
+    $('tab-me').classList.remove('active');
+    load();
+  });
+  $('refresh').addEventListener('click', load);
+
+  load();
+})();
+</script>
+</body>
+</html>

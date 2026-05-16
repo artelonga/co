@@ -5,6 +5,65 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.7.28] — 2026-05-16 — Storage dashboard: UI page + per-user + per-universe
+
+2.7.27 shipped only the admin JSON. This release adds the surfaces
+the user actually needs:
+
+### Two new endpoints
+
+- `GET /api/v1/me/storage` — every universe the caller **owns**
+  (owner-only by construction; auth required, 401 otherwise)
+- `GET /api/v1/universes/{slug}/storage` — single universe by key,
+  **owner-gated**: 200 for the owner, 403 for anyone else
+
+Both use the same `compute_dashboard_filtered(state, filter)`
+helper with a `DashboardFilter::{All, OwnedBy, Single}` enum, so
+the response shape is identical across all three (admin / me /
+single-universe) — clients render one template.
+
+### `/storage` page (auth-required UI)
+
+New static page served at `GET /storage`. Single HTML + JS file
+(`co-web/static/shared/storage.html`); calls one of the three
+endpoints depending on:
+
+- Tab "Meus universos" → `/api/v1/me/storage`
+- Tab "Todos (admin)" → `/api/v1/admin/storage` (admin sees, others
+  get an inline 403 message)
+- `?universe=<slug>` query param → `/api/v1/universes/<slug>/storage`
+  (drill-in from the universe info modal; tabs hidden)
+
+Renders four summary cards (universes, markdown, data.db, host
+used) + a sortable table (entries, md_bytes, data_db_bytes,
+entry_events.rows, entries.rows). Click any column header to sort;
+click the universe key to navigate to that universe.
+
+### Header link
+
+The user badge in the SPA header now has a database icon linking
+to `/storage`. Visible only when logged in.
+
+### Tests
+
+`co-web/tests/storage_dashboard_tests.rs` extended to 4 tests:
+- `storage_dashboard_requires_admin` (existing)
+- `storage_dashboard_returns_shape` (existing)
+- `me_storage_returns_owned_universes_only` — owned-only scope is
+  enforced server-side; other users' universes don't appear
+- `universe_storage_owner_only` — owner gets 200; non-owner gets 403
+
+All pass.
+
+### Not yet (deliberate)
+
+- Sub-folder / path-prefix filters (you said "subset as filters
+  later")
+- Per-table bytes (DBSTAT virtual table; needs rusqlite compile flag)
+- Volume `total`/`available` bytes via statvfs (would add `libc`/`nix`)
+- Inline storage section in the universe info modal (link exists
+  via `/storage?universe=<slug>`; modal embed is a polish iteration)
+
 ## [2.7.27] — 2026-05-15 — Per-universe storage dashboard (admin)
 
 New endpoint `GET /api/v1/admin/storage` returns a snapshot of every

@@ -360,6 +360,9 @@ export function renderHeaderUserArea(me) {
         const name = me.display_name || me.usuario || me.email || '';
         area.innerHTML = `
             <span class="header-user-badge" title="${esc(name)}">${esc(name)}</span>
+            <a class="btn btn-ghost btn-storage" href="/storage" title="${window.t ? window.t('storage') : 'Armazenamento'}">
+                <span class="material-symbols-outlined" style="font-size:18px">database</span>
+            </a>
             <button class="btn btn-ghost btn-signout" id="btn-signout" title="${window.t ? window.t('sign_out') : 'Sair'}">
                 <span class="material-symbols-outlined" style="font-size:18px">logout</span>
             </button>`;

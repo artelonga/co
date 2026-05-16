@@ -144,6 +144,128 @@ async fn storage_dashboard_requires_admin() {
 }
 
 #[tokio::test]
+async fn me_storage_returns_owned_universes_only() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // Seed two universes: one owned by test-user, one by someone else.
+    let storage = Storage::new(dir.path());
+    // non_admin_bearer signs JWT with sub = "regular-user", so that's
+    // the owner_id resolve_user_id will produce.
+    for (key, owner) in [("mine", "regular-user"), ("yours", "other-user")] {
+        storage
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO users (id, email, display_name, created_at) \
+                 VALUES (?1, ?2, ?3, '2026-01-01')",
+                rusqlite::params![owner, format!("{owner}@t.l"), owner],
+            )
+            .unwrap();
+        storage
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_public, visibility) \
+                 VALUES (?1, ?1, '', ?2, '2026-01-01', 1, 'public-subscribable')",
+                rusqlite::params![key, owner],
+            )
+            .unwrap();
+    }
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/me/storage")
+                .header(header::AUTHORIZATION, non_admin_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_to_json(res.into_body()).await;
+    let keys: Vec<&str> = body["universes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|u| u["key"].as_str().unwrap())
+        .collect();
+    assert!(keys.contains(&"mine"), "should include owned 'mine'");
+    assert!(
+        !keys.contains(&"yours"),
+        "should NOT include other user's 'yours'"
+    );
+    assert!(
+        !keys.contains(&"template"),
+        "should NOT include template (owned by 'system')"
+    );
+}
+
+#[tokio::test]
+async fn universe_storage_owner_only() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+    let storage = Storage::new(dir.path());
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO users (id, email, display_name, created_at) \
+             VALUES (?1, ?2, ?3, '2026-01-01')",
+            rusqlite::params!["regular-user", "t@t", "T"],
+        )
+        .unwrap();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, owner_id, created_at, is_public, visibility) \
+             VALUES ('owned-by-me', 'mine', 'regular-user', '2026-01-01', 1, 'public-subscribable')",
+            [],
+        )
+        .unwrap();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, owner_id, created_at, is_public, visibility) \
+             VALUES ('owned-by-other', 'theirs', 'other-user', '2026-01-01', 1, 'public-subscribable')",
+            [],
+        )
+        .unwrap();
+
+    // Owner can drill in.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/owned-by-me/storage")
+                .header(header::AUTHORIZATION, non_admin_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_to_json(res.into_body()).await;
+    assert_eq!(body["universes"][0]["key"], "owned-by-me");
+
+    // Non-owner is denied.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/owned-by-other/storage")
+                .header(header::AUTHORIZATION, non_admin_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
 async fn storage_dashboard_returns_shape() {
     unsafe {
         std::env::set_var("JWT_SECRET", "dev-secret-change-me");

@@ -452,6 +452,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // Public — no auth on the page itself; commands carry the user's
         // session cookie when calling write endpoints.
         .route("/repl", get(crate::repl_routes::serve_repl_page))
+        // 2.7.28: per-user storage dashboard. Page renders client-side
+        // via /api/v1/me/storage (auth required there).
+        .route(
+            "/storage",
+            get(crate::storage_dashboard::serve_storage_page),
+        )
         // CO-183: leads admin page — server-side auth.
         .route(
             "/admin/leads.html",
@@ -634,6 +640,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/admin", admin_dashboard_api)
         // 2.7.27: per-universe storage dashboard (admin-only).
         .nest("/api/v1/admin", crate::storage_dashboard::router())
+        // 2.7.28: per-user + per-universe storage views (owner-gated).
+        .nest("/api/v1/me", crate::storage_dashboard::me_router())
+        .nest(
+            "/api/v1/universes",
+            crate::storage_dashboard::universe_router(),
+        )
         // CO-179 + CO-180: public analytics (summary, recent, popularity)
         .nest("/api/v1/analytics/public", analytics_public_api)
         // CO-183: public leads intake + admin queue API

@@ -121,9 +121,18 @@ fn host_info(data_dir: &Path) -> HostInfo {
     }
 }
 
-/// Compute storage summary for every universe the caller is allowed
-/// to see. Admin-only today; if scoped later, filter by `owner_id`.
-pub fn compute_dashboard(state: &AppState) -> StorageDashboard {
+/// Filter governing which universes appear in the dashboard.
+pub enum DashboardFilter<'a> {
+    /// Every universe (admin-only).
+    All,
+    /// Universes whose `owner_id` matches the given user id.
+    OwnedBy(&'a str),
+    /// A single universe by key.
+    Single(&'a str),
+}
+
+/// Compute storage summary for the universes matching `filter`.
+pub fn compute_dashboard_filtered(state: &AppState, filter: DashboardFilter<'_>) -> StorageDashboard {
     let storage = state.storage.lock();
     let data_dir: PathBuf = storage.data_dir.clone();
     drop(storage);
@@ -131,17 +140,34 @@ pub fn compute_dashboard(state: &AppState) -> StorageDashboard {
     let meta_conn_storage = state.storage.lock();
     let conn = meta_conn_storage.conn();
 
-    // Pull universe rows from meta.db.
+    // Pull universe rows from meta.db, applying the filter at SQL.
+    let (sql, params_iter): (&str, Vec<String>) = match filter {
+        DashboardFilter::All => (
+            "SELECT key, owner_id, is_public, is_template, visibility, content_count \
+             FROM universes ORDER BY key",
+            vec![],
+        ),
+        DashboardFilter::OwnedBy(uid) => (
+            "SELECT key, owner_id, is_public, is_template, visibility, content_count \
+             FROM universes WHERE owner_id = ?1 ORDER BY key",
+            vec![uid.to_string()],
+        ),
+        DashboardFilter::Single(slug) => (
+            "SELECT key, owner_id, is_public, is_template, visibility, content_count \
+             FROM universes WHERE key = ?1",
+            vec![slug.to_string()],
+        ),
+    };
     let mut universes: Vec<(String, String, bool, bool, Option<String>, i64)> = {
-        let mut stmt = match conn.prepare(
-            "SELECT key, owner_id, is_public, is_template, visibility, content_count
-             FROM universes
-             ORDER BY key",
-        ) {
+        let mut stmt = match conn.prepare(sql) {
             Ok(s) => s,
             Err(_) => return empty_dashboard(&data_dir),
         };
-        let rows = match stmt.query_map([], |r| {
+        let params_refs: Vec<&dyn rusqlite::ToSql> = params_iter
+            .iter()
+            .map(|s| s as &dyn rusqlite::ToSql)
+            .collect();
+        let rows = match stmt.query_map(params_refs.as_slice(), |r| {
             Ok((
                 r.get::<_, String>(0)?,
                 r.get::<_, String>(1).unwrap_or_default(),
@@ -228,11 +254,18 @@ fn empty_dashboard(data_dir: &Path) -> StorageDashboard {
 // HTTP handler
 // ---------------------------------------------------------------------------
 
-async fn storage_dashboard_handler(
+/// Back-compat shim — `compute_dashboard(state)` returns the full
+/// (all-universes) dashboard. Calls `compute_dashboard_filtered`
+/// under the hood.
+pub fn compute_dashboard(state: &AppState) -> StorageDashboard {
+    compute_dashboard_filtered(state, DashboardFilter::All)
+}
+
+/// Admin view — every universe. Cached 60s.
+async fn admin_storage_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
 ) -> Result<Json<StorageDashboard>, Response> {
-    // Admin-only.
     let claims = crate::admin_routes::extract_claims(&headers).map_err(|status| {
         (status, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
     })?;
@@ -244,7 +277,6 @@ async fn storage_dashboard_handler(
             .into_response());
     }
 
-    // Serve from 60-second cache when fresh.
     {
         let cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(ref c) = *cache
@@ -253,8 +285,7 @@ async fn storage_dashboard_handler(
             return Ok(Json(c.data.clone()));
         }
     }
-
-    let data = compute_dashboard(&state);
+    let data = compute_dashboard_filtered(&state, DashboardFilter::All);
     {
         let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
         *cache = Some(CachedDashboard {
@@ -265,6 +296,86 @@ async fn storage_dashboard_handler(
     Ok(Json(data))
 }
 
+/// Per-user view — every universe the caller owns. Any authenticated
+/// caller can hit this; the response is scoped by `owner_id`.
+async fn me_storage_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<StorageDashboard>, Response> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        )
+            .into_response()
+    })?;
+    let data = compute_dashboard_filtered(&state, DashboardFilter::OwnedBy(&user_id));
+    Ok(Json(data))
+}
+
+/// Per-universe view — single universe by slug. Authed caller must
+/// be the owner. Useful when drilling in from the per-user view.
+async fn universe_storage_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    headers: HeaderMap,
+) -> Result<Json<StorageDashboard>, Response> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers).ok_or_else(|| {
+        (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "Unauthorized"})),
+        )
+            .into_response()
+    })?;
+    // Owner check via the meta DB.
+    let is_owner = {
+        let storage = state.storage.lock();
+        storage
+            .get_universe(&slug)
+            .map(|u| u.owner_id == user_id)
+            .unwrap_or(false)
+    };
+    if !is_owner {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Forbidden — owner only"})),
+        )
+            .into_response());
+    }
+    let data = compute_dashboard_filtered(&state, DashboardFilter::Single(&slug));
+    Ok(Json(data))
+}
+
+/// Admin-only router (mounted at `/api/v1/admin`).
 pub fn router() -> Router<AppState> {
-    Router::new().route("/storage", get(storage_dashboard_handler))
+    Router::new().route("/storage", get(admin_storage_handler))
+}
+
+/// Per-user router (mounted at `/api/v1/me`).
+pub fn me_router() -> Router<AppState> {
+    Router::new().route("/storage", get(me_storage_handler))
+}
+
+/// Per-universe router (mounted at `/api/v1/universes`).
+pub fn universe_router() -> Router<AppState> {
+    Router::new().route("/{slug}/storage", get(universe_storage_handler))
+}
+
+// ---------------------------------------------------------------------------
+// Static HTML page
+// ---------------------------------------------------------------------------
+
+const STORAGE_HTML: &str = include_str!("../static/shared/storage.html");
+
+pub async fn serve_storage_page() -> Response {
+    let mut resp = Response::new(STORAGE_HTML.into());
+    resp.headers_mut().insert(
+        axum::http::header::CONTENT_TYPE,
+        axum::http::HeaderValue::from_static("text/html; charset=utf-8"),
+    );
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    resp
 }
