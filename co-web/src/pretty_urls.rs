@@ -33,6 +33,8 @@ const SEED_PAGE_SLUGS: &[&str] = &[
     "infra-yggdrasil",
     "infra-quilomboaraucaria",
     "infra-rfq-gateway",
+    // Conta + mensagens (2.8.1) — user-facing how-it-works doc
+    "conta-e-mensagens",
 ];
 
 /// True when `slug` matches one of the seeded template page slugs.

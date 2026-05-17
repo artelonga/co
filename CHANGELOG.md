@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.1] — 2026-05-17 — User-facing doc: Conta e mensagens
+
+New seed page `co::public/conta-e-mensagens.md` documenting the
+account + messaging flows in plain Portuguese, end-user oriented (no
+modules, no SQL, no algorithm names beyond what matters for trust).
+
+Covers:
+- 4 ways to sign in (email code, password, Google, invitation link)
+- Session lifetime + cookie name
+- Universe types (público / privado / template) + member permissions
+- Inviting + propose-change flow for non-members
+- 3 messaging surfaces (universe chat, DMs, proposals-as-messages)
+- DM privacy policy options
+- Notifications: bell + email + push (3 channels)
+- Cross-domain auth in plain language (Co ↔ Quilombo "passaporte"
+  flow, 7-day session per domain)
+- Privacy posture (no third-party tracking, portable data)
+- Troubleshooting (forgot password, no code received, deletion)
+
+Reachable at `/conta-e-mensagens` (pretty URL) → redirects to
+`/co/public/conta-e-mensagens` via the existing seed-page redirector.
+Pretty-URL allowlist updated.
+
 ## [2.8.0] — 2026-05-17 — Token exchange for cross-universe API callers (CO-214)
 
 Two coupled changes, both required for downstream universes (quilombo's
