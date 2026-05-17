@@ -1455,3 +1455,240 @@ async fn excerpt_false_returns_full_entry() {
         "relations should be present in full entry"
     );
 }
+
+// ===========================================================================
+// CO-214: Widened require_auth + POST /api/v1/auth/exchange-session
+// ===========================================================================
+//
+// Two coupled changes:
+//   1. `require_auth` accepts ES256 (was HS256-only) so co's own JWKS-signed
+//      tokens authorize calls to co's API — needed for cross-apex callers
+//      that can't share cookies (quilombo's co-client).
+//   2. `POST /api/v1/auth/exchange-session` trades a 60s ES256 handover token
+//      (CO-186) or session cookie for a 7-day ES256 JWT, so the chat backend
+//      remains usable past the SSO redirect window.
+
+fn build_test_router_with_state(dir: &std::path::Path) -> (axum::Router, AppState) {
+    let config = test_config(dir);
+    let mut storage = Storage::new(&config.data_dir);
+    seed_data(&mut storage);
+    let experiment = ExperimentStore::new(&config.data_dir);
+
+    let auth_store = co_web::auth::AuthStore::new(dir).unwrap();
+    let mail: std::sync::Arc<dyn co::MailProvider> = std::sync::Arc::new(co::LogMailProvider);
+    let game_db_path = dir.join("game_test.db");
+    let game_storage = std::sync::Arc::new(
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
+    );
+    let state: AppState = Arc::new(AppStateInner {
+        storage: parking_lot::Mutex::new(storage),
+        experiment: Mutex::new(experiment),
+        config,
+        auth_store: Mutex::new(auth_store),
+        mail,
+        game_storage,
+        plugin_registry: game_core::plugin::PluginRegistry::new(),
+        doc_rooms: co_web::ws::new_room_manager(),
+        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
+        cache: co_web::cache::CacheLayer::new(),
+        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+        wae: co_web::wae::WaeEmitter::new(None, None),
+        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+        embedding_tx: {
+            let (tx, _) = co_web::embedding_worker::channel();
+            tx
+        },
+        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+    });
+
+    let router = build_router(state.clone(), None);
+    (router, state)
+}
+
+fn seed_user(state: &AppState, email: &str, display_name: &str) -> co_web::models::User {
+    let mut storage = state.storage.lock();
+    storage.create_user(email, display_name).unwrap()
+}
+
+#[tokio::test]
+async fn test_require_auth_accepts_es256_bearer() {
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_router_with_state(dir.path());
+    let user = seed_user(&state, "es256@test", "ES256 User");
+
+    let (token, _) =
+        co_web::auth::sign_jwt_es256(&state.jwt_key, &user.id, &user.email, &user.tier).unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth/me")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "require_auth must accept ES256 Bearer tokens signed by the same JwtKey"
+    );
+}
+
+#[tokio::test]
+async fn test_require_auth_still_accepts_hs256_bearer() {
+    let dir = tempdir().unwrap();
+    let (app, _state) = build_test_router_with_state(dir.path());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/projects")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_ne!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "HS256 Bearer tokens must keep working after CO-214 widens require_auth"
+    );
+}
+
+#[tokio::test]
+async fn test_exchange_session_with_es256_handover_returns_long_lived_jwt() {
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_router_with_state(dir.path());
+    let user = seed_user(&state, "handover@test", "Handover User");
+
+    let handover =
+        co_web::auth::sign_handover_jwt_es256(&state.jwt_key, &user.id, &user.email, &user.tier)
+            .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/exchange-session")
+                .header(header::AUTHORIZATION, format!("Bearer {handover}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_string(response.into_body()).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+
+    let token = v["token"]
+        .as_str()
+        .expect("response must include `token` string");
+    assert!(!token.is_empty());
+
+    let exp_str = v["expires_at"]
+        .as_str()
+        .expect("response must include `expires_at` ISO-8601 string");
+    let exp: chrono::DateTime<chrono::Utc> = exp_str.parse().expect("expires_at must be RFC3339");
+    let now = chrono::Utc::now();
+    assert!(
+        exp > now + chrono::Duration::days(6),
+        "exchanged token TTL must be ~7 days (got {exp_str})"
+    );
+}
+
+#[tokio::test]
+async fn test_exchange_session_with_session_cookie() {
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_router_with_state(dir.path());
+    let user = seed_user(&state, "cookie@test", "Cookie User");
+
+    let (session_token, _) =
+        co_web::auth::sign_jwt(&user.id, &user.email, &user.tier, "dev-secret-change-me").unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/exchange-session")
+                .header("cookie", format!("session={session_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_exchange_session_without_auth_returns_401() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/exchange-session")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_exchanged_token_authorizes_subsequent_call() {
+    let dir = tempdir().unwrap();
+    let (app, state) = build_test_router_with_state(dir.path());
+    let user = seed_user(&state, "roundtrip@test", "Roundtrip User");
+
+    let handover =
+        co_web::auth::sign_handover_jwt_es256(&state.jwt_key, &user.id, &user.email, &user.tier)
+            .unwrap();
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/exchange-session")
+                .header(header::AUTHORIZATION, format!("Bearer {handover}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = body_to_string(response.into_body()).await;
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let new_token = v["token"].as_str().unwrap().to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/auth/me")
+                .header(header::AUTHORIZATION, format!("Bearer {new_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the exchanged 7-day JWT must authorize a subsequent /me call"
+    );
+}

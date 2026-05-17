@@ -336,6 +336,10 @@ pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String>
 /// JWT-only — does NOT accept API tokens. For routes that should accept API
 /// tokens too (e.g., paths a long-lived background worker hits), use
 /// `require_auth_with_token` (state-aware variant).
+///
+/// CO-214: accepts both ES256 (asymmetric, JWKS-verifiable cross-domain) and
+/// HS256 (legacy shared-secret) tokens via [`decode_claims_any`]. The
+/// [`JwtKey`] is read from a request extension populated by `build_router`.
 pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response, Response> {
     let token = req
         .headers()
@@ -346,23 +350,16 @@ pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret();
-    let validation = Validation::new(Algorithm::HS256);
+    let jwt_key = req
+        .extensions()
+        .get::<std::sync::Arc<JwtKey>>()
+        .cloned()
+        .ok_or_else(|| unauthorized("Server misconfigured: missing JwtKey extension"))?;
 
-    let token_data = decode::<Claims>(
-        &token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    )
-    .map_err(|e| match e.kind() {
-        jsonwebtoken::errors::ErrorKind::ExpiredSignature => unauthorized("Token expired"),
-        jsonwebtoken::errors::ErrorKind::InvalidSignature => {
-            unauthorized("Invalid token signature")
-        }
-        _ => unauthorized("Invalid token"),
-    })?;
+    let claims = decode_claims_any(&token, &jwt_key, &jwt_secret())
+        .map_err(|_| unauthorized("Invalid or expired token"))?;
 
-    req.extensions_mut().insert(UserId(token_data.claims.sub));
+    req.extensions_mut().insert(UserId(claims.sub));
     Ok(next.run(req).await)
 }
 
@@ -386,14 +383,9 @@ pub async fn require_auth_with_token(
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret();
-    let validation = Validation::new(Algorithm::HS256);
-    if let Ok(data) = decode::<Claims>(
-        &token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    ) {
-        req.extensions_mut().insert(UserId(data.claims.sub));
+    // CO-214: accept ES256 + HS256 (was HS256-only).
+    if let Ok(claims) = decode_claims_any(&token, &state.jwt_key, &jwt_secret()) {
+        req.extensions_mut().insert(UserId(claims.sub));
         return Ok(next.run(req).await);
     }
 

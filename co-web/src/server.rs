@@ -547,6 +547,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api", board_public)
         .nest("/api", board_protected)
         .nest("/api", auth_api)
+        // CO-214: token exchange for cross-universe API callers (quilombo's
+        // co-client) — short-lived ES256 handover → 7-day ES256 JWT.
+        .nest("/api", crate::auth_routes::auth_routes_router())
         .nest("/api", experiment_api)
         .nest("/api", game_public)
         .nest("/api", game_protected)
@@ -609,10 +612,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // Visibility is implicit: the universe must exist + be
         // visible (the handler's `get_universe` check returns 404
         // otherwise, same shape as a deny).
-        .nest(
-            "/api/v1/universes",
-            crate::proposal_routes::inline_router(),
-        )
+        .nest("/api/v1/universes", crate::proposal_routes::inline_router())
         // 2.7.24: inbox — list inbound proposals across owned universes.
         .nest("/api/v1/me", crate::proposal_routes::inbox_router())
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).
@@ -700,6 +700,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     router
         .fallback(serve_variant_file)
+        // CO-214: expose the ES256 JwtKey to `require_auth` middleware so it
+        // can verify cross-domain tokens via decode_claims_any.
+        .layer(axum::Extension(state.jwt_key.clone()))
         .with_state(state)
         .layer(DefaultBodyLimit::max(1_048_576)) // 1MB max body
         .layer(CompressionLayer::new())

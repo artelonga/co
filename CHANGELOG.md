@@ -5,6 +5,39 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.8.0] — 2026-05-17 — Token exchange for cross-universe API callers (CO-214)
+
+Two coupled changes, both required for downstream universes (quilombo's
+`co-client`) to call co's API past the 60-second SSO redirect window.
+
+### Widen `require_auth` to accept ES256 (was HS256-only)
+
+`co-web/src/auth.rs` had `decode_claims_any` (ES256+HS256) but no middleware
+used it — `require_auth` only validated HS256, which meant a freshly-issued
+ES256 handover token (CO-186) couldn't authenticate against co's own API.
+This silently broke any cross-apex caller that received a handover token
+and tried to use it as Bearer.
+
+`require_auth` now reads the `JwtKey` from a request extension populated
+by `build_router` and calls `decode_claims_any`. `require_auth_with_token`
+does the same via its existing `State<AppState>`. HS256 tokens keep working
+(regression-tested).
+
+### Add `POST /api/v1/auth/exchange-session`
+
+Trades a valid short-lived ES256 handover JWT or a session cookie for a
+7-day ES256 JWT signed with the same `JwtKey`. The new token can be used
+as `Authorization: Bearer …` on any authenticated co route.
+
+The endpoint reloads the user from storage before re-signing, so a token
+for a since-deleted account fails (401), and the new token reflects
+current email/tier — not whatever was frozen in the input.
+
+No revocation list (matches existing session JWT semantics). Per-request
+role checks in `chat_routes.rs` etc. enforce real-time membership.
+
+Unblocks QB-13 Phase 2 in quilomboaraucaria.
+
 ## [2.7.29] — 2026-05-16 — Bug fixes + remove admin gate + architecture review
 
 Four threads, one release:
