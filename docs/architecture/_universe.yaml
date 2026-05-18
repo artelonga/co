@@ -1,0 +1,19 @@
+---
+slug: co-arch
+name: CO Architecture
+description: >-
+  Architecture audit + refactor backlog for the co repo.
+  Sub-universe of `co` — auto-tracked via CO's `entry_events`
+  append-only log (Iceberg-compatible per `co::public/transaction-log.md`).
+visibility: private
+parent_universe: co
+kind: docs-subuniverse
+schema: schema.yaml
+content_root: .
+expected_files:
+  - as-is.md
+  - api-catalog.md
+  - refactor-plan.md
+  - task-backlog-summary.md
+created_at: 2026-05-18T00:00:00Z
+---
