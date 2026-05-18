@@ -1,0 +1,47 @@
+name: Docs Subuniverse
+description: >-
+  Canonical schema for any repo's `docs/architecture/` folder.
+  Each file in `expected_files` maps to a content_type below.
+  Every write produces an `entry_events` row (Iceberg-compatible append-only log).
+schema_version: 1
+content_types:
+  - name: as-is
+    description: C4-aligned current-state snapshot (Context + Containers + Components, dependency graph, API catalog reference).
+    expected_path: as-is.md
+    frontmatter:
+      audit_date: { type: date, required: true }
+      c4_levels: { type: array, items: enum, values: [context, container, component, code] }
+      dep_graph_format: { type: enum, values: [mermaid, dot, plantuml] }
+  - name: api-catalog
+    description: Endpoint catalog organized by surface, with verb + path + status + auth + response shape.
+    expected_path: api-catalog.md
+    frontmatter:
+      catalog_date: { type: date, required: true }
+      endpoint_count: { type: number }
+      drift_check_script: { type: string }
+  - name: refactor-plan
+    description: Gap analysis vs the seven design principles plus proposed REPO-N tasks (scope, acceptance, blast radius, priority).
+    expected_path: refactor-plan.md
+    frontmatter:
+      audit_date: { type: date, required: true }
+      task_count: { type: number }
+      first_task_id: { type: number }
+      principle_scorecard: { type: array, items: object }
+  - name: task-backlog-summary
+    description: Cross-cutting backlog roll-up grouped by repo → epic → user story, with conventional commit + semver per task.
+    expected_path: task-backlog-summary.md
+    frontmatter:
+      summary_date: { type: date, required: true }
+      epic_count: { type: number }
+      story_count: { type: number }
+      net_semver_bump: { type: enum, values: [major, minor, patch, none] }
+  - name: change-log
+    description: >-
+      Optional iceberg-compatible change log for this subuniverse.
+      Each row mirrors an `entry_events` event (created, updated, deleted) — used when the subuniverse
+      lives outside CO's runtime and needs to bootstrap state.
+    expected_path: CHANGELOG.md
+    frontmatter:
+      iceberg_namespace: { type: string }
+      first_event_at: { type: date }
+      schema_evolution: { type: array, items: object }
