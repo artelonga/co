@@ -5,6 +5,19 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.1] — 2026-05-18 — Server decomposition (CO-215)
+
+### Refactored
+
+- Split `co-web/src/server.rs` (1567 LoC) into focused submodules under `server/`:
+  - `server/state.rs` — `AppStateInner`, `AppState`, lock helpers
+  - `server/validation.rs` — input validation functions (task/comment/project)
+  - `server/uat_boot.rs` — UAT startup tasks (reset flag, yuri seed, anon cleanup)
+  - `server/seed_orchestrator.rs` — boot seed orchestration (template, quilombo, yggdrasil, admin, chat/push backfill)
+  - `server/router.rs` — `build_router()` with all route registrations
+  - `server/mod.rs` — module root: `start_server()`, health checks, static-file helpers
+- Public API at `crate::server::{AppState, AppStateInner, start_server, build_router}` unchanged
+
 ## [2.9.0] — 2026-05-18 — Cross-repo architecture audit + security hardening + backlog scaffold
 
 Bundled theme covering everything since 2.7.29 — five repos audited and scaffolded, one universe migrated, one prod bug fixed, one user-facing security doc, 16 new backlog user-stories + 14 new epic specs, 70+ task specs scaffolded across all repos.
