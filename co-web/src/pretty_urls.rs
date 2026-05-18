@@ -24,6 +24,7 @@ const SEED_PAGE_SLUGS: &[&str] = &[
     "seguranca-dependencias",
     "seguranca-cenarios",
     "seguranca-vapid",
+    "seguranca-criptografia",
     // License + renderers
     "licensa",
     "renderers",

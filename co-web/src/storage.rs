@@ -36,6 +36,7 @@ const SEED_SEGURANCA_MD: &str = include_str!("../seed/co/public/seguranca.md");
 const SEED_SEGURANCA_DEPS_MD: &str = include_str!("../seed/co/public/seguranca-dependencias.md");
 const SEED_SEGURANCA_CENARIOS_MD: &str = include_str!("../seed/co/public/seguranca-cenarios.md");
 const SEED_SEGURANCA_VAPID_MD: &str = include_str!("../seed/co/public/seguranca-vapid.md");
+const SEED_SEGURANCA_CRIPTO_MD: &str = include_str!("../seed/co/public/seguranca-criptografia.md");
 const SEED_LICENSA_MD: &str = include_str!("../seed/co/public/licensa.md");
 const SEED_RENDERERS_MD: &str = include_str!("../seed/co/public/renderers.md");
 const SEED_INFRA_MD: &str = include_str!("../seed/co/public/infra.md");
