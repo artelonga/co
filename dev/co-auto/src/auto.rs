@@ -27,6 +27,8 @@ pub struct AutoConfig {
     pub data_dir: Option<String>,
     pub workspace: Option<String>,
     pub interactive: bool,
+    /// After each successful task, push the branch + open a PR via `scripts/ship-task.sh`.
+    pub auto_pr: bool,
 }
 
 /// Represents a parsed task from markdown
@@ -247,6 +249,64 @@ pub fn run(config: AutoConfig) -> Result<()> {
                     review.total
                 );
                 tracker.tasks_completed.push(task.key.clone());
+
+                // --auto-pr: after a successful task, shell out to ship-task.sh to
+                // rebase + push + `gh pr create`. Best-effort — failures don't abort
+                // the cycle (the user can re-run ship-task.sh manually).
+                if config.auto_pr {
+                    println!(
+                        "  {} ship-task.sh {} (auto-pr)",
+                        "◆".dimmed(),
+                        task.key.cyan()
+                    );
+                    // Walk up workdir parents to find a `scripts/ship-task.sh` (typically
+                    // lives in the CO repo root).
+                    let mut probe: Option<PathBuf> = Some(workdir.clone());
+                    let mut script: Option<PathBuf> = None;
+                    while let Some(p) = probe.clone() {
+                        let candidate = p.join("scripts").join("ship-task.sh");
+                        if candidate.exists() {
+                            script = Some(candidate);
+                            break;
+                        }
+                        probe = p.parent().map(|x| x.to_path_buf());
+                    }
+                    // Fallback: hardcoded canonical location.
+                    let canonical = PathBuf::from("/Users/artelonga/projects/co/scripts/ship-task.sh");
+                    if script.is_none() && canonical.exists() {
+                        script = Some(canonical);
+                    }
+                    if let Some(s) = script {
+                        let out = Command::new(&s).arg(&task.key).output();
+                        match out {
+                            Ok(o) => {
+                                let stdout = String::from_utf8_lossy(&o.stdout);
+                                let stderr = String::from_utf8_lossy(&o.stderr);
+                                for line in stdout.lines().chain(stderr.lines()).take(20) {
+                                    println!("    {}", line.dimmed());
+                                }
+                                if !o.status.success() {
+                                    println!(
+                                        "  {} ship-task.sh exited non-zero — left for manual recovery",
+                                        "⚠".yellow()
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                println!(
+                                    "  {} ship-task.sh spawn failed: {} — left for manual push",
+                                    "⚠".yellow(),
+                                    e
+                                );
+                            }
+                        }
+                    } else {
+                        println!(
+                            "  {} --auto-pr set but no ship-task.sh found; push manually",
+                            "⚠".yellow()
+                        );
+                    }
+                }
 
                 // CO-197: After a successful task in classic mode (no worktree),
                 // fast-forward main to the feat-branch tip so the NEXT task
@@ -652,7 +712,13 @@ fn launch_claude(
 
         let mut cmd = Command::new("claude");
         cmd.arg("-p").arg(&user_prompt);
-        cmd.arg("--bare");
+        // `--bare` requires ANTHROPIC_API_KEY (OAuth/keychain are never read in
+        // bare mode — see `claude --help`). Only enable it for API-key users;
+        // subscription users (keychain-auth via `claude /login`) need claude to
+        // run without --bare so it can read their saved credentials.
+        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
+            cmd.arg("--bare");
+        }
         cmd.arg("--dangerously-skip-permissions");
         cmd.arg("--model").arg(model);
         cmd.arg("--name").arg(format!("co-auto-{}", task_key));

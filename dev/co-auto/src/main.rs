@@ -61,6 +61,11 @@ struct Cli {
     /// Run headless (invisible -p mode instead of interactive session)
     #[arg(long)]
     headless: bool,
+
+    /// After each successful task, automatically push the branch and open a PR via `gh`.
+    /// Delegates to `scripts/ship-task.sh <TASK-ID>` if present in the workdir's parent CO repo.
+    #[arg(long)]
+    auto_pr: bool,
 }
 
 /// Resolve the workdir: explicit arg, env var, or current directory.
@@ -163,6 +168,7 @@ fn main() {
             data_dir: Some(data_dir.to_string_lossy().into_owned()),
             workspace: None,
             interactive: !cli.headless,
+            auto_pr: cli.auto_pr,
         };
 
         co_auto::run(config)
