@@ -483,20 +483,18 @@ async function _sendMessage() {
 // WebSocket
 // ---------------------------------------------------------------------------
 
-function _hasSessionCookie() {
-    // Cheap auth check: the session JWT lives in a cookie named `session`.
-    // If absent, skip the WS handshake — the server will 401 us anyway,
-    // which triggers the reconnect-loop banner and looks like a bug.
-    try {
-        return /(^|;\s*)session=/.test(document.cookie || '');
-    } catch (_) {
-        return false;
-    }
+function _isAuthenticated() {
+    // CO-234: rely on the `me` state passed to mountChat(), not document.cookie.
+    // The session cookie is HttpOnly (set at co-web/src/auth.rs:271), so it's
+    // invisible to JavaScript by design. Previously we used a document.cookie
+    // regex which returned false for every logged-in user, surfacing the
+    // "Entre para participar do chat" hint even when the session was valid.
+    return !!_state?.me;
 }
 
 function _openWs(roomSlug) {
     if (!_state || _state.destroyed) return;
-    if (!_hasSessionCookie()) {
+    if (!_isAuthenticated()) {
         // Anonymous users can read the room history but can't hold an
         // authed WebSocket. Hide the connection banner so they don't see
         // a perpetual "Conexão perdida. Reconectando…" loop and surface
