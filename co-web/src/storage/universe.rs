@@ -85,6 +85,8 @@ impl Storage {
             requires_login: false,
             visibility: "private".into(),
             parent_key: None,
+            forked_from: None,
+            forked_at_op: None,
         })
     }
 
@@ -115,6 +117,8 @@ impl Storage {
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                         parent_key: None,
+                        forked_from: None,
+                        forked_at_op: None,
                     })
                 },
             )
@@ -128,6 +132,20 @@ impl Storage {
             )
             .ok()
             .flatten();
+        // CO-95: opportunistically fetch lineage columns (added in v45).
+        if let Ok((ff, fao)) = self.conn.query_row(
+            "SELECT forked_from, forked_at_op FROM universes WHERE key = ?1",
+            params![key],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<i64>>(1)?,
+                ))
+            },
+        ) {
+            universe.forked_from = ff;
+            universe.forked_at_op = fao;
+        }
         Some(universe)
     }
 
@@ -174,6 +192,8 @@ impl Storage {
                     requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                     visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                     parent_key: None,
+                    forked_from: None,
+                    forked_at_op: None,
                 })
             })
             .expect("Failed to list universes for user")
@@ -343,6 +363,8 @@ impl Storage {
                 requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                 visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                 parent_key: None,
+                forked_from: None,
+                forked_at_op: None,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))
@@ -770,5 +792,200 @@ impl Storage {
             "blob backfill: scanned {universes_scanned} universe(s), processed {entries_processed} entries, {blobs_added} new blob(s) added"
         );
         (universes_scanned, entries_processed, blobs_added)
+    }
+
+    // -------------------------------------------------------------------------
+    // CO-95 Phase 3 — universe lineage
+    // -------------------------------------------------------------------------
+
+    /// Record that `universe_key` was forked from `parent_key` at op seq `op`.
+    pub fn set_universe_lineage(
+        &self,
+        universe_key: &str,
+        parent_key: &str,
+        forked_at_op: Option<i64>,
+    ) -> anyhow::Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE universes SET forked_from = ?1, forked_at_op = ?2, forked_at = ?3 WHERE key = ?4",
+            params![parent_key, forked_at_op, now, universe_key],
+        )?;
+        Ok(())
+    }
+
+    /// Get the current maximum op seq in a universe's entry_events table.
+    /// Returns 0 if the table is empty or doesn't exist.
+    pub fn universe_max_op_seq(&self, universe_key: &str) -> i64 {
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let Ok(guard) = uc.lock() else { return 0 };
+        guard
+            .query_row("SELECT COALESCE(MAX(seq), 0) FROM entry_events", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap_or(0)
+    }
+
+    /// Read entry_events rows for a universe, ordered by seq ascending.
+    /// `since_seq`: if Some(n), only return events with seq > n.
+    /// `limit`: max rows (defaults to 10_000).
+    pub fn universe_ops(
+        &self,
+        universe_key: &str,
+        since_seq: Option<i64>,
+        limit: usize,
+    ) -> Vec<crate::entry_index::EntryEventRow> {
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let Ok(guard) = uc.lock() else {
+            return vec![];
+        };
+        let limit = limit.min(10_000);
+        if let Some(since) = since_seq {
+            let mut stmt = match guard.prepare(
+                "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash, \
+                 frontmatter_json, author_id, request_id \
+                 FROM entry_events WHERE seq > ?1 ORDER BY seq ASC LIMIT ?2",
+            ) {
+                Ok(s) => s,
+                Err(_) => return vec![],
+            };
+            stmt.query_map(params![since, limit as i64], |row| {
+                Ok(crate::entry_index::EntryEventRow {
+                    seq: row.get(0)?,
+                    ts_micros: row.get(1)?,
+                    op: row.get(2)?,
+                    path: row.get(3)?,
+                    body_hash: row.get(4)?,
+                    prev_body_hash: row.get(5)?,
+                    frontmatter_json: row.get(6)?,
+                    author_id: row.get(7)?,
+                    request_id: row.get(8)?,
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+        } else {
+            let mut stmt = match guard.prepare(
+                "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash, \
+                 frontmatter_json, author_id, request_id \
+                 FROM entry_events ORDER BY seq ASC LIMIT ?1",
+            ) {
+                Ok(s) => s,
+                Err(_) => return vec![],
+            };
+            stmt.query_map(params![limit as i64], |row| {
+                Ok(crate::entry_index::EntryEventRow {
+                    seq: row.get(0)?,
+                    ts_micros: row.get(1)?,
+                    op: row.get(2)?,
+                    path: row.get(3)?,
+                    body_hash: row.get(4)?,
+                    prev_body_hash: row.get(5)?,
+                    frontmatter_json: row.get(6)?,
+                    author_id: row.get(7)?,
+                    request_id: row.get(8)?,
+                })
+            })
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            .unwrap_or_default()
+        }
+    }
+
+    /// Read entry_events up to (and including) `to_seq`, ordered by seq ascending.
+    pub fn universe_ops_to_seq(
+        &self,
+        universe_key: &str,
+        to_seq: i64,
+    ) -> Vec<crate::entry_index::EntryEventRow> {
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let Ok(guard) = uc.lock() else {
+            return vec![];
+        };
+        let mut stmt = match guard.prepare(
+            "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash, \
+             frontmatter_json, author_id, request_id \
+             FROM entry_events WHERE seq <= ?1 ORDER BY seq ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![to_seq], |row| {
+            Ok(crate::entry_index::EntryEventRow {
+                seq: row.get(0)?,
+                ts_micros: row.get(1)?,
+                op: row.get(2)?,
+                path: row.get(3)?,
+                body_hash: row.get(4)?,
+                prev_body_hash: row.get(5)?,
+                frontmatter_json: row.get(6)?,
+                author_id: row.get(7)?,
+                request_id: row.get(8)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Read ops in a seq range [from_seq+1, to_seq] (exclusive start, inclusive end).
+    pub fn universe_ops_range(
+        &self,
+        universe_key: &str,
+        from_seq: i64,
+        to_seq: i64,
+    ) -> Vec<crate::entry_index::EntryEventRow> {
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let Ok(guard) = uc.lock() else {
+            return vec![];
+        };
+        let mut stmt = match guard.prepare(
+            "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash, \
+             frontmatter_json, author_id, request_id \
+             FROM entry_events WHERE seq > ?1 AND seq <= ?2 ORDER BY seq ASC",
+        ) {
+            Ok(s) => s,
+            Err(_) => return vec![],
+        };
+        stmt.query_map(params![from_seq, to_seq], |row| {
+            Ok(crate::entry_index::EntryEventRow {
+                seq: row.get(0)?,
+                ts_micros: row.get(1)?,
+                op: row.get(2)?,
+                path: row.get(3)?,
+                body_hash: row.get(4)?,
+                prev_body_hash: row.get(5)?,
+                frontmatter_json: row.get(6)?,
+                author_id: row.get(7)?,
+                request_id: row.get(8)?,
+            })
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
+    /// Record a branch operation in the global audit log.
+    pub fn record_branch_audit(
+        &self,
+        operation: &str,
+        source_universe: &str,
+        target_universe: &str,
+        ops_applied: i64,
+        conflicts: i64,
+        author_id: Option<&str>,
+    ) -> anyhow::Result<i64> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO branch_audits \
+             (operation, source_universe, target_universe, ops_applied, conflicts, author_id, created_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                operation,
+                source_universe,
+                target_universe,
+                ops_applied,
+                conflicts,
+                author_id,
+                now,
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
     }
 }

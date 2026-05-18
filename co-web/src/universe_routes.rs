@@ -211,6 +211,8 @@ pub async fn list_public_universes(
                     let s: String = row.get(10).unwrap_or_default();
                     if s.is_empty() { None } else { Some(s) }
                 },
+                forked_from: None,
+                forked_at_op: None,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -505,9 +507,8 @@ pub async fn delete_universe(
         tables.sort();
         for table in &tables {
             let sql = format!("DELETE FROM \"{table}\" WHERE universe_key = ?1");
-            conn.execute(&sql, [&slug]).map_err(|e| {
-                AppError::Internal(format!("delete cascade ({table}): {e}"))
-            })?;
+            conn.execute(&sql, [&slug])
+                .map_err(|e| AppError::Internal(format!("delete cascade ({table}): {e}")))?;
         }
         conn.execute("DELETE FROM universes WHERE key = ?1", [&slug])
             .map_err(|e| AppError::Internal(format!("delete cascade (universes): {e}")))?;
@@ -586,13 +587,29 @@ pub async fn duplicate_universe(
         }
     }
 
-    let universe = lock_storage(&state).clone_universe(
+    // Capture parent's current op seq before forking (Phase 3 lineage).
+    let forked_at_op = {
+        let storage = lock_storage(&state);
+        storage.universe_max_op_seq(&source_slug)
+    };
+
+    let mut universe = lock_storage(&state).clone_universe(
         &source_slug,
         &body.key,
         &body.name,
         &body.description,
         &user_id,
     )?;
+
+    // Record lineage: the new universe was forked from source at forked_at_op.
+    if let Err(e) =
+        lock_storage(&state).set_universe_lineage(&body.key, &source_slug, Some(forked_at_op))
+    {
+        tracing::warn!("CO-95: set_universe_lineage failed for {}: {e}", body.key);
+    } else {
+        universe.forked_from = Some(source_slug.clone());
+        universe.forked_at_op = Some(forked_at_op);
+    }
 
     Ok((StatusCode::CREATED, Json(universe)))
 }

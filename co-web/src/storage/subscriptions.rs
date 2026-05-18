@@ -101,6 +101,8 @@ impl Storage {
                 // CO-98: search results don't carry parent_key (not load-bearing
                 // for the search UX); leave as None for resilience.
                 parent_key: None,
+                forked_from: None,
+                forked_at_op: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())

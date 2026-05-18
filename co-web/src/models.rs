@@ -393,6 +393,12 @@ pub struct Universe {
     /// sidebar (e.g. timeline trio under `template`). `None` = top-level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_key: Option<String>,
+    /// CO-95: universe this was forked from (Phase 3 lineage).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<String>,
+    /// CO-95: op seq in the parent universe at the moment of fork.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_at_op: Option<i64>,
 }
 
 fn default_visibility() -> String {

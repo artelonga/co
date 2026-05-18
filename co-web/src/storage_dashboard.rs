@@ -90,10 +90,11 @@ fn walk_bytes(root: &Path, predicate: impl Fn(&Path) -> bool + Copy) -> u64 {
             let Ok(ft) = entry.file_type() else { continue };
             if ft.is_dir() {
                 inner(&path, pred, acc);
-            } else if ft.is_file() && pred(&path) {
-                if let Ok(m) = entry.metadata() {
-                    *acc += m.len();
-                }
+            } else if ft.is_file()
+                && pred(&path)
+                && let Ok(m) = entry.metadata()
+            {
+                *acc += m.len();
             }
         }
     }
@@ -138,7 +139,10 @@ pub enum DashboardFilter<'a> {
 }
 
 /// Compute storage summary for the universes matching `filter`.
-pub fn compute_dashboard_filtered(state: &AppState, filter: DashboardFilter<'_>) -> StorageDashboard {
+pub fn compute_dashboard_filtered(
+    state: &AppState,
+    filter: DashboardFilter<'_>,
+) -> StorageDashboard {
     let storage = state.storage.lock();
     let data_dir: PathBuf = storage.data_dir.clone();
     drop(storage);
@@ -212,7 +216,12 @@ pub fn compute_dashboard_filtered(state: &AppState, filter: DashboardFilter<'_>)
         let uc_arc = storage.universe_conn(&key);
         drop(storage);
         if let Ok(uc) = uc_arc.lock() {
-            for t in ["entries", "entry_events", "entry_relations", "references_meta"] {
+            for t in [
+                "entries",
+                "entry_events",
+                "entry_relations",
+                "references_meta",
+            ] {
                 let rows: i64 = uc
                     .query_row(&format!("SELECT COUNT(*) FROM {t}"), [], |r| r.get(0))
                     .unwrap_or(0);

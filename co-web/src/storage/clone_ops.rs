@@ -964,6 +964,8 @@ impl Storage {
             requires_login: false,
             visibility: "private".into(),
             parent_key: None,
+            forked_from: None,
+            forked_at_op: None,
         })
     }
 

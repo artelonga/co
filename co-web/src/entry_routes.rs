@@ -210,7 +210,10 @@ fn filter_public_for_anon(
     if !is_public_convention(slug) || !caller_is_anon(state, headers) {
         return entries;
     }
-    entries.into_iter().filter(|e| is_public_path(&e.path)).collect()
+    entries
+        .into_iter()
+        .filter(|e| is_public_path(&e.path))
+        .collect()
 }
 
 fn is_public_for_anon(state: &AppState, headers: &HeaderMap, slug: &str, path: &str) -> bool {
@@ -775,8 +778,8 @@ pub async fn update_entry(
             .map_err(|e| AppError::Internal(e.to_string()))?;
         // 2.7.25: append to entry_events. See vault_routes::write_vault_entry
         // for the parallel hook on the other write path.
-        if let Ok(fm_json) = serde_json::to_string(&new_fm) {
-            if let Err(e) = index.log_event(
+        if let Ok(fm_json) = serde_json::to_string(&new_fm)
+            && let Err(e) = index.log_event(
                 &path,
                 "put",
                 Some(&entry.body_hash),
@@ -785,9 +788,9 @@ pub async fn update_entry(
                 Some(&fm_json),
                 None,
                 None,
-            ) {
-                tracing::warn!("entry_events log failed for {slug}/{path}: {e}");
-            }
+            )
+        {
+            tracing::warn!("entry_events log failed for {slug}/{path}: {e}");
         }
         // CO-73: index semantic date fields (reuse cached manifest)
         index

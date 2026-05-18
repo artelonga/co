@@ -121,6 +121,33 @@ impl Storage {
         self.data_dir.join("universes").join(universe_key)
     }
 
+    /// Alias used by branch_routes to avoid name collision with universe_root (returns PathBuf).
+    pub fn universe_root_path(&self, universe_key: &str) -> PathBuf {
+        self.universe_root(universe_key)
+    }
+
+    /// Return a HashMap of path → body_hash for all entries in the universe.
+    /// Used by diff and cherry-pick conflict detection.
+    pub fn universe_current_hashes(
+        &self,
+        universe_key: &str,
+    ) -> std::collections::HashMap<String, String> {
+        let uc = self.universe_pool.get_or_open(universe_key);
+        let Ok(guard) = uc.lock() else {
+            return std::collections::HashMap::new();
+        };
+        let mut stmt =
+            match guard.prepare("SELECT path, body_hash FROM entries WHERE universe_key = ?1") {
+                Ok(s) => s,
+                Err(_) => return std::collections::HashMap::new(),
+            };
+        stmt.query_map(rusqlite::params![universe_key], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        .unwrap_or_default()
+    }
+
     /// Access the underlying meta.db connection (for auth, users, universes, quilombo).
     pub fn conn(&self) -> &Connection {
         &self.conn

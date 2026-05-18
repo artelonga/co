@@ -1705,5 +1705,43 @@ impl Storage {
                  ON telemetry_events(universe_key, timestamp);",
             )
             .expect("CO-179: idx_telemetry_universe_time");
+
+        if current_version < 45 {
+            // CO-95 Phase 3: universe lineage — track the parent universe and
+            // the op_seq at which a fork was created.
+            ensure_column(&self.conn, "universes", "forked_from", "TEXT")
+                .expect("migration v45: universes.forked_from");
+            ensure_column(&self.conn, "universes", "forked_at_op", "INTEGER")
+                .expect("migration v45: universes.forked_at_op");
+            ensure_column(&self.conn, "universes", "forked_at", "TEXT")
+                .expect("migration v45: universes.forked_at");
+            // Audit log for promote/revert/cherry-pick operations.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS branch_audits (
+                         id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                         operation       TEXT    NOT NULL,
+                         source_universe TEXT    NOT NULL,
+                         target_universe TEXT    NOT NULL,
+                         ops_applied     INTEGER NOT NULL DEFAULT 0,
+                         conflicts       INTEGER NOT NULL DEFAULT 0,
+                         author_id       TEXT,
+                         created_at      TEXT    NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_branch_audits_target
+                         ON branch_audits(target_universe, created_at DESC);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (45);",
+                )
+                .expect("migration v45: branch_audits + schema_version");
+        }
+
+        // CO-95 unconditional backfill — idempotent ensure_column calls guard
+        // against partial application of v45 on an existing instance.
+        ensure_column(&self.conn, "universes", "forked_from", "TEXT")
+            .expect("CO-95 backfill: universes.forked_from");
+        ensure_column(&self.conn, "universes", "forked_at_op", "INTEGER")
+            .expect("CO-95 backfill: universes.forked_at_op");
+        ensure_column(&self.conn, "universes", "forked_at", "TEXT")
+            .expect("CO-95 backfill: universes.forked_at");
     }
 }

@@ -609,10 +609,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // Visibility is implicit: the universe must exist + be
         // visible (the handler's `get_universe` check returns 404
         // otherwise, same shape as a deny).
-        .nest(
-            "/api/v1/universes",
-            crate::proposal_routes::inline_router(),
-        )
+        .nest("/api/v1/universes", crate::proposal_routes::inline_router())
         // 2.7.24: inbox — list inbound proposals across owned universes.
         .nest("/api/v1/me", crate::proposal_routes::inbox_router())
         // 1.75.0: blob CAS API (foundation for mempalace BaseBackend shim).

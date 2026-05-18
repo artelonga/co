@@ -5,6 +5,35 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-05-18 — CO-95: Universe branching — op log, replay, diff, promote, revert, cherry-pick
+
+Complete Phases 2-4 of universe branching. Phase 1 (snapshot duplication via `POST /duplicate`) shipped in 2.9.0.
+
+### CO-95 Phase 2 — Universe op log
+
+Every vault PUT/DELETE writes to the per-universe `entry_events` append-only log. This release adds the API endpoint to inspect it:
+
+- `GET /api/v1/universes/:slug/ops` — list entry_events (owner/member auth). Supports `?since=<seq>&limit=<n>`.
+
+Op log guarantees: monotonically growing seq, crash-safe (same SQLite connection as the vault write).
+
+### CO-95 Phase 3 — Replay engine + diff
+
+- `GET /api/v1/universes/:slug/replay?to_op=<n>` — entry state at op N (put adds/updates, delete removes).
+- `GET /api/v1/universes/:slug/diff?from_op=<a>&to_op=<b>` — what changed between op A+1 and B.
+- `GET /api/v1/universes/:slug/diff?against=<other>` — compare two universes by entry body_hash.
+
+### CO-95 Phase 4 — Promote, revert, cherry-pick + lineage
+
+DB: migration v45 adds `forked_from`, `forked_at_op`, `forked_at` to `universes` + `branch_audits` table.
+
+- `POST /api/v1/universes/:slug/promote` — apply branch ops onto parent (last-write-wins, conflicts counted).
+- `POST /api/v1/universes/:slug/revert?to=<op>` — snapshot universe at historical op N.
+- `POST /api/v1/universes/:slug/cherry-pick` `{from, op_ids[]}` — apply specific ops from another universe.
+- `POST /api/v1/universes/:slug/duplicate` — now records lineage (`forked_from` + `forked_at_op`).
+
+All operations record conflicts in the response; never silently dropped.
+
 ## [2.9.0] — 2026-05-18 — Cross-repo architecture audit + security hardening + backlog scaffold
 
 Bundled theme covering everything since 2.7.29 — five repos audited and scaffolded, one universe migrated, one prod bug fixed, one user-facing security doc, 16 new backlog user-stories + 14 new epic specs, 70+ task specs scaffolded across all repos.

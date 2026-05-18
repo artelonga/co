@@ -428,8 +428,8 @@ pub(crate) fn write_vault_entry(
         // write. The log is the source of truth for time-travel and
         // the future Kafka/Iceberg export; see
         // co::public/transaction-log.md.
-        if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter) {
-            if let Err(e) = index.log_event(
+        if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter)
+            && let Err(e) = index.log_event(
                 path,
                 "put",
                 Some(&entry.body_hash),
@@ -438,11 +438,9 @@ pub(crate) fn write_vault_entry(
                 Some(&fm_json),
                 None,
                 None,
-            ) {
-                tracing::warn!(
-                    "entry_events log failed for {universe_key}/{path}: {e}",
-                );
-            }
+            )
+        {
+            tracing::warn!("entry_events log failed for {universe_key}/{path}: {e}",);
         }
         // CO-73: index semantic date fields (reuse cached manifest)
         index
