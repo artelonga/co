@@ -5,6 +5,76 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.9.0] — 2026-05-18 — Cross-repo architecture audit + security hardening + backlog scaffold
+
+Bundled theme covering everything since 2.7.29 — five repos audited and scaffolded, one universe migrated, one prod bug fixed, one user-facing security doc, 16 new backlog user-stories + 14 new epic specs, 70+ task specs scaffolded across all repos.
+
+### Cross-repo architecture audit (5 repos)
+
+C4-aligned `as-is.md` + `api-catalog.md` + `refactor-plan.md` produced for each of: **co**, **rfq-gateway**, **quilombo-blog**, **ArteLonga**, **yggdrasil**. Each repo's `docs/architecture/` is registered as a CO sub-universe via the shared `_universe.yaml` + `schema.yaml` + `CHANGELOG.md` template — Iceberg-compatible append-only log slot ready for the transaction-log roadmap.
+
+70+ task specs written across all 5 repos in `work/<space>/`:
+- CO: CO-215..226 user-stories + CO-227..231 epics + CO-232..233 bug stories + CO-234 chat fix
+- rfq-gateway: RFQ-14..23 + RFQ-24..26 epics + RFQ-27 OpenAPI endpoint
+- quilombo-blog: bootstrapped `work/qb/` + QB-1..12 + QB-13..15 epics
+- ArteLonga: AL-51..60 + AL-64..66 epics
+- yggdrasil: YG-38..46 + YG-47..49 epics + YG-50 OpenAPI spec
+
+This is the "universally documented API + docs template" target — every repo will expose `/openapi.json` after the universal-template tasks ship (CO-226 + QB-1 + AL-55 + RFQ-27 + YG-50).
+
+### Comunicação migrated to a live CO universe
+
+48 markdown files migrated from `/Users/artelonga/projects/comunicacao` to the CO universe `comunicacao` via Vault PUT. Every write logs to `entry_events`. The local git repo retires in favor of CO as source-of-truth + audit log.
+
+### CO-234 — fix chat "Entre para participar do chat" for logged-in users
+
+Universal bug across every universe: `chat.js:_hasSessionCookie()` regex-tested `document.cookie` for `session=`, but the session cookie is `HttpOnly` at `auth.rs:271`. Replaced with `_isAuthenticated()` checking `_state?.me`. Server-side WS handshake unchanged.
+
+### CO-232 / CO-233 — flag two open prod-integration issues as user-stories
+
+- CO-232 — Cross-universe deep-link `/<universe>/<unknown-slug>` falls through to universe home instead of 404
+- CO-233 — Sync pipeline reliability (latest changes not appearing on prod web)
+
+Both surfaced during the audit conversation; tracked for the next operational sweep.
+
+### Security docs + CO-236 / CO-237 specs
+
+New user-facing page at `/seguranca-criptografia` documenting the actual storage model with file:line citations into the code:
+
+- **Senhas**: Argon2id (default params, OsRng salt)
+- **JWTs**: ES256 (HS256 legacy fallback), 7-day TTL
+- **Cookies**: HttpOnly + SameSite=Lax (the gotcha that caused CO-234)
+- **Tokens de API**: 90-day, plaintext at rest (gap → CO-237)
+- **Anexos**: ChaCha20-Poly1305 per-universe (CO-148)
+- **Canais de recuperação**: encrypted-at-rest values
+- **Códigos de verificação**: Argon2id-hashed
+
+Plus:
+- **CO-235** — `co clone <git-url>` feature concept (universe = open-source repo, automated mirroring)
+- **CO-236** — `co auth` CLI command suite (reset-password, login, change-password, token create/list/revoke)
+- **CO-237** — hash API tokens at rest (SHA-256 or Argon2id)
+
+### 8 additional follow-on specs (CO-238..245) — sidebar / storage / file-types review
+
+- CO-238 — Sidebar UX clarity (owned vs member vs sub-universe semantics)
+- CO-239 — Real host disk stats (`nix::sys::statvfs`; currently stubbed to zero)
+- CO-240 — Per-universe `data_db_bytes` fix (currently 0 for every universe)
+- CO-241 — True content-volume metrics (lines / words / chars) — fixes "lines = files" confusion
+- CO-242 — Unified file listing — surface ALL file types (PDF, image, video, code), not just .md
+- CO-243 — VS Code (and LSP) integration — open universe as remote workspace
+- CO-244 — Python / R REPL interoperability — DuckDB attach + in-browser REPL
+- CO-245 — Inline CodeMirror editor for plaintext file types
+
+### Tooling shipped (transitional — roadmap is native CO commands)
+
+`scripts/gen-task-specs.py`, `scripts/apply-docs-subuniverse.py`, `scripts/migrate-comunicacao.py`, `scripts/launch-phase-c.sh`, `scripts/gen-co-238-245.py`. These will be replaced by native CO CLI commands as part of CO-235 (`co clone`) and CO-236 (`co auth`).
+
+### Version note
+
+Skipping 2.8.x because CO-214 work was tagged 2.8.0/2.8.1 on a feature branch that never landed as a proper release. 2.9.0 cleanly marks the first stable release-tagged point that contains the audit cycle.
+
+The next milestone is Phase C execution — co-auto cycles all five repos through their refactor backlogs on long-running branches, ONE PR per repo at the end.
+
 ## [2.7.29] — 2026-05-16 — Bug fixes + remove admin gate + architecture review
 
 Four threads, one release:
