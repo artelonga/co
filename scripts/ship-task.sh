@@ -79,18 +79,71 @@ if [[ "$AHEAD" -eq 0 ]]; then
 fi
 echo "Commits:  $AHEAD ahead of origin/main"
 
-# Rebase on origin/main
-echo "Rebasing on origin/main..."
-if ! git rebase origin/main; then
-  echo
-  echo "ERROR: Rebase failed (conflicts). Steps to resolve:" >&2
-  echo "  cd $WT" >&2
-  echo "  # resolve conflicts" >&2
-  echo "  git add <files>" >&2
-  echo "  git rebase --continue" >&2
-  echo "  $0 $TASK_ID  # rerun" >&2
-  exit 2
+# === Pre-rebase status sync: set task spec to 'done' on this branch ===
+# Root cause of repeated rebase conflicts: each new task's spec file (work/<space>/<TASK>.md)
+# may have status=in_progress on the worktree branch while main has status=done from prior
+# sync. Fix at source: stamp 'done' on the branch BEFORE rebase so main's state matches.
+SPEC_LOCAL=""
+for space_dir in work/*/; do
+  candidate="${space_dir}${TASK_ID}.md"
+  if [[ -f "$candidate" ]]; then
+    SPEC_LOCAL="$candidate"
+    break
+  fi
+done
+if [[ -n "$SPEC_LOCAL" ]]; then
+  current_status=$(grep -m1 '^status:' "$SPEC_LOCAL" | sed 's/^status: *//')
+  if [[ "$current_status" != "done" ]]; then
+    echo "  patching $SPEC_LOCAL status: $current_status → done"
+    # macOS sed compat
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+      sed -i '' 's/^status:.*$/status: done/' "$SPEC_LOCAL"
+    else
+      sed -i 's/^status:.*$/status: done/' "$SPEC_LOCAL"
+    fi
+    git add "$SPEC_LOCAL"
+    # Amend the last commit (the task's commit) to bundle status: done
+    git commit --amend --no-edit --no-verify > /dev/null 2>&1 || git commit -m "chore: mark $TASK_ID done" --no-verify > /dev/null 2>&1
+  fi
 fi
+
+# Rebase on origin/main, auto-resolving common conflict patterns:
+#   - work/<space>/X.md  (spec status sync)  → ours (this branch's, now 'done')
+#   - CHANGELOG.md       (release notes)     → theirs (latest from main + we'll re-append)
+#   - Cargo.lock         (build state)       → theirs (regenerate)
+echo "Rebasing on origin/main (auto-resolving metadata conflicts)..."
+git rebase origin/main 2>&1 | tail -3 || true
+while [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]]; do
+  echo "  resolving conflicts:"
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if [[ "$f" == work/*/*.md ]]; then
+      echo "    $f → ours (spec)"
+      git checkout --ours -- "$f"
+    elif [[ "$f" == "CHANGELOG.md" || "$f" == "Cargo.lock" ]]; then
+      echo "    $f → theirs (regenerable/append-only)"
+      git checkout --theirs -- "$f"
+    elif [[ "$f" == "Cargo.toml" ]]; then
+      # Cargo.toml version conflict: keep the higher version from the task branch
+      # by taking ours (the task's). If main has a higher version, the user should
+      # manually verify.
+      echo "    $f → ours (task's version bump)"
+      git checkout --ours -- "$f"
+    else
+      echo "    $f → no auto-resolve; aborting" >&2
+      git rebase --abort 2>&1 | head -1 >&2
+      echo "ERROR: Unhandled conflict in $f. Resolve manually." >&2
+      exit 2
+    fi
+    git add "$f"
+  done < <(git diff --name-only --diff-filter=U)
+  # Continue
+  if ! git -c core.editor=true rebase --continue 2>&1 | tail -3; then
+    # If --continue fails, exit
+    echo "ERROR: rebase --continue failed; resolve manually." >&2
+    exit 2
+  fi
+done
 
 # Read task title + conventional-commit prefix from spec file
 TASK_TITLE="$TASK_ID"
