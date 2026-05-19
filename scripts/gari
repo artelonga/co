@@ -1,0 +1,355 @@
+#!/usr/bin/env bash
+# gari — periodic cleaner for the ArteLonga monorepo cluster.
+#
+# pt-BR "gari" = street sweeper. This script sweeps regenerable build
+# artifacts, session caches, npm modules, stale worktrees, dangling refs,
+# and editor cruft across all ~/projects/<repo>/ repositories.
+#
+# Defaults to DRY-RUN. Use --execute to actually delete (requires typed confirmation).
+#
+# Usage:
+#   gari                    # dry-run: show what WOULD be deleted, with sizes
+#   gari --execute          # actually delete (interactive confirmation)
+#   gari --only <category>  # restrict to one category
+#   gari --stash-age <N>    # flag stashes older than N days (default 7; never auto-deletes)
+#
+# Categories (each safe + idempotent):
+#   target      Rust build artifacts (target/ + .worktrees/*/target/) — Cargo regenerates
+#   node        node_modules/ — npm/pnpm install regenerates
+#   sessions    /private/tmp/claude-*/*/tasks/*.output — Claude Code session buffers
+#   worktrees   .worktrees/<TASK>/ where the branch is gone from origin (merged + deleted)
+#   git-prune   git fetch --prune across all repos — drops stale origin/* refs
+#   ds-store    .DS_Store files (macOS Finder cruft)
+#   stashes     git stashes older than N days (REPORT ONLY — review before deleting manually)
+#
+# Authored 2026-05-19 during the Phase C architecture-refactor cycle when
+# /Users/artelonga/projects/co/target alone hit 208 GB. Run this nightly via
+# launchd to keep the cluster lean.
+
+set -uo pipefail
+
+DRY_RUN=1
+ONLY=""
+STASH_AGE_DAYS=7
+AUTO_YES=0
+EVENT_LOG="$HOME/projects/co/data/gari-events.jsonl"
+
+REPOS=(
+  "/Users/artelonga/projects/co"
+  "/Users/artelonga/projects/rfq-gateway"
+  "/Users/artelonga/projects/ArteLonga"
+  "/Users/artelonga/projects/yggdrasil"
+  "/Users/artelonga/projects/quilomboaraucaria"
+  "/Users/artelonga/projects/universos"
+  "/Users/artelonga/projects/comunicacao"
+)
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --execute) DRY_RUN=0 ;;
+    --dry-run) DRY_RUN=1 ;;
+    --yes|-y) AUTO_YES=1 ;;
+    --only) ONLY="$2"; shift ;;
+    --stash-age) STASH_AGE_DAYS="$2"; shift ;;
+    --event-log) EVENT_LOG="$2"; shift ;;
+    --help|-h)
+      grep -E "^#" "$0" | sed 's/^# \?//'
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1. Try --help."
+      exit 1
+      ;;
+  esac
+  shift
+done
+
+CYAN=$(tput setaf 6 2>/dev/null || echo "")
+GREEN=$(tput setaf 2 2>/dev/null || echo "")
+YELLOW=$(tput setaf 3 2>/dev/null || echo "")
+RED=$(tput setaf 1 2>/dev/null || echo "")
+DIM=$(tput dim 2>/dev/null || echo "")
+RESET=$(tput sgr0 2>/dev/null || echo "")
+
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "${CYAN}━━━ gari (dry-run) — nothing will be deleted ━━━${RESET}"
+  echo "${DIM}Run with --execute to actually clean.${RESET}"
+else
+  echo "${YELLOW}━━━ gari (EXECUTE) — deletions are permanent ━━━${RESET}"
+  if [[ $AUTO_YES -eq 0 ]]; then
+    read -p "Type 'sweep' to confirm: " confirm
+    if [[ "$confirm" != "sweep" ]]; then
+      echo "aborted"
+      exit 1
+    fi
+  else
+    echo "${DIM}--yes: auto-confirmed${RESET}"
+  fi
+fi
+echo
+
+# Initialise event log — every deletion appends one JSONL row for auditability.
+# Phase 2 (CO-249): events upload to the CO 'ops' universe via Vault PUT.
+mkdir -p "$(dirname "$EVENT_LOG")"
+gari_emit() {
+  local category="$1" path="$2" bytes="$3" mode="$4"
+  printf '{"ts":"%s","host":"%s","user":"%s","mode":"%s","category":"%s","path":"%s","bytes_freed":%s}\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(hostname -s)" \
+    "$USER" \
+    "$mode" \
+    "$category" \
+    "$path" \
+    "${bytes:-0}" \
+    >> "$EVENT_LOG"
+}
+
+human_size() { du -sh "$1" 2>/dev/null | awk '{print $1}'; }
+# du -sb is GNU-only; macOS uses kilobytes via -sk, multiply ×1024 for bytes.
+total_bytes() {
+  if du --help 2>&1 | grep -q "\-b"; then
+    du -sb "$@" 2>/dev/null | awk '{sum+=$1} END {print sum+0}'
+  else
+    du -sk "$@" 2>/dev/null | awk '{sum+=$1} END {print (sum*1024)+0}'
+  fi
+}
+fmt_bytes() {
+  local b=$1
+  if (( b > 1073741824 )); then awk "BEGIN { printf \"%.1fG\", $b/1073741824 }"
+  elif (( b > 1048576 )); then awk "BEGIN { printf \"%.1fM\", $b/1048576 }"
+  elif (( b > 1024 )); then awk "BEGIN { printf \"%.1fK\", $b/1024 }"
+  else echo "${b}B"
+  fi
+}
+
+TOTAL_FREED=0
+
+want() { [[ -z "$ONLY" || "$ONLY" == "$1" ]]; }
+
+# ────────────────────────────────────────────────────────────────
+# 1. target/ (Rust build artifacts)
+# ────────────────────────────────────────────────────────────────
+if want target; then
+  echo "${CYAN}╭─ target/ ──────────────────────────────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: Cargo regenerates target/ from source on next     │${RESET}"
+  echo "${CYAN}│      cargo build. Safe. Causes one full rebuild        │${RESET}"
+  echo "${CYAN}│      (~5-15 min) the first time after deletion.        │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  CAT_FREED=0
+  for repo in "${REPOS[@]}"; do
+    target="$repo/target"
+    if [[ -d "$target" ]]; then
+      bytes=$(total_bytes "$target")
+      CAT_FREED=$((CAT_FREED + bytes))
+      printf "    %-55s %8s\n" "$(basename "$repo")/target" "$(human_size "$target")"
+      if [[ $DRY_RUN -eq 0 ]]; then
+        rm -rf "$target"
+        gari_emit "target" "$target" "$bytes" "execute"
+        echo "      ${GREEN}✓ deleted${RESET}"
+      else
+        gari_emit "target" "$target" "$bytes" "dry-run"
+      fi
+    fi
+    if [[ -d "$repo/.worktrees" ]]; then
+      for wt in "$repo/.worktrees"/*; do
+        wt_target="$wt/target"
+        if [[ -d "$wt_target" ]]; then
+          bytes=$(total_bytes "$wt_target")
+          CAT_FREED=$((CAT_FREED + bytes))
+          printf "    %-55s %8s\n" "$(basename "$repo")/.worktrees/$(basename "$wt")/target" "$(human_size "$wt_target")"
+          if [[ $DRY_RUN -eq 0 ]]; then
+            rm -rf "$wt_target"
+            gari_emit "target" "$wt_target" "$bytes" "execute"
+            echo "      ${GREEN}✓ deleted${RESET}"
+          else
+            gari_emit "target" "$wt_target" "$bytes" "dry-run"
+          fi
+        fi
+      done
+    fi
+  done
+  echo "  ${GREEN}subtotal: $(fmt_bytes $CAT_FREED)${RESET}"
+  TOTAL_FREED=$((TOTAL_FREED + CAT_FREED))
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 2. node_modules/
+# ────────────────────────────────────────────────────────────────
+if want node; then
+  echo "${CYAN}╭─ node_modules/ ────────────────────────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: npm/pnpm install regenerates from package.json/   │${RESET}"
+  echo "${CYAN}│      package-lock.json. Safe. ~1-3 min reinstall.      │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  CAT_FREED=0
+  for repo in "${REPOS[@]}"; do
+    while IFS= read -r nm; do
+      bytes=$(total_bytes "$nm")
+      CAT_FREED=$((CAT_FREED + bytes))
+      rel=${nm#"$repo/"}
+      printf "    %-55s %8s\n" "$(basename "$repo")/$rel" "$(human_size "$nm")"
+      if [[ $DRY_RUN -eq 0 ]]; then
+        rm -rf "$nm"
+        gari_emit "node_modules" "$nm" "$bytes" "execute"
+        echo "      ${GREEN}✓ deleted${RESET}"
+      else
+        gari_emit "node_modules" "$nm" "$bytes" "dry-run"
+      fi
+    done < <(find "$repo" -maxdepth 4 -name node_modules -type d -prune 2>/dev/null)
+  done
+  echo "  ${GREEN}subtotal: $(fmt_bytes $CAT_FREED)${RESET}"
+  TOTAL_FREED=$((TOTAL_FREED + CAT_FREED))
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 3. /private/tmp/claude-* session task outputs
+# ────────────────────────────────────────────────────────────────
+if want sessions; then
+  echo "${CYAN}╭─ /private/tmp/claude-* sessions ───────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: Claude Code stores per-tool output buffers here.  │${RESET}"
+  echo "${CYAN}│      Completed-session outputs are regenerable +       │${RESET}"
+  echo "${CYAN}│      grow unbounded. Each session gets a fresh dir.    │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  CAT_FREED=0
+  for d in /private/tmp/claude-*/*/tasks; do
+    if [[ -d "$d" ]]; then
+      bytes=$(total_bytes "$d")
+      CAT_FREED=$((CAT_FREED + bytes))
+      printf "    %-55s %8s\n" "$d" "$(human_size "$d")"
+      if [[ $DRY_RUN -eq 0 ]]; then
+        find "$d" -name "*.output" -delete 2>/dev/null
+        echo "      ${GREEN}✓ pruned *.output${RESET}"
+      fi
+    fi
+  done
+  echo "  ${GREEN}subtotal: $(fmt_bytes $CAT_FREED)${RESET}"
+  TOTAL_FREED=$((TOTAL_FREED + CAT_FREED))
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 4. stale .worktrees/<TASK>/ (branch gone from origin)
+# ────────────────────────────────────────────────────────────────
+if want worktrees; then
+  echo "${CYAN}╭─ stale .worktrees/<TASK>/ ─────────────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: After a per-task PR merges with --delete-branch,  │${RESET}"
+  echo "${CYAN}│      origin no longer has the branch — the local       │${RESET}"
+  echo "${CYAN}│      worktree is just cruft. Branch ref also dropped.  │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  CAT_FREED=0
+  for repo in "${REPOS[@]}"; do
+    if [[ ! -d "$repo/.worktrees" ]]; then continue; fi
+    for wt in "$repo/.worktrees"/*; do
+      [[ -d "$wt" ]] || continue
+      branch=$(git -C "$wt" branch --show-current 2>/dev/null)
+      [[ -n "$branch" ]] || continue
+      # Is the branch still on origin?
+      if ! git -C "$repo" ls-remote --heads origin "$branch" 2>/dev/null | grep -q .; then
+        bytes=$(total_bytes "$wt")
+        CAT_FREED=$((CAT_FREED + bytes))
+        rel=$(basename "$repo")/.worktrees/$(basename "$wt")
+        printf "    %-55s %8s\n" "$rel" "$(human_size "$wt")"
+        printf "    %-55s ${DIM}branch '%s' gone from origin${RESET}\n" "" "$branch"
+        if [[ $DRY_RUN -eq 0 ]]; then
+          git -C "$repo" worktree remove --force "$wt" 2>&1 | head -1 | sed 's/^/      /'
+          git -C "$repo" branch -D "$branch" 2>&1 | head -1 | sed 's/^/      /'
+          gari_emit "worktree" "$wt" "$bytes" "execute"
+          echo "      ${GREEN}✓ removed worktree + branch${RESET}"
+        else
+          gari_emit "worktree" "$wt" "$bytes" "dry-run"
+        fi
+      fi
+    done
+  done
+  if [[ $CAT_FREED -eq 0 ]]; then
+    echo "    ${DIM}(no stale worktrees found)${RESET}"
+  fi
+  echo "  ${GREEN}subtotal: $(fmt_bytes $CAT_FREED)${RESET}"
+  TOTAL_FREED=$((TOTAL_FREED + CAT_FREED))
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 5. git fetch --prune (no size, just ref hygiene)
+# ────────────────────────────────────────────────────────────────
+if want git-prune; then
+  echo "${CYAN}╭─ git fetch --prune ────────────────────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: After PR auto-delete-branch, refs/remotes/origin  │${RESET}"
+  echo "${CYAN}│      can linger. --prune drops the dead ones. No data  │${RESET}"
+  echo "${CYAN}│      loss; just cleaner ref namespace.                 │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  for repo in "${REPOS[@]}"; do
+    [[ -d "$repo/.git" ]] || continue
+    if [[ $DRY_RUN -eq 0 ]]; then
+      out=$(git -C "$repo" fetch --prune 2>&1 | grep -E "deleted|pruned" || true)
+      count=$(echo "$out" | grep -c . 2>/dev/null || echo 0)
+      printf "    %-55s %s refs pruned\n" "$(basename "$repo")" "$count"
+    else
+      # Probe without pruning
+      probe=$(git -C "$repo" fetch --dry-run --prune 2>&1 | grep -c "would prune" || echo 0)
+      printf "    %-55s ${DIM}~%s refs would be pruned${RESET}\n" "$(basename "$repo")" "$probe"
+    fi
+  done
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 6. .DS_Store
+# ────────────────────────────────────────────────────────────────
+if want ds-store; then
+  echo "${CYAN}╭─ .DS_Store ────────────────────────────────────────────╮${RESET}"
+  echo "${CYAN}│ Why: macOS Finder metadata. Never useful anywhere.     │${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  CAT_FREED=0
+  count=0
+  for repo in "${REPOS[@]}"; do
+    while IFS= read -r f; do
+      bytes=$(stat -f %z "$f" 2>/dev/null || echo 0)
+      CAT_FREED=$((CAT_FREED + bytes))
+      count=$((count + 1))
+      if [[ $DRY_RUN -eq 0 ]]; then
+        rm -f "$f"
+      fi
+    done < <(find "$repo" -name .DS_Store -type f 2>/dev/null)
+  done
+  echo "    $count files, $(fmt_bytes $CAT_FREED) total"
+  TOTAL_FREED=$((TOTAL_FREED + CAT_FREED))
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# 7. Old stashes (report only)
+# ────────────────────────────────────────────────────────────────
+if want stashes; then
+  echo "${CYAN}╭─ git stashes older than $STASH_AGE_DAYS days (REPORT ONLY) ─────────╮${RESET}"
+  echo "${CYAN}│ Why: Old stashes likely contain stale WIP. Never auto- │${RESET}"
+  echo "${CYAN}│      deleted (data loss risk); listed for manual review.│${RESET}"
+  echo "${CYAN}╰────────────────────────────────────────────────────────╯${RESET}"
+  cutoff_ts=$(($(date +%s) - STASH_AGE_DAYS * 86400))
+  found=0
+  for repo in "${REPOS[@]}"; do
+    [[ -d "$repo/.git" ]] || continue
+    while IFS=$'\t' read -r stash ts rest; do
+      if [[ -n "$ts" && "$ts" -lt $cutoff_ts ]]; then
+        date_str=$(date -r "$ts" '+%Y-%m-%d')
+        printf "    %-25s %s %s\n" "$(basename "$repo")" "$stash@$date_str" "$rest"
+        found=$((found + 1))
+      fi
+    done < <(git -C "$repo" stash list --pretty=$'%gd\t%ct\t%s' 2>/dev/null)
+  done
+  if [[ $found -eq 0 ]]; then
+    echo "    ${DIM}(no stashes older than $STASH_AGE_DAYS days)${RESET}"
+  else
+    echo "  ${DIM}Review and 'git -C <repo> stash drop <ref>' to remove.${RESET}"
+  fi
+  echo
+fi
+
+# ────────────────────────────────────────────────────────────────
+# Total
+# ────────────────────────────────────────────────────────────────
+echo "${GREEN}━━━ TOTAL RECLAIMABLE: $(fmt_bytes $TOTAL_FREED) ━━━${RESET}"
+if [[ $DRY_RUN -eq 1 ]]; then
+  echo "${DIM}Run 'gari --execute' to actually delete.${RESET}"
+fi
