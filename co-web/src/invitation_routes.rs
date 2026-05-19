@@ -301,20 +301,6 @@ pub async fn create_invitation_handler(
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
-        // CO-199: notification for invited user if they have a CO account
-        if let Some(ref invited_uid) = invited_user_id {
-            let _ = storage.create_notification(
-                invited_uid,
-                "universe.invitation",
-                Some(&slug),
-                None,
-                &user_id.0,
-                &token_hash,
-                "notif.universe.invitation",
-                serde_json::json!({"name": inviter_name, "universe": universe_name}),
-            );
-        }
-
         (
             invited_email,
             invited_user_id,
@@ -324,6 +310,22 @@ pub async fn create_invitation_handler(
             raw_token,
         )
     };
+
+    // CO-220: emit NotificationRequested through the event bus so the
+    // notification worker handles it without coupling invitation_routes to
+    // the notification subsystem directly.
+    if let Some(ref invited_uid) = invited_user_id {
+        state.event_bus.publish(crate::events::DomainEvent::NotificationRequested {
+            recipient_id: invited_uid.clone(),
+            kind: "universe.invitation".into(),
+            universe_key: Some(slug.clone()),
+            room_id: None,
+            actor_id: user_id.0.clone(),
+            object_id: token_hash.clone(),
+            summary_key: "notif.universe.invitation".into(),
+            summary_params: serde_json::json!({"name": inviter_name, "universe": universe_name}),
+        });
+    }
 
     // Send email if we have an address (fire-and-forget, outside the lock).
     if let Some(ref email) = invited_email {
@@ -717,6 +719,7 @@ mod tests {
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+            event_bus: crate::events::Bus::new(),
         });
         crate::server::build_router(state, None)
     }

@@ -5,23 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.10.1] — 2026-05-19 — Typed handler payloads (CO-217)
+## [2.11.0] — 2026-05-19 — In-process event bus (CO-220)
 
-### Refactored
+### Added
 
-- **18 named `Deserialize`/`Serialize` structs** replace `serde_json::Value` at handler boundaries:
-  - `UpdatePreferencesRequest` (notification_routes) — typed partial-update for notification prefs
-  - `UpdateUniverseRequest` + `UpdateUniverseResponse` (universe_routes) — typed PUT body and response
-  - `DeleteUniverseResponse` (universe_routes) — typed DELETE confirmation
-  - `EntryHistoryResponse` (entry_routes) — typed `path + events + total` response
-  - `CreateLeadResponse` + `LeadsListResponse` (lead_routes) — typed create and list responses
-  - `CreateFlagResponse` + `ToggleFlagResponse` (ab_routes) — typed A/B flag management responses
-  - `MissaoComParticipacoes` + `LinkCoAccountResponse` (quilombo_routes) — typed mission and account-link responses
-  - `AdminResumo` + `PaginaPopular` (quilombo_models + quilombo_storage) — typed admin summary
-  - `UniverseStat` + `UserStatsResponse` + `GoogleStatusResponse` (server/auth_handlers) — typed auth stats
-  - `CacheLayerStats` + `CacheStats` (cache) — typed cache metrics; `CacheLayer::stats()` now returns `CacheStats`
-- All remaining `serde_json::Value` sites annotated with `// FREEFORM: <reason>` (frontmatter, telemetry properties, UTM/experiment maps).
-- Tests added for every replaced handler exercising the typed parse/serialize roundtrip.
+- **`crate::events` module**: `Bus`, `BusReceiver`, `DomainEvent`, and `EventFilter` — a thin tokio-broadcast-backed in-process event bus.
+- **`DomainEvent` variants**: `EntryWritten`, `EntryDeleted`, `NotificationRequested`, `InvitationAccepted`, `ProposalDecided`, `AssetUploaded`.
+- **Notification listener** (server startup): subscribes to `EventFilter::Notification`, handles `NotificationRequested` events from `invitation_routes` and `proposal_routes`.
+- **Entry listener** (server startup): subscribes to `EventFilter::Entry`, forwards `EntryWritten`/`EntryDeleted` to the embedding worker channel — replacing direct `embedding_worker::enqueue_*` calls in `entry_routes`.
+- **Asset listener** (server startup): subscribes to `EventFilter::Asset`, auto-creates reference card entries for uploaded PDF/image assets.
+
+### Changed
+
+- `invitation_routes`: replaced direct `storage.create_notification()` with `event_bus.publish(NotificationRequested)`.
+- `proposal_routes`: replaced two direct `storage.create_notification()` calls with `event_bus.publish(NotificationRequested)`.
+- `entry_routes`: replaced three direct `embedding_worker::enqueue_*()` calls with `event_bus.publish(EntryWritten/EntryDeleted)`.
+- `asset_routes`: emits `AssetUploaded` event after successful blob upload.
+- `AppStateInner`: added `event_bus: crate::events::Bus` field.
 
 ## [2.10.0] — 2026-05-19 — Universe branching (CO-95 Phases 2-4)
 

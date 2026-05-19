@@ -22,6 +22,7 @@ pub mod embedding_worker;
 pub mod entry_index;
 pub mod entry_routes;
 pub mod error;
+pub mod events;
 pub mod experiment;
 pub mod game_models;
 pub mod game_routes;

@@ -633,14 +633,16 @@ pub async fn create_entry(
         );
         rc
     };
-    // CO-164: enqueue embedding job for background indexing.
-    crate::embedding_worker::enqueue_upsert(
-        &state,
-        &slug,
-        &body.path,
-        &body.body,
-        &entry.body_hash,
-    );
+    // CO-220: route entry write through the event bus so embedding + other
+    // workers subscribe without coupling to entry_routes directly.
+    state
+        .event_bus
+        .publish(crate::events::DomainEvent::EntryWritten {
+            universe_key: slug.clone(),
+            path: body.path.clone(),
+            body: body.body.clone(),
+            body_hash: entry.body_hash.clone(),
+        });
 
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
@@ -829,8 +831,15 @@ pub async fn update_entry(
             &universe_root,
         );
     }
-    // CO-164: enqueue embedding job for background indexing.
-    crate::embedding_worker::enqueue_upsert(&state, &slug, &path, &new_body, &entry.body_hash);
+    // CO-220: route entry update through the event bus.
+    state
+        .event_bus
+        .publish(crate::events::DomainEvent::EntryWritten {
+            universe_key: slug.clone(),
+            path: path.clone(),
+            body: new_body.clone(),
+            body_hash: entry.body_hash.clone(),
+        });
 
     // CO-79: invalidate query cache entries for this universe after a write.
     state.cache.query.invalidate_prefix(&format!("{slug}:"));
@@ -962,8 +971,13 @@ pub async fn delete_entry(
         // CO-164: remove embedding row
         let _ = crate::embedding_index::EmbeddingIndex::new(&uc_guard).remove(&slug, &path);
     }
-    // CO-164: enqueue delete (async cleanup, belt-and-suspenders with the sync remove above)
-    crate::embedding_worker::enqueue_delete(&state, &slug, &path);
+    // CO-220: route entry delete through the event bus.
+    state
+        .event_bus
+        .publish(crate::events::DomainEvent::EntryDeleted {
+            universe_key: slug.clone(),
+            path: path.clone(),
+        });
     let mut storage = lock_storage(&state);
     storage.decrement_universe_content_count(&slug, 1);
 

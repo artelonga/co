@@ -238,36 +238,37 @@ pub async fn create_inline_proposal(
 
     crate::vault_routes::write_vault_entry(&state, &target_slug, &proposal_path, fm, &req.body)?;
 
-    // 2.7.24: notify the target universe's owner. The notification
-    // routes through the same machinery as invitations + chat: it
-    // becomes a notification row, surfaces in the bell + /notifications
-    // page, and is delivered by the email worker if preferences allow.
+    // CO-220: emit NotificationRequested through the event bus so the
+    // notification worker handles owner notification without coupling
+    // proposal_routes to the notification subsystem directly.
     let target_universe_for_notif = target_slug.clone();
     let proposal_path_for_notif = proposal_path.clone();
     let target_path_for_notif = req.target_path.clone();
     let author_for_notif = author.clone();
-    {
+    let owner_id_for_notif = {
         let storage = state.storage.lock();
-        if let Some(universe) = storage.get_universe(&target_universe_for_notif) {
-            // Skip if the proposer is also the owner — they wouldn't
-            // need a notification about their own draft.
-            if universe.owner_id != author_for_notif && universe.owner_id != "system" {
-                let _ = storage.create_notification(
-                    &universe.owner_id,
-                    "universe.proposal",
-                    Some(&target_universe_for_notif),
-                    None,
-                    &author_for_notif,
-                    &proposal_path_for_notif,
-                    "notif.universe.proposal",
-                    serde_json::json!({
-                        "author": author_for_notif,
-                        "universe": target_universe_for_notif,
-                        "target_path": target_path_for_notif,
-                    }),
-                );
-            }
-        }
+        storage
+            .get_universe(&target_universe_for_notif)
+            .filter(|u| u.owner_id != author_for_notif && u.owner_id != "system")
+            .map(|u| u.owner_id.clone())
+    };
+    if let Some(owner_id) = owner_id_for_notif {
+        state
+            .event_bus
+            .publish(crate::events::DomainEvent::NotificationRequested {
+                recipient_id: owner_id,
+                kind: "universe.proposal".into(),
+                universe_key: Some(target_universe_for_notif.clone()),
+                room_id: None,
+                actor_id: author_for_notif.clone(),
+                object_id: proposal_path_for_notif.clone(),
+                summary_key: "notif.universe.proposal".into(),
+                summary_params: serde_json::json!({
+                    "author": author_for_notif,
+                    "universe": target_universe_for_notif,
+                    "target_path": target_path_for_notif,
+                }),
+            });
     }
 
     Ok(Json(InlineProposalResponse {
@@ -830,31 +831,33 @@ pub async fn decide_inline_proposal(
         &proposal_entry.body,
     )?;
 
-    // 3. Notify the proposer (if they're a registered user, not system).
+    // CO-220: emit NotificationRequested so the proposer is notified via the
+    // event bus rather than a direct cross-feature storage call.
     if let Some(author_uid) = author
         && author_uid != "system"
         && author_uid != caller
     {
-        let storage = state.storage.lock();
         let summary_key = if action == "merge" {
             "notif.universe.proposal.merged"
         } else {
             "notif.universe.proposal.rejected"
         };
-        let _ = storage.create_notification(
-            &author_uid,
-            "universe.proposal.decided",
-            Some(&target_slug),
-            None,
-            &caller,
-            &req.proposal_path,
-            summary_key,
-            serde_json::json!({
-                "universe": target_slug,
-                "target_path": target_path,
-                "action": action,
-            }),
-        );
+        state
+            .event_bus
+            .publish(crate::events::DomainEvent::NotificationRequested {
+                recipient_id: author_uid.clone(),
+                kind: "universe.proposal.decided".into(),
+                universe_key: Some(target_slug.clone()),
+                room_id: None,
+                actor_id: caller.clone(),
+                object_id: req.proposal_path.clone(),
+                summary_key: summary_key.into(),
+                summary_params: serde_json::json!({
+                    "universe": target_slug,
+                    "target_path": target_path,
+                    "action": action,
+                }),
+            });
     }
 
     Ok(Json(DecideProposalResponse {
