@@ -41,10 +41,11 @@ const SEED_LICENSA_MD: &str = include_str!("../seed/co/public/licensa.md");
 const SEED_RENDERERS_MD: &str = include_str!("../seed/co/public/renderers.md");
 const SEED_INFRA_MD: &str = include_str!("../seed/co/public/infra.md");
 const SEED_INFRA_CO_MD: &str = include_str!("../seed/co/public/infra-co.md");
-const SEED_INFRA_YGGDRASIL_MD: &str = include_str!("../seed/co/public/infra-yggdrasil.md");
-const SEED_INFRA_QUILOMBO_MD: &str = include_str!("../seed/co/public/infra-quilomboaraucaria.md");
-const SEED_INFRA_RFQ_MD: &str = include_str!("../seed/co/public/infra-rfq-gateway.md");
+// Cross-repo infra pages (infra-rfq-gateway, infra-yggdrasil, infra-quilomboaraucaria)
+// removed: their content belongs in the respective universe's content, not in CO's
+// public seed. Users get those docs by subscribing to the universe.
 const SEED_TX_LOG_MD: &str = include_str!("../seed/co/public/transaction-log.md");
+const SEED_CONTA_MD: &str = include_str!("../seed/co/public/conta-e-mensagens.md");
 const SEED_YGGDRASIL_INDEX_MD: &str = include_str!("../seed/yggdrasil/index.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)

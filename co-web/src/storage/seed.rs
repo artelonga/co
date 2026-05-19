@@ -8,11 +8,10 @@ use super::Storage;
 use super::schema::{seed_page_body, seed_page_frontmatter, upsert_entry_row};
 
 use super::{
-    SEED_CO_PLATAFORMA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_INFRA_CO_MD, SEED_INFRA_MD,
-    SEED_INFRA_QUILOMBO_MD, SEED_INFRA_RFQ_MD, SEED_INFRA_YGGDRASIL_MD, SEED_LICENSA_MD, SEED_TX_LOG_MD,
-    SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD, SEED_SEGURANCA_CENARIOS_MD,
-    SEED_SEGURANCA_CRIPTO_MD, SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD,
-    SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD,
+    SEED_CO_PLATAFORMA_MD, SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_INFRA_CO_MD,
+    SEED_INFRA_MD, SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD,
+    SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD, SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD,
+    SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD, SEED_TX_LOG_MD,
 };
 
 impl Storage {
@@ -333,10 +332,9 @@ impl Storage {
             ("public/renderers.md", SEED_RENDERERS_MD),
             ("public/infra.md", SEED_INFRA_MD),
             ("public/infra-co.md", SEED_INFRA_CO_MD),
-            ("public/infra-yggdrasil.md", SEED_INFRA_YGGDRASIL_MD),
-            ("public/infra-quilomboaraucaria.md", SEED_INFRA_QUILOMBO_MD),
-            ("public/infra-rfq-gateway.md", SEED_INFRA_RFQ_MD),
+            // Cross-repo infra pages removed — those belong in their native universe.
             ("public/transaction-log.md", SEED_TX_LOG_MD),
+            ("public/conta-e-mensagens.md", SEED_CONTA_MD),
         ] {
             let entry = make_entry(
                 path,

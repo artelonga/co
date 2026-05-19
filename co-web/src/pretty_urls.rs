@@ -28,12 +28,13 @@ const SEED_PAGE_SLUGS: &[&str] = &[
     // License + renderers
     "licensa",
     "renderers",
-    // Infra catalog
+    // Infra catalog — only CO-specific pages. Cross-repo infra docs live in
+    // their respective universe (subscribe to rfq / yggdrasil / quilomboaraucaria
+    // for those).
     "infra",
     "infra-co",
-    "infra-yggdrasil",
-    "infra-quilomboaraucaria",
-    "infra-rfq-gateway",
+    // Conta + mensagens (2.8.1) — user-facing how-it-works doc for CO auth/chat
+    "conta-e-mensagens",
 ];
 
 /// True when `slug` matches one of the seeded template page slugs.
