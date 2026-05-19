@@ -54,6 +54,45 @@ pub struct ReadAllResponse {
     pub count: usize,
 }
 
+/// Typed request body for `PUT /api/v1/me/notification-preferences`.
+///
+/// All fields are optional — omitted fields are left unchanged (partial update).
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UpdatePreferencesRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_chat_message: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_chat_dm: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_invitation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_mention: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_chat_message: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_chat_dm: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_invitation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_mention: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_app_chat_message: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_app_chat_dm: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_app_invitation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_app_mention: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email_digest_freq: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_hours_start: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_hours_end: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quiet_hours_tz: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -135,43 +174,31 @@ async fn get_preferences_handler(
 async fn put_preferences_handler(
     State(state): State<AppState>,
     user_id: UserId,
-    axum::Json(body): axum::Json<serde_json::Value>,
+    axum::Json(body): axum::Json<UpdatePreferencesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
-    // Validate before writing.
-    if let Some(obj) = body.as_object() {
-        let valid_digest_freqs = ["instant", "hourly", "daily", "weekly", "never"];
-
-        if let Some(freq) = obj.get("email_digest_freq") {
-            let s = freq
-                .as_str()
-                .ok_or_else(|| AppError::BadRequest("email_digest_freq must be a string".into()))?;
-            if !valid_digest_freqs.contains(&s) {
-                return Err(AppError::BadRequest(
-                    "email_digest_freq must be one of: instant, hourly, daily, weekly, never"
-                        .into(),
-                ));
-            }
-        }
-
-        for field in &["quiet_hours_start", "quiet_hours_end"] {
-            if let Some(val) = obj.get(*field)
-                && !val.is_null()
-            {
-                let s = val.as_str().ok_or_else(|| {
-                    AppError::BadRequest(format!("'{field}' must be a string or null"))
-                })?;
-                if !is_hhmm(s) {
-                    return Err(AppError::BadRequest(format!(
-                        "'{field}' must match HH:MM format or be null"
-                    )));
-                }
-            }
+    let valid_digest_freqs = ["instant", "hourly", "daily", "weekly", "never"];
+    if let Some(freq) = &body.email_digest_freq
+        && !valid_digest_freqs.contains(&freq.as_str())
+    {
+        return Err(AppError::BadRequest(
+            "email_digest_freq must be one of: instant, hourly, daily, weekly, never".into(),
+        ));
+    }
+    for val in [&body.quiet_hours_start, &body.quiet_hours_end]
+        .iter()
+        .filter_map(|o| o.as_ref())
+    {
+        if !is_hhmm(val) {
+            return Err(AppError::BadRequest(
+                "quiet_hours_start/end must match HH:MM format".into(),
+            ));
         }
     }
 
+    let patch = serde_json::to_value(&body).map_err(|e| AppError::Internal(e.to_string()))?;
     let storage = lock_storage(&state);
     storage
-        .update_preferences(&user_id.0, &body)
+        .update_preferences(&user_id.0, &patch)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
     let prefs = storage.get_preferences(&user_id.0);
     Ok(axum::Json(prefs))
@@ -972,5 +999,44 @@ mod tests {
             notifs_o.is_empty(),
             "non-member should not get any notifications"
         );
+    }
+
+    // --- test_update_preferences_request_parses_typed_struct ---
+    #[test]
+    fn test_update_preferences_request_parses_typed_struct() {
+        let json =
+            r#"{"email_digest_freq":"hourly","email_chat_dm":false,"quiet_hours_start":"22:00"}"#;
+        let req: super::UpdatePreferencesRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.email_digest_freq.as_deref(), Some("hourly"));
+        assert_eq!(req.email_chat_dm, Some(false));
+        assert_eq!(req.quiet_hours_start.as_deref(), Some("22:00"));
+        assert!(req.email_chat_message.is_none());
+    }
+
+    // --- test_update_preferences_put_returns_200 ---
+    #[tokio::test]
+    async fn test_update_preferences_put_returns_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let user_id = insert_user(dir.path(), "prefs200@example.com");
+        let token = make_jwt(&user_id);
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/api/v1/me/notification-preferences")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(
+                        r#"{"email_digest_freq":"weekly","email_chat_dm":false}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
     }
 }

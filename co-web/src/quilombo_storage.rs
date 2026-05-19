@@ -1071,7 +1071,7 @@ pub fn atualizar_papel(conn: &Connection, id: &str, papel: &Papel) -> Result<Usu
 }
 
 /// Admin dashboard summary.
-pub fn resumo_admin(conn: &Connection, days: i64) -> serde_json::Value {
+pub fn resumo_admin(conn: &Connection, days: i64) -> AdminResumo {
     let since = format!("datetime('now', '-{} days')", days.clamp(1, 365));
 
     let total_visitas: i64 = conn
@@ -1120,12 +1120,12 @@ pub fn resumo_admin(conn: &Connection, days: i64) -> serde_json::Value {
             "SELECT path, COUNT(*) as c FROM quilombo_telemetria WHERE criado_em >= {since} GROUP BY path ORDER BY c DESC LIMIT 10"
         ))
         .expect("Failed to prepare popular pages");
-    let paginas_populares: Vec<serde_json::Value> = stmt
+    let paginas_populares: Vec<PaginaPopular> = stmt
         .query_map([], |row| {
-            Ok(serde_json::json!({
-                "path": row.get::<_, String>(0)?,
-                "visitas": row.get::<_, i64>(1)?
-            }))
+            Ok(PaginaPopular {
+                path: row.get::<_, String>(0)?,
+                visitas: row.get::<_, i64>(1)?,
+            })
         })
         .expect("Failed to query popular pages")
         .filter_map(|r| r.ok())
@@ -1147,18 +1147,18 @@ pub fn resumo_admin(conn: &Connection, days: i64) -> serde_json::Value {
         )
         .unwrap_or(0);
 
-    serde_json::json!({
-        "periodo_dias": days,
-        "visitas": total_visitas,
-        "visitantes_unicos": visitantes_unicos,
-        "usuarios": total_usuarios,
-        "com_email": com_email,
-        "vinculados_co": vinculados_co,
-        "eventos": total_eventos,
-        "missoes": total_missoes,
-        "comentarios": total_comentarios,
-        "paginas_populares": paginas_populares,
-    })
+    AdminResumo {
+        periodo_dias: days,
+        visitas: total_visitas,
+        visitantes_unicos,
+        usuarios: total_usuarios,
+        com_email,
+        vinculados_co,
+        eventos: total_eventos,
+        missoes: total_missoes,
+        comentarios: total_comentarios,
+        paginas_populares,
+    }
 }
 
 /// Query telemetry data for admin dashboard.

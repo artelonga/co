@@ -87,7 +87,7 @@ pub struct VaultFileInfo {
 pub struct VaultFile {
     pub path: String,
     pub content: String,
-    pub frontmatter: JsonValue,
+    pub frontmatter: JsonValue, // FREEFORM: vault note frontmatter is user-defined YAML with arbitrary keys
     pub tags: Vec<String>,
     pub stat: VaultStat,
 }

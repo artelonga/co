@@ -124,20 +124,28 @@ pub struct TreeQuery {
 #[derive(Debug, Deserialize)]
 pub struct CreateEntryBody {
     pub path: String,
-    pub frontmatter: JsonValue,
+    pub frontmatter: JsonValue, // FREEFORM: per-type schema defined by universe manifest
     #[serde(default)]
     pub body: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateEntryBody {
-    pub frontmatter: Option<JsonValue>,
+    pub frontmatter: Option<JsonValue>, // FREEFORM: partial patch on open per-type schema
     pub body: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct EntryListResponse {
     pub entries: Vec<EntryRow>,
+    pub total: usize,
+}
+
+/// Typed response for `GET /:slug/entries/history`.
+#[derive(Debug, Serialize)]
+pub struct EntryHistoryResponse {
+    pub path: String,
+    pub events: Vec<crate::entry_index::EntryEventRow>,
     pub total: usize,
 }
 
@@ -1279,11 +1287,12 @@ pub async fn entry_history_handler(
     let events = index
         .list_events_for_path(&q.path, limit)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(serde_json::json!({
-        "path": q.path,
-        "events": events,
-        "total": events.len(),
-    })))
+    let total = events.len();
+    Ok(Json(EntryHistoryResponse {
+        path: q.path,
+        events,
+        total,
+    }))
 }
 
 pub fn router() -> Router<AppState> {
@@ -1372,4 +1381,23 @@ fn json_value_to_proto(val: &JsonValue) -> co::proto::entry::Value {
         _ => Some(Kind::StringValue(val.to_string())),
     };
     Value { kind }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// EntryHistoryResponse serializes with the expected shape.
+    #[test]
+    fn test_entry_history_response_serializes() {
+        let resp = EntryHistoryResponse {
+            path: "projects/CO/1.md".to_string(),
+            events: vec![],
+            total: 0,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["path"], "projects/CO/1.md");
+        assert_eq!(json["total"], 0);
+        assert!(json["events"].is_array());
+    }
 }

@@ -1,5 +1,36 @@
 use super::*;
 
+// ---------------------------------------------------------------------------
+// Typed response structs (CO-217)
+// ---------------------------------------------------------------------------
+
+/// Per-universe statistics row for `GET /api/v1/auth/stats`.
+#[derive(Debug, serde::Serialize)]
+pub(super) struct UniverseStat {
+    pub key: String,
+    pub name: String,
+    pub entries: i64,
+    pub pages: i64,
+    pub tasks: i64,
+    pub content_count: i64,
+    pub is_public: bool,
+}
+
+/// Typed response for `GET /api/v1/auth/stats`.
+#[derive(Debug, serde::Serialize)]
+pub(super) struct UserStatsResponse {
+    pub user_id: String,
+    pub universes: Vec<UniverseStat>,
+    pub total_universes: usize,
+    pub total_entries: i64,
+}
+
+/// Typed response for `GET /api/v1/auth/google-status`.
+#[derive(Debug, serde::Serialize)]
+pub(super) struct GoogleStatusResponse {
+    pub configured: bool,
+}
+
 // --- Experiment Handlers ---
 
 pub(super) async fn get_variant(
@@ -300,11 +331,11 @@ pub(super) async fn me_handler(
 pub(super) async fn user_stats_handler(
     State(state): State<AppState>,
     user_id: crate::auth::UserId,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<UserStatsResponse>, AppError> {
     let storage = lock_storage(&state);
     let universes = storage.list_universes_for_user(&user_id.0);
 
-    let mut stats = Vec::new();
+    let mut stats: Vec<UniverseStat> = Vec::new();
     for u in &universes {
         let entry_count: i64 = storage
             .conn()
@@ -333,23 +364,24 @@ pub(super) async fn user_stats_handler(
             )
             .unwrap_or(0);
 
-        stats.push(serde_json::json!({
-            "key": u.key,
-            "name": u.name,
-            "entries": entry_count,
-            "pages": page_count,
-            "tasks": task_count,
-            "content_count": u.content_count,
-            "is_public": u.is_public,
-        }));
+        stats.push(UniverseStat {
+            key: u.key.clone(),
+            name: u.name.clone(),
+            entries: entry_count,
+            pages: page_count,
+            tasks: task_count,
+            content_count: u.content_count,
+            is_public: u.is_public,
+        });
     }
 
-    Ok(Json(serde_json::json!({
-        "user_id": user_id.0,
-        "universes": stats,
-        "total_universes": universes.len(),
-        "total_entries": stats.iter().map(|s| s["entries"].as_i64().unwrap_or(0)).sum::<i64>(),
-    })))
+    let total_entries = stats.iter().map(|s| s.entries).sum();
+    Ok(Json(UserStatsResponse {
+        user_id: user_id.0,
+        universes: stats,
+        total_universes: universes.len(),
+        total_entries,
+    }))
 }
 
 pub(super) async fn logout_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
@@ -664,10 +696,10 @@ pub(super) async fn uat_login_handler(
 /// Lets the login modal hide the "Continuar com Google" button when the
 /// `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env vars aren't set —
 /// avoids a button that lands on 503.
-pub(super) async fn google_status_handler() -> Json<serde_json::Value> {
+pub(super) async fn google_status_handler() -> Json<GoogleStatusResponse> {
     let configured =
         std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
-    Json(serde_json::json!({ "configured": configured }))
+    Json(GoogleStatusResponse { configured })
 }
 
 // --- CO-206: cross-apex SSO handover ---
@@ -715,4 +747,41 @@ pub(super) async fn co_handover_handler(
         (),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// UserStatsResponse serializes with expected fields.
+    #[test]
+    fn test_user_stats_response_serializes() {
+        let r = UserStatsResponse {
+            user_id: "usr-123".to_string(),
+            universes: vec![UniverseStat {
+                key: "my-uni".to_string(),
+                name: "My Universe".to_string(),
+                entries: 42,
+                pages: 10,
+                tasks: 5,
+                content_count: 42,
+                is_public: false,
+            }],
+            total_universes: 1,
+            total_entries: 42,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["user_id"], "usr-123");
+        assert_eq!(json["total_universes"], 1);
+        assert_eq!(json["universes"][0]["key"], "my-uni");
+        assert_eq!(json["universes"][0]["entries"], 42);
+    }
+
+    /// GoogleStatusResponse serializes with configured field.
+    #[test]
+    fn test_google_status_response_serializes() {
+        let r = GoogleStatusResponse { configured: false };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["configured"], false);
+    }
 }

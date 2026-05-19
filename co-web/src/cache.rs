@@ -23,8 +23,30 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use lru::LruCache;
+use serde::Serialize;
 
 const L1_CAPACITY: usize = 10_000;
+
+// ---------------------------------------------------------------------------
+// Typed stats structs (CO-217)
+// ---------------------------------------------------------------------------
+
+/// Hit/miss/eviction metrics for a single cache layer.
+#[derive(Debug, Serialize)]
+pub struct CacheLayerStats {
+    pub hits: u64,
+    pub misses: u64,
+    pub evictions: u64,
+    pub hit_rate: f64,
+}
+
+/// Typed response for `GET /api/v1/cache/stats`.
+#[derive(Debug, Serialize)]
+pub struct CacheStats {
+    pub manifest: CacheLayerStats,
+    pub theme_css: CacheLayerStats,
+    pub query: CacheLayerStats,
+}
 
 // ---------------------------------------------------------------------------
 // Metrics
@@ -377,28 +399,28 @@ impl CacheLayer {
         self.invalidation_tx.subscribe()
     }
 
-    /// JSON metrics snapshot (hit rate, eviction rate per layer).
-    pub fn stats(&self) -> serde_json::Value {
-        serde_json::json!({
-            "manifest": {
-                "hits": self.manifest.counters.hits(),
-                "misses": self.manifest.counters.misses(),
-                "evictions": self.manifest.counters.evictions(),
-                "hit_rate": self.manifest.counters.hit_rate(),
+    /// Typed metrics snapshot (hit rate, eviction rate per layer).
+    pub fn stats(&self) -> CacheStats {
+        CacheStats {
+            manifest: CacheLayerStats {
+                hits: self.manifest.counters.hits(),
+                misses: self.manifest.counters.misses(),
+                evictions: self.manifest.counters.evictions(),
+                hit_rate: self.manifest.counters.hit_rate(),
             },
-            "theme_css": {
-                "hits": self.theme_css.counters.hits(),
-                "misses": self.theme_css.counters.misses(),
-                "evictions": self.theme_css.counters.evictions(),
-                "hit_rate": self.theme_css.counters.hit_rate(),
+            theme_css: CacheLayerStats {
+                hits: self.theme_css.counters.hits(),
+                misses: self.theme_css.counters.misses(),
+                evictions: self.theme_css.counters.evictions(),
+                hit_rate: self.theme_css.counters.hit_rate(),
             },
-            "query": {
-                "hits": self.query.counters.hits(),
-                "misses": self.query.counters.misses(),
-                "evictions": self.query.counters.evictions(),
-                "hit_rate": self.query.counters.hit_rate(),
+            query: CacheLayerStats {
+                hits: self.query.counters.hits(),
+                misses: self.query.counters.misses(),
+                evictions: self.query.counters.evictions(),
+                hit_rate: self.query.counters.hit_rate(),
             },
-        })
+        }
     }
 }
 
@@ -564,13 +586,24 @@ mod tests {
     fn cache_layer_stats_has_all_layers() {
         let layer = CacheLayer::new();
         let stats = layer.stats();
+        // Stats is now a typed CacheStats struct — verify each layer is present and serializable.
+        let json = serde_json::to_value(&stats).unwrap();
         for layer_name in ["manifest", "theme_css", "query"] {
-            let obj = stats.get(layer_name).expect("layer present");
+            let obj = json.get(layer_name).expect("layer present");
             assert!(obj.get("hits").is_some());
             assert!(obj.get("misses").is_some());
             assert!(obj.get("evictions").is_some());
             assert!(obj.get("hit_rate").is_some());
         }
+    }
+
+    #[test]
+    fn cache_stats_typed_fields_accessible() {
+        let layer = CacheLayer::new();
+        let stats = layer.stats();
+        assert_eq!(stats.manifest.hits, 0);
+        assert_eq!(stats.query.misses, 0);
+        assert_eq!(stats.theme_css.evictions, 0);
     }
 
     // --- CacheLayer: invalidation pub/sub ---

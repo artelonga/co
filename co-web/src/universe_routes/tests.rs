@@ -847,3 +847,140 @@ async fn test_create_universe_duplicate_key_returns_409() {
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!(json["error"], "conflict");
 }
+
+/// PUT /api/v1/universes/:slug returns typed UpdateUniverseResponse with all updated fields.
+#[tokio::test]
+async fn test_update_universe_request_and_response_typed() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let (storage, dir) = make_storage();
+
+    // Insert a test user and universe for the owner
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at, usuario) \
+             VALUES ('usr_update','update@example.com','Update','player',?1,'update')",
+            params![now],
+        )
+        .unwrap();
+
+    let (router, _tmp) = make_universe_router(storage, dir.path());
+    let (token, _) =
+        crate::auth::sign_jwt("usr_update", "update@example.com", "player", "test-secret").unwrap();
+
+    let payload = serde_json::json!({
+        "key": "upd-uni",
+        "name": "Before Update",
+        "description": ""
+    });
+    let create_resp = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), axum::http::StatusCode::CREATED);
+
+    let put_body = r#"{"name":"After Update","description":"new desc"}"#;
+    let put_resp = router
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/upd-uni")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(put_body))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(put_resp.status(), axum::http::StatusCode::OK);
+    let body = body_bytes(put_resp).await;
+    let resp: super::UpdateUniverseResponse = serde_json::from_str(&body).unwrap();
+    assert_eq!(resp.key, "upd-uni");
+    assert_eq!(resp.name, "After Update");
+    assert_eq!(resp.description, "new desc");
+}
+
+/// UpdateUniverseRequest parses correctly from JSON.
+#[test]
+fn test_update_universe_request_parses() {
+    let json = r#"{"name":"New Name","visibility":"public-subscribable"}"#;
+    let req: super::UpdateUniverseRequest = serde_json::from_str(json).unwrap();
+    assert_eq!(req.name.as_deref(), Some("New Name"));
+    assert_eq!(req.visibility.as_deref(), Some("public-subscribable"));
+    assert!(req.description.is_none());
+}
+
+/// DELETE /api/v1/universes/:slug returns typed DeleteUniverseResponse.
+#[tokio::test]
+async fn test_delete_universe_returns_typed_response() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let (storage, dir) = make_storage();
+
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at, usuario) \
+             VALUES ('usr_del','del@example.com','Del','player',?1,'del')",
+            params![now],
+        )
+        .unwrap();
+
+    let (router, _tmp) = make_universe_router(storage, dir.path());
+    let (token, _) =
+        crate::auth::sign_jwt("usr_del", "del@example.com", "player", "test-secret").unwrap();
+
+    // Create a universe to delete
+    let create_resp = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(
+                    r#"{"key":"to-delete","name":"To Delete","description":""}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), axum::http::StatusCode::CREATED);
+
+    let del_resp = router
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri("/api/v1/universes/to-delete")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(del_resp.status(), axum::http::StatusCode::OK);
+    let body = body_bytes(del_resp).await;
+    let resp: super::DeleteUniverseResponse = serde_json::from_str(&body).unwrap();
+    assert_eq!(resp.deleted, "to-delete");
+}

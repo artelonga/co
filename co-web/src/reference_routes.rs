@@ -82,14 +82,14 @@ pub struct ListRefsQuery {
 #[derive(Debug, Deserialize)]
 pub struct CreateRefBody {
     pub path: String,
-    pub frontmatter: serde_json::Value,
+    pub frontmatter: serde_json::Value, // FREEFORM: reference card schema (title, work_id, editions, medium) is open and extensible
     #[serde(default)]
     pub body: String,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct UpdateRefBody {
-    pub frontmatter: Option<serde_json::Value>,
+    pub frontmatter: Option<serde_json::Value>, // FREEFORM: partial patch on open reference card schema
     pub body: Option<String>,
 }
 
@@ -119,7 +119,7 @@ pub(crate) fn maybe_sync_reference_meta(
     universe_key: &str,
     entry_path: &str,
     entry_type: &str,
-    frontmatter: &serde_json::Value,
+    frontmatter: &serde_json::Value, // FREEFORM: reference frontmatter is an open schema
     body: &str,
     title: Option<&str>,
     universe_root: &std::path::Path,
@@ -151,7 +151,7 @@ fn upsert_reference_meta(
     conn: &Connection,
     universe_key: &str,
     entry_path: &str,
-    frontmatter: &serde_json::Value,
+    frontmatter: &serde_json::Value, // FREEFORM: reference frontmatter is an open schema
     body: &str,
     title: Option<&str>,
     universe_root: &std::path::Path,

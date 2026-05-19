@@ -3,6 +3,7 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Router, middleware};
+use serde::Serialize;
 
 use crate::auth::{self, UserId};
 use crate::error::AppError;
@@ -12,6 +13,26 @@ use crate::quilombo_storage;
 use crate::server::AppState;
 use crate::storage::Storage;
 use crate::webhook;
+
+// ---------------------------------------------------------------------------
+// Typed response structs (CO-217)
+// ---------------------------------------------------------------------------
+
+/// Typed response for `GET /quilombo/missoes/:id` — mission + participation list merged.
+#[derive(Debug, Serialize)]
+pub struct MissaoComParticipacoes {
+    #[serde(flatten)]
+    pub missao: Missao,
+    pub participacoes: Vec<Participacao>,
+}
+
+/// Typed response for `POST /quilombo/link-co-account`.
+#[derive(Debug, Serialize)]
+pub struct LinkCoAccountResponse {
+    pub linked: bool,
+    pub quilombo_user_id: String,
+    pub co_user_id: String,
+}
 
 use rusqlite;
 
@@ -324,6 +345,7 @@ async fn cadastro_handler(
 
 // --- Content Handlers (filesystem markdown) ---
 
+// FREEFORM: publications are parsed from markdown frontmatter with arbitrary user-defined fields
 async fn listar_publicacoes() -> Result<Json<Vec<serde_json::Value>>, AppError> {
     let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
     let posts_dir = std::path::Path::new(&quilombo_dir).join(relatos_dir());
@@ -367,6 +389,7 @@ async fn listar_publicacoes() -> Result<Json<Vec<serde_json::Value>>, AppError> 
     Ok(Json(posts))
 }
 
+// FREEFORM: single publication frontmatter parsed from markdown — structure defined by content authors
 async fn obter_publicacao(Path(slug): Path<String>) -> Result<Json<serde_json::Value>, AppError> {
     let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
     let path = std::path::Path::new(&quilombo_dir)
@@ -389,6 +412,7 @@ async fn obter_publicacao(Path(slug): Path<String>) -> Result<Json<serde_json::V
     Ok(Json(fm))
 }
 
+// FREEFORM: garden page frontmatter parsed from YAML — structure defined by content authors
 async fn obter_pagina(Path(slug): Path<String>) -> Result<Json<serde_json::Value>, AppError> {
     let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
     let path = std::path::Path::new(&quilombo_dir)
@@ -411,6 +435,7 @@ async fn obter_pagina(Path(slug): Path<String>) -> Result<Json<serde_json::Value
     Ok(Json(fm))
 }
 
+// FREEFORM: parses YAML frontmatter from markdown files into a dynamic map
 fn parse_frontmatter(content: &str) -> Option<serde_json::Value> {
     let content = content.trim_start();
     if !content.starts_with("---") {
@@ -475,6 +500,7 @@ async fn listar_tags_handler() -> Result<Json<Vec<String>>, AppError> {
     Ok(Json(tags.into_iter().collect()))
 }
 
+// FREEFORM: returns publications filtered by tag — frontmatter is user-defined YAML
 async fn publicacoes_por_tag_handler(
     Path(tag): Path<String>,
 ) -> Result<Json<Vec<serde_json::Value>>, AppError> {
@@ -617,21 +643,15 @@ async fn listar_missoes_handler(
 async fn obter_missao_handler(
     State(state): State<AppState>,
     Path(id): Path<i64>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<MissaoComParticipacoes>, AppError> {
     let storage = lock_storage(&state);
     let missao = quilombo_storage::obter_missao(storage.conn(), id)
         .ok_or_else(|| AppError::NotFound("Mission not found".into()))?;
     let participacoes = quilombo_storage::listar_participacoes(storage.conn(), id);
-
-    let mut result = serde_json::to_value(&missao).unwrap();
-    if let Some(obj) = result.as_object_mut() {
-        obj.insert(
-            "participacoes".to_string(),
-            serde_json::to_value(&participacoes).unwrap(),
-        );
-    }
-
-    Ok(Json(result))
+    Ok(Json(MissaoComParticipacoes {
+        missao,
+        participacoes,
+    }))
 }
 
 async fn criar_missao_handler(
@@ -961,7 +981,7 @@ async fn admin_resumo_handler(
     State(state): State<AppState>,
     user_id: UserId,
     Query(query): Query<TelemetriaQuery>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<Json<AdminResumo>, AppError> {
     let storage = lock_storage(&state);
     let user = lookup_quilombo_user(&storage, &user_id.0)?;
 
@@ -1124,7 +1144,7 @@ async fn link_co_account_handler(
     State(state): State<AppState>,
     user_id: UserId,
     Json(body): Json<LinkCoAccountBody>,
-) -> Result<axum::Json<serde_json::Value>, AppError> {
+) -> Result<axum::Json<LinkCoAccountResponse>, AppError> {
     if body.co_user_id.trim().is_empty() {
         return Err(AppError::BadRequest("co_user_id is required".into()));
     }
@@ -1144,9 +1164,81 @@ async fn link_co_account_handler(
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(axum::Json(serde_json::json!({
-        "linked": true,
-        "quilombo_user_id": user_id.0,
-        "co_user_id": body.co_user_id.trim(),
-    })))
+    Ok(axum::Json(LinkCoAccountResponse {
+        linked: true,
+        quilombo_user_id: user_id.0,
+        co_user_id: body.co_user_id.trim().to_string(),
+    }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MissaoComParticipacoes serializes with all fields from Missao + participacoes.
+    #[test]
+    fn test_missao_com_participacoes_serializes() {
+        use crate::quilombo_models::{Missao, StatusMissao};
+        use chrono::Utc;
+
+        let missao = Missao {
+            id: 1,
+            titulo: "Test Mission".to_string(),
+            descricao: "desc".to_string(),
+            objetivo: "obj".to_string(),
+            status: StatusMissao::Aberta,
+            criado_por: None,
+            criado_em: Utc::now(),
+            atualizado_em: Utc::now(),
+            participantes: 0,
+        };
+        let resp = MissaoComParticipacoes {
+            missao,
+            participacoes: vec![],
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["id"], 1);
+        assert_eq!(json["titulo"], "Test Mission");
+        assert!(json["participacoes"].is_array());
+    }
+
+    /// LinkCoAccountResponse serializes with expected fields.
+    #[test]
+    fn test_link_co_account_response_serializes() {
+        let resp = LinkCoAccountResponse {
+            linked: true,
+            quilombo_user_id: "qu-123".to_string(),
+            co_user_id: "usr-456".to_string(),
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["linked"], true);
+        assert_eq!(json["quilombo_user_id"], "qu-123");
+        assert_eq!(json["co_user_id"], "usr-456");
+    }
+
+    /// AdminResumo serializes with expected structure.
+    #[test]
+    fn test_admin_resumo_serializes() {
+        use crate::quilombo_models::{AdminResumo, PaginaPopular};
+
+        let resumo = AdminResumo {
+            periodo_dias: 7,
+            visitas: 100,
+            visitantes_unicos: 42,
+            usuarios: 10,
+            com_email: 8,
+            vinculados_co: 3,
+            eventos: 5,
+            missoes: 2,
+            comentarios: 20,
+            paginas_populares: vec![PaginaPopular {
+                path: "/home".to_string(),
+                visitas: 50,
+            }],
+        };
+        let json = serde_json::to_value(&resumo).unwrap();
+        assert_eq!(json["periodo_dias"], 7);
+        assert_eq!(json["visitas"], 100);
+        assert_eq!(json["paginas_populares"][0]["path"], "/home");
+    }
 }
