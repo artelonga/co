@@ -9,9 +9,10 @@ use super::schema::{seed_page_body, seed_page_frontmatter, upsert_entry_row};
 
 use super::{
     SEED_CO_PLATAFORMA_MD, SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_INFRA_CO_MD,
-    SEED_INFRA_MD, SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD,
-    SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD, SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD,
-    SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD, SEED_TX_LOG_MD,
+    SEED_INFRA_MD, SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD,
+    SEED_RENDERERS_MD, SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD,
+    SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD,
+    SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD, SEED_TX_LOG_MD,
 };
 
 impl Storage {
@@ -646,7 +647,8 @@ impl Storage {
         let now_str = Utc::now().to_rfc3339();
         let yggdrasil_root = self.universe_root("yggdrasil");
 
-        for (path, md) in [("index.md", super::SEED_YGGDRASIL_INDEX_MD)] {
+        {
+            let (path, md) = ("index.md", super::SEED_YGGDRASIL_INDEX_MD);
             let entry = make_entry(
                 path,
                 seed_page_frontmatter(md, &now_str),

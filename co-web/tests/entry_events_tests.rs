@@ -148,7 +148,7 @@ async fn put_appends_event_with_body_and_hash() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/universes/log-test/entries/history?path=note.md")
-// /entries/history uses ?path=, not /entries/{*path}, so it's unaffected by the upsert path.
+                // /entries/history uses ?path=, not /entries/{*path}, so it's unaffected by the upsert path.
                 .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
@@ -202,7 +202,7 @@ async fn second_put_records_prev_hash() {
         .oneshot(
             Request::builder()
                 .uri("/api/v1/universes/log-test/entries/history?path=note.md")
-// /entries/history uses ?path=, not /entries/{*path}, so it's unaffected by the upsert path.
+                // /entries/history uses ?path=, not /entries/{*path}, so it's unaffected by the upsert path.
                 .header(header::AUTHORIZATION, test_bearer())
                 .body(Body::empty())
                 .unwrap(),
@@ -276,10 +276,12 @@ async fn delete_appends_delete_event_with_prev_hash() {
     let delete_ev = &events[0];
     let put_ev = &events[1];
     assert_eq!(delete_ev["op"], "delete");
-    assert!(delete_ev["body_hash"].is_null(), "delete has no new body_hash");
+    assert!(
+        delete_ev["body_hash"].is_null(),
+        "delete has no new body_hash"
+    );
     assert_eq!(
-        delete_ev["prev_body_hash"],
-        put_ev["body_hash"],
+        delete_ev["prev_body_hash"], put_ev["body_hash"],
         "delete's prev_hash must equal the PUT's body_hash"
     );
     assert_eq!(put_ev["op"], "put");

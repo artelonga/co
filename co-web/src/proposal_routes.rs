@@ -117,18 +117,12 @@ pub fn router() -> Router<AppState> {
 ///   - frontmatter server-controlled
 pub fn inline_router() -> Router<AppState> {
     Router::new()
-        .route(
-            "/{slug}/proposals/inline",
-            post(create_inline_proposal),
-        )
+        .route("/{slug}/proposals/inline", post(create_inline_proposal))
         // 2.7.24: decision endpoint. Only the target universe's
         // owner (or admin) can decide. Action = merge | reject.
         // The proposal path travels in the request body so we don't
         // have to URL-encode `_proposals/<filename>` into the path.
-        .route(
-            "/{slug}/proposals/decide",
-            post(decide_inline_proposal),
-        )
+        .route("/{slug}/proposals/decide", post(decide_inline_proposal))
 }
 
 /// Lists open inline proposals across every universe the caller owns.
@@ -242,13 +236,7 @@ pub async fn create_inline_proposal(
         fm["note"] = serde_json::Value::String(req.note);
     }
 
-    crate::vault_routes::write_vault_entry(
-        &state,
-        &target_slug,
-        &proposal_path,
-        fm,
-        &req.body,
-    )?;
+    crate::vault_routes::write_vault_entry(&state, &target_slug, &proposal_path, fm, &req.body)?;
 
     // 2.7.24: notify the target universe's owner. The notification
     // routes through the same machinery as invitations + chat: it
@@ -744,9 +732,9 @@ pub async fn decide_inline_proposal(
     // Authorization: only the target universe's owner may decide.
     {
         let storage = state.storage.lock();
-        let universe = storage.get_universe(&target_slug).ok_or_else(|| {
-            AppError::NotFound(format!("Universe '{target_slug}' not found"))
-        })?;
+        let universe = storage
+            .get_universe(&target_slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{target_slug}' not found")))?;
         if universe.owner_id != caller {
             return Err(AppError::Forbidden(
                 "Only the universe owner may decide on proposals".into(),
@@ -778,9 +766,7 @@ pub async fn decide_inline_proposal(
         ));
     }
     if fm.get("status").and_then(|v| v.as_str()) != Some("open") {
-        return Err(AppError::BadRequest(
-            "Proposal is already decided".into(),
-        ));
+        return Err(AppError::BadRequest("Proposal is already decided".into()));
     }
     let target_path = fm
         .get("target_path")
@@ -844,29 +830,30 @@ pub async fn decide_inline_proposal(
     )?;
 
     // 3. Notify the proposer (if they're a registered user, not system).
-    if let Some(author_uid) = author {
-        if author_uid != "system" && author_uid != caller {
-            let storage = state.storage.lock();
-            let summary_key = if action == "merge" {
-                "notif.universe.proposal.merged"
-            } else {
-                "notif.universe.proposal.rejected"
-            };
-            let _ = storage.create_notification(
-                &author_uid,
-                "universe.proposal.decided",
-                Some(&target_slug),
-                None,
-                &caller,
-                &req.proposal_path,
-                summary_key,
-                serde_json::json!({
-                    "universe": target_slug,
-                    "target_path": target_path,
-                    "action": action,
-                }),
-            );
-        }
+    if let Some(author_uid) = author
+        && author_uid != "system"
+        && author_uid != caller
+    {
+        let storage = state.storage.lock();
+        let summary_key = if action == "merge" {
+            "notif.universe.proposal.merged"
+        } else {
+            "notif.universe.proposal.rejected"
+        };
+        let _ = storage.create_notification(
+            &author_uid,
+            "universe.proposal.decided",
+            Some(&target_slug),
+            None,
+            &caller,
+            &req.proposal_path,
+            summary_key,
+            serde_json::json!({
+                "universe": target_slug,
+                "target_path": target_path,
+                "action": action,
+            }),
+        );
     }
 
     Ok(Json(DecideProposalResponse {
@@ -969,7 +956,9 @@ pub async fn list_inbound_proposals(
 
     // Newest first.
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    Ok(Json(serde_json::json!({"proposals": out, "total": out.len()})))
+    Ok(Json(
+        serde_json::json!({"proposals": out, "total": out.len()}),
+    ))
 }
 
 // ---------------------------------------------------------------------------

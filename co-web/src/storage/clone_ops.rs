@@ -1050,4 +1050,155 @@ impl Storage {
             let _ = upsert_entry_row(&uc_guard, universe_key, &entry);
         }
     }
+
+    /// CO-95 Phase 3 — O(1) universe fork via filesystem copy of the per-universe
+    /// SQLite file (data.db).
+    ///
+    /// Unlike `clone_universe` (which copies entries row-by-row), this method:
+    /// 1. WAL-checkpoints the source DB so data.db reflects all committed writes.
+    /// 2. Copies data.db with `std::fs::copy` — a single filesystem call.
+    /// 3. Reconnects the target DB and bulk-updates `universe_key` in every row.
+    /// 4. Clears `entry_events` so the fork starts with a clean op log.
+    ///
+    /// The caller must ensure the target key does not already exist.
+    pub fn fast_fork_universe(
+        &mut self,
+        source_key: &str,
+        new_key: &str,
+        new_name: &str,
+        description: &str,
+        owner_id: &str,
+    ) -> anyhow::Result<crate::models::Universe> {
+        if self.get_universe(new_key).is_some() {
+            anyhow::bail!("Universe '{}' already exists", new_key);
+        }
+
+        let src_db_path = self.universe_pool.db_path(source_key);
+        let dst_db_dir = self.universe_pool.universe_dir(new_key);
+        let dst_db_path = dst_db_dir.join("data.db");
+
+        std::fs::create_dir_all(&dst_db_dir)?;
+
+        // 1. Checkpoint the source WAL so data.db is self-contained, then copy.
+        {
+            let src_uc = self.universe_pool.get_or_open(source_key);
+            let src_guard = src_uc.lock().expect("fast_fork: source conn lock");
+            let _ = src_guard.execute_batch("PRAGMA wal_checkpoint(FULL)");
+            std::fs::copy(&src_db_path, &dst_db_path)?;
+        }
+
+        // 2. Evict any stale handle, open the new DB, and rewrite universe_key.
+        self.universe_pool.evict(new_key);
+        {
+            let dst_uc = self.universe_pool.get_or_open(new_key);
+            let dst_guard = dst_uc.lock().expect("fast_fork: dst conn lock");
+
+            // Bulk-update universe_key in entries (all entries were copied from source).
+            dst_guard.execute(
+                "UPDATE entries SET universe_key = ?1",
+                rusqlite::params![new_key],
+            )?;
+
+            // Rebuild FTS index for the new universe_key.
+            let _ = dst_guard.execute_batch("DELETE FROM entries_fts");
+            let paths_titles_bodies: Vec<(String, Option<String>, String)> = {
+                let mut stmt = dst_guard
+                    .prepare("SELECT path, title, body FROM entries WHERE universe_key = ?1")?;
+                stmt.query_map(rusqlite::params![new_key], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect()
+            };
+            for (path, title, body) in &paths_titles_bodies {
+                let _ = dst_guard.execute(
+                    "INSERT INTO entries_fts (universe_key, path, title, body) \
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![new_key, path, title.as_deref().unwrap_or(""), body],
+                );
+            }
+
+            // Clear op log — fork starts with a fresh history.
+            let _ = dst_guard.execute_batch("DELETE FROM entry_events");
+
+            // Reset schema_version sequence to avoid re-running migrations on a
+            // already-migrated copy. No-op if the table is already correct.
+            // (run_universe_migrations is idempotent via IF NOT EXISTS / version guards.)
+        }
+
+        // 3. Create universe metadata row in the global meta.db.
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO universes \
+             (key, name, description, owner_id, created_at, is_template, is_public) \
+             VALUES (?1, ?2, ?3, ?4, ?5, 0, 0)",
+            rusqlite::params![new_key, new_name, description, owner_id, now_str],
+        )?;
+
+        self.conn.execute(
+            "INSERT OR IGNORE INTO universe_members \
+             (universe_key, user_id, role, joined_at) \
+             VALUES (?1, ?2, 'owner', ?3)",
+            rusqlite::params![new_key, owner_id, now_str],
+        )?;
+
+        // 4. Refresh content_count from the copied entries.
+        let content_count: i64 = {
+            let dst_uc = self.universe_pool.get_or_open(new_key);
+            let dst_guard = dst_uc.lock().expect("fast_fork: count lock");
+            dst_guard
+                .query_row(
+                    "SELECT COUNT(*) FROM entries WHERE universe_key = ?1",
+                    rusqlite::params![new_key],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0)
+        };
+        let _ = self.conn.execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            rusqlite::params![content_count, new_key],
+        );
+
+        // 5. Inherit form config from source.
+        if let Some(config) = self.get_universe_form_config(source_key) {
+            let tokens_str = config.custom_tokens.as_ref().map(|v| v.to_string());
+            let _ = self.conn.execute(
+                "UPDATE universes SET theme_preset = ?1, layout = ?2, \
+                 font_headline = ?3, font_body = ?4, custom_tokens = ?5 \
+                 WHERE key = ?6",
+                rusqlite::params![
+                    config.theme_preset,
+                    config.layout,
+                    config.font_headline,
+                    config.font_body,
+                    tokens_str,
+                    new_key,
+                ],
+            );
+            let _ = self.write_universo_yaml(new_key, &config);
+        }
+
+        tracing::info!(
+            "fast_fork_universe: {source_key} → {new_key} ({content_count} entries copied)"
+        );
+
+        Ok(crate::models::Universe {
+            key: new_key.to_string(),
+            name: new_name.to_string(),
+            description: description.to_string(),
+            owner_id: owner_id.to_string(),
+            created_at: now,
+            is_template: false,
+            is_public: false,
+            content_count,
+            requires_login: false,
+            visibility: "private".into(),
+            parent_key: None,
+        })
+    }
 }

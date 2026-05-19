@@ -110,11 +110,7 @@ impl<'a> EntryIndex<'a> {
     /// Look up the current `body_hash` for an entry without loading the
     /// body. Used by the event-log writer to record `prev_body_hash`
     /// on an update. Returns None if the entry doesn't exist yet.
-    pub fn current_body_hash(
-        &self,
-        universe_key: &str,
-        path: &str,
-    ) -> Option<String> {
+    pub fn current_body_hash(&self, universe_key: &str, path: &str) -> Option<String> {
         self.conn
             .query_row(
                 "SELECT body_hash FROM entries WHERE universe_key = ?1 AND path = ?2",

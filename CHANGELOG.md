@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.0] — 2026-05-19 — Universe branching (CO-95 Phases 2-4)
+
+### Added
+
+- **Phase 2 — Op log endpoint**: `GET /api/v1/universes/:slug/ops` exposes the per-universe `entry_events` append-only log, paginated via `?after_seq=N&limit=N`.
+- **Phase 2 — Atomic writes**: vault PUT and DELETE now wrap the `entries` upsert + `entry_events` insert in a single `BEGIN IMMEDIATE … COMMIT` transaction, preventing entries/events divergence on crash.
+- **Phase 3 — Replay**: `GET /api/v1/universes/:slug/replay?to_op=N` returns the logical entry state of the universe as of op N — active paths (last event was `put`) and deleted paths (last event was `delete`).
+- **Phase 3 — Op diff**: `GET /api/v1/universes/:slug/op-diff?from_op=M&to_op=N` shows the exact change set between two op IDs: added, modified, and deleted paths with before/after body hashes.
+- **Phase 3 — O(1) fork**: `duplicate_universe` now uses `Storage::fast_fork_universe` — WAL checkpoint + `std::fs::copy` of `data.db` — instead of row-by-row copying. Falls back to `clone_universe` if the source DB file is absent.
+- **Phase 4 — Universe diff**: `GET /api/v1/universes/:slug/diff?against=<key>` compares two live universe entry sets, reporting added, modified, and deleted paths.
+- **Phase 4 — Promote**: `POST /api/v1/universes/:slug/promote` applies all source entries onto a target universe (last-write-wins). Returns a conflict list (paths with divergent hashes) and writes an audit entry at `_audit/promote-<ts>.md` in the target.
+- **Phase 4 — Revert**: `POST /api/v1/universes/:slug/revert?to=<op_id>` restores the universe to its historical state at op N by replaying the event log.
+- **Phase 4 — Cherry-pick**: `POST /api/v1/universes/:slug/cherry-pick` copies selected paths from source into a target universe.
+
+### Fixed
+
+- Clippy: collapsed nested `if`/`if let` chains in `entry_routes`, `proposal_routes`, `storage_dashboard`; removed for-loop over single element in `storage/seed`; removed needless dereferences in vault/op-log routes.
+
 ## [2.9.1] — 2026-05-18 — Server decomposition (CO-215)
 
 ### Refactored

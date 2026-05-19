@@ -414,36 +414,46 @@ pub(crate) fn write_vault_entry(
         let uc_guard = uc
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-        let index = EntryIndex::new(&uc_guard);
-        // 2.7.25: capture prev body_hash BEFORE upsert so the event
-        // log row carries the delta. None means "no prior version"
-        // (creation event).
-        let prev_hash = index.current_body_hash(universe_key, path);
-        index
-            .upsert(universe_key, &entry)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
-        // 2.7.25: append to the per-universe entry_events log. Same
-        // SQLite connection, immediately after the upsert — fails
-        // independently (logged) so a corrupted log doesn't block the
-        // write. The log is the source of truth for time-travel and
-        // the future Kafka/Iceberg export; see
-        // co::public/transaction-log.md.
-        if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter) {
-            if let Err(e) = index.log_event(
-                path,
-                "put",
-                Some(&entry.body_hash),
-                prev_hash.as_deref(),
-                Some(body),
-                Some(&fm_json),
-                None,
-                None,
-            ) {
-                tracing::warn!(
-                    "entry_events log failed for {universe_key}/{path}: {e}",
-                );
+        // CO-95 Phase 2: wrap entries upsert + entry_events log in a single
+        // SQLite transaction so a crash between the two writes never leaves
+        // entries and entry_events out of sync.
+        uc_guard
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| AppError::Internal(format!("begin tx: {e}")))?;
+        let prev_hash = EntryIndex::new(&uc_guard).current_body_hash(universe_key, path);
+        let tx_result: Result<(), AppError> = {
+            let index = EntryIndex::new(&uc_guard);
+            index
+                .upsert(universe_key, &entry)
+                .map_err(|e| AppError::Internal(e.to_string()))
+                .and_then(|()| {
+                    if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter) {
+                        index
+                            .log_event(
+                                path,
+                                "put",
+                                Some(&entry.body_hash),
+                                prev_hash.as_deref(),
+                                Some(body),
+                                Some(&fm_json),
+                                None,
+                                None,
+                            )
+                            .map_err(|e| AppError::Internal(format!("entry_events log: {e}")))?;
+                    }
+                    Ok(())
+                })
+        };
+        match tx_result {
+            Ok(()) => uc_guard
+                .execute_batch("COMMIT")
+                .map_err(|e| AppError::Internal(format!("commit tx: {e}")))?,
+            Err(e) => {
+                let _ = uc_guard.execute_batch("ROLLBACK");
+                return Err(e);
             }
         }
+        let index = EntryIndex::new(&uc_guard);
         // CO-73: index semantic date fields (reuse cached manifest)
         index
             .upsert_dates(universe_key, &entry, manifest_arc.as_deref())
@@ -1021,25 +1031,41 @@ pub async fn delete_vault_file(
         let uc_guard = uc
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-        let index = EntryIndex::new(&uc_guard);
-        // 2.7.25: capture pre-delete body_hash for the event log.
-        let prev_hash = index.current_body_hash(&slug, &path);
-        index
-            .remove(&slug, &path)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
-        // 2.7.25: append delete event. No body kept (the deleted body
-        // is recoverable from the prior `put` event in the log).
-        if let Err(e) = index.log_event(
-            &path,
-            "delete",
-            None,
-            prev_hash.as_deref(),
-            None,
-            None,
-            None,
-            None,
-        ) {
-            tracing::warn!("entry_events delete log failed for {slug}/{path}: {e}");
+        // CO-95 Phase 2: wrap entries remove + entry_events log in a single
+        // transaction to prevent entries/entry_events divergence on crash.
+        uc_guard
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| AppError::Internal(format!("begin del tx: {e}")))?;
+        let prev_hash = EntryIndex::new(&uc_guard).current_body_hash(&slug, &path);
+        let del_result: Result<(), AppError> = {
+            let index = EntryIndex::new(&uc_guard);
+            index
+                .remove(&slug, &path)
+                .map_err(|e| AppError::Internal(e.to_string()))
+                .and_then(|()| {
+                    index
+                        .log_event(
+                            &path,
+                            "delete",
+                            None,
+                            prev_hash.as_deref(),
+                            None,
+                            None,
+                            None,
+                            None,
+                        )
+                        .map(|_| ())
+                        .map_err(|e| AppError::Internal(format!("entry_events del log: {e}")))
+                })
+        };
+        match del_result {
+            Ok(()) => uc_guard
+                .execute_batch("COMMIT")
+                .map_err(|e| AppError::Internal(format!("commit del tx: {e}")))?,
+            Err(e) => {
+                let _ = uc_guard.execute_batch("ROLLBACK");
+                return Err(e);
+            }
         }
         // CO-74: remove outbound FK relations
         let _ = crate::relation_index::RelationIndex::new(&uc_guard).delete_for_entry(&slug, &path);
