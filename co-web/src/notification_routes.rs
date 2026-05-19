@@ -290,6 +290,40 @@ mod tests {
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+            event_bus: crate::events::Bus::new(),
+        });
+        // CO-220: subscribe before spawning so events published synchronously
+        // during the HTTP handler are not missed.
+        let mut notif_rx = state
+            .event_bus
+            .subscribe(crate::events::EventFilter::Notification);
+        let notif_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            while let Some(event) = notif_rx.recv().await {
+                if let crate::events::DomainEvent::NotificationRequested {
+                    recipient_id,
+                    kind,
+                    universe_key,
+                    room_id,
+                    actor_id,
+                    object_id,
+                    summary_key,
+                    summary_params,
+                } = event
+                {
+                    let storage = notif_state.storage.lock();
+                    let _ = storage.create_notification(
+                        &recipient_id,
+                        &kind,
+                        universe_key.as_deref(),
+                        room_id.as_deref(),
+                        &actor_id,
+                        &object_id,
+                        &summary_key,
+                        summary_params,
+                    );
+                }
+            }
         });
         crate::server::build_router(state, None)
     }
@@ -934,6 +968,9 @@ mod tests {
             "body: {:?}",
             body_json(resp.into_body()).await
         );
+
+        // CO-220: yield so the notification event bus listener processes the event.
+        tokio::task::yield_now().await;
 
         let storage = Storage::new(dir.path().to_str().unwrap());
         let count = storage.get_unread_count(&guest_id);

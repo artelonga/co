@@ -41,6 +41,8 @@ pub struct AppStateInner {
         std::sync::Mutex<std::collections::HashMap<String, std::collections::HashMap<String, u32>>>,
     /// CO-178: in-process MaxMind GeoLite2 database for country+city enrichment.
     pub geo: std::sync::Arc<crate::geo::GeoDb>,
+    /// CO-220: in-process domain event bus for decoupled cross-feature signaling.
+    pub event_bus: crate::events::Bus,
 }
 
 pub type AppState = Arc<AppStateInner>;

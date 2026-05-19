@@ -901,6 +901,7 @@ mod tests {
             embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
             embedding_tx,
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+            event_bus: crate::events::Bus::new(),
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });

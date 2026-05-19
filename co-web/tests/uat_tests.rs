@@ -86,6 +86,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+        event_bus: co_web::events::Bus::new(),
     });
     build_router(state, None)
 }

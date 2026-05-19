@@ -70,6 +70,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+        event_bus: crate::events::Bus::new(),
     });
     crate::server::build_router(state, None)
 }

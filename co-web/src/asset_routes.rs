@@ -284,11 +284,24 @@ pub async fn upload_asset(
             universe: universe_key.clone(),
             list: None,
             key: Some(sha256.clone()),
-            actor: Some(user_id),
+            actor: Some(user_id.clone()),
             session_id: crate::telemetry::extract_session_id(&headers),
             extra: Some(serde_json::json!({ "mime": mime, "size_bytes": size })),
         },
     );
+
+    // CO-220: emit AssetUploaded through the event bus so reference-card
+    // workers can react without coupling asset_routes to reference_routes.
+    state
+        .event_bus
+        .publish(crate::events::DomainEvent::AssetUploaded {
+            universe_key: universe_key.clone(),
+            sha256: sha256.clone(),
+            mime: mime.clone(),
+            size_bytes: size,
+            user_id,
+            filename: q.filename.clone(),
+        });
 
     Ok(Json(AssetUploadResponse {
         sha256: sha256.clone(),

@@ -388,7 +388,125 @@ pub async fn start_server(config: WebConfig) {
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo,
+        event_bus: crate::events::Bus::new(),
     });
+
+    // CO-220: spawn event bus listeners — decoupled cross-feature wiring.
+    {
+        // Notification listener: handles NotificationRequested events emitted by
+        // invitation_routes and proposal_routes.
+        let s = Arc::clone(&state);
+        tokio::spawn(async move {
+            let mut rx = s
+                .event_bus
+                .subscribe(crate::events::EventFilter::Notification);
+            while let Some(event) = rx.recv().await {
+                if let crate::events::DomainEvent::NotificationRequested {
+                    recipient_id,
+                    kind,
+                    universe_key,
+                    room_id,
+                    actor_id,
+                    object_id,
+                    summary_key,
+                    summary_params,
+                } = event
+                {
+                    let storage = s.storage.lock();
+                    let _ = storage.create_notification(
+                        &recipient_id,
+                        &kind,
+                        universe_key.as_deref(),
+                        room_id.as_deref(),
+                        &actor_id,
+                        &object_id,
+                        &summary_key,
+                        summary_params,
+                    );
+                }
+            }
+        });
+    }
+    {
+        // Entry listener: forwards EntryWritten / EntryDeleted to the embedding worker.
+        let s = Arc::clone(&state);
+        tokio::spawn(async move {
+            let mut rx = s.event_bus.subscribe(crate::events::EventFilter::Entry);
+            while let Some(event) = rx.recv().await {
+                match event {
+                    crate::events::DomainEvent::EntryWritten {
+                        universe_key,
+                        path,
+                        body,
+                        body_hash,
+                    } => {
+                        let _ = s.embedding_tx.try_send(
+                            crate::embedding_worker::EmbeddingJob::Upsert {
+                                universe_key,
+                                path,
+                                body,
+                                body_hash,
+                            },
+                        );
+                    }
+                    crate::events::DomainEvent::EntryDeleted { universe_key, path } => {
+                        let _ = s.embedding_tx.try_send(
+                            crate::embedding_worker::EmbeddingJob::Delete { universe_key, path },
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        });
+    }
+    {
+        // Asset listener: auto-creates reference cards for uploaded PDF/image assets.
+        let s = Arc::clone(&state);
+        tokio::spawn(async move {
+            let mut rx = s.event_bus.subscribe(crate::events::EventFilter::Asset);
+            while let Some(event) = rx.recv().await {
+                if let crate::events::DomainEvent::AssetUploaded {
+                    universe_key,
+                    sha256,
+                    mime,
+                    size_bytes,
+                    user_id: _,
+                    filename,
+                } = event
+                {
+                    let medium = if mime == "application/pdf" {
+                        "pdf"
+                    } else if mime.starts_with("image/") {
+                        "image"
+                    } else if mime.starts_with("video/") {
+                        "video"
+                    } else {
+                        continue;
+                    };
+                    let card_path = format!("references/assets/{}.md", &sha256[..16]);
+                    let title = filename.unwrap_or_else(|| sha256[..8].to_string());
+                    let fm = serde_json::json!({
+                        "type": "reference",
+                        "title": title,
+                        "medium": medium,
+                        "mime": mime,
+                        "blob_sha256": sha256,
+                        "size_bytes": size_bytes,
+                        "auto_created": true,
+                    });
+                    if let Err(e) = crate::vault_routes::write_vault_entry(
+                        &s,
+                        &universe_key,
+                        &card_path,
+                        fm,
+                        "",
+                    ) {
+                        tracing::warn!("CO-220: auto reference card for {sha256}: {e}");
+                    }
+                }
+            }
+        });
+    }
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
 

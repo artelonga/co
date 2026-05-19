@@ -90,6 +90,40 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+        event_bus: co_web::events::Bus::new(),
+    });
+    // CO-220: subscribe before spawning so events published synchronously
+    // during the HTTP handler are not missed by the task.
+    let mut notif_rx = state
+        .event_bus
+        .subscribe(co_web::events::EventFilter::Notification);
+    let notif_state = Arc::clone(&state);
+    tokio::spawn(async move {
+        while let Some(event) = notif_rx.recv().await {
+            if let co_web::events::DomainEvent::NotificationRequested {
+                recipient_id,
+                kind,
+                universe_key,
+                room_id,
+                actor_id,
+                object_id,
+                summary_key,
+                summary_params,
+            } = event
+            {
+                let storage = notif_state.storage.lock();
+                let _ = storage.create_notification(
+                    &recipient_id,
+                    &kind,
+                    universe_key.as_deref(),
+                    room_id.as_deref(),
+                    &actor_id,
+                    &object_id,
+                    &summary_key,
+                    summary_params,
+                );
+            }
+        }
     });
     build_router(state, None)
 }
@@ -252,6 +286,10 @@ async fn inline_proposal_notifies_owner() {
         .unwrap();
     let res = app.clone().oneshot(req).await.unwrap();
     assert_eq!(res.status(), StatusCode::OK);
+
+    // CO-220: yield to let the notification event bus listener process the
+    // NotificationRequested event before reading storage.
+    tokio::task::yield_now().await;
 
     // Look up the owner's notifications via storage directly (the
     // notifications API endpoint requires its own auth setup; storage
