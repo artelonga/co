@@ -10,7 +10,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::UserId;
+use crate::auth::extractors::AuthedUser;
 use crate::error::AppError;
 use crate::server::AppState;
 
@@ -76,7 +76,7 @@ async fn vapid_public_key_handler() -> Result<impl IntoResponse, AppError> {
 /// POST /api/v1/me/push-subscriptions
 async fn subscribe_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
     axum::Json(body): axum::Json<SubscribeRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     if body.endpoint.is_empty() || body.p256dh.is_empty() || body.auth.is_empty() {
@@ -95,7 +95,7 @@ async fn subscribe_handler(
 
     let id = storage
         .upsert_push_subscription(
-            &user_id.0,
+            &user.user_id,
             &body.endpoint,
             &body.p256dh,
             &body.auth,
@@ -110,12 +110,12 @@ async fn subscribe_handler(
 async fn delete_subscription_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = state.storage.lock();
 
     let deleted = storage
-        .delete_push_subscription(&id, &user_id.0)
+        .delete_push_subscription(&id, &user.user_id)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     if !deleted {
@@ -128,11 +128,11 @@ async fn delete_subscription_handler(
 /// GET /api/v1/me/push-subscriptions
 async fn list_subscriptions_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = state.storage.lock();
 
-    let subscriptions = storage.list_push_subscriptions_for_user(&user_id.0);
+    let subscriptions = storage.list_push_subscriptions_for_user(&user.user_id);
 
     Ok(axum::Json(ListSubscriptionsResponse { subscriptions }))
 }

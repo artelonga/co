@@ -1,6 +1,6 @@
 [package]
 name = "co-cli"
-version = "0.72.0"
+version = "0.72.1"
 edition = "2024"
 description = "CLI for CO - graph-based content management"
 license = "AGPL-3.0-or-later"
