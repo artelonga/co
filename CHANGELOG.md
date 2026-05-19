@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [game-core 0.2.0] — 2026-05-19 — Reconcile drift with universos/core (YG-52)
+
+### Added
+
+- `game_core::universo::{Universo, UniversoLocal}` — PT-BR trait interface wrapping `engine::Universe`. `Universo` defines `nome()`, `mapa()`, `mapa_mut()`, `engine()`. `UniversoLocal` is the in-memory implementation; serde-serializable for snapshot use-cases.
+
+### Fixed
+
+- Restored `GAME_DB_PATH` env-var support in `storage::db_path()` for test environment isolation (had been removed in a prior refactor).
+
+### Changed
+
+- All shared source files in `game-core/src/` are now byte-identical to `universos/core/src/` (except `mail.rs`, which is exclusive to `game-core`).
+
 ## [2.9.1] — 2026-05-18 — Server decomposition (CO-215)
 
 ### Refactored

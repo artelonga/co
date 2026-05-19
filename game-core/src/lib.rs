@@ -14,8 +14,10 @@ pub use engine::{
 
 pub mod mail;
 pub mod plugin;
+pub mod universo;
 
 pub use mail::{LogMailProvider, MailProvider};
+pub use universo::{Universo, UniversoLocal};
 
 pub use games::{
     create_poker_universe, Game, GameAction, InvadersGame, Lobby, PointSetGame, PokerGame,

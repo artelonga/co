@@ -26,8 +26,21 @@ use crate::engine::error::Result;
 use obfstr::obfstr;
 use std::path::PathBuf;
 
-/// Get the database file path
+/// Get the database file path.
+/// Respects `GAME_DB_PATH` env var for test environment isolation.
 fn db_path() -> PathBuf {
+    if let Ok(custom) = std::env::var("GAME_DB_PATH") {
+        let expanded = if custom.starts_with('~') {
+            if let Some(home) = dirs::home_dir() {
+                home.join(custom.strip_prefix("~/").unwrap_or(&custom))
+            } else {
+                PathBuf::from(custom)
+            }
+        } else {
+            PathBuf::from(custom)
+        };
+        return expanded;
+    }
     let base = match dirs::data_dir() {
         Some(d) => d,
         None => PathBuf::from(obfstr!(".")),
