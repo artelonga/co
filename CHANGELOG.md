@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.10.1] — 2026-05-19 — Typed handler payloads (CO-217)
+
+### Refactored
+
+- **18 named `Deserialize`/`Serialize` structs** replace `serde_json::Value` at handler boundaries:
+  - `UpdatePreferencesRequest` (notification_routes) — typed partial-update for notification prefs
+  - `UpdateUniverseRequest` + `UpdateUniverseResponse` (universe_routes) — typed PUT body and response
+  - `DeleteUniverseResponse` (universe_routes) — typed DELETE confirmation
+  - `EntryHistoryResponse` (entry_routes) — typed `path + events + total` response
+  - `CreateLeadResponse` + `LeadsListResponse` (lead_routes) — typed create and list responses
+  - `CreateFlagResponse` + `ToggleFlagResponse` (ab_routes) — typed A/B flag management responses
+  - `MissaoComParticipacoes` + `LinkCoAccountResponse` (quilombo_routes) — typed mission and account-link responses
+  - `AdminResumo` + `PaginaPopular` (quilombo_models + quilombo_storage) — typed admin summary
+  - `UniverseStat` + `UserStatsResponse` + `GoogleStatusResponse` (server/auth_handlers) — typed auth stats
+  - `CacheLayerStats` + `CacheStats` (cache) — typed cache metrics; `CacheLayer::stats()` now returns `CacheStats`
+- All remaining `serde_json::Value` sites annotated with `// FREEFORM: <reason>` (frontmatter, telemetry properties, UTM/experiment maps).
+- Tests added for every replaced handler exercising the typed parse/serialize roundtrip.
+
 ## [2.10.0] — 2026-05-19 — Universe branching (CO-95 Phases 2-4)
 
 ### Added

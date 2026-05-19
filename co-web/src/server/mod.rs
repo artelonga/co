@@ -115,7 +115,7 @@ async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
 // --- CO-79: Cache metrics ---
 
 /// GET /api/v1/cache/stats — hit rate, miss rate, eviction rate per cache layer.
-async fn cache_stats_handler(State(state): State<AppState>) -> Json<serde_json::Value> {
+async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
     Json(state.cache.stats())
 }
 

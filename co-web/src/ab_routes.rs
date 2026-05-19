@@ -10,10 +10,25 @@ use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
+use serde::Serialize;
 
 use crate::ab::{CreateFlagRequest, ToggleFlagRequest};
 use crate::github_auth::GitHubAdmin;
 use crate::server::AppState;
+
+/// Typed response for `POST /api/v1/admin/flags`.
+#[derive(Debug, Serialize)]
+pub struct CreateFlagResponse {
+    pub flag_key: String,
+    pub created: bool,
+}
+
+/// Typed response for `PUT /api/v1/admin/flags/:key`.
+#[derive(Debug, Serialize)]
+pub struct ToggleFlagResponse {
+    pub flag_key: String,
+    pub enabled: bool,
+}
 
 pub fn admin_router() -> Router<AppState> {
     Router::new()
@@ -42,7 +57,10 @@ async fn create_flag_handler(
     match crate::ab::create_flag(storage.conn(), &body) {
         Ok(true) => (
             StatusCode::CREATED,
-            Json(serde_json::json!({"flag_key": body.flag_key, "created": true})),
+            Json(CreateFlagResponse {
+                flag_key: body.flag_key,
+                created: true,
+            }),
         )
             .into_response(),
         Ok(false) => (
@@ -81,9 +99,11 @@ async fn toggle_flag_handler(
 ) -> impl IntoResponse {
     let storage = state.storage.lock();
     match crate::ab::toggle_flag(storage.conn(), &key, body.enabled) {
-        Ok(true) => {
-            Json(serde_json::json!({"flag_key": key, "enabled": body.enabled})).into_response()
-        }
+        Ok(true) => Json(ToggleFlagResponse {
+            flag_key: key,
+            enabled: body.enabled,
+        })
+        .into_response(),
         Ok(false) => (
             StatusCode::NOT_FOUND,
             Json(serde_json::json!({"error": "flag not found"})),
@@ -94,5 +114,34 @@ async fn toggle_flag_handler(
             Json(serde_json::json!({"error": e.to_string()})),
         )
             .into_response(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CreateFlagResponse serializes with expected shape.
+    #[test]
+    fn test_create_flag_response_serializes() {
+        let r = CreateFlagResponse {
+            flag_key: "my-flag".to_string(),
+            created: true,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["flag_key"], "my-flag");
+        assert_eq!(json["created"], true);
+    }
+
+    /// ToggleFlagResponse serializes with expected shape.
+    #[test]
+    fn test_toggle_flag_response_serializes() {
+        let r = ToggleFlagResponse {
+            flag_key: "my-flag".to_string(),
+            enabled: false,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["flag_key"], "my-flag");
+        assert_eq!(json["enabled"], false);
     }
 }

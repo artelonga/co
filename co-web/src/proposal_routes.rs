@@ -233,7 +233,7 @@ pub async fn create_inline_proposal(
         "created_at": now_iso.clone(),
     });
     if !req.note.is_empty() {
-        fm["note"] = serde_json::Value::String(req.note);
+        fm["note"] = serde_json::Value::String(req.note); // FREEFORM: building dynamic proposal frontmatter
     }
 
     crate::vault_routes::write_vault_entry(&state, &target_slug, &proposal_path, fm, &req.body)?;
@@ -817,6 +817,7 @@ pub async fn decide_inline_proposal(
     }
 
     // 2. Flip the proposal's frontmatter status (preserve body for audit).
+    // FREEFORM: mutating proposal frontmatter fields that are free-form by design
     let mut updated_fm = proposal_entry.frontmatter.clone();
     updated_fm["status"] = serde_json::Value::String(new_status.clone());
     updated_fm["decided_by"] = serde_json::Value::String(caller.clone());

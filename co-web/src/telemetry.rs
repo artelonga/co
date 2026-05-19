@@ -173,7 +173,7 @@ pub struct CrudEvent {
     /// Stable session token derived from the JWT cookie or anon-cookie hash.
     pub session_id: Option<String>,
     /// Kind-specific extra data serialised into `properties`.
-    pub extra: Option<serde_json::Value>,
+    pub extra: Option<serde_json::Value>, // FREEFORM: event-kind–specific payload varies per event type
 }
 
 /// Emit a [`CrudEvent`] to `telemetry_events` (fire-and-forget via `tokio::spawn`).
@@ -292,7 +292,7 @@ pub struct EventRow {
     pub event_name: String,
     pub universe_key: Option<String>,
     pub path: Option<String>,
-    pub properties: Option<serde_json::Value>,
+    pub properties: Option<serde_json::Value>, // FREEFORM: serialized event payload varies per event type
     pub duration_ms: Option<i64>,
     pub ip_hash: Option<String>,
     pub ua_device: Option<String>,
@@ -645,7 +645,7 @@ pub struct ClientEvent {
     pub event_type: String,
     pub universe_key: Option<String>,
     pub path: Option<String>,
-    pub properties: Option<serde_json::Value>,
+    pub properties: Option<serde_json::Value>, // FREEFORM: user-defined tracking properties for client events
     pub duration_ms: Option<i64>,
     pub session_id: Option<String>,
 }
@@ -729,9 +729,9 @@ pub struct MarketingEvent {
     pub vh: Option<i64>,
     pub lang: Option<String>,
     pub ua_brand: Option<String>,
-    pub utm: Option<serde_json::Value>,
-    pub experiments: Option<serde_json::Value>,
-    pub props: Option<serde_json::Value>,
+    pub utm: Option<serde_json::Value>, // FREEFORM: UTM parameters as arbitrary key/value pairs
+    pub experiments: Option<serde_json::Value>, // FREEFORM: experiment assignment flags with arbitrary keys
+    pub props: Option<serde_json::Value>, // FREEFORM: page-level analytics properties with arbitrary keys
 }
 
 #[derive(Debug, Deserialize)]

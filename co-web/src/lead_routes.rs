@@ -51,6 +51,19 @@ pub struct LeadRow {
     pub promoted_to_al: Option<i64>,
 }
 
+/// Typed response for `POST /api/v1/leads`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateLeadResponse {
+    pub id: i64,
+}
+
+/// Typed response for `GET /api/v1/admin/leads`.
+#[derive(Debug, Serialize)]
+pub struct LeadsListResponse {
+    pub leads: Vec<LeadRow>,
+    pub total: i64,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct LeadPatch {
     pub status: Option<String>,
@@ -343,7 +356,7 @@ pub async fn submit_lead(
     );
     tokio::spawn(send_lead_notification(id, nome, servico_titulo, lead_body));
 
-    (StatusCode::CREATED, Json(serde_json::json!({"id": id}))).into_response()
+    (StatusCode::CREATED, Json(CreateLeadResponse { id })).into_response()
 }
 
 pub async fn list_leads(
@@ -426,7 +439,7 @@ pub async fn list_leads(
         })
         .unwrap_or_default();
 
-    Json(serde_json::json!({"leads": leads, "total": total})).into_response()
+    Json(LeadsListResponse { leads, total }).into_response()
 }
 
 pub async fn patch_lead(
@@ -948,5 +961,51 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM leads", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    /// POST /api/v1/leads returns typed CreateLeadResponse with id.
+    #[tokio::test]
+    async fn test_submit_lead_returns_typed_response() {
+        use http_body_util::BodyExt;
+
+        let dir = tempdir().unwrap();
+        let router = build_test_router(dir.path());
+
+        let resp = router
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/leads")
+                    .header("Content-Type", "application/json")
+                    .body(Body::from(r#"{"mensagem":"Test typed response"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let parsed: super::CreateLeadResponse = serde_json::from_slice(&bytes).unwrap();
+        assert!(parsed.id > 0);
+    }
+
+    /// CreateLeadResponse serializes correctly.
+    #[test]
+    fn test_create_lead_response_serializes() {
+        let r = super::CreateLeadResponse { id: 42 };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["id"], 42);
+    }
+
+    /// LeadsListResponse serializes correctly.
+    #[test]
+    fn test_leads_list_response_serializes() {
+        let r = super::LeadsListResponse {
+            leads: vec![],
+            total: 0,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["total"], 0);
+        assert!(json["leads"].is_array());
     }
 }

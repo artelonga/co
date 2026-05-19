@@ -423,3 +423,29 @@ pub struct PaginacaoQuery {
 fn default_limit() -> u64 {
     50
 }
+
+// ---------------------------------------------------------------------------
+// Admin summary types (CO-217)
+// ---------------------------------------------------------------------------
+
+/// A popular page entry in the admin summary.
+#[derive(Debug, Serialize)]
+pub struct PaginaPopular {
+    pub path: String,
+    pub visitas: i64,
+}
+
+/// Typed response for the quilombo admin summary endpoint.
+#[derive(Debug, Serialize)]
+pub struct AdminResumo {
+    pub periodo_dias: i64,
+    pub visitas: i64,
+    pub visitantes_unicos: i64,
+    pub usuarios: i64,
+    pub com_email: i64,
+    pub vinculados_co: i64,
+    pub eventos: i64,
+    pub missoes: i64,
+    pub comentarios: i64,
+    pub paginas_populares: Vec<PaginaPopular>,
+}

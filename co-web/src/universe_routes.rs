@@ -7,7 +7,7 @@ use axum::{
     response::IntoResponse,
     routing::{delete, get, post, put},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::auth::UserId;
 use crate::error::AppError;
@@ -55,6 +55,29 @@ pub struct UniverseInfo {
     /// processes (e.g. alterar-pagina-na-web). Defaults to "0.0.0".
     #[serde(default)]
     pub content_version: String,
+}
+
+/// Typed request body for `PUT /api/v1/universes/:slug`.
+#[derive(Debug, Deserialize)]
+pub struct UpdateUniverseRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub visibility: Option<String>,
+}
+
+/// Typed response for `PUT /api/v1/universes/:slug`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UpdateUniverseResponse {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub visibility: String,
+}
+
+/// Typed response for `DELETE /api/v1/universes/:slug`.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DeleteUniverseResponse {
+    pub deleted: String,
 }
 
 /// Query params for universe search.
@@ -354,8 +377,8 @@ pub async fn update_universe(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     headers: HeaderMap,
-    Json(body): Json<serde_json::Value>,
-) -> Result<Json<serde_json::Value>, AppError> {
+    Json(body): Json<UpdateUniverseRequest>,
+) -> Result<Json<UpdateUniverseResponse>, AppError> {
     // 1.45.0 model: every authenticated user is an admin and can edit any
     // universe they can see. The visibility gate (private vs subscribable
     // vs public) is the only access control that remains. A future `static`
@@ -370,7 +393,7 @@ pub async fn update_universe(
 
     drop(storage);
 
-    if let Some(name) = body.get("name").and_then(|v| v.as_str()) {
+    if let Some(name) = body.name.as_deref() {
         let name = name.trim();
         if name.is_empty() || name.len() > 100 {
             return Err(AppError::BadRequest("Name must be 1-100 characters".into()));
@@ -385,7 +408,7 @@ pub async fn update_universe(
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
-    if let Some(desc) = body.get("description").and_then(|v| v.as_str()) {
+    if let Some(desc) = body.description.as_deref() {
         let storage = lock_storage(&state);
         storage
             .conn()
@@ -396,7 +419,7 @@ pub async fn update_universe(
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
-    if let Some(vis) = body.get("visibility").and_then(|v| v.as_str()) {
+    if let Some(vis) = body.visibility.as_deref() {
         // 1.46.0: only `private` and `public-subscribable` are user-settable.
         // `template` is system-only; `requires_login` was collapsed into
         // `public-subscribable` (paired with `default_for_new_users` for
@@ -430,12 +453,12 @@ pub async fn update_universe(
     // CO-79: invalidate manifest + query caches for this universe.
     state.cache.invalidate_universe(&slug);
 
-    Ok(Json(serde_json::json!({
-        "key": updated.key,
-        "name": updated.name,
-        "description": updated.description,
-        "visibility": updated.visibility,
-    })))
+    Ok(Json(UpdateUniverseResponse {
+        key: updated.key,
+        name: updated.name,
+        description: updated.description,
+        visibility: updated.visibility,
+    }))
 }
 
 /// DELETE /api/v1/universes/:slug — delete a universe entirely (1.50.0).
@@ -523,9 +546,7 @@ pub async fn delete_universe(
 
     Ok((
         axum::http::StatusCode::OK,
-        Json(serde_json::json!({
-            "deleted": slug,
-        })),
+        Json(DeleteUniverseResponse { deleted: slug }),
     ))
 }
 
@@ -1073,7 +1094,10 @@ pub async fn update_universe_config(
 // ---------------------------------------------------------------------------
 
 /// Compute a stable ETag from the active theme preset name + serialized custom tokens.
-fn config_etag(theme_preset: &str, custom_tokens: Option<&serde_json::Value>) -> String {
+fn config_etag(
+    theme_preset: &str,
+    custom_tokens: Option<&serde_json::Value>, // FREEFORM: CSS variable override map has arbitrary keys
+) -> String {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     theme_preset.hash(&mut hasher);
     if let Some(tokens) = custom_tokens {
