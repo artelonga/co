@@ -5,6 +5,18 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.1] — 2026-05-19 — Typed auth extractor hierarchy (CO-222)
+
+### Added
+
+- **`auth::extractors` module**: four typed axum extractors — `AuthedUser`, `OwnerOf`, `AdminUser`, `TokenOrJwtUser` — that express auth requirements directly in handler signatures.
+- **`auth::extract_bearer_or_cookie`**: shared helper extracted from middleware to locate the caller's token (Bearer header or `session` cookie) without duplicating header-parsing logic.
+
+### Changed
+
+- **11 handlers migrated** to `AuthedUser` extractor: `list_notifications_handler`, `read_all_notifications_handler`, `mark_notification_read_handler`, `get_preferences_handler`, `put_preferences_handler` (notification_routes); `subscribe_handler`, `delete_subscription_handler`, `list_subscriptions_handler` (push_routes); `list_rooms_handler`, `list_room_members_handler`, `create_room_handler` (chat_routes).
+- Existing `require_auth` / `require_auth_with_token` middleware remains active in parallel — `AuthedUser` uses the `UserId` extension they inject as a fast path, so all existing tests continue to pass.
+
 ## [2.11.0] — 2026-05-19 — In-process event bus (CO-220)
 
 ### Added

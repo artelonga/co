@@ -8,7 +8,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::UserId;
+use crate::auth::extractors::AuthedUser;
 use crate::error::AppError;
 use crate::server::AppState;
 
@@ -108,14 +108,14 @@ fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage:
 /// GET /api/v1/me/notifications
 async fn list_notifications_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
     Query(q): Query<ListNotificationsQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let storage = lock_storage(&state);
     let (notifications, has_more) =
-        storage.list_my_notifications(&user_id.0, q.since.as_deref(), limit);
-    let unread_count = storage.get_unread_count(&user_id.0);
+        storage.list_my_notifications(&user.user_id, q.since.as_deref(), limit);
+    let unread_count = storage.get_unread_count(&user.user_id);
     Ok(axum::Json(ListNotificationsResponse {
         notifications,
         unread_count,
@@ -126,10 +126,10 @@ async fn list_notifications_handler(
 /// POST /api/v1/me/notifications/read-all
 async fn read_all_notifications_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = lock_storage(&state);
-    let count = storage.mark_all_read(&user_id.0)?;
+    let count = storage.mark_all_read(&user.user_id)?;
     Ok(axum::Json(ReadAllResponse { count }))
 }
 
@@ -137,11 +137,11 @@ async fn read_all_notifications_handler(
 async fn mark_notification_read_handler(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = lock_storage(&state);
     storage
-        .mark_notification_read(&id, &user_id.0)
+        .mark_notification_read(&id, &user.user_id)
         .map_err(|e| {
             if e.to_string().contains("not found") {
                 AppError::NotFound("Notification not found".into())
@@ -151,7 +151,7 @@ async fn mark_notification_read_handler(
         })?;
 
     // Fetch the updated notification to return it.
-    let (notifications, _) = storage.list_my_notifications(&user_id.0, None, 200);
+    let (notifications, _) = storage.list_my_notifications(&user.user_id, None, 200);
     let notif = notifications
         .into_iter()
         .find(|n| n.id == id)
@@ -163,17 +163,17 @@ async fn mark_notification_read_handler(
 /// GET /api/v1/me/notification-preferences
 async fn get_preferences_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = lock_storage(&state);
-    let prefs = storage.get_preferences(&user_id.0);
+    let prefs = storage.get_preferences(&user.user_id);
     Ok(axum::Json(prefs))
 }
 
 /// PUT /api/v1/me/notification-preferences
 async fn put_preferences_handler(
     State(state): State<AppState>,
-    user_id: UserId,
+    user: AuthedUser,
     axum::Json(body): axum::Json<UpdatePreferencesRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let valid_digest_freqs = ["instant", "hourly", "daily", "weekly", "never"];
@@ -198,9 +198,9 @@ async fn put_preferences_handler(
     let patch = serde_json::to_value(&body).map_err(|e| AppError::Internal(e.to_string()))?;
     let storage = lock_storage(&state);
     storage
-        .update_preferences(&user_id.0, &patch)
+        .update_preferences(&user.user_id, &patch)
         .map_err(|e| AppError::BadRequest(e.to_string()))?;
-    let prefs = storage.get_preferences(&user_id.0);
+    let prefs = storage.get_preferences(&user.user_id);
     Ok(axum::Json(prefs))
 }
 

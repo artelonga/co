@@ -16,7 +16,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::auth::UserId;
+use crate::auth::{UserId, extractors::AuthedUser};
 use crate::error::AppError;
 use crate::server::AppState;
 
@@ -140,7 +140,7 @@ fn can_manage_rooms(role: &str) -> bool {
 pub async fn list_rooms_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    user_id: UserId,
+    user: AuthedUser,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<impl IntoResponse, AppError> {
     let include_archived = params
@@ -154,7 +154,7 @@ pub async fn list_rooms_handler(
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-    let role = resolve_role(&storage, &slug, &user_id.0)
+    let role = resolve_role(&storage, &slug, &user.user_id)
         .ok_or_else(|| AppError::Forbidden("Chat is only available to universe members".into()))?;
 
     if !can_read(&role) {
@@ -169,7 +169,7 @@ pub async fn list_rooms_handler(
 pub async fn list_room_members_handler(
     State(state): State<AppState>,
     Path((slug, room_slug)): Path<(String, String)>,
-    user_id: UserId,
+    user: AuthedUser,
 ) -> Result<axum::Json<Vec<crate::storage::chat::ChatRoomMemberInfo>>, AppError> {
     let storage = lock_storage(&state);
 
@@ -181,7 +181,7 @@ pub async fn list_room_members_handler(
         storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
-        let role = resolve_role(&storage, &slug, &user_id.0)
+        let role = resolve_role(&storage, &slug, &user.user_id)
             .ok_or_else(|| AppError::Forbidden("Not a member of this universe".into()))?;
         if !can_read(&role) {
             return Err(AppError::Forbidden("Insufficient role to read chat".into()));
@@ -192,7 +192,7 @@ pub async fn list_room_members_handler(
     };
 
     // For DMs, verify caller is a participant.
-    if slug == "dm" && !storage.is_dm_member(&room.id, &user_id.0) {
+    if slug == "dm" && !storage.is_dm_member(&room.id, &user.user_id) {
         return Err(AppError::Forbidden("Not a member of this DM".into()));
     }
 
@@ -204,7 +204,7 @@ pub async fn list_room_members_handler(
 pub async fn create_room_handler(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-    user_id: UserId,
+    user: AuthedUser,
     axum::Json(body): axum::Json<CreateRoomRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let name = body.name.trim().to_string();
@@ -223,7 +223,7 @@ pub async fn create_room_handler(
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
 
-    let role = resolve_role(&storage, &slug, &user_id.0)
+    let role = resolve_role(&storage, &slug, &user.user_id)
         .ok_or_else(|| AppError::Forbidden("Chat is only available to universe members".into()))?;
 
     if !can_manage_rooms(&role) {
@@ -233,7 +233,7 @@ pub async fn create_room_handler(
     }
 
     let room = storage
-        .create_chat_room(&slug, &name, body.description.as_deref(), &user_id.0)
+        .create_chat_room(&slug, &name, body.description.as_deref(), &user.user_id)
         .map_err(|e| {
             if e.to_string().contains("UNIQUE constraint failed") {
                 AppError::Conflict("A room with this name already exists in this universe".into())

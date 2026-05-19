@@ -315,6 +315,19 @@ pub fn resolve_user_id(
         .map(|tok| tok.user_id)
 }
 
+/// Extracts a Bearer token from `Authorization` header or the `session` cookie.
+///
+/// Used by [`extractors`] and the auth middleware to locate the caller's token
+/// without duplicating the header-parsing logic.
+pub(crate) fn extract_bearer_or_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+    headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| extract_session_cookie(headers))
+}
+
 /// Extracts the session token from the `Cookie` header, if present.
 pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
@@ -858,6 +871,9 @@ pub fn new_code_entry(user_id: Option<String>, code: String) -> VerifyCodeEntry 
         attempts: 3,
     }
 }
+
+/// CO-222: typed extractor hierarchy (`AuthedUser`, `OwnerOf`, `AdminUser`, `TokenOrJwtUser`).
+pub mod extractors;
 
 #[cfg(test)]
 mod tests {
