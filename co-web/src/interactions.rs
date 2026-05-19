@@ -16,13 +16,7 @@
 
 use std::sync::OnceLock;
 
-use axum::{
-    Json, Router,
-    extract::Path,
-    http::StatusCode,
-    response::IntoResponse,
-    routing::get,
-};
+use axum::{Json, Router, extract::Path, http::StatusCode, response::IntoResponse, routing::get};
 use serde_json::{Value, json};
 
 use crate::server::AppState;
@@ -35,8 +29,8 @@ static OPENAPI: OnceLock<Value> = OnceLock::new();
 
 fn openapi() -> &'static Value {
     OPENAPI.get_or_init(|| {
-        let yaml: serde_yaml::Value = serde_yaml::from_str(REGISTRY_YAML)
-            .expect("registry.yaml must be valid YAML");
+        let yaml: serde_yaml::Value =
+            serde_yaml::from_str(REGISTRY_YAML).expect("registry.yaml must be valid YAML");
         serde_json::to_value(yaml).expect("YAML → JSON conversion")
     })
 }
@@ -210,10 +204,7 @@ mod tests {
         // a path parameter, not a top-level field. Verify each path
         // template includes {universe}.
         let doc = openapi();
-        let paths = doc
-            .get("paths")
-            .and_then(|p| p.as_object())
-            .expect("paths");
+        let paths = doc.get("paths").and_then(|p| p.as_object()).expect("paths");
         for path_template in paths.keys() {
             assert!(
                 path_template.contains("{universe}"),

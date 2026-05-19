@@ -163,6 +163,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .merge(crate::branch_routes::router())
         .merge(crate::proposal_routes::router())
         .merge(crate::universe_routes::universe_actions_router())
+        // CO-95: op log, replay, diff, promote, revert, cherry-pick
+        .merge(crate::op_log_routes::router())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             crate::auth::universe_writer_gate,

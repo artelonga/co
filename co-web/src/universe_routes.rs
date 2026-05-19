@@ -505,9 +505,8 @@ pub async fn delete_universe(
         tables.sort();
         for table in &tables {
             let sql = format!("DELETE FROM \"{table}\" WHERE universe_key = ?1");
-            conn.execute(&sql, [&slug]).map_err(|e| {
-                AppError::Internal(format!("delete cascade ({table}): {e}"))
-            })?;
+            conn.execute(&sql, [&slug])
+                .map_err(|e| AppError::Internal(format!("delete cascade ({table}): {e}")))?;
         }
         conn.execute("DELETE FROM universes WHERE key = ?1", [&slug])
             .map_err(|e| AppError::Internal(format!("delete cascade (universes): {e}")))?;
@@ -586,13 +585,35 @@ pub async fn duplicate_universe(
         }
     }
 
-    let universe = lock_storage(&state).clone_universe(
-        &source_slug,
-        &body.key,
-        &body.name,
-        &body.description,
-        &user_id,
-    )?;
+    // CO-95 Phase 3: use the O(1) filesystem-copy fork path when the source
+    // has a per-universe data.db (all universes post-CO-77). Falls back to
+    // the row-by-row clone_universe path if fast_fork fails (e.g. the source
+    // DB file doesn't exist yet because it was never accessed).
+    let universe = {
+        let result = lock_storage(&state).fast_fork_universe(
+            &source_slug,
+            &body.key,
+            &body.name,
+            &body.description,
+            &user_id,
+        );
+        match result {
+            Ok(u) => u,
+            Err(e) => {
+                tracing::warn!(
+                    "fast_fork_universe failed for {source_slug} → {}: {e}. Falling back to clone_universe.",
+                    body.key
+                );
+                lock_storage(&state).clone_universe(
+                    &source_slug,
+                    &body.key,
+                    &body.name,
+                    &body.description,
+                    &user_id,
+                )?
+            }
+        }
+    };
 
     Ok((StatusCode::CREATED, Json(universe)))
 }

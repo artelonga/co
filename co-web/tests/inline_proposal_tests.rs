@@ -203,11 +203,7 @@ async fn inline_proposal_rejects_traversal_in_target_path() {
 /// Helper: create a user + a universe they own. Required because
 /// `user_notifications` has a FK on `users(id)` — notifications about
 /// the owner silently fail if the user row is missing.
-fn seed_owned_universe(
-    dir: &std::path::Path,
-    owner_id: &str,
-    slug: &str,
-) {
+fn seed_owned_universe(dir: &std::path::Path, owner_id: &str, slug: &str) {
     let storage = Storage::new(dir);
     storage
         .conn()
