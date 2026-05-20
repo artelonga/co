@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.2] — 2026-05-20 — Hotfix: CO-232 broke SPA routes with trailing slash
+
+### Fixed — `serve_deep_link` returned 404 for non-universe SPA routes
+
+`serve_deep_link` (added in CO-232) was registered on `/{slug}/{*subpath}` and treated every two-segment URL as "universe + entry path". For SPA-owned routes like `/entrar/`, `/sobre/`, `/termos/` (where the first segment is **not** a universe slug at all), it returned 404 because no entry matched — breaking the login page and several static SPA routes in prod.
+
+**Fix**: `serve_deep_link` now distinguishes three cases:
+
+1. **Slug is not a universe** → 200 with SPA shell (e.g. `/entrar/`, `/sobre/`) — client router renders the page.
+2. **Universe exists + entry exists** → 200 with SPA shell, SPA opens the entry.
+3. **Universe exists but entry doesn't** → 404 with SPA shell (CO-232's original intent), SPA renders not-found view.
+
+New helper `universe_exists()` separates universe lookup from entry lookup. The CO-232 tests still pass (case 2 + 3 unchanged); case 1 is the new fix.
+
 ## [2.12.1] — 2026-05-20 — Hash API tokens at rest (CO-237)
 
 ### Security — API tokens no longer stored in plaintext

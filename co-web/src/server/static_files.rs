@@ -122,6 +122,14 @@ pub(super) async fn serve_co_index(
     (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
+/// Universe-existence check separated from entry lookup so `serve_deep_link` can
+/// distinguish "not a universe slug at all" (SPA route like `/entrar/`) from
+/// "universe exists but entry doesn't" (true 404).
+fn universe_exists(state: &AppState, universe_slug: &str) -> bool {
+    let storage = state.core.storage.lock();
+    storage.get_universe(universe_slug).is_some()
+}
+
 /// Check whether any of the SPA's candidate entry paths exist for a given subpath.
 ///
 /// Mirrors `maybeOpenEntryFromUrl` candidates in `app.js`. Returns `false` when
@@ -170,7 +178,13 @@ pub(super) async fn serve_deep_link(
         return (StatusCode::NOT_FOUND, "Not found").into_response();
     };
 
-    let status = if entry_exists_for_subpath(&state, &universe_slug, &subpath) {
+    // CO-232 hotfix: when the slug is not a known universe, treat the URL as a
+    // pure SPA route (e.g. `/entrar/`, `/sobre/`, `/termos/`) and serve 200 so
+    // the client-side router renders the page. Only return 404 when the
+    // universe exists but the entry within it does not.
+    let status = if !universe_exists(&state, &universe_slug) {
+        StatusCode::OK
+    } else if entry_exists_for_subpath(&state, &universe_slug, &subpath) {
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND
