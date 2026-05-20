@@ -217,17 +217,17 @@ async fn changes_handler(
     _user: UserId,
     Query(q): Query<ChangesQuery>,
 ) -> Result<Json<UatChangesResponse>, AppError> {
-    if !state.config.is_uat() {
+    if !state.core.config.is_uat() {
         return Err(AppError::NotFound(
             "UAT endpoint not available in production".into(),
         ));
     }
 
-    let data_dir = &state.config.data_dir;
+    let data_dir = &state.core.config.data_dir;
     let (snapshot_label, since_id) = resolve_since(data_dir, q.since.as_deref());
 
     let mutations = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.get_uat_mutations_since(since_id)
     };
 
@@ -253,17 +253,17 @@ async fn export_patch_handler(
     State(state): State<AppState>,
     _user: UserId,
 ) -> Result<Response, AppError> {
-    if !state.config.is_uat() {
+    if !state.core.config.is_uat() {
         return Err(AppError::NotFound(
             "UAT endpoint not available in production".into(),
         ));
     }
 
-    let data_dir = state.config.data_dir.clone();
+    let data_dir = state.core.config.data_dir.clone();
     let (snapshot_label, since_id) = resolve_since(&data_dir, None);
 
     let mutations: Vec<UatMutation> = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.get_uat_mutations_since(since_id)
     };
 

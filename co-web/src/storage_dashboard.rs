@@ -143,11 +143,11 @@ pub fn compute_dashboard_filtered(
     state: &AppState,
     filter: DashboardFilter<'_>,
 ) -> StorageDashboard {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let data_dir: PathBuf = storage.data_dir.clone();
     drop(storage);
 
-    let meta_conn_storage = state.storage.lock();
+    let meta_conn_storage = state.core.storage.lock();
     let conn = meta_conn_storage.conn();
 
     // Pull universe rows from meta.db, applying the filter at SQL.
@@ -212,7 +212,7 @@ pub fn compute_dashboard_filtered(
         // entries (current state), entry_events (transaction log),
         // entry_relations (CO-74 FK graph), references_meta (CO-156).
         let mut tables = HashMap::new();
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let uc_arc = storage.universe_conn(&key);
         drop(storage);
         if let Ok(uc) = uc_arc.lock() {
@@ -351,7 +351,7 @@ async fn universe_storage_handler(
     // authenticated reader since they're public — same posture as
     // the entries read API.
     let allowed = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let Some(u) = storage.get_universe(&slug) else {
             return Err((
                 StatusCode::NOT_FOUND,

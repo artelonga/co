@@ -20,7 +20,7 @@ async fn test_ws_presence_join_leave_events() {
     add_member(dir.path(), "ws8", &member_id, "member");
 
     let state = make_state(dir.path());
-    let port = spawn_server(std::sync::Arc::clone(&state)).await;
+    let port = spawn_server(state.clone()).await;
 
     let tok_owner = make_jwt(&owner_id);
     let tok_member = make_jwt(&member_id);
@@ -106,7 +106,7 @@ async fn test_ws_same_user_multiple_connections_dedup() {
     add_member(dir.path(), "ws9", &member_id, "member");
 
     let state = make_state(dir.path());
-    let port = spawn_server(std::sync::Arc::clone(&state)).await;
+    let port = spawn_server(state.clone()).await;
 
     let tok_owner = make_jwt(&owner_id);
     let tok_member = make_jwt(&member_id);
@@ -178,7 +178,7 @@ async fn test_ws_typing_rate_limit_2s() {
     add_member(dir.path(), "ws10", &member_id, "member");
 
     let state = make_state(dir.path());
-    let port = spawn_server(std::sync::Arc::clone(&state)).await;
+    let port = spawn_server(state.clone()).await;
 
     let tok_owner = make_jwt(&owner_id);
     let tok_member = make_jwt(&member_id);

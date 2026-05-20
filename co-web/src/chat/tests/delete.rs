@@ -281,7 +281,7 @@ async fn test_edit_broadcasts_message_edited_event() {
     let state = make_state_inner(dir.path());
 
     let (msg_id, room_id) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let room = storage
             .get_chat_room_by_slug("uni29", "general")
             .expect("room");
@@ -293,11 +293,11 @@ async fn test_edit_broadcasts_message_edited_event() {
 
     let (tx, mut rx) = broadcast::channel::<ChatEvent>(64);
     {
-        let mut map = state.chat_rooms_broadcast.lock().unwrap();
+        let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_id.clone(), tx);
     }
 
-    let app = crate::server::build_router(Arc::clone(&state), None);
+    let app = crate::server::build_router(state.clone(), None);
     let token = make_jwt(&owner_id);
 
     let resp = app
@@ -340,7 +340,7 @@ async fn test_delete_broadcasts_message_deleted_event() {
     let state = make_state_inner(dir.path());
 
     let (msg_id, room_id) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let room = storage
             .get_chat_room_by_slug("uni30", "general")
             .expect("room");
@@ -352,11 +352,11 @@ async fn test_delete_broadcasts_message_deleted_event() {
 
     let (tx, mut rx) = broadcast::channel::<ChatEvent>(64);
     {
-        let mut map = state.chat_rooms_broadcast.lock().unwrap();
+        let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_id.clone(), tx);
     }
 
-    let app = crate::server::build_router(Arc::clone(&state), None);
+    let app = crate::server::build_router(state.clone(), None);
     let token = make_jwt(&owner_id);
 
     let resp = app

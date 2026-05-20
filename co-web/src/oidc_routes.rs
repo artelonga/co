@@ -28,10 +28,12 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use std::sync::Arc;
+
 use crate::auth::UserId;
 use crate::error::AppError;
 use crate::github_auth::GitHubAdmin;
-use crate::server::AppState;
+use crate::server::{AppState, CoreState, IntegrationsState};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -294,7 +296,7 @@ pub async fn register_oauth_client(
     };
 
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         insert_oauth_client(storage.conn(), &client)
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
@@ -318,7 +320,7 @@ pub async fn list_oauth_clients_handler(
     State(state): State<AppState>,
     _admin: GitHubAdmin,
 ) -> Result<axum::Json<Vec<RegisterClientResponse>>, AppError> {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let clients = list_oauth_clients(storage.conn());
     let resp: Vec<RegisterClientResponse> = clients
         .into_iter()
@@ -349,10 +351,10 @@ pub fn gestao_oauth_router() -> Router<AppState> {
 // ---------------------------------------------------------------------------
 
 /// GET /.well-known/openid-configuration — OIDC discovery document
-pub async fn openid_configuration(State(state): State<AppState>) -> impl IntoResponse {
+pub async fn openid_configuration(State(core): State<Arc<CoreState>>) -> impl IntoResponse {
     // Derive the issuer URL from environment or fall back to localhost.
     let base = std::env::var("CO_PUBLIC_URL")
-        .unwrap_or_else(|_| format!("http://localhost:{}", state.config.port));
+        .unwrap_or_else(|_| format!("http://localhost:{}", core.config.port));
 
     axum::Json(serde_json::json!({
         "issuer": base,
@@ -371,8 +373,8 @@ pub async fn openid_configuration(State(state): State<AppState>) -> impl IntoRes
 }
 
 /// GET /.well-known/jwks.json — JWK Set containing the public ES256 key
-pub async fn jwks_json(State(state): State<AppState>) -> impl IntoResponse {
-    let jwk = state.jwt_key.public_jwk();
+pub async fn jwks_json(State(integrations): State<Arc<IntegrationsState>>) -> impl IntoResponse {
+    let jwk = integrations.jwt_key.public_jwk();
     axum::Json(serde_json::json!({ "keys": [jwk] }))
 }
 
@@ -418,7 +420,7 @@ pub async fn authorize_handler(
 
     // Look up client.
     let client = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         get_oauth_client_by_client_id(storage.conn(), &params.client_id)
             .ok_or_else(|| AppError::BadRequest("Unknown client_id".into()))?
     };
@@ -445,7 +447,7 @@ pub async fn authorize_handler(
     let expires_at = (now + chrono::Duration::seconds(300)).to_rfc3339();
 
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         insert_auth_code(
             storage.conn(),
             &AuthCodeRow {
@@ -511,7 +513,7 @@ pub async fn token_handler(
 
     // Fetch and consume the auth code.
     let code_row = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
 
         // Validate client credentials.
         let client = get_oauth_client_by_client_id(storage.conn(), &params.client_id)
@@ -557,7 +559,7 @@ pub async fn token_handler(
     let at_expires_at = (now + chrono::Duration::seconds(3600)).to_rfc3339();
 
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         insert_access_token(
             storage.conn(),
             &access_token,
@@ -573,16 +575,21 @@ pub async fn token_handler(
     // Mint ES256 ID token.
     let id_token = {
         let user_email = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage
                 .get_user_by_id(&code_row.user_id)
                 .map(|u| u.email)
                 .unwrap_or_default()
         };
 
-        crate::auth::sign_jwt_es256(&state.jwt_key, &code_row.user_id, &user_email, "player")
-            .map_err(|e| AppError::Internal(e.to_string()))?
-            .0
+        crate::auth::sign_jwt_es256(
+            &state.integrations.jwt_key,
+            &code_row.user_id,
+            &user_email,
+            "player",
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .0
     };
 
     Ok(axum::Json(TokenResponse {
@@ -620,7 +627,7 @@ pub async fn userinfo_handler(
 
     // Validate access token and look up user.
     let (user_id, _scope, _client_id, expires_at_str) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         get_access_token_row(storage.conn(), token)
             .ok_or_else(|| AppError::Unauthorized("Invalid access token".into()))?
     };
@@ -635,7 +642,7 @@ pub async fn userinfo_handler(
 
     // Fetch user.
     let user = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage
             .get_user_by_id(&user_id)
             .ok_or_else(|| AppError::NotFound("User not found".into()))?
@@ -684,7 +691,10 @@ mod tests {
     fn build_test_router(dir: &std::path::Path) -> axum::Router {
         use crate::config::WebConfig;
         use crate::experiment::ExperimentStore;
-        use crate::server::{AppState, AppStateInner, build_router};
+        use crate::server::{
+            AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
+            build_router,
+        };
         use crate::storage::Storage;
         use std::sync::Mutex;
 
@@ -715,30 +725,38 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path)
                 .expect("Failed to open test game storage"),
         );
-        let state: AppState = Arc::new(AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: Mutex::new(experiment),
-            config,
-            auth_store: Mutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx: {
-                let (tx, _) = crate::embedding_worker::channel();
-                tx
-            },
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        let state: AppState = AppState::new(AppStateInner {
+            core: Arc::new(CoreState {
+                storage: parking_lot::Mutex::new(storage),
+                config,
+                auth_store: Mutex::new(auth_store),
+                event_bus: crate::events::Bus::new(),
+            }),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx: {
+                    let (tx, _) = crate::embedding_worker::channel();
+                    tx
+                },
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: Mutex::new(experiment),
+                worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            }),
         });
         build_router(state, None)
     }
@@ -961,7 +979,10 @@ mod tests {
     async fn test_quilombo_legacy_login_disabled_returns_410() {
         use crate::config::WebConfig;
         use crate::experiment::ExperimentStore;
-        use crate::server::{AppState, AppStateInner, build_router};
+        use crate::server::{
+            AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
+            build_router,
+        };
         use crate::storage::Storage;
         use std::sync::Mutex;
 
@@ -993,30 +1014,38 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path)
                 .expect("Failed to open test game storage"),
         );
-        let state: AppState = Arc::new(AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: Mutex::new(experiment),
-            config,
-            auth_store: Mutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx: {
-                let (tx, _) = crate::embedding_worker::channel();
-                tx
-            },
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        let state: AppState = AppState::new(AppStateInner {
+            core: Arc::new(CoreState {
+                storage: parking_lot::Mutex::new(storage),
+                config,
+                auth_store: Mutex::new(auth_store),
+                event_bus: crate::events::Bus::new(),
+            }),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx: {
+                    let (tx, _) = crate::embedding_worker::channel();
+                    tx
+                },
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: Mutex::new(experiment),
+                worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            }),
         });
         let app = build_router(state, None);
 

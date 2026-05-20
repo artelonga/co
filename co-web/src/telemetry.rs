@@ -180,7 +180,7 @@ pub struct CrudEvent {
 ///
 /// `deployment_version` is set from `CARGO_PKG_VERSION` at compile time.
 pub fn emit_crud_event(state: &crate::server::AppState, ev: CrudEvent) {
-    let state_clone = std::sync::Arc::clone(state);
+    let state_clone = state.clone();
     let timestamp_ns = chrono::Utc::now()
         .timestamp_nanos_opt()
         .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000);
@@ -214,7 +214,7 @@ pub fn emit_crud_event(state: &crate::server::AppState, ev: CrudEvent) {
         ua_os: None,
     };
     tokio::spawn(async move {
-        let storage = state_clone.storage.lock();
+        let storage = state_clone.core.storage.lock();
         insert_event(storage.conn(), &row);
     });
 }
@@ -570,7 +570,7 @@ pub async fn telemetry_middleware(
         .filter(|s| !s.is_empty() && !RESERVED_TOP.contains(s))
         .map(String::from);
 
-    let (country, city) = crate::geo::geo_lookup(&state.geo, &ip);
+    let (country, city) = crate::geo::geo_lookup(&state.integrations.geo, &ip);
 
     let start = Instant::now();
     let mut response = next.run(req).await;
@@ -614,14 +614,14 @@ pub async fn telemetry_middleware(
     };
 
     // OLTP write (primary store — CO-46)
-    let state_clone = Arc::clone(&state);
+    let state_clone = state.clone();
     tokio::spawn(async move {
-        let storage = state_clone.storage.lock();
+        let storage = state_clone.core.storage.lock();
         insert_event(storage.conn(), &ev);
     });
 
     // CO-118: parallel WAE write (fire-and-forget, no-op when not configured)
-    Arc::clone(&state.wae).emit(crate::wae::TelemetryEvent {
+    Arc::clone(&state.integrations.wae).emit(crate::wae::TelemetryEvent {
         event_type: "page_view".into(),
         universe_id: wae_universe_id,
         user_kind: "anon".into(),
@@ -671,7 +671,7 @@ pub async fn track_event_handler(
 
     let visitor_token = get_visitor_token(&headers);
     let raw_ip = extract_ip_from_headers(&headers);
-    let (country, city) = crate::geo::geo_lookup(&state.geo, &raw_ip);
+    let (country, city) = crate::geo::geo_lookup(&state.integrations.geo, &raw_ip);
     let ip_hash = hash_ip_daily(&raw_ip);
 
     let ev = EventRow {
@@ -693,9 +693,9 @@ pub async fn track_event_handler(
         city,
     };
 
-    let state_clone = Arc::clone(&state);
+    let state_clone = state.clone();
     tokio::spawn(async move {
-        let storage = state_clone.storage.lock();
+        let storage = state_clone.core.storage.lock();
         insert_event(storage.conn(), &ev);
     });
 
@@ -764,7 +764,7 @@ pub async fn marketing_events_handler(
     }
 
     let raw_ip = extract_ip_from_headers(&headers);
-    let (country, city) = crate::geo::geo_lookup(&state.geo, &raw_ip);
+    let (country, city) = crate::geo::geo_lookup(&state.integrations.geo, &raw_ip);
     let ip_hash = hash_ip_daily(&raw_ip);
     let ua_device = parse_ua_device(&ua).to_string();
     let ua_browser = parse_ua_browser(&ua).to_string();
@@ -846,9 +846,9 @@ pub async fn marketing_events_handler(
         return StatusCode::NO_CONTENT;
     }
 
-    let state_clone = Arc::clone(&state);
+    let state_clone = state.clone();
     tokio::spawn(async move {
-        let storage = state_clone.storage.lock();
+        let storage = state_clone.core.storage.lock();
         for row in &rows {
             insert_event(storage.conn(), row);
         }
@@ -877,13 +877,13 @@ fn derive_event_type_from_marketing(name: &str) -> String {
 
 /// GET /api/v1/admin/telemetry/summary — aggregated analytics dashboard data.
 pub async fn summary_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     Json(telemetry_summary(storage.conn())).into_response()
 }
 
 /// GET /api/v1/admin/telemetry/export — last 10 000 events as CSV.
 pub async fn export_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let csv = build_csv(storage.conn());
     drop(storage);
 
@@ -1139,7 +1139,7 @@ pub fn router() -> Router<AppState> {
 
 /// GET /api/v1/admin/telemetry/crud-summary — CRUD events in last 24 hours.
 pub async fn crud_summary_handler(State(state): State<AppState>) -> impl IntoResponse {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     Json(crud_event_summary_24h(storage.conn())).into_response()
 }
 

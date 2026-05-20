@@ -391,7 +391,7 @@ pub(crate) fn remove_reference_meta(conn: &Connection, universe_key: &str, entry
 // ---------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn require_writer(

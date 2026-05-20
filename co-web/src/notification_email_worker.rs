@@ -32,7 +32,7 @@ pub async fn tick(
     let now = Utc::now();
 
     let users = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.list_users_with_pending_email_notifications()
     };
 
@@ -47,7 +47,7 @@ pub async fn tick(
         }
 
         let (prefs, batch) = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             let prefs = storage.get_preferences(&user_id);
             let batch = storage.list_pending_email_notifications(&user_id, MAX_PER_DIGEST);
             (prefs, batch)
@@ -77,7 +77,7 @@ pub async fn tick(
         match send_digest_email(&email, &display_name, &filtered, &lang).await {
             Ok(()) => {
                 failure_counts.remove(&user_id);
-                let storage = state.storage.lock();
+                let storage = state.core.storage.lock();
                 if let Err(e) = storage.mark_notifications_email_delivered(&ids) {
                     tracing::warn!("mark_delivered for {user_id}: {e}");
                 }

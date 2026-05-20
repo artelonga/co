@@ -32,13 +32,13 @@ pub async fn tick(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
         .unwrap_or_else(|_| "mailto:noreply@co.artelonga.com.br".to_string());
 
     let users = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.list_users_with_pending_push_notifications()
     };
 
     for (user_id, _display_name) in users {
         let (prefs, batch, subscriptions) = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             let prefs = storage.get_preferences(&user_id);
             let batch = storage.list_pending_push_notifications(&user_id, MAX_PER_USER);
             let subscriptions = storage.list_all_push_subscriptions_for_user(&user_id);
@@ -80,7 +80,7 @@ pub async fn tick(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
                     deliver_push(sub, &payload, &vapid_private_key, &vapid_subject).await
                 };
 
-                let storage = state.storage.lock();
+                let storage = state.core.storage.lock();
                 match outcome {
                     DeliveryOutcome::Success => {
                         let _ = storage.update_push_subscription_last_success(&sub.id);
@@ -115,7 +115,7 @@ pub async fn tick(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
         }
 
         if !delivered_ids.is_empty() {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             if let Err(e) = storage.mark_notifications_push_delivered(&delivered_ids) {
                 tracing::warn!("mark_push_delivered for {user_id}: {e}");
             }

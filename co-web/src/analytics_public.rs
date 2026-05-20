@@ -383,7 +383,7 @@ pub async fn summary_handler(
     }
 
     let data = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         query_public_summary(storage.conn(), days)
     };
 
@@ -420,7 +420,7 @@ pub async fn recent_handler(
     }
 
     let data = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         query_public_recent(storage.conn(), limit)
     };
 
@@ -606,7 +606,7 @@ pub async fn popularity_handler(
     }
 
     let items = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         query_popularity(storage.conn(), &prefix, days)
     };
 
@@ -848,6 +848,7 @@ mod tests {
 
     // --- HTTP integration tests ---
 
+    use crate::server::{CoreState, IndexState, IntegrationsState, RealtimeState};
     use std::sync::{Arc, Mutex as StdMutex};
 
     use axum::body::Body;
@@ -884,28 +885,37 @@ mod tests {
                 .expect("Failed to open test game storage"),
         );
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
-        let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: StdMutex::new(experiment),
-            config,
-            auth_store: StdMutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx,
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-        });
+        let state: crate::server::AppState =
+            crate::server::AppState::new(crate::server::AppStateInner {
+                core: Arc::new(CoreState {
+                    storage: parking_lot::Mutex::new(storage),
+                    config,
+                    auth_store: StdMutex::new(auth_store),
+                    event_bus: crate::events::Bus::new(),
+                }),
+                realtime: Arc::new(RealtimeState {
+                    doc_rooms: crate::ws::new_room_manager(),
+                    sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                    chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                    chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+                }),
+                index: Arc::new(IndexState {
+                    cache: crate::cache::CacheLayer::new(),
+                    embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                    embedding_tx,
+                }),
+                integrations: Arc::new(IntegrationsState {
+                    mail,
+                    geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                    plugin_registry: game_core::plugin::PluginRegistry::new(),
+                    game_storage,
+                    wae: crate::wae::WaeEmitter::new(None, None),
+                    jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                    rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
+                    experiment: StdMutex::new(experiment),
+                    worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+                }),
+            });
         crate::server::build_router(state, None)
     }
 

@@ -346,7 +346,7 @@ fn redact_email(email: &str) -> String {
 }
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 // -------------------------------------------------------------------------
@@ -822,9 +822,13 @@ async fn reset_password_handler(
     // SPA appends it to the redirect when `return_to` ends in
     // `/auth/co-handover`, letting the receiving deployment mint its own
     // session cookie cross-apex. Validated via CO's JWKS — no shared secret.
-    let co_token =
-        crate::auth::sign_handover_jwt_es256(&state.jwt_key, &user.id, &user.email, &user.tier)
-            .ok();
+    let co_token = crate::auth::sign_handover_jwt_es256(
+        &state.integrations.jwt_key,
+        &user.id,
+        &user.email,
+        &user.tier,
+    )
+    .ok();
 
     Ok((
         StatusCode::OK,
@@ -968,7 +972,7 @@ async fn find_user_for_recovery_pair(
     //     they want to recover via the new one going forward.
     // Idempotent for already-existing channels.
     if !email.is_empty() && email.contains('@') {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let _ = storage.ensure_email_recovery_channel(&user_id, email);
     }
 
@@ -983,7 +987,7 @@ async fn find_user_for_recovery_pair(
         &crate::recovery_crypto::normalize_channel_value("email", email),
     );
 
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let channels = storage.get_recovery_channels_for_user(&user_id);
     let channel_match = channels
         .iter()
@@ -1007,7 +1011,7 @@ async fn find_user_for_recovery_pair(
 }
 
 async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<String> {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let trimmed = identifier.trim();
     tracing::info!(
         "find_user_for_recovery: input={} (len={})",

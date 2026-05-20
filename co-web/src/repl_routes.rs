@@ -11,17 +11,19 @@
 //!   - R kernel via WebR (follow-up)
 //!   - `x-runnable` markdown fences for "include as code"
 
+use std::sync::Arc;
+
 use axum::{
     extract::State,
     http::{HeaderValue, StatusCode, header},
     response::Response,
 };
 
-use crate::server::AppState;
+use crate::server::CoreState;
 
 const REPL_HTML: &str = include_str!("../static/shared/repl.html");
 
-pub async fn serve_repl_page(State(_state): State<AppState>) -> Response {
+pub async fn serve_repl_page(State(_core): State<Arc<CoreState>>) -> Response {
     let mut resp = Response::new(REPL_HTML.into());
     resp.headers_mut().insert(
         header::CONTENT_TYPE,

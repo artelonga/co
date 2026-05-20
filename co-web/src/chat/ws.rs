@@ -114,7 +114,7 @@ enum ClientMsg {
 /// Increment the per-user refcount for `(room_id, user_id)`.
 /// Returns `true` when this is the FIRST connection for that user in the room.
 fn join_presence(state: &AppState, room_id: &str, user_id: &str) -> bool {
-    let mut map = state.chat_presence.lock().unwrap();
+    let mut map = state.realtime.chat_presence.lock().unwrap();
     let room = map.entry(room_id.to_string()).or_default();
     let count = room.entry(user_id.to_string()).or_insert(0);
     *count += 1;
@@ -124,7 +124,7 @@ fn join_presence(state: &AppState, room_id: &str, user_id: &str) -> bool {
 /// Decrement the per-user refcount. Returns `true` when this was the LAST
 /// connection for that user in the room.
 fn leave_presence(state: &AppState, room_id: &str, user_id: &str) -> bool {
-    let mut map = state.chat_presence.lock().unwrap();
+    let mut map = state.realtime.chat_presence.lock().unwrap();
     if let Some(room) = map.get_mut(room_id)
         && let Some(count) = room.get_mut(user_id)
     {
@@ -145,7 +145,7 @@ fn current_presence(
     storage: &crate::storage::Storage,
 ) -> Vec<ChatAuthor> {
     let user_ids: Vec<String> = {
-        let map = state.chat_presence.lock().unwrap();
+        let map = state.realtime.chat_presence.lock().unwrap();
         map.get(room_id)
             .map(|r| r.keys().cloned().collect())
             .unwrap_or_default()
@@ -193,7 +193,7 @@ pub async fn chat_ws_handler(
 
     // 2. Connect rate-limit: 5 connects per user per minute.
     {
-        let mut limiter = match state.rate_limiter.lock() {
+        let mut limiter = match state.integrations.rate_limiter.lock() {
             Ok(l) => l,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
@@ -205,7 +205,7 @@ pub async fn chat_ws_handler(
 
     // 3. Membership + room check (all reads under one storage lock).
     let (room_id, your_role, author) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
 
         if storage.get_universe(&slug).is_none() {
             return StatusCode::NOT_FOUND.into_response();
@@ -241,7 +241,7 @@ pub async fn chat_ws_handler(
 
     // 4. Get or create broadcast channel for the room.
     let tx = {
-        let mut map = match state.chat_rooms_broadcast.lock() {
+        let mut map = match state.realtime.chat_rooms_broadcast.lock() {
             Ok(m) => m,
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
@@ -251,7 +251,7 @@ pub async fn chat_ws_handler(
     };
 
     // 5. Upgrade the HTTP connection to WebSocket.
-    let state2 = Arc::clone(&state);
+    let state2 = state.clone();
     ws.on_upgrade(move |socket| async move {
         handle_ws(socket, state2, room_id, user_id, your_role, author, tx).await;
     })
@@ -280,7 +280,7 @@ async fn handle_ws(
 
     // 2. Build current presence list for the `ready` event.
     let presence_list = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         current_presence(&state, &room_id, &storage)
     };
 
@@ -355,7 +355,7 @@ async fn handle_ws(
     });
 
     // 8. Reader task — deserialises client messages and handles typing events.
-    let state_r = Arc::clone(&state);
+    let state_r = state.clone();
     let room_id_r = room_id.clone();
     let user_id_r = user_id.clone();
     let tx_r = tx.clone();
@@ -371,6 +371,7 @@ async fn handle_ws(
                             ClientMsg::TypingStart => {
                                 let key = format!("chat:typing:{}:{}", user_id_r, room_id_r);
                                 let allowed = state_r
+                                    .integrations
                                     .rate_limiter
                                     .lock()
                                     .map(|mut l| l.check(&key, 1).is_ok())

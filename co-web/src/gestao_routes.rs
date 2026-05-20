@@ -390,7 +390,7 @@ fn validar_conteudo(conteudo: &str) -> ValidarResponse {
 }
 
 fn universo_dir(state: &AppState) -> PathBuf {
-    PathBuf::from(&state.config.universo_dir)
+    PathBuf::from(&state.core.config.universo_dir)
 }
 
 // ---- Handlers ----
@@ -763,7 +763,7 @@ async fn schema_check_handler(
     State(state): State<AppState>,
     _admin: GitHubAdmin,
 ) -> Result<Json<SchemaCheckResponse>, AppError> {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let conn = storage.conn();
 
     let mut stmt = conn

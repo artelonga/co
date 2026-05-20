@@ -3,7 +3,6 @@
 //! Tracks page views, filters bots and scanner probes, manages visitor cookies.
 //! Ported from quilombo-blog's hooks.server.ts.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use axum::body::Body;
@@ -224,11 +223,11 @@ pub async fn telemetry_middleware(
     }
 
     // Record visit asynchronously (don't block response)
-    let state = Arc::clone(&state);
+    let state = state.clone();
     let path_clone = path;
     let user_agent_clone = user_agent;
     tokio::spawn(async move {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         // Filter internal referrers
         let filtered_referrer = referrer.as_deref().and_then(|r| {
             if r.contains("quilomboaraucaria.org")

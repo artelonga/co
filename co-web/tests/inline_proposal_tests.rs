@@ -17,7 +17,9 @@ use tower::ServiceExt;
 
 use co_web::config::WebConfig;
 use co_web::experiment::ExperimentStore;
-use co_web::server::{AppState, AppStateInner, build_router};
+use co_web::server::{
+    AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+};
 use co_web::storage::{Storage, seed_data};
 
 extern crate co;
@@ -68,37 +70,46 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
     let game_storage = std::sync::Arc::new(
         game_core::storage::Storage::open(&game_db_path).expect("game storage"),
     );
-    let state: AppState = Arc::new(AppStateInner {
-        storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
-        config,
-        auth_store: Mutex::new(auth_store),
-        mail,
-        game_storage,
-        plugin_registry: game_core::plugin::PluginRegistry::new(),
-        doc_rooms: co_web::ws::new_room_manager(),
-        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
-        cache: co_web::cache::CacheLayer::new(),
-        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
-        wae: co_web::wae::WaeEmitter::new(None, None),
-        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
-        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
-        embedding_tx: {
-            let (tx, _) = co_web::embedding_worker::channel();
-            tx
-        },
-        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
-        event_bus: co_web::events::Bus::new(),
-        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+    let state: AppState = AppState::new(AppStateInner {
+        core: Arc::new(CoreState {
+            storage: parking_lot::Mutex::new(storage),
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: co_web::events::Bus::new(),
+        }),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: co_web::ws::new_room_manager(),
+            sync_rooms: co_web::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: co_web::cache::CacheLayer::new(),
+            embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+            embedding_tx: {
+                let (tx, _) = co_web::embedding_worker::channel();
+                tx
+            },
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: co_web::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+        }),
     });
     // CO-220: subscribe before spawning so events published synchronously
     // during the HTTP handler are not missed by the task.
     let mut notif_rx = state
+        .core
         .event_bus
         .subscribe(co_web::events::EventFilter::Notification);
-    let notif_state = Arc::clone(&state);
+    let notif_state = state.clone();
     tokio::spawn(async move {
         while let Some(event) = notif_rx.recv().await {
             if let co_web::events::DomainEvent::NotificationRequested {
@@ -112,7 +123,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
                 summary_params,
             } = event
             {
-                let storage = notif_state.storage.lock();
+                let storage = notif_state.core.storage.lock();
                 let _ = storage.create_notification(
                     &recipient_id,
                     &kind,

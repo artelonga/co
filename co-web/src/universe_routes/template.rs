@@ -518,7 +518,7 @@ pub async fn apply_template_all(
                     let _ = crate::entry_index::EntryIndex::new(&g).upsert(slug, &entry);
                 }
                 {
-                    let mut s = state.storage.lock();
+                    let mut s = state.core.storage.lock();
                     s.increment_universe_content_count(slug);
                 }
                 created.push(rel.to_string());
@@ -702,14 +702,14 @@ pub async fn reindex(
 
     // Sync content_count to on-disk reality.
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let _ = storage.conn().execute(
             "UPDATE universes SET content_count = ?1 WHERE key = ?2",
             rusqlite::params![disk_entries.len() as i64, &slug],
         );
     }
 
-    state.cache.invalidate_universe(&slug);
+    state.index.cache.invalidate_universe(&slug);
 
     Ok(axum::Json(ReindexResponse { indexed, errors }))
 }

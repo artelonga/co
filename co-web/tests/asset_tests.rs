@@ -13,7 +13,9 @@ use tower::ServiceExt;
 
 use co_web::config::WebConfig;
 use co_web::experiment::ExperimentStore;
-use co_web::server::{AppState, AppStateInner, build_router};
+use co_web::server::{
+    AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+};
 use co_web::storage::Storage;
 
 extern crate co;
@@ -49,30 +51,38 @@ fn build_test_app(dir: &std::path::Path) -> (axum::Router, AppState) {
     let game_storage = Arc::new(
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
-    let state: AppState = Arc::new(AppStateInner {
-        storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
-        config,
-        auth_store: Mutex::new(auth_store),
-        mail,
-        game_storage,
-        plugin_registry: game_core::plugin::PluginRegistry::new(),
-        doc_rooms: co_web::ws::new_room_manager(),
-        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
-        cache: co_web::cache::CacheLayer::new(),
-        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
-        wae: co_web::wae::WaeEmitter::new(None, None),
-        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
-        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
-        embedding_tx: {
-            let (tx, _) = co_web::embedding_worker::channel();
-            tx
-        },
-        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
-        event_bus: co_web::events::Bus::new(),
-        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+    let state: AppState = AppState::new(AppStateInner {
+        core: Arc::new(CoreState {
+            storage: parking_lot::Mutex::new(storage),
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: co_web::events::Bus::new(),
+        }),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: co_web::ws::new_room_manager(),
+            sync_rooms: co_web::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: co_web::cache::CacheLayer::new(),
+            embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+            embedding_tx: {
+                let (tx, _) = co_web::embedding_worker::channel();
+                tx
+            },
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: co_web::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+        }),
     });
     let router = build_router(state.clone(), None);
     (router, state)
@@ -90,7 +100,7 @@ fn user_bearer(user_id: &str) -> String {
 }
 
 fn make_universe(state: &AppState, key: &str, owner: &str, public: bool) {
-    let mut storage = state.storage.lock();
+    let mut storage = state.core.storage.lock();
     storage
         .create_universe(
             co_web::models::CreateUniverse {
@@ -201,7 +211,7 @@ async fn upload_dedupes_by_sha256() {
 
     // Exactly one row in the assets table for this content.
     let conn_arc = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.universe_conn("u1")
     };
     let conn = conn_arc.lock().unwrap();
@@ -403,7 +413,7 @@ async fn blob_on_disk_is_ciphertext() {
         .unwrap();
 
     let universe_dir = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.universe_pool.universe_dir("u1")
     };
     let blob_root = universe_dir.join("blobs");

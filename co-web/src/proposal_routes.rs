@@ -202,7 +202,7 @@ pub async fn create_inline_proposal(
     // Verify target universe exists (anyone can see public-subscribable
     // universes; the visibility gate is enforced at the route layer).
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         if storage.get_universe(&target_slug).is_none() {
             return Err(AppError::NotFound(format!(
                 "Universe '{target_slug}' not found"
@@ -246,7 +246,7 @@ pub async fn create_inline_proposal(
     let target_path_for_notif = req.target_path.clone();
     let author_for_notif = author.clone();
     let owner_id_for_notif = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage
             .get_universe(&target_universe_for_notif)
             .filter(|u| u.owner_id != author_for_notif && u.owner_id != "system")
@@ -254,6 +254,7 @@ pub async fn create_inline_proposal(
     };
     if let Some(owner_id) = owner_id_for_notif {
         state
+            .core
             .event_bus
             .publish(crate::events::DomainEvent::NotificationRequested {
                 recipient_id: owner_id,
@@ -316,7 +317,7 @@ pub async fn create_proposal(
 
     // Verify target universe + source universe + source state all exist.
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         if storage.get_universe(&target_slug).is_none() {
             return Err(AppError::NotFound(format!(
                 "Target universe '{target_slug}' not found"
@@ -331,7 +332,7 @@ pub async fn create_proposal(
     }
     {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(&req.source_universe)
         };
         let uc_guard = uc
@@ -433,7 +434,7 @@ pub async fn merge_proposal(
 
     let (source_universe, source_state, target_branch, current_status, prop_title, prop_desc) = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             if storage.get_universe(&target_slug).is_none() {
                 return Err(AppError::NotFound(format!(
                     "Universe '{target_slug}' not found"
@@ -499,7 +500,7 @@ pub async fn merge_proposal(
 
     let source_entries = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             if storage.get_universe(&source_universe).is_none() {
                 return Err(AppError::BadRequest(format!(
                     "Source universe '{source_universe}' no longer exists"
@@ -552,7 +553,7 @@ pub async fn merge_proposal(
     let branch_path = format!("branches/{target_branch}.md");
     let branch_advanced = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(&target_slug)
         };
         let uc_guard = uc
@@ -732,7 +733,7 @@ pub async fn decide_inline_proposal(
 
     // Authorization: only the target universe's owner may decide.
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let universe = storage
             .get_universe(&target_slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{target_slug}' not found")))?;
@@ -746,7 +747,7 @@ pub async fn decide_inline_proposal(
     // Load the proposal entry (its frontmatter carries target_path + author).
     let proposal_entry = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(&target_slug)
         };
         let uc_guard = uc
@@ -795,7 +796,7 @@ pub async fn decide_inline_proposal(
         // yet (proposed creation), use a minimal page frontmatter.
         let target_fm = {
             let uc = {
-                let storage = state.storage.lock();
+                let storage = state.core.storage.lock();
                 storage.universe_conn(&target_slug)
             };
             let uc_guard = uc
@@ -843,6 +844,7 @@ pub async fn decide_inline_proposal(
             "notif.universe.proposal.rejected"
         };
         state
+            .core
             .event_bus
             .publish(crate::events::DomainEvent::NotificationRequested {
                 recipient_id: author_uid.clone(),
@@ -893,7 +895,7 @@ pub async fn list_inbound_proposals(
 
     // Owned universes.
     let owned: Vec<String> = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let mut stmt = storage
             .conn()
             .prepare("SELECT key FROM universes WHERE owner_id = ?1")
@@ -907,7 +909,7 @@ pub async fn list_inbound_proposals(
     let mut out: Vec<InboundProposalSummary> = Vec::new();
     for universe_key in owned {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(&universe_key)
         };
         let uc_guard = match uc.lock() {
@@ -985,7 +987,7 @@ fn take_state_for_merge(
 
     let (state_lines, parent_path) = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(slug)
         };
         let uc_guard = uc

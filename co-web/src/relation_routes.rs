@@ -50,7 +50,7 @@ pub struct OutboundRelation {
 // ---------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 // ---------------------------------------------------------------------------

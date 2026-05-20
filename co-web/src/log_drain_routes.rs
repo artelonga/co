@@ -19,7 +19,9 @@ use hmac::{Hmac, Mac};
 use serde::Deserialize;
 use sha1::Sha1;
 
-use crate::server::AppState;
+use std::sync::Arc;
+
+use crate::server::{AppState, CoreState};
 use crate::storage::LogDrainEvent;
 
 type HmacSha1 = Hmac<Sha1>;
@@ -49,13 +51,13 @@ struct VercelLogEntry {
 
 async fn vercel_drain_handler(
     Path(universe_id): Path<String>,
-    State(state): State<AppState>,
+    State(core): State<Arc<CoreState>>,
     headers: HeaderMap,
     body: Bytes,
 ) -> StatusCode {
     // 1. Look up the per-universe drain secret.
     let secret = {
-        let storage = state.storage.lock();
+        let storage = core.storage.lock();
         match storage.get_log_drain_secret(&universe_id) {
             Ok(Some(s)) if !s.is_empty() => s,
             Ok(_) => return StatusCode::NOT_FOUND,
@@ -85,7 +87,7 @@ async fn vercel_drain_handler(
 
     // 4. Persist events — deduplicated by event_id via INSERT OR IGNORE.
     let received_at = Utc::now().to_rfc3339();
-    let storage = state.storage.lock();
+    let storage = core.storage.lock();
     for event in &events {
         let event_id = if event.id.is_empty() {
             uuid::Uuid::new_v4().to_string()
@@ -142,7 +144,10 @@ mod tests {
     use crate::config::WebConfig;
     use crate::experiment::ExperimentStore;
     use crate::models::CreateUniverse;
-    use crate::server::{AppState, AppStateInner, build_router};
+    use crate::server::{
+        AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
+        build_router,
+    };
     use crate::storage::Storage;
 
     fn make_sig(secret: &[u8], body: &[u8]) -> String {
@@ -180,27 +185,35 @@ mod tests {
         let game_storage =
             Arc::new(game_core::storage::Storage::open(&game_db_path).expect("open game storage"));
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
-        let state: AppState = Arc::new(AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: Mutex::new(experiment),
-            config,
-            auth_store: Mutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx,
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        let state: AppState = AppState::new(AppStateInner {
+            core: Arc::new(CoreState {
+                storage: parking_lot::Mutex::new(storage),
+                config,
+                auth_store: Mutex::new(auth_store),
+                event_bus: crate::events::Bus::new(),
+            }),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx,
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: Mutex::new(experiment),
+                worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            }),
         });
         build_router(state, None)
     }

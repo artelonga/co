@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.4] — 2026-05-20 — Slim AppStateInner via segregated sub-states (CO-221)
+
+### Changed
+
+- **`AppStateInner` split into 4 composable sub-states**: `CoreState` (storage, config, auth_store, event_bus), `RealtimeState` (doc_rooms, sync_rooms, chat broadcast + presence), `IndexState` (cache, embeddings, embedding_tx), `IntegrationsState` (mail, geo, plugin_registry, game_storage, wae, jwt_key, rate_limiter, experiment, worker_supervisor).
+- `AppStateInner` now holds `Arc<CoreState>`, `Arc<RealtimeState>`, `Arc<IndexState>`, `Arc<IntegrationsState>` — one Arc per sub-state.
+- `AppState` changed from a bare type alias to a `Clone + Deref` newtype, enabling `FromRef<AppState>` impls for each sub-state.
+- axum `FromRef` impls added: handlers can now take `State<Arc<CoreState>>` (or any sub-state) and receive only the fields they actually use.
+- 11 handlers migrated to narrow sub-state extractors: `health_check_deep`, `cache_stats_handler`, `list_plugins`, `openid_configuration`, `jwks_json`, `vercel_drain_handler`, `serve_repl_page`, `workers_status_handler`, `create_flag_handler`, `list_flags_handler`, `toggle_flag_handler`.
+- Remaining handlers continue to take `State<AppState>` — migration is opt-in.
+
+### Why
+
+Closes CO-221. The global `State<AppState>` extractor leaked all 20 unrelated dependencies into every handler, making the dependency graph opaque and compilation slower. With sub-states, handlers declare their actual dependencies; the compiler enforces it.
+
 ## [2.11.3] — 2026-05-20 — co-cli build hotfix
 
 ### Fixed

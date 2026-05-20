@@ -180,7 +180,7 @@ impl axum::extract::FromRequestParts<AppState> for OwnerOf {
         };
 
         let result = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             match storage.get_universe(&slug) {
                 Some(universe) if universe.owner_id == user_id => Ok(OwnerOf { user_id, slug }),
                 Some(_) => Err(forbidden("Not authorized: you do not own this universe")),
@@ -272,7 +272,7 @@ impl axum::extract::FromRequestParts<AppState> for TokenOrJwtUser {
         }
         // Fall back to API token lookup.
         let result = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage
                 .get_api_token_by_value(&token)
                 .ok()

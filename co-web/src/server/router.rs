@@ -109,7 +109,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     let github_token_cache = crate::github_auth::new_token_cache();
     let allowed_admins =
-        crate::github_auth::AllowedAdmins(state.config.gestao_github_admins.clone());
+        crate::github_auth::AllowedAdmins(state.core.config.gestao_github_admins.clone());
     let gestao_api = crate::gestao_routes::router()
         .layer(axum::Extension(github_token_cache.clone()))
         .layer(axum::Extension(allowed_admins.clone()));

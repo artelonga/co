@@ -250,7 +250,7 @@ async fn callback_handler(
 
     // 4. Find or create CO user.
     let user = {
-        let mut storage = state.storage.lock();
+        let mut storage = state.core.storage.lock();
         storage.find_or_create_user_by_google(
             &userinfo.sub,
             &userinfo.email,
@@ -263,7 +263,7 @@ async fn callback_handler(
     // CO-184 reverse bridge: ensure a quilombo identity exists too. Best-effort —
     // a failure here doesn't block sign-in (user can still use CO routes).
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         if let Err(e) = storage.ensure_quilombo_user_for_co(&user.id) {
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {} (sign-in continues): {e}",
@@ -282,7 +282,7 @@ async fn callback_handler(
     .map_err(|e| AppError::Internal(e.to_string()))?;
     let cookie = crate::auth::build_session_cookie(
         &session_token,
-        state.config.cookie_domain.as_deref(),
+        state.core.config.cookie_domain.as_deref(),
         604800,
     );
 
@@ -310,7 +310,7 @@ async fn callback_handler(
         &user.id,
         &user.email,
         &user.tier,
-        &state.jwt_key,
+        &state.integrations.jwt_key,
     );
 
     use axum::http::HeaderValue;

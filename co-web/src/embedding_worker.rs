@@ -57,7 +57,7 @@ pub fn enqueue_upsert(
         body: body.to_string(),
         body_hash: body_hash.to_string(),
     };
-    let _ = state.embedding_tx.try_send(job);
+    let _ = state.index.embedding_tx.try_send(job);
 }
 
 /// Enqueue a delete job (fire-and-forget; drops silently if channel full).
@@ -66,7 +66,7 @@ pub fn enqueue_delete(state: &AppState, universe_key: &str, path: &str) {
         universe_key: universe_key.to_string(),
         path: path.to_string(),
     };
-    let _ = state.embedding_tx.try_send(job);
+    let _ = state.index.embedding_tx.try_send(job);
 }
 
 /// Spawn the embedding worker on a dedicated OS thread.
@@ -81,11 +81,11 @@ pub fn spawn(rx: EmbeddingReceiver, state: AppState) {
 /// then enqueue them. Runs as an async background task (non-blocking).
 pub fn boot_scan(state: AppState) {
     tokio::spawn(async move {
-        let universe_keys = { state.storage.lock().all_universe_keys() };
+        let universe_keys = { state.core.storage.lock().all_universe_keys() };
 
         let mut queued = 0usize;
         for key in universe_keys {
-            let uc = { state.storage.lock().universe_conn(&key) };
+            let uc = { state.core.storage.lock().universe_conn(&key) };
             let conn = match uc.lock() {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -98,7 +98,7 @@ pub fn boot_scan(state: AppState) {
                 }
             };
             for (path, body_hash, body) in stale {
-                let _ = state.embedding_tx.try_send(EmbeddingJob::Upsert {
+                let _ = state.index.embedding_tx.try_send(EmbeddingJob::Upsert {
                     universe_key: key.clone(),
                     path,
                     body,
@@ -147,7 +147,7 @@ fn process_batch(batch: &[EmbeddingJob], state: &AppState) {
     // --- Handle deletes first ---
     for job in batch {
         if let EmbeddingJob::Delete { universe_key, path } = job {
-            let uc = state.storage.lock().universe_conn(universe_key);
+            let uc = state.core.storage.lock().universe_conn(universe_key);
             if let Ok(conn) = uc.lock() {
                 let _ = EmbeddingIndex::new(&conn).remove(universe_key, path);
             }
@@ -183,7 +183,7 @@ fn process_batch(batch: &[EmbeddingJob], state: &AppState) {
 
     // Compute embeddings for all bodies in one batch call.
     let texts: Vec<&str> = upserts.iter().map(|(_, _, body, _)| *body).collect();
-    let embeddings = match state.embeddings.embed(&texts) {
+    let embeddings = match state.index.embeddings.embed(&texts) {
         Some(e) => e,
         None => {
             debug!(
@@ -206,7 +206,7 @@ fn process_batch(batch: &[EmbeddingJob], state: &AppState) {
     // Write each embedding to the per-universe DB.
     for ((universe_key, path, _body, body_hash), embedding) in upserts.iter().zip(embeddings.iter())
     {
-        let uc = state.storage.lock().universe_conn(universe_key);
+        let uc = state.core.storage.lock().universe_conn(universe_key);
         let conn = match uc.lock() {
             Ok(c) => c,
             Err(_) => continue,

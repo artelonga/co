@@ -5,8 +5,6 @@
 //! Admin:   PATCH /api/v1/admin/leads/:id — triage / update status.
 //! Admin:   GET  /admin/leads.html      — static admin page (cookie auth).
 
-use std::sync::Arc;
-
 use axum::{
     Json, Router,
     extract::{Path, Query, State},
@@ -257,7 +255,7 @@ pub async fn submit_lead(
 
     // 5. Rate limit — 5 leads per IP-hash per 24 h
     let rate_exceeded = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let count: i64 = storage
             .conn()
             .query_row(
@@ -312,7 +310,7 @@ pub async fn submit_lead(
     // 7. Persist
     let now = chrono::Utc::now().to_rfc3339();
     let (id, insert_ok) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let res = storage.conn().execute(
             "INSERT INTO leads
              (created_at, updated_at, nome, email, telefone, mensagem,
@@ -368,7 +366,7 @@ pub async fn list_leads(
         return err;
     }
 
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
 
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
 
@@ -452,7 +450,7 @@ pub async fn patch_lead(
         return err;
     }
 
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
 
     // Read current status
     let current_status: Option<String> = storage
@@ -582,10 +580,10 @@ const LEADS_PAGE_HTML: &str = include_str!("../static/variants/a/leads.html");
 // Background retention task (CO-183 LGPD 24-month purge)
 // ---------------------------------------------------------------------------
 
-pub async fn retention_task(state: Arc<crate::server::AppStateInner>) {
+pub async fn retention_task(state: crate::server::AppState) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 3600)).await;
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         match storage.conn().execute(
             "DELETE FROM leads \
              WHERE created_at < datetime('now', '-24 months') \
@@ -621,6 +619,7 @@ pub fn admin_router() -> Router<AppState> {
 
 #[cfg(test)]
 mod tests {
+    use crate::server::{CoreState, IndexState, IntegrationsState, RealtimeState};
     use std::sync::{Arc, Mutex};
 
     use axum::body::Body;
@@ -655,28 +654,37 @@ mod tests {
         let game_storage =
             Arc::new(game_core::storage::Storage::open(&game_db_path).expect("game storage"));
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
-        let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: Mutex::new(experiment),
-            config,
-            auth_store: Mutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx,
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
-        });
+        let state: crate::server::AppState =
+            crate::server::AppState::new(crate::server::AppStateInner {
+                core: Arc::new(CoreState {
+                    storage: parking_lot::Mutex::new(storage),
+                    config,
+                    auth_store: Mutex::new(auth_store),
+                    event_bus: crate::events::Bus::new(),
+                }),
+                realtime: Arc::new(RealtimeState {
+                    doc_rooms: crate::ws::new_room_manager(),
+                    sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                    chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                    chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+                }),
+                index: Arc::new(IndexState {
+                    cache: crate::cache::CacheLayer::new(),
+                    embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+                    embedding_tx,
+                }),
+                integrations: Arc::new(IntegrationsState {
+                    mail,
+                    geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                    plugin_registry: game_core::plugin::PluginRegistry::new(),
+                    game_storage,
+                    wae: crate::wae::WaeEmitter::new(None, None),
+                    jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                    rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+                    experiment: Mutex::new(experiment),
+                    worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+                }),
+            });
         crate::server::build_router(state, None)
     }
 
