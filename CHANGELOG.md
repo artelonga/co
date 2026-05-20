@@ -5,6 +5,40 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.6] — 2026-05-20 — Sync pipeline: latest changes not appearing on prod web (CO-233)
+
+### Fixed — cache headers on mutable entry API responses
+
+**Root cause:** `list_entries`, `list_entry_tags`, and `entry_tree` returned no
+`Cache-Control` header. Without an explicit `no-store` directive, Cloudflare CDN
+(CO-117, with a "Cache Everything" page rule) could cache these mutable API
+responses and serve stale data for its configured TTL — making vault PUTs and
+board edits invisible to visitors until the CDN TTL expired (potentially hours).
+
+Additionally, `entry_cache_control` used `stale-while-revalidate=300` for anon
+reads of template / `co::public/*` seed content, creating a 5-minute window
+where browsers could serve stale content even after a fresh response arrived.
+
+**Fix:**
+
+- `GET /{slug}/entries`: both JSON and protobuf responses now include
+  `Cache-Control: no-store`, preventing caching at every layer (browser,
+  CDN, proxy).
+- `GET /{slug}/entries/tags`: same.
+- `GET /{slug}/entries/tree`: same.
+- Anon seed-content single-entry GET: `stale-while-revalidate=300` removed;
+  header is now `public, max-age=60, must-revalidate` — no stale window.
+
+**Regression tests** (`co-web/tests/sync_pipeline_tests.rs`):
+
+- `vault_write_appears_in_list_immediately`: vault PUT immediately followed
+  by `GET /entries`; asserts the entry appears AND `Cache-Control: no-store`
+  is present; timing asserted < 2 s.
+- `entry_tags_carries_no_store_header`: tags endpoint.
+- `entry_tree_carries_no_store_header`: tree endpoint.
+- `entry_update_visible_immediately`: update entry via vault, read back via
+  GET single-entry; asserts updated frontmatter visible without delay.
+
 ## [2.11.5] — 2026-05-20 — Cross-universe deep-link returns 404 for unknown entries (CO-232)
 
 ### Fixed
