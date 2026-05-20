@@ -827,6 +827,7 @@ dependencies = [
  "lru",
  "maxminddb",
  "nanoid",
+ "nix",
  "p256",
  "parking_lot",
  "percent-encoding",
