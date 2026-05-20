@@ -5,6 +5,12 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.3] — 2026-05-20 — co-cli build hotfix
+
+### Fixed
+
+- `co-cli` `board.rs` was missing the `bypass_rate_limit: false` field on its `WebConfig` initializer (added in a prior `co-web` change). The library compiled but `co-cli` did not. 2.11.2 shipped the changelog + workspace bump without catching this; 2.11.3 unblocks the binary.
+
 ## [2.11.2] — 2026-05-20 — Worker trait + supervisor (CO-223)
 
 ### Added
