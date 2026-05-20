@@ -182,9 +182,9 @@ pub(super) async fn serve_deep_link(
     // pure SPA route (e.g. `/entrar/`, `/sobre/`, `/termos/`) and serve 200 so
     // the client-side router renders the page. Only return 404 when the
     // universe exists but the entry within it does not.
-    let status = if !universe_exists(&state, &universe_slug) {
-        StatusCode::OK
-    } else if entry_exists_for_subpath(&state, &universe_slug, &subpath) {
+    let status = if !universe_exists(&state, &universe_slug)
+        || entry_exists_for_subpath(&state, &universe_slug, &subpath)
+    {
         StatusCode::OK
     } else {
         StatusCode::NOT_FOUND

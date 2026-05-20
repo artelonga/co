@@ -7,7 +7,7 @@
 //! See `co::public/storage-dashboard.md` for what each metric measures.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use axum::{
@@ -143,9 +143,10 @@ pub fn compute_dashboard_filtered(
     state: &AppState,
     filter: DashboardFilter<'_>,
 ) -> StorageDashboard {
-    let storage = state.core.storage.lock();
-    let data_dir: PathBuf = storage.data_dir.clone();
-    drop(storage);
+    let (data_dir, universe_pool) = {
+        let storage = state.core.storage.lock();
+        (storage.data_dir.clone(), storage.universe_pool.clone())
+    };
 
     let meta_conn_storage = state.core.storage.lock();
     let conn = meta_conn_storage.conn();
@@ -201,7 +202,7 @@ pub fn compute_dashboard_filtered(
     let mut results: Vec<UniverseStorage> = Vec::with_capacity(universes.len());
     for (key, owner_id, is_public, is_template, visibility, content_count) in universes.drain(..) {
         let universe_dir = data_dir.join("universes").join(&key);
-        let data_db_path = universe_dir.join("data.db");
+        let data_db_path = universe_pool.db_path(&key);
 
         let md_bytes = walk_bytes(&universe_dir, |p| {
             p.extension().and_then(|e| e.to_str()) == Some("md")
