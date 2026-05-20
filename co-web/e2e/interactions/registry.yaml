@@ -1,8 +1,7 @@
-# CO Content Interactions — canonical OpenAPI 3.1 document.
+# CO Platform Interactions — canonical OpenAPI 3.1 document.
 #
-# One resource: `entry`. The HTTP verb is the operation. `{universe}`
-# is a path parameter — the same primitives work for every universe
-# the caller can access.
+# Resources: `entry` (content), `auth` (sessions/tokens),
+#            `admin` (platform management), `chat` (room-scoped messaging).
 #
 # This file IS the OpenAPI doc. The server embeds it via
 # include_str!, parses it once at startup, and serves it as-is at
@@ -17,23 +16,35 @@
 
 openapi: "3.1.0"
 info:
-  title: "CO Content"
-  version: "1.0.0"
+  title: "CO Platform API"
+  version: "1.1.0"
   description: |
-    CRUD primitives on universe content entries.
+    Typed contract for CO Platform HTTP endpoints: content entries,
+    authentication flows, admin operations, and universe chat.
 
-    These four operations are the atomic platform interactions for
-    content. `{universe}` is a path parameter — they work uniformly
-    across every universe the caller has access to. Specific
-    business operations (e.g. "switch IG links to internal wikilinks")
-    are clients of these primitives, not part of the contract.
+    Four interaction classes:
+    - entry: CRUD on universe content (path-keyed markdown + frontmatter)
+    - auth: session lifecycle, token management, OAuth/OIDC flows
+    - admin: platform management, telemetry, A/B flags, webhooks
+    - chat: room-scoped messages within a universe
 
 servers:
   - url: "https://co.artelonga.com.br"
   - url: "https://co-artelonga.fly.dev"
 
 components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
   schemas:
+    # --- content ---
     Entry:
       type: object
       required: [path]
@@ -61,7 +72,84 @@ components:
           additionalProperties: true
           description: "YAML frontmatter as a JSON object."
 
+    # --- auth ---
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, nullable: true }
+        display_name: { type: string }
+        tier: { type: string, enum: [free, plus, admin] }
+    Session:
+      type: object
+      properties:
+        user_id: { type: string }
+        email: { type: string, nullable: true }
+        display_name: { type: string }
+        expires_at: { type: string, format: date-time }
+    ApiToken:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        prefix: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at: { type: string, format: date-time, nullable: true }
+
+    # --- chat ---
+    ChatRoom:
+      type: object
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        is_private: { type: boolean }
+        created_at: { type: string, format: date-time }
+    ChatMessage:
+      type: object
+      required: [id, body]
+      properties:
+        id: { type: integer }
+        body: { type: string }
+        user_id: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time, nullable: true }
+    ChatMessageList:
+      type: object
+      properties:
+        messages:
+          type: array
+          items: { $ref: "#/components/schemas/ChatMessage" }
+        total: { type: integer }
+
+    # --- admin ---
+    Lead:
+      type: object
+      properties:
+        id: { type: integer }
+        email: { type: string }
+        message: { type: string, nullable: true }
+        status: { type: string, enum: [new, contacted, converted, closed] }
+        created_at: { type: string, format: date-time }
+    AbFlag:
+      type: object
+      properties:
+        key: { type: string }
+        enabled: { type: boolean }
+        description: { type: string, nullable: true }
+        rollout_pct: { type: integer, minimum: 0, maximum: 100 }
+    Webhook:
+      type: object
+      properties:
+        id: { type: integer }
+        url: { type: string, format: uri }
+        events: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+
 paths:
+  # =============================================================
+  # CONTENT — entry CRUD (universe-scoped)
+  # =============================================================
   /api/v1/universes/{universe}/entries/{path}:
     parameters:
       - name: universe
@@ -176,3 +264,1044 @@ paths:
         - id: post.respects_limit
           rule: "len(response.entries) <= request.limit."
       x-safety: dry-run
+
+  # =============================================================
+  # AUTH — session lifecycle, tokens, OAuth/OIDC
+  # =============================================================
+  /api/v1/auth/login:
+    post:
+      operationId: authRequestCode
+      summary: "Request email magic-code"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email }
+      responses:
+        '204': { description: "Code queued for delivery" }
+        '422': { description: "Invalid email" }
+        '429': { description: "Rate limited" }
+      x-preconditions:
+        - id: pre.valid_email
+          rule: "request.email is a syntactically valid email address."
+      x-postconditions:
+        - id: post.code_queued
+          rule: "A 6-digit code is queued for the email channel."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/verify:
+    post:
+      operationId: authVerifyCode
+      summary: "Exchange magic-code for session cookie"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string }
+                code: { type: string }
+      responses:
+        '200':
+          description: "Session created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        '401': { description: "Invalid or expired code" }
+      x-preconditions:
+        - id: pre.code_valid
+          rule: "request.code was issued for request.email and has not expired."
+      x-postconditions:
+        - id: post.session_cookie
+          rule: "Response sets an HttpOnly session cookie."
+        - id: post.session_shape
+          rule: "Body contains user_id, display_name, expires_at."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/me:
+    get:
+      operationId: authGetMe
+      summary: "Current authenticated user + tier"
+      tags: [auth]
+      responses:
+        '200':
+          description: "Current user"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        '401': { description: "Not authenticated" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session cookie or Bearer token."
+      x-postconditions:
+        - id: post.shape
+          rule: "Response contains id, display_name, tier."
+      x-safety: dry-run
+
+  /api/v1/auth/stats:
+    get:
+      operationId: authGetStats
+      summary: "Per-user storage and usage statistics"
+      tags: [auth]
+      responses:
+        '200': { description: "Usage stats" }
+        '401': { description: "Not authenticated" }
+      x-preconditions: [{id: pre.authed, rule: "Caller has a valid session."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains universe_count and entry_count."}]
+      x-safety: dry-run
+
+  /api/v1/auth/logout:
+    post:
+      operationId: authLogout
+      summary: "Clear session cookie"
+      tags: [auth]
+      responses:
+        '204': { description: "Session cleared" }
+      x-preconditions: [{id: pre.any, rule: "No auth required; clears session cookie if present."}]
+      x-postconditions: [{id: post.cookie_cleared, rule: "Response unsets the session cookie."}]
+      x-safety: snapshot-restore
+
+  /api/v1/auth/password-login:
+    post:
+      operationId: authPasswordLogin
+      summary: "Login with username+password (any environment)"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: "Session created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        '401': { description: "Invalid credentials" }
+      x-preconditions:
+        - id: pre.password_set
+          rule: "User account has a password_hash set."
+      x-postconditions:
+        - id: post.session_cookie
+          rule: "Response sets an HttpOnly session cookie."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/signup:
+    post:
+      operationId: authSignup
+      summary: "Create account with username+password"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username: { type: string }
+                password: { type: string }
+                email: { type: string, nullable: true }
+      responses:
+        '201':
+          description: "Account created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        '409': { description: "Username already taken" }
+        '429': { description: "Rate limit: 100 signups/day" }
+      x-preconditions:
+        - id: pre.unique_username
+          rule: "request.username is not already registered."
+      x-postconditions:
+        - id: post.session
+          rule: "Caller is immediately logged in. Response sets session cookie."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/google/status:
+    get:
+      operationId: authGoogleStatus
+      summary: "Whether Google OAuth is configured on this server"
+      tags: [auth]
+      responses:
+        '200': { description: "OAuth status" }
+      x-preconditions: [{id: pre.none, rule: "No auth required."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains enabled: bool."}]
+      x-safety: dry-run
+
+  /api/v1/auth/forgot-password:
+    post:
+      operationId: authForgotPassword
+      summary: "Initiate password reset flow"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        '204': { description: "Reset code queued (if email exists)" }
+      x-preconditions:
+        - id: pre.valid_email
+          rule: "request.email is a valid email address."
+      x-postconditions:
+        - id: post.idempotent
+          rule: "Always 204 regardless of whether the email is registered (prevents enumeration)."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/reset-password:
+    post:
+      operationId: authResetPassword
+      summary: "Complete password reset with recovery token"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token: { type: string }
+                new_password: { type: string }
+      responses:
+        '204': { description: "Password updated" }
+        '401': { description: "Invalid or expired token" }
+      x-preconditions:
+        - id: pre.token_valid
+          rule: "request.token was issued by a forgot-password flow and has not expired."
+      x-postconditions:
+        - id: post.password_changed
+          rule: "Subsequent password-login with the new password succeeds."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/onboard-with-email:
+    post:
+      operationId: authOnboardWithEmail
+      summary: "Passwordless onboarding — send magic code"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string }
+      responses:
+        '204': { description: "Code sent" }
+        '429': { description: "Rate limited" }
+      x-preconditions:
+        - id: pre.valid_email
+          rule: "request.email is a valid email address."
+      x-postconditions:
+        - id: post.code_queued
+          rule: "A verification code is queued for the provided email."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/onboard-with-email/verify:
+    post:
+      operationId: authOnboardWithEmailVerify
+      summary: "Passwordless onboarding — verify code and create session"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, code]
+              properties:
+                email: { type: string }
+                code: { type: string }
+      responses:
+        '200':
+          description: "Session created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        '401': { description: "Invalid or expired code" }
+      x-preconditions:
+        - id: pre.code_valid
+          rule: "code was issued for email and has not expired."
+      x-postconditions:
+        - id: post.session_cookie
+          rule: "Response sets an HttpOnly session cookie."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/token:
+    post:
+      operationId: authCreateToken
+      summary: "Create a long-lived API token"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        '201':
+          description: "Token created (raw secret shown once)"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApiToken" }
+        '401': { description: "Not authenticated" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+      x-postconditions:
+        - id: post.secret_once
+          rule: "Response includes the raw token value; it will not be retrievable again."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/tokens:
+    get:
+      operationId: authListTokens
+      summary: "List long-lived API tokens (secrets redacted)"
+      tags: [auth]
+      responses:
+        '200':
+          description: "Token list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApiToken" }
+        '401': { description: "Not authenticated" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+      x-postconditions:
+        - id: post.no_secrets
+          rule: "Token secrets are NOT included in the listing."
+      x-safety: dry-run
+
+  /api/v1/auth/tokens/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      operationId: authRevokeToken
+      summary: "Revoke an API token"
+      tags: [auth]
+      responses:
+        '204': { description: "Revoked" }
+        '401': { description: "Not authenticated" }
+        '404': { description: "Token not found" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller owns the token."
+      x-postconditions:
+        - id: post.token_invalid
+          rule: "Subsequent requests using the token return 401."
+      x-safety: destructive
+
+  /api/v1/auth/exchange-session:
+    post:
+      operationId: authExchangeSession
+      summary: "Exchange short-lived handover token for 7-day ES256 JWT"
+      tags: [auth]
+      responses:
+        '200':
+          description: "Long-lived token"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+        '401': { description: "Invalid handover token" }
+      x-preconditions:
+        - id: pre.valid_handover
+          rule: "Caller has a valid short-lived handover token in the request."
+      x-postconditions:
+        - id: post.jwt
+          rule: "Response contains a 7-day ES256 JWT for co.artelonga.com.br."
+      x-safety: snapshot-restore
+
+  /api/v1/auth/uat-login:
+    post:
+      operationId: authUatLogin
+      summary: "UAT login (yuri/uat — 404 in production)"
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        '200':
+          description: "Session created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        '404': { description: "Endpoint not available in this environment" }
+      x-preconditions:
+        - id: pre.uat_env
+          rule: "CO_ENV=uat is set on the server."
+      x-postconditions:
+        - id: post.session
+          rule: "Response sets a session cookie for the yuri@uat.local account."
+      x-safety: snapshot-restore
+
+  /.well-known/openid-configuration:
+    get:
+      operationId: oidcDiscovery
+      summary: "OIDC provider discovery document"
+      tags: [auth, oidc]
+      responses:
+        '200': { description: "OIDC discovery JSON" }
+      x-preconditions: [{id: pre.none, rule: "No auth required."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains issuer, authorization_endpoint, jwks_uri."}]
+      x-safety: dry-run
+
+  /.well-known/jwks.json:
+    get:
+      operationId: oidcJwks
+      summary: "JWKS — ES256 public key set"
+      tags: [auth, oidc]
+      responses:
+        '200': { description: "JSON Web Key Set" }
+      x-preconditions: [{id: pre.none, rule: "No auth required."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains keys array with at least one ES256 key."}]
+      x-safety: dry-run
+
+  /oauth/token:
+    post:
+      operationId: oauthTokenExchange
+      summary: "OAuth2 token exchange (authorization_code / refresh_token grant)"
+      tags: [auth, oidc]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, code, redirect_uri, client_id]
+              properties:
+                grant_type: { type: string }
+                code: { type: string }
+                redirect_uri: { type: string }
+                client_id: { type: string }
+                client_secret: { type: string }
+      responses:
+        '200': { description: "Access token + id_token" }
+        '400': { description: "Invalid grant" }
+      x-preconditions:
+        - id: pre.valid_code
+          rule: "code was issued by GET /oauth/authorize for the same client_id."
+      x-postconditions:
+        - id: post.tokens
+          rule: "Response contains access_token, token_type, and id_token."
+      x-safety: snapshot-restore
+
+  /oauth/userinfo:
+    get:
+      operationId: oauthUserinfo
+      summary: "OIDC userinfo — claims for bearer token holder"
+      tags: [auth, oidc]
+      responses:
+        '200': { description: "OIDC claims" }
+        '401': { description: "Invalid token" }
+      x-preconditions:
+        - id: pre.bearer_token
+          rule: "Request carries a valid Bearer access token."
+      x-postconditions:
+        - id: post.claims
+          rule: "Response contains sub, name, email claims."
+      x-safety: dry-run
+
+  /api/v1/gestao/oauth/clients:
+    get:
+      operationId: gestaoListOauthClients
+      summary: "List registered OAuth clients"
+      tags: [admin, oidc]
+      responses:
+        '200': { description: "Client list" }
+        '403': { description: "Gestao admin required" }
+      x-preconditions: [{id: pre.gestao_admin, rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."}]
+      x-postconditions: [{id: post.shape, rule: "Response is an array of OAuth client records."}]
+      x-safety: dry-run
+    post:
+      operationId: gestaoCreateOauthClient
+      summary: "Register an OAuth client"
+      tags: [admin, oidc]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, redirect_uris]
+              properties:
+                name: { type: string }
+                redirect_uris: { type: array, items: { type: string } }
+      responses:
+        '201': { description: "Client registered" }
+        '403': { description: "Gestao admin required" }
+      x-preconditions:
+        - id: pre.gestao_admin
+          rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."
+      x-postconditions:
+        - id: post.shape
+          rule: "Response contains client_id and client_secret."
+      x-safety: snapshot-restore
+
+  # =============================================================
+  # ADMIN — platform management endpoints
+  # =============================================================
+  /api/v1/admin/dashboard:
+    get:
+      operationId: adminGetDashboard
+      summary: "Cross-system admin dashboard"
+      tags: [admin]
+      responses:
+        '200': { description: "Dashboard metrics" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response is a JSON object with system-wide metrics."}]
+      x-safety: dry-run
+
+  /api/v1/admin/users/origin-breakdown:
+    get:
+      operationId: adminUsersOriginBreakdown
+      summary: "User signup origin breakdown"
+      tags: [admin]
+      responses:
+        '200': { description: "Origin counts" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response is an array of {origin, count} objects."}]
+      x-safety: dry-run
+
+  /api/v1/admin/leads:
+    get:
+      operationId: adminListLeads
+      summary: "List contact leads queue"
+      tags: [admin]
+      responses:
+        '200':
+          description: "Leads list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Lead" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response is an array of Lead objects."}]
+      x-safety: dry-run
+
+  /api/v1/admin/leads/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    patch:
+      operationId: adminPatchLead
+      summary: "Update a lead (status, notes)"
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string }
+                notes: { type: string }
+      responses:
+        '200': { description: "Lead updated" }
+        '403': { description: "Admin required" }
+        '404': { description: "Lead not found" }
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has admin tier."
+        - id: pre.lead_exists
+          rule: "Lead with given id exists."
+      x-postconditions:
+        - id: post.updated
+          rule: "Lead record reflects the patched fields."
+      x-safety: snapshot-restore
+
+  /api/v1/admin/telemetry/summary:
+    get:
+      operationId: adminTelemetrySummary
+      summary: "Aggregated telemetry summary"
+      tags: [admin]
+      responses:
+        '200': { description: "Summary object" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains aggregated event counts."}]
+      x-safety: dry-run
+
+  /api/v1/admin/telemetry/export:
+    get:
+      operationId: adminTelemetryExport
+      summary: "Export raw telemetry as CSV"
+      tags: [admin]
+      responses:
+        '200':
+          description: "CSV data"
+          content:
+            text/csv:
+              schema: { type: string }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.csv, rule: "Response body is valid CSV with a header row."}]
+      x-safety: dry-run
+
+  /api/v1/admin/telemetry/crud-summary:
+    get:
+      operationId: adminTelemetryCrudSummary
+      summary: "CRUD event counts by resource type"
+      tags: [admin]
+      responses:
+        '200': { description: "CRUD summary" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains per-resource create/read/update/delete counts."}]
+      x-safety: dry-run
+
+  /api/v1/admin/storage:
+    get:
+      operationId: adminGetStorage
+      summary: "Cluster-wide storage breakdown"
+      tags: [admin]
+      responses:
+        '200': { description: "Storage stats" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response contains per-universe disk usage."}]
+      x-safety: dry-run
+
+  /api/v1/ab/flags:
+    get:
+      operationId: adminListAbFlags
+      summary: "List A/B experiment flags"
+      tags: [admin]
+      responses:
+        '200':
+          description: "Flag list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AbFlag" }
+        '403': { description: "Admin required" }
+      x-preconditions: [{id: pre.admin, rule: "Caller has admin tier."}]
+      x-postconditions: [{id: post.shape, rule: "Response is an array of AbFlag objects."}]
+      x-safety: dry-run
+    post:
+      operationId: adminCreateAbFlag
+      summary: "Create an A/B experiment flag"
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key: { type: string }
+                enabled: { type: boolean, default: false }
+                description: { type: string }
+                rollout_pct: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '201': { description: "Flag created" }
+        '403': { description: "Admin required" }
+        '409': { description: "Flag key already exists" }
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has admin tier."
+        - id: pre.unique_key
+          rule: "request.key is not already registered."
+      x-postconditions:
+        - id: post.readable
+          rule: "Subsequent GET /api/v1/ab/flags includes the new flag."
+      x-safety: snapshot-restore
+
+  /api/v1/ab/flags/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: adminToggleAbFlag
+      summary: "Enable, disable, or adjust rollout percentage of an A/B flag"
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+                rollout_pct: { type: integer, minimum: 0, maximum: 100 }
+      responses:
+        '200': { description: "Flag updated" }
+        '403': { description: "Admin required" }
+        '404': { description: "Flag not found" }
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has admin tier."
+        - id: pre.flag_exists
+          rule: "Flag with given key exists."
+      x-postconditions:
+        - id: post.updated
+          rule: "Subsequent GET reflects the new enabled/rollout_pct values."
+      x-safety: snapshot-restore
+
+  /api/v1/gestao/webhooks:
+    get:
+      operationId: gestaoListWebhooks
+      summary: "List registered outbound webhooks"
+      tags: [admin]
+      responses:
+        '200':
+          description: "Webhook list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Webhook" }
+        '403': { description: "Gestao admin required" }
+      x-preconditions: [{id: pre.gestao_admin, rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."}]
+      x-postconditions: [{id: post.shape, rule: "Response is an array of Webhook objects."}]
+      x-safety: dry-run
+    post:
+      operationId: gestaoCreateWebhook
+      summary: "Register an outbound webhook"
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: { type: string, format: uri }
+                events: { type: array, items: { type: string } }
+                secret: { type: string, nullable: true }
+      responses:
+        '201': { description: "Webhook registered" }
+        '403': { description: "Gestao admin required" }
+      x-preconditions:
+        - id: pre.gestao_admin
+          rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."
+        - id: pre.valid_url
+          rule: "request.url is a reachable HTTPS URL."
+      x-postconditions:
+        - id: post.registered
+          rule: "Webhook appears in subsequent GET /api/v1/gestao/webhooks."
+      x-safety: snapshot-restore
+
+  /api/v1/gestao/webhooks/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer }
+    put:
+      operationId: gestaoUpdateWebhook
+      summary: "Update webhook URL or event filter"
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url: { type: string, format: uri }
+                events: { type: array, items: { type: string } }
+      responses:
+        '200': { description: "Webhook updated" }
+        '403': { description: "Gestao admin required" }
+        '404': { description: "Webhook not found" }
+      x-preconditions:
+        - id: pre.gestao_admin
+          rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."
+      x-postconditions:
+        - id: post.updated
+          rule: "Webhook record reflects the new values."
+      x-safety: snapshot-restore
+    delete:
+      operationId: gestaoDeleteWebhook
+      summary: "Delete an outbound webhook"
+      tags: [admin]
+      responses:
+        '204': { description: "Deleted" }
+        '403': { description: "Gestao admin required" }
+        '404': { description: "Webhook not found" }
+      x-preconditions:
+        - id: pre.gestao_admin
+          rule: "Caller is in GESTAO_GITHUB_ADMINS allow list."
+      x-postconditions:
+        - id: post.gone
+          rule: "Subsequent GET /api/v1/gestao/webhooks does not include this webhook."
+      x-safety: destructive
+
+  # =============================================================
+  # CHAT — room-scoped messaging within a universe
+  # =============================================================
+  /api/v1/universes/{universe}/chat/rooms:
+    parameters:
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: chatListRooms
+      summary: "List chat rooms in a universe"
+      tags: [chat]
+      responses:
+        '200':
+          description: "Room list"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ChatRoom" }
+        '401': { description: "Auth required" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.universe_accessible
+          rule: "Caller is a member of {universe} or it is public."
+      x-postconditions:
+        - id: post.shape
+          rule: "Response is an array of ChatRoom objects visible to the caller."
+      x-safety: dry-run
+    post:
+      operationId: chatCreateRoom
+      summary: "Create a chat room in a universe"
+      tags: [chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+                is_private: { type: boolean, default: false }
+      responses:
+        '201':
+          description: "Room created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatRoom" }
+        '401': { description: "Auth required" }
+        '403': { description: "Universe members only" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.universe_member
+          rule: "Caller is a member of {universe}."
+      x-postconditions:
+        - id: post.readable
+          rule: "Subsequent GET /chat/rooms includes the new room."
+      x-safety: snapshot-restore
+
+  /api/v1/universes/{universe}/chat/rooms/{room_slug}/members:
+    parameters:
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
+      - name: room_slug
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: chatListRoomMembers
+      summary: "List members of a chat room"
+      tags: [chat]
+      responses:
+        '200': { description: "Member list" }
+        '401': { description: "Auth required" }
+        '403': { description: "Not a room member" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.room_accessible
+          rule: "Room is public or caller is a member."
+      x-postconditions:
+        - id: post.shape
+          rule: "Response is an array of {user_id, display_name} objects."
+      x-safety: dry-run
+
+  /api/v1/universes/{universe}/chat/rooms/{room_slug}/messages:
+    parameters:
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
+      - name: room_slug
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: chatListMessages
+      summary: "Paginated message history"
+      tags: [chat]
+      parameters:
+        - name: before
+          in: query
+          schema: { type: integer }
+          description: "Cursor: return messages with id < before."
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50 }
+      responses:
+        '200':
+          description: "Message page"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatMessageList" }
+        '401': { description: "Auth required" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.room_accessible
+          rule: "Room is public or caller is a member."
+      x-postconditions:
+        - id: post.shape
+          rule: "Response contains messages array and total count."
+        - id: post.cursor
+          rule: "If before is set, all returned messages have id < before."
+      x-safety: dry-run
+    post:
+      operationId: chatPostMessage
+      summary: "Post a message to a room"
+      tags: [chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        '201':
+          description: "Message created"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatMessage" }
+        '401': { description: "Auth required" }
+        '403': { description: "Not a room member" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.room_member
+          rule: "Caller is a member of the room."
+      x-postconditions:
+        - id: post.readable
+          rule: "Subsequent GET /messages includes the new message."
+        - id: post.websocket_fan_out
+          rule: "Message is broadcast to all connected WebSocket clients."
+      x-safety: snapshot-restore
+
+  /api/v1/universes/{universe}/chat/rooms/{room_slug}/messages/{msg_id}:
+    parameters:
+      - name: universe
+        in: path
+        required: true
+        schema: { type: string }
+      - name: room_slug
+        in: path
+        required: true
+        schema: { type: string }
+      - name: msg_id
+        in: path
+        required: true
+        schema: { type: integer }
+    patch:
+      operationId: chatEditMessage
+      summary: "Edit own message body"
+      tags: [chat]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [body]
+              properties:
+                body: { type: string }
+      responses:
+        '200':
+          description: "Message updated"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ChatMessage" }
+        '401': { description: "Auth required" }
+        '403': { description: "Only the message author may edit" }
+        '404': { description: "Message not found" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.author
+          rule: "Caller is the author of message {msg_id}."
+      x-postconditions:
+        - id: post.updated
+          rule: "Message body reflects the new content; updated_at is set."
+      x-safety: snapshot-restore
+    delete:
+      operationId: chatDeleteMessage
+      summary: "Delete own message (admin may delete any)"
+      tags: [chat]
+      responses:
+        '204': { description: "Deleted" }
+        '401': { description: "Auth required" }
+        '403': { description: "Only author or universe admin may delete" }
+        '404': { description: "Message not found" }
+      x-preconditions:
+        - id: pre.authed
+          rule: "Caller has a valid session."
+        - id: pre.author_or_admin
+          rule: "Caller is the message author OR has admin role in {universe}."
+      x-postconditions:
+        - id: post.gone
+          rule: "Subsequent GET /messages does not include the deleted message."
+      x-safety: destructive
