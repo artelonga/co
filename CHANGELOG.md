@@ -5,6 +5,14 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.3] — 2026-05-20 — Hotfix: add explicit `/{slug}/` trailing-slash route
+
+### Fixed — trailing-slash SPA routes still 404'd after 2.12.2
+
+2.12.2's serve_deep_link logic was correct, but axum's `{*subpath}` wildcard doesn't match empty paths — so `/entrar/` never reached the handler. It fell through to the framework 404 (text/plain) instead of the SPA shell.
+
+**Fix**: added an explicit `.route("/{slug}/", get(serve_co_index))` between the `/{slug}` route and the `/{slug}/{*subpath}` deep-link route. Trailing-slash SPA paths (`/entrar/`, `/sobre/`, `/termos/`) now hit `serve_co_index` and return 200 with the SPA shell.
+
 ## [2.12.2] — 2026-05-20 — Hotfix: CO-232 broke SPA routes with trailing slash
 
 ### Fixed — `serve_deep_link` returned 404 for non-universe SPA routes

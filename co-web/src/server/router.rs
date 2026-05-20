@@ -239,6 +239,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // 2.7.20: `/co/{slug}` redirects removed — `co` is now a universe slug.
         .route("/{slug}/assets", get(serve_assets_page))
         .route("/{slug}", get(serve_co_index))
+        // 2.12.2 hotfix: `/{slug}/` (trailing slash, empty subpath) doesn't match
+        // the `{*subpath}` wildcard below, so add an explicit trailing-slash route
+        // to serve the SPA shell. Without this, `/entrar/`, `/sobre/`, `/termos/` 404.
+        .route("/{slug}/", get(serve_co_index))
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));
