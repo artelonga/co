@@ -6013,3 +6013,34 @@ body {
     text-align: center;
     letter-spacing: .1em;
 }
+
+/* CO-232: deep-link 404 view */
+.not-found-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    padding: 48px 24px;
+}
+.not-found-container {
+    text-align: center;
+    max-width: 480px;
+}
+.not-found-title {
+    font-size: 1.75rem;
+    font-weight: 600;
+    margin: 0 0 12px;
+    color: var(--text-primary, inherit);
+}
+.not-found-subtitle {
+    font-size: 1rem;
+    opacity: .7;
+    margin: 0 0 28px;
+    line-height: 1.5;
+}
+.not-found-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}

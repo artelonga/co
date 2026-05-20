@@ -240,7 +240,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/{slug}/assets", get(serve_assets_page))
         .route("/{slug}", get(serve_co_index))
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
-        .route("/{slug}/{*subpath}", get(serve_co_index));
+        // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
+        .route("/{slug}/{*subpath}", get(serve_deep_link));
 
     let oauth_api = crate::oidc_routes::oauth_router();
     let analytics_public_api = crate::analytics_public::router();
