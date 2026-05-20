@@ -62,8 +62,8 @@ pub(super) async fn create_project(
     }
 
     // Server-side universe scope takes precedence over client-supplied value.
-    if state.config.universe_key.is_some() {
-        body.universe_key = state.config.universe_key.clone();
+    if state.core.config.universe_key.is_some() {
+        body.universe_key = state.core.config.universe_key.clone();
     }
 
     let mut storage = lock_storage(&state);

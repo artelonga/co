@@ -37,7 +37,7 @@ pub struct LinkCoAccountResponse {
 use rusqlite;
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn relatos_dir() -> String {
@@ -132,7 +132,7 @@ async fn login_handler(
     Json(body): Json<LoginUsuario>,
 ) -> Result<Response, AppError> {
     // CO-166: legacy login deprecation path.
-    if !state.config.quilombo_legacy_login {
+    if !state.core.config.quilombo_legacy_login {
         return Ok((
             axum::http::StatusCode::GONE,
             axum::Json(serde_json::json!({
@@ -150,6 +150,7 @@ async fn login_handler(
     // Rate limit check
     {
         let auth = state
+            .core
             .auth_store
             .lock()
             .map_err(|_| AppError::Internal("Auth lock failed".into()))?;
@@ -184,8 +185,11 @@ async fn login_handler(
         &jwt_secret,
     )?;
 
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     let missing_email = user.email.is_none();
     let response_body = LoginResponse {
@@ -312,8 +316,11 @@ async fn cadastro_handler(
         &jwt_secret,
     )?;
 
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     quilombo_storage::registrar_atividade(
         storage.conn(),

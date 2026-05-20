@@ -333,7 +333,7 @@ async fn handle_socket(
     if prev_count == 1 {
         // Last client — save immediately and remove room.
         save_room(&doc_arc, &slug, &doc_id, &state).await;
-        state.doc_rooms.write().await.remove(&room_key);
+        state.realtime.doc_rooms.write().await.remove(&room_key);
         debug!("ws room removed: {room_key}");
     } else {
         // Others still connected — mark dirty for idle-persist.
@@ -440,7 +440,7 @@ async fn get_or_create_room(
 ) -> Arc<DocRoom> {
     // Fast path.
     {
-        let rooms = state.doc_rooms.read().await;
+        let rooms = state.realtime.doc_rooms.read().await;
         if let Some(room) = rooms.get(room_key) {
             return Arc::clone(room);
         }
@@ -448,6 +448,7 @@ async fn get_or_create_room(
 
     // Load existing content (empty string if entry not found).
     let content = state
+        .core
         .storage
         .lock()
         .get_entry_body(slug, doc_id)
@@ -472,7 +473,7 @@ async fn get_or_create_room(
     );
 
     // Write-lock and double-check (avoid racing two creates).
-    let mut rooms = state.doc_rooms.write().await;
+    let mut rooms = state.realtime.doc_rooms.write().await;
     if let Some(existing) = rooms.get(room_key) {
         return Arc::clone(existing);
     }
@@ -502,7 +503,7 @@ fn spawn_persist_task(
             save_room(&room.doc, &slug, &doc_id, &state).await;
 
             if room.client_count.load(Ordering::Relaxed) == 0 {
-                state.doc_rooms.write().await.remove(&room_key);
+                state.realtime.doc_rooms.write().await.remove(&room_key);
                 break;
             }
         }
@@ -516,7 +517,7 @@ async fn save_room(doc_arc: &Arc<Mutex<Doc>>, slug: &str, doc_id: &str, state: &
         let txn = doc.transact();
         text.get_string(&txn)
     };
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     if let Err(e) = storage.update_entry_body(slug, doc_id, &content) {
         warn!("ws persist failed for {slug}/{doc_id}: {e}");
     }
@@ -613,7 +614,9 @@ mod tests {
         use crate::auth::AuthStore;
         use crate::config::WebConfig;
         use crate::experiment::ExperimentStore;
-        use crate::server::{AppStateInner, build_router};
+        use crate::server::{
+            AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+        };
         use crate::storage::Storage;
         use tokio::net::TcpListener;
         use tokio_tungstenite::connect_async;
@@ -626,47 +629,55 @@ mod tests {
         let game_db = tmp.path().join("game.db");
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
-        let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: StdMutex::new(experiment),
-            config: WebConfig {
-                port: 0,
-                data_dir: tmp.path().to_string_lossy().into(),
-                static_dir: "co-web/static".into(),
-                default_variant: "a".into(),
-                experiments: false,
-                plugins_dir: "plugins".into(),
-                game_db_path: None,
-                universo_dir: tmp.path().join("universes").to_string_lossy().into(),
-                gestao_github_admins: vec![],
-                universe_key: None,
-                co_env: "prod".into(),
-                wae_endpoint: None,
-                wae_api_key: None,
-                cookie_domain: None,
-                quilombo_legacy_login: true,
-                bypass_rate_limit: false,
-            },
-            auth_store: StdMutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: Default::default(),
-            doc_rooms: new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx: {
-                let (tx, _) = crate::embedding_worker::channel();
-                tx
-            },
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        let state: crate::server::AppState = AppState::new(AppStateInner {
+            core: Arc::new(CoreState {
+                storage: parking_lot::Mutex::new(storage),
+                config: WebConfig {
+                    port: 0,
+                    data_dir: tmp.path().to_string_lossy().into(),
+                    static_dir: "co-web/static".into(),
+                    default_variant: "a".into(),
+                    experiments: false,
+                    plugins_dir: "plugins".into(),
+                    game_db_path: None,
+                    universo_dir: tmp.path().join("universes").to_string_lossy().into(),
+                    gestao_github_admins: vec![],
+                    universe_key: None,
+                    co_env: "prod".into(),
+                    wae_endpoint: None,
+                    wae_api_key: None,
+                    cookie_domain: None,
+                    quilombo_legacy_login: true,
+                    bypass_rate_limit: false,
+                },
+                auth_store: StdMutex::new(auth_store),
+                event_bus: crate::events::Bus::new(),
+            }),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx: {
+                    let (tx, _) = crate::embedding_worker::channel();
+                    tx
+                },
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: Default::default(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: StdMutex::new(experiment),
+                worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            }),
         });
 
         let app = build_router(state, None);
@@ -700,7 +711,9 @@ mod tests {
         use crate::auth::{AuthStore, sign_jwt};
         use crate::config::WebConfig;
         use crate::experiment::ExperimentStore;
-        use crate::server::{AppStateInner, build_router};
+        use crate::server::{
+            AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+        };
         use crate::storage::Storage;
         use futures_util::{SinkExt as _, StreamExt as _};
         use tokio::net::TcpListener;
@@ -718,47 +731,55 @@ mod tests {
         let game_db = tmp.path().join("game.db");
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
-        let state: crate::server::AppState = Arc::new(AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: StdMutex::new(experiment),
-            config: WebConfig {
-                port: 0,
-                data_dir: tmp.path().to_string_lossy().into(),
-                static_dir: "co-web/static".into(),
-                default_variant: "a".into(),
-                experiments: false,
-                plugins_dir: "plugins".into(),
-                game_db_path: None,
-                universo_dir: tmp.path().join("universes").to_string_lossy().into(),
-                gestao_github_admins: vec![],
-                universe_key: None,
-                co_env: "prod".into(),
-                wae_endpoint: None,
-                wae_api_key: None,
-                cookie_domain: None,
-                quilombo_legacy_login: true,
-                bypass_rate_limit: false,
-            },
-            auth_store: StdMutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: Default::default(),
-            doc_rooms: new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx: {
-                let (tx, _) = crate::embedding_worker::channel();
-                tx
-            },
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        let state: crate::server::AppState = AppState::new(AppStateInner {
+            core: Arc::new(CoreState {
+                storage: parking_lot::Mutex::new(storage),
+                config: WebConfig {
+                    port: 0,
+                    data_dir: tmp.path().to_string_lossy().into(),
+                    static_dir: "co-web/static".into(),
+                    default_variant: "a".into(),
+                    experiments: false,
+                    plugins_dir: "plugins".into(),
+                    game_db_path: None,
+                    universo_dir: tmp.path().join("universes").to_string_lossy().into(),
+                    gestao_github_admins: vec![],
+                    universe_key: None,
+                    co_env: "prod".into(),
+                    wae_endpoint: None,
+                    wae_api_key: None,
+                    cookie_domain: None,
+                    quilombo_legacy_login: true,
+                    bypass_rate_limit: false,
+                },
+                auth_store: StdMutex::new(auth_store),
+                event_bus: crate::events::Bus::new(),
+            }),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx: {
+                    let (tx, _) = crate::embedding_worker::channel();
+                    tx
+                },
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: Default::default(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: StdMutex::new(experiment),
+                worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            }),
         });
 
         let app = build_router(state.clone(), None);

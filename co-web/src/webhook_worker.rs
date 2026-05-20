@@ -65,7 +65,7 @@ pub async fn tick(
     whatsapp_provider: Option<&Arc<dyn ChannelProvider>>,
 ) -> anyhow::Result<()> {
     let notification = {
-        let s = state.storage.lock();
+        let s = state.core.storage.lock();
         claim_next_notification(s.conn())
     };
 
@@ -78,7 +78,7 @@ pub async fn tick(
     match notif.channel.as_deref() {
         Some("email") => {
             let Some(provider) = email_provider else {
-                let s = state.storage.lock();
+                let s = state.core.storage.lock();
                 mark_notification_failed(s.conn(), &notif.id, 3, "email provider not configured");
                 return Ok(());
             };
@@ -90,19 +90,19 @@ pub async fn tick(
             );
             match provider.send(client, recipient, &notif.payload).await {
                 Ok(()) => {
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_sent(s.conn(), &notif.id);
                 }
                 Err(e) => {
                     warn!(notification_id = %notif.id, error = %e, "webhook_worker: email failed");
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_failed(s.conn(), &notif.id, new_attempts, &e);
                 }
             }
         }
         Some("whatsapp") => {
             let Some(provider) = whatsapp_provider else {
-                let s = state.storage.lock();
+                let s = state.core.storage.lock();
                 mark_notification_failed(
                     s.conn(),
                     &notif.id,
@@ -119,12 +119,12 @@ pub async fn tick(
             );
             match provider.send(client, recipient, &notif.payload).await {
                 Ok(()) => {
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_sent(s.conn(), &notif.id);
                 }
                 Err(e) => {
                     warn!(notification_id = %notif.id, error = %e, "webhook_worker: WhatsApp failed");
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_failed(s.conn(), &notif.id, new_attempts, &e);
                 }
             }
@@ -132,7 +132,7 @@ pub async fn tick(
         // Legacy webhook channel (or None)
         _ => {
             let webhook = {
-                let s = state.storage.lock();
+                let s = state.core.storage.lock();
                 get_webhook_with_secret(s.conn(), &notif.webhook_id)
             };
 
@@ -173,7 +173,7 @@ pub async fn tick(
                         status = %resp.status(),
                         "webhook_worker: delivered"
                     );
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_sent(s.conn(), &notif.id);
                 }
                 Ok(resp) => {
@@ -184,7 +184,7 @@ pub async fn tick(
                         error = %err,
                         "webhook_worker: delivery failed"
                     );
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
                 }
                 Err(e) => {
@@ -195,7 +195,7 @@ pub async fn tick(
                         error = %err,
                         "webhook_worker: network error"
                     );
-                    let s = state.storage.lock();
+                    let s = state.core.storage.lock();
                     mark_notification_failed(s.conn(), &notif.id, new_attempts, &err);
                 }
             }

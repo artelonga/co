@@ -37,7 +37,7 @@ pub(super) async fn get_variant(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Json<VariantResponse> {
-    let variant = extract_variant(&headers, &state.config);
+    let variant = extract_variant(&headers, &state.core.config);
     Json(VariantResponse { variant })
 }
 
@@ -82,7 +82,7 @@ pub(super) async fn submit_feedback(
 ) -> Result<impl IntoResponse, AppError> {
     let participant_id =
         extract_participant(&headers).unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let variant = extract_variant(&headers, &state.config);
+    let variant = extract_variant(&headers, &state.core.config);
 
     let mut experiment = lock_experiment(&state)?;
     let entry = experiment.submit_feedback(&participant_id, &variant, body);
@@ -136,7 +136,7 @@ pub(super) async fn login_handler(
     let subject = "Seu código de acesso";
     let body_text =
         format!("Seu código de verificação é: {code}\n\nEste código expira em 5 minutos.");
-    if let Err(e) = state.mail.send(&email, subject, &body_text) {
+    if let Err(e) = state.integrations.mail.send(&email, subject, &body_text) {
         tracing::warn!("Failed to send verification email to {email}: {e}");
     }
 
@@ -232,8 +232,11 @@ pub(super) async fn verify_handler(
         auth.delete_code(&email)?;
     }
 
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     // CO-184 reverse bridge — best-effort.
     {
@@ -472,8 +475,11 @@ pub(super) async fn password_login_handler(
     let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     // CO-184 reverse bridge — best-effort.
     {
@@ -637,8 +643,11 @@ pub(super) async fn signup_handler(
     let jwt_secret = crate::auth::jwt_secret();
     let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     // CO-184 reverse bridge — best-effort.
     {
@@ -686,7 +695,7 @@ pub(super) async fn uat_login_handler(
     State(state): State<AppState>,
     Json(req): Json<PasswordLoginRequest>,
 ) -> Result<Response, AppError> {
-    if !state.config.is_uat() {
+    if !state.core.config.is_uat() {
         return Err(AppError::NotFound("Not found".into()));
     }
     password_login_handler(State(state), Json(req)).await
@@ -729,7 +738,7 @@ pub(super) async fn co_handover_handler(
         ));
     }
     let user = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage
             .get_user_by_id(&user_id)
             .ok_or_else(|| AppError::Internal("User not found".into()))?
@@ -739,7 +748,7 @@ pub(super) async fn co_handover_handler(
         &user.id,
         &user.email,
         &user.tier,
-        &state.jwt_key,
+        &state.integrations.jwt_key,
     );
     Ok((
         StatusCode::SEE_OTHER,

@@ -289,7 +289,7 @@ pub struct UpdateCoDevEntry {
 
 /// GET /api/v1/universes/co-dev — universe info
 pub async fn get_co_dev_info(State(state): State<AppState>) -> Json<DevUniverseInfo> {
-    let count = scan_co_entries(&state.config.data_dir).len();
+    let count = scan_co_entries(&state.core.config.data_dir).len();
     Json(DevUniverseInfo {
         key: "co-dev".to_string(),
         name: "CO Dev Board".to_string(),
@@ -305,7 +305,7 @@ pub async fn list_co_dev_entries(
     State(state): State<AppState>,
     Query(q): Query<DevEntryQuery>,
 ) -> Json<DevEntryListResponse> {
-    let mut entries = scan_co_entries(&state.config.data_dir);
+    let mut entries = scan_co_entries(&state.core.config.data_dir);
 
     if let Some(ref status) = q.status {
         entries.retain(|e| {
@@ -373,7 +373,7 @@ pub async fn list_co_dev_entries(
 
 /// GET /api/v1/universes/co-dev/entries/tags — aggregate labels
 pub async fn list_co_dev_tags(State(state): State<AppState>) -> Json<Vec<TagCount>> {
-    let entries = scan_co_entries(&state.config.data_dir);
+    let entries = scan_co_entries(&state.core.config.data_dir);
     let mut counts: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
 
     for e in &entries {
@@ -399,7 +399,7 @@ pub async fn get_co_dev_entry(
     State(state): State<AppState>,
     Path(path): Path<String>,
 ) -> Result<Json<EntryRow>, AppError> {
-    let entry = resolve_co_entry(&state.config.data_dir, &path)?;
+    let entry = resolve_co_entry(&state.core.config.data_dir, &path)?;
     Ok(Json(entry))
 }
 
@@ -428,7 +428,7 @@ pub async fn update_co_dev_entry(
         }
     }
 
-    let file_path = safe_co_path(&state.config.data_dir, &path)?;
+    let file_path = safe_co_path(&state.core.config.data_dir, &path)?;
     let content = std::fs::read_to_string(&file_path)
         .map_err(|e| AppError::Internal(format!("Failed to read {path}: {e}")))?;
 

@@ -59,7 +59,10 @@ pub mod validation;
 // --- Re-exports (public API at `crate::server::*`) ---
 
 pub use router::build_router;
-pub use state::{AppState, AppStateInner, lock_auth, lock_experiment, lock_storage};
+pub use state::{
+    AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, lock_auth,
+    lock_experiment, lock_storage,
+};
 pub use validation::*;
 
 use auth_handlers::*;
@@ -75,9 +78,9 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
-async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
+async fn health_check_deep(State(core): State<Arc<CoreState>>) -> impl IntoResponse {
     let (db_status, disk_status) = {
-        let storage = lock_storage(&state);
+        let storage = core.storage.lock();
         let db = match storage.conn().execute_batch(
             "SAVEPOINT health_deep; ROLLBACK TO SAVEPOINT health_deep; RELEASE SAVEPOINT health_deep;",
         ) {
@@ -115,8 +118,10 @@ async fn health_check_deep(State(state): State<AppState>) -> impl IntoResponse {
 // --- CO-79: Cache metrics ---
 
 /// GET /api/v1/cache/stats — hit rate, miss rate, eviction rate per cache layer.
-async fn cache_stats_handler(State(state): State<AppState>) -> Json<crate::cache::CacheStats> {
-    Json(state.cache.stats())
+async fn cache_stats_handler(
+    State(index): State<Arc<IndexState>>,
+) -> Json<crate::cache::CacheStats> {
+    Json(index.cache.stats())
 }
 
 // --- Variant-aware static file serving ---
@@ -369,36 +374,49 @@ pub async fn start_server(config: WebConfig) {
         std::sync::Arc::new(crate::geo::GeoDb::open(&path))
     };
 
-    let state: AppState = Arc::new(AppStateInner {
+    let core = Arc::new(CoreState {
         storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
         config: config.clone(),
         auth_store: Mutex::new(auth_store),
-        mail: mail_provider,
-        game_storage,
-        plugin_registry,
+        event_bus: crate::events::Bus::new(),
+    });
+    let realtime = Arc::new(RealtimeState {
         doc_rooms: crate::ws::new_room_manager(),
         sync_rooms: crate::sync_ws::new_sync_room_manager(),
-        cache: crate::cache::CacheLayer::new(),
-        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
-        wae,
-        jwt_key,
-        embeddings,
-        embedding_tx,
         chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+    });
+    let index = Arc::new(IndexState {
+        cache: crate::cache::CacheLayer::new(),
+        embeddings,
+        embedding_tx,
+    });
+    let integrations = Arc::new(IntegrationsState {
+        mail: mail_provider,
         geo,
-        event_bus: crate::events::Bus::new(),
+        plugin_registry,
+        game_storage,
+        wae,
+        jwt_key,
+        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+        experiment: Mutex::new(experiment),
         worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+    });
+    let state: AppState = AppState::new(AppStateInner {
+        core,
+        realtime,
+        index,
+        integrations,
     });
 
     // CO-220: spawn event bus listeners — decoupled cross-feature wiring.
     {
         // Notification listener: handles NotificationRequested events emitted by
         // invitation_routes and proposal_routes.
-        let s = Arc::clone(&state);
+        let s = state.clone();
         tokio::spawn(async move {
             let mut rx = s
+                .core
                 .event_bus
                 .subscribe(crate::events::EventFilter::Notification);
             while let Some(event) = rx.recv().await {
@@ -413,7 +431,7 @@ pub async fn start_server(config: WebConfig) {
                     summary_params,
                 } = event
                 {
-                    let storage = s.storage.lock();
+                    let storage = s.core.storage.lock();
                     let _ = storage.create_notification(
                         &recipient_id,
                         &kind,
@@ -430,9 +448,12 @@ pub async fn start_server(config: WebConfig) {
     }
     {
         // Entry listener: forwards EntryWritten / EntryDeleted to the embedding worker.
-        let s = Arc::clone(&state);
+        let s = state.clone();
         tokio::spawn(async move {
-            let mut rx = s.event_bus.subscribe(crate::events::EventFilter::Entry);
+            let mut rx = s
+                .core
+                .event_bus
+                .subscribe(crate::events::EventFilter::Entry);
             while let Some(event) = rx.recv().await {
                 match event {
                     crate::events::DomainEvent::EntryWritten {
@@ -441,7 +462,7 @@ pub async fn start_server(config: WebConfig) {
                         body,
                         body_hash,
                     } => {
-                        let _ = s.embedding_tx.try_send(
+                        let _ = s.index.embedding_tx.try_send(
                             crate::embedding_worker::EmbeddingJob::Upsert {
                                 universe_key,
                                 path,
@@ -451,7 +472,7 @@ pub async fn start_server(config: WebConfig) {
                         );
                     }
                     crate::events::DomainEvent::EntryDeleted { universe_key, path } => {
-                        let _ = s.embedding_tx.try_send(
+                        let _ = s.index.embedding_tx.try_send(
                             crate::embedding_worker::EmbeddingJob::Delete { universe_key, path },
                         );
                     }
@@ -462,9 +483,12 @@ pub async fn start_server(config: WebConfig) {
     }
     {
         // Asset listener: auto-creates reference cards for uploaded PDF/image assets.
-        let s = Arc::clone(&state);
+        let s = state.clone();
         tokio::spawn(async move {
-            let mut rx = s.event_bus.subscribe(crate::events::EventFilter::Asset);
+            let mut rx = s
+                .core
+                .event_bus
+                .subscribe(crate::events::EventFilter::Asset);
             while let Some(event) = rx.recv().await {
                 if let crate::events::DomainEvent::AssetUploaded {
                     universe_key,
@@ -517,32 +541,32 @@ pub async fn start_server(config: WebConfig) {
     tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);
 
     // CO-164: spawn embedding OS thread + load model after server binds.
-    crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
-    crate::embedding_worker::boot_scan(Arc::clone(&state));
+    crate::embedding_worker::spawn(embedding_rx, state.clone());
+    crate::embedding_worker::boot_scan(state.clone());
     // Load the embedding model in the background so startup doesn't block on it.
     // Server health check passes immediately; model becomes available ~10–60s later.
-    Arc::clone(&state.embeddings).load_deferred(model_dir);
+    Arc::clone(&state.index.embeddings).load_deferred(model_dir);
 
     // CO-223: register all five workers with the supervisor.
     // The supervisor runs each in an isolated tokio::spawn so panics in one
     // worker never bring down siblings or poison the shared storage lock.
     {
-        let sup = &state.worker_supervisor;
+        let sup = &state.integrations.worker_supervisor;
 
         sup.spawn(crate::workers::EmbeddingWorker::new(
-            state.embedding_tx.clone(),
+            state.index.embedding_tx.clone(),
         ));
-        sup.spawn(crate::workers::EmailWorker::new(Arc::clone(&state)));
-        sup.spawn(crate::workers::PushWorker::new(Arc::clone(&state)));
-        match crate::workers::WebhookWorker::new(Arc::clone(&state)) {
+        sup.spawn(crate::workers::EmailWorker::new(state.clone()));
+        sup.spawn(crate::workers::PushWorker::new(state.clone()));
+        match crate::workers::WebhookWorker::new(state.clone()) {
             Ok(w) => sup.spawn(w),
             Err(e) => tracing::error!("webhook worker init failed: {e}"),
         }
-        sup.spawn(crate::workers::JobQueueWorker::new(Arc::clone(&state)));
+        sup.spawn(crate::workers::JobQueueWorker::new(state.clone()));
     }
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
-    tokio::spawn(crate::lead_routes::retention_task(Arc::clone(&state)));
+    tokio::spawn(crate::lead_routes::retention_task(state.clone()));
 
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.
@@ -571,7 +595,7 @@ pub async fn start_server(config: WebConfig) {
     // CO-118: emit a deploy event to WAE so the dataset is immediately queryable
     // after every startup — visible in WAE SQL within 60s per acceptance criteria.
     {
-        let wae = Arc::clone(&state.wae);
+        let wae = Arc::clone(&state.integrations.wae);
         let co_env = config.co_env.clone();
         tokio::spawn(async move {
             wae.emit(crate::wae::TelemetryEvent {

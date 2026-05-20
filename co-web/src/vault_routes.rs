@@ -208,7 +208,7 @@ fn validate_vault_auth(
     }
 
     // Try API token
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     match storage.get_api_token_by_value(&bearer) {
         Ok(Some(tok)) => Ok((tok.user_id, Some(tok.id))),
         Ok(None) => Err(AppError::Unauthorized("Invalid or expired token".into())),
@@ -230,7 +230,7 @@ fn vault_auth(state: &AppState, headers: &HeaderMap) -> Result<String, AppError>
     if let Some(ref tid) = token_id {
         // Look up the token's owner tier; admin-tier owners bypass the limit.
         let is_admin = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage
                 .get_user_by_id(&user_id)
                 .map(|u| u.tier == "admin")
@@ -250,7 +250,7 @@ fn vault_auth(state: &AppState, headers: &HeaderMap) -> Result<String, AppError>
 // ---------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 /// Build a VaultStat from optional ISO-8601 datetime strings and body size.
@@ -369,7 +369,7 @@ fn index_raw_vault_file(
         .ok_or_else(|| AppError::Internal("raw entry vanished after upsert".into()))?;
     // 1.71.0 (Phase 8 step 2): same CAS dual-write for raw YAML files.
     {
-        let meta = state.storage.lock();
+        let meta = state.core.storage.lock();
         if let Err(e) = meta.put_blob(body.as_bytes()) {
             tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
         }
@@ -398,11 +398,15 @@ pub(crate) fn write_vault_entry(
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
     // CO-79: load manifest from L1 cache (sync fast-path); fall back to disk on miss.
-    let manifest_arc = state.cache.manifest.get(universe_key).or_else(|| {
+    let manifest_arc = state.index.cache.manifest.get(universe_key).or_else(|| {
         let bytes = std::fs::read(universe_root.join(co::manifest::MANIFEST_FILENAME)).ok()?;
         let m = co::manifest::parse(&bytes).ok().map(|r| r.manifest)?;
-        state.cache.manifest.insert(universe_key.to_string(), m);
-        state.cache.manifest.get(universe_key)
+        state
+            .index
+            .cache
+            .manifest
+            .insert(universe_key.to_string(), m);
+        state.index.cache.manifest.get(universe_key)
     });
 
     let now = Utc::now().to_rfc3339();
@@ -488,7 +492,7 @@ pub(crate) fn write_vault_entry(
         // rewind. Errors are logged but non-fatal — the vault write is
         // already durable in the on-disk file + entries index.
         {
-            let meta = state.storage.lock();
+            let meta = state.core.storage.lock();
             if let Err(e) = meta.put_blob(body.as_bytes()) {
                 tracing::warn!("put_blob failed for {universe_key}/{path}: {e}");
             }
@@ -508,7 +512,7 @@ pub(crate) fn write_vault_entry(
             )
             .ok();
         if let Some(n) = actual_count {
-            let meta = state.storage.lock();
+            let meta = state.core.storage.lock();
             let _ = meta.conn().execute(
                 "UPDATE universes SET content_count = ?1 WHERE key = ?2",
                 rusqlite::params![n, universe_key],
@@ -678,16 +682,20 @@ pub async fn put_vault_file(
     );
 
     // CO-79: invalidate query cache entries for this universe after any vault write.
-    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
 
     // CO-71 + CO-74: when `_universe.yaml` is updated, apply manifest indexes and
     // backfill typed FK relations for affected content types — both in background.
     if path == co::manifest::MANIFEST_FILENAME {
         // CO-79: invalidate manifest cache so the next read picks up the new schema.
-        state.cache.invalidate_universe(&slug);
-        let db_path = Some(state.storage.lock().data_dir.join("co.db"));
+        state.index.cache.invalidate_universe(&slug);
+        let db_path = Some(state.core.storage.lock().data_dir.join("co.db"));
         let universe_root = Some(lock_storage(&state).universe_root(&slug));
-        let universe_pool = Some(state.storage.lock().universe_pool.clone());
+        let universe_pool = Some(state.core.storage.lock().universe_pool.clone());
         if let (Some(db_path), Some(universe_root)) = (db_path, universe_root) {
             let manifest_path = universe_root.join(co::manifest::MANIFEST_FILENAME);
             if let Ok(bytes) = std::fs::read(&manifest_path)

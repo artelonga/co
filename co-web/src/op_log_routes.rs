@@ -67,13 +67,13 @@ pub fn router() -> Router<AppState> {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Convenience: lock `state.storage` and return the Arc<Mutex<Connection>>
+/// Convenience: lock `state.core.storage` and return the Arc<Mutex<Connection>>
 /// for `universe_key`.  Returns `NotFound` when the universe doesn't exist.
 fn get_universe_conn(
     state: &AppState,
     universe_key: &str,
 ) -> Result<std::sync::Arc<std::sync::Mutex<rusqlite::Connection>>, AppError> {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     if storage.get_universe(universe_key).is_none() {
         return Err(AppError::NotFound(format!(
             "Universe '{universe_key}' not found"
@@ -88,7 +88,7 @@ fn require_write_access(
     universe_key: &str,
     user_id: &str,
 ) -> Result<(), AppError> {
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let universe = storage
         .get_universe(universe_key)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
@@ -877,7 +877,7 @@ fn delete_entry_from_universe(
     path: &str,
 ) -> Result<(), AppError> {
     let (uc, universe_root) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let uc = storage.universe_conn(universe_key);
         let root = storage.universe_root(universe_key);
         (uc, root)
@@ -912,7 +912,7 @@ fn delete_entry_from_universe(
 /// count.  Non-fatal: errors are logged but do not propagate to callers.
 fn refresh_content_count(state: &AppState, universe_key: &str) {
     let uc = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage.universe_conn(universe_key)
     };
     if let Ok(uc_guard) = uc.lock() {
@@ -924,7 +924,7 @@ fn refresh_content_count(state: &AppState, universe_key: &str) {
             )
             .ok();
         if let Some(n) = actual_count {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             if let Err(e) = storage.conn().execute(
                 "UPDATE universes SET content_count = ?1 WHERE key = ?2",
                 params![n, universe_key],

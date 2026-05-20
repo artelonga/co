@@ -57,9 +57,9 @@ pub(super) async fn serve_co_index(
             .into_response();
     }
 
-    let variant = extract_variant(&headers, &state.config);
+    let variant = extract_variant(&headers, &state.core.config);
     let embed_path = format!("variants/{}/index.html", variant);
-    let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
+    let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
 
     // CO-121: assign + expose home_v2_layout for each visitor (fire-and-forget).
     // CO-97: prefer al_vid (apex marketing cookie) for unified visitor identity.
@@ -81,10 +81,10 @@ pub(super) async fn serve_co_index(
         })
         .unwrap_or_else(|| nanoid::nanoid!(24));
     {
-        let state_clone = Arc::clone(&state);
+        let state_clone = state.clone();
         let uid = visitor_token.clone();
         tokio::spawn(async move {
-            let storage = state_clone.storage.lock();
+            let storage = state_clone.core.storage.lock();
             if let Ok(Some(ab_variant)) = crate::ab::assign(storage.conn(), &uid, "home_v2_layout")
             {
                 let _ =
@@ -125,7 +125,7 @@ pub(super) async fn serve_co_index(
 /// CO-150: Serve the asset browser page at `/{slug}/assets`.
 pub(super) async fn serve_assets_page(State(state): State<AppState>) -> Response {
     let embed_path = "shared/assets.html";
-    let fs_path = std::path::Path::new(&state.config.static_dir).join(embed_path);
+    let fs_path = std::path::Path::new(&state.core.config.static_dir).join(embed_path);
     if let Some(contents) = resolve_asset(embed_path, Some(&fs_path)) {
         return (
             StatusCode::OK,
@@ -162,7 +162,7 @@ pub(super) async fn serve_sync_settings(
     };
 
     let token = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         match storage.create_api_token(&user_id, "co-sync") {
             Ok(t) => t.token,
             Err(e) => {
@@ -245,13 +245,13 @@ pub(super) async fn serve_variant_file(
     uri: Uri,
     State(state): State<AppState>,
 ) -> Response {
-    let variant = extract_variant(&headers, &state.config);
+    let variant = extract_variant(&headers, &state.core.config);
     let path = uri.path().trim_start_matches('/');
     let path = if path.is_empty() { "index.html" } else { path };
 
     // CO-160: Serve PDF.js viewer bundle at /pdfjs/...
     if path.starts_with("pdfjs/") {
-        let fs_path = std::path::Path::new(&state.config.static_dir).join(path);
+        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(path);
         if let Some(contents) = resolve_asset(path, Some(&fs_path)) {
             let content_type = guess_content_type(path);
             let cache_header = cache_control_for(path);
@@ -274,7 +274,7 @@ pub(super) async fn serve_variant_file(
         } else {
             format!("shared/{}", path)
         };
-        let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
+        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
         if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
             let content_type = guess_content_type(path);
             let cache_header = cache_control_for(path);
@@ -292,7 +292,7 @@ pub(super) async fn serve_variant_file(
 
     // Try variant-specific file
     let embed_path = format!("variants/{}/{}", variant, path);
-    let fs_path = std::path::Path::new(&state.config.static_dir).join(&embed_path);
+    let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
 
     if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
         let content_type = guess_content_type(path);
@@ -308,7 +308,7 @@ pub(super) async fn serve_variant_file(
             .into_response();
 
         // Set variant cookie if not present
-        if extract_variant(&headers, &state.config) == state.config.default_variant {
+        if extract_variant(&headers, &state.core.config) == state.core.config.default_variant {
             response.headers_mut().insert(
                 header::SET_COOKIE,
                 format!(

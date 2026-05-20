@@ -88,7 +88,7 @@ pub struct SearchQuery {
 }
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn validate_universe_key(key: &str) -> Result<(), AppError> {
@@ -451,7 +451,7 @@ pub async fn update_universe(
         .ok_or_else(|| AppError::Internal("Universe disappeared".into()))?;
 
     // CO-79: invalidate manifest + query caches for this universe.
-    state.cache.invalidate_universe(&slug);
+    state.index.cache.invalidate_universe(&slug);
 
     Ok(Json(UpdateUniverseResponse {
         key: updated.key,
@@ -541,8 +541,12 @@ pub async fn delete_universe(
     }
 
     // Invalidate all caches keyed by this slug.
-    state.cache.invalidate_universe(&slug);
-    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+    state.index.cache.invalidate_universe(&slug);
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
 
     Ok((
         axum::http::StatusCode::OK,
@@ -695,7 +699,7 @@ pub async fn clone_universe(
         if let Ok((token, _)) = crate::auth::sign_jwt(&anon_id, "", "anon", &secret) {
             let cookie = crate::auth::build_session_cookie(
                 &token,
-                state.config.cookie_domain.as_deref(),
+                state.core.config.cookie_domain.as_deref(),
                 2592000,
             );
             if let Ok(val) = axum::http::HeaderValue::from_str(&cookie) {
@@ -1084,7 +1088,7 @@ pub async fn update_universe_config(
 
     // CO-79: invalidate manifest + query caches (theme preset may have changed).
     // Theme CSS cache is keyed by ETag — invalidates naturally when ETag changes.
-    state.cache.invalidate_universe(&slug);
+    state.index.cache.invalidate_universe(&slug);
 
     Ok(Json(config))
 }
@@ -1210,16 +1214,18 @@ pub async fn get_universe_theme_css(
 
     // CO-79: serve CSS from L1 cache; generate and insert on miss.
     let css = state
+        .index
         .cache
         .theme_css
         .get(&etag)
-        .map(|arc| arc.as_ref().clone())
+        .map(|arc: std::sync::Arc<String>| arc.as_ref().clone())
         .unwrap_or_else(|| {
             let preset = crate::theme_engine::ThemePreset::by_name(&config.theme_preset)
                 .unwrap_or_else(|| crate::theme_engine::ThemePreset::by_name("modern").unwrap());
             let generated =
                 crate::theme_engine::generate_css(&preset, config.custom_tokens.as_ref());
             state
+                .index
                 .cache
                 .theme_css
                 .insert(etag.clone(), generated.clone());

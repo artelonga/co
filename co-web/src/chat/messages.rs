@@ -121,6 +121,7 @@ pub async fn post_message_handler(
     // Rate limit: 20 messages per user per minute
     {
         let mut limiter = state
+            .integrations
             .rate_limiter
             .lock()
             .map_err(|_| AppError::Internal("Rate limiter lock failed".into()))?;
@@ -273,7 +274,7 @@ pub async fn post_message_handler(
 
     // Fan out to WS subscribers (best-effort: no error if no subscribers).
     if let Some((msg, room_id)) = broadcast_payload
-        && let Ok(map) = state.chat_rooms_broadcast.lock()
+        && let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
         let _ = tx.send(ChatEvent::MessageCreated { message: msg });
@@ -357,7 +358,7 @@ pub async fn edit_message_handler(
         (msg, room_id)
     };
 
-    if let Ok(map) = state.chat_rooms_broadcast.lock()
+    if let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
         let _ = tx.send(ChatEvent::MessageEdited {
@@ -428,7 +429,7 @@ pub async fn delete_message_handler(
 
     let deleted_at_str = deleted_at.to_rfc3339();
 
-    if let Ok(map) = state.chat_rooms_broadcast.lock()
+    if let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
         let _ = tx.send(ChatEvent::MessageDeleted {

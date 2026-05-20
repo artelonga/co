@@ -12,9 +12,11 @@ use axum::response::IntoResponse;
 use axum::routing::{get, post, put};
 use serde::Serialize;
 
+use std::sync::Arc;
+
 use crate::ab::{CreateFlagRequest, ToggleFlagRequest};
 use crate::github_auth::GitHubAdmin;
-use crate::server::AppState;
+use crate::server::{AppState, CoreState};
 
 /// Typed response for `POST /api/v1/admin/flags`.
 #[derive(Debug, Serialize)]
@@ -41,7 +43,7 @@ pub fn admin_router() -> Router<AppState> {
 }
 
 async fn create_flag_handler(
-    State(state): State<AppState>,
+    State(core): State<Arc<CoreState>>,
     _admin: GitHubAdmin,
     Json(body): Json<CreateFlagRequest>,
 ) -> impl IntoResponse {
@@ -53,7 +55,7 @@ async fn create_flag_handler(
             .into_response();
     }
 
-    let storage = state.storage.lock();
+    let storage = core.storage.lock();
     match crate::ab::create_flag(storage.conn(), &body) {
         Ok(true) => (
             StatusCode::CREATED,
@@ -77,10 +79,10 @@ async fn create_flag_handler(
 }
 
 async fn list_flags_handler(
-    State(state): State<AppState>,
+    State(core): State<Arc<CoreState>>,
     _admin: GitHubAdmin,
 ) -> impl IntoResponse {
-    let storage = state.storage.lock();
+    let storage = core.storage.lock();
     match crate::ab::list_flags(storage.conn()) {
         Ok(flags) => Json(flags).into_response(),
         Err(e) => (
@@ -92,12 +94,12 @@ async fn list_flags_handler(
 }
 
 async fn toggle_flag_handler(
-    State(state): State<AppState>,
+    State(core): State<Arc<CoreState>>,
     _admin: GitHubAdmin,
     Path(key): Path<String>,
     Json(body): Json<ToggleFlagRequest>,
 ) -> impl IntoResponse {
-    let storage = state.storage.lock();
+    let storage = core.storage.lock();
     match crate::ab::toggle_flag(storage.conn(), &key, body.enabled) {
         Ok(true) => Json(ToggleFlagResponse {
             flag_key: key,

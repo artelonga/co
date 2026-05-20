@@ -36,7 +36,7 @@ pub async fn global_semantic_search(
 ) -> Result<Json<GlobalSearchResponse>, AppError> {
     let k = q.k.unwrap_or(10).min(200);
 
-    let query_embedding = match state.embeddings.embed_one(&q.semantic) {
+    let query_embedding = match state.index.embeddings.embed_one(&q.semantic) {
         Some(e) => e,
         None => {
             return Ok(Json(GlobalSearchResponse {
@@ -48,7 +48,7 @@ pub async fn global_semantic_search(
 
     // Determine which universes the user can read.
     let universe_keys: Vec<String> = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
 
         // Public universes (search_public_universes("") returns all — LIKE "%%" matches all)
         let mut keys: Vec<String> = storage
@@ -73,7 +73,7 @@ pub async fn global_semantic_search(
 
     for uni_key in &universe_keys {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(uni_key)
         };
         let conn = match uc.lock() {
@@ -97,7 +97,7 @@ pub async fn global_semantic_search(
     let mut entries = Vec::with_capacity(all_scored.len());
     for (uni_key, path, score) in all_scored {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             storage.universe_conn(&uni_key)
         };
         let conn = match uc.lock() {

@@ -69,7 +69,7 @@ struct OnboardVerifyResponse {
 // -------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn hash_code(code: &str) -> anyhow::Result<String> {
@@ -449,8 +449,11 @@ async fn onboard_verify_handler(
     let (token, expires_at) = crate::auth::sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie =
-        crate::auth::build_session_cookie(&token, state.config.cookie_domain.as_deref(), 604800);
+    let cookie = crate::auth::build_session_cookie(
+        &token,
+        state.core.config.cookie_domain.as_deref(),
+        604800,
+    );
 
     crate::telemetry::emit_crud_event(
         &state,

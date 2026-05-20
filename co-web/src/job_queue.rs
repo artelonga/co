@@ -23,7 +23,6 @@
 //! starve others: the oldest eligible job always wins regardless of
 //! which universe submitted it.
 
-use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::Utc;
@@ -343,7 +342,7 @@ fn process_job(job: &Job, storage: &Storage) -> Result<(), String> {
 /// job was found; job errors are recorded in the DB, not propagated.
 pub async fn tick(state: &AppState) -> anyhow::Result<()> {
     let job = {
-        let s = state.storage.lock();
+        let s = state.core.storage.lock();
         claim_next_job(s.conn())
     };
 
@@ -362,13 +361,13 @@ pub async fn tick(state: &AppState) -> anyhow::Result<()> {
     // Run the job on a blocking thread so the async runtime is not
     // starved. The 5-minute wall-time limit is enforced by the
     // timeout wrapper below.
-    let state_clone = Arc::clone(state);
+    let state_clone = state.clone();
     let job_clone = job.clone();
 
     let result = tokio::time::timeout(
         Duration::from_secs(ResourceLimits::default().wall_time_secs),
         tokio::task::spawn_blocking(move || {
-            let s = state_clone.storage.lock();
+            let s = state_clone.core.storage.lock();
             process_job(&job_clone, &s)
         }),
     )
@@ -386,7 +385,7 @@ pub async fn tick(state: &AppState) -> anyhow::Result<()> {
     match outcome {
         Ok(()) => {
             info!(job_id = %job.id, universe = %job.universe_key, "job_queue: done");
-            let s = state.storage.lock();
+            let s = state.core.storage.lock();
             mark_done(s.conn(), &job.id);
             clear_universe_doc_gen_error(s.conn(), &job.universe_key);
         }
@@ -399,7 +398,7 @@ pub async fn tick(state: &AppState) -> anyhow::Result<()> {
                 error = %err,
                 "job_queue: failed"
             );
-            let s = state.storage.lock();
+            let s = state.core.storage.lock();
             mark_failed(s.conn(), &job.id, attempts, &err);
             set_universe_doc_gen_error(s.conn(), &job.universe_key, &err);
         }

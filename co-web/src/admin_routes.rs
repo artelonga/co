@@ -3,7 +3,7 @@
 //! GET /api/v1/admin/dashboard — JSON aggregates, JWT + CO_SEED_ADMIN_EMAIL gate.
 //! GET /admin               — serves admin.html, Cookie auth, same email gate.
 
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::{
@@ -16,7 +16,7 @@ use axum::{
 use rusqlite::Connection;
 use serde::Serialize;
 
-use crate::server::AppState;
+use crate::server::{AppState, IntegrationsState};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -331,7 +331,7 @@ pub async fn dashboard_handler(
 
     // Query fresh aggregates
     let data = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         query_admin_dashboard(storage.conn())
     };
 
@@ -422,7 +422,7 @@ pub async fn origin_breakdown_handler(
             .into_response());
     }
 
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let conn = storage.conn();
 
     let total_users: i64 = conn
@@ -458,7 +458,7 @@ pub async fn origin_breakdown_handler(
 /// Returns a JSON array of `WorkerStatus` snapshots for all supervised workers.
 /// Requires a valid admin JWT (same gate as `/api/v1/admin/dashboard`).
 pub async fn workers_status_handler(
-    State(state): State<AppState>,
+    State(integrations): State<Arc<IntegrationsState>>,
     headers: HeaderMap,
 ) -> Result<Json<Vec<crate::worker_supervisor::WorkerStatus>>, Response> {
     let claims = extract_claims(&headers).map_err(|status| {
@@ -473,7 +473,7 @@ pub async fn workers_status_handler(
             .into_response());
     }
 
-    Ok(Json(state.worker_supervisor.statuses()))
+    Ok(Json(integrations.worker_supervisor.statuses()))
 }
 
 pub fn api_router() -> Router<AppState> {
@@ -726,6 +726,8 @@ mod tests {
     use tempfile::tempdir;
     use tower::ServiceExt;
 
+    use crate::server::{CoreState, IndexState, IntegrationsState, RealtimeState};
+
     fn build_test_router(dir: &std::path::Path) -> axum::Router {
         let config = crate::config::WebConfig {
             port: 3000,
@@ -755,28 +757,37 @@ mod tests {
                 .expect("Failed to open test game storage"),
         );
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
-        let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: StdMutex::new(experiment),
-            config,
-            auth_store: StdMutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx,
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
-        });
+        let state: crate::server::AppState =
+            crate::server::AppState::new(crate::server::AppStateInner {
+                core: Arc::new(CoreState {
+                    storage: parking_lot::Mutex::new(storage),
+                    config,
+                    auth_store: StdMutex::new(auth_store),
+                    event_bus: crate::events::Bus::new(),
+                }),
+                realtime: Arc::new(RealtimeState {
+                    doc_rooms: crate::ws::new_room_manager(),
+                    sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                    chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                    chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+                }),
+                index: Arc::new(IndexState {
+                    cache: crate::cache::CacheLayer::new(),
+                    embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+                    embedding_tx,
+                }),
+                integrations: Arc::new(IntegrationsState {
+                    mail,
+                    geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                    plugin_registry: game_core::plugin::PluginRegistry::new(),
+                    game_storage,
+                    wae: crate::wae::WaeEmitter::new(None, None),
+                    jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                    rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
+                    experiment: StdMutex::new(experiment),
+                    worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+                }),
+            });
         crate::server::build_router(state, None)
     }
 

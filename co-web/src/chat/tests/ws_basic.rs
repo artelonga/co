@@ -177,7 +177,7 @@ async fn test_ws_broadcast_to_all_subscribers() {
     // Pre-register a broadcast channel for the general room so we can
     // subscribe before the REST POST.
     let room_id = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         storage
             .get_chat_room_by_slug("ws6", "general")
             .expect("general room")
@@ -187,11 +187,11 @@ async fn test_ws_broadcast_to_all_subscribers() {
     let (tx, mut rx1) = broadcast::channel::<ChatEvent>(64);
     let mut rx2 = tx.subscribe();
     {
-        let mut map = state.chat_rooms_broadcast.lock().unwrap();
+        let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_id.clone(), tx);
     }
 
-    let app = build_router(Arc::clone(&state), None);
+    let app = build_router(state.clone(), None);
     let token = make_jwt(&owner_id);
 
     // POST a message via REST
@@ -245,7 +245,7 @@ async fn test_ws_no_broadcast_to_other_rooms() {
 
     // Get room A (general) and create room B
     let (room_a_id, room_b_id) = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         let room_a = storage
             .get_chat_room_by_slug("ws7", "general")
             .expect("general room");
@@ -258,11 +258,11 @@ async fn test_ws_no_broadcast_to_other_rooms() {
     // Subscribe only to room B
     let (tx_b, mut rx_b) = broadcast::channel::<ChatEvent>(64);
     {
-        let mut map = state.chat_rooms_broadcast.lock().unwrap();
+        let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_b_id.clone(), tx_b);
     }
 
-    let app = build_router(Arc::clone(&state), None);
+    let app = build_router(state.clone(), None);
     let token = make_jwt(&owner_id);
 
     // POST to room A

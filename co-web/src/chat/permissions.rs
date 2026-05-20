@@ -4,7 +4,7 @@
 pub fn lock_storage(
     state: &crate::server::AppState,
 ) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 /// Resolve the effective role of a caller for a universe.

@@ -253,7 +253,7 @@ pub fn extract_auth_identity_with_token(
         .map(|s| s.to_string())
         .or_else(|| extract_session_cookie(headers))?;
 
-    let storage = state.storage.lock();
+    let storage = state.core.storage.lock();
     let api_token = storage.get_api_token_by_value(&token).ok().flatten()?;
     let user = storage.get_user_by_id(&api_token.user_id)?;
     Some((api_token.user_id, Tier::parse(&user.tier)))
@@ -300,7 +300,7 @@ pub async fn rate_limit_middleware(
     // CO-208: test-only bypass — lets e2e fixtures create projects/universes
     // without depleting the anonymous token buckets. Only active when both
     // CO_ENV=test and CO_BYPASS_RATE_LIMIT=1 are set; no-op in prod/uat.
-    if state.config.bypass_rate_limit && state.config.co_env == "test" {
+    if state.core.config.bypass_rate_limit && state.core.config.co_env == "test" {
         return Ok(next.run(req).await);
     }
 
@@ -341,6 +341,7 @@ pub async fn rate_limit_middleware(
     let key = format!("{}:{}", bucket_key, op.key_suffix());
 
     let result = state
+        .integrations
         .rate_limiter
         .lock()
         .map_err(|_| rate_limited_response(1))?

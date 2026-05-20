@@ -79,7 +79,7 @@ pub async fn create_state(
 
     let (state_lines, parent_path) = {
         let uc = {
-            let storage = state.storage.lock();
+            let storage = state.core.storage.lock();
             // Defensive 404: visibility middleware already gated this route,
             // but a direct test-call without it should still 404 cleanly.
             if storage.get_universe(&slug).is_none() {
@@ -305,7 +305,7 @@ fn read_state_manifest(
         )));
     }
     let uc = {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         if storage.get_universe(slug).is_none() {
             return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
         }

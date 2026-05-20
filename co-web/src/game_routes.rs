@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use axum::{
     Json,
     extract::{Extension, Path, Query, State},
@@ -76,11 +78,13 @@ pub async fn health() -> Json<HealthResponse> {
 
 // ---- Plugins (unauthenticated) ----
 
-pub async fn list_plugins(State(state): State<AppState>) -> Json<Vec<PluginListEntry>> {
-    let entries: Vec<PluginListEntry> = state
+pub async fn list_plugins(
+    State(integrations): State<Arc<crate::server::IntegrationsState>>,
+) -> Json<Vec<PluginListEntry>> {
+    let entries: Vec<PluginListEntry> = integrations
         .plugin_registry
         .iter()
-        .map(|p| {
+        .map(|p: &dyn game_core::plugin::Plugin| {
             let m = p.manifest();
             PluginListEntry {
                 name: m.name.clone(),
@@ -99,8 +103,8 @@ pub async fn login(
     Json(req): Json<LoginRequest>,
 ) -> impl IntoResponse {
     let email = req.email.to_lowercase();
-    let storage = state.game_storage.clone();
-    let mail = state.mail.clone();
+    let storage = state.integrations.game_storage.clone();
+    let mail = state.integrations.mail.clone();
 
     // Run all blocking storage ops in a blocking task
     let result = tokio::task::spawn_blocking(move || {
@@ -186,7 +190,7 @@ pub async fn verify(
 ) -> impl IntoResponse {
     let email = req.email.to_lowercase();
     let code = req.code.clone();
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
 
     let blocking_result = tokio::task::spawn_blocking(move || {
         let now = chrono::Utc::now().timestamp();
@@ -398,7 +402,7 @@ pub async fn register(
     }
 
     // Check username uniqueness
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let username = req.username.clone();
     let existing = tokio::task::spawn_blocking({
         let storage = storage.clone();
@@ -500,7 +504,7 @@ pub async fn legacy_login(
     State(state): State<AppState>,
     Json(req): Json<LegacyLoginRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let name = req.name.clone();
 
     let user = tokio::task::spawn_blocking(move || {
@@ -563,7 +567,7 @@ pub async fn get_profile(
     State(state): State<AppState>,
     Extension(user_id): Extension<UserId>,
 ) -> Result<Json<ProfileResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let uid = user_id.0;
 
     let user = tokio::task::spawn_blocking(move || storage.get_user_by_id(&uid))
@@ -595,7 +599,7 @@ pub async fn get_wallet(
     State(state): State<AppState>,
     Extension(user_id): Extension<UserId>,
 ) -> Result<Json<WalletResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let uid = user_id.0;
 
     let wallet = tokio::task::spawn_blocking(move || storage.get_wallet_for_user(&uid))
@@ -615,7 +619,7 @@ pub async fn record_game_result(
     Path(game_name): Path<String>,
     Json(req): Json<GameResultRequest>,
 ) -> Result<Json<GameStatsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let gname = game_name.clone();
     let uid = user_id.0;
     let score = req.score;
@@ -661,7 +665,7 @@ pub async fn get_game_stats(
     Extension(user_id): Extension<UserId>,
     Path(game_name): Path<String>,
 ) -> Result<Json<GameStatsResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let uid = user_id.0;
 
     let stats = tokio::task::spawn_blocking(move || storage.get_game_stats(&game_name, &uid))
@@ -686,7 +690,7 @@ pub async fn get_leaderboard(
     Query(params): Query<LeaderboardQuery>,
 ) -> Result<Json<Vec<LeaderboardEntry>>, (StatusCode, Json<ErrorResponse>)> {
     let limit = params.limit.unwrap_or(20).min(100) as usize;
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let gname = game_name.clone();
 
     let entries = tokio::task::spawn_blocking(move || {
@@ -738,7 +742,7 @@ pub async fn get_global_leaderboard(
     Query(params): Query<LeaderboardQuery>,
 ) -> Result<Json<Vec<GlobalLeaderboardEntry>>, (StatusCode, Json<ErrorResponse>)> {
     let limit = params.limit.unwrap_or(10).min(100) as usize;
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
 
     let entries = tokio::task::spawn_blocking(move || {
         // Stat keys have the format "{game_name}:{user_id}".
@@ -816,7 +820,7 @@ pub async fn get_recent_activity(
     Query(params): Query<LeaderboardQuery>,
 ) -> Result<Json<Vec<RecentActivityEntry>>, (StatusCode, Json<ErrorResponse>)> {
     let limit = params.limit.unwrap_or(20).min(100) as usize;
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
 
     let entries = tokio::task::spawn_blocking(move || {
         let keys = storage
@@ -878,7 +882,7 @@ pub async fn get_player_profile(
     State(state): State<AppState>,
     Path(username): Path<String>,
 ) -> Result<Json<PlayerProfileResponse>, (StatusCode, Json<ErrorResponse>)> {
-    let storage = state.game_storage.clone();
+    let storage = state.integrations.game_storage.clone();
     let uname = username.clone();
 
     let result = tokio::task::spawn_blocking(move || {

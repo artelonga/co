@@ -117,7 +117,7 @@ pub struct AcceptInvitationResponse {
 // ---------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn redact_email(email: &str) -> String {
@@ -315,7 +315,7 @@ pub async fn create_invitation_handler(
     // notification worker handles it without coupling invitation_routes to
     // the notification subsystem directly.
     if let Some(ref invited_uid) = invited_user_id {
-        state.event_bus.publish(crate::events::DomainEvent::NotificationRequested {
+        state.core.event_bus.publish(crate::events::DomainEvent::NotificationRequested {
             recipient_id: invited_uid.clone(),
             kind: "universe.invitation".into(),
             universe_key: Some(slug.clone()),
@@ -649,6 +649,7 @@ pub async fn me_invitations_handler(
 
 #[cfg(test)]
 mod tests {
+    use crate::server::{CoreState, IndexState, IntegrationsState, RealtimeState};
     use std::sync::{Arc, Mutex};
 
     use axum::body::Body;
@@ -700,28 +701,37 @@ mod tests {
             game_core::storage::Storage::open(&game_db_path).expect("open test game storage"),
         );
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
-        let state: crate::server::AppState = Arc::new(crate::server::AppStateInner {
-            storage: parking_lot::Mutex::new(storage),
-            experiment: Mutex::new(experiment),
-            config,
-            auth_store: Mutex::new(auth_store),
-            mail,
-            game_storage,
-            plugin_registry: game_core::plugin::PluginRegistry::new(),
-            doc_rooms: crate::ws::new_room_manager(),
-            sync_rooms: crate::sync_ws::new_sync_room_manager(),
-            cache: crate::cache::CacheLayer::new(),
-            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
-            wae: crate::wae::WaeEmitter::new(None, None),
-            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-            embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
-            embedding_tx,
-            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-            event_bus: crate::events::Bus::new(),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
-        });
+        let state: crate::server::AppState =
+            crate::server::AppState::new(crate::server::AppStateInner {
+                core: Arc::new(CoreState {
+                    storage: parking_lot::Mutex::new(storage),
+                    config,
+                    auth_store: Mutex::new(auth_store),
+                    event_bus: crate::events::Bus::new(),
+                }),
+                realtime: Arc::new(RealtimeState {
+                    doc_rooms: crate::ws::new_room_manager(),
+                    sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                    chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                    chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+                }),
+                index: Arc::new(IndexState {
+                    cache: crate::cache::CacheLayer::new(),
+                    embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+                    embedding_tx,
+                }),
+                integrations: Arc::new(IntegrationsState {
+                    mail,
+                    geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+                    plugin_registry: game_core::plugin::PluginRegistry::new(),
+                    game_storage,
+                    wae: crate::wae::WaeEmitter::new(None, None),
+                    jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                    rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+                    experiment: Mutex::new(experiment),
+                    worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+                }),
+            });
         crate::server::build_router(state, None)
     }
 

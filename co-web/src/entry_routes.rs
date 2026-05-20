@@ -39,6 +39,7 @@ async fn load_manifest_cached(
 ) -> Option<std::sync::Arc<co::manifest::Manifest>> {
     let root = universe_root.to_path_buf();
     state
+        .index
         .cache
         .manifest
         .get_or_fill(slug.to_string(), || async move { load_manifest(&root) })
@@ -169,7 +170,7 @@ pub struct EntryWithRelations {
 // ---------------------------------------------------------------------------
 
 fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage::Storage> {
-    state.storage.lock()
+    state.core.storage.lock()
 }
 
 fn accept_protobuf(headers: &HeaderMap) -> bool {
@@ -586,7 +587,7 @@ pub async fn create_entry(
 
     // If the manifest file itself was written, invalidate the L1 cache.
     if body.path == co::manifest::MANIFEST_FILENAME {
-        state.cache.invalidate_universe(&slug);
+        state.index.cache.invalidate_universe(&slug);
     }
 
     // Index into universe data.db
@@ -636,6 +637,7 @@ pub async fn create_entry(
     // CO-220: route entry write through the event bus so embedding + other
     // workers subscribe without coupling to entry_routes directly.
     state
+        .core
         .event_bus
         .publish(crate::events::DomainEvent::EntryWritten {
             universe_key: slug.clone(),
@@ -645,7 +647,11 @@ pub async fn create_entry(
         });
 
     // CO-79: invalidate query cache entries for this universe after a write.
-    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
 
     // CO-156: emit entry.upsert telemetry
     crate::telemetry::emit_crud_event(
@@ -682,7 +688,7 @@ pub async fn create_entry(
     storage.increment_universe_content_count(&slug);
 
     // CO-45: log mutation on UAT before body values are moved into the response
-    if state.config.is_uat() {
+    if state.core.config.is_uat() {
         let after_val = serde_json::json!({
             "path": body.path,
             "frontmatter": body.frontmatter,
@@ -769,7 +775,7 @@ pub async fn update_entry(
 
     // If the manifest file itself was written, invalidate the L1 cache.
     if path == co::manifest::MANIFEST_FILENAME {
-        state.cache.invalidate_universe(&slug);
+        state.index.cache.invalidate_universe(&slug);
     }
 
     {
@@ -833,6 +839,7 @@ pub async fn update_entry(
     }
     // CO-220: route entry update through the event bus.
     state
+        .core
         .event_bus
         .publish(crate::events::DomainEvent::EntryWritten {
             universe_key: slug.clone(),
@@ -842,7 +849,11 @@ pub async fn update_entry(
         });
 
     // CO-79: invalidate query cache entries for this universe after a write.
-    state.cache.query.invalidate_prefix(&format!("{slug}:"));
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
 
     // CO-156: emit entry.upsert telemetry
     crate::telemetry::emit_crud_event(
@@ -860,7 +871,7 @@ pub async fn update_entry(
 
     let storage = lock_storage(&state);
     // CO-45: log mutation on UAT
-    if state.config.is_uat() {
+    if state.core.config.is_uat() {
         let before_val = serde_json::to_string(&existing).unwrap_or_default();
         let after_val = serde_json::json!({ "frontmatter": new_fm, "body": new_body }).to_string();
         let target = format!("{}:{}", slug, path);
@@ -928,7 +939,7 @@ pub async fn delete_entry(
     };
 
     // CO-45: capture before_value on UAT before deletion
-    let before_val = if state.config.is_uat() {
+    let before_val = if state.core.config.is_uat() {
         let uc = {
             let storage = lock_storage(&state);
             storage.universe_conn(&slug)
@@ -973,6 +984,7 @@ pub async fn delete_entry(
     }
     // CO-220: route entry delete through the event bus.
     state
+        .core
         .event_bus
         .publish(crate::events::DomainEvent::EntryDeleted {
             universe_key: slug.clone(),
@@ -982,7 +994,7 @@ pub async fn delete_entry(
     storage.decrement_universe_content_count(&slug, 1);
 
     // CO-45: log mutation on UAT
-    if state.config.is_uat() {
+    if state.core.config.is_uat() {
         let target = format!("{}:{}", slug, path);
         let _ = storage.log_uat_mutation(
             "entry.delete",
@@ -1156,7 +1168,7 @@ pub(crate) fn semantic_search_entries(
     k: usize,
     fts_query: Option<&str>,
 ) -> anyhow::Result<Vec<EntryRow>> {
-    let query_embedding = match state.embeddings.embed_one(sem_query) {
+    let query_embedding = match state.index.embeddings.embed_one(sem_query) {
         Some(e) => e,
         None => return Ok(vec![]), // model unavailable
     };

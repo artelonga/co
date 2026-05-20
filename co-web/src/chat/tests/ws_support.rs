@@ -8,7 +8,9 @@ use tokio_tungstenite::tungstenite::http::Request as TRequest;
 
 use crate::config::WebConfig;
 use crate::experiment::ExperimentStore;
-use crate::server::{AppState, AppStateInner, build_router};
+use crate::server::{
+    AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+};
 use crate::storage::Storage;
 
 pub type WsStream =
@@ -45,27 +47,35 @@ pub fn make_state(dir: &std::path::Path) -> AppState {
     let game_storage =
         Arc::new(game_core::storage::Storage::open(&game_db_path).expect("open test game storage"));
     let (embedding_tx, _rx) = crate::embedding_worker::channel();
-    Arc::new(AppStateInner {
-        storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
-        config,
-        auth_store: Mutex::new(auth_store),
-        mail,
-        game_storage,
-        plugin_registry: game_core::plugin::PluginRegistry::new(),
-        doc_rooms: crate::ws::new_room_manager(),
-        sync_rooms: crate::sync_ws::new_sync_room_manager(),
-        cache: crate::cache::CacheLayer::new(),
-        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
-        wae: crate::wae::WaeEmitter::new(None, None),
-        jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-        embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
-        embedding_tx,
-        chat_rooms_broadcast: Mutex::new(std::collections::HashMap::new()),
-        chat_presence: Mutex::new(std::collections::HashMap::new()),
-        geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
-        event_bus: crate::events::Bus::new(),
-        worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+    AppState::new(AppStateInner {
+        core: Arc::new(CoreState {
+            storage: parking_lot::Mutex::new(storage),
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: crate::events::Bus::new(),
+        }),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: crate::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: Mutex::new(std::collections::HashMap::new()),
+            chat_presence: Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: crate::cache::CacheLayer::new(),
+            embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        }),
     })
 }
 

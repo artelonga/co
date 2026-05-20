@@ -9,7 +9,9 @@ use tower::ServiceExt;
 use co_web::config::WebConfig;
 use co_web::experiment::ExperimentStore;
 use co_web::models::*;
-use co_web::server::{AppState, AppStateInner, build_router};
+use co_web::server::{
+    AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState, build_router,
+};
 use co_web::storage::{Storage, seed_data};
 extern crate co;
 
@@ -60,30 +62,38 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
     let game_storage = std::sync::Arc::new(
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
-    let state: AppState = Arc::new(AppStateInner {
-        storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
-        config,
-        auth_store: Mutex::new(auth_store),
-        mail,
-        game_storage,
-        plugin_registry: game_core::plugin::PluginRegistry::new(),
-        doc_rooms: co_web::ws::new_room_manager(),
-        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
-        cache: co_web::cache::CacheLayer::new(),
-        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
-        wae: co_web::wae::WaeEmitter::new(None, None),
-        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
-        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
-        embedding_tx: {
-            let (tx, _) = co_web::embedding_worker::channel();
-            tx
-        },
-        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
-        event_bus: co_web::events::Bus::new(),
-        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+    let state: AppState = AppState::new(AppStateInner {
+        core: Arc::new(CoreState {
+            storage: parking_lot::Mutex::new(storage),
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: co_web::events::Bus::new(),
+        }),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: co_web::ws::new_room_manager(),
+            sync_rooms: co_web::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: co_web::cache::CacheLayer::new(),
+            embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+            embedding_tx: {
+                let (tx, _) = co_web::embedding_worker::channel();
+                tx
+            },
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: co_web::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+        }),
     });
 
     build_router(state, None)
@@ -1077,30 +1087,38 @@ fn build_blank_test_router(dir: &std::path::Path) -> (axum::Router, AppState) {
     let game_storage = std::sync::Arc::new(
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
-    let state: AppState = Arc::new(AppStateInner {
-        storage: parking_lot::Mutex::new(storage),
-        experiment: Mutex::new(experiment),
-        config,
-        auth_store: Mutex::new(auth_store),
-        mail,
-        game_storage,
-        plugin_registry: game_core::plugin::PluginRegistry::new(),
-        doc_rooms: co_web::ws::new_room_manager(),
-        sync_rooms: co_web::sync_ws::new_sync_room_manager(),
-        cache: co_web::cache::CacheLayer::new(),
-        rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
-        wae: co_web::wae::WaeEmitter::new(None, None),
-        jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
-        embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
-        embedding_tx: {
-            let (tx, _) = co_web::embedding_worker::channel();
-            tx
-        },
-        chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
-        chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
-        geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
-        event_bus: co_web::events::Bus::new(),
-        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+    let state: AppState = AppState::new(AppStateInner {
+        core: Arc::new(CoreState {
+            storage: parking_lot::Mutex::new(storage),
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: co_web::events::Bus::new(),
+        }),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: co_web::ws::new_room_manager(),
+            sync_rooms: co_web::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: co_web::cache::CacheLayer::new(),
+            embeddings: std::sync::Arc::new(co_web::embedding::EmbeddingService::disabled()),
+            embedding_tx: {
+                let (tx, _) = co_web::embedding_worker::channel();
+                tx
+            },
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: co_web::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
+            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+        }),
     });
     let router = build_router(state.clone(), None);
     (router, state)
@@ -1133,14 +1151,14 @@ async fn test_usage_gate_anon_blocked_at_101() {
 
     // Set up: create a universe owned by "anon-test", one project
     {
-        let mut storage = state.storage.lock();
+        let mut storage = state.core.storage.lock();
         // Seed template universe so clone works
         storage.seed_template_universe();
     }
 
     // Set up anonymous universe + project directly in storage
     {
-        let mut storage = state.storage.lock();
+        let mut storage = state.core.storage.lock();
         storage
             .create_universe(
                 co_web::models::CreateUniverse {
@@ -1226,7 +1244,7 @@ async fn test_usage_gate_anon_blocked_at_101() {
 
     // After claiming the universe (set owner to real user), writes should succeed
     {
-        let storage = state.storage.lock();
+        let storage = state.core.storage.lock();
         // Claim: set owner_id to real-user
         storage
             .conn()
