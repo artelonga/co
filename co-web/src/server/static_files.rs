@@ -122,6 +122,83 @@ pub(super) async fn serve_co_index(
     (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
+/// Check whether any of the SPA's candidate entry paths exist for a given subpath.
+///
+/// Mirrors `maybeOpenEntryFromUrl` candidates in `app.js`. Returns `false` when
+/// the universe does not exist, when the per-universe connection cannot be acquired,
+/// or when none of the four candidate paths are present in the entry index.
+fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str) -> bool {
+    let uc = {
+        let storage = state.core.storage.lock();
+        if storage.get_universe(universe_slug).is_none() {
+            return false;
+        }
+        storage.universe_conn(universe_slug)
+    };
+    let Ok(uc_guard) = uc.lock() else {
+        return false;
+    };
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let candidates = [
+        format!("{subpath}.md"),
+        subpath.to_string(),
+        format!("content/{subpath}.md"),
+        format!("content/{subpath}"),
+    ];
+    candidates
+        .iter()
+        .any(|p| index.get(universe_slug, p).ok().flatten().is_some())
+}
+
+/// GET `/{universe}/{*subpath}` — SPA deep-link handler (CO-232).
+///
+/// Returns HTTP 200 when the entry exists (or is indeterminate) and HTTP 404
+/// when it is provably absent. In both cases the SPA shell is served so the
+/// client-side router can render the appropriate view. The SPA's own
+/// `maybeOpenEntryFromUrl()` also shows a 404 view on failure, so status code
+/// and rendered view always agree.
+pub(super) async fn serve_deep_link(
+    Path((universe_slug, subpath)): Path<(String, String)>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Response {
+    let variant = extract_variant(&headers, &state.core.config);
+    let embed_path = format!("variants/{}/index.html", variant);
+    let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
+
+    let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) else {
+        return (StatusCode::NOT_FOUND, "Not found").into_response();
+    };
+
+    let status = if entry_exists_for_subpath(&state, &universe_slug, &subpath) {
+        StatusCode::OK
+    } else {
+        StatusCode::NOT_FOUND
+    };
+
+    let mut response = (
+        status,
+        [
+            (
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            ),
+            (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+        ],
+        contents,
+    )
+        .into_response();
+
+    if extract_lang_cookie(&headers).is_none() {
+        let lang = detect_lang_from_accept(&headers);
+        if let Ok(v) = format!("co_lang={}; Path=/; SameSite=Lax; Max-Age=31536000", lang).parse() {
+            response.headers_mut().append(header::SET_COOKIE, v);
+        }
+    }
+
+    response
+}
+
 /// CO-150: Serve the asset browser page at `/{slug}/assets`.
 pub(super) async fn serve_assets_page(State(state): State<AppState>) -> Response {
     let embed_path = "shared/assets.html";

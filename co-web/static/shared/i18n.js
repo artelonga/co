@@ -353,6 +353,11 @@
             'conversas.empty': 'Selecione uma conversa.',
             'conversas.dm_button': '📩 Enviar mensagem',
             'conversas.filter_members': 'Filtrar membros…',
+            // CO-232: deep-link 404 view
+            'not_found.title': 'Página não encontrada',
+            'not_found.subtitle': 'Este conteúdo não existe neste universo.',
+            'not_found.back_universe': '← Voltar ao universo',
+            'not_found.back_home': 'Ir para o início',
         },
         en: {
             // Spec-defined dot-notation keys
@@ -691,6 +696,11 @@
             'conversas.empty': 'Select a conversation.',
             'conversas.dm_button': '📩 Send message',
             'conversas.filter_members': 'Filter members…',
+            // CO-232: deep-link 404 view
+            'not_found.title': 'Page not found',
+            'not_found.subtitle': 'This content does not exist in this universe.',
+            'not_found.back_universe': '← Back to universe',
+            'not_found.back_home': 'Go to home',
         },
     };
 

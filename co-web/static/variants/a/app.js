@@ -244,6 +244,27 @@ async function openContentEditor(taskId) {
 }
 
 // ===== Deep URL helpers =====
+
+// CO-232: render a 404 view when a deep-linked entry cannot be resolved.
+function showNotFoundView(universeSlug) {
+    const t = k => window.t ? window.t(k) : k;
+    const existing = document.getElementById('co-not-found-view');
+    if (existing) existing.remove();
+    const view = document.createElement('div');
+    view.id = 'co-not-found-view';
+    view.className = 'not-found-view';
+    view.innerHTML =
+        `<div class="not-found-container">` +
+        `<h1 class="not-found-title">${t('not_found.title')}</h1>` +
+        `<p class="not-found-subtitle">${t('not_found.subtitle')}</p>` +
+        `<div class="not-found-actions">` +
+        `<a href="/${esc(universeSlug)}" class="btn btn-secondary">${t('not_found.back_universe')}</a>` +
+        `<a href="/" class="btn btn-primary">${t('not_found.back_home')}</a>` +
+        `</div></div>`;
+    const app = document.getElementById('app');
+    if (app) app.appendChild(view);
+}
+
 function maybeOpenPageFromUrl(universeSlug) {
     const params = new URLSearchParams(window.location.search);
     const page = params.get('page');
@@ -292,8 +313,8 @@ async function maybeOpenEntryFromUrl(universeSlug) {
             return;
         }
     } catch (_) {}
-    window.history.replaceState({}, '', `/${universeSlug}`);
-    maybeOpenPageFromUrl(universeSlug);
+    // CO-232: entry not found — show 404 view instead of silently landing on universe home.
+    showNotFoundView(universeSlug);
 }
 
 // ===== View switching =====

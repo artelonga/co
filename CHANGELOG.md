@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.5] — 2026-05-20 — Cross-universe deep-link returns 404 for unknown entries (CO-232)
+
+### Fixed
+
+- **`/<universe>/<slug>`** now returns HTTP 404 (and renders the SPA 404 view) when the entry does not exist, instead of silently landing on the universe home. Covers unknown entry paths for any universe; the happy-path (known entry) and the bare universe home (`/<universe>/`) are unchanged.
+- New `serve_deep_link` handler in `co-web/src/server/static_files.rs` checks the four SPA candidate paths (`<slug>.md`, `<slug>`, `content/<slug>.md`, `content/<slug>`) against the per-universe entry index before deciding the HTTP status code.
+- SPA `maybeOpenEntryFromUrl()` now renders an inline 404 view (with links back to the universe home and the global home) instead of resetting the URL to the universe home when all lookup attempts fail.
+- New `not_found.*` i18n strings in Portuguese and English.
+- 3 new in-process Rust unit tests (unknown slug → 404, known slug → 200, non-existent universe → 404).
+- 1 new Playwright e2e spec (`e2e/deep-link-404.spec.ts`) asserting 404 HTTP status and 404 view rendering across `template` and `artelonga` universes.
+
 ## [2.11.4] — 2026-05-20 — Slim AppStateInner via segregated sub-states (CO-221)
 
 ### Changed

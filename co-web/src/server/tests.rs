@@ -636,3 +636,108 @@ async fn test_telemetry_admin_requires_auth_no_cors_bypass() {
         resp.status()
     );
 }
+
+// --- CO-232: deep-link 404 ---
+
+fn setup_universe_with_entry(dir: &std::path::Path, universe_slug: &str, entry_path: &str) {
+    let mut storage = Storage::new(dir.to_str().unwrap());
+
+    // Insert owner user.
+    let owner_id = "usr_test_owner";
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = storage.conn().execute(
+        "INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at) \
+         VALUES (?1, ?2, 'Owner', 'player', ?3)",
+        rusqlite::params![owner_id, "owner@test.local", now],
+    );
+
+    let _ = storage.create_universe(
+        crate::models::CreateUniverse {
+            key: universe_slug.to_string(),
+            name: universe_slug.to_string(),
+            description: String::new(),
+        },
+        owner_id,
+    );
+
+    // Open the per-universe DB and upsert the test entry.
+    let uc = storage.universe_conn(universe_slug);
+    let guard = uc.lock().unwrap();
+    let index = crate::entry_index::EntryIndex::new(&guard);
+    let entry = crate::entry_index::make_entry(
+        entry_path,
+        serde_json::json!({"type": "note", "title": "Test entry"}),
+        "Test body",
+    );
+    index.upsert(universe_slug, &entry).unwrap();
+}
+
+/// `/{universe}/{unknown-slug}` must return 404.
+#[tokio::test]
+async fn test_deep_link_unknown_slug_returns_404() {
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let dir = tempdir().unwrap();
+    setup_universe_with_entry(dir.path(), "testuniv", "content/existing-page.md");
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/testuniv/does-not-exist")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "unknown slug must return 404"
+    );
+}
+
+/// `/{universe}/{known-slug}` must return 200 and the SPA shell.
+#[tokio::test]
+async fn test_deep_link_known_slug_returns_200() {
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let dir = tempdir().unwrap();
+    setup_universe_with_entry(dir.path(), "testuniv2", "content/existing-page.md");
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/testuniv2/content/existing-page")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK, "known slug must return 200");
+}
+
+/// `/{universe}/{*subpath}` for a non-existent universe must return 404.
+#[tokio::test]
+async fn test_deep_link_nonexistent_universe_returns_404() {
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/ghost-universe/some-entry")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "non-existent universe deep-link must return 404"
+    );
+}
