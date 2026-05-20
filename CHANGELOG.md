@@ -5,6 +5,22 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.11.2] — 2026-05-20 — Worker trait + supervisor (CO-223)
+
+### Added
+
+- **`workers::Worker` trait**: unified lifecycle contract (`name()`, `run()`, `tick()`) for the three long-running background workers (embeddings, notifications, push delivery).
+- **`workers::Supervisor`**: panic-isolated wrapper that restarts a worker on panic with exponential backoff. Replaces the prior fire-and-forget `tokio::spawn` calls.
+
+### Changed
+
+- Embedding, notification, and push workers refactored to implement `Worker` and run under the supervisor. A panic in one worker no longer kills the others.
+- `core/src/workers/` layout established as the home for the trait, supervisor, and per-worker submodules.
+
+### Why
+
+Closes CO-223. Prior `tokio::spawn` workers ran unsupervised — a panic anywhere in the worker body terminated only the spawned task while the rest of the process kept running, leaving the system in a partial-failure state with no visible signal. The supervisor surfaces panics, restarts the worker with backoff, and exposes a uniform shape for the next worker we add (e.g. CO-244 REPL polling).
+
 ## [2.11.1] — 2026-05-19 — Typed auth extractor hierarchy (CO-222)
 
 ### Added
