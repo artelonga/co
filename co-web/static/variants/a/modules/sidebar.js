@@ -30,13 +30,21 @@ export function injectSetUniverseSlugInUrl(fn) { _setUniverseSlugInUrl = fn; }
 
 // --- Sidebar universe tree helpers ---
 
-function buildChildMap(universes) {
+function buildChildMap(universes, allUniversesMap = null) {
     const keys = new Set(universes.map(u => u.key));
     const childrenByParent = {};
     const topLevel = [];
+    const syntheticByKey = {};
     universes.forEach(u => {
         if (u.parent_key && keys.has(u.parent_key)) {
             (childrenByParent[u.parent_key] = childrenByParent[u.parent_key] || []).push(u);
+        } else if (u.parent_key && allUniversesMap && allUniversesMap.has(u.parent_key)) {
+            const pk = u.parent_key;
+            if (!syntheticByKey[pk]) {
+                syntheticByKey[pk] = { ...allUniversesMap.get(pk), _synthetic: true };
+                topLevel.push(syntheticByKey[pk]);
+            }
+            (childrenByParent[pk] = childrenByParent[pk] || []).push(u);
         } else {
             topLevel.push(u);
         }
@@ -65,11 +73,13 @@ function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip) {
         ? `<span class="sidebar-universe-chevron" data-toggle="${esc(u.key)}" style="display:inline-block;width:14px;text-align:center;cursor:pointer;user-select:none">${expanded ? '▾' : '▸'}</span>`
         : '<span class="sidebar-universe-chevron-spacer" style="display:inline-block;width:14px"></span>';
     const role = u.role;
-    const roleChip = showRoleChip && role && role !== 'owner'
+    const roleChip = showRoleChip && role && !u._synthetic
         ? `<span class="role-chip">${esc(window.t ? window.t('sidebar.role.' + role) || role : role)}</span>`
         : '';
-    let html = `<div class="sidebar-item sidebar-universe-item${active}" data-universe="${esc(u.key)}" style="padding-left:${indent}px">
-        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}</span>${roleChip}
+    const subCount = hasKids ? ` (${kids.length})` : '';
+    const syntheticClass = u._synthetic ? ' sidebar-universe-synthetic' : '';
+    let html = `<div class="sidebar-item sidebar-universe-item${syntheticClass}${active}" data-universe="${esc(u.key)}" style="padding-left:${indent}px">
+        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}
     </div>`;
     if (hasKids && expanded) {
         for (const k of kids) html += renderUniverseItemHtml(k, childrenByParent, depth + 1, showRoleChip);
@@ -77,11 +87,12 @@ function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip) {
     return html;
 }
 
-function renderSectionHtml(label, universes, showRoleChip) {
+function renderSectionHtml(label, universes, showRoleChip, tooltip = '', allUniversesMap = null) {
     if (!universes || universes.length === 0) return '';
-    const { childrenByParent, topLevel } = buildChildMap(universes);
+    const { childrenByParent, topLevel } = buildChildMap(universes, allUniversesMap);
+    const titleAttr = tooltip ? ` title="${esc(tooltip)}"` : '';
     return `<div class="sidebar-universe-section">
-        <div class="sidebar-section-label">${esc(label)}</div>
+        <div class="sidebar-section-label"${titleAttr}>${esc(label)}</div>
         ${topLevel.map(u => renderUniverseItemHtml(u, childrenByParent, 0, showRoleChip)).join('')}
     </div>`;
 }
@@ -117,10 +128,13 @@ export function renderSidebar() {
     const me = state.meUniverses;
 
     if (me) {
-        // CO-192: bucketed sidebar sections
-        universeHtml += renderSectionHtml(t('sidebar.section.owned'), me.owned, false);
-        universeHtml += renderSectionHtml(t('sidebar.section.member'), me.member, true);
-        universeHtml += renderSectionHtml(t('sidebar.section.subscribed'), me.subscribed, true);
+        // CO-238: sidebar section clarity — tooltips, owner chip, sub-universe counts, cross-bucket parents
+        const allUniversesMap = new Map();
+        [...(me.owned || []), ...(me.member || []), ...(me.subscribed || []), ...(me.discoverable || [])]
+            .forEach(u => allUniversesMap.set(u.key, u));
+        universeHtml += renderSectionHtml(t('sidebar.section.owned'), me.owned, true, t('sidebar.section.owned.tooltip'), allUniversesMap);
+        universeHtml += renderSectionHtml(t('sidebar.section.member'), me.member, true, t('sidebar.section.member.tooltip'), allUniversesMap);
+        universeHtml += renderSectionHtml(t('sidebar.section.subscribed'), me.subscribed, true, t('sidebar.section.subscribed.tooltip'), allUniversesMap);
 
         if (me.invited && me.invited.length > 0) {
             universeHtml += `<div class="sidebar-universe-section sidebar-invited-section">
