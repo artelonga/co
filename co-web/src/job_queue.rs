@@ -210,7 +210,7 @@ fn job_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Job> {
 
 const MAX_ATTEMPTS: i64 = 5;
 // Poll interval between worker ticks (in seconds).
-const POLL_INTERVAL_SECS: u64 = 3;
+pub const POLL_INTERVAL_SECS: u64 = 3;
 
 /// Claim the oldest eligible pending job. Returns `None` if the queue is empty.
 ///
@@ -339,84 +339,73 @@ fn process_job(job: &Job, storage: &Storage) -> Result<(), String> {
     Ok(())
 }
 
-/// Spawn the background worker loop. This should be called once at server
-/// startup. The loop polls the `jobs` table every `POLL_INTERVAL_SECS` seconds,
-/// claims the oldest eligible job, and dispatches it.
-///
-/// The loop runs until the process exits — it does not hold any `JoinHandle`.
-pub fn spawn_worker(state: AppState) {
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
+/// Claim and process one pending job. Returns `Ok(())` whether or not a
+/// job was found; job errors are recorded in the DB, not propagated.
+pub async fn tick(state: &AppState) -> anyhow::Result<()> {
+    let job = {
+        let s = state.storage.lock();
+        claim_next_job(s.conn())
+    };
 
-            let job = {
-                let s = state.storage.lock();
-                claim_next_job(s.conn())
-            };
+    let Some(job) = job else {
+        return Ok(());
+    };
 
-            let Some(job) = job else {
-                continue;
-            };
+    info!(
+        job_id = %job.id,
+        universe = %job.universe_key,
+        kind = %job.kind,
+        attempt = job.attempts + 1,
+        "job_queue: processing"
+    );
 
-            info!(
+    // Run the job on a blocking thread so the async runtime is not
+    // starved. The 5-minute wall-time limit is enforced by the
+    // timeout wrapper below.
+    let state_clone = Arc::clone(state);
+    let job_clone = job.clone();
+
+    let result = tokio::time::timeout(
+        Duration::from_secs(ResourceLimits::default().wall_time_secs),
+        tokio::task::spawn_blocking(move || {
+            let s = state_clone.storage.lock();
+            process_job(&job_clone, &s)
+        }),
+    )
+    .await;
+
+    let outcome: Result<(), String> = match result {
+        Err(_timeout) => Err(format!(
+            "job timed out after {}s",
+            ResourceLimits::default().wall_time_secs
+        )),
+        Ok(Err(join_err)) => Err(format!("task panicked: {join_err}")),
+        Ok(Ok(inner)) => inner,
+    };
+
+    match outcome {
+        Ok(()) => {
+            info!(job_id = %job.id, universe = %job.universe_key, "job_queue: done");
+            let s = state.storage.lock();
+            mark_done(s.conn(), &job.id);
+            clear_universe_doc_gen_error(s.conn(), &job.universe_key);
+        }
+        Err(err) => {
+            let attempts = job.attempts + 1;
+            warn!(
                 job_id = %job.id,
                 universe = %job.universe_key,
-                kind = %job.kind,
-                attempt = job.attempts + 1,
-                "job_queue: processing"
+                attempt = attempts,
+                error = %err,
+                "job_queue: failed"
             );
-
-            // Run the job on a blocking thread so the async runtime is not
-            // starved. The 5-minute wall-time limit is enforced by the
-            // timeout wrapper below.
-            let state_clone = Arc::clone(&state);
-            let job_clone = job.clone();
-
-            let result = tokio::time::timeout(
-                Duration::from_secs(ResourceLimits::default().wall_time_secs),
-                tokio::task::spawn_blocking(move || {
-                    let s = state_clone.storage.lock();
-                    process_job(&job_clone, &s)
-                }),
-            )
-            .await;
-
-            let outcome: Result<(), String> = match result {
-                Err(_timeout) => Err(format!(
-                    "job timed out after {}s",
-                    ResourceLimits::default().wall_time_secs
-                )),
-                Ok(Err(join_err)) => Err(format!("task panicked: {join_err}")),
-                Ok(Ok(inner)) => inner,
-            };
-
-            match outcome {
-                Ok(()) => {
-                    info!(job_id = %job.id, universe = %job.universe_key, "job_queue: done");
-                    {
-                        let s = state.storage.lock();
-                        mark_done(s.conn(), &job.id);
-                        clear_universe_doc_gen_error(s.conn(), &job.universe_key);
-                    }
-                }
-                Err(err) => {
-                    let attempts = job.attempts + 1;
-                    warn!(
-                        job_id = %job.id,
-                        universe = %job.universe_key,
-                        attempt = attempts,
-                        error = %err,
-                        "job_queue: failed"
-                    );
-                    {
-                        let s = state.storage.lock();
-                        mark_failed(s.conn(), &job.id, attempts, &err);
-                        set_universe_doc_gen_error(s.conn(), &job.universe_key, &err);
-                    }
-                }
-            }
+            let s = state.storage.lock();
+            mark_failed(s.conn(), &job.id, attempts, &err);
+            set_universe_doc_gen_error(s.conn(), &job.universe_key, &err);
         }
-    });
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

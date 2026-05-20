@@ -91,6 +91,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
         event_bus: co_web::events::Bus::new(),
+        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
     });
     // CO-220: subscribe before spawning so events published synchronously
     // during the HTTP handler are not missed by the task.

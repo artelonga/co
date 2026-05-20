@@ -30,6 +30,9 @@ pub enum EmbeddingJob {
         universe_key: String,
         path: String,
     },
+    /// CO-223: health-check probe sent by `WorkerSupervisor`. No-op in the
+    /// OS thread — confirms the receiver is still alive.
+    Probe,
 }
 
 pub type EmbeddingSender = mpsc::SyncSender<EmbeddingJob>;

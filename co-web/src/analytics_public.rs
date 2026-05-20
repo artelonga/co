@@ -902,6 +902,7 @@ mod tests {
             embedding_tx,
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
             event_bus: crate::events::Bus::new(),
+            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
             chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         });

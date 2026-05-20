@@ -389,6 +389,7 @@ pub async fn start_server(config: WebConfig) {
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo,
         event_bus: crate::events::Bus::new(),
+        worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
     });
 
     // CO-220: spawn event bus listeners — decoupled cross-feature wiring.
@@ -515,21 +516,30 @@ pub async fn start_server(config: WebConfig) {
     let addr = format!("0.0.0.0:{}", config.port);
     tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);
 
-    // CO-72: spawn doc-gen worker loop.
-    crate::job_queue::spawn_worker(Arc::clone(&state));
-
-    // CO-164: spawn embedding background worker + load model after server binds.
+    // CO-164: spawn embedding OS thread + load model after server binds.
     crate::embedding_worker::spawn(embedding_rx, Arc::clone(&state));
     crate::embedding_worker::boot_scan(Arc::clone(&state));
     // Load the embedding model in the background so startup doesn't block on it.
     // Server health check passes immediately; model becomes available ~10–60s later.
     Arc::clone(&state.embeddings).load_deferred(model_dir);
-    // CO-168: spawn outbound webhook delivery worker.
-    crate::webhook_worker::spawn_worker(Arc::clone(&state));
-    // CO-200: email digest delivery worker.
-    tokio::spawn(crate::notification_email_worker::run(Arc::clone(&state)));
-    // CO-201: web push delivery worker (10-second tick).
-    tokio::spawn(crate::notification_push_worker::run(Arc::clone(&state)));
+
+    // CO-223: register all five workers with the supervisor.
+    // The supervisor runs each in an isolated tokio::spawn so panics in one
+    // worker never bring down siblings or poison the shared storage lock.
+    {
+        let sup = &state.worker_supervisor;
+
+        sup.spawn(crate::workers::EmbeddingWorker::new(
+            state.embedding_tx.clone(),
+        ));
+        sup.spawn(crate::workers::EmailWorker::new(Arc::clone(&state)));
+        sup.spawn(crate::workers::PushWorker::new(Arc::clone(&state)));
+        match crate::workers::WebhookWorker::new(Arc::clone(&state)) {
+            Ok(w) => sup.spawn(w),
+            Err(e) => tracing::error!("webhook worker init failed: {e}"),
+        }
+        sup.spawn(crate::workers::JobQueueWorker::new(Arc::clone(&state)));
+    }
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(Arc::clone(&state)));

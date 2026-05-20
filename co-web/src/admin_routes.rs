@@ -453,10 +453,34 @@ pub async fn origin_breakdown_handler(
     }))
 }
 
+/// GET /api/v1/admin/workers/status
+///
+/// Returns a JSON array of `WorkerStatus` snapshots for all supervised workers.
+/// Requires a valid admin JWT (same gate as `/api/v1/admin/dashboard`).
+pub async fn workers_status_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<Vec<crate::worker_supervisor::WorkerStatus>>, Response> {
+    let claims = extract_claims(&headers).map_err(|status| {
+        (status, Json(serde_json::json!({"error": "Unauthorized"}))).into_response()
+    })?;
+
+    if !check_admin_email(&claims.email) {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(serde_json::json!({"error": "Forbidden"})),
+        )
+            .into_response());
+    }
+
+    Ok(Json(state.worker_supervisor.statuses()))
+}
+
 pub fn api_router() -> Router<AppState> {
     Router::new()
         .route("/dashboard", get(dashboard_handler))
         .route("/users/origin-breakdown", get(origin_breakdown_handler))
+        .route("/workers/status", get(workers_status_handler))
 }
 
 // ---------------------------------------------------------------------------
@@ -751,6 +775,7 @@ mod tests {
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
             event_bus: crate::events::Bus::new(),
+            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
         });
         crate::server::build_router(state, None)
     }

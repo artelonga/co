@@ -83,4 +83,6 @@ pub mod wae;
 pub mod webhook;
 pub mod webhook_routes;
 pub mod webhook_worker;
+pub mod worker_supervisor;
+pub mod workers;
 pub mod ws;

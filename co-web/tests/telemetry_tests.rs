@@ -72,6 +72,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
         chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
         geo: std::sync::Arc::new(co_web::geo::GeoDb::disabled()),
         event_bus: co_web::events::Bus::new(),
+        worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
     });
     build_router(state, None)
 }
