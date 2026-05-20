@@ -200,6 +200,7 @@ mod tests {
             chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
             geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
             event_bus: crate::events::Bus::new(),
+            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
         });
         build_router(state, None)
     }

@@ -43,6 +43,9 @@ pub struct AppStateInner {
     pub geo: std::sync::Arc<crate::geo::GeoDb>,
     /// CO-220: in-process domain event bus for decoupled cross-feature signaling.
     pub event_bus: crate::events::Bus,
+    /// CO-223: unified worker lifecycle supervisor — tracks last-tick timestamps
+    /// and exposes `/api/v1/admin/workers/status`.
+    pub worker_supervisor: crate::worker_supervisor::WorkerSupervisor,
 }
 
 pub type AppState = Arc<AppStateInner>;

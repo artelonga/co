@@ -25,7 +25,10 @@ pub async fn run(state: AppState) {
     }
 }
 
-async fn tick(state: &AppState, failure_counts: &mut HashMap<String, u32>) -> anyhow::Result<()> {
+pub async fn tick(
+    state: &AppState,
+    failure_counts: &mut HashMap<String, u32>,
+) -> anyhow::Result<()> {
     let now = Utc::now();
 
     let users = {
