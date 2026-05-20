@@ -1705,5 +1705,46 @@ impl Storage {
                  ON telemetry_events(universe_key, timestamp);",
             )
             .expect("CO-179: idx_telemetry_universe_time");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 45 {
+            // CO-237: hash API tokens at rest.
+            // Add token_hash (SHA-256 hex) and token_prefix (first 11 chars for
+            // display) columns. Existing plaintext tokens are invalidated — users
+            // must re-create their tokens after this migration.
+            ensure_column(&self.conn, "api_tokens", "token_hash", "TEXT")
+                .expect("migration v45: api_tokens.token_hash");
+            ensure_column(&self.conn, "api_tokens", "token_prefix", "TEXT")
+                .expect("migration v45: api_tokens.token_prefix");
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_hash \
+                     ON api_tokens(token_hash) WHERE token_hash IS NOT NULL;
+                     DELETE FROM api_tokens;
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (45);",
+                )
+                .expect("migration v45: idx_api_tokens_hash + invalidate + schema_version");
+        }
+
+        // CO-237 unconditional backfill — ensures hash columns exist even if v45
+        // was partially applied.
+        ensure_column(&self.conn, "api_tokens", "token_hash", "TEXT")
+            .expect("CO-237 backfill: api_tokens.token_hash");
+        ensure_column(&self.conn, "api_tokens", "token_prefix", "TEXT")
+            .expect("CO-237 backfill: api_tokens.token_prefix");
+        self.conn
+            .execute_batch(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_api_tokens_hash \
+                 ON api_tokens(token_hash) WHERE token_hash IS NOT NULL;",
+            )
+            .expect("CO-237 backfill: idx_api_tokens_hash");
     }
 }

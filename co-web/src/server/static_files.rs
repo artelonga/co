@@ -241,7 +241,7 @@ pub(super) async fn serve_sync_settings(
     let token = {
         let storage = state.core.storage.lock();
         match storage.create_api_token(&user_id, "co-sync") {
-            Ok(t) => t.token,
+            Ok(t) => t.token.unwrap_or_default(),
             Err(e) => {
                 return (
                     StatusCode::INTERNAL_SERVER_ERROR,

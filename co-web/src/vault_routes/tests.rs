@@ -732,3 +732,74 @@ fn test_patch_block_replace() {
     );
     assert!(!result.contains("Some paragraph"), "Got: {result}");
 }
+
+// -----------------------------------------------------------------------
+// CO-237: API token hashing at rest
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_api_token_hash_at_rest() {
+    let dir = tempdir().unwrap();
+    let storage = crate::storage::Storage::new(dir.path().to_str().unwrap());
+
+    let tok = storage
+        .create_api_token("user-hash-test", "hash-test-token")
+        .unwrap();
+
+    // Raw token returned to caller
+    let raw = tok
+        .token
+        .clone()
+        .expect("raw token must be Some on creation");
+    assert!(raw.starts_with("co_"), "token must have co_ prefix");
+
+    // token_hash and token_prefix must be populated
+    assert!(!tok.token_hash.is_empty(), "token_hash must not be empty");
+    assert!(
+        tok.token_prefix.starts_with("co_"),
+        "token_prefix must start with co_"
+    );
+
+    // DB must NOT contain the raw co_<value> token — only the hash
+    let conn = rusqlite::Connection::open(dir.path().join("meta.db")).unwrap();
+    let stored_token: String = conn
+        .query_row(
+            "SELECT token FROM api_tokens WHERE id = ?1",
+            rusqlite::params![tok.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(
+        !stored_token.starts_with("co_"),
+        "plaintext token must not be in DB; got: {stored_token:?}"
+    );
+
+    let stored_hash: String = conn
+        .query_row(
+            "SELECT token_hash FROM api_tokens WHERE id = ?1",
+            rusqlite::params![tok.id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        stored_hash, tok.token_hash,
+        "stored hash must match returned hash"
+    );
+
+    // Lookup by raw value must succeed and return the same token id
+    let found = storage
+        .get_api_token_by_value(&raw)
+        .unwrap()
+        .expect("token must be found by raw value");
+    assert_eq!(found.id, tok.id);
+    assert!(
+        found.token.is_none(),
+        "raw token must not be returned on lookup"
+    );
+
+    // Lookup with wrong value must return None
+    let not_found = storage
+        .get_api_token_by_value("co_thisiswrong1234567890")
+        .unwrap();
+    assert!(not_found.is_none(), "wrong token must not match");
+}

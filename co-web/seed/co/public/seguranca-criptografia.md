@@ -81,15 +81,18 @@ Como cada tipo de dado é guardado, hasheado, criptografado ou apenas indexado. 
 
 **Uso:** `Authorization: Bearer co_<token>` em qualquer endpoint que aceita JWT — substitui o cookie em scripts/CLI.
 
-**Onde armazenamos:** tabela `api_tokens` no `meta.db`. Cada linha tem: `id`, `user_id`, `name`, `token`, `created_at`, `expires_at`, `last_used_at`.
+**Onde armazenamos:** tabela `api_tokens` no `meta.db`. Colunas: `id`, `user_id`, `name`, `token_hash`, `token_prefix`, `created_at`, `expires_at`, `last_used_at`.
 
-**Lacuna conhecida:** hoje o `token` é guardado em **texto puro** na tabela. Se o banco for comprometido, todos os tokens ativos são expostos. **Não é o padrão recomendado** — tokens deveriam ser hasheados (SHA-256 ou Argon2id) no banco e comparados por hash no lookup. Rastreado em [CO-237](#lacunas-conhecidas).
+**Hashing:** o token bruto nunca é persistido. No momento da criação, calculamos `SHA-256(token)` e armazenamos apenas o hash hexadecimal na coluna `token_hash`. No lookup, fazemos o mesmo: `SHA-256(bearer_value)` é comparado contra `token_hash` via query SQL — nenhum texto puro toca o banco. A coluna `token_prefix` guarda os primeiros 11 caracteres (ex.: `co_abc12345`) para exibição na listagem de tokens.
 
-**Mitigações atuais:**
+**Migração CO-237 (2.11.7):** todos os tokens anteriores à versão 2.11.7 foram invalidados. Usuários com tokens antigos precisam gerar um novo via `POST /api/v1/auth/token`. Essa é uma breaking change documentada para portadores de tokens CLI/agente.
+
+**Proteções:**
 - O banco está em volume Fly criptografado-at-rest (camada de infraestrutura, não do app)
 - Tokens são revogáveis individualmente (`DELETE /api/v1/auth/tokens/:id`)
 - Cada token tem um nome (não anônimo — facilita auditoria via `GET /api/v1/auth/tokens`)
 - Acesso ao banco em produção exige SSH via Fly + chave do operador
+- Um dump do banco expõe apenas hashes SHA-256 irreversíveis — não os tokens em si
 
 **Recomendação para usuários:** trate tokens como senhas. Não comite em git, não cole em chat público, rotacione a cada 90 dias.
 
@@ -159,7 +162,6 @@ Cada lacuna tem um ticket público correspondente — você pode acompanhar o pr
 
 | Lacuna | Ticket | Status |
 |---|---|---|
-| Tokens de API armazenados em texto puro no banco | **CO-237** | aberto, prioritário |
 | Sessões expiram em 7 dias (sem refresh token automático) | parte de CO-235 ("co clone") + melhorias futuras | em design |
 | Sem 2FA / TOTP ainda (recuperação é apenas via canais verificados) | a planejar | pendente |
 | Logs de erro podem incluir IP por 14 dias | aceito (necessário para diagnóstico) | documentado |

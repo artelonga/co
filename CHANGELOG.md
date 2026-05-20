@@ -5,6 +5,41 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.1] — 2026-05-20 — Hash API tokens at rest (CO-237)
+
+### Security — API tokens no longer stored in plaintext
+
+**Root cause:** The `api_tokens` table stored raw `co_<40-char>` tokens in a
+`token TEXT` column. A database dump (stolen backup, SSH escalation, accidental
+log leak) would expose every active token, allowing an attacker to impersonate
+any user with a CLI or agent integration.
+
+**Fix:**
+
+- **SHA-256 hashing at insert** — `create_api_token` computes `SHA-256(token)`
+  and stores only the hex hash in a new `token_hash TEXT` column. The raw token
+  is returned to the caller exactly once and never written to the database.
+- **Hash-based lookup** — `get_api_token_by_value` hashes the incoming Bearer
+  value before the SQL lookup (`WHERE token_hash = ?`). No plaintext token is
+  ever compared against stored data.
+- **Token prefix for display** — a new `token_prefix TEXT` column stores the
+  first 11 characters of the token (e.g. `co_abc12345`) so the list endpoint
+  can show a recognizable prefix without exposing the full secret.
+- **Migration v45** — adds `token_hash` and `token_prefix` columns with a
+  unique index on `token_hash`. All existing tokens are invalidated at migration
+  time (deleted from the table).
+- **Documentation updated** — `seguranca-criptografia.md` removes the known-gap
+  entry for CO-237 and documents the new hashing scheme.
+
+**⚠️ Breaking change for token holders:** all API tokens issued before v2.12.1
+are invalidated. Users must re-create their tokens via
+`POST /api/v1/auth/token` (or the web UI). One-time cycle; tokens created from
+v2.12.1 onward are hashed and unaffected by future DB dumps.
+
+**Test:** `vault_routes::tests::test_api_token_hash_at_rest` — creates a token,
+verifies no `co_*` value is stored in the DB, confirms lookup by raw value
+succeeds and lookup by wrong value returns `None`.
+
 ## [2.12.0] — 2026-05-20 — OpenAPI coverage: auth + admin + chat (CO-226)
 
 ### Added — interactions registry extended to auth, admin, and chat

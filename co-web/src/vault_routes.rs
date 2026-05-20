@@ -57,7 +57,10 @@ pub struct ApiToken {
     pub id: String,
     pub user_id: String,
     pub name: String,
-    pub token: String,
+    /// Raw token — `Some` only at creation time; `None` on all subsequent reads.
+    pub token: Option<String>,
+    pub token_hash: String,
+    pub token_prefix: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
@@ -168,6 +171,7 @@ pub struct CreateTokenResponse {
 pub struct TokenInfo {
     pub id: String,
     pub name: String,
+    pub token_prefix: String,
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
@@ -1459,7 +1463,7 @@ pub async fn create_api_token(
         Json(CreateTokenResponse {
             id: tok.id,
             name: tok.name,
-            token: tok.token,
+            token: tok.token.unwrap_or_default(),
             expires_at: tok.expires_at,
         }),
     )
@@ -1482,6 +1486,7 @@ pub async fn list_api_tokens(
         .map(|t| TokenInfo {
             id: t.id,
             name: t.name,
+            token_prefix: t.token_prefix,
             created_at: t.created_at,
             expires_at: t.expires_at,
             last_used_at: t.last_used_at,
