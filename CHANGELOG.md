@@ -5,6 +5,35 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.0] — 2026-05-20 — OpenAPI coverage: auth + admin + chat (CO-226)
+
+### Added — interactions registry extended to auth, admin, and chat
+
+`co-web/e2e/interactions/registry.yaml` is the canonical OpenAPI 3.1 document
+served at `GET /api/v1/interactions/openapi.json`. Previously it covered only
+content entry CRUD (4 operations). This release adds 45 new operations:
+
+- **auth (23 ops):** session lifecycle (`login`, `verify`, `logout`, `me`, `stats`),
+  password flows (`password-login`, `signup`, `forgot-password`, `reset-password`),
+  passwordless onboarding, API token management, session exchange,
+  Google OAuth status, UAT login, and the full OIDC provider surface
+  (discovery, JWKS, token exchange, userinfo, OAuth client management).
+- **admin (15 ops):** dashboard, user origin breakdown, leads queue CRUD,
+  telemetry endpoints (summary, CSV export, CRUD summary), storage breakdown,
+  A/B flag management, and outbound webhook management (gestao).
+- **chat (7 ops):** room listing and creation, room member list, paginated
+  message history, post/edit/delete messages.
+
+Coverage: ≥85% of auth routes, 100% of admin routes, ≥87% of HTTP chat routes
+in `docs/architecture/api-catalog.md`.
+
+Tests updated:
+- `four_operations_under_entry_resource` → `entry_operations_present` (removed
+  hard-coded count assertion; registry now covers more than one resource).
+- `universe_is_a_path_parameter` → `universe_scoped_paths_use_universe_parameter`
+  (narrowed to paths under `/api/v1/universes/`; auth/admin/OIDC paths are exempt).
+- Added `registry_covers_auth_admin_chat` assertion test.
+
 ## [2.11.6] — 2026-05-20 — Sync pipeline: latest changes not appearing on prod web (CO-233)
 
 ### Fixed — cache headers on mutable entry API responses

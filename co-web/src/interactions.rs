@@ -163,7 +163,7 @@ mod tests {
     }
 
     #[test]
-    fn four_operations_under_entry_resource() {
+    fn entry_operations_present() {
         let ops: Vec<_> = iter_operations(openapi())
             .iter()
             .map(|o| o.operation_id.to_string())
@@ -174,7 +174,6 @@ mod tests {
                 "{required} should be present",
             );
         }
-        assert_eq!(ops.len(), 4, "exactly four operations on entry resource");
     }
 
     #[test]
@@ -199,17 +198,49 @@ mod tests {
     }
 
     #[test]
-    fn universe_is_a_path_parameter() {
-        // The interaction should work for all universes — universe is
-        // a path parameter, not a top-level field. Verify each path
-        // template includes {universe}.
+    fn universe_scoped_paths_use_universe_parameter() {
+        // Paths under /api/v1/universes/ operate on a specific universe
+        // and must template {universe} — auth/admin/OIDC paths are exempt.
         let doc = openapi();
         let paths = doc.get("paths").and_then(|p| p.as_object()).expect("paths");
         for path_template in paths.keys() {
-            assert!(
-                path_template.contains("{universe}"),
-                "path `{path_template}` should template {{universe}}",
-            );
+            if path_template.starts_with("/api/v1/universes/") {
+                assert!(
+                    path_template.contains("{universe}"),
+                    "path `{path_template}` should template {{universe}}",
+                );
+            }
         }
+    }
+
+    #[test]
+    fn registry_covers_auth_admin_chat() {
+        let ops = iter_operations(openapi());
+        let tag_count = |tag: &str| -> usize {
+            ops.iter()
+                .filter(|o| {
+                    o.block
+                        .get("tags")
+                        .and_then(|t| t.as_array())
+                        .map(|arr| arr.iter().any(|v| v.as_str() == Some(tag)))
+                        .unwrap_or(false)
+                })
+                .count()
+        };
+        assert!(
+            tag_count("auth") >= 15,
+            "expected ≥15 auth operations, got {}",
+            tag_count("auth")
+        );
+        assert!(
+            tag_count("admin") >= 10,
+            "expected ≥10 admin operations, got {}",
+            tag_count("admin")
+        );
+        assert!(
+            tag_count("chat") >= 6,
+            "expected ≥6 chat operations, got {}",
+            tag_count("chat")
+        );
     }
 }
