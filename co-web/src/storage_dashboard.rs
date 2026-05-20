@@ -107,18 +107,37 @@ fn file_size(path: &Path) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
 }
 
-/// Volume metrics for the data directory. v1: just the directory
-/// path + recursive bytes-on-disk. statfs-based total/available
-/// requires a libc binding we don't currently depend on; skipped
-/// here to keep the dependency footprint flat. Add `nix::sys::statvfs`
-/// later if precise volume telemetry is needed.
+#[cfg(target_os = "linux")]
+fn disk_stats(path: &Path) -> (u64, u64) {
+    match nix::sys::statvfs::statvfs(path) {
+        Ok(stat) => {
+            let frsize = stat.fragment_size() as u64;
+            (
+                stat.blocks() as u64 * frsize,
+                stat.blocks_available() as u64 * frsize,
+            )
+        }
+        Err(e) => {
+            tracing::warn!("statvfs({path:?}) failed: {e}");
+            (0, 0)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn disk_stats(_path: &Path) -> (u64, u64) {
+    tracing::warn!("data_dir disk total/available not available on non-Linux platforms");
+    (0, 0)
+}
+
 fn host_info(data_dir: &Path) -> HostInfo {
     let used = walk_bytes(data_dir, |_| true);
+    let (total, available) = disk_stats(data_dir);
     HostInfo {
         data_dir: data_dir.display().to_string(),
-        data_dir_total_bytes: 0,
+        data_dir_total_bytes: total,
         data_dir_used_bytes: used,
-        data_dir_available_bytes: 0,
+        data_dir_available_bytes: available,
     }
 }
 
