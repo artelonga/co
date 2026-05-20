@@ -5,22 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.12.4] — 2026-05-20 — Fix per-universe data_db_bytes (CO-240)
+## [2.12.5] — 2026-05-20 — Sidebar UX clarity (CO-238)
 
-### Fixed — storage dashboard showed 0 bytes for every universe's data.db
+### Changed — sidebar communicates owned/member/role/sub-universe semantics
 
-`storage_dashboard.rs` was constructing the per-universe DB path as
-`{data_dir}/universes/{key}/data.db`, but `UniversePool` stores each
-universe's `data.db` under a 2-level xxHash fanout:
-`{data_dir}/universes/{ab}/{cd}/{key}/data.db`.  
-`file_size()` found nothing → always returned 0.
+Refactors the SPA sidebar so users can tell at a glance which universes they own, are members of, what role they hold, and which are sub-universes vs top-level universes.
 
-**Fix**: replace the manual path construction with `universe_pool.db_path(&key)`,
-which uses the same fanout logic as the pool itself. The per-user and admin
-storage endpoints now return accurate `data_db_bytes` values.
+See `work/co/CO-238.md` for the full behavioral spec.
 
-Integration test added in `storage_dashboard_tests.rs`:
-create-universe → 5 vault PUTs → assert `data_db_bytes > 0`.
+## [2.12.4] — 2026-05-20 — CO-238: sidebar UX — clarify owned/member/role/sub-universe semantics
+
+### Changed — sidebar section labels, ownership chip, sub-universe counts, cross-bucket parents
+
+- Renamed `sidebar.section.owned`: "Meus universos" → "Universos que criei" (pt) / "Universes I created" (en)
+- Renamed `sidebar.section.member`: "Comunidades" → "Universos onde tenho papel" (pt) / "Universes where I have a role" (en)
+- Added `sidebar.role.owner`: "criador" (pt) / "creator" (en) — owned universes now show a chip consistent with member/subscribed sections
+- Hover tooltips on `.sidebar-section-label` explain the relationship for each section
+- Sub-universe count (`(N)`) rendered next to parent universe names
+- `buildChildMap` extended to create synthetic parent entries when `parent_key` references a universe in another bucket
 
 ## [2.12.3] — 2026-05-20 — Hotfix: add explicit `/{slug}/` trailing-slash route
 
