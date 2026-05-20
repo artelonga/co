@@ -36,11 +36,18 @@ pub struct UniverseStorage {
     pub is_public: bool,
     pub is_template: bool,
     pub visibility: Option<String>,
+    /// Number of .md files indexed (file count, not line count).
     pub content_count: i64,
     /// Sum of `*.md` file sizes under `universes/<key>/`.
     pub md_bytes: u64,
     /// Size of `universes/<key>/data.db` on disk (bytes).
     pub data_db_bytes: u64,
+    /// Total body lines across all entries (CO-241).
+    pub body_lines: i64,
+    /// Total body words across all entries (CO-241).
+    pub body_words: i64,
+    /// Total body chars across all entries (CO-241).
+    pub body_chars: i64,
     /// Row counts for the heavy per-universe tables. Bytes-per-row
     /// estimates omitted in v1 — would need DBSTAT virtual table,
     /// not all builds enable it. The row counts already point to
@@ -232,6 +239,9 @@ pub fn compute_dashboard_filtered(
         // entries (current state), entry_events (transaction log),
         // entry_relations (CO-74 FK graph), references_meta (CO-156).
         let mut tables = HashMap::new();
+        let mut body_lines: i64 = 0;
+        let mut body_words: i64 = 0;
+        let mut body_chars: i64 = 0;
         let storage = state.core.storage.lock();
         let uc_arc = storage.universe_conn(&key);
         drop(storage);
@@ -247,6 +257,25 @@ pub fn compute_dashboard_filtered(
                     .unwrap_or(0);
                 tables.insert(t.to_string(), TableSize { rows });
             }
+            // CO-241: aggregate content-volume metrics.
+            if let Ok((l, w, c)) = uc.query_row(
+                "SELECT COALESCE(SUM(body_lines),0), \
+                        COALESCE(SUM(body_words),0), \
+                        COALESCE(SUM(body_chars),0) \
+                 FROM entries",
+                [],
+                |r| {
+                    Ok((
+                        r.get::<_, i64>(0)?,
+                        r.get::<_, i64>(1)?,
+                        r.get::<_, i64>(2)?,
+                    ))
+                },
+            ) {
+                body_lines = l;
+                body_words = w;
+                body_chars = c;
+            }
         }
 
         results.push(UniverseStorage {
@@ -258,6 +287,9 @@ pub fn compute_dashboard_filtered(
             content_count,
             md_bytes,
             data_db_bytes,
+            body_lines,
+            body_words,
+            body_chars,
             tables,
         });
     }

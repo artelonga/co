@@ -5,6 +5,33 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.0] — 2026-05-20 — True content-volume metrics: lines, words, chars (CO-241)
+
+### Added — body_lines / body_words / body_chars per entry and per universe
+
+Added three new columns to the `entries` table (both meta-DB and per-universe
+`data.db`) that capture true body-text volume distinct from `content_count`
+(which counts files, not lines):
+
+- `body_lines` — `body.lines().count()`
+- `body_words` — `body.split_whitespace().count()`
+- `body_chars` — `body.chars().count()`
+
+**Vault PUT** (`EntryIndex::upsert`) computes and writes all three on every
+insert/update. An idempotent boot-time backfill pass populates them for
+existing entries (rows with `body_chars = 0 AND body != ''`).
+
+**Storage dashboard** (`/api/v1/admin/storage`, `/api/v1/me/storage`,
+`/api/v1/universes/{slug}/storage`) aggregates the three metrics per universe
+via `SUM()` and exposes them on `UniverseStorage`.
+
+**Storage HTML page** replaces the misleading "Linhas entries" column (which
+was the SQLite row count, identical to `content_count`) with three distinct
+columns: `Entradas / Linhas / Palavras / Tamanho`. `content_count` is now
+uniformly labeled "Entradas" everywhere.
+
+**Migrations:** meta-DB migration v46; per-universe migration v12.
+
 ## [2.12.4] — 2026-05-20 — Fix per-universe data_db_bytes (CO-240)
 
 ### Fixed — storage dashboard showed 0 bytes for every universe's data.db
