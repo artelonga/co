@@ -1,8 +1,14 @@
 use chrono::Utc;
 use rusqlite::params;
+use sha2::{Digest, Sha256};
 
 use super::Storage;
 use super::schema::{row_to_recovery_channel, row_to_recovery_verification};
+
+fn hash_token(token: &str) -> String {
+    let hash = Sha256::digest(token.as_bytes());
+    hash.iter().map(|b| format!("{b:02x}")).collect()
+}
 
 impl Storage {
     pub fn get_entry_body(&self, universe_key: &str, path: &str) -> Option<String> {
@@ -45,40 +51,62 @@ impl Storage {
     // -------------------------------------------------------------------------
 
     /// Create a new long-lived API token (90 days) for the given user.
+    /// The raw token is returned once in `ApiToken.token`; only its SHA-256
+    /// hash is persisted — the plaintext is never written to the database.
     pub fn create_api_token(
         &self,
         user_id: &str,
         name: &str,
     ) -> anyhow::Result<crate::vault_routes::ApiToken> {
         let id = nanoid::nanoid!(21);
-        let token = format!("co_{}", nanoid::nanoid!(40));
+        let raw_token = format!("co_{}", nanoid::nanoid!(40));
+        let token_hash = hash_token(&raw_token);
+        let token_prefix: String = raw_token.chars().take(11).collect(); // "co_" + 8 chars
         let now = Utc::now();
         let expires_at = now + chrono::Duration::days(90);
         let now_str = now.to_rfc3339();
         let exp_str = expires_at.to_rfc3339();
+        // `token` column retains a NOT NULL constraint from migration v15.
+        // We store an empty placeholder so the constraint is satisfied while
+        // ensuring no plaintext token lives in the DB (the real secret is
+        // in `token_hash`). The UNIQUE index on `token` is satisfied because
+        // the column value is unique per-row via the id-prefixed placeholder.
+        let token_placeholder = format!("hashed:{id}");
         self.conn.execute(
-            "INSERT INTO api_tokens (id, user_id, name, token, created_at, expires_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, user_id, name, token, now_str, exp_str],
+            "INSERT INTO api_tokens \
+             (id, user_id, name, token, token_hash, token_prefix, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                user_id,
+                name,
+                token_placeholder,
+                token_hash,
+                token_prefix,
+                now_str,
+                exp_str
+            ],
         )?;
         Ok(crate::vault_routes::ApiToken {
             id,
             user_id: user_id.to_string(),
             name: name.to_string(),
-            token,
+            token: Some(raw_token), // returned once; not persisted
+            token_hash,
+            token_prefix,
             created_at: now,
             expires_at,
             last_used_at: None,
         })
     }
 
-    /// List API tokens for a user (token value redacted).
+    /// List API tokens for a user (raw token never returned).
     pub fn list_api_tokens(
         &self,
         user_id: &str,
     ) -> anyhow::Result<Vec<crate::vault_routes::ApiToken>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, user_id, name, token, created_at, expires_at, last_used_at \
+            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at \
              FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![user_id], |row| {
@@ -89,12 +117,14 @@ impl Storage {
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
-                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(6)?,
+                row.get::<_, Option<String>>(7)?,
             ))
         })?;
         let mut tokens = vec![];
         for row in rows.filter_map(|r| r.ok()) {
-            let (id, uid, name, token, created_str, expires_str, last_used_str) = row;
+            let (id, uid, name, token_hash, token_prefix, created_str, expires_str, last_used_str) =
+                row;
             let created_at = created_str
                 .parse::<chrono::DateTime<Utc>>()
                 .unwrap_or_else(|_| Utc::now());
@@ -108,7 +138,9 @@ impl Storage {
                 id,
                 user_id: uid,
                 name,
-                token,
+                token: None,
+                token_hash,
+                token_prefix,
                 created_at,
                 expires_at,
                 last_used_at,
@@ -127,14 +159,17 @@ impl Storage {
     }
 
     /// Look up a token by value; check expiry. Updates `last_used_at`.
+    /// The incoming raw token is hashed with SHA-256 before the DB lookup —
+    /// no plaintext token is ever compared directly against stored data.
     pub fn get_api_token_by_value(
         &self,
         token: &str,
     ) -> anyhow::Result<Option<crate::vault_routes::ApiToken>> {
+        let incoming_hash = hash_token(token);
         let result = self.conn.query_row(
-            "SELECT id, user_id, name, token, created_at, expires_at, last_used_at \
-             FROM api_tokens WHERE token = ?1",
-            params![token],
+            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at \
+             FROM api_tokens WHERE token_hash = ?1",
+            params![incoming_hash],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
@@ -143,12 +178,22 @@ impl Storage {
                     row.get::<_, String>(3)?,
                     row.get::<_, String>(4)?,
                     row.get::<_, String>(5)?,
-                    row.get::<_, Option<String>>(6)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             },
         );
         match result {
-            Ok((id, uid, name, tok, created_str, expires_str, last_used_str)) => {
+            Ok((
+                id,
+                uid,
+                name,
+                token_hash,
+                token_prefix,
+                created_str,
+                expires_str,
+                last_used_str,
+            )) => {
                 let created_at = created_str
                     .parse::<chrono::DateTime<Utc>>()
                     .unwrap_or_else(|_| Utc::now());
@@ -161,7 +206,6 @@ impl Storage {
                 let last_used_at = last_used_str
                     .as_deref()
                     .and_then(|s| s.parse::<chrono::DateTime<Utc>>().ok());
-                // Update last_used_at
                 let _ = self.conn.execute(
                     "UPDATE api_tokens SET last_used_at = ?1 WHERE id = ?2",
                     params![Utc::now().to_rfc3339(), id],
@@ -170,7 +214,9 @@ impl Storage {
                     id,
                     user_id: uid,
                     name,
-                    token: tok,
+                    token: None,
+                    token_hash,
+                    token_prefix,
                     created_at,
                     expires_at,
                     last_used_at,

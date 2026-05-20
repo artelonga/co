@@ -371,6 +371,7 @@ async fn test_rate_limit_admin_api_token_resolves_to_admin_tier() {
             .create_api_token(&user_id, "test-rate-limit")
             .unwrap()
             .token
+            .unwrap_or_default()
     };
 
     // 25 reads is past the 20/min anonymous read budget — none should 429.
