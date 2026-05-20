@@ -31,10 +31,7 @@ pub struct AppStateInner {
     pub embedding_tx: crate::embedding_worker::EmbeddingSender,
     /// CO-194: per-room broadcast channels for chat WebSocket fan-out.
     pub chat_rooms_broadcast: std::sync::Mutex<
-        std::collections::HashMap<
-            String,
-            tokio::sync::broadcast::Sender<crate::chat_ws::ChatEvent>,
-        >,
+        std::collections::HashMap<String, tokio::sync::broadcast::Sender<crate::chat::ChatEvent>>,
     >,
     /// CO-194: per-room presence refcounts (room_id → user_id → connection count).
     pub chat_presence:

@@ -137,8 +137,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::middleware::from_fn(crate::auth::require_auth));
     let invitation_api = crate::invitation_routes::invitation_router();
 
-    let chat_api = crate::chat_routes::chat_router()
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+    let chat_api =
+        crate::chat::chat_router().layer(axum::middleware::from_fn(crate::auth::require_auth));
 
     let dm_api =
         crate::dm_routes::dm_router().layer(axum::middleware::from_fn(crate::auth::require_auth));
@@ -186,7 +186,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // Chat WebSocket — auth done inside handler.
     let chat_ws_route = Router::new().route(
         "/api/v1/universes/{slug}/chat/rooms/{room_slug}/ws",
-        get(crate::chat_ws::chat_ws_handler),
+        get(crate::chat::chat_ws_handler),
     );
 
     // All literal routes are registered before `/{slug}` so axum's matcher
