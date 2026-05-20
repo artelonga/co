@@ -272,7 +272,8 @@ pub fn run(config: AutoConfig) -> Result<()> {
                         probe = p.parent().map(|x| x.to_path_buf());
                     }
                     // Fallback: hardcoded canonical location.
-                    let canonical = PathBuf::from("/Users/artelonga/projects/co/scripts/ship-task.sh");
+                    let canonical =
+                        PathBuf::from("/Users/artelonga/projects/co/scripts/ship-task.sh");
                     if script.is_none() && canonical.exists() {
                         script = Some(canonical);
                     }
