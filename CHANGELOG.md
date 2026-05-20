@@ -5,6 +5,23 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.12.4] — 2026-05-20 — Fix per-universe data_db_bytes (CO-240)
+
+### Fixed — storage dashboard showed 0 bytes for every universe's data.db
+
+`storage_dashboard.rs` was constructing the per-universe DB path as
+`{data_dir}/universes/{key}/data.db`, but `UniversePool` stores each
+universe's `data.db` under a 2-level xxHash fanout:
+`{data_dir}/universes/{ab}/{cd}/{key}/data.db`.  
+`file_size()` found nothing → always returned 0.
+
+**Fix**: replace the manual path construction with `universe_pool.db_path(&key)`,
+which uses the same fanout logic as the pool itself. The per-user and admin
+storage endpoints now return accurate `data_db_bytes` values.
+
+Integration test added in `storage_dashboard_tests.rs`:
+create-universe → 5 vault PUTs → assert `data_db_bytes > 0`.
+
 ## [2.12.3] — 2026-05-20 — Hotfix: add explicit `/{slug}/` trailing-slash route
 
 ### Fixed — trailing-slash SPA routes still 404'd after 2.12.2

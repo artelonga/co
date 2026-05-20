@@ -325,3 +325,81 @@ async fn storage_dashboard_returns_shape() {
     assert!(t["tables"]["entries"]["rows"].is_number());
     assert!(t["tables"]["entry_events"]["rows"].is_number());
 }
+
+#[tokio::test]
+async fn data_db_bytes_nonzero_after_vault_put() {
+    unsafe { std::env::set_var("JWT_SECRET", "dev-secret-change-me") };
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // Seed a universe owned by "regular-user" using direct storage access
+    // (same pattern as other tests in this file).
+    let storage = Storage::new(dir.path());
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO users (id, email, display_name, created_at) \
+             VALUES (?1, ?2, ?3, '2026-01-01')",
+            rusqlite::params!["regular-user", "regular@example.com", "Regular User"],
+        )
+        .unwrap();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universes \
+             (key, name, owner_id, created_at, is_public, visibility) \
+             VALUES ('co240-fix', 'CO-240 Fix', 'regular-user', '2026-01-01', 1, 'public-subscribable')",
+            [],
+        )
+        .unwrap();
+    drop(storage);
+
+    let bearer = non_admin_bearer();
+
+    // PUT 5 entries via vault API — materialises the per-universe data.db.
+    for i in 1..=5u32 {
+        let content = format!("---\ntitle: Entry {i}\ntype: note\n---\n\nBody {i}");
+        let res = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!(
+                        "/api/v1/universes/co240-fix/vault/notes/entry{i}.md"
+                    ))
+                    .header(header::AUTHORIZATION, &bearer)
+                    .header(header::CONTENT_TYPE, "text/plain")
+                    .body(Body::from(content))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(
+            res.status().is_success(),
+            "vault PUT entry {i} failed: {}",
+            res.status()
+        );
+    }
+
+    // Query the per-universe storage dashboard.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/co240-fix/storage")
+                .header(header::AUTHORIZATION, &bearer)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = body_to_json(res.into_body()).await;
+
+    let universe = &body["universes"][0];
+    assert_eq!(universe["key"], "co240-fix");
+    assert!(
+        universe["data_db_bytes"].as_u64().unwrap_or(0) > 0,
+        "data_db_bytes should be > 0 after 5 vault PUTs, got: {}",
+        universe["data_db_bytes"]
+    );
+}
