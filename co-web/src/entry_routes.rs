@@ -14,7 +14,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
-use crate::entry_index::{EntryRow, TagCount, TreeNode, make_entry};
+use crate::entry_index::{EntryRow, make_entry};
 use crate::error::AppError;
 use crate::server::AppState;
 
@@ -255,7 +255,7 @@ fn entry_cache_control(
     let is_co_public = slug == "co" && is_public_path(path);
     if is_template_seed || is_co_public {
         Some(axum::http::HeaderValue::from_static(
-            "public, max-age=60, stale-while-revalidate=300",
+            "public, max-age=60, must-revalidate",
         ))
     } else {
         None
@@ -394,15 +394,25 @@ pub async fn list_entries(
         let mut buf = Vec::new();
         list.encode(&mut buf)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        Ok((
+        let mut resp = (
             StatusCode::OK,
             [(axum::http::header::CONTENT_TYPE, "application/x-protobuf")],
             buf,
         )
-            .into_response())
+            .into_response();
+        resp.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        );
+        Ok(resp)
     } else {
         let total = entries.len();
-        Ok(Json(EntryListResponse { entries, total }).into_response())
+        let mut resp = Json(EntryListResponse { entries, total }).into_response();
+        resp.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        );
+        Ok(resp)
     }
 }
 
@@ -410,7 +420,7 @@ pub async fn list_entries(
 pub async fn list_entry_tags(
     State(state): State<AppState>,
     Path(slug): Path<String>,
-) -> Result<Json<Vec<TagCount>>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state);
@@ -423,7 +433,12 @@ pub async fn list_entry_tags(
     let tags = index
         .tags(&slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(tags))
+    let mut resp = Json(tags).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
 }
 
 /// GET /api/v1/universes/:slug/entries/tree — hierarchical tree
@@ -431,7 +446,7 @@ pub async fn entry_tree(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(q): Query<TreeQuery>,
-) -> Result<Json<Vec<TreeNode>>, AppError> {
+) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     let uc = {
         let storage = lock_storage(&state);
@@ -445,7 +460,12 @@ pub async fn entry_tree(
     let tree = index
         .tree(&slug, entry_type)
         .map_err(|e| AppError::Internal(e.to_string()))?;
-    Ok(Json(tree))
+    let mut resp = Json(tree).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
 }
 
 /// Query params for single-entry GET: `?excerpt=true` returns frontmatter + 200-char excerpt only.
