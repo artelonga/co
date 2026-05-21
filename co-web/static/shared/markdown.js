@@ -226,7 +226,7 @@
       return '<tr>' + cells.map((c, i) => `<td${aligns[i] || ''}>${c}</td>`).join('') + '</tr>';
     }).join('');
 
-    return `<table class="md-table"><${thead}<tbody>${tbody}</tbody></table>`;
+    return `<table class="md-table">${thead}<tbody>${tbody}</tbody></table>`;
   }
 
   function _fallbackRender(text) {

@@ -105,15 +105,11 @@ A Arte Longa **não compartilha dados com terceiros**, exceto:
 - Universos anônimos sem login: removíveis após 90 dias de inatividade
 - Logs técnicos: 90 dias
 
-## 8. Crianças
-
-O Co não é direcionado a menores de 13 anos.
-
-## 9. Mudanças
+## 8. Mudanças
 
 Alterações relevantes serão comunicadas com **15 dias** de antecedência. Histórico de versões: <https://github.com/artelonga/co/commits/main/co-web/seed/template/privacidade.md>.
 
 ---
 
-*Arte Longa — Curitiba, PR, Brasil.*  
+*[Arte Longa](https://artelonga.com.br) — São Paulo, Brasil.*  
 *Licença do código: [AGPL v3](/co/public/licensa).*

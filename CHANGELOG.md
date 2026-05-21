@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.1] — 2026-05-21 — Table render fix + privacy/homepage polish
+
+### Fixed — markdown table HTML had stray `<` before `<thead>`
+
+`_renderTable()` in `co-web/static/shared/markdown.js` produced `<table class="md-table"><<thead>` — an extra `<` glued to the start of `<thead>`. Browsers parsed it as an unknown empty element + `<thead>`, rendering the bare `<` as visible text right before every table. Single character fix at line 229: removed the stray `<` from the template literal.
+
+### Changed — Privacy policy footer
+
+- Location: *"Curitiba, PR, Brasil"* → *"São Paulo, Brasil"* (Curitiba was a hallucination from an earlier rewrite)
+- *"Arte Longa"* → linked to https://artelonga.com.br
+- Section 8 "Crianças" removed — children-protection will be a dedicated track later, not a token sentence
+- Sections renumbered (was 1–12 with gaps, now 1–8)
+
+### Changed — Homepage `index.md`
+
+- Title now simply **Co** (was *"Co — Gestão de conteúdo em grafo"*)
+- Bolded link emphasis for every wiki destination so the structure is visually scannable
+- Privacy policy promoted to first item in "Dados e privacidade"
+- AGPL v3 callout in the "Universo de desenvolvimento" section
+
 ## [2.15.0] — 2026-05-21 — Surface 'co' dev sub-universe on the anonymous sidebar + landing (CO-252)
 
 ### Added
