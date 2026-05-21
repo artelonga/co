@@ -164,10 +164,7 @@ export function setupDragDrop() {
             const newStatus = zone.dataset.status;
             const task = state.tasks.find(t => t.id === taskId);
             if (task && task.status !== newStatus) {
-                if (state.isTemplate) {
-                    await _ensureOwnUniverse();
-                    return;
-                }
+                if (!(await _ensureOwnUniverse())) return;
                 const oldStatus = task.status;
                 task.status = newStatus;
                 _renderKanban();

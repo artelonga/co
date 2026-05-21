@@ -5,6 +5,31 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] — 2026-05-21 — Access: unsubscribed universe read-only + subscribe/login-to-subscribe prompt (CO-253)
+
+### Added — Public universes readable by anyone; writes gate behind an explicit subscribe action
+
+**Read path**: Anonymous and logged-in users can browse any `public-subscribable` universe without
+being redirected to the template. The board, task list, conteúdo view, and entry markdown all
+render without login friction.
+
+**Subscribe prompt**: When an unsubscribed user attempts any write (Nova Tarefa, task edit, drag
+status change, delete, or vault save), a modal appears instead of the action executing:
+- **Anonymous**: "Para criar/editar conteúdo, entre na sua conta." + "Entrar" → opens login modal.
+- **Logged-in non-member**: "Para criar/editar conteúdo neste universo, inscreva-se primeiro." +
+  "Inscrever-se nesse universo" → POSTs `/api/v1/universes/<slug>/subscribe`, refreshes sidebar,
+  and enables CRUD without page reload.
+
+**Backend**: `universe_writer_gate` now lets subscribed users write to `public-subscribable`
+universes (previously only `universe_members` rows were checked, so subscribers got 403 on any
+POST/PUT/DELETE).
+
+**i18n**: four new keys — `subscribe.prompt.logged_in`, `subscribe.cta`,
+`subscribe.prompt.anonymous`, `subscribe.login_cta` — in both pt-BR and en.
+
+**E2E**: `co-web/e2e/unsubscribed-access.spec.ts` covers DOM structure, anonymous read path,
+subscribe prompt copy, login-modal handoff, and subscribe API contract.
+
 ## [2.13.6] — 2026-05-21 — E2E: static-asset MIME + anonymous bootstrap smoke tests (CO-250)
 
 ### Added — Playwright specs that would have caught the 2.13.3/4/5 regression cascade

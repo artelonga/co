@@ -1,7 +1,7 @@
 // ===== CO App — Boot Orchestrator =====
 // ES module entry point. Imports all feature modules and wires them together.
 
-import { state } from './modules/state.js';
+import { state, canEditCurrentUniverse } from './modules/state.js';
 import { api, apiFetch, injectApiCallbacks } from './modules/api.js';
 import { esc, filteredTasks, loadSubtreeState, addDays, todayDate } from './modules/helpers.js';
 import { STATUSES, ZOOM_DAYS, rebuildI18nConstants } from './modules/constants.js';
@@ -31,6 +31,7 @@ import {
     openTaskModal, closeModal, loadEditorBundle,
     handleFormSubmit, handleDelete, handleArchive,
     showUsageLimitModal, hideUsageLimitModal, setupUsageLimitModal,
+    showSubscribePromptModal, hideSubscribePromptModal, setupSubscribePromptModal,
     toggleActivityPanel,
     setupUniverseInfoModal,
     injectModalCallbacks,
@@ -154,9 +155,15 @@ function readGameFromUrl() {
 }
 
 async function ensureOwnUniverse() {
-    if (!state.isTemplate) return true;
-    showLoginModal();
-    return false;
+    if (state.isTemplate) {
+        showLoginModal();
+        return false;
+    }
+    if (!canEditCurrentUniverse()) {
+        showSubscribePromptModal();
+        return false;
+    }
+    return true;
 }
 
 // ===== CO-73: Manifest view tab injection =====
@@ -237,8 +244,8 @@ async function openContentEditor(taskId) {
         const ta = document.getElementById('content-editor-textarea');
         let newDesc = (_contentEditorInstance && _contentEditorInstance.getContent)
             ? _contentEditorInstance.getContent() : (ta ? ta.value : task.description);
+        if (!(await ensureOwnUniverse())) return;
         if (state.isTemplate) {
-            if (!(await ensureOwnUniverse())) { showToast('Crie uma conta para salvar', 'error'); return; }
             showToast(window.t ? window.t('saved') : 'Salvo', 'success'); return;
         }
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
@@ -436,9 +443,9 @@ function wireModules() {
     injectTableCallbacks({ openTaskModal, refreshTasks, renderTable, showToast });
     injectTimelineCallbacks({ openTaskModal, refreshTasks, renderContent });
     injectDashboardCallbacks({ openTaskModal });
-    injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle });
+    injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     injectOpenContentEditor(openContentEditor);
-    injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse });
+    injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });
     setupUniverseInfoModal({});
     injectInvitationsCallbacks({ showToast, showLoginModal, loadMeUniverses });
     injectOpenDmWith((userId, drawerContainer) => openDmWith(userId, drawerContainer));
@@ -522,7 +529,7 @@ function bindStaticEvents() {
     });
 
     document.querySelector('#btn-new-task').addEventListener('click', async () => {
-        if (state.isTemplate) { await ensureOwnUniverse(); return; }
+        if (!(await ensureOwnUniverse())) return;
         // 2.7.29: auto-select the first project on the universe when no
         // current project is set. Previously the click silently no-op'd
         // on the Conteudo home view because state.currentProject was null
@@ -611,6 +618,7 @@ async function init() {
     });
     setupCriarModal();
     setupUsageLimitModal();
+    setupSubscribePromptModal();
     setupSettingsPanel();
     setupInvitationsPanel();
     _setupConversasTrigger();
@@ -721,6 +729,13 @@ async function init() {
         state.projects = await api.getUniverseProjects(slug);
         if (state.projects.length > 0) await selectProject(state.projects[0].key);
         render();
+        return;
+    }
+
+    // CO-253: public universe → read-only for anonymous visitors (no redirect to template).
+    if (info && info.visibility === 'public-subscribable') {
+        await bootAppForUniverse(slug);
+        await maybeOpenEntryFromUrl(slug);
         return;
     }
 

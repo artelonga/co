@@ -11,6 +11,8 @@ let _render = () => {};
 let _renderUniverseInfo = async () => {};
 let _renderContent = () => {};
 let _ensureOwnUniverse = async () => true;
+let _loadMeUniverses = async () => {};
+let _renderSidebar = () => {};
 
 export function injectModalCallbacks(callbacks) {
     _showToast = callbacks.showToast;
@@ -19,6 +21,8 @@ export function injectModalCallbacks(callbacks) {
     _render = callbacks.render;
     _renderContent = callbacks.renderContent;
     _ensureOwnUniverse = callbacks.ensureOwnUniverse;
+    if (callbacks.loadMeUniverses) _loadMeUniverses = callbacks.loadMeUniverses;
+    if (callbacks.renderSidebar) _renderSidebar = callbacks.renderSidebar;
 }
 
 // ===== Editor lazy-load =====
@@ -306,10 +310,8 @@ export async function handleFormSubmit(e) {
     const parentVal = document.querySelector('#task-parent').value;
     if (parentVal) data.parent = parseInt(parentVal);
 
-    if (state.isTemplate) {
-        const ok = await _ensureOwnUniverse();
-        if (!ok) { if (submitBtn) submitBtn.disabled = false; return; }
-    }
+    const ok = await _ensureOwnUniverse();
+    if (!ok) { if (submitBtn) submitBtn.disabled = false; return; }
 
     const key = state.currentProject.key;
 
@@ -337,6 +339,7 @@ export async function handleFormSubmit(e) {
 
 export async function handleDelete() {
     if (!state.editingTaskId || !state.currentProject) return;
+    if (!(await _ensureOwnUniverse())) return;
     if (!confirm('Delete this task?')) return;
 
     await api.deleteTask(state.currentProject.key, state.editingTaskId);
@@ -429,6 +432,66 @@ export function setupActivityClose() {
         closeBtn.addEventListener('click', () => {
             const panel = document.querySelector('#activity-panel');
             if (panel) panel.classList.add('hidden');
+        });
+    }
+}
+
+// ===== Subscribe prompt modal (CO-253) =====
+export function showSubscribePromptModal() {
+    const overlay = document.getElementById('subscribe-prompt-overlay');
+    if (!overlay) return;
+    const msg = document.getElementById('subscribe-prompt-msg');
+    const cta = document.getElementById('btn-subscribe-cta');
+    const t = k => window.t ? window.t(k) : k;
+    if (state.me) {
+        if (msg) msg.textContent = t('subscribe.prompt.logged_in');
+        if (cta) {
+            cta.textContent = t('subscribe.cta');
+            cta.style.display = '';
+        }
+    } else {
+        if (msg) msg.textContent = t('subscribe.prompt.anonymous');
+        if (cta) {
+            cta.textContent = t('subscribe.login_cta');
+            cta.style.display = '';
+        }
+    }
+    overlay.classList.remove('hidden');
+}
+
+export function hideSubscribePromptModal() {
+    const overlay = document.getElementById('subscribe-prompt-overlay');
+    if (overlay) overlay.classList.add('hidden');
+}
+
+export function setupSubscribePromptModal() {
+    const overlay = document.getElementById('subscribe-prompt-overlay');
+    const cta = document.getElementById('btn-subscribe-cta');
+    const cancel = document.getElementById('btn-subscribe-cancel');
+
+    if (cancel) cancel.addEventListener('click', hideSubscribePromptModal);
+    if (overlay) overlay.addEventListener('click', e => { if (e.target === overlay) hideSubscribePromptModal(); });
+
+    if (cta) {
+        cta.addEventListener('click', async () => {
+            if (!state.me) {
+                hideSubscribePromptModal();
+                _showLoginModal();
+                return;
+            }
+            const slug = state.currentUniverseSlug;
+            cta.disabled = true;
+            try {
+                await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/subscribe`, { method: 'POST' }, true);
+                hideSubscribePromptModal();
+                await _loadMeUniverses();
+                _renderSidebar();
+                _showToast(window.t ? window.t('subscribe.cta') : 'Inscrito!', 'success');
+            } catch (err) {
+                _showToast('Erro ao se inscrever.', 'error');
+            } finally {
+                cta.disabled = false;
+            }
         });
     }
 }

@@ -331,6 +331,20 @@
         </div>
     </div>
 
+    <!-- Subscribe Prompt Modal (CO-253: shown when unsubscribed user attempts a CRUD action) -->
+    <div id="subscribe-prompt-overlay" class="login-screen hidden">
+        <div class="login-card">
+            <div class="login-header">
+                <span class="login-logo">Co</span>
+                <p class="login-subtitle" id="subscribe-prompt-msg">Para criar/editar conteúdo neste universo, inscreva-se primeiro.</p>
+            </div>
+            <div class="form-actions" style="flex-direction:column;gap:0.5rem">
+                <button type="button" class="btn btn-primary btn-full" id="btn-subscribe-cta">Inscrever-se nesse universo</button>
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-subscribe-cancel">Fechar</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Usage Limit Modal (shown when anonymous user hits 100 entries) -->
     <div id="usage-limit-overlay" class="login-screen hidden">
         <div class="login-card">
