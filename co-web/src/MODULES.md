@@ -207,3 +207,50 @@ sup.spawn(JobQueueWorker::new(state.clone()));
 
 **Rule:** new background polling work must implement `Worker` and register via
 `sup.spawn(...)`. Never `tokio::spawn` a raw loop in a route module.
+
+---
+
+## 6. SPA Module Map (CO-259)
+
+The three central SPA modules in `co-web/static/variants/a/modules/` were split
+into folder-based submodules. Each `.js` proxy at the old path re-exports from
+its `<name>/index.js` — no existing `import { … } from './sidebar.js'` needs to
+change.
+
+### `sidebar/`
+
+| File | Contents |
+|------|----------|
+| `index.js` | Re-exports — preserves all `from './sidebar.js'` imports |
+| `sections.js` | `buildChildMap`, `renderSectionHtml`, `renderUniverseItemHtml`, `renderInviteRowHtml`, `renderDiscoverableItemHtml` |
+| `render.js` | `renderSidebar`, `injectSidebarCallbacks`, `injectSetUniverseSlugInUrl` |
+| `header.js` | `renderHeader`, `renderHeaderUserArea`, `renderUsageCount`, `incrementLocalUsageCount`, `injectShowLoginModal` |
+| `badge.js` | `renderUserBadge` |
+| `mini-calendar.js` | `renderMiniCalendar`, `injectScrollToDate` |
+| `wire.js` | `setupHamburgerMenu` |
+
+### `state/`
+
+| File | Contents |
+|------|----------|
+| `index.js` | Re-exports — preserves all `from './state.js'` imports |
+| `shape.js` | The `state` object (all fields + defaults) |
+| `universes.js` | `canEditCurrentUniverse` |
+| `views.js` | `createViewDefaults()` — view-specific initial state values |
+
+### `api/`
+
+| File | Contents |
+|------|----------|
+| `index.js` | Assembles `api` object + re-exports `apiFetch`, `injectApiCallbacks` |
+| `client.js` | `apiFetch`, `_u`, `injectApiCallbacks` |
+| `auth.js` | `me`, `logout`, `loginWithPassword` |
+| `tasks.js` | `getTasks`, `createTask`, `updateTask`, `deleteTask`, `getComments`, `createComment`, `getActivity`, `getDashboard`, `bulkUpdateTasks`, `bulkDeleteTasks` |
+| `universes.js` | `getProjects`, `getUniverses`, `listUniverses`, `getUniverseInfo`, `getUniverseProjects`, `cloneUniverse`, `claimUniverse`, `getUniverseConfig`, `updateUniverseConfig`, `getPublicacoes`, `getEventos`, `getMissoes`, `getOplog`, `getOpDiff`, `revertToOp` |
+| `entries.js` | `getUniverseEntries`, `getEntriesByDate`, `getUniverseManifest` |
+
+**Rule:** parallel tasks that touch SPA behaviour must target one submodule
+only. `sections.js`/`render.js`/`wire.js` handle disjoint sidebar concerns;
+`auth.js`/`tasks.js`/`universes.js`/`entries.js` handle disjoint API domains.
+New view-state fields go in `state/views.js`; universe helpers go in
+`state/universes.js`.
