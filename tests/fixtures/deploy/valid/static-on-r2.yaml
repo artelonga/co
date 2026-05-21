@@ -1,0 +1,12 @@
+version: 1
+target: static-on-r2
+runtime:
+  kind: static
+  build:
+    command: co build
+    output: dist/
+bindings:
+  storage:
+    type: r2
+    bucket: u-meu-portfolio
+    encrypted: true

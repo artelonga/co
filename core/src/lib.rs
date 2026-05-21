@@ -40,6 +40,7 @@ pub mod agent;
 pub mod archive;
 pub mod config;
 pub mod content;
+pub mod deploy;
 pub mod edge;
 pub mod entry;
 pub mod feature;
@@ -107,6 +108,13 @@ pub use config::{GlobalConfig, GroupDef, GroupsConfig, RepoConfig, RepoLocalConf
 
 // GitHub integration exports
 pub use github::{GhCli, GhError, GithubIssue, GithubLabel, GithubUser, MappedWorkItem};
+
+// Deploy manifest exports
+pub use deploy::{
+    Backup, BackupSchedule, Bindings, BuildConfig, DEPLOY_FILENAME, DeployError, DeployManifest,
+    DeployTarget, RuntimeConfig, RuntimeKind, SUPPORTED_VERSION, Scaling, StorageBinding,
+    StorageType, Telemetry, TelemetrySink,
+};
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";

@@ -1,0 +1,3 @@
+# Error: unknown enum variant for `target`
+version: 1
+target: unknown-platform

@@ -1,0 +1,25 @@
+version: 1
+target: fly
+domain: full-example.co.app
+runtime:
+  kind: rust
+  build:
+    command: co build --release
+    output: dist/
+bindings:
+  storage:
+    type: r2
+    bucket: u-full-example
+    encrypted: true
+  secrets:
+    - STRIPE_KEY
+    - SENDGRID_API_KEY
+scaling:
+  min: 0
+  max: 100
+telemetry:
+  sink: co-central
+  sampling: 0.25
+backup:
+  schedule: daily
+  retention: 30d

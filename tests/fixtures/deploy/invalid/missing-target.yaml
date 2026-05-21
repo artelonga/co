@@ -1,0 +1,3 @@
+# Error: missing required field `target`
+version: 1
+domain: example.co.app

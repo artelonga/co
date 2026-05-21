@@ -1,0 +1,6 @@
+# Error: scaling.max must be >= scaling.min
+version: 1
+target: fly
+scaling:
+  min: 50
+  max: 10

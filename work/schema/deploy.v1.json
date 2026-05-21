@@ -1,0 +1,215 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DeployManifest",
+  "description": "CO deploy.yaml — universe deployment intent (v1).\n\nPlace this file at the universe root to declare the deployment target and options.\nDeployer adapters consume a typed, validated DeployManifest rather than freeform YAML.",
+  "type": "object",
+  "required": ["version", "target"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "Schema version. Must be 1.",
+      "type": "integer",
+      "const": 1
+    },
+    "target": {
+      "description": "Target platform for this deployment.",
+      "$ref": "#/definitions/DeployTarget"
+    },
+    "domain": {
+      "description": "Custom domain. If absent the deployer assigns a default.",
+      "type": ["string", "null"]
+    },
+    "runtime": {
+      "description": "Runtime configuration (required for non-static targets).",
+      "anyOf": [
+        { "$ref": "#/definitions/RuntimeConfig" },
+        { "type": "null" }
+      ]
+    },
+    "bindings": {
+      "description": "Service bindings (storage, secrets).",
+      "anyOf": [
+        { "$ref": "#/definitions/Bindings" },
+        { "type": "null" }
+      ]
+    },
+    "scaling": {
+      "description": "Auto-scaling parameters.",
+      "anyOf": [
+        { "$ref": "#/definitions/Scaling" },
+        { "type": "null" }
+      ]
+    },
+    "telemetry": {
+      "description": "Observability sink and sampling rate.",
+      "anyOf": [
+        { "$ref": "#/definitions/Telemetry" },
+        { "type": "null" }
+      ]
+    },
+    "backup": {
+      "description": "Automated backup policy.",
+      "anyOf": [
+        { "$ref": "#/definitions/Backup" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "definitions": {
+    "DeployTarget": {
+      "description": "Deployment target platform.",
+      "type": "string",
+      "enum": ["static-on-r2", "cloudflare-pages", "fly", "vercel", "fargate"]
+    },
+    "RuntimeConfig": {
+      "description": "Runtime configuration for the deployed service.",
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "description": "Runtime kind; for static targets use 'static'.",
+          "$ref": "#/definitions/RuntimeKind"
+        },
+        "build": {
+          "description": "Build step configuration.",
+          "anyOf": [
+            { "$ref": "#/definitions/BuildConfig" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "RuntimeKind": {
+      "description": "Kind of runtime environment.",
+      "type": "string",
+      "enum": ["static", "node", "rust", "python", "wasm"]
+    },
+    "BuildConfig": {
+      "description": "Build step for the deployment pipeline.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "Shell command to build the universe (default: 'co build').",
+          "type": ["string", "null"]
+        },
+        "output": {
+          "description": "Directory containing build output (default: 'dist/').",
+          "type": ["string", "null"]
+        }
+      }
+    },
+    "Bindings": {
+      "description": "Service bindings: object storage and named secrets.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "storage": {
+          "description": "Object storage binding.",
+          "anyOf": [
+            { "$ref": "#/definitions/StorageBinding" },
+            { "type": "null" }
+          ]
+        },
+        "secrets": {
+          "description": "Secret names (values are resolved per-target from CO secrets).",
+          "type": "array",
+          "items": { "type": "string" },
+          "default": []
+        }
+      }
+    },
+    "StorageBinding": {
+      "description": "Object storage binding.",
+      "type": "object",
+      "required": ["type", "bucket"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "description": "Storage backend type.",
+          "$ref": "#/definitions/StorageType"
+        },
+        "bucket": {
+          "description": "Bucket name.",
+          "type": "string"
+        },
+        "encrypted": {
+          "description": "Whether the bucket contents are encrypted at rest.",
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "StorageType": {
+      "description": "Storage backend type.",
+      "type": "string",
+      "enum": ["r2", "s3", "gcs"]
+    },
+    "Scaling": {
+      "description": "Auto-scaling bounds for the deployed service.",
+      "type": "object",
+      "required": ["max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": {
+          "description": "Minimum replica count (>= 0). Default: 0.",
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        },
+        "max": {
+          "description": "Maximum replica count (>= min).",
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "Telemetry": {
+      "description": "Observability configuration.",
+      "type": "object",
+      "required": ["sink"],
+      "additionalProperties": false,
+      "properties": {
+        "sink": {
+          "description": "Where telemetry events are sent.",
+          "$ref": "#/definitions/TelemetrySink"
+        },
+        "sampling": {
+          "description": "Fraction of events to sample (0.0 to 1.0). Default: 1.0.",
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "default": 1.0
+        }
+      }
+    },
+    "TelemetrySink": {
+      "description": "Telemetry sink destination.",
+      "type": "string",
+      "enum": ["co-central", "none"]
+    },
+    "Backup": {
+      "description": "Automated backup policy.",
+      "type": "object",
+      "required": ["schedule", "retention"],
+      "additionalProperties": false,
+      "properties": {
+        "schedule": {
+          "description": "How often snapshots are taken.",
+          "$ref": "#/definitions/BackupSchedule"
+        },
+        "retention": {
+          "description": "How long snapshots are kept. A positive integer followed by d/h/w/m (e.g. '30d', '24h', '1w').",
+          "type": "string",
+          "pattern": "^[1-9][0-9]*[dhwm]$"
+        }
+      }
+    },
+    "BackupSchedule": {
+      "description": "Backup frequency.",
+      "type": "string",
+      "enum": ["hourly", "daily", "weekly", "none"]
+    }
+  }
+}
