@@ -5,34 +5,30 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [2.14.0] — 2026-05-21 — feat(content): template wiki landing + popular entries endpoint
+## [2.13.6] — 2026-05-21 — E2E: static-asset MIME + anonymous bootstrap smoke tests (CO-250)
 
-### Added — Template `index.md` rewritten as hyperlinked wiki landing
+### Added — Playwright specs that would have caught the 2.13.3/4/5 regression cascade
 
-`co-web/seed/template/index.md` is now a wiki-style article that replaces the
-old manifesto. It organically links to every content page seeded in the template
-universe (sobre, termos, privacidade, dados-rastreados, linhas-do-tempo,
-co-plataforma, guia) and includes a prominent link to the `co` development
-universe ("Veja o código por trás disso").
+Two new e2e specs prevent the class of regression where `serve_deep_link` served
+`text/html` for JS/CSS assets, causing browsers to refuse script execution and
+leaving every anonymous visitor at "Carregando…" forever.
 
-### Added — `GET /api/v1/universes/{slug}/entries/popular`
+**`co-web/e2e/static-assets.spec.ts`** — hits 12 critical asset URLs with an HTTP
+GET and asserts each returns HTTP 200 with the correct `Content-Type` prefix:
+- `/variants/a/app.js`, `/variants/a/modules/{api,sidebar,boot}.js`, `/variants/a/style.css`
+- `/shared/{i18n,markdown}.js`, `/shared/{production,experiment}.css`
+- `/pdfjs/build/pdf.mjs`, `/manifest.json`, `/sw.js`
 
-New endpoint returns up to N entries ranked by write-event frequency from the
-per-universe `entry_events` log, falling back to `updated_at DESC` when no
-events exist (e.g. fresh template install). Excludes `index.md` and
-`projects/*` task entries. Default limit 10, max 50.
+If any path returns `text/html` instead of `application/javascript`, the test
+fails with a message identifying the offending path and its actual content-type.
 
-### Added — "Ver mais" dynamic section in `renderUniverseHome()`
-
-After rendering `index.md`, `boot.js` now fetches the popular endpoint and
-appends a `<section class="universe-home-popular">` listing the top 5 entries
-with links. The fetch is best-effort (silently skipped on error).
-
-### Added — E2E coverage for popular endpoint (`seed-links.spec.ts`)
-
-New Playwright test verifies that
-`/api/v1/universes/template/entries/popular?limit=5` returns ≥ 5 entries, each
-with a `path` and `title` field.
+**`co-web/e2e/anonymous-bootstrap.spec.ts`** — opens `/` in a fresh context
+(no cookies, no localStorage) and asserts:
+1. `#view-tabs` appears (proves JS assets loaded and executed)
+2. Sidebar has ≥ 1 project item on non-mobile viewports
+3. `.conteudo-stat` appears (proves the template project was auto-selected
+   and the entries API responded with populated data)
+4. No MIME-type or script-execution `console.error` / `pageerror` during boot
 
 ## [2.13.5] — 2026-05-21 — UX: Universe visibility simplified to two options
 
