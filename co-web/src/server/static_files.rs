@@ -369,6 +369,26 @@ pub(super) async fn serve_variant_file(
         }
     }
 
+    // 2.13.4: paths that already start with `variants/` (e.g. `variants/a/app.js`
+    // from the SPA's relative module imports) need to be served as-is, not
+    // re-prefixed with another `variants/<variant>/`.
+    if path.starts_with("variants/") {
+        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(path);
+        if let Some(contents) = resolve_asset(path, Some(&fs_path)) {
+            let content_type = guess_content_type(path);
+            let cache_header = cache_control_for(path);
+            return (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+                    (header::CACHE_CONTROL, cache_header),
+                ],
+                contents,
+            )
+                .into_response();
+        }
+    }
+
     // Try shared/ first (for experiment.js, experiment.css)
     if path.starts_with("shared/") || path == "manifest.json" || path == "sw.js" {
         let embed_path = if path.starts_with("shared/") {

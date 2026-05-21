@@ -5,6 +5,25 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.4] — 2026-05-21 — Hotfix: `serve_variant_file` double-prepended `variants/<variant>/`
+
+### Fixed — `/variants/a/app.js` still 404'd after 2.13.3
+
+2.13.3 routed static-asset paths from `serve_deep_link` to `serve_variant_file`, but the latter unconditionally prefixes `variants/<variant>/` to the incoming path. When the incoming path *already* starts with `variants/a/...`, the result was `variants/a/variants/a/app.js` — which doesn't exist, returning 404 (plain-text "Not found"). Browser then hit:
+
+```
+Refused to execute script from 'https://co.artelonga.com.br/variants/a/app.js' 
+because its MIME type ('text/plain') is not executable
+```
+
+The same cascade hit `/shared/style.css`, `/shared/i18n.js`, `/shared/markdown.js`, every SPA module — all the script-loading errors in the user's console.
+
+**Fix**: `serve_variant_file` now has an explicit branch for paths starting with `variants/` that serves the file as-is without re-prefixing. Mirrors the `pdfjs/` and `shared/` branches already in place.
+
+### Why this kept slipping past
+
+The fallback `serve_variant_file` was originally only invoked by `Router::fallback`, where the matcher already stripped any matched prefix — so paths arriving there *never* started with `variants/`. CO-232 introduced a *direct* call (via my 2.13.3 hotfix) without realizing the prefix-naive design. A passing route-test for `/variants/a/app.js` against the deployed binary would have caught it.
+
 ## [2.13.3] — 2026-05-21 — CRITICAL hotfix: `serve_deep_link` was serving HTML for static assets
 
 ### Fixed — `/variants/a/app.js` returned HTML, breaking the entire SPA
