@@ -45,7 +45,7 @@ gh issue view <NUMBER> --comments
 3. Implement following TDD (see below)
 4. **Include version bump in the same PR** (see Versioning below)
 5. Create PR referencing the issue with `Closes #<n>`
-6. Merge and clean up branches
+6. Merge via `scripts/safe-merge-pr.sh <repo> <pr-number>` (never bare `gh pr merge --delete-branch`) and clean up branches
 
 ### Branch Naming
 
@@ -61,9 +61,13 @@ gh issue view <NUMBER> --comments
 **Always clean up after merge:**
 
 ```bash
+# Merge the PR safely — never use bare gh pr merge --delete-branch.
+# GitHub may return mergeable=UNKNOWN (transient); bare --delete-branch deletes the
+# branch even when the merge fails, silently closing the PR without merging.
+scripts/safe-merge-pr.sh <repo> <pr-number>
+
 git checkout main && git pull origin main
 git branch -d <branch-name>
-git push origin --delete <branch-name>
 ```
 
 ## Versioning Policy (#53)

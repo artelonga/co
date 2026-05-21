@@ -140,6 +140,17 @@ co config show          # Show configuration
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, branch conventions, and the PR process.
 
+### Merging PRs safely
+
+Use `scripts/safe-merge-pr.sh` instead of `gh pr merge --delete-branch` directly.
+GitHub sometimes returns `mergeable: UNKNOWN` (transient) — bare `gh pr merge --delete-branch`
+will fail the merge but still delete the branch, silently closing the PR without merging.
+The wrapper polls every 5s (up to 30s) until the status is determinable:
+
+```bash
+scripts/safe-merge-pr.sh artelonga/co <pr-number>
+```
+
 All contributions are welcome — bug reports, feature requests, documentation, and code.
 
 ---
