@@ -1140,7 +1140,9 @@ export async function renderConteudo() {
             const onMove = (e) => {
                 if (!dragging) return;
                 const rect = splitEl.getBoundingClientRect();
-                const pct = ((e.clientX - rect.left) / rect.width) * 100;
+                const isObsidian = splitEl.classList.contains('obsidian-mode');
+                const pctRaw = ((e.clientX - rect.left) / rect.width) * 100;
+                const pct = isObsidian ? 100 - pctRaw : pctRaw;
                 const clamped = Math.max(15, Math.min(85, pct));
                 splitEl.style.setProperty('--split-pct', `${clamped}%`);
                 try { localStorage.setItem('co_conteudo_split_pct', String(Math.round(clamped))); } catch (_) {}

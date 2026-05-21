@@ -2650,7 +2650,7 @@ body {
     flex-direction: row-reverse;
 }
 .conteudo-split.obsidian-mode .conteudo-sections-pane {
-    flex: 0 0 280px;
+    flex: 0 0 calc(100% - var(--split-pct) - 14px);
     padding-left: 0;
     padding-right: 14px;
     border-right: 1px solid var(--border, #e5e5e0);
