@@ -61,6 +61,22 @@
     font-size: 12px;
   }
   header .spacer { flex: 1; }
+  #py-banner {
+    display: none;
+    font-size: 12px;
+    color: var(--warn);
+    font-family: var(--mono);
+    padding: 4px 8px;
+    border: 1px solid var(--warn);
+    border-radius: 4px;
+    background: transparent;
+  }
+  #py-status {
+    display: none;
+    font-size: 12px;
+    color: var(--ok);
+    font-family: var(--mono);
+  }
   header button {
     background: var(--accent);
     color: #fff;
@@ -106,7 +122,7 @@
     word-break: break-word;
   }
   .cell-input::before {
-    content: "co> ";
+    content: attr(data-prefix);
     color: var(--accent);
   }
   .cell-output {
@@ -167,6 +183,13 @@
   <h1>co repl</h1>
   <span class="meta">shell over <a href="/api/v1/interactions" target="_blank">/api/v1/interactions</a></span>
   <span class="spacer"></span>
+  <span id="py-banner">Pyodide loading...</span>
+  <span id="py-status">python ready</span>
+  <label>kernel</label>
+  <select id="kernel">
+    <option value="co">co shell</option>
+    <option value="python">python (Pyodide)</option>
+  </select>
   <label>universe</label>
   <input id="universe" value="template" autocomplete="off">
   <button id="save-btn" class="ghost" title="Save transcript as markdown entry">save</button>
@@ -201,18 +224,93 @@ Hit shift+enter to run. Output is wrapped in <code>```co</code> / <code>```outpu
   const transcript = document.getElementById('transcript');
   const promptEl   = document.getElementById('prompt');
   const universeEl = document.getElementById('universe');
+  const kernelEl   = document.getElementById('kernel');
   const runBtn     = document.getElementById('run-btn');
   const saveBtn    = document.getElementById('save-btn');
   const clearBtn   = document.getElementById('clear-btn');
+  const pyBanner   = document.getElementById('py-banner');
+  const pyStatus   = document.getElementById('py-status');
 
   /** in-memory session for save */
   const session = []; // [{input, output, status: 'ok'|'err'}]
 
+  // --- Pyodide state -------------------------------------------------------
+  let pyodide = null;
+  let pyodideLoading = false;
+
+  async function ensurePyodide() {
+    if (pyodide) return pyodide;
+    if (pyodideLoading) {
+      // Wait until loading finishes
+      await new Promise(resolve => {
+        const id = setInterval(() => { if (pyodide) { clearInterval(id); resolve(); } }, 100);
+      });
+      return pyodide;
+    }
+    pyodideLoading = true;
+    pyBanner.style.display = '';
+    pyBanner.textContent = 'Pyodide loading...';
+
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/pyodide/v0.27.5/full/pyodide.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+
+    // eslint-disable-next-line no-undef
+    pyodide = await loadPyodide();
+    await pyodide.loadPackage('micropip');
+    const micropip = pyodide.pyimport('micropip');
+    try {
+      await micropip.install('duckdb');
+    } catch (_) {
+      // duckdb may not be available on Pyodide — queries will use the /query API
+    }
+
+    // Pre-inject co helper
+    pyodide.globals.set('_universe_el', universeEl);
+    await pyodide.runPythonAsync(`
+import pyodide.http
+import json
+
+async def co_query(sql, limit=100):
+    from js import document
+    universe = document.getElementById('universe').value
+    resp = await pyodide.http.pyfetch(
+        f'/api/v1/universes/{universe}/query',
+        method='POST',
+        headers={'Content-Type': 'application/json'},
+        body=json.dumps({'sql': sql, 'limit': limit})
+    )
+    data = await resp.json()
+    return data
+`);
+
+    pyBanner.style.display = 'none';
+    pyStatus.style.display = '';
+    pyodideLoading = false;
+    return pyodide;
+  }
+
+  kernelEl.addEventListener('change', () => {
+    if (kernelEl.value === 'python' && !pyodide && !pyodideLoading) {
+      ensurePyodide().catch(e => {
+        pyBanner.textContent = 'Pyodide failed: ' + e.message;
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+
   function appendCell(input, output, status) {
+    const prefix = kernelEl.value === 'python' ? 'py> ' : 'co> ';
     const cell = document.createElement('div');
     cell.className = 'cell';
     const inp = document.createElement('div');
     inp.className = 'cell-input';
+    inp.setAttribute('data-prefix', prefix);
     inp.textContent = input;
     const out = document.createElement('div');
     out.className = 'cell-output ' + (status || '');
@@ -410,9 +508,36 @@ Hit shift+enter to run. Output is wrapped in <code>```co</code> / <code>```outpu
     return lines.join('\n');
   }
 
+  async function runPython(code) {
+    const py = await ensurePyodide();
+    let result;
+    try {
+      result = await py.runPythonAsync(code);
+    } catch (e) {
+      throw new Error(String(e));
+    }
+    if (result === undefined || result === null) return '';
+    if (typeof result.toJs === 'function') {
+      try { return JSON.stringify(result.toJs({ dict_converter: Object.fromEntries }), null, 2); }
+      catch (_) { return String(result); }
+    }
+    return String(result);
+  }
+
   async function runLine(line) {
     line = line.trim();
     if (!line) return;
+
+    if (kernelEl.value === 'python') {
+      try {
+        const out = await runPython(line);
+        appendCell(line, out, 'ok');
+      } catch (e) {
+        appendCell(line, String(e.message || e), 'err');
+      }
+      return;
+    }
+
     const tokens = tokenize(line);
     const verb = tokens.shift();
     const { positional, flags } = parseFlags(tokens);

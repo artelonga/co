@@ -304,6 +304,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                 .layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
         .nest("/api/v1/universes", universe_content_api)
+        // CO-244: read-only SQL query — auth required, but outside writer gate
+        // since POST here is a query (not a mutation).
+        .nest(
+            "/api/v1/universes",
+            crate::query_routes::router()
+                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
         // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
         // enforces its own auth + path constraints.
         .nest("/api/v1/universes", crate::proposal_routes::inline_router())
