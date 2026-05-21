@@ -3,6 +3,7 @@
 pub mod agents;
 pub mod analyze;
 pub mod archive;
+pub mod auth;
 pub mod board;
 pub mod collab;
 pub mod conduct;

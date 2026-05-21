@@ -156,6 +156,33 @@ Como cada tipo de dado é guardado, hasheado, criptografado ou apenas indexado. 
 
 **Retenção de logs:** 14 dias (Fly default). Após esse período, descartados sem backup.
 
+## Fluxo de recuperação via CLI (CO-236)
+
+O comando `co auth reset-password` encapsula as quatro chamadas de recuperação em um único fluxo interativo:
+
+```bash
+# Fluxo completo — sem curl, sem copiar tokens na linha de comando
+co auth reset-password --email voce@exemplo.com
+
+# Após a redefinição, fazer login e salvar um token de API de 90 dias
+co auth login --email voce@exemplo.com --save-token
+
+# Verificar status
+co auth status   # exit 0 = autenticado, exit 1 = não autenticado
+```
+
+As senhas nunca aparecem no histórico do shell (entrada oculta via `rpassword`).
+O arquivo `~/.config/co/credentials` é criado com permissão 600 (somente o dono pode ler).
+
+### Gerenciamento de tokens via CLI
+
+```bash
+co auth token create --save          # Cria e salva token de 90 dias
+co auth token list --json            # Lista tokens (human ou JSON)
+co auth token revoke <id>            # Revoga token com confirmação
+co auth logout --revoke-token        # Limpa credenciais locais + revoga token
+```
+
 ## Lacunas conhecidas
 
 Cada lacuna tem um ticket público correspondente — você pode acompanhar o progresso no board:
