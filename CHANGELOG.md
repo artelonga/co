@@ -5,6 +5,61 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.22.0] — 2026-05-21 — Wave C — deployer adapter + LSP/VS Code + sidebar/state/api split
+
+## CO-134 — Deployer adapter trait + first impl (static-on-R2)
+
+Introduces the `DeployerAdapter` trait in `co::deploy` and ships the first concrete
+implementation, `StaticOnR2Adapter`, which uploads a built universe to Cloudflare R2
+(via the S3-compatible API) and maintains an atomic "current" pointer for rollback.
+
+New public API in `co::deploy`:
+- `DeployerAdapter` trait — `name`, `deploy`, `rollback`, `status`
+- `BuildArtifact` — tarball + metadata produced by the build step
+- `DeployResult` — deploy ID, public URL, snapshot hash
+- `DeployStatus` — `Active`, `Inactive`, or `Unknown`
+- `DeployAdapterError` — typed errors for upload, not-found, permission, I/O
+- `SecretResolver` trait + `EnvSecretResolver` — pluggable secret lookup
+- `S3Backend` trait — abstracted object-store ops (mockable in tests)
+- `AwsS3Backend` — AWS-SDK-backed implementation (also works with R2)
+- `StaticOnR2Adapter` — full deploy + rollback + status over R2
+- `create_tarball_from_dir` — helper to pack a directory into `.tar.gz`
+
+CLI: `co deploy --universe-id <id> --dist <dir>` publishes to R2.
+     `co deploy rollback --deploy-id <id>` restores a previous deployment.
+
+### Why
+
+This is the first step of the CO-116 deploy adapter epic: prove the abstraction on
+the simplest possible target (static hosting on R2) before tackling Cloudflare Pages
+and beyond. The `S3Backend` trait keeps the implementation unit-testable without a
+live bucket.
+
+## CO-259 — Split sidebar.js + state.js + api.js into smaller files for parallel task independence
+
+`sidebar.js` (539 LOC), `state.js` (72 LOC), and `api.js` (255 LOC) were each
+promoted to folder modules following the same directory pattern used for
+`chat/` (CO-219) on the server side.
+
+Each old `.js` file is now a 3-line re-export proxy (`export * from './<name>/index.js'`),
+so all existing imports across the codebase are unchanged.
+
+New submodule layout:
+
+- `sidebar/`: sections.js · render.js · header.js · badge.js · mini-calendar.js · wire.js
+- `state/`: shape.js · universes.js · views.js
+- `api/`: client.js · auth.js · tasks.js · universes.js · entries.js
+
+`co-web/src/MODULES.md` extended with section 6 documenting the SPA module map.
+
+### Why
+
+Parallel co-auto tasks were causing rebase conflicts whenever two unrelated
+tickets (e.g. sidebar UX + universe subscription) happened to land in the
+same 470-LOC `sidebar.js`. With the split, each task touches a disjoint file
+and the file-overlap pre-flight reliably finds zero shared paths.
+
+
 ## [2.21.0] — 2026-05-21 — Wave B — REPL + DuckDB + inline CodeMirror + deploy.yaml schema
 
 ## CO-133 — deploy.yaml schema + universe-level manifest validation
