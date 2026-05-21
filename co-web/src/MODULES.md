@@ -1,8 +1,9 @@
-# Module Organisation Pattern
+# co-web Module Patterns
 
-This document describes the module layout convention used in `co-web/src/`.
+This document codifies the five architectural patterns used in `co-web/src/`.
+New code must follow these patterns; PR reviewers point here as the source of truth.
 
-## Flat modules vs. folder modules
+## 1. Directory Pattern (CO-215, CO-219)
 
 **Flat module** (`foo.rs`) — used when a feature has a single responsibility and
 fits comfortably in one file (< ~400 LoC).
@@ -10,11 +11,9 @@ fits comfortably in one file (< ~400 LoC).
 **Folder module** (`foo/mod.rs` + sub-files) — used when a feature has multiple
 distinct concerns or when a single file would exceed ~400 LoC.
 
-## Folder module layout
-
 ```
 foo/
-├── mod.rs          # module declarations, re-exports of the public surface
+├── mod.rs          # module declarations + public re-exports only
 ├── <concern_a>.rs  # one file per concern
 ├── <concern_b>.rs
 └── tests/
@@ -30,43 +29,181 @@ foo/
    No business logic lives in `mod.rs`.
 3. `tests/mod.rs` declares all test sub-modules. Test files use
    `use super::support::*` to import shared helpers.
-4. Helper functions in `tests/support.rs` and `tests/ws_support.rs` must be
-   `pub` so test sub-modules can import them.
-5. The module's public surface is re-exported from `mod.rs`, so callers outside
-   the module use `crate::foo::bar` rather than `crate::foo::internal::bar`.
+4. Helper functions in `tests/support.rs` must be `pub` so test sub-modules can
+   import them.
+5. The module's public surface is re-exported from `mod.rs`, so callers use
+   `crate::foo::Bar` rather than `crate::foo::internal::Bar`.
 
-## Example: `chat/`
+### Example: `chat/` (CO-219)
 
-The chat module was extracted from `chat_routes.rs` (2067 LoC) and
-`chat_ws.rs` (1215 LoC) in CO-219.
+`chat_routes.rs` (2063 LoC) + `chat_ws.rs` (1215 LoC) were promoted to:
 
 ```
 chat/
 ├── mod.rs          # re-exports chat_router, chat_ws_handler, ChatEvent
-├── permissions.rs  # resolve_role, can_read, can_post, can_manage_rooms, lock_storage
-├── routes.rs       # chat_router() only — wires HTTP routes to handlers
+├── permissions.rs  # resolve_role, can_read, can_post, can_manage_rooms
+├── routes.rs       # chat_router() — wires HTTP routes to handlers
 ├── rooms.rs        # room CRUD handlers + types
 ├── members.rs      # list_room_members_handler
 ├── messages.rs     # message handlers + types
 ├── ws.rs           # WebSocket upgrade handler + ChatEvent enum
 └── tests/
     ├── mod.rs
-    ├── support.rs      # REST test helpers (build_test_router, insert_user, …)
-    ├── ws_support.rs   # WS test helpers (make_state, spawn_server, ws_connect, …)
-    ├── rooms.rs        # room tests (1-6, 14-16)
-    ├── messages.rs     # list/post message tests (7-13)
-    ├── edits.rs        # rate-limit + edit tests (17-22)
-    ├── delete.rs       # delete + broadcast tests (23-31)
-    ├── ws_basic.rs     # WS auth gate + event tests (1-7)
-    └── ws_presence.rs  # WS presence/typing tests (8-11)
+    ├── support.rs      # REST test helpers
+    ├── ws_support.rs   # WS test helpers
+    ├── rooms.rs        # room tests
+    ├── messages.rs     # list/post message tests
+    ├── edits.rs        # rate-limit + edit tests
+    ├── delete.rs       # delete + broadcast tests
+    ├── ws_basic.rs     # WS auth gate + event tests
+    └── ws_presence.rs  # WS presence/typing tests
 ```
 
-### Key design decisions
+`permissions.rs` is the single source of truth for role helpers; `ws.rs`
+imports from it instead of duplicating `resolve_role`.
 
-- `permissions.rs` is the single source of truth for role helpers; `ws.rs`
-  imports from it instead of duplicating `resolve_role`/`can_read`.
-- `ChatEvent` lives in `ws.rs` and is re-exported from `mod.rs` so
-  `server/state.rs` can reference `crate::chat::ChatEvent`.
-- Tests are a subtree of the chat module (`#[cfg(test)] mod tests;` in
-  `mod.rs`), not a separate integration test crate, so they have access to
-  private items.
+---
+
+## 2. Sub-state Pattern (CO-221)
+
+Replace an 18-field `AppStateInner` god-state with four focused sub-states.
+Handlers declare exactly the sub-state they need via Axum's `FromRef<AppState>`.
+
+```rust
+pub struct AppStateInner {
+    pub core: Arc<CoreState>,        // storage, config, auth, event_bus
+    pub realtime: Arc<RealtimeState>,// CRDT rooms, sync rooms, chat WS
+    pub index: Arc<IndexState>,      // LRU cache, embedding service + sender
+    pub integrations: Arc<IntegrationsState>, // mail, geo, plugins, JWT, workers
+}
+pub struct AppState(pub Arc<AppStateInner>);
+
+impl FromRef<AppState> for Arc<CoreState> { ... }
+impl FromRef<AppState> for Arc<RealtimeState> { ... }
+// … same for IndexState, IntegrationsState
+```
+
+**Usage:** a handler that only reads storage + auth declares `State<Arc<CoreState>>`,
+not `State<AppState>`. This makes the dependency explicit and keeps test setup
+minimal.
+
+```rust
+async fn list_entries(State(core): State<Arc<CoreState>>, ...) { ... }
+```
+
+See `co-web/src/server/state.rs` for the full definitions.
+
+---
+
+## 3. Extractor Pattern (CO-222)
+
+Express auth requirements in handler signatures via typed Axum extractors.
+No more ad-hoc middleware layers or in-handler `resolve_role()` guards.
+
+| Extractor | Requirement | Failure |
+|-----------|-------------|---------|
+| `AuthedUser` | Any authenticated user (JWT or session cookie) | 401 |
+| `OwnerOf` | Authenticated + owns `{slug}` universe | 403 |
+| `AdminUser` | Authenticated + `tier == "admin"` in JWT claims | 403 |
+| `TokenOrJwtUser` | Authenticated via JWT **or** long-lived API token | 401 |
+
+All four implement `FromRequestParts` and live in `co-web/src/auth/extractors.rs`.
+
+```rust
+// Auth requirement visible at a glance — no separate middleware layer
+pub async fn delete_universe(
+    owner: OwnerOf,          // 401 if not logged in, 403 if not owner
+    State(core): State<Arc<CoreState>>,
+    Path(slug): Path<String>,
+) -> Result<impl IntoResponse, AppError> { ... }
+```
+
+`OwnerOf` requires `{slug}` in the matched route pattern; returning 500 otherwise
+is intentional — it is a programmer error, not a runtime one.
+
+---
+
+## 4. Event Bus Pattern (CO-220)
+
+Decouple cross-feature signaling via an in-process publish-subscribe bus.
+Publishers emit `DomainEvent` values; listeners run in dedicated `tokio::spawn`
+tasks and react without polluting the emitting handler.
+
+```rust
+pub enum DomainEvent {
+    EntryWritten { universe_key, path, body, body_hash },
+    EntryDeleted { universe_key, path },
+    NotificationRequested { recipient_id, kind, universe_key, ... },
+    InvitationAccepted { universe_key, user_id },
+    ProposalDecided { universe_key, proposal_path, action, proposer_id },
+    AssetUploaded { universe_key, sha256, mime, size_bytes, user_id, filename },
+}
+```
+
+`Bus` wraps a Tokio broadcast channel (capacity 2048). Listeners subscribe with
+an `EventFilter` to receive only relevant variants.
+
+```rust
+// Publisher (invitation_routes.rs)
+core.event_bus.publish(DomainEvent::NotificationRequested { ... });
+
+// Listener (server/mod.rs — started at boot)
+tokio::spawn(async move {
+    let mut rx = s.core.event_bus.subscribe(EventFilter::Notification);
+    while let Some(DomainEvent::NotificationRequested { .. }) = rx.recv().await {
+        storage.create_notification(...);
+    }
+});
+```
+
+**Rule:** route handlers publish events only; they never call sibling route
+modules directly. Side effects (notifications, embeddings, reference cards) are
+implemented in listeners, not in the originating handler.
+
+See `co-web/src/events.rs` for `Bus`, `DomainEvent`, `EventFilter`, `BusReceiver`.
+Listeners are wired in `co-web/src/server/mod.rs`.
+
+---
+
+## 5. Worker Trait (CO-223)
+
+All background polling workers implement a single trait so the supervisor can
+manage lifecycle uniformly.
+
+```rust
+#[async_trait]
+pub trait Worker: Send + 'static {
+    fn name(&self) -> &'static str;
+    fn interval(&self) -> Duration;
+    async fn tick(&mut self) -> anyhow::Result<()>;
+}
+```
+
+The five concrete workers are in `co-web/src/workers.rs`:
+
+| Worker | Interval | Responsibility |
+|--------|----------|----------------|
+| `EmbeddingWorker` | 30 s | Probe embedding OS-thread; forward entry jobs |
+| `EmailWorker` | 60 s | Deliver queued email digests |
+| `PushWorker` | 10 s | Deliver queued web-push notifications |
+| `WebhookWorker` | 5 s | Deliver outbound webhook payloads with backoff |
+| `JobQueueWorker` | 3 s | Process `doc_gen` / `apply_template_all` jobs |
+
+`WorkerSupervisor` (in `co-web/src/worker_supervisor.rs`) runs each worker in its
+own `tokio::spawn` loop. A panic in one worker is caught via `JoinHandle::await`,
+logged, and the worker is restarted with exponential backoff (5 s → 60 s max).
+Status (tick count, error count, panic count, last tick) is exposed at
+`GET /api/v1/admin/workers/status`.
+
+```rust
+// Registration at startup (server/mod.rs)
+let sup = &state.integrations.worker_supervisor;
+sup.spawn(EmbeddingWorker::new(...));
+sup.spawn(EmailWorker::new(state.clone()));
+sup.spawn(PushWorker::new(state.clone()));
+sup.spawn(WebhookWorker::new(state.clone())?);
+sup.spawn(JobQueueWorker::new(state.clone()));
+```
+
+**Rule:** new background polling work must implement `Worker` and register via
+`sup.spawn(...)`. Never `tokio::spawn` a raw loop in a route module.
