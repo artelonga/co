@@ -59,6 +59,9 @@ COPY co/ co/
 COPY game-core/ game-core/
 COPY dev/ dev/
 COPY co-agent/ co-agent/
+# CO-260: changelog_routes.rs include_str!("../../CHANGELOG.md") needs the file
+# at workspace root inside the build context.
+COPY CHANGELOG.md ./
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
