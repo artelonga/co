@@ -1110,7 +1110,9 @@ fn work_task_frontmatter(raw: &str, now_str: &str, project_key: &str) -> serde_j
                 .to_string();
             obj.insert("modified".to_string(), json!(ts));
         }
-        if !obj.contains_key("tags") && let Some(labels) = obj.get("labels").cloned() {
+        if !obj.contains_key("tags")
+            && let Some(labels) = obj.get("labels").cloned()
+        {
             obj.insert("tags".to_string(), labels);
         }
         // The board SQL filter is `archived = 0`; json_extract returns NULL for

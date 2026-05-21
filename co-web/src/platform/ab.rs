@@ -9,7 +9,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 // Seed file embedded at compile time so the server ships its own default flags.
-const SEED_FEATURE_FLAGS_YAML: &str = include_str!("../seed/feature_flags.yaml");
+const SEED_FEATURE_FLAGS_YAML: &str = include_str!("../../seed/feature_flags.yaml");
 
 // ---------------------------------------------------------------------------
 // Types

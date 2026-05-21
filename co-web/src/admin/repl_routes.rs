@@ -21,7 +21,7 @@ use axum::{
 
 use crate::server::CoreState;
 
-const REPL_HTML: &str = include_str!("../static/shared/repl.html");
+const REPL_HTML: &str = include_str!("../../static/shared/repl.html");
 
 pub async fn serve_repl_page(State(_core): State<Arc<CoreState>>) -> Response {
     let mut resp = Response::new(REPL_HTML.into());

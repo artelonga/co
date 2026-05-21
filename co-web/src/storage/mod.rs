@@ -24,40 +24,41 @@ pub struct LogDrainEvent {
 // compile time via `include_str!`. Frontmatter (slug/title/order/tags) becomes
 // the entry metadata; the body becomes the entry body.
 
-const SEED_TEMPLATE_INDEX_MD: &str = include_str!("../seed/template/index.md");
-const SEED_SOBRE_MD: &str = include_str!("../seed/template/sobre.md");
-const SEED_TERMOS_MD: &str = include_str!("../seed/template/termos.md");
-const SEED_PRIVACIDADE_MD: &str = include_str!("../seed/template/privacidade.md");
-const SEED_DADOS_RASTREADOS_MD: &str = include_str!("../seed/template/dados-rastreados.md");
-const SEED_LINHAS_DO_TEMPO_MD: &str = include_str!("../seed/template/linhas-do-tempo.md");
-const SEED_CO_PLATAFORMA_MD: &str = include_str!("../seed/template/co-plataforma.md");
-const SEED_GUIA_MD: &str = include_str!("../seed/template/guia.md");
-const SEED_SEGURANCA_MD: &str = include_str!("../seed/co/public/seguranca.md");
-const SEED_SEGURANCA_DEPS_MD: &str = include_str!("../seed/co/public/seguranca-dependencias.md");
-const SEED_SEGURANCA_CENARIOS_MD: &str = include_str!("../seed/co/public/seguranca-cenarios.md");
-const SEED_SEGURANCA_VAPID_MD: &str = include_str!("../seed/co/public/seguranca-vapid.md");
-const SEED_SEGURANCA_CRIPTO_MD: &str = include_str!("../seed/co/public/seguranca-criptografia.md");
-const SEED_LICENSA_MD: &str = include_str!("../seed/co/public/licensa.md");
-const SEED_RENDERERS_MD: &str = include_str!("../seed/co/public/renderers.md");
-const SEED_INFRA_MD: &str = include_str!("../seed/co/public/infra.md");
-const SEED_INFRA_CO_MD: &str = include_str!("../seed/co/public/infra-co.md");
+const SEED_TEMPLATE_INDEX_MD: &str = include_str!("../../seed/template/index.md");
+const SEED_SOBRE_MD: &str = include_str!("../../seed/template/sobre.md");
+const SEED_TERMOS_MD: &str = include_str!("../../seed/template/termos.md");
+const SEED_PRIVACIDADE_MD: &str = include_str!("../../seed/template/privacidade.md");
+const SEED_DADOS_RASTREADOS_MD: &str = include_str!("../../seed/template/dados-rastreados.md");
+const SEED_LINHAS_DO_TEMPO_MD: &str = include_str!("../../seed/template/linhas-do-tempo.md");
+const SEED_CO_PLATAFORMA_MD: &str = include_str!("../../seed/template/co-plataforma.md");
+const SEED_GUIA_MD: &str = include_str!("../../seed/template/guia.md");
+const SEED_SEGURANCA_MD: &str = include_str!("../../seed/co/public/seguranca.md");
+const SEED_SEGURANCA_DEPS_MD: &str = include_str!("../../seed/co/public/seguranca-dependencias.md");
+const SEED_SEGURANCA_CENARIOS_MD: &str = include_str!("../../seed/co/public/seguranca-cenarios.md");
+const SEED_SEGURANCA_VAPID_MD: &str = include_str!("../../seed/co/public/seguranca-vapid.md");
+const SEED_SEGURANCA_CRIPTO_MD: &str =
+    include_str!("../../seed/co/public/seguranca-criptografia.md");
+const SEED_LICENSA_MD: &str = include_str!("../../seed/co/public/licensa.md");
+const SEED_RENDERERS_MD: &str = include_str!("../../seed/co/public/renderers.md");
+const SEED_INFRA_MD: &str = include_str!("../../seed/co/public/infra.md");
+const SEED_INFRA_CO_MD: &str = include_str!("../../seed/co/public/infra-co.md");
 // Cross-repo infra pages (infra-rfq-gateway, infra-yggdrasil, infra-quilomboaraucaria)
 // removed: their content belongs in the respective universe's content, not in CO's
 // public seed. Users get those docs by subscribing to the universe.
-const SEED_TX_LOG_MD: &str = include_str!("../seed/co/public/transaction-log.md");
-const SEED_CONTA_MD: &str = include_str!("../seed/co/public/conta-e-mensagens.md");
-const SEED_CO_INDEX_MD: &str = include_str!("../seed/co/index.md");
-const SEED_YGGDRASIL_INDEX_MD: &str = include_str!("../seed/yggdrasil/index.md");
+const SEED_TX_LOG_MD: &str = include_str!("../../seed/co/public/transaction-log.md");
+const SEED_CONTA_MD: &str = include_str!("../../seed/co/public/conta-e-mensagens.md");
+const SEED_CO_INDEX_MD: &str = include_str!("../../seed/co/index.md");
+const SEED_YGGDRASIL_INDEX_MD: &str = include_str!("../../seed/yggdrasil/index.md");
 
 // Timeline universes — three sibling universes (`tempo`, `humanity`, `universo`)
 // each backed by a JSON event manifest + a markdown index/front page. Loaded
 // at compile time and seeded once on first boot.
-const SEED_TIMELINE_TEMPO_JSON: &str = include_str!("../seed/timeline/tempo.json");
-const SEED_TIMELINE_HUMANITY_JSON: &str = include_str!("../seed/timeline/humanity.json");
-const SEED_TIMELINE_UNIVERSO_JSON: &str = include_str!("../seed/timeline/universo.json");
-const SEED_TIMELINE_TEMPO_INDEX_MD: &str = include_str!("../seed/timeline/tempo-index.md");
-const SEED_TIMELINE_HUMANITY_INDEX_MD: &str = include_str!("../seed/timeline/humanity-index.md");
-const SEED_TIMELINE_UNIVERSO_INDEX_MD: &str = include_str!("../seed/timeline/universo-index.md");
+const SEED_TIMELINE_TEMPO_JSON: &str = include_str!("../../seed/timeline/tempo.json");
+const SEED_TIMELINE_HUMANITY_JSON: &str = include_str!("../../seed/timeline/humanity.json");
+const SEED_TIMELINE_UNIVERSO_JSON: &str = include_str!("../../seed/timeline/universo.json");
+const SEED_TIMELINE_TEMPO_INDEX_MD: &str = include_str!("../../seed/timeline/tempo-index.md");
+const SEED_TIMELINE_HUMANITY_INDEX_MD: &str = include_str!("../../seed/timeline/humanity-index.md");
+const SEED_TIMELINE_UNIVERSO_INDEX_MD: &str = include_str!("../../seed/timeline/universo-index.md");
 
 /// CO-170 Phase B: a row pulled from a source universe ready to be re-inserted
 /// into a destination universe under a (possibly transformed) path. Replaces
