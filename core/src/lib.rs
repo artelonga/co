@@ -109,11 +109,36 @@ pub use config::{GlobalConfig, GroupDef, GroupsConfig, RepoConfig, RepoLocalConf
 // GitHub integration exports
 pub use github::{GhCli, GhError, GithubIssue, GithubLabel, GithubUser, MappedWorkItem};
 
-// Deploy manifest exports
+// Deploy manifest + adapter exports
 pub use deploy::{
-    Backup, BackupSchedule, Bindings, BuildConfig, DEPLOY_FILENAME, DeployError, DeployManifest,
-    DeployTarget, RuntimeConfig, RuntimeKind, SUPPORTED_VERSION, Scaling, StorageBinding,
-    StorageType, Telemetry, TelemetrySink,
+    // CO-134: deployer adapter trait + first impl
+    AwsS3Backend,
+    Backup,
+    BackupSchedule,
+    Bindings,
+    BuildArtifact,
+    BuildConfig,
+    DEPLOY_FILENAME,
+    DeployAdapterError,
+    DeployError,
+    DeployManifest,
+    DeployResult,
+    DeployStatus,
+    DeployTarget,
+    DeployerAdapter,
+    EnvSecretResolver,
+    RuntimeConfig,
+    RuntimeKind,
+    S3Backend,
+    SUPPORTED_VERSION,
+    Scaling,
+    SecretResolver,
+    StaticOnR2Adapter,
+    StorageBinding,
+    StorageType,
+    Telemetry,
+    TelemetrySink,
+    create_tarball_from_dir,
 };
 
 /// The root type - CO itself

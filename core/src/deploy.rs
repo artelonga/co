@@ -574,3 +574,889 @@ backup:
         );
     }
 }
+
+// ─── Adapter supporting types ─────────────────────────────────────────────────
+
+use std::sync::Arc;
+
+/// A built universe tarball ready for deployment.
+#[derive(Debug, Clone)]
+pub struct BuildArtifact {
+    /// Universe identifier (slug or UUID).
+    pub universe_id: String,
+    /// Path to the `.tar.gz` archive of built output.
+    pub tarball: PathBuf,
+    /// Uncompressed size in bytes.
+    pub size_bytes: u64,
+    /// SHA-256 hex digest of the tarball.
+    pub checksum: String,
+}
+
+/// Outcome of a successful deployment.
+#[derive(Debug, Clone)]
+pub struct DeployResult {
+    /// Stable identifier: `{universe_id}/{timestamp}-{suffix}`.
+    pub deploy_id: String,
+    /// Public URL where the universe is served.
+    pub url: String,
+    /// Content-addressable snapshot identifier.
+    pub snapshot_id: String,
+}
+
+/// Observed state of a specific deployment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DeployStatus {
+    /// This deployment is live and serving traffic.
+    Active { deploy_id: String, url: String },
+    /// This deployment exists but is not currently active.
+    Inactive { deploy_id: String },
+    /// Deployment ID not found or state is unknown.
+    Unknown,
+}
+
+/// Errors produced by a deployer adapter.
+#[derive(Debug, thiserror::Error)]
+pub enum DeployAdapterError {
+    #[error("upload failed: {0}")]
+    Upload(String),
+    #[error("deployment not found: {0}")]
+    NotFound(String),
+    #[error("permission denied: {0}")]
+    Permission(String),
+    #[error("io error: {0}")]
+    Io(String),
+    #[error("{0}")]
+    Other(String),
+}
+
+impl From<std::io::Error> for DeployAdapterError {
+    fn from(e: std::io::Error) -> Self {
+        DeployAdapterError::Io(e.to_string())
+    }
+}
+
+/// Resolves named secrets for a deployment.
+pub trait SecretResolver: Send + Sync {
+    fn get(&self, key: &str) -> Option<String>;
+}
+
+/// Resolves secrets from environment variables.
+pub struct EnvSecretResolver;
+
+impl SecretResolver for EnvSecretResolver {
+    fn get(&self, key: &str) -> Option<String> {
+        std::env::var(key).ok()
+    }
+}
+
+// ─── DeployerAdapter trait ────────────────────────────────────────────────────
+
+/// Pluggable deployment backend.
+///
+/// Each implementation handles upload, pointer-swap, rollback, and status for a
+/// specific hosting platform. CO-134 ships the first implementation: R2 static.
+#[async_trait::async_trait]
+pub trait DeployerAdapter: Send + Sync {
+    /// Short identifier for this adapter (e.g. `"static-on-r2"`).
+    fn name(&self) -> &'static str;
+
+    /// Publish the artifact, returning a stable deploy ID and public URL.
+    async fn deploy(
+        &self,
+        artifact: BuildArtifact,
+        manifest: &DeployManifest,
+        secrets: &dyn SecretResolver,
+    ) -> Result<DeployResult, DeployAdapterError>;
+
+    /// Restore a previous deployment by ID.
+    async fn rollback(&self, deploy_id: &str) -> Result<(), DeployAdapterError>;
+
+    /// Query the current state of a deployment.
+    async fn status(&self, deploy_id: &str) -> DeployStatus;
+}
+
+// ─── S3Backend abstraction ────────────────────────────────────────────────────
+
+/// Low-level S3-compatible object-store operations.
+///
+/// Abstracted so unit tests can inject a mock without a live bucket.
+#[cfg_attr(test, mockall::automock)]
+#[async_trait::async_trait]
+pub trait S3Backend: Send + Sync {
+    async fn put_object(
+        &self,
+        bucket: &str,
+        key: &str,
+        body: Vec<u8>,
+        content_type: &str,
+    ) -> Result<(), DeployAdapterError>;
+
+    async fn get_object(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, DeployAdapterError>;
+
+    async fn list_objects(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<Vec<String>, DeployAdapterError>;
+
+    async fn head_object(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<String>, DeployAdapterError>;
+}
+
+// ─── AwsS3Backend ─────────────────────────────────────────────────────────────
+
+/// `S3Backend` backed by the AWS SDK (also works against Cloudflare R2 via S3 compat).
+pub struct AwsS3Backend {
+    client: aws_sdk_s3::Client,
+}
+
+impl AwsS3Backend {
+    pub fn new(client: aws_sdk_s3::Client) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait::async_trait]
+impl S3Backend for AwsS3Backend {
+    async fn put_object(
+        &self,
+        bucket: &str,
+        key: &str,
+        body: Vec<u8>,
+        content_type: &str,
+    ) -> Result<(), DeployAdapterError> {
+        self.client
+            .put_object()
+            .bucket(bucket)
+            .key(key)
+            .body(aws_sdk_s3::primitives::ByteStream::from(body))
+            .content_type(content_type)
+            .send()
+            .await
+            .map_err(|e| DeployAdapterError::Upload(e.to_string()))?;
+        Ok(())
+    }
+
+    async fn get_object(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>, DeployAdapterError> {
+        use aws_sdk_s3::error::SdkError;
+        match self
+            .client
+            .get_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(resp) => {
+                let bytes = resp
+                    .body
+                    .collect()
+                    .await
+                    .map_err(|e| DeployAdapterError::Other(e.to_string()))?
+                    .into_bytes();
+                Ok(Some(bytes.to_vec()))
+            }
+            Err(SdkError::ServiceError(svc)) if svc.err().is_no_such_key() => Ok(None),
+            Err(e) => Err(DeployAdapterError::Upload(e.to_string())),
+        }
+    }
+
+    async fn list_objects(
+        &self,
+        bucket: &str,
+        prefix: &str,
+    ) -> Result<Vec<String>, DeployAdapterError> {
+        let resp = self
+            .client
+            .list_objects_v2()
+            .bucket(bucket)
+            .prefix(prefix)
+            .send()
+            .await
+            .map_err(|e| DeployAdapterError::Upload(e.to_string()))?;
+        let keys = resp
+            .contents()
+            .iter()
+            .filter_map(|obj| obj.key().map(str::to_string))
+            .collect();
+        Ok(keys)
+    }
+
+    async fn head_object(
+        &self,
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<String>, DeployAdapterError> {
+        use aws_sdk_s3::error::SdkError;
+        match self
+            .client
+            .head_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+        {
+            Ok(resp) => Ok(resp.e_tag().map(str::to_string)),
+            Err(SdkError::ServiceError(svc)) if svc.err().is_not_found() => Ok(None),
+            Err(e) => Err(DeployAdapterError::Upload(e.to_string())),
+        }
+    }
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/// Map file extension to HTTP content-type.
+fn content_type_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") | Some("mjs") => "application/javascript",
+        Some("json") => "application/json",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("svg") => "image/svg+xml",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        Some("txt") => "text/plain; charset=utf-8",
+        Some("md") => "text/markdown; charset=utf-8",
+        Some("pdf") => "application/pdf",
+        Some("wasm") => "application/wasm",
+        _ => "application/octet-stream",
+    }
+}
+
+/// Extract a `.tar.gz` archive into `dest`.
+fn extract_tarball(tarball: &Path, dest: &Path) -> Result<(), DeployAdapterError> {
+    use flate2::read::GzDecoder;
+    use tar::Archive;
+    let file = std::fs::File::open(tarball).map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+    let gz = GzDecoder::new(file);
+    let mut archive = Archive::new(gz);
+    archive
+        .unpack(dest)
+        .map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+    Ok(())
+}
+
+/// Pack a directory into a `.tar.gz` archive at `dest`.
+pub fn create_tarball_from_dir(src: &Path, dest: &Path) -> Result<(), DeployAdapterError> {
+    use flate2::Compression;
+    use flate2::write::GzEncoder;
+    use tar::Builder;
+    let file = std::fs::File::create(dest).map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+    let enc = GzEncoder::new(file, Compression::default());
+    let mut builder = Builder::new(enc);
+    builder
+        .append_dir_all(".", src)
+        .map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+    builder
+        .finish()
+        .map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+    Ok(())
+}
+
+// ─── StaticOnR2Adapter ────────────────────────────────────────────────────────
+
+const R2_DEPLOYS_PREFIX: &str = "co-deployments";
+const R2_CURRENT_PREFIX: &str = "co-deployments-current";
+
+/// Uploads a static universe to Cloudflare R2 (S3-compatible).
+///
+/// Deploy layout in the bucket:
+/// ```text
+/// co-deployments/{deploy_id}/index.html
+/// co-deployments/{deploy_id}/style.css
+/// co-deployments-current/{universe_id}/current  → deploy_id (text body)
+/// ```
+pub struct StaticOnR2Adapter {
+    s3: Arc<dyn S3Backend>,
+    bucket: String,
+    base_domain: String,
+}
+
+impl StaticOnR2Adapter {
+    /// Create from any `S3Backend` implementation.
+    pub fn new(
+        s3: impl S3Backend + 'static,
+        bucket: impl Into<String>,
+        base_domain: impl Into<String>,
+    ) -> Self {
+        Self {
+            s3: Arc::new(s3),
+            bucket: bucket.into(),
+            base_domain: base_domain.into(),
+        }
+    }
+
+    /// Create from a shared `Arc<dyn S3Backend>` (useful for stateful test backends).
+    pub fn with_shared_backend(
+        s3: Arc<dyn S3Backend>,
+        bucket: impl Into<String>,
+        base_domain: impl Into<String>,
+    ) -> Self {
+        Self {
+            s3,
+            bucket: bucket.into(),
+            base_domain: base_domain.into(),
+        }
+    }
+
+    /// Build an adapter from R2 credentials.
+    pub async fn from_credentials(
+        account_id: &str,
+        access_key_id: &str,
+        secret_access_key: &str,
+        bucket: impl Into<String>,
+        base_domain: impl Into<String>,
+    ) -> Self {
+        use aws_sdk_s3::config::{Credentials, Region};
+        let creds = Credentials::new(access_key_id, secret_access_key, None, None, "r2");
+        let endpoint = format!("https://{account_id}.r2.cloudflarestorage.com");
+        let config = aws_sdk_s3::config::Builder::new()
+            .credentials_provider(creds)
+            .endpoint_url(&endpoint)
+            .region(Region::new("auto"))
+            .force_path_style(true)
+            .build();
+        let client = aws_sdk_s3::Client::from_conf(config);
+        Self::new(AwsS3Backend::new(client), bucket, base_domain)
+    }
+
+    /// Deploy directly from a build output directory (creates the tarball internally).
+    pub async fn deploy_from_dir(
+        &self,
+        dir: &Path,
+        universe_id: &str,
+        manifest: &DeployManifest,
+        secrets: &dyn SecretResolver,
+    ) -> Result<DeployResult, DeployAdapterError> {
+        let tmp = tempfile::tempdir().map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+        let tarball_path = tmp.path().join("artifact.tar.gz");
+        create_tarball_from_dir(dir, &tarball_path)?;
+        let artifact = BuildArtifact {
+            universe_id: universe_id.to_string(),
+            tarball: tarball_path,
+            size_bytes: 0,
+            checksum: String::new(),
+        };
+        self.deploy(artifact, manifest, secrets).await
+    }
+
+    fn pointer_key(universe_id: &str) -> String {
+        format!("{R2_CURRENT_PREFIX}/{universe_id}/current")
+    }
+
+    fn deploy_url(&self, deploy_id: &str) -> String {
+        format!(
+            "https://{}/{R2_DEPLOYS_PREFIX}/{deploy_id}/",
+            self.base_domain
+        )
+    }
+
+    fn universe_id_from_deploy_id(deploy_id: &str) -> &str {
+        deploy_id.split('/').next().unwrap_or(deploy_id)
+    }
+}
+
+#[async_trait::async_trait]
+impl DeployerAdapter for StaticOnR2Adapter {
+    fn name(&self) -> &'static str {
+        "static-on-r2"
+    }
+
+    async fn deploy(
+        &self,
+        artifact: BuildArtifact,
+        _manifest: &DeployManifest,
+        _secrets: &dyn SecretResolver,
+    ) -> Result<DeployResult, DeployAdapterError> {
+        use sha2::{Digest, Sha256};
+        use uuid::Uuid;
+
+        // 1. Generate a unique deploy ID
+        let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        let suffix = &Uuid::new_v4().to_string()[..8];
+        let deploy_id = format!("{}/{ts}-{suffix}", artifact.universe_id);
+
+        // 2. Extract tarball to a temp dir
+        let tmp = tempfile::tempdir().map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+        extract_tarball(&artifact.tarball, tmp.path())?;
+
+        // 3. Upload all files under the versioned prefix
+        for entry in walkdir::WalkDir::new(tmp.path())
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+        {
+            let abs = entry.path();
+            let rel = abs
+                .strip_prefix(tmp.path())
+                .map_err(|e| DeployAdapterError::Other(e.to_string()))?;
+            let rel_str = rel
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            let key = format!("{R2_DEPLOYS_PREFIX}/{deploy_id}/{rel_str}");
+            let body = std::fs::read(abs).map_err(|e| DeployAdapterError::Io(e.to_string()))?;
+            let ct = content_type_for_path(rel);
+            self.s3.put_object(&self.bucket, &key, body, ct).await?;
+        }
+
+        // 4. Update the "current" pointer
+        let pointer_key = Self::pointer_key(&artifact.universe_id);
+        self.s3
+            .put_object(
+                &self.bucket,
+                &pointer_key,
+                deploy_id.as_bytes().to_vec(),
+                "text/plain",
+            )
+            .await?;
+
+        // 5. Compute snapshot_id from deploy_id
+        let mut hasher = Sha256::new();
+        hasher.update(deploy_id.as_bytes());
+        let snapshot_id = format!("{:x}", hasher.finalize());
+
+        Ok(DeployResult {
+            url: self.deploy_url(&deploy_id),
+            deploy_id,
+            snapshot_id,
+        })
+    }
+
+    async fn rollback(&self, deploy_id: &str) -> Result<(), DeployAdapterError> {
+        let universe_id = Self::universe_id_from_deploy_id(deploy_id);
+
+        // Verify the deployment has objects in the bucket
+        let prefix = format!("{R2_DEPLOYS_PREFIX}/{deploy_id}/");
+        let keys = self.s3.list_objects(&self.bucket, &prefix).await?;
+        if keys.is_empty() {
+            return Err(DeployAdapterError::NotFound(format!(
+                "deployment '{deploy_id}' has no objects in bucket"
+            )));
+        }
+
+        // Rewrite the pointer to point at the target deploy
+        let pointer_key = Self::pointer_key(universe_id);
+        self.s3
+            .put_object(
+                &self.bucket,
+                &pointer_key,
+                deploy_id.as_bytes().to_vec(),
+                "text/plain",
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    async fn status(&self, deploy_id: &str) -> DeployStatus {
+        let universe_id = Self::universe_id_from_deploy_id(deploy_id);
+        let pointer_key = Self::pointer_key(universe_id);
+
+        match self.s3.get_object(&self.bucket, &pointer_key).await {
+            Ok(Some(bytes)) => match String::from_utf8(bytes) {
+                Ok(current_id) if current_id.trim() == deploy_id => DeployStatus::Active {
+                    deploy_id: deploy_id.to_string(),
+                    url: self.deploy_url(deploy_id),
+                },
+                Ok(_) => DeployStatus::Inactive {
+                    deploy_id: deploy_id.to_string(),
+                },
+                Err(_) => DeployStatus::Unknown,
+            },
+            Ok(None) | Err(_) => DeployStatus::Unknown,
+        }
+    }
+}
+
+// ─── Adapter tests ─────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod adapter_tests {
+    use super::*;
+    use mockall::predicate::*;
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
+
+    // ── In-memory S3 backend for stateful tests ───────────────────────────────
+
+    struct InMemoryS3 {
+        objects: Mutex<HashMap<String, Vec<u8>>>,
+    }
+
+    impl InMemoryS3 {
+        fn new() -> Self {
+            Self {
+                objects: Mutex::new(HashMap::new()),
+            }
+        }
+
+        fn get_raw(&self, key: &str) -> Option<Vec<u8>> {
+            self.objects.lock().unwrap().get(key).cloned()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl S3Backend for InMemoryS3 {
+        async fn put_object(
+            &self,
+            _bucket: &str,
+            key: &str,
+            body: Vec<u8>,
+            _ct: &str,
+        ) -> Result<(), DeployAdapterError> {
+            self.objects.lock().unwrap().insert(key.to_string(), body);
+            Ok(())
+        }
+
+        async fn get_object(
+            &self,
+            _bucket: &str,
+            key: &str,
+        ) -> Result<Option<Vec<u8>>, DeployAdapterError> {
+            Ok(self.objects.lock().unwrap().get(key).cloned())
+        }
+
+        async fn list_objects(
+            &self,
+            _bucket: &str,
+            prefix: &str,
+        ) -> Result<Vec<String>, DeployAdapterError> {
+            let objects = self.objects.lock().unwrap();
+            Ok(objects
+                .keys()
+                .filter(|k| k.starts_with(prefix))
+                .cloned()
+                .collect())
+        }
+
+        async fn head_object(
+            &self,
+            _bucket: &str,
+            key: &str,
+        ) -> Result<Option<String>, DeployAdapterError> {
+            let objects = self.objects.lock().unwrap();
+            Ok(objects.get(key).map(|_| "\"test-etag\"".to_string()))
+        }
+    }
+
+    // ── Fixture helpers ───────────────────────────────────────────────────────
+
+    fn make_manifest() -> DeployManifest {
+        parse_str(
+            "version: 1\ntarget: static-on-r2\n",
+            &PathBuf::from("deploy.yaml"),
+        )
+        .unwrap()
+    }
+
+    fn make_artifact(tarball: PathBuf, universe_id: &str) -> BuildArtifact {
+        BuildArtifact {
+            universe_id: universe_id.to_string(),
+            tarball,
+            size_bytes: 0,
+            checksum: "test-checksum".to_string(),
+        }
+    }
+
+    fn make_universe_dir(dir: &Path) {
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("index.html"), b"<h1>Hello</h1>").unwrap();
+        std::fs::write(dir.join("style.css"), b"body { color: red; }").unwrap();
+        std::fs::write(dir.join("app.js"), b"console.log('hi')").unwrap();
+    }
+
+    fn make_tarball(src: &Path, out: &Path) {
+        create_tarball_from_dir(src, out).unwrap();
+    }
+
+    // ── Unit tests (MockS3Backend via mockall) ────────────────────────────────
+
+    #[tokio::test]
+    async fn test_deploy_uploads_files_and_pointer() {
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("universe");
+        make_universe_dir(&src);
+        let tarball = tmp.path().join("artifact.tar.gz");
+        make_tarball(&src, &tarball);
+
+        let mut mock = MockS3Backend::new();
+        // 3 file uploads + 1 pointer write = 4 put_object calls
+        mock.expect_put_object()
+            .times(4)
+            .returning(|_, _, _, _| Ok(()));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        let result = adapter
+            .deploy(
+                make_artifact(tarball, "u_test"),
+                &make_manifest(),
+                &EnvSecretResolver,
+            )
+            .await
+            .unwrap();
+
+        assert!(result.deploy_id.starts_with("u_test/"));
+        assert!(result.url.contains("co.app"));
+        assert!(result.url.contains("co-deployments"));
+        assert!(!result.snapshot_id.is_empty());
+        assert_eq!(result.snapshot_id.len(), 64); // sha256 hex
+    }
+
+    #[tokio::test]
+    async fn test_name_returns_static_on_r2() {
+        let mock = MockS3Backend::new();
+        let adapter = StaticOnR2Adapter::new(mock, "b", "d");
+        assert_eq!(adapter.name(), "static-on-r2");
+    }
+
+    #[tokio::test]
+    async fn test_status_active_when_pointer_matches() {
+        let mut mock = MockS3Backend::new();
+        mock.expect_get_object()
+            .with(eq("my-bucket"), eq("co-deployments-current/u_test/current"))
+            .returning(|_, _| Ok(Some(b"u_test/20240101T000000Z-abc12345".to_vec())));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        let status = adapter.status("u_test/20240101T000000Z-abc12345").await;
+        assert!(matches!(status, DeployStatus::Active { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_status_inactive_when_pointer_differs() {
+        let mut mock = MockS3Backend::new();
+        mock.expect_get_object()
+            .with(eq("my-bucket"), eq("co-deployments-current/u_test/current"))
+            .returning(|_, _| Ok(Some(b"u_test/20240102T000000Z-xyz99999".to_vec())));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        let status = adapter.status("u_test/20240101T000000Z-abc12345").await;
+        assert!(matches!(status, DeployStatus::Inactive { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_status_unknown_when_no_pointer() {
+        let mut mock = MockS3Backend::new();
+        mock.expect_get_object().returning(|_, _| Ok(None));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        let status = adapter.status("u_test/20240101T000000Z-abc12345").await;
+        assert_eq!(status, DeployStatus::Unknown);
+    }
+
+    #[tokio::test]
+    async fn test_rollback_updates_pointer() {
+        let mut mock = MockS3Backend::new();
+        mock.expect_list_objects()
+            .with(
+                eq("my-bucket"),
+                eq("co-deployments/u_test/20240101T000000Z-abc12345/"),
+            )
+            .returning(|_, _| {
+                Ok(vec![
+                    "co-deployments/u_test/20240101T000000Z-abc12345/index.html".to_string(),
+                ])
+            });
+        mock.expect_put_object()
+            .with(
+                eq("my-bucket"),
+                eq("co-deployments-current/u_test/current"),
+                eq(b"u_test/20240101T000000Z-abc12345".to_vec()),
+                eq("text/plain"),
+            )
+            .returning(|_, _, _, _| Ok(()));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        adapter
+            .rollback("u_test/20240101T000000Z-abc12345")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_rollback_fails_when_deploy_not_found() {
+        let mut mock = MockS3Backend::new();
+        mock.expect_list_objects().returning(|_, _| Ok(vec![]));
+
+        let adapter = StaticOnR2Adapter::new(mock, "my-bucket", "co.app");
+        let err = adapter.rollback("u_test/nonexistent").await.unwrap_err();
+        assert!(matches!(err, DeployAdapterError::NotFound(_)));
+    }
+
+    // ── Stateful rollback scenario (InMemoryS3) ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_deploy_v1_deploy_v2_rollback_to_v1() {
+        let s3 = Arc::new(InMemoryS3::new());
+        let adapter = StaticOnR2Adapter::with_shared_backend(
+            s3.clone() as Arc<dyn S3Backend>,
+            "my-bucket",
+            "co.app",
+        );
+        let manifest = make_manifest();
+
+        // v1: universe with a landing page
+        let tmp = tempdir().unwrap();
+        let src_v1 = tmp.path().join("v1");
+        make_universe_dir(&src_v1);
+        let tarball_v1 = tmp.path().join("v1.tar.gz");
+        make_tarball(&src_v1, &tarball_v1);
+
+        let r1 = adapter
+            .deploy(
+                make_artifact(tarball_v1, "u_test"),
+                &manifest,
+                &EnvSecretResolver,
+            )
+            .await
+            .unwrap();
+        let id_v1 = r1.deploy_id.clone();
+
+        // v1 should be active
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Active { .. }
+        ));
+
+        // v2: updated content
+        let src_v2 = tmp.path().join("v2");
+        make_universe_dir(&src_v2);
+        std::fs::write(src_v2.join("index.html"), b"<h1>v2</h1>").unwrap();
+        let tarball_v2 = tmp.path().join("v2.tar.gz");
+        make_tarball(&src_v2, &tarball_v2);
+
+        let r2 = adapter
+            .deploy(
+                make_artifact(tarball_v2, "u_test"),
+                &manifest,
+                &EnvSecretResolver,
+            )
+            .await
+            .unwrap();
+        let id_v2 = r2.deploy_id.clone();
+
+        // v2 active, v1 inactive
+        assert!(matches!(
+            adapter.status(&id_v2).await,
+            DeployStatus::Active { .. }
+        ));
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Inactive { .. }
+        ));
+
+        // Rollback to v1
+        adapter.rollback(&id_v1).await.unwrap();
+
+        // v1 active again, v2 inactive
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Active { .. }
+        ));
+        assert!(matches!(
+            adapter.status(&id_v2).await,
+            DeployStatus::Inactive { .. }
+        ));
+
+        // v1 content is still in the bucket
+        let v1_index_key = format!("co-deployments/{id_v1}/index.html");
+        let content = s3.get_raw(&v1_index_key).expect("v1 index.html in bucket");
+        assert_eq!(content, b"<h1>Hello</h1>");
+    }
+
+    // ── Integration test (real R2 bucket — skipped in CI) ────────────────────
+
+    #[tokio::test]
+    #[ignore = "requires real R2 bucket — set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, CO_BASE_DOMAIN"]
+    async fn test_integration_r2_deploy_and_rollback() {
+        let account_id = std::env::var("R2_ACCOUNT_ID").expect("R2_ACCOUNT_ID");
+        let access_key = std::env::var("R2_ACCESS_KEY_ID").expect("R2_ACCESS_KEY_ID");
+        let secret_key = std::env::var("R2_SECRET_ACCESS_KEY").expect("R2_SECRET_ACCESS_KEY");
+        let bucket = std::env::var("R2_BUCKET").expect("R2_BUCKET");
+        let base_domain = std::env::var("CO_BASE_DOMAIN").unwrap_or_else(|_| "co.app".to_string());
+
+        let adapter = StaticOnR2Adapter::from_credentials(
+            &account_id,
+            &access_key,
+            &secret_key,
+            &bucket,
+            &base_domain,
+        )
+        .await;
+        let manifest = make_manifest();
+
+        let tmp = tempdir().unwrap();
+        let src = tmp.path().join("u_integ");
+        make_universe_dir(&src);
+        let tarball_v1 = tmp.path().join("v1.tar.gz");
+        make_tarball(&src, &tarball_v1);
+
+        // Deploy v1
+        let r1 = adapter
+            .deploy(
+                make_artifact(tarball_v1, "u_integ"),
+                &manifest,
+                &EnvSecretResolver,
+            )
+            .await
+            .unwrap();
+        let id_v1 = r1.deploy_id.clone();
+
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Active { .. }
+        ));
+
+        // Deploy v2
+        std::fs::write(src.join("index.html"), b"<h1>v2</h1>").unwrap();
+        let tarball_v2 = tmp.path().join("v2.tar.gz");
+        make_tarball(&src, &tarball_v2);
+
+        let r2 = adapter
+            .deploy(
+                make_artifact(tarball_v2, "u_integ"),
+                &manifest,
+                &EnvSecretResolver,
+            )
+            .await
+            .unwrap();
+        let id_v2 = r2.deploy_id.clone();
+
+        assert!(matches!(
+            adapter.status(&id_v2).await,
+            DeployStatus::Active { .. }
+        ));
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Inactive { .. }
+        ));
+
+        // Rollback to v1
+        adapter.rollback(&id_v1).await.unwrap();
+
+        assert!(matches!(
+            adapter.status(&id_v1).await,
+            DeployStatus::Active { .. }
+        ));
+        assert!(matches!(
+            adapter.status(&id_v2).await,
+            DeployStatus::Inactive { .. }
+        ));
+    }
+}
