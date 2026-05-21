@@ -46,11 +46,27 @@ prost = "0.13"
 # Graph
 petgraph = { workspace = true }
 
+# Async (for deployer adapter trait)
+async-trait = { workspace = true }
+
+# Tarball support (for BuildArtifact extraction and creation)
+flate2 = "1"
+tar = "0.4"
+
+# Temp directories (used at runtime by deployer adapters)
+tempfile = { workspace = true }
+
+# AWS SDK — R2 static-on-r2 adapter
+aws-sdk-s3 = "1"
+aws-config = "1"
+
 [build-dependencies]
 prost-build = "0.13"
 
 [dev-dependencies]
 tempfile = { workspace = true }
+mockall = "0.13"
+tokio = { workspace = true }
 
 [features]
 default = []

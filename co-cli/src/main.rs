@@ -486,6 +486,37 @@ enum Commands {
         profile: Option<String>,
     },
 
+    /// Deploy a universe to a target platform
+    ///
+    /// Publishes the built output directory to the specified target.
+    /// R2 credentials are read from environment variables:
+    ///   R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET
+    ///
+    /// Examples:
+    ///   co deploy --universe-id my-universe --dist ./dist
+    ///   co deploy --universe-id my-universe --target static-on-r2 --dist ./dist
+    ///   co deploy rollback --deploy-id my-universe/20240101T000000Z-abc12345
+    Deploy {
+        #[command(subcommand)]
+        action: Option<DeploySubcommand>,
+
+        /// Target platform (currently only static-on-r2)
+        #[arg(long, default_value = "static-on-r2")]
+        target: String,
+
+        /// Built output directory to publish
+        #[arg(long, default_value = "dist")]
+        dist: String,
+
+        /// deploy.yaml path
+        #[arg(long, default_value = "deploy.yaml")]
+        manifest: String,
+
+        /// Universe identifier (slug or UUID)
+        #[arg(long)]
+        universe_id: Option<String>,
+    },
+
     /// Pipeline engine: plan, execute, approve via Claude + GitHub
     ///
     /// Modular pipeline for LLM-powered GitHub workflows on any repository.
@@ -507,6 +538,16 @@ enum Commands {
         /// Auto-approve all pipeline stages (no prompts)
         #[arg(long, global = true)]
         auto_approve: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum DeploySubcommand {
+    /// Roll back to a previous deployment
+    Rollback {
+        /// Deploy ID to restore (format: {universe_id}/{timestamp}-{suffix})
+        #[arg(long)]
+        deploy_id: String,
     },
 }
 
@@ -1264,6 +1305,24 @@ fn main() {
                 commands::board::reset(&data, confirm);
             }
             None => commands::board::run(port, data, static_dir, default_variant),
+        },
+        Commands::Deploy {
+            action,
+            target,
+            dist,
+            manifest,
+            universe_id,
+        } => match action {
+            Some(DeploySubcommand::Rollback { deploy_id }) => {
+                commands::deploy::rollback(&deploy_id);
+            }
+            None => {
+                let uid = universe_id.unwrap_or_else(|| {
+                    eprintln!("error: --universe-id is required");
+                    std::process::exit(1);
+                });
+                commands::deploy::run(&target, &dist, &manifest, &uid);
+            }
         },
         Commands::Auth { action, profile } => {
             let auth_action = match action {
