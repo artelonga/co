@@ -5,6 +5,15 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.15.0] — 2026-05-21 — Surface 'co' dev sub-universe on the anonymous sidebar + landing (CO-252)
+
+### Added
+
+- **Sidebar**: Anonymous visitors now see the `co` dev universe pinned at the top of the universe list, with a green "código aberto" / "open source" chip as a visual accent.
+- **co universe home page**: `seed/co/index.md` provides a useful landing page explaining CO's open-source mission, linking to the dev board, documentation pages (security, infra, license), and the template universe.
+- **i18n**: `sidebar.co_dev_chip` key added to both `pt-BR` ("código aberto") and `en` ("open source") locales.
+- **CSS**: `.oss-chip` class (green accent badge) reuses the `role-chip` layout convention from CO-238.
+
 ## [2.13.6] — 2026-05-21 — E2E: static-asset MIME + anonymous bootstrap smoke tests (CO-250)
 
 ### Added — Playwright specs that would have caught the 2.13.3/4/5 regression cascade

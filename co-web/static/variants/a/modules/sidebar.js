@@ -76,10 +76,13 @@ function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip) {
     const roleChip = showRoleChip && role && !u._synthetic
         ? `<span class="role-chip">${esc(window.t ? window.t('sidebar.role.' + role) || role : role)}</span>`
         : '';
+    const ossChip = u.key === 'co'
+        ? `<span class="oss-chip">${esc(window.t ? window.t('sidebar.co_dev_chip') || 'código aberto' : 'código aberto')}</span>`
+        : '';
     const subCount = hasKids ? ` (${kids.length})` : '';
     const syntheticClass = u._synthetic ? ' sidebar-universe-synthetic' : '';
     let html = `<div class="sidebar-item sidebar-universe-item${syntheticClass}${active}" data-universe="${esc(u.key)}" style="padding-left:${indent}px">
-        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}
+        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}${ossChip}
     </div>`;
     if (hasKids && expanded) {
         for (const k of kids) html += renderUniverseItemHtml(k, childrenByParent, depth + 1, showRoleChip);
@@ -157,8 +160,14 @@ export function renderSidebar() {
             universeHtml += '<hr class="sidebar-divider">';
         }
     } else if (state.userUniverses && state.userUniverses.length >= 1) {
-        // Fallback: flat list for anonymous users or before meUniverses loads
-        const { childrenByParent, topLevel } = buildChildMap(state.userUniverses);
+        // Fallback: flat list for anonymous users or before meUniverses loads.
+        // CO-252: pin the 'co' dev universe to the top of the list.
+        const sorted = [...state.userUniverses].sort((a, b) => {
+            if (a.key === 'co') return -1;
+            if (b.key === 'co') return 1;
+            return 0;
+        });
+        const { childrenByParent, topLevel } = buildChildMap(sorted);
         universeHtml = `<div class="sidebar-universes">
             <div class="sidebar-universe-label">${t('universes')}</div>
             ${topLevel.map(u => renderUniverseItemHtml(u, childrenByParent, 0, false)).join('')}
