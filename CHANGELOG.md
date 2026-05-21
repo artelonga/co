@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.1] — 2026-05-21 — Hotfix: anonymous sidebar empty + Carregando... stuck
+
+### Fixed — `loadMeUniverses()` bailed silently on 401 for anonymous users
+
+`app.js` `loadMeUniverses()` called `/api/v1/me/universes` and bailed when the response was null (401). For anonymous visitors this meant `state.userUniverses` was never populated, so:
+
+- `sidebar.js renderSidebar()` had no `state.meUniverses` (logged-out) AND no `state.userUniverses` (never set) → universe section rendered empty
+- Project list area waited indefinitely → "Carregando..." stuck forever
+- Visible regression after CO-238 sidebar refactor exposed an unused fallback branch as the only path that could have rendered anything
+
+**Fix**: when `/api/v1/me/universes` returns null (anonymous), `loadMeUniverses()` now falls back to `/api/v1/universes/public` and populates `state.userUniverses` with the public list. The sidebar's existing "flat list for anonymous users" branch in `renderSidebar()` now actually receives data and renders.
+
+**Why this slipped past CO-238**: the bucketed shape `me.owned/member/subscribed/invited/discoverable` (CO-191) became the only render path for logged-in users; the anonymous fallback was dead code that no tests exercised. CO-238 made the sidebar's section structure visible without touching the data-fetching layer where the bug lived.
+
 ## [2.13.0] — 2026-05-20 — True content-volume metrics: lines, words, chars (CO-241)
 
 ### Added — body_lines / body_words / body_chars per entry and per universe

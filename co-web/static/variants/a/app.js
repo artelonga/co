@@ -59,14 +59,23 @@ import { renderNotificationSettings } from './modules/notification-settings.js';
 // ===== CO-191: Bucketed universe loader =====
 async function loadMeUniverses() {
     const me = await apiFetch('/api/v1/me/universes', {}, true);
-    if (!me) return;
-    state.meUniverses = me;
-    // Backward compat: keep state.userUniverses for any code still reading it.
-    state.userUniverses = [
-        ...(me.owned || []).map(u => u),
-        ...(me.member || []).map(u => u),
-        ...(me.subscribed || []).map(u => u),
-    ];
+    if (me) {
+        state.meUniverses = me;
+        // Backward compat: keep state.userUniverses for any code still reading it.
+        state.userUniverses = [
+            ...(me.owned || []).map(u => u),
+            ...(me.member || []).map(u => u),
+            ...(me.subscribed || []).map(u => u),
+        ];
+        return;
+    }
+    // Anonymous fallback: /me/universes 401'd. Populate state.userUniverses
+    // from the public list so the sidebar can render something (without this
+    // the sidebar stays empty and the user sees "Carregando..." forever).
+    const pub = await apiFetch('/api/v1/universes/public', {}, true);
+    if (Array.isArray(pub)) {
+        state.userUniverses = pub;
+    }
 }
 
 // ===== Tiny helpers that don't belong in any module =====
