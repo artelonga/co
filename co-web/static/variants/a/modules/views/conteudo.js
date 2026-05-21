@@ -1,5 +1,5 @@
 // ===== Conteúdo (content browser) view =====
-import { state } from '../state.js';
+import { state, canEditCurrentUniverse } from '../state.js';
 import { api, apiFetch } from '../api.js';
 import { esc, relativeDate, todayDate } from '../helpers.js';
 
@@ -7,12 +7,14 @@ let _openZoomModal = () => {};
 let _showLoginModal = () => {};
 let _showToast = () => {};
 let _loadEditorBundle = async () => {};
+let _showSubscribePromptModal = () => {};
 
 export function injectConteudoCallbacks(callbacks) {
     _openZoomModal = callbacks.openZoomModal;
     _showLoginModal = callbacks.showLoginModal;
     _showToast = callbacks.showToast;
     _loadEditorBundle = callbacks.loadEditorBundle;
+    if (callbacks.showSubscribePromptModal) _showSubscribePromptModal = callbacks.showSubscribePromptModal;
 }
 
 export function buildFolderTree(entries) {
@@ -365,6 +367,10 @@ function createDetailController(container, initialEntry, deps) {
 
     function enterEdit() {
         if (editing) return;
+        if (!isTemplate && !canEditCurrentUniverse()) {
+            (deps.showSubscribePromptModal || _showSubscribePromptModal)();
+            return;
+        }
         editing = true;
         renderEdit();
     }
@@ -1124,6 +1130,7 @@ export async function renderConteudo() {
             entryTitle,
             esc,
             selectionKey: SELECTION_KEY,
+            showSubscribePromptModal: _showSubscribePromptModal,
         });
 
         // Wire the splitter drag handler.
