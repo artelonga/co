@@ -53,6 +53,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // Phase 2
         .route("/{slug}/ops", get(list_ops))
+        // CO-129: grouped commit-node view of the op log
+        .route("/{slug}/oplog", get(list_oplog))
         // Phase 3
         .route("/{slug}/replay", get(replay_to_op))
         .route("/{slug}/op-diff", get(op_diff))
@@ -238,6 +240,260 @@ pub async fn list_ops(
         "events": events,
         "total": total,
         "after_seq": after_seq,
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// CO-129: GET /{slug}/oplog — grouped commit-node DAG view
+// ---------------------------------------------------------------------------
+
+/// A single file change within an oplog commit node.
+#[derive(Debug, Serialize)]
+pub struct OplogChange {
+    pub path: String,
+    /// `"added"`, `"modified"`, or `"deleted"`.
+    pub op: String,
+    pub body_hash_before: Option<String>,
+    pub body_hash_after: Option<String>,
+}
+
+/// A logical "commit node" in the op-log DAG.
+#[derive(Debug, Serialize)]
+pub struct OplogNode {
+    /// Stable ID: the request_id if present, or `"seq-N"` for ungrouped events.
+    pub id: String,
+    /// The highest seq in this group — used as the target for revert/diff.
+    pub seq: i64,
+    /// The lowest seq in this group.
+    pub seq_min: i64,
+    pub ts_micros: i64,
+    pub author_id: Option<String>,
+    /// `"commit"` | `"promote"` | `"conflict"` | `"revert"`.
+    pub node_type: String,
+    pub changes: Vec<OplogChange>,
+    /// Human-readable one-line summary.
+    pub summary: String,
+    /// Parent node IDs (linear chain for now; DAG merges reserved for future).
+    pub parents: Vec<String>,
+}
+
+struct RawEventRow {
+    seq: i64,
+    ts_micros: i64,
+    op: String,
+    path: String,
+    body_hash: Option<String>,
+    prev_body_hash: Option<String>,
+    frontmatter_json: Option<String>,
+    author_id: Option<String>,
+    cid: String,
+}
+
+fn detect_node_type(group: &[RawEventRow]) -> String {
+    for row in group {
+        if row.path.starts_with("_audit/promote-") {
+            let has_conflicts = row
+                .frontmatter_json
+                .as_deref()
+                .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+                .and_then(|v| v.get("conflicts").and_then(|c| c.as_i64()))
+                .is_some_and(|n| n > 0);
+            return if has_conflicts {
+                "conflict".to_string()
+            } else {
+                "promote".to_string()
+            };
+        }
+        if row.path.starts_with("_audit/revert-") {
+            return "revert".to_string();
+        }
+    }
+    "commit".to_string()
+}
+
+fn build_summary(changes: &[OplogChange], node_type: &str, group: &[RawEventRow]) -> String {
+    if (node_type == "promote" || node_type == "conflict")
+        && let Some(audit) = group.iter().find(|r| r.path.starts_with("_audit/promote-"))
+        && let Some(fm) = audit
+            .frontmatter_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<JsonValue>(s).ok())
+    {
+        let added = fm.get("added").and_then(|x| x.as_i64()).unwrap_or(0);
+        let overwritten = fm.get("overwritten").and_then(|x| x.as_i64()).unwrap_or(0);
+        let source = fm
+            .get("source")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown");
+        return if node_type == "conflict" {
+            let n = fm.get("conflicts").and_then(|x| x.as_i64()).unwrap_or(0);
+            format!("Promote {source}: {added} added, {overwritten} overwritten, {n} conflicts")
+        } else {
+            format!("Promote {source}: {added} added, {overwritten} overwritten")
+        };
+    }
+    match changes.len() {
+        0 => "No changes".to_string(),
+        1 => {
+            let c = &changes[0];
+            let fname = c.path.split('/').next_back().unwrap_or(&c.path);
+            match c.op.as_str() {
+                "added" => format!("Added {fname}"),
+                "deleted" => format!("Deleted {fname}"),
+                _ => format!("Modified {fname}"),
+            }
+        }
+        n => {
+            let added = changes.iter().filter(|c| c.op == "added").count();
+            let deleted = changes.iter().filter(|c| c.op == "deleted").count();
+            let modified = n - added - deleted;
+            let mut parts = Vec::new();
+            if added > 0 {
+                parts.push(format!("{added} added"));
+            }
+            if modified > 0 {
+                parts.push(format!("{modified} modified"));
+            }
+            if deleted > 0 {
+                parts.push(format!("{deleted} deleted"));
+            }
+            parts.join(", ")
+        }
+    }
+}
+
+fn build_oplog_nodes(rows: Vec<RawEventRow>, limit: usize) -> Vec<OplogNode> {
+    // Group contiguous rows by cid (request_id or "seq-N").
+    // Because events are ordered by seq ASC and requests process sequentially
+    // per universe (single Mutex<Connection>), same-request events are contiguous.
+    let mut groups: Vec<Vec<RawEventRow>> = Vec::new();
+    for row in rows {
+        let same = groups
+            .last()
+            .and_then(|g| g.first())
+            .is_some_and(|r: &RawEventRow| r.cid == row.cid);
+        if same {
+            groups.last_mut().unwrap().push(row);
+        } else {
+            groups.push(vec![row]);
+        }
+    }
+
+    let mut nodes: Vec<OplogNode> = Vec::new();
+    let mut prev_id: Option<String> = None;
+
+    for group in groups.into_iter().take(limit) {
+        let first = group.first().unwrap();
+        let cid = first.cid.clone();
+        let seq_min = group.iter().map(|r| r.seq).min().unwrap_or(0);
+        let seq_max = group.iter().map(|r| r.seq).max().unwrap_or(0);
+        let ts_micros = first.ts_micros;
+        let author_id = group.iter().find_map(|r| r.author_id.clone());
+
+        let changes: Vec<OplogChange> = group
+            .iter()
+            .map(|r| {
+                let op = if r.op == "delete" {
+                    "deleted"
+                } else if r.prev_body_hash.is_none() {
+                    "added"
+                } else {
+                    "modified"
+                };
+                OplogChange {
+                    path: r.path.clone(),
+                    op: op.to_string(),
+                    body_hash_before: r.prev_body_hash.clone(),
+                    body_hash_after: r.body_hash.clone(),
+                }
+            })
+            .collect();
+
+        let node_type = detect_node_type(&group);
+        let summary = build_summary(&changes, &node_type, &group);
+
+        let node = OplogNode {
+            id: cid.clone(),
+            seq: seq_max,
+            seq_min,
+            ts_micros,
+            author_id,
+            node_type,
+            summary,
+            changes,
+            parents: prev_id.iter().cloned().collect(),
+        };
+        prev_id = Some(cid);
+        nodes.push(node);
+    }
+
+    nodes
+}
+
+/// `GET /api/v1/universes/:slug/oplog`
+///
+/// Returns the op-log as a list of "commit nodes" — events grouped by
+/// `request_id` so that a single save operation appears as one node.
+/// Nodes are ordered oldest-first and include parent-ID links for DAG rendering.
+pub async fn list_oplog(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<OpsQuery>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let _caller = resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Unauthorized("Authentication required".into()))?;
+
+    let limit = q.limit.unwrap_or(100).min(1_000);
+    let after_seq = q.after_seq.unwrap_or(0);
+
+    // Fetch up to limit*20 raw events so grouping produces at least `limit` nodes.
+    let raw_limit = ((limit * 20).min(50_000)) as i64;
+
+    let uc = get_universe_conn(&state, &slug)?;
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let mut stmt = uc_guard
+        .prepare(
+            "SELECT seq, ts_micros, op, path, body_hash, prev_body_hash, \
+                    frontmatter_json, author_id, \
+                    COALESCE(request_id, 'seq-' || CAST(seq AS TEXT)) AS cid \
+             FROM entry_events \
+             WHERE seq > ?1 \
+             ORDER BY seq ASC \
+             LIMIT ?2",
+        )
+        .map_err(|e| AppError::Internal(format!("list_oplog prepare: {e}")))?;
+
+    let rows: Vec<RawEventRow> = stmt
+        .query_map(params![after_seq, raw_limit], |row| {
+            Ok(RawEventRow {
+                seq: row.get(0)?,
+                ts_micros: row.get(1)?,
+                op: row.get(2)?,
+                path: row.get(3)?,
+                body_hash: row.get(4)?,
+                prev_body_hash: row.get(5)?,
+                frontmatter_json: row.get(6)?,
+                author_id: row.get(7)?,
+                cid: row.get(8)?,
+            })
+        })
+        .map_err(|e| AppError::Internal(format!("list_oplog query: {e}")))?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let next_after_seq = rows.last().map(|r| r.seq);
+    let nodes = build_oplog_nodes(rows, limit);
+    let total = nodes.len();
+
+    Ok(Json(json!({
+        "nodes": nodes,
+        "total": total,
+        "after_seq": after_seq,
+        "next_after_seq": next_after_seq,
     })))
 }
 
@@ -945,7 +1201,6 @@ mod tests {
 
     #[test]
     fn test_router_builds() {
-        // Smoke test: `router()` should compile and produce a Router without panicking.
         let _r: Router<AppState> = router();
     }
 
@@ -967,5 +1222,106 @@ mod tests {
         };
         let effective = q.limit.unwrap_or(100).min(1_000);
         assert_eq!(effective, 100);
+    }
+
+    fn make_row(seq: i64, op: &str, path: &str, cid: &str, prev_hash: Option<&str>) -> RawEventRow {
+        RawEventRow {
+            seq,
+            ts_micros: seq * 1_000_000,
+            op: op.to_string(),
+            path: path.to_string(),
+            body_hash: if op == "delete" {
+                None
+            } else {
+                Some(format!("hash{seq}"))
+            },
+            prev_body_hash: prev_hash.map(|s| s.to_string()),
+            frontmatter_json: None,
+            author_id: Some("user-1".to_string()),
+            cid: cid.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_build_oplog_nodes_groups_by_cid() {
+        let rows = vec![
+            make_row(1, "put", "a.md", "req-A", None),
+            make_row(2, "put", "b.md", "req-A", None),
+            make_row(3, "put", "c.md", "req-B", None),
+        ];
+        let nodes = build_oplog_nodes(rows, 100);
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].id, "req-A");
+        assert_eq!(nodes[0].changes.len(), 2);
+        assert_eq!(nodes[1].id, "req-B");
+        assert_eq!(nodes[1].parents, vec!["req-A"]);
+    }
+
+    #[test]
+    fn test_build_oplog_nodes_ungrouped_seq_ids() {
+        let rows = vec![
+            make_row(1, "put", "a.md", "seq-1", None),
+            make_row(2, "put", "b.md", "seq-2", None),
+        ];
+        let nodes = build_oplog_nodes(rows, 100);
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].id, "seq-1");
+        assert_eq!(nodes[1].id, "seq-2");
+    }
+
+    #[test]
+    fn test_detect_node_type_promote() {
+        let audit_row = RawEventRow {
+            seq: 1,
+            ts_micros: 0,
+            op: "put".to_string(),
+            path: "_audit/promote-123.md".to_string(),
+            body_hash: None,
+            prev_body_hash: None,
+            frontmatter_json: Some(r#"{"action":"promote","conflicts":0}"#.to_string()),
+            author_id: None,
+            cid: "req-1".to_string(),
+        };
+        assert_eq!(detect_node_type(&[audit_row]), "promote");
+    }
+
+    #[test]
+    fn test_detect_node_type_conflict() {
+        let audit_row = RawEventRow {
+            seq: 1,
+            ts_micros: 0,
+            op: "put".to_string(),
+            path: "_audit/promote-123.md".to_string(),
+            body_hash: None,
+            prev_body_hash: None,
+            frontmatter_json: Some(r#"{"action":"promote","conflicts":3}"#.to_string()),
+            author_id: None,
+            cid: "req-1".to_string(),
+        };
+        assert_eq!(detect_node_type(&[audit_row]), "conflict");
+    }
+
+    #[test]
+    fn test_change_op_classification() {
+        let rows = vec![
+            make_row(1, "put", "new.md", "req-1", None), // added (no prev_hash)
+            make_row(2, "put", "mod.md", "req-1", Some("old")), // modified (has prev_hash)
+            make_row(3, "delete", "del.md", "req-1", Some("old")), // deleted
+        ];
+        let nodes = build_oplog_nodes(rows, 100);
+        assert_eq!(nodes.len(), 1);
+        let ops: Vec<&str> = nodes[0].changes.iter().map(|c| c.op.as_str()).collect();
+        assert!(ops.contains(&"added"));
+        assert!(ops.contains(&"modified"));
+        assert!(ops.contains(&"deleted"));
+    }
+
+    #[test]
+    fn test_build_oplog_nodes_respects_limit() {
+        let rows: Vec<RawEventRow> = (1..=10)
+            .map(|i| make_row(i, "put", &format!("f{i}.md"), &format!("seq-{i}"), None))
+            .collect();
+        let nodes = build_oplog_nodes(rows, 5);
+        assert_eq!(nodes.len(), 5);
     }
 }

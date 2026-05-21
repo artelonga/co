@@ -24,6 +24,7 @@ import {
     injectTimelineCallbacks,
 } from './modules/views/timeline.js';
 import { renderDashboard, injectDashboardCallbacks } from './modules/views/dashboard.js';
+import { renderChangelog, injectChangelogCallbacks } from './modules/views/changelog.js';
 import {
     renderConteudo, openZoomModal, injectConteudoCallbacks, injectOpenContentEditor,
 } from './modules/views/conteudo.js';
@@ -378,6 +379,7 @@ function renderContent() {
     else if (state.view === 'table') renderTable();
     else if (state.view === 'timeline') renderTimeline();
     else if (state.view === 'dashboard') renderDashboard();
+    else if (state.view === 'changelog') renderChangelog();
 }
 
 function render() {
@@ -443,6 +445,7 @@ function wireModules() {
     injectTableCallbacks({ openTaskModal, refreshTasks, renderTable, showToast });
     injectTimelineCallbacks({ openTaskModal, refreshTasks, renderContent });
     injectDashboardCallbacks({ openTaskModal });
+    injectChangelogCallbacks({ showToast, showLoginModal });
     injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });

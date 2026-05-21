@@ -231,4 +231,25 @@ export const api = {
         const r = await apiFetch(url, {}, true);
         return (r && r.entries) || [];
     },
+    // CO-129: op-log DAG renderer APIs
+    async getOplog(slug, afterSeq, limit) {
+        let url = `/api/v1/universes/${encodeURIComponent(slug)}/oplog`;
+        const params = [];
+        if (afterSeq != null) params.push(`after_seq=${afterSeq}`);
+        if (limit != null) params.push(`limit=${limit}`);
+        if (params.length) url += '?' + params.join('&');
+        return apiFetch(url, {}, false);
+    },
+    async getOpDiff(slug, fromOp, toOp) {
+        return apiFetch(
+            `/api/v1/universes/${encodeURIComponent(slug)}/op-diff?from_op=${fromOp}&to_op=${toOp}`,
+            {}, false,
+        );
+    },
+    async revertToOp(slug, toOp) {
+        return apiFetch(
+            `/api/v1/universes/${encodeURIComponent(slug)}/revert?to=${toOp}`,
+            { method: 'POST' }, false,
+        );
+    },
 };
