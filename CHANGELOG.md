@@ -5,6 +5,107 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.23.0] — 2026-05-21 — Wave D — work/*.md sync + cross-version changelog viewer
+
+## CO-243 — VS Code (and LSP) integration — open universe as remote workspace
+
+Added `co-vscode` VS Code extension and `co-lsp` Language Server Protocol server that expose CO universe content as a native editor workspace.
+
+**co-vscode** (TypeScript, VS Code extension):
+- Registers the `co://` URI scheme via `vscode.workspace.registerFileSystemProvider`, mapping reads/writes to the CO Vault API.
+- Command `CO: Open Remote Workspace` lists the user's universes via `GET /api/v1/me/universes` and opens the selected one as a VS Code workspace folder.
+- Reads authentication credentials from `~/.config/co/credentials` (written by `co auth login`) — no extra setup required after CLI login.
+- Wikilink `[[...]]` auto-completion for markdown files in `co://` workspaces.
+- Buildable to a `.vsix` sideloadable package (`npm run package`).
+
+**co-lsp** (Rust binary, standalone workspace):
+- Standalone `co-lsp` binary implementing the Language Server Protocol over stdin/stdout.
+- Compatible with any LSP-aware editor: VS Code, Neovim, Helix, Zed, Emacs Eglot.
+- Features: wikilink completion (`[[...]]`), broken-link diagnostics, hover and go-to-definition stubs ready for Phase 2 expansion.
+- CLI: `co-lsp [--url <url>] [--token <token>] [--universe <slug>]`; falls back to `~/.config/co/credentials`.
+
+### Why
+
+Reduces the content-editing friction for developers: instead of a dedicated GUI, editors they already use (VS Code, Neovim, etc.) can read and write CO universe content natively. The Vault API is the source of truth; the extension/LSP are thin adapters.
+
+## CO-260 — Cross-version changelog viewer — range queries + group-by-type + sort-by-PR-size
+
+Added a standalone changelog viewer at `/changelog` and a new `GET /api/v1/changelog` API
+endpoint that exposes all CO release history as structured, filterable JSON.
+
+**Backend (`co-web/src/changelog_routes.rs`):**
+- `GET /api/v1/changelog` — public endpoint that parses the embedded `CHANGELOG.md` and
+  returns a `{ range, versions[] }` response. Supports query params:
+  - `from=<version>` / `to=<version>` — semver range filter (inclusive)
+  - `type=<feat|fix|refactor|docs|chore>` — filter by conventional-commit type
+  - `sort=size` — sort entries within each version by PR size (LOC diff) descending;
+    `sort=date` (default) keeps versions newest-first
+- `POST /api/v1/admin/changelog/reindex` — (auth required) rebuilds `changelog_cache` by
+  scanning `git log` for conventional-commit types + PR numbers
+- Responses served from DB cache (`changelog_cache`) + compile-time embedded `CHANGELOG.md`
+
+**Database (migration v47):**
+- New table `changelog_cache(version, ticket, entry_type, title, pr_number, pr_size,
+  additions, deletions, commit_sha, author, indexed_at)` — pre-computed per-entry PR-size
+  data populated by the reindex endpoint and `scripts/release-commit.sh`
+
+**Frontend (`co-web/static/variants/a/changelog.html`):**
+- Standalone page at `/changelog` with:
+  - Version range pickers (from/to selects auto-populated from available versions)
+  - Type filter chips (`feat` / `fix` / `refactor` / `docs` / `chore`) — client-side, instant
+  - Sort selector (newest-first / biggest PR first)
+  - Sequential view (versions in order with their entries)
+  - Grouped view (entries bucketed by type across all versions)
+  - LOC size bars for PRs with size data; PR links to GitHub
+  - Mobile responsive (size bars + version themes hidden below 640px)
+- `modules/views/changelog-viewer.js` — importable ES module exposing
+  `fetchChangelog()` and `renderChangelogViewer()` for embedding in other contexts
+
+**Tooling (`scripts/release-commit.sh`):**
+- After each release commit, calls `POST /api/v1/admin/changelog/reindex` on the local
+  dev server (when running) to update the cache with the new version's git history
+
+**Documentation (`co-web/seed/co/index.md`):**
+- Added `/changelog` link to the CO universe home page
+
+**Tests (`co-web/e2e/changelog-viewer.spec.ts`):**
+- API tests: shape, version sort order, range filter, type filter, sort-by-size, range echo
+- UI tests: page renders, chip filter (client-side), sequential/grouped toggle
+
+### Why
+
+Seven+ release waves (v2.13 → v2.22) with no structured way to compare them. The
+CHANGELOG.md is great for narrative reading per release but useless for questions like
+"what were the biggest refactors between 2.18 and 2.22?" or "list every fix in Wave B."
+CO-260 exposes that data in a filterable, sortable viewer without touching the existing
+CHANGELOG.md format.
+
+## CO-261 — Sync repo work/*.md → CO universe entries (live dev board for /co, /yggdrasil, /rfq)
+
+`seed_co_universe_tasks` now creates a **"CO Development Board"** project entry
+(`projects/CO/_project.md`) and seeds each `CO-N.md` file from `work/co/` as a
+`task` entry under that project, so the `/co` kanban shows the real CO-1..N
+development tasks (grouped by `status` into todo / in_progress / done columns).
+
+Documentation files (CLAUDE.md, ROADMAP.md, etc.) are filtered out of the task
+seed so only `{PREFIX}-{N}.md` specs appear in the board.
+
+Frontmatter mapping: `type: user-story` → `entry_type: task`, `project: CO`
+injected, original type preserved as `story_type`, `created_at`/`updated_at`
+mapped to `created`/`modified`, `labels` mapped to `tags`.
+
+Two placeholder content pages are seeded into the **yggdrasil** and **rfq**
+universes (`content/sister-repo-sync.md`) to communicate that their
+`work/<space>/` task sync is not yet wired and will arrive in CO-261 Wave B/C.
+
+### Why
+
+CO-N ticket specs were committed to `work/co/` and bundled into the Docker image
+(`/app/seed-co/`) on every build, but the per-universe `entries` table was never
+populated with them as board-compatible tasks. The `/co` universe showed only the
+old baseline API/CW/DS/PLT projects instead of the real development board.
+
+
 ## [2.22.0] — 2026-05-21 — Wave C — deployer adapter + LSP/VS Code + sidebar/state/api split
 
 ## CO-134 — Deployer adapter trait + first impl (static-on-R2)
