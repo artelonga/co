@@ -49,6 +49,18 @@ export const api = {
         return url + (url.includes('?') ? '&' : '?') + `u=${slug}`;
     },
     async getProjects() {
+        // 2.13.2 hotfix: the legacy /api/projects?u=<slug> endpoint requires
+        // auth and 401s for anonymous visitors, leaving the board "Carregando…"
+        // forever. The v1 endpoint /api/v1/universes/<slug>/projects works
+        // anonymously, so try it first and fall back to the legacy path only
+        // if v1 doesn't return.
+        const slug = state.currentUniverseSlug;
+        if (slug) {
+            try {
+                const r = await apiFetch(`/api/v1/universes/${encodeURIComponent(slug)}/projects`, {}, true);
+                if (Array.isArray(r)) return r;
+            } catch (_) {}
+        }
         const r = await apiFetch(this._u('/api/projects'), {}, true);
         return r || [];
     },

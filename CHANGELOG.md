@@ -5,6 +5,20 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.2] — 2026-05-21 — Hotfix: anonymous project list 401 → board never renders
+
+### Fixed — `api.getProjects()` hit auth-gated legacy endpoint
+
+`api.getProjects()` called `/api/projects?u=<slug>` — a legacy endpoint that requires authentication. For anonymous visitors this returned 401 ("Missing or malformed Authorization header"), `apiFetch` returned null, `state.projects` stayed empty, and the board area rendered "Selecione um projeto na barra lateral" + the universe-home loader stuck on "Carregando…".
+
+Sibling endpoints work anonymously without issue:
+- `GET /api/v1/universes/<slug>/projects` → 200
+- `GET /api/projects/<key>/tasks?u=<slug>` → 200
+
+**Fix**: `getProjects()` now prefers the v1 endpoint and falls back to the legacy path only if v1 doesn't return. Anonymous visitors get the tutorial project ("Bem-vindo ao Co") populated immediately on load — the board renders, the universe home renders, the Carregando state clears.
+
+**Combined with 2.13.1** (sidebar fallback) this closes the full anonymous-bootstrap gap. New incognito visitor lands on `/` → sidebar shows public universes, board shows tutorial project, tasks render — no 401-stuck states.
+
 ## [2.13.1] — 2026-05-21 — Hotfix: anonymous sidebar empty + Carregando... stuck
 
 ### Fixed — `loadMeUniverses()` bailed silently on 401 for anonymous users
