@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO — Changelog</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" type="image/svg+xml" href="/shared/favicon.svg">
+<style>
+/* ======================================================
+   CO-260 changelog viewer — standalone page styles
+   ====================================================== */
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  background:var(--bg,#0f172a);
+  color:var(--text,#e2e8f0);
+  font:14px/1.6 system-ui,sans-serif;
+  min-height:100vh;
+}
+a{color:var(--accent,#7c6fcd);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* ── header ── */
+.cl-header{
+  display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+  padding:16px 24px;
+  border-bottom:1px solid var(--border,#1e293b);
+  background:var(--card,#131929);
+  position:sticky;top:0;z-index:10;
+}
+.cl-logo{font-size:1.1rem;font-weight:700;color:var(--accent,#7c6fcd)}
+.cl-logo a{color:inherit;text-decoration:none}
+.cl-title{font-size:1rem;color:var(--text-muted,#94a3b8);font-weight:400}
+
+/* ── controls ── */
+.cl-controls{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:12px 24px;
+  border-bottom:1px solid var(--border,#1e293b);
+  background:var(--card-alt,#0f172a);
+}
+.cl-range{display:flex;align-items:center;gap:6px;font-size:13px}
+.cl-range label{color:var(--text-muted,#94a3b8);white-space:nowrap}
+.cl-select{
+  background:var(--input-bg,#1e293b);
+  border:1px solid var(--border,#334155);
+  color:var(--text,#e2e8f0);
+  border-radius:6px;
+  padding:4px 8px;
+  font-size:13px;cursor:pointer;
+}
+.cl-select:focus{outline:2px solid var(--accent,#7c6fcd)}
+
+/* ── type chips ── */
+.cl-chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.cl-chip{
+  padding:3px 10px;border-radius:999px;font-size:12px;font-weight:500;
+  border:1px solid transparent;cursor:pointer;transition:opacity .15s;
+}
+.cl-chip:not(.active){opacity:.45}
+.cl-chip.active{opacity:1}
+.cl-chip[data-type=feat]  {background:#14532d;color:#86efac;border-color:#16a34a}
+.cl-chip[data-type=fix]   {background:#1e3a5f;color:#93c5fd;border-color:#2563eb}
+.cl-chip[data-type=refactor]{background:#3b1d5c;color:#d8b4fe;border-color:#7c3aed}
+.cl-chip[data-type=docs]  {background:#1e293b;color:#94a3b8;border-color:#475569}
+.cl-chip[data-type=chore] {background:#1e293b;color:#94a3b8;border-color:#475569}
+
+/* ── view toggle ── */
+.cl-view-toggle{display:flex;gap:4px;margin-left:auto}
+.cl-view-btn{
+  padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;
+  background:transparent;border:1px solid var(--border,#334155);
+  color:var(--text-muted,#94a3b8);transition:background .15s;
+}
+.cl-view-btn.active{background:var(--accent,#7c6fcd);color:#fff;border-color:var(--accent,#7c6fcd)}
+
+/* ── sort select ── */
+.cl-sort-row{display:flex;align-items:center;gap:6px;font-size:13px}
+
+/* ── main body ── */
+.cl-body{padding:24px;max-width:960px;margin:0 auto}
+
+/* ── version block ── */
+.cl-version{margin-bottom:32px}
+.cl-version-header{
+  display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;
+  margin-bottom:12px;padding-bottom:8px;
+  border-bottom:1px solid var(--border,#1e293b);
+}
+.cl-version-tag{
+  font-size:1rem;font-weight:700;color:var(--text,#e2e8f0);
+  background:var(--card,#131929);
+  border:1px solid var(--border,#334155);
+  border-radius:6px;padding:2px 10px;
+  font-family:ui-monospace,monospace;
+}
+.cl-version-date{font-size:12px;color:var(--text-muted,#94a3b8)}
+.cl-version-theme{font-size:13px;color:var(--text-muted,#94a3b8);font-style:italic}
+
+/* ── entry rows ── */
+.cl-entries{display:flex;flex-direction:column;gap:8px}
+.cl-entry{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:10px 14px;
+  background:var(--card,#131929);
+  border:1px solid var(--border,#1e293b);
+  border-radius:8px;
+}
+.cl-ticket{
+  font-size:11px;font-weight:600;white-space:nowrap;
+  padding:2px 8px;border-radius:999px;
+  font-family:ui-monospace,monospace;
+  border:1px solid transparent;
+}
+.cl-ticket[data-type=feat]    {background:#14532d;color:#86efac;border-color:#16a34a}
+.cl-ticket[data-type=fix]     {background:#1e3a5f;color:#93c5fd;border-color:#2563eb}
+.cl-ticket[data-type=refactor]{background:#3b1d5c;color:#d8b4fe;border-color:#7c3aed}
+.cl-ticket[data-type=docs],
+.cl-ticket[data-type=chore]   {background:#1e293b;color:#94a3b8;border-color:#475569}
+
+.cl-entry-title{flex:1;font-size:13px;color:var(--text,#e2e8f0)}
+.cl-size-bar-wrap{display:flex;align-items:center;gap:6px}
+.cl-size-bar{
+  height:6px;border-radius:3px;min-width:2px;
+  background:linear-gradient(90deg,var(--accent,#7c6fcd),#a78bfa);
+}
+.cl-size-label{font-size:11px;color:var(--text-muted,#94a3b8);white-space:nowrap}
+.cl-pr-link{font-size:11px;color:var(--text-muted,#94a3b8);white-space:nowrap}
+.cl-pr-link a{color:var(--text-muted,#94a3b8)}
+
+/* ── grouped view type headers ── */
+.cl-type-section{margin-bottom:28px}
+.cl-type-header{
+  font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--text-muted,#94a3b8);margin-bottom:10px;padding:4px 0;
+  border-bottom:1px solid var(--border,#1e293b);
+}
+
+/* ── empty / loading states ── */
+.cl-loading,.cl-empty{
+  text-align:center;padding:48px;color:var(--text-muted,#94a3b8);font-size:14px
+}
+
+/* ── mobile responsive ── */
+@media (max-width:640px){
+  .cl-size-bar-wrap,.cl-pr-link{display:none}
+  .cl-version-theme{display:none}
+  .cl-controls{gap:8px;padding:10px 16px}
+  .cl-body{padding:16px}
+}
+</style>
+</head>
+<body>
+<div class="cl-header">
+  <span class="cl-logo"><a href="/">Co</a></span>
+  <span class="cl-title">Changelog — histórico de versões</span>
+</div>
+
+<div class="cl-controls">
+  <!-- Version range picker -->
+  <div class="cl-range">
+    <label>De</label>
+    <select id="cl-from" class="cl-select"><option value="">qualquer</option></select>
+    <label>até</label>
+    <select id="cl-to" class="cl-select"><option value="">qualquer</option></select>
+  </div>
+
+  <!-- Type filter chips -->
+  <div class="cl-chips" id="cl-chips">
+    <span style="font-size:12px;color:var(--text-muted,#94a3b8)">Tipo:</span>
+    <button class="cl-chip active" data-type="feat">feat</button>
+    <button class="cl-chip active" data-type="fix">fix</button>
+    <button class="cl-chip active" data-type="refactor">refactor</button>
+    <button class="cl-chip active" data-type="docs">docs</button>
+    <button class="cl-chip active" data-type="chore">chore</button>
+  </div>
+
+  <!-- Sort selector -->
+  <div class="cl-sort-row">
+    <label style="font-size:13px;color:var(--text-muted,#94a3b8)">Ordenar:</label>
+    <select id="cl-sort" class="cl-select">
+      <option value="date">mais recente primeiro</option>
+      <option value="size">maior PR primeiro</option>
+    </select>
+  </div>
+
+  <!-- View mode toggle -->
+  <div class="cl-view-toggle">
+    <button class="cl-view-btn active" id="btn-view-sequential">Sequential</button>
+    <button class="cl-view-btn" id="btn-view-grouped">Grouped</button>
+  </div>
+</div>
+
+<div class="cl-body" id="cl-body">
+  <div class="cl-loading">Carregando changelog…</div>
+</div>
+
+<script type="module">
+// ======================================================
+// CO-260 — Changelog viewer JS
+// ======================================================
+
+const SEP_BAR_MAX_WIDTH = 120; // px for the largest PR size bar
+
+let _allVersions = [];  // raw data from API
+let _viewMode = 'sequential'; // 'sequential' | 'grouped'
+let _activeTypes = new Set(['feat','fix','refactor','docs','chore']);
+let _sort = 'date';
+
+function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── fetch data ──────────────────────────────────────────────────────────────
+
+async function fetchChangelog(from, to) {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    const url = '/api/v1/changelog' + (params.toString() ? '?' + params : '');
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.json();
+}
+
+// ── populate version selects ─────────────────────────────────────────────────
+
+function populateSelects(versions) {
+    const fromEl = document.getElementById('cl-from');
+    const toEl   = document.getElementById('cl-to');
+    const savedFrom = fromEl.value;
+    const savedTo   = toEl.value;
+
+    // Versions are already sorted newest-first
+    const all = versions.map(v => v.version);
+    const oldest = [...all].reverse();
+
+    fromEl.innerHTML = '<option value="">qualquer</option>';
+    oldest.forEach(v => {
+        const o = document.createElement('option');
+        o.value = o.textContent = v;
+        if (v === savedFrom) o.selected = true;
+        fromEl.appendChild(o);
+    });
+
+    toEl.innerHTML = '<option value="">qualquer</option>';
+    all.forEach(v => {
+        const o = document.createElement('option');
+        o.value = o.textContent = v;
+        if (v === savedTo) o.selected = true;
+        toEl.appendChild(o);
+    });
+}
+
+// ── max PR size (for bar scaling) ─────────────────────────────────────────────
+
+function maxPrSize(versions) {
+    let max = 1;
+    for (const v of versions) {
+        for (const e of v.entries) {
+            if ((e.pr_size ?? 0) > max) max = e.pr_size;
+        }
+    }
+    return max;
+}
+
+// ── filter & sort ─────────────────────────────────────────────────────────────
+
+function applyFilters(versions) {
+    return versions
+        .map(v => ({
+            ...v,
+            entries: v.entries.filter(e => _activeTypes.has(e.entry_type)),
+        }))
+        .filter(v => v.entries.length > 0);
+}
+
+function applySortEntries(versions) {
+    if (_sort !== 'size') return versions;
+    return versions.map(v => ({
+        ...v,
+        entries: [...v.entries].sort((a,b) => (b.pr_size??0) - (a.pr_size??0)),
+    }));
+}
+
+// ── render helpers ────────────────────────────────────────────────────────────
+
+function renderSizeBar(prSize, maxSize) {
+    if (!prSize) return '';
+    const w = Math.round((prSize / maxSize) * SEP_BAR_MAX_WIDTH);
+    return `<span class="cl-size-bar-wrap">
+        <span class="cl-size-bar" style="width:${w}px"></span>
+        <span class="cl-size-label">${prSize} LOC</span>
+    </span>`;
+}
+
+function renderPrLink(pr) {
+    if (!pr) return '';
+    return `<span class="cl-pr-link"><a href="https://github.com/artelonga/co/pull/${pr}" target="_blank" rel="noopener">#${pr}</a></span>`;
+}
+
+function renderEntry(entry, maxSize) {
+    return `<div class="cl-entry" data-type="${esc(entry.entry_type)}">
+        <a class="cl-ticket" data-type="${esc(entry.entry_type)}" href="${esc(entry.spec_url)}">${esc(entry.ticket)}</a>
+        <span class="cl-entry-title">${esc(entry.title || entry.ticket)}</span>
+        ${renderSizeBar(entry.pr_size, maxSize)}
+        ${renderPrLink(entry.pr)}
+    </div>`;
+}
+
+// ── sequential view ───────────────────────────────────────────────────────────
+
+function renderSequential(versions) {
+    const maxSize = maxPrSize(versions);
+    return versions.map(v => `
+        <div class="cl-version">
+            <div class="cl-version-header">
+                <span class="cl-version-tag">v${esc(v.version)}</span>
+                <span class="cl-version-date">${esc(v.date)}</span>
+                ${v.theme ? `<span class="cl-version-theme">${esc(v.theme)}</span>` : ''}
+            </div>
+            <div class="cl-entries">
+                ${v.entries.map(e => renderEntry(e, maxSize)).join('')}
+            </div>
+        </div>`
+    ).join('');
+}
+
+// ── grouped view ──────────────────────────────────────────────────────────────
+
+const TYPE_LABELS = {
+    feat:     'Features',
+    fix:      'Bug fixes',
+    refactor: 'Refactors',
+    docs:     'Documentation',
+    chore:    'Chores',
+};
+const TYPE_ORDER = ['feat','fix','refactor','docs','chore'];
+
+function renderGrouped(versions) {
+    const maxSize = maxPrSize(versions);
+    // Collect entries per type across all versions
+    const grouped = {};
+    for (const v of versions) {
+        for (const e of v.entries) {
+            if (!grouped[e.entry_type]) grouped[e.entry_type] = [];
+            grouped[e.entry_type].push({ ...e, _version: v.version, _date: v.date });
+        }
+    }
+
+    // Sort each group by pr_size desc when sort=size, otherwise by version desc (already ordered)
+    const order = TYPE_ORDER.filter(t => grouped[t]?.length);
+
+    return order.map(type => {
+        let entries = grouped[type];
+        if (_sort === 'size') {
+            entries = [...entries].sort((a,b) => (b.pr_size??0) - (a.pr_size??0));
+        }
+        return `<div class="cl-type-section">
+            <div class="cl-type-header">${TYPE_LABELS[type] || type}</div>
+            <div class="cl-entries">
+                ${entries.map(e => `
+                    <div class="cl-entry" data-type="${esc(e.entry_type)}">
+                        <a class="cl-ticket" data-type="${esc(e.entry_type)}" href="${esc(e.spec_url)}">${esc(e.ticket)}</a>
+                        <span class="cl-version-date" style="font-size:11px;white-space:nowrap">v${esc(e._version)}</span>
+                        <span class="cl-entry-title">${esc(e.title || e.ticket)}</span>
+                        ${renderSizeBar(e.pr_size, maxSize)}
+                        ${renderPrLink(e.pr)}
+                    </div>`).join('')}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── main render ───────────────────────────────────────────────────────────────
+
+function render() {
+    const body = document.getElementById('cl-body');
+    if (!_allVersions.length) {
+        body.innerHTML = '<div class="cl-empty">Nenhuma versão encontrada.</div>';
+        return;
+    }
+
+    let versions = applyFilters(_allVersions);
+    versions = applySortEntries(versions);
+
+    if (!versions.length) {
+        body.innerHTML = '<div class="cl-empty">Nenhuma entrada para os filtros selecionados.</div>';
+        return;
+    }
+
+    body.innerHTML = _viewMode === 'grouped'
+        ? renderGrouped(versions)
+        : renderSequential(versions);
+}
+
+// ── load data ─────────────────────────────────────────────────────────────────
+
+async function load() {
+    const from = document.getElementById('cl-from').value;
+    const to   = document.getElementById('cl-to').value;
+    const body = document.getElementById('cl-body');
+    body.innerHTML = '<div class="cl-loading">Carregando…</div>';
+    try {
+        const data = await fetchChangelog(from || null, to || null);
+        _allVersions = data.versions || [];
+        populateSelects(data.versions || []);
+        render();
+    } catch (err) {
+        body.innerHTML = `<div class="cl-empty">Erro ao carregar: ${esc(err.message)}</div>`;
+    }
+}
+
+// ── wire controls ─────────────────────────────────────────────────────────────
+
+document.getElementById('cl-from').addEventListener('change', load);
+document.getElementById('cl-to').addEventListener('change', load);
+
+document.getElementById('cl-sort').addEventListener('change', e => {
+    _sort = e.target.value;
+    render();
+});
+
+document.getElementById('cl-chips').addEventListener('click', e => {
+    const chip = e.target.closest('.cl-chip');
+    if (!chip) return;
+    const type = chip.dataset.type;
+    if (_activeTypes.has(type)) {
+        _activeTypes.delete(type);
+        chip.classList.remove('active');
+    } else {
+        _activeTypes.add(type);
+        chip.classList.add('active');
+    }
+    render();
+});
+
+document.getElementById('btn-view-sequential').addEventListener('click', () => {
+    _viewMode = 'sequential';
+    document.getElementById('btn-view-sequential').classList.add('active');
+    document.getElementById('btn-view-grouped').classList.remove('active');
+    render();
+});
+document.getElementById('btn-view-grouped').addEventListener('click', () => {
+    _viewMode = 'grouped';
+    document.getElementById('btn-view-grouped').classList.add('active');
+    document.getElementById('btn-view-sequential').classList.remove('active');
+    render();
+});
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+load();
+</script>
+</body>
+</html>
