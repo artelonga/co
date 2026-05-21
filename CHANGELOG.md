@@ -5,6 +5,17 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.16.2] — 2026-05-21 — Splitter mirror behavior in obsidian-mode (CO-255)
+
+### Fixed — conteúdo split-pane drag direction in obsidian-mode
+
+In obsidian-mode the sections pane had a hard-coded `280px` flex basis and the detail pane took the remainder, so `--split-pct` was disconnected from both panes. Dragging the splitter appeared to do nothing.
+
+- **CSS**: `.conteudo-split.obsidian-mode .conteudo-sections-pane` now uses `flex: 0 0 calc(100% - var(--split-pct) - 14px)` so the variable is wired again.
+- **JS**: `onMove` inverts the raw percentage (`100 - pctRaw`) when `obsidian-mode` is active, so dragging left grows the detail pane (mirroring the normal-mode behaviour on the opposite side).
+
+Touch and mouse both work in both modes. `--split-pct` persists in localStorage and survives mode toggle.
+
 ## [2.16.1] — 2026-05-21 — Table render fix + privacy/homepage polish
 
 ### Fixed — markdown table HTML had stray `<` before `<thead>`
