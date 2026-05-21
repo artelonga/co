@@ -1,6 +1,6 @@
 ---
 created: 2026-04-11T01:26:20.515990+00:00
-modified: 2026-04-26T00:00:00+00:00
+modified: 2026-05-21T00:00:00+00:00
 order: 11
 slug: privacidade
 tags:
@@ -11,133 +11,109 @@ type: page
 
 # Política de Privacidade
 
-Última atualização: abril de 2026
+Atualizada em 21 de maio de 2026.
 
-## Resumo
+## Resumo em uma linha
 
-- **Você é dono do seu conteúdo.** Markdown nativo, exportável a qualquer momento.
-- **Hospedagem flexível:** rode o Co no seu próprio servidor (código MIT) ou use a instância gerenciada pela Arte Longa.
-- **Privado por padrão:** universos novos são privados; só você e quem você convidar enxerga.
-- **Sem rastreadores de terceiros:** nada de Google Analytics, Facebook Pixel, ads ou fingerprinting.
-- **Transparência total:** lista exaustiva do que coletamos em [dados rastreados](/co/template?path=content/dados-rastreados.md).
+Você é dono do seu conteúdo, ele fica no servidor que **você** escolhe, e a Arte Longa não vende, aluga, nem repassa nada a terceiros.
 
-## 1. Dois modelos de hospedagem
+## 1. Dois cenários
 
-O Co é software livre (MIT). Você escolhe onde seus dados moram:
+| Cenário | Quem é o controlador | Esta política se aplica? |
+|---|---|---|
+| **Auto-hospedagem** (você roda o Co num servidor seu) | Você | Não — você é o controlador |
+| **Instância gerenciada** (`co.artelonga.com.br`) | Arte Longa | Sim |
 
-### Auto-hospedagem
-Você roda o Co no seu próprio servidor (laptop, VPS, Raspberry Pi, qualquer coisa). **A Arte Longa não tem acesso aos seus dados nessa modalidade.** Esta política não se aplica — você é o controlador.
+O Co é software livre sob [AGPL v3](/co/public/licensa). Em qualquer cenário, o código é o mesmo e auditável.
 
-### Instância Arte Longa (`co.artelonga.com.br`)
-Hospedada na Fly.io, região São Paulo (GRU). A Arte Longa é a controladora dos dados. Esta política descreve essa modalidade.
+## 2. O que coletamos
 
-## 2. Dados coletados
-
-O mínimo necessário para o serviço funcionar:
+Só o estritamente necessário:
 
 | Categoria | Dados | Por quê |
-|-----------|-------|---------|
-| **Conta** | e-mail, nome de exibição (opcional), hash Argon2id da senha | Autenticação |
-| **Conteúdo** | textos, tarefas, arquivos que você cria nos seus universos | É o serviço |
-| **Cookies** | sessão JWT, idioma, tema, universo anônimo local | Funcionamento |
-| **Logs técnicos** | hash diário do IP, rotas acessadas, código de erro | Segurança e debug |
-| **Telemetria opt-in** | eventos de UI agregados e anônimos | Melhorar a UX |
+|---|---|---|
+| Conta | e-mail, nome, hash Argon2id da senha | autenticação |
+| Conteúdo | seus textos, tarefas, arquivos | é o serviço |
+| Cookies essenciais | sessão JWT, idioma, tema | funcionamento |
+| Logs técnicos | hash diário do IP, rota, código de erro | segurança/debug |
+| Telemetria | eventos de UI agregados, anônimos, **opt-out via Do Not Track** | melhorar UX |
 
-**Não coletamos:** IP bruto, conteúdo de mensagens via terceiros, dados biométricos, localização precisa, histórico fora do Co, identificadores cross-site.
+**Não coletamos:** IP bruto, biometria, localização precisa, identificadores cross-site, conteúdo de mensagens via terceiros, nem nada que permita perfilamento publicitário.
 
-## 3. Como protegemos seus dados
+Detalhe exaustivo em [Dados Rastreados](/template/dados-rastreados).
 
-### Hoje (implementado)
+## 3. Proteção
 
-- **Em trânsito:** TLS 1.3 em todas as requisições (HTTPS obrigatório).
-- **Senhas:** hash Argon2id, nunca armazenadas em texto puro.
-- **Tokens:** JWT com expiração; tokens de API armazenáveis no keychain do SO via `co-token`.
-- **Controle de acesso:** modelo determinístico por universo (CO-49). Universos privados retornam 404 para quem não tem permissão.
-- **Isolamento de banco:** SQLite no volume da Fly.io, montado apenas na máquina autorizada, acessível apenas via SSH com a chave do operador.
-- **Sem terceiros:** sem CDN externa para JS, sem rastreador, sem analytics de terceiros.
+- **TLS 1.3** em todas as requisições.
+- **Argon2id** para senhas — texto puro nunca toca o banco.
+- **SHA-256** para tokens de API em repouso (v2.12.1+).
+- **Universos privados retornam 404** para quem não tem permissão (CO-49).
+- **Sem terceiros embedados** — sem CDN, sem Google Analytics, sem Facebook Pixel, sem Hotjar, sem Sentry remoto.
 
-### Honestidade sobre cifragem em repouso
+**Honestidade sobre cifragem em repouso:** corpos de notas/tarefas estão em texto puro no SQLite hoje. O operador da instância tecnicamente consegue ler conteúdo se acessar o servidor. Roadmap [CO-86](/co/CO-86) implementa cifragem ChaCha20-Poly1305 derivada da sua senha — até lá, conteúdo sensível deve ir em auto-hospedagem.
 
-**Os corpos das notas e tarefas são armazenados em texto puro no SQLite hoje.** Isto significa que o operador da instância (Arte Longa, no caso de `co.artelonga.com.br`) tecnicamente consegue ler conteúdo se acessar o servidor. Não fazemos isso, mas a possibilidade técnica existe.
+## 4. Cookies
 
-**Roadmap (v3.0 — CO-86):** cifragem dos corpos com envelope ChaCha20-Poly1305 e chave derivada da senha do usuário, de modo que nem o operador consiga ler. Até lá:
-- Para conteúdo sensível, **use auto-hospedagem** ou aguarde a v3.0.
-- Para conteúdo público ou semi-privado (notas pessoais, kanban de projeto), o modelo atual é equivalente ao de qualquer SaaS comum (Notion, Trello, etc.).
-
-Esta honestidade é deliberada — preferimos descrever o que está pronto hoje a vender uma promessa que ainda não cumprimos.
-
-## 4. Uso dos dados
-
-Seus dados são usados exclusivamente para:
-- Autenticar sua conta e manter sua sessão
-- Armazenar e exibir seu conteúdo nos seus universos
-- Melhorar o produto (telemetria agregada e anônima, opt-in)
-- Cumprir obrigações legais quando aplicável
-
-**Não vendemos, alugamos, cedemos ou monetizamos seus dados.** Sem ads, sem retargeting, sem data brokers.
-
-## 5. Cookies
-
-Apenas estritamente necessários:
+Apenas essenciais — não precisamos do seu consentimento para usá-los (LGPD Art. 7, IX).
 
 | Cookie | Finalidade | Duração |
-|--------|-----------|---------|
-| `session` | Autenticação (JWT) | 30 dias |
-| `co_lang` | Idioma da interface | 1 ano |
-| `co_named_palette` | Tema visual | 1 ano |
-| `co_local_universe` | Universo anônimo local | Sessão |
+|---|---|---|
+| `session` | autenticação JWT | 30 dias |
+| `co_lang` | idioma da interface | 1 ano |
+| `co_named_palette` | tema visual | 1 ano |
+| `co_local_universe` | universo anônimo local | sessão |
 
-## 6. Telemetria
+Nenhum cookie de terceiro. Nenhum cookie de tracking. Por isso não há banner "Aceitar cookies".
 
-Eventos agregados e anonimizados, com **opt-out automático** se você habilitou Do Not Track no navegador.
+## 5. LGPD — Lei 13.709/2018
 
-- IP convertido em hash diário (irreversível)
-- Identificador de visitante é nanoid aleatório, sem ligação com identidade real
-- Conteúdo de mensagens, notas ou tarefas **nunca é enviado**
-- Lista exaustiva: [dados rastreados](/co/template?path=content/dados-rastreados.md)
+A Arte Longa atua como **controladora** dos dados na instância gerenciada. Bases legais aplicáveis:
 
-Para desativar: opt-out em Configurações → Privacidade (em breve), ou habilite Do Not Track no navegador.
+| Tratamento | Base legal | Art. |
+|---|---|---|
+| Sua conta + conteúdo | Execução de contrato | 7º, V |
+| Cookies essenciais | Legítimo interesse + exercício regular de direitos | 7º, IX |
+| Telemetria agregada anônima | Anonimizada → fora do escopo da LGPD | Art. 12 |
+| Logs técnicos | Cumprimento de obrigação legal (segurança) | 7º, II |
 
-## 7. Seus direitos (LGPD)
+### Seus direitos (LGPD Art. 18)
 
-Conforme a Lei 13.709/2018 (LGPD), você tem direito a:
-- **Acessar** seus dados pessoais
+- **Acessar** seus dados pessoais — solicite por email, resposta em até 15 dias
 - **Corrigir** dados incompletos ou inexatos
-- **Excluir** sua conta e todo o conteúdo associado
-- **Exportar** seu conteúdo (Markdown nativo, sempre disponível)
-- **Revogar** consentimento de telemetria
+- **Excluir** sua conta e todo o conteúdo associado — purga em até 30 dias, backups em até 90 dias
+- **Exportar** seu conteúdo — Markdown nativo, sempre disponível via API ou UI
+- **Revogar** consentimento para telemetria — Do Not Track ou Configurações → Privacidade
+- **Saber** com quem seus dados foram compartilhados (resposta: ninguém, exceto Fly.io como sub-operador)
 
-Para exercer: yuri@artelonga.com.br — resposta em até 15 dias.
+### Controladora e DPO
 
-## 8. Retenção
+- Controlador: Yuri Felipe Hild — `yuri@artelonga.com.br`
+- Encarregado (DPO): mesmo contato
+- Incidentes de segurança comunicados à ANPD em até 48h (LGPD Art. 48)
 
-- Conta ativa: dados mantidos enquanto você usar o serviço
-- Universos anônimos (sem login): podem ser removidos após 90 dias de inatividade
-- Conta excluída: dados removidos em até 30 dias (incluindo backups)
-- Logs técnicos: 90 dias
-- Agregados anônimos: indefinidamente (sem ligação com identidade)
-
-## 9. Compartilhamento
+## 6. Compartilhamento
 
 A Arte Longa **não compartilha dados com terceiros**, exceto:
-- **Provedor de infraestrutura:** Fly.io (hospedagem). Sujeito à [política de privacidade da Fly.io](https://fly.io/legal/privacy-policy/) e ao DPA correspondente, disponível mediante solicitação por se tratar de cliente corporativo.
-- **Obrigação legal:** mediante ordem judicial fundamentada, conforme legislação brasileira.
 
-Não usamos: Google Analytics, Facebook Pixel, Hotjar, Sentry remoto, intercom de chat, nem qualquer outro tracker de terceiros.
+- **Fly.io** (sub-operador de infraestrutura, região São Paulo): hospeda o servidor e o volume. Sujeito ao [DPA Fly.io](https://fly.io/legal/privacy-policy/), disponível mediante solicitação.
+- **Ordem judicial** fundamentada conforme legislação brasileira.
 
-## 10. Crianças
+## 7. Retenção
 
-O Co não é direcionado a menores de 13 anos. Não coletamos conscientemente dados de crianças.
+- Conta ativa: enquanto você usar
+- Conta excluída: 30 dias (90 dias para backups)
+- Universos anônimos sem login: removíveis após 90 dias de inatividade
+- Logs técnicos: 90 dias
 
-## 11. Mudanças nesta política
+## 8. Crianças
 
-Alterações relevantes serão comunicadas via banner na Plataforma com pelo menos 15 dias de antecedência. O histórico de versões está em <https://github.com/artelonga/co/commits/main/co-web/seed/template/privacidade.md>.
+O Co não é direcionado a menores de 13 anos.
 
-## 12. Contato
+## 9. Mudanças
 
-Controlador (instância gerenciada): Yuri Felipe Hild — yuri@artelonga.com.br
-Encarregado (DPO): mesmo contato
+Alterações relevantes serão comunicadas com **15 dias** de antecedência. Histórico de versões: <https://github.com/artelonga/co/commits/main/co-web/seed/template/privacidade.md>.
 
 ---
 
-*Arte Longa — Curitiba, PR, Brasil*
+*Arte Longa — Curitiba, PR, Brasil.*  
+*Licença do código: [AGPL v3](/co/public/licensa).*

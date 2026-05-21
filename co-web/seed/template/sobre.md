@@ -21,7 +21,7 @@ Esta página guarda os detalhes técnicos e de governança.
 1. **Markdown é o formato canônico.** Frontmatter YAML para metadados, corpo em Markdown. Portabilidade antes de tudo.
 2. **Universos são unidades de identidade.** Privados = perfis. Públicos = vitrines. Cada universo tem dono, regras de visibilidade e um histórico próprio.
 3. **A rede é o produto.** Universos se conectam por links, subscrições, relações tipadas. O grafo emerge sem coordenação central.
-4. **Software livre, conteúdo seu.** Licença MIT no código; donos detêm seus próprios universos.
+4. **Software livre, conteúdo seu.** Código sob [AGPL v3](/co/public/licensa); donos detêm seus próprios universos.
 
 ## Stack
 
@@ -33,7 +33,7 @@ Esta página guarda os detalhes técnicos e de governança.
 
 - Código: [github.com/artelonga/co](https://github.com/artelonga/co)
 - Issues e roadmap: board público em [/co/co](/co/co)
-- Licença: MIT
+- Licença: [AGPL v3](/co/public/licensa) — copyleft de rede que protege a comunidade contra fechamento privado
 
 ---
 

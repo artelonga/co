@@ -605,17 +605,9 @@
         <a class="footer-github-link" href="https://github.com/artelonga/co" target="_blank" rel="noopener" data-i18n="action.github">GitHub</a>
     </footer>
 
-    <!-- Cookie Banner -->
-    <div id="cookie-banner" class="cookie-banner hidden">
-        <div class="cookie-banner-inner">
-            <p class="cookie-banner-text">
-                Este site usa cookies essenciais para autenticação e preferências.
-                Ao aceitar, você também consente com a coleta de dados de uso anonimizados para melhoria da plataforma.
-                <a href="/?page=privacidade" id="cookie-privacy-link" target="_blank" rel="noopener" style="text-decoration:underline">Política de Privacidade</a>
-            </p>
-            <button class="btn btn-primary btn-sm" id="cookie-accept">Aceitar</button>
-        </div>
-    </div>
+    <!-- Cookie banner removed in 2.13.6 — Co only uses cookies estritamente
+         necessários (sessão JWT + preferências de UI). LGPD Art. 7º, IX dispensa
+         consentimento prévio para esses casos. Detalhes na /privacidade. -->
 
     <!-- CO-69: Offline conflict banner — shown when there are queued offline writes.
          Uses style.display rather than .hidden class to avoid specificity conflict. -->
@@ -640,18 +632,8 @@
     <script src="/shared/experiment.js?v=3"></script>
     <script src="/shared/telemetry.js?v=1" defer></script>
     <script>
-    // Cookie consent banner
+    // Cookie consent banner removed in 2.13.6 — only essential cookies used.
     (function() {
-        if (localStorage.getItem('co_cookie_consent')) return;
-        var banner = document.getElementById('cookie-banner');
-        if (banner) banner.classList.remove('hidden');
-        var btn = document.getElementById('cookie-accept');
-        if (btn) btn.addEventListener('click', function() {
-            localStorage.setItem('co_cookie_consent', '1');
-            banner.classList.add('hidden');
-        });
-        // cookie-privacy-link opens privacy page in new tab (no JS handler needed)
-
         // Register PWA service worker. When a new SW takes control of the
         // page (i.e. a deploy happened), reload once so the user gets the
         // fresh app.js / style.css instead of whatever the old SW had cached.

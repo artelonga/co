@@ -5,6 +5,34 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.6] — 2026-05-21 — Privacy policy rewrite + cookie banner removed + MIT → AGPL
+
+### Changed — Privacy policy
+
+`co-web/seed/template/privacidade.md` rewritten:
+- ~30% shorter — collapsed redundant prose, denser tables, single "Resumo em uma linha" up top
+- License references corrected: was *"código MIT"* / *"Licença MIT"* in two places — Co has been under [AGPL v3](/co/public/licensa) since the 2.7.x license flip, not MIT
+- New **section 5 — LGPD** with explicit base-legal mapping (Art. 7º V/IX/II, Art. 12, Art. 18, Art. 48) plus right-by-right user actions and the controladora/DPO contact
+- Section 9 (sharing) trimmed; section 12 (contact) absorbed into the LGPD block
+
+### Changed — `sobre.md`
+
+Two stale MIT references corrected:
+- *"Software livre, conteúdo seu. Licença MIT no código"* → AGPL v3 with link
+- *"Licença: MIT"* → AGPL v3 with the "copyleft de rede" framing
+
+### Removed — Cookie consent banner
+
+`#cookie-banner` HTML, CSS class, and JS handler removed. Rationale:
+- The four cookies Co sets (`session`, `co_lang`, `co_named_palette`, `co_local_universe`) are all **estritamente necessários** for authentication or UI preferences
+- LGPD Art. 7º, IX (legítimo interesse + exercício regular de direitos) does not require prior consent for essential cookies
+- The prior banner copy implied opt-in to "anonymized usage data collection" — but Co already respects Do Not Track for telemetry, so the consent flow added no real choice
+- Privacy policy section 4 now explains this explicitly: "Por isso não há banner 'Aceitar cookies'"
+
+### Why
+
+The legal page was inaccurate on its single most-checked field (license) and contained a misleading consent prompt for cookies that didn't need consent. Both regressions of trust. Fixed together so the privacy story is internally consistent: only essential cookies + only LGPD-mandated bases + AGPL on the code + no theatrical accept-button.
+
 ## [2.13.5] — 2026-05-21 — UX: Universe visibility simplified to two options
 
 ### Changed — Visibilidade form has 2 options, clearer terminology
