@@ -56,9 +56,9 @@ tar = "0.4"
 # Temp directories (used at runtime by deployer adapters)
 tempfile = { workspace = true }
 
-# AWS SDK — R2 static-on-r2 adapter
-aws-sdk-s3 = "1"
-aws-config = "1"
+# AWS SDK — R2 static-on-r2 adapter (optional; enable via `deploy-r2` feature)
+aws-sdk-s3 = { version = "1", optional = true }
+aws-config = { version = "1", optional = true }
 
 [build-dependencies]
 prost-build = "0.13"
@@ -70,9 +70,11 @@ tokio = { workspace = true }
 
 [features]
 default = []
+# Gate the AWS SDK — compile with --features deploy-r2 to enable R2 deploys
+deploy-r2 = ["dep:aws-sdk-s3", "dep:aws-config"]
 # Enable full graph traversal capabilities
 full-graph = []
 # Enable translation support
 translations = []
-# Enable all features
+# Enable all features (deploy-r2 intentionally excluded — add explicitly when needed)
 all = ["full-graph", "translations"]
