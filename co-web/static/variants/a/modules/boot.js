@@ -62,6 +62,23 @@ export async function renderUniverseHome() {
         if (md && typeof md.renderMermaidBlocks === 'function') {
             md.renderMermaidBlocks(body);
         }
+        // Inject "Ver mais" — top entries by popularity, replacing the sentinel comment.
+        try {
+            const popular = await apiFetch(
+                `/api/v1/universes/${encodeURIComponent(slug)}/entries/popular?limit=5`,
+                {}, true
+            );
+            if (popular && popular.length > 0) {
+                const listHtml = popular
+                    .map(e => `<li><a href="/${esc(slug)}?path=${encodeURIComponent(e.path)}">${esc(e.title)}</a></li>`)
+                    .join('');
+                const section = document.createElement('section');
+                section.className = 'universe-home-popular';
+                section.innerHTML = `<h2>Ver mais</h2><ul class="universe-popular-list">${listHtml}</ul>`;
+                const article = body.querySelector('article');
+                if (article) article.appendChild(section);
+            }
+        } catch (_) {}
         return;
     }
 

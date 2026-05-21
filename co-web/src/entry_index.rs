@@ -641,6 +641,31 @@ impl<'a> EntryIndex<'a> {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
+    /// Return entries ranked by event frequency (write count) in `entry_events`,
+    /// falling back to `updated_at DESC` for entries with no recorded events.
+    /// Excludes `index.md` and task/project entries under `projects/`.
+    /// Used by `GET /api/v1/universes/{slug}/entries/popular`.
+    pub fn popular(&self, universe_key: &str, limit: usize) -> anyhow::Result<Vec<EntryRow>> {
+        let cap = (limit.min(50)) as i64;
+        let mut stmt = self.conn.prepare(
+            "SELECT e.path, e.universe_key, e.entry_type, e.title, \
+             e.frontmatter_json, e.body, e.body_hash, e.created_at, e.updated_at \
+             FROM entries e \
+             LEFT JOIN ( \
+               SELECT path, COUNT(*) AS cnt \
+               FROM entry_events WHERE op = 'put' \
+               GROUP BY path \
+             ) ev ON e.path = ev.path \
+             WHERE e.universe_key = ?1 \
+               AND e.path != 'index.md' \
+               AND e.path NOT LIKE 'projects/%' \
+             ORDER BY COALESCE(ev.cnt, 0) DESC, e.updated_at DESC \
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![universe_key, cap], row_to_entry_row)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     /// Count entries of a given type in a universe.
     pub fn count(&self, universe_key: &str, entry_type: Option<&str>) -> i64 {
         match entry_type {
