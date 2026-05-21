@@ -3,6 +3,7 @@
 **Snapshot:** 2026-05-13 · workspace 2.8.1
 **Scope:** the four-binary workspace (`co-web`, `co-cli`, `co`, `co-agent`, `game-core`) plus the embedded SPA at `co-web/static/variants/a/`.
 **Build on:** [`docs/architecture-review.md`](../architecture-review.md) already covers the SPA decomposition + the inject-callback IoC pattern; this document widens the lens to the Rust side and the platform context. The SPA section here defers to that review.
+**Module patterns:** the five server-side patterns (directory, sub-state, extractor, event-bus, worker) are codified in [`co-web/src/MODULES.md`](../../co-web/src/MODULES.md).
 
 ---
 

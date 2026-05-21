@@ -9,6 +9,7 @@ This file contains instructions for Claude instances working on the CO project.
 - **Repository:** `institutional-pointset/co`
 - **Current Version:** Check `Cargo.toml` for latest
 - **Stack:** Rust, clap, SQLite (rusqlite), serde
+- **co-web module patterns:** see [`co-web/src/MODULES.md`](co-web/src/MODULES.md) for the five server-side conventions (directory, sub-state, extractor, event-bus, worker)
 
 ## Before Starting Work
 
