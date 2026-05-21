@@ -6,7 +6,7 @@
 # previous CXXFLAGS=-std=c++14 workaround is unreliable because ort-sys's
 # build.rs can override CXX flags. Easier to ship on a base image that has
 # the symbols natively.
-FROM rust:1.90-slim-trixie AS builder
+FROM rust:1.94-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     protobuf-compiler pkg-config libssl-dev g++ \
