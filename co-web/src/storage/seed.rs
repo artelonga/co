@@ -918,7 +918,9 @@ impl Storage {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                let entry_path = rel.display().to_string().replace('\\', "/");
+                // CO-262: prefix with public/ so anon visitors see these entries
+                // via the entries API (filter_public_for_anon requires public/* for co).
+                let entry_path = format!("public/{}", rel.display().to_string().replace('\\', "/"));
                 out.push((p, entry_path));
             }
             out
@@ -1110,7 +1112,9 @@ fn work_task_frontmatter(raw: &str, now_str: &str, project_key: &str) -> serde_j
                 .to_string();
             obj.insert("modified".to_string(), json!(ts));
         }
-        if !obj.contains_key("tags") && let Some(labels) = obj.get("labels").cloned() {
+        if !obj.contains_key("tags")
+            && let Some(labels) = obj.get("labels").cloned()
+        {
             obj.insert("tags".to_string(), labels);
         }
         // The board SQL filter is `archived = 0`; json_extract returns NULL for
