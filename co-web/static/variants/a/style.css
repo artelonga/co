@@ -237,6 +237,17 @@ body {
     vertical-align: middle;
     flex-shrink: 0;
 }
+/* CO-252: open-source badge on the co dev universe row */
+.oss-chip {
+    font-size: 10px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.18);
+    color: rgba(134, 239, 172, 0.9);
+    margin-left: 6px;
+    vertical-align: middle;
+    flex-shrink: 0;
+}
 .sidebar-invite-row {
     margin-bottom: 2px;
 }

@@ -255,6 +255,7 @@
             'sidebar.invite.accepted': 'Convite aceito!',
             'sidebar.invite.decline': 'Recusar',
             'sidebar.discover.subscribe': 'Inscrever-se',
+            'sidebar.co_dev_chip': 'código aberto',
             // CO-38: Yggdrasil
             'ygg.title': 'Yggdrasil',
             'ygg.subtitle': 'Hub de minijogos — perfis e rankings',
@@ -618,6 +619,7 @@
             'sidebar.invite.accepted': 'Invitation accepted!',
             'sidebar.invite.decline': 'Decline',
             'sidebar.discover.subscribe': 'Subscribe',
+            'sidebar.co_dev_chip': 'open source',
             // CO-195/196: Chat
             'chat.open': '💬 Chat',
             'chat.title': 'Chat — {universe}',
