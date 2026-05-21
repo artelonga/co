@@ -416,6 +416,54 @@ pub async fn list_entries(
     }
 }
 
+/// GET /api/v1/universes/:slug/entries/popular — top-N entries by event frequency
+#[derive(Debug, Deserialize)]
+pub struct PopularQuery {
+    pub limit: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PopularEntry {
+    pub path: String,
+    pub title: String,
+    pub entry_type: String,
+    pub updated_at: Option<String>,
+}
+
+pub async fn popular_entries(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<PopularQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let limit = q.limit.unwrap_or(10).min(50);
+    let uc = {
+        let storage = lock_storage(&state);
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let rows = index
+        .popular(&slug, limit)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let items: Vec<PopularEntry> = rows
+        .into_iter()
+        .map(|e| PopularEntry {
+            path: e.path.clone(),
+            title: e.title.clone().unwrap_or_else(|| e.path.clone()),
+            entry_type: e.entry_type.clone(),
+            updated_at: e.updated_at.clone(),
+        })
+        .collect();
+    let mut resp = Json(items).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
+}
+
 /// GET /api/v1/universes/:slug/entries/tags — aggregate tags
 pub async fn list_entry_tags(
     State(state): State<AppState>,
@@ -1347,6 +1395,7 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/manifest", get(get_manifest))
         // CO-74: query DSL endpoint
         .route("/{slug}/query", get(query_handler))
+        .route("/{slug}/entries/popular", get(popular_entries))
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))
         .route("/{slug}/entries", get(list_entries).post(create_entry))

@@ -209,6 +209,30 @@ test.describe("Seed page links resolve", () => {
     }
   });
 
+  test("popular endpoint returns at least 5 entries for template universe", async () => {
+    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const ctx = await request.newContext({ baseURL: base });
+
+    const res = await ctx.get(
+      "/api/v1/universes/template/entries/popular?limit=5"
+    );
+    expect(res.status(), "popular endpoint should be 200").toBe(200);
+
+    const items = await res.json();
+    expect(Array.isArray(items), "popular should return an array").toBe(true);
+    expect(
+      items.length,
+      "popular should return at least 5 entries"
+    ).toBeGreaterThanOrEqual(5);
+
+    for (const item of items) {
+      expect(typeof item.path, "each item has a path").toBe("string");
+      expect(typeof item.title, "each item has a title").toBe("string");
+    }
+
+    await ctx.dispose();
+  });
+
   test("pretty-URL redirects land on /template/<slug>", async ({}) => {
     const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
     const ctx = await request.newContext({ baseURL: base });
