@@ -6,6 +6,9 @@ use crate::storage::Storage;
 pub fn run_startup_seeds(config: &WebConfig) {
     let mut storage = Storage::new(&config.data_dir);
     let had_template = storage.template_exists();
+    // CO-254: rename tutorial project CO → TUTORIAL on existing installs
+    // before seed_template_universe checks for the new path.
+    storage.migrate_template_project_rename();
     storage.seed_template_universe();
     storage.reseed_template_content_pages();
     // Force theme preset back to 'modern' so the public landing page

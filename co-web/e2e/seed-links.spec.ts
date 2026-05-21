@@ -233,6 +233,35 @@ test.describe("Seed page links resolve", () => {
     await ctx.dispose();
   });
 
+  test("template tutorial project is keyed TUTORIAL, not CO", async () => {
+    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const ctx = await request.newContext({ baseURL: base });
+
+    const res = await ctx.get("/api/v1/universes/template/projects");
+    expect(res.status(), "projects endpoint should be 200").toBe(200);
+
+    const projects = await res.json();
+    expect(Array.isArray(projects), "projects should be an array").toBe(true);
+
+    const tutorialProject = projects.find(
+      (p: { key: string }) => p.key === "TUTORIAL",
+    );
+    expect(
+      tutorialProject,
+      "template should have a project keyed TUTORIAL",
+    ).toBeDefined();
+
+    const coProject = projects.find(
+      (p: { key: string }) => p.key === "CO",
+    );
+    expect(
+      coProject,
+      "template should NOT have a project keyed CO (CO belongs to the co universe)",
+    ).toBeUndefined();
+
+    await ctx.dispose();
+  });
+
   test("pretty-URL redirects land on /template/<slug>", async ({}) => {
     const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
     const ctx = await request.newContext({ baseURL: base });

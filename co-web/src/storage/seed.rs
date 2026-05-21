@@ -54,7 +54,7 @@ impl Storage {
         }
 
         // Check if project entry already exists (query per-universe DB — CO-77).
-        let proj_path = "projects/CO/_project.md";
+        let proj_path = "projects/TUTORIAL/_project.md";
         let template_uc = self.universe_pool.get_or_open("template");
         let already_seeded: bool = {
             let uc_guard = template_uc.lock().expect("template universe conn lock");
@@ -75,8 +75,8 @@ impl Storage {
         // Create project entry
         let proj_fm = json!({
             "type": "project",
-            "key": "CO",
-            "title": "Bem-vindo ao Co",
+            "key": "TUTORIAL",
+            "title": "Tutorial — comece por aqui",
             "status": "active",
             "next_id": 10,
             "created": now_str,
@@ -97,7 +97,7 @@ impl Storage {
         }
         // Register in project_universe_index so get_project() works
         let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES ('CO', 'template')",
+            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES ('TUTORIAL', 'template')",
             [],
         );
 
@@ -221,7 +221,7 @@ impl Storage {
                     .format("%Y-%m-%d")
                     .to_string()
             });
-            let task_path = format!("projects/CO/{}.md", t.id);
+            let task_path = format!("projects/TUTORIAL/{}.md", t.id);
             let labels: Vec<serde_json::Value> = t.labels.iter().map(|l| json!(l)).collect();
             let task_fm = json!({
                 "type": "task",
@@ -236,7 +236,7 @@ impl Storage {
                 "modified": updated_at,
                 "archived": false,
                 "assignee": null,
-                "project": "CO"
+                "project": "TUTORIAL"
             });
             let task_entry = make_entry(&task_path, task_fm, t.description);
             let _ = co::entry::write_entry(&universe_root, &task_entry);
@@ -388,6 +388,67 @@ impl Storage {
                 params![path],
             );
         }
+    }
+
+    /// CO-254: rename the tutorial project from `CO` to `TUTORIAL` on existing
+    /// installs. Template is ephemeral (CO-49) so we simply drop the old entries
+    /// and let `seed_template_universe` re-seed fresh with the new key.
+    ///
+    /// Idempotent: no-op when old `projects/CO/_project.md` is already absent.
+    pub fn migrate_template_project_rename(&mut self) {
+        if !self.template_exists() {
+            return;
+        }
+        let template_uc = self.universe_pool.get_or_open("template");
+        let paths_to_delete: Vec<String> = {
+            let uc_guard = template_uc.lock().expect("template universe conn lock");
+            let old_exists: bool = uc_guard
+                .query_row(
+                    "SELECT COUNT(*) FROM entries \
+                     WHERE universe_key = 'template' AND path = 'projects/CO/_project.md'",
+                    [],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if !old_exists {
+                return;
+            }
+            let mut stmt = match uc_guard.prepare(
+                "SELECT path FROM entries \
+                 WHERE universe_key = 'template' AND path LIKE 'projects/CO/%'",
+            ) {
+                Ok(s) => s,
+                Err(_) => return,
+            };
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+
+        if paths_to_delete.is_empty() {
+            return;
+        }
+
+        let universe_root = self.universe_root("template");
+        let uc_guard = template_uc.lock().expect("template universe conn lock");
+        for path in &paths_to_delete {
+            let file = universe_root.join(path);
+            if file.exists() {
+                let _ = std::fs::remove_file(&file);
+            }
+            let _ = uc_guard.execute(
+                "DELETE FROM entries WHERE universe_key = 'template' AND path = ?1",
+                params![path],
+            );
+        }
+        tracing::info!(
+            "CO-254: dropped {} stale CO tutorial entries from template; \
+             will re-seed as TUTORIAL on next seed_template_universe call",
+            paths_to_delete.len()
+        );
     }
 
     // --- Quilombo Araucária universe ---

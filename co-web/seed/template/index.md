@@ -18,6 +18,8 @@ type: page
 
 Você está no universo **template** — o ponto de partida. Comece por **[Sobre o Co](/sobre)** ou explore os links abaixo.
 
+> **Nota:** o painel de tarefas deste universo é um tutorial interativo (projeto *Tutorial — comece por aqui*). Para ver o desenvolvimento real do Co, abra o sub-universo **[Co](/co)** — lá ficam as tarefas CO-1…CO-N, decisões de arquitetura e o changelog.
+
 ## Sobre o Co
 
 - **[Sobre o Co](/sobre)** — missão, valores e história da plataforma
