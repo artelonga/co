@@ -293,19 +293,21 @@
                     <textarea id="criar-description" autocomplete="off" rows="2" placeholder="(opcional)"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Visibilidade</label>
+                    <label data-i18n="criar.visibility">Visibilidade</label>
                     <div class="form-radio-group" role="radiogroup" aria-label="Visibilidade">
                         <label class="form-radio">
                             <input type="radio" name="criar-visibility" value="private" checked>
-                            <span>Privado — só você</span>
+                            <span>
+                                <strong data-i18n="criar.visibility.private">Privado</strong>
+                                <span class="form-radio-hint" data-i18n="criar.visibility.private.hint"> — você e quem você convidar</span>
+                            </span>
                         </label>
                         <label class="form-radio">
                             <input type="radio" name="criar-visibility" value="public-subscribable">
-                            <span>Público — assinável</span>
-                        </label>
-                        <label class="form-radio">
-                            <input type="radio" name="criar-visibility" value="requires_login">
-                            <span>Login obrigatório</span>
+                            <span>
+                                <strong data-i18n="criar.visibility.public">Público</strong>
+                                <span class="form-radio-hint" data-i18n="criar.visibility.public.hint"> — visível para quem buscar</span>
+                            </span>
                         </label>
                     </div>
                 </div>

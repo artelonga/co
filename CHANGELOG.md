@@ -5,6 +5,21 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.5] — 2026-05-21 — UX: Universe visibility simplified to two options
+
+### Changed — Visibilidade form has 2 options, clearer terminology
+
+The "create universe" form had three radio buttons (`Privado — só você`, `Público — assinável`, `Login obrigatório`) but the third was dead code: the backend collapsed `requires_login` into `public-subscribable` (per the 1.46.0 universe_routes comment) and would 400 the request if submitted. Users selecting the third option got an opaque save failure.
+
+**Two options now, each with a short hint clarifying *who* sees the universe:**
+
+- **Privado** — você e quem você convidar
+- **Público** — visível para quem buscar
+
+(EN equivalents: "Private — you and people you invite" / "Public — visible to anyone who searches")
+
+The hint text is muted (`--text-muted`) and styled smaller than the bold label via a new `.form-radio-hint` class in `production.css`. i18n keys `criar.visibility.{private,public}{,.hint}` added to both `pt` and `en` blocks.
+
 ## [2.13.4] — 2026-05-21 — Hotfix: `serve_variant_file` double-prepended `variants/<variant>/`
 
 ### Fixed — `/variants/a/app.js` still 404'd after 2.13.3

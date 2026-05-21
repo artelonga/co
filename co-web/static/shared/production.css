@@ -1222,3 +1222,10 @@
 .btn-saga-new:hover {
     filter: brightness(1.1);
 }
+
+/* Visibility radio hint — muted descriptive text after the bold label */
+.form-radio-hint {
+    color: var(--text-muted, #6b7280);
+    font-size: 13px;
+    font-weight: normal;
+}
