@@ -5,6 +5,97 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.21.0] — 2026-05-21 — Wave B — REPL + DuckDB + inline CodeMirror + deploy.yaml schema
+
+## CO-133 — deploy.yaml schema + universe-level manifest validation
+
+Added `deploy.yaml` as a first-class universe artifact. Universes can now declare
+their deployment intent in a versioned, validated manifest that deployer adapters
+(CO-134, CO-135) consume as a typed `DeployManifest` struct.
+
+**What was added:**
+
+- `core/src/deploy.rs` — `DeployManifest` struct hierarchy (`serde` + `schemars`),
+  `parse_file` / `parse_str` functions, and semantic validation with errors that
+  carry file path, line number, and field path
+- `work/schema/deploy.v1.json` — formal JSON Schema for external tooling and editors
+- `tests/fixtures/deploy/` — 10 fixtures: 5 valid (one per target) and 5 invalid
+  (each testing a distinct error: missing version, invalid version, missing target,
+  unknown target, scaling.max < scaling.min)
+- `co validate deploy [PATH]` — CLI subcommand that validates a deploy.yaml and
+  exits 1 on any error
+- `docs/DEPLOY-MANIFEST.md` — reference documentation with one full example per
+  target (static-on-r2, cloudflare-pages, fly, vercel, fargate)
+
+### Why
+
+Deployer adapters CO-134 and CO-135 need a typed, validated contract rather than
+freeform YAML. By formalizing the schema now, adapter code never touches raw YAML
+and schema drift between adapters is impossible by construction.
+
+## CO-244 — Python / R REPL interoperability — DuckDB attach + in-browser REPL
+
+Added `co-py` and `co-r` helper packages for querying CO universe data via DuckDB, a `POST /api/v1/universes/{slug}/query` read-only SQL endpoint (auth-gated, 1000-row cap), an example Jupyter notebook, and a Pyodide-powered in-browser Python kernel in the REPL panel.
+
+### Why
+Researchers and analysts need frictionless SQL + DataFrame access to universe content from Python or R without writing API clients — the per-universe SQLite is already the right shape.
+
+## CO-245 — Inline code editor for plaintext file types (CodeMirror)
+
+Users can now edit code, YAML, JSON, CSV, and other plaintext files directly in
+the browser without downloading, editing locally, and re-uploading. Clicking a
+`asset.code` entry in the Content view opens a CodeMirror editor with language-
+appropriate syntax highlighting. Ctrl/Cmd+S saves immediately; a Save button
+is also provided in the zoom toolbar. Unknown plaintext types fall back to read-
+only display.
+
+### What changed
+
+- **`co-web/src/vault_routes.rs`**: `PUT /api/v1/universes/{slug}/vault/{path}`
+  now detects plaintext code file extensions (`.py`, `.rs`, `.ts`, `.js`, `.sh`,
+  `.sql`, `.go`, `.r`, `.rb`, `.csv`, `.tsv`, `.html`, `.css`, `.xml`, `.cpp`,
+  `.c`, `.java`, `.php`, …). These files are written verbatim (no markdown
+  frontmatter wrapper) and indexed as `entry_type = "asset.code"` with the
+  correct MIME type, so subsequent GETs and the asset viewer work correctly.
+
+- **`co-web/editor/src/editor.js`**: Added `initCodeEditor(container, opts)`
+  — a new public function in the `window.CoEditor` bundle. It detects the
+  programming language from the filename extension, loads the matching
+  CodeMirror language mode (Python, Rust, TypeScript, JavaScript, Go, SQL,
+  Shell, YAML, JSON, TOML, HTML, CSS, XML, C/C++, Java, PHP, R, Ruby…), and
+  mounts a lightweight code editor without the markdown preview pane. When
+  `onSave` is provided and the user presses Ctrl/Cmd+S, the callback fires with
+  the current content.
+
+- **`co-web/static/shared/editor.bundle.js`**: Rebuilt with the new
+  `initCodeEditor` export. Bundle size unchanged (all language parsers were
+  already transitive deps of `@codemirror/language-data`).
+
+- **`co-web/static/variants/a/modules/views/conteudo.js`**: `mountAssetCodeEditor`
+  extended to accept `{ editable, onSave }` options. When the current user can
+  edit the universe, a Save button is injected into the zoom toolbar and the
+  editor is mounted in read-write mode; otherwise it stays read-only. Save
+  writes back via `PUT /api/v1/universes/{slug}/vault/{path}` with the file's
+  MIME Content-Type so the server routes it through the new verbatim code-file
+  path.
+
+- **`co-web/src/vault_routes/tests.rs`**: Added unit tests for `is_code_file`,
+  `code_file_mime`, and an integration test (`test_vault_put_python_file_indexes_as_asset_code`)
+  that creates a universe, PUTs a Python file, and verifies the entry is indexed
+  with `entry_type = "asset.code"` and `mime = "text/x-python"`.
+
+- **`co-web/e2e/wave-2/co-245-code-editor.spec.ts`**: Playwright E2E tests
+  covering the vault PUT → asset.code index round-trip and the content-view
+  interaction.
+
+### Why
+
+Config files, analysis scripts, and code snippets are common universe content.
+Before this, there was no way to update them without leaving the browser. The
+new inline editor closes that loop — iterate on a YAML config or Python script
+right where it lives, without friction.
+
+
 ## [2.20.0] — 2026-05-21 — Wave A — interactive changelog + MODULES.md + co auth CLI + unified file listing
 
 ## CO-129 — Jujutsu-shaped changelog renderer (op-log → commit DAG)
