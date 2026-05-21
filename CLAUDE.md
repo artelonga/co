@@ -66,21 +66,32 @@ git branch -d <branch-name>
 git push origin --delete <branch-name>
 ```
 
-## Versioning Policy (#53)
+## Versioning Policy (CO-258)
 
-**Version bump happens IN the issue PR.** One issue = one PR = one version bump.
+**Version bumps and CHANGELOG entries are owned by the release commit, NOT by task PRs.**
 
-See **Issue Labels & Git Mapping** below for version bump rules per label type.
+### Files agents MUST NOT modify
 
-### Version Bump (in same PR)
+- `Cargo.toml` (workspace version)
+- `co-cli/Cargo.toml` (binary version)
+- `CHANGELOG.md`
 
-Before creating the PR, include these changes:
+These are mutated exclusively by `scripts/release-commit.sh` after a wave of tasks merges.
 
-1. Update `Cargo.toml` (workspace version)
-2. Update `co-cli/Cargo.toml` (version field)
-3. Add entry to `CHANGELOG.md`
+### What agents write instead
 
-**Do NOT create separate issues/PRs for version bumps.**
+Write your changelog entry to `CHANGELOG-PENDING/<TASK-ID>.md`:
+
+```markdown
+## <TASK-ID> — <title>
+
+<description of what changed and why>
+
+### Why
+<optional — rationale or motivation>
+```
+
+**Do NOT touch `Cargo.toml`, `co-cli/Cargo.toml`, or `CHANGELOG.md`.**
 
 ## TDD: Red-Green-Refactor
 
