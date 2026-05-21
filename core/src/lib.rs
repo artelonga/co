@@ -111,35 +111,15 @@ pub use github::{GhCli, GhError, GithubIssue, GithubLabel, GithubUser, MappedWor
 
 // Deploy manifest + adapter exports
 pub use deploy::{
-    // CO-134: deployer adapter trait + first impl
-    AwsS3Backend,
-    Backup,
-    BackupSchedule,
-    Bindings,
-    BuildArtifact,
-    BuildConfig,
-    DEPLOY_FILENAME,
-    DeployAdapterError,
-    DeployError,
-    DeployManifest,
-    DeployResult,
-    DeployStatus,
-    DeployTarget,
-    DeployerAdapter,
-    EnvSecretResolver,
-    RuntimeConfig,
-    RuntimeKind,
-    S3Backend,
-    SUPPORTED_VERSION,
-    Scaling,
-    SecretResolver,
-    StaticOnR2Adapter,
-    StorageBinding,
-    StorageType,
-    Telemetry,
-    TelemetrySink,
-    create_tarball_from_dir,
+    Backup, BackupSchedule, Bindings, BuildArtifact, BuildConfig, DEPLOY_FILENAME,
+    DeployAdapterError, DeployError, DeployManifest, DeployResult, DeployStatus, DeployTarget,
+    DeployerAdapter, EnvSecretResolver, RuntimeConfig, RuntimeKind, S3Backend, SUPPORTED_VERSION,
+    Scaling, SecretResolver, StaticOnR2Adapter, StorageBinding, StorageType, Telemetry,
+    TelemetrySink, create_tarball_from_dir,
 };
+// AwsS3Backend carries aws-sdk-s3; only available with the deploy-r2 feature
+#[cfg(feature = "deploy-r2")]
+pub use deploy::AwsS3Backend;
 
 /// The root type - CO itself
 pub const CO_ROOT: &str = "co";

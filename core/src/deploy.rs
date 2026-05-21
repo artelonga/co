@@ -713,16 +713,19 @@ pub trait S3Backend: Send + Sync {
 // ─── AwsS3Backend ─────────────────────────────────────────────────────────────
 
 /// `S3Backend` backed by the AWS SDK (also works against Cloudflare R2 via S3 compat).
+#[cfg(feature = "deploy-r2")]
 pub struct AwsS3Backend {
     client: aws_sdk_s3::Client,
 }
 
+#[cfg(feature = "deploy-r2")]
 impl AwsS3Backend {
     pub fn new(client: aws_sdk_s3::Client) -> Self {
         Self { client }
     }
 }
 
+#[cfg(feature = "deploy-r2")]
 #[async_trait::async_trait]
 impl S3Backend for AwsS3Backend {
     async fn put_object(
@@ -811,6 +814,42 @@ impl S3Backend for AwsS3Backend {
             Err(SdkError::ServiceError(svc)) if svc.err().is_not_found() => Ok(None),
             Err(e) => Err(DeployAdapterError::Upload(e.to_string())),
         }
+    }
+}
+
+// ─── Disabled S3 backend (stub when deploy-r2 feature is off) ─────────────────
+
+#[cfg(not(feature = "deploy-r2"))]
+struct DisabledS3Backend;
+
+#[cfg(not(feature = "deploy-r2"))]
+#[async_trait::async_trait]
+impl S3Backend for DisabledS3Backend {
+    async fn put_object(
+        &self,
+        _: &str,
+        _: &str,
+        _: Vec<u8>,
+        _: &str,
+    ) -> Result<(), DeployAdapterError> {
+        Err(DeployAdapterError::Other(
+            "R2 deployer disabled — rebuild with --features deploy-r2".into(),
+        ))
+    }
+    async fn get_object(&self, _: &str, _: &str) -> Result<Option<Vec<u8>>, DeployAdapterError> {
+        Err(DeployAdapterError::Other(
+            "R2 deployer disabled — rebuild with --features deploy-r2".into(),
+        ))
+    }
+    async fn list_objects(&self, _: &str, _: &str) -> Result<Vec<String>, DeployAdapterError> {
+        Err(DeployAdapterError::Other(
+            "R2 deployer disabled — rebuild with --features deploy-r2".into(),
+        ))
+    }
+    async fn head_object(&self, _: &str, _: &str) -> Result<Option<String>, DeployAdapterError> {
+        Err(DeployAdapterError::Other(
+            "R2 deployer disabled — rebuild with --features deploy-r2".into(),
+        ))
     }
 }
 
@@ -913,7 +952,11 @@ impl StaticOnR2Adapter {
         }
     }
 
-    /// Build an adapter from R2 credentials.
+    /// Build an adapter from R2 credentials (requires `deploy-r2` feature).
+    ///
+    /// Without the feature a disabled stub adapter is returned; all deploy/rollback
+    /// calls on it will fail with "R2 deployer disabled".
+    #[cfg(feature = "deploy-r2")]
     pub async fn from_credentials(
         account_id: &str,
         access_key_id: &str,
@@ -932,6 +975,17 @@ impl StaticOnR2Adapter {
             .build();
         let client = aws_sdk_s3::Client::from_conf(config);
         Self::new(AwsS3Backend::new(client), bucket, base_domain)
+    }
+
+    #[cfg(not(feature = "deploy-r2"))]
+    pub async fn from_credentials(
+        _account_id: &str,
+        _access_key_id: &str,
+        _secret_access_key: &str,
+        bucket: impl Into<String>,
+        base_domain: impl Into<String>,
+    ) -> Self {
+        Self::new(DisabledS3Backend, bucket, base_domain)
     }
 
     /// Deploy directly from a build output directory (creates the tarball internally).
@@ -1382,6 +1436,7 @@ mod adapter_tests {
 
     // ── Integration test (real R2 bucket — skipped in CI) ────────────────────
 
+    #[cfg(feature = "deploy-r2")]
     #[tokio::test]
     #[ignore = "requires real R2 bucket — set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, CO_BASE_DOMAIN"]
     async fn test_integration_r2_deploy_and_rollback() {
