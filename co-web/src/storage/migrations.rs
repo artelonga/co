@@ -1746,5 +1746,87 @@ impl Storage {
                  ON api_tokens(token_hash) WHERE token_hash IS NOT NULL;",
             )
             .expect("CO-237 backfill: idx_api_tokens_hash");
+
+        if current_version < 46 {
+            // CO-241: content-volume metrics on meta-DB entries table.
+            // The same three columns are added to per-universe data.db via
+            // run_universe_migrations (universe_pool.rs). Both tables share
+            // the EntryIndex::upsert path so both need the columns.
+            ensure_column(
+                &self.conn,
+                "entries",
+                "body_lines",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v46: entries.body_lines");
+            ensure_column(
+                &self.conn,
+                "entries",
+                "body_words",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v46: entries.body_words");
+            ensure_column(
+                &self.conn,
+                "entries",
+                "body_chars",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v46: entries.body_chars");
+            self.conn
+                .execute_batch("INSERT OR IGNORE INTO schema_version (version) VALUES (46);")
+                .expect("migration v46: schema_version");
+        }
+
+        // CO-241 unconditional backfill — compute body_lines/words/chars for
+        // meta-DB entries rows that still have the DEFAULT 0 values.
+        ensure_column(
+            &self.conn,
+            "entries",
+            "body_lines",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-241 backfill: entries.body_lines");
+        ensure_column(
+            &self.conn,
+            "entries",
+            "body_words",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-241 backfill: entries.body_words");
+        ensure_column(
+            &self.conn,
+            "entries",
+            "body_chars",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-241 backfill: entries.body_chars");
+        {
+            let rows: Vec<(i64, String)> = {
+                let mut stmt = self
+                    .conn
+                    .prepare(
+                        "SELECT rowid, body FROM entries \
+                         WHERE body_chars = 0 AND body != ''",
+                    )
+                    .expect("CO-241 backfill prepare");
+                stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+                    .expect("CO-241 backfill query")
+                    .filter_map(|r| r.ok())
+                    .collect()
+            };
+            for (rowid, body) in rows {
+                let lines = body.lines().count() as i64;
+                let words = body.split_whitespace().count() as i64;
+                let chars = body.chars().count() as i64;
+                self.conn
+                    .execute(
+                        "UPDATE entries SET body_lines = ?1, body_words = ?2, body_chars = ?3 \
+                         WHERE rowid = ?4",
+                        rusqlite::params![lines, words, chars, rowid],
+                    )
+                    .expect("CO-241 backfill update");
+            }
+        }
     }
 }

@@ -215,9 +215,15 @@ impl<'a> EntryIndex<'a> {
             .map(String::from)
             .or_else(|| created_at.clone());
 
+        let body_lines = entry.body.lines().count() as i64;
+        let body_words = entry.body.split_whitespace().count() as i64;
+        let body_chars = entry.body.chars().count() as i64;
+
         self.conn.execute(
-            "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, payload, body, body_hash, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9)
+            "INSERT INTO entries \
+               (path, universe_key, entry_type, title, frontmatter_json, payload, \
+                body, body_hash, body_lines, body_words, body_chars, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
              ON CONFLICT(universe_key, path) DO UPDATE SET
                entry_type = excluded.entry_type,
                title = excluded.title,
@@ -225,6 +231,9 @@ impl<'a> EntryIndex<'a> {
                payload = excluded.payload,
                body = excluded.body,
                body_hash = excluded.body_hash,
+               body_lines = excluded.body_lines,
+               body_words = excluded.body_words,
+               body_chars = excluded.body_chars,
                created_at = excluded.created_at,
                updated_at = excluded.updated_at",
             params![
@@ -235,6 +244,9 @@ impl<'a> EntryIndex<'a> {
                 fm_json,
                 entry.body,
                 entry.body_hash,
+                body_lines,
+                body_words,
+                body_chars,
                 created_at,
                 updated_at,
             ],

@@ -37,6 +37,9 @@ CREATE TABLE IF NOT EXISTS entries (
     payload           TEXT NOT NULL DEFAULT '{}',
     body              TEXT NOT NULL DEFAULT '',
     body_hash         TEXT NOT NULL DEFAULT '',
+    body_lines        INTEGER NOT NULL DEFAULT 0,
+    body_words        INTEGER NOT NULL DEFAULT 0,
+    body_chars        INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT,
     updated_at        TEXT,
     PRIMARY KEY (universe_key, path)
@@ -445,6 +448,52 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
         .expect("universe schema v11: entry_events");
         conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
             .expect("universe schema_version v11");
+    }
+    if v < 12 {
+        // CO-241: true content-volume metrics — lines/words/chars separate
+        // from content_count (file count). New databases already have these
+        // columns from UNIVERSE_SCHEMA; existing DBs get them via ALTER TABLE.
+        ensure_universe_column(conn, "entries", "body_lines", "INTEGER NOT NULL DEFAULT 0");
+        ensure_universe_column(conn, "entries", "body_words", "INTEGER NOT NULL DEFAULT 0");
+        ensure_universe_column(conn, "entries", "body_chars", "INTEGER NOT NULL DEFAULT 0");
+        // Backfill: compute the three metrics for every row that still has the
+        // DEFAULT 0 values. SQLite's length() gives char count; lines and words
+        // require a Rust-side pass (no built-in). We mark them "needs backfill"
+        // by leaving body_chars = 0, then the unconditional backfill below fixes
+        // them up. Inserting schema_version 12 here lets us skip the ALTER TABLE
+        // on future opens.
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (12)",
+            [],
+        )
+        .expect("universe schema_version v12");
+    }
+    // CO-241 unconditional backfill: for every entry where body_chars = 0 and
+    // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
+    // computed", so we re-run the computation for all rows where body_chars = 0.
+    // Rows with an empty body legitimately have body_chars = 0 and will be
+    // re-set to 0, which is a no-op. Idempotent.
+    {
+        let mut stmt = conn
+            .prepare("SELECT rowid, body FROM entries WHERE body_chars = 0 AND body != ''")
+            .expect("CO-241 backfill prepare");
+        let rows: Vec<(i64, String)> = stmt
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+            .expect("CO-241 backfill query")
+            .filter_map(|r| r.ok())
+            .collect();
+        drop(stmt);
+        for (rowid, body) in rows {
+            let lines = body.lines().count() as i64;
+            let words = body.split_whitespace().count() as i64;
+            let chars = body.chars().count() as i64;
+            conn.execute(
+                "UPDATE entries SET body_lines = ?1, body_words = ?2, body_chars = ?3 \
+                 WHERE rowid = ?4",
+                rusqlite::params![lines, words, chars, rowid],
+            )
+            .expect("CO-241 backfill update");
+        }
     }
 }
 

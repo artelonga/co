@@ -254,15 +254,15 @@
       ['key', 'Universo'],
       ['visibility', 'Visibilidade'],
       ['content_count', 'Entradas'],
-      ['md_bytes', 'Markdown'],
+      ['body_lines', 'Linhas'],
+      ['body_words', 'Palavras'],
+      ['md_bytes', 'Tamanho'],
       ['data_db_bytes', 'data.db'],
       ['entry_events', 'Eventos (log)'],
-      ['entries', 'Linhas entries'],
     ];
     const head = headers.map(([k, l]) => `<th data-sort="${k}">${l}${sortKey === k ? (sortDesc ? ' ↓' : ' ↑') : ''}</th>`).join('');
     const body = rows.map(u => {
       const events = u.tables?.entry_events?.rows ?? 0;
-      const entries = u.tables?.entries?.rows ?? 0;
       const badges = [];
       if (u.is_template) badges.push('<span class="badge template">template</span>');
       else if (u.is_public) badges.push('<span class="badge public">público</span>');
@@ -271,10 +271,11 @@
         <td class="key"><a href="/${u.key}">${u.key}</a></td>
         <td>${badges.join(' ')} <span class="muted">${u.visibility || ''}</span></td>
         <td class="num">${fmtNum(u.content_count)}</td>
+        <td class="num">${fmtNum(u.body_lines)}</td>
+        <td class="num">${fmtNum(u.body_words)}</td>
         <td class="num">${fmtBytes(u.md_bytes)}</td>
         <td class="num">${fmtBytes(u.data_db_bytes)}</td>
         <td class="num">${fmtNum(events)}</td>
-        <td class="num">${fmtNum(entries)}</td>
       </tr>`;
     }).join('');
 
