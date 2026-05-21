@@ -29,8 +29,11 @@ co-engine = { path = "../co" }
 co-web = { path = "../co-web" }
 anyhow = { workspace = true }
 whoami = "1"
+reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], default-features = false }
+rpassword = "7"
+toml = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
 predicates = "3.0"
-tempfile = "3.0"
+tempfile = { workspace = true }

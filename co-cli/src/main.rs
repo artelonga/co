@@ -464,6 +464,28 @@ enum Commands {
         default_variant: String,
     },
 
+    /// Authenticate and manage API tokens
+    ///
+    /// All password prompts use hidden input (never echoed, never in shell
+    /// history). Credentials are stored in ~/.config/co/credentials (mode 600).
+    ///
+    /// Examples:
+    ///   co auth login --email you@example.com --save-token
+    ///   co auth reset-password --email you@example.com
+    ///   co auth status
+    ///   co auth token create --save
+    ///   co auth token list --json
+    ///   co auth token revoke tok_abc123
+    ///   co auth logout --revoke-token
+    Auth {
+        #[command(subcommand)]
+        action: AuthSubcommand,
+
+        /// Profile name in ~/.config/co/credentials (default: "default")
+        #[arg(long, global = true)]
+        profile: Option<String>,
+    },
+
     /// Pipeline engine: plan, execute, approve via Claude + GitHub
     ///
     /// Modular pipeline for LLM-powered GitHub workflows on any repository.
@@ -597,6 +619,89 @@ enum EngineSubcommand {
     Identity {
         #[command(subcommand)]
         action: IdentitySubcommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthSubcommand {
+    /// Interactive password login
+    ///
+    /// Prompts for password with hidden input. With --save-token, also creates
+    /// a 90-day API token and writes it to ~/.config/co/credentials.
+    Login {
+        /// Email address
+        #[arg(long)]
+        email: Option<String>,
+
+        /// Create and save a 90-day API token after login
+        #[arg(long)]
+        save_token: bool,
+    },
+
+    /// Full forgot-password flow in one command
+    ///
+    /// Sends code to verified recovery channels, prompts for code, prompts for
+    /// new password (hidden, confirmed twice), then auto-logs in.
+    #[command(name = "reset-password")]
+    ResetPassword {
+        /// Email or username to identify the account
+        #[arg(long)]
+        email: Option<String>,
+    },
+
+    /// Change password (requires active login session)
+    ///
+    /// Prompts for current and new password with hidden input.
+    #[command(name = "change-password")]
+    ChangePassword,
+
+    /// Show authentication status and exit 0/1 for scripts
+    ///
+    /// Prints logged-in user, token ID, expiry, and base URL.
+    /// Exits 0 when authenticated; exits 1 otherwise.
+    Status,
+
+    /// Manage 90-day API tokens
+    Token {
+        #[command(subcommand)]
+        action: TokenSubcommand,
+    },
+
+    /// Clear local credentials (and optionally revoke API token server-side)
+    Logout {
+        /// Also DELETE the API token from the server
+        #[arg(long)]
+        revoke_token: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum TokenSubcommand {
+    /// Create a new 90-day API token
+    ///
+    /// Token value is printed once and never retrievable again.
+    /// Use --save to persist it to ~/.config/co/credentials.
+    Create {
+        /// Token name (default: cli-<hostname>-<YYYY-MM-DD>)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Save to ~/.config/co/credentials
+        #[arg(long)]
+        save: bool,
+    },
+
+    /// List all API tokens for the authenticated user
+    List {
+        /// Print raw JSON instead of a table
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Revoke (permanently delete) an API token by ID
+    Revoke {
+        /// Token ID to revoke (from 'co auth token list')
+        id: String,
     },
 }
 
@@ -1146,6 +1251,35 @@ fn main() {
             }
             None => commands::board::run(port, data, static_dir, default_variant),
         },
+        Commands::Auth { action, profile } => {
+            let auth_action = match action {
+                AuthSubcommand::Login { email, save_token } => {
+                    commands::auth::AuthAction::Login { email, save_token }
+                }
+                AuthSubcommand::ResetPassword { email } => {
+                    commands::auth::AuthAction::ResetPassword { email }
+                }
+                AuthSubcommand::ChangePassword => commands::auth::AuthAction::ChangePassword,
+                AuthSubcommand::Status => commands::auth::AuthAction::Status,
+                AuthSubcommand::Token {
+                    action: token_action,
+                } => match token_action {
+                    TokenSubcommand::Create { name, save } => {
+                        commands::auth::AuthAction::TokenCreate { name, save }
+                    }
+                    TokenSubcommand::List { json } => {
+                        commands::auth::AuthAction::TokenList { json }
+                    }
+                    TokenSubcommand::Revoke { id } => {
+                        commands::auth::AuthAction::TokenRevoke { id }
+                    }
+                },
+                AuthSubcommand::Logout { revoke_token } => {
+                    commands::auth::AuthAction::Logout { revoke_token }
+                }
+            };
+            commands::auth::run(auth_action, profile);
+        }
         Commands::Engine {
             action,
             vault,
