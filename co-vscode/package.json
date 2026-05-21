@@ -1,0 +1,80 @@
+{
+  "name": "co-vscode",
+  "displayName": "CO — Universe Workspace",
+  "description": "Open a CO universe as a remote workspace in VS Code",
+  "version": "0.1.0",
+  "publisher": "artelonga",
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/artelonga/co"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["co", "universe", "remote", "workspace", "markdown"],
+  "activationEvents": [
+    "onFileSystem:co",
+    "onCommand:co.openRemoteWorkspace"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "co.openRemoteWorkspace",
+        "title": "Open Remote Workspace",
+        "category": "CO"
+      },
+      {
+        "command": "co.configure",
+        "title": "Configure",
+        "category": "CO"
+      }
+    ],
+    "configuration": {
+      "title": "CO Universe",
+      "properties": {
+        "co.instanceUrl": {
+          "type": "string",
+          "default": "https://co.artelonga.com.br",
+          "description": "CO server base URL"
+        },
+        "co.apiToken": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "CO API token (`co_…`). Leave empty to use credentials from `~/.config/co/credentials` (set by `co auth login`)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run build",
+    "build": "node esbuild.config.mjs production",
+    "dev": "node esbuild.config.mjs",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^20.12.11",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "7.7.1",
+    "@typescript-eslint/parser": "7.7.1",
+    "esbuild": "0.20.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.4",
+    "tslib": "2.6.2",
+    "typescript": "5.4.5"
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "moduleNameMapper": {
+      "^vscode$": "<rootDir>/tests/__mocks__/vscode.ts"
+    },
+    "testMatch": ["**/tests/**/*.test.ts"]
+  }
+}

@@ -1,0 +1,7 @@
+node_modules/**
+src/**
+tests/**
+.eslintrc.*
+tsconfig.json
+esbuild.config.mjs
+**/*.map
