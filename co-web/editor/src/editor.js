@@ -854,3 +854,106 @@ export function initEditor(container, {
     },
   };
 }
+
+// ===== CO-245: Inline code editor =====
+// Language mapping: file extension → LanguageDescription name or alias.
+const EXT_TO_LANG = {
+  py: 'Python', rs: 'Rust', ts: 'TypeScript', tsx: 'TSX',
+  js: 'JavaScript', mjs: 'JavaScript', jsx: 'JSX',
+  go: 'Go', sql: 'SQL', sh: 'Shell', bash: 'Shell',
+  yaml: 'YAML', yml: 'YAML', json: 'JSON', toml: 'TOML',
+  html: 'HTML', htm: 'HTML', css: 'CSS', scss: 'SCSS',
+  xml: 'XML', cpp: 'C++', c: 'C', java: 'Java', php: 'PHP',
+  r: 'R', rb: 'Ruby', kt: 'Kotlin',
+  csv: 'Plain Text', tsv: 'Plain Text', txt: 'Plain Text',
+};
+
+/**
+ * Initialise a read/write CodeMirror editor for a non-markdown code file.
+ *
+ * @param {HTMLElement} container
+ * @param {{
+ *   content?: string,
+ *   filename?: string,
+ *   language?: string,
+ *   readOnly?: boolean,
+ *   onSave?: (content: string) => void,
+ * }} opts
+ * @returns {Promise<{ getValue, setValue, destroy }>}
+ */
+export async function initCodeEditor(container, {
+  content = '',
+  filename = '',
+  language = '',
+  readOnly = false,
+  onSave,
+} = {}) {
+  injectStyles();
+
+  // Resolve language from explicit param or file extension.
+  const ext = language || (filename.split('.').pop() || '').toLowerCase();
+  const langName = EXT_TO_LANG[ext] || '';
+  let langExt = [];
+  if (langName && langName !== 'Plain Text') {
+    const desc = languages.find(l =>
+      l.name === langName ||
+      (l.alias && l.alias.includes(langName))
+    );
+    if (desc) {
+      try {
+        const support = await desc.load();
+        if (support) langExt = [support];
+      } catch (_) {}
+    }
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'co-code-editor-wrap co-editor-wrap';
+  wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:300px;';
+
+  const cmMount = document.createElement('div');
+  cmMount.style.cssText = 'flex:1;overflow:auto;min-height:0;';
+  wrap.appendChild(cmMount);
+
+  container.innerHTML = '';
+  container.appendChild(wrap);
+
+  const readOnlyCompartment = new Compartment();
+
+  const saveKeymap = onSave ? keymap.of([{
+    key: 'Mod-s',
+    run: (view) => { onSave(view.state.doc.toString()); return true; },
+  }]) : [];
+
+  const extensions = [
+    history(),
+    drawSelection(),
+    highlightActiveLine(),
+    syntaxHighlighting(coHighlightStyle),
+    coTheme,
+    keymap.of([...defaultKeymap, ...historyKeymap]),
+    saveKeymap,
+    ...langExt,
+    EditorView.lineWrapping,
+    readOnlyCompartment.of(EditorState.readOnly.of(readOnly)),
+  ];
+
+  const state = EditorState.create({ doc: content, extensions });
+  const view = new EditorView({ state, parent: cmMount });
+
+  return {
+    getValue() { return view.state.doc.toString(); },
+    getContent() { return view.state.doc.toString(); },
+    setValue(newContent) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: newContent } });
+    },
+    setReadOnly(ro) {
+      view.dispatch({ effects: readOnlyCompartment.reconfigure(EditorState.readOnly.of(ro)) });
+    },
+    focus() { view.focus(); },
+    destroy() {
+      view.destroy();
+      if (container.contains(wrap)) container.removeChild(wrap);
+    },
+  };
+}

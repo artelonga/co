@@ -304,6 +304,81 @@ fn is_raw_data_file(path: &str) -> bool {
         || lower.ends_with(".json")
 }
 
+/// CO-245: plaintext code/data files that are stored verbatim (no markdown
+/// frontmatter wrapper) and indexed as `asset.code` entries with their
+/// detected MIME type. This allows inline editing in the browser while
+/// keeping the file valid for interpreters and linters.
+fn is_code_file(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    lower.ends_with(".py")
+        || lower.ends_with(".rs")
+        || lower.ends_with(".ts")
+        || lower.ends_with(".js")
+        || lower.ends_with(".mjs")
+        || lower.ends_with(".sh")
+        || lower.ends_with(".bash")
+        || lower.ends_with(".sql")
+        || lower.ends_with(".go")
+        || lower.ends_with(".r")
+        || lower.ends_with(".rb")
+        || lower.ends_with(".csv")
+        || lower.ends_with(".tsv")
+        || lower.ends_with(".html")
+        || lower.ends_with(".htm")
+        || lower.ends_with(".css")
+        || lower.ends_with(".scss")
+        || lower.ends_with(".xml")
+        || lower.ends_with(".txt")
+        || lower.ends_with(".cpp")
+        || lower.ends_with(".c")
+        || lower.ends_with(".h")
+        || lower.ends_with(".java")
+        || lower.ends_with(".kt")
+        || lower.ends_with(".php")
+}
+
+/// CO-245: return the MIME type for a known plaintext code file extension.
+fn code_file_mime(path: &str) -> &'static str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".py") {
+        "text/x-python"
+    } else if lower.ends_with(".rs") {
+        "text/x-rust"
+    } else if lower.ends_with(".ts") {
+        "application/typescript"
+    } else if lower.ends_with(".js") || lower.ends_with(".mjs") {
+        "application/javascript"
+    } else if lower.ends_with(".sh") || lower.ends_with(".bash") {
+        "text/x-shellscript"
+    } else if lower.ends_with(".sql") {
+        "text/x-sql"
+    } else if lower.ends_with(".go") {
+        "text/x-go"
+    } else if lower.ends_with(".r") {
+        "text/x-r"
+    } else if lower.ends_with(".rb") {
+        "text/x-ruby"
+    } else if lower.ends_with(".csv") {
+        "text/csv"
+    } else if lower.ends_with(".tsv") {
+        "text/tab-separated-values"
+    } else if lower.ends_with(".html") || lower.ends_with(".htm") {
+        "text/html"
+    } else if lower.ends_with(".css") || lower.ends_with(".scss") {
+        "text/css"
+    } else if lower.ends_with(".xml") {
+        "text/xml"
+    } else if lower.ends_with(".cpp") || lower.ends_with(".c") || lower.ends_with(".h") {
+        "text/x-c"
+    } else if lower.ends_with(".java") || lower.ends_with(".kt") {
+        "text/x-java"
+    } else if lower.ends_with(".php") {
+        "text/x-php"
+    } else {
+        "text/plain"
+    }
+}
+
 /// Parse a raw markdown string into (frontmatter JSON, body).
 fn parse_markdown_content(content: &str) -> (JsonValue, String) {
     match co::entry::split_frontmatter(content) {
@@ -862,6 +937,79 @@ pub async fn put_vault_file(
             "Vault PUT: body is not valid UTF-8; set Content-Type for binary uploads".into(),
         )
     })?;
+
+    // CO-245: write plaintext code files (.py, .rs, .ts, etc.) verbatim —
+    // no markdown frontmatter wrapper — and index them as `asset.code` entries
+    // so the browser can offer inline editing with syntax highlighting.
+    if is_code_file(&path) {
+        write_raw_vault_file(&state, &slug, &path, &body)?;
+        let filename = path.split('/').next_back().unwrap_or("").to_string();
+        let mime = code_file_mime(&path);
+        let size_bytes = body.len() as i64;
+        let fm = serde_json::json!({
+            "type": "asset.code",
+            "mime": mime,
+            "filename": filename,
+            "size_bytes": size_bytes,
+        });
+        let entry = make_entry(&path, fm.clone(), &body);
+        // Scope the mutex guard so it is dropped before the first .await below.
+        let row = {
+            let uc = {
+                let storage = lock_storage(&state);
+                storage
+                    .get_universe(&slug)
+                    .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+                storage.universe_conn(&slug)
+            };
+            let uc_guard = uc
+                .lock()
+                .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+            let index = EntryIndex::new(&uc_guard);
+            index
+                .upsert(&slug, &entry)
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+            index
+                .get(&slug, &path)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+                .ok_or_else(|| AppError::Internal("code entry vanished after upsert".into()))?
+        };
+        crate::telemetry::emit_crud_event(
+            &state,
+            crate::telemetry::CrudEvent {
+                kind: "entry.upsert",
+                universe: slug.clone(),
+                list: Some("asset.code".to_string()),
+                key: Some(path.clone()),
+                actor: crate::auth::resolve_user_id(&state, &headers),
+                session_id: crate::telemetry::extract_session_id(&headers),
+                extra: None,
+            },
+        );
+        state
+            .index
+            .cache
+            .query
+            .invalidate_prefix(&format!("{slug}:"));
+        crate::sync_ws::emit_rest_upsert(&state, &slug, &path, &body).await;
+        let stat = make_stat(
+            row.created_at.as_deref(),
+            row.updated_at.as_deref(),
+            body.len(),
+        );
+        let tags = extract_tags(&fm);
+        return Ok((
+            StatusCode::CREATED,
+            Json(VaultFile {
+                path,
+                content: body,
+                frontmatter: fm,
+                tags,
+                stat,
+            }),
+        )
+            .into_response());
+    }
 
     // 1.50.0: write structured-data files (.yaml/.yml/.toml/.json) verbatim
     // to disk so downstream parsers (e.g., manifest reader on
