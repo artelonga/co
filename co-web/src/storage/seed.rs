@@ -5,7 +5,7 @@ use serde_json::json;
 use crate::entry_index::make_entry;
 
 use super::Storage;
-use super::schema::{seed_page_body, seed_page_frontmatter, upsert_entry_row};
+use super::schema::{seed_page_body, seed_page_frontmatter, split_frontmatter, upsert_entry_row};
 
 use super::{
     SEED_CO_INDEX_MD, SEED_CO_PLATAFORMA_MD, SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD,
@@ -832,23 +832,17 @@ impl Storage {
     }
 
     /// Ingest CO-*.md ticket files from `/app/seed-co/` (or any source dir) into
-    /// the `co` universe's entries table at path `tasks/<filename>`.
+    /// the `co` universe's entries table as board-compatible tasks under a
+    /// "CO Development Board" project.
     ///
-    /// Mirrors `reseed_template_content_pages` shape: idempotent upsert, runs
-    /// on every boot. Closes the "co has 0 entries" gap user-reported on
-    /// 2026-05-02 — Phase E of CO-142 populated `/data/co/` for the dev_board
-    /// admin scan, but the SPA's `/co/co` board reads from the per-universe
-    /// `entries` table. This function bridges that.
+    /// CO-261: creates a `projects/CO/_project.md` entry so the kanban sidebar
+    /// shows the CO project, then seeds each `{PREFIX}-{N}.md` file (e.g.
+    /// CO-261.md) as a `task` entry with `project: CO` so it appears in the
+    /// kanban columns grouped by `status`. Documentation files (CLAUDE.md,
+    /// ROADMAP.md, etc.) are skipped.
     ///
-    /// **1.52.0:** No longer wipes the entry table before re-seeding. The
-    /// pre-1.52 wipe killed user-generated content (states/branches/proposals
-    /// from the CO-native versioning roadmap) on every deploy. Now purely
-    /// additive: the seed only upserts paths it knows about (CO-N.md files
-    /// from `seed-co/`); paths the seed never wrote stay untouched. If you
-    /// remove a file from `seed-co/`, the corresponding entry will linger
-    /// on prod until explicitly deleted via `DELETE /universes/:slug/...` —
-    /// but that's the right tradeoff for a system whose canonical source
-    /// is auto-sync from local, not the baked-in seed.
+    /// Idempotent: runs on every boot via `run_co142_refresh`. Purely additive —
+    /// user-created entries in the `co` universe are never deleted.
     pub fn seed_co_universe_tasks(&mut self, source_dir: &std::path::Path) {
         if !source_dir.exists() {
             tracing::warn!(
@@ -867,12 +861,42 @@ impl Storage {
         let mut upserted = 0usize;
         let mut skipped = 0usize;
 
-        // Recursively walk source_dir. Path layout in the `co` universe:
-        //   - top-level *.md  → tasks/<filename>   (legacy compat with 1.34.3)
-        //   - subdir/<f>.md   → <subdir>/<f>       (CO-144: e.g. processos/)
-        //
-        // Files >2 levels deep are flattened to <leaf-subdir>/<filename> for
-        // safety against pathological nesting; rare in practice.
+        // CO-261: ensure the CO Development Board project entry exists so the
+        // kanban sidebar shows the project. Upsert is safe on every boot.
+        {
+            let proj_path = "projects/CO/_project.md";
+            let proj_fm = json!({
+                "type": "project",
+                "key": "CO",
+                "title": "CO Development Board",
+                "status": "active",
+                "next_id": 1000,
+                "created": now_str,
+                "modified": now_str,
+                "archived": false,
+                "tags": ["dev", "platform"],
+            });
+            let proj_entry = make_entry(
+                proj_path,
+                proj_fm,
+                "CO platform — development tasks CO-1..N, sourced from work/co/ at build time.",
+            );
+            if let Err(e) = co::entry::write_entry(&universe_root, &proj_entry) {
+                tracing::warn!("seed_co_universe_tasks: write CO project: {e}");
+            }
+            let co_uc = self.universe_pool.get_or_open("co");
+            let uc_guard = co_uc.lock().expect("co universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "co", &proj_entry) {
+                tracing::warn!("seed_co_universe_tasks: upsert CO project: {e}");
+            }
+        }
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) \
+             VALUES ('CO', 'co')",
+            [],
+        );
+
+        // Recursively walk source_dir. Entry paths are relative to the source dir.
         fn walk(
             dir: &std::path::Path,
             base: &std::path::Path,
@@ -894,8 +918,6 @@ impl Storage {
                     Ok(r) => r,
                     Err(_) => continue,
                 };
-                // Entry path = path relative to source dir, forward slashes.
-                // No tasks/ prefix — CO-*.md live at root of the universe.
                 let entry_path = rel.display().to_string().replace('\\', "/");
                 out.push((p, entry_path));
             }
@@ -912,6 +934,14 @@ impl Storage {
                     continue;
                 }
             };
+
+            // CO-261: only seed {PREFIX}-{DIGITS}.md task specs.
+            // Documentation files (CLAUDE.md, ROADMAP.md, etc.) are skipped.
+            if !is_task_filename(&filename) {
+                skipped += 1;
+                continue;
+            }
+
             let raw = match std::fs::read_to_string(&path) {
                 Ok(s) => s,
                 Err(_) => {
@@ -922,7 +952,7 @@ impl Storage {
 
             let entry = make_entry(
                 &entry_path,
-                seed_page_frontmatter(&raw, &now_str),
+                work_task_frontmatter(&raw, &now_str, "CO"),
                 seed_page_body(&raw),
             );
             if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
@@ -940,9 +970,7 @@ impl Storage {
             upserted += 1;
         }
 
-        // 1.52.0: count actual rows in the per-universe entry index, not
-        // just `upserted` (which only sees seed-co files). Otherwise user-
-        // generated states/branches/proposals get under-counted.
+        // Count actual rows — includes user-created entries beyond the seed set.
         let actual_count: i64 = {
             let co_uc = self.universe_pool.get_or_open("co");
             co_uc
@@ -964,8 +992,235 @@ impl Storage {
         );
 
         tracing::info!(
-            "seed_co_universe_tasks: seeded {upserted} from {} (skipped {skipped}); co now has {actual_count} entries total",
+            "seed_co_universe_tasks: seeded {upserted} CO tasks from {} (skipped {skipped}); \
+             co now has {actual_count} entries total",
             source_dir.display()
         );
+    }
+
+    /// CO-261: seed a placeholder content page in each sister-repo universe
+    /// (yggdrasil, rfq) to indicate that the `work/<space>/` sync is not yet
+    /// wired. Wave B/C of CO-261 will replace these with the real task board.
+    ///
+    /// Idempotent — upserts the same path on every boot.
+    pub fn reseed_sister_repo_stubs(&mut self) {
+        let now_str = Utc::now().to_rfc3339();
+        const STUBS: &[(&str, &str, &str, &str)] = &[
+            (
+                "yggdrasil",
+                "content/sister-repo-sync.md",
+                "Yggdrasil task sync not yet wired — CO-261 Wave B",
+                "The Yggdrasil dev board (`work/yggdrasil/*.md`) is not yet synced to this universe.\n\n\
+                 **Coming in CO-261 Wave B:** a file-watcher and bidirectional Vault sync will \
+                 reflect YG-1..YG-N tasks here on every deploy.\n\n\
+                 See the [CO Development Board](/co) for the roadmap.",
+            ),
+            (
+                "rfq",
+                "content/sister-repo-sync.md",
+                "RFQ task sync not yet wired — CO-261 Wave B",
+                "The RFQ Gateway dev board (`work/rfq/*.md`) is not yet synced to this universe.\n\n\
+                 **Coming in CO-261 Wave B:** a file-watcher and bidirectional Vault sync will \
+                 reflect RFQ-1..RFQ-N tasks here on every deploy.\n\n\
+                 See the [CO Development Board](/co) for the roadmap.",
+            ),
+        ];
+        for (universe_key, path, title, body) in STUBS {
+            if self.get_universe(universe_key).is_none() {
+                continue;
+            }
+            let universe_root = self.universe_root(universe_key);
+            let fm = json!({
+                "type": "page",
+                "title": title,
+                "created": now_str,
+                "modified": now_str,
+            });
+            let entry = make_entry(path, fm, body);
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("CO-261 stub: write {universe_key}/{path}: {e}");
+                continue;
+            }
+            let uc = self.universe_pool.get_or_open(universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, universe_key, &entry) {
+                tracing::warn!("CO-261 stub: upsert {universe_key}/{path}: {e}");
+            }
+        }
+        tracing::info!("CO-261: sister-repo sync stubs seeded for yggdrasil/rfq");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CO-261 helpers — free functions used by seed_co_universe_tasks
+// ---------------------------------------------------------------------------
+
+/// Returns true if `filename` matches the `{PREFIX}-{DIGITS}.md` pattern
+/// (e.g. `CO-261.md`, `YG-62.md`, `RFQ-27.md`).
+/// Used to distinguish task specs from documentation files in `work/<space>/`.
+fn is_task_filename(filename: &str) -> bool {
+    let stem = match filename.strip_suffix(".md") {
+        Some(s) => s,
+        None => return false,
+    };
+    if let Some(pos) = stem.rfind('-') {
+        let suffix = &stem[pos + 1..];
+        !suffix.is_empty() && suffix.chars().all(|c| c.is_ascii_digit())
+    } else {
+        false
+    }
+}
+
+/// Parse the frontmatter from a `work/<space>/*.md` file and inject the fields
+/// required for the kanban board:
+///
+/// - `type` → overridden to `"task"` (board reads `entry_type` from this)
+/// - `project` → set to `project_key` (board filters tasks by this field)
+/// - `story_type` → preserves the original `type` value (e.g. `"user-story"`)
+/// - `created` / `modified` → mapped from `created_at` / `updated_at` if the
+///   standard fields are absent (CO-N.md uses the `_at` suffix convention)
+/// - `tags` → mapped from `labels` when `tags` is not already present, so
+///   work-item labels appear in the board's label column
+fn work_task_frontmatter(raw: &str, now_str: &str, project_key: &str) -> serde_json::Value {
+    let (fm_yaml, _) = split_frontmatter(raw);
+    let mut fm: serde_json::Value = serde_yaml::from_str::<serde_yaml::Value>(fm_yaml)
+        .ok()
+        .and_then(|v| serde_json::to_value(v).ok())
+        .unwrap_or_else(|| json!({}));
+    if let Some(obj) = fm.as_object_mut() {
+        if let Some(orig) = obj.get("type").and_then(|v| v.as_str()).map(String::from) {
+            obj.entry("story_type".to_string())
+                .or_insert_with(|| json!(orig));
+        }
+        obj.insert("type".to_string(), json!("task"));
+        obj.insert("project".to_string(), json!(project_key));
+        if !obj.contains_key("created") {
+            let ts = obj
+                .get("created_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or(now_str)
+                .to_string();
+            obj.insert("created".to_string(), json!(ts));
+        }
+        if !obj.contains_key("modified") {
+            let ts = obj
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or(now_str)
+                .to_string();
+            obj.insert("modified".to_string(), json!(ts));
+        }
+        if !obj.contains_key("tags") && let Some(labels) = obj.get("labels").cloned() {
+            obj.insert("tags".to_string(), labels);
+        }
+        // The board SQL filter is `archived = 0`; json_extract returns NULL for
+        // absent fields and NULL = 0 is false, so unarchived tasks would be
+        // filtered out. Default to false when the field is absent.
+        obj.entry("archived".to_string())
+            .or_insert_with(|| json!(false));
+    }
+    fm
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::Storage;
+
+    fn make_co_task_md(n: u64, status: &str) -> String {
+        format!(
+            "---\nid: {n}\ntitle: Test CO-{n}\ntype: user-story\nstatus: {status}\n\
+             priority: high\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-02-01T00:00:00Z\n\
+             labels:\n  - type:feat\n---\n\nBody of CO-{n}.",
+        )
+    }
+
+    #[test]
+    fn test_is_task_filename_matches_task_pattern() {
+        assert!(is_task_filename("CO-261.md"));
+        assert!(is_task_filename("YG-62.md"));
+        assert!(is_task_filename("RFQ-1.md"));
+        assert!(!is_task_filename("CLAUDE.md"));
+        assert!(!is_task_filename("ROADMAP.md"));
+        assert!(!is_task_filename("_universe.yaml"));
+        assert!(!is_task_filename("CO-.md"));
+        assert!(!is_task_filename("CO-abc.md"));
+    }
+
+    #[test]
+    fn test_work_task_frontmatter_injects_board_fields() {
+        let raw = "---\nid: 42\ntitle: My Story\ntype: user-story\nstatus: in_progress\n\
+                   priority: high\nlabels:\n  - type:feat\ncreated_at: 2026-01-15T00:00:00Z\n\
+                   updated_at: 2026-02-01T00:00:00Z\n---\n\nBody.";
+        let fm = work_task_frontmatter(raw, "2026-03-01T00:00:00Z", "CO");
+        assert_eq!(fm["type"].as_str(), Some("task"), "type should be 'task'");
+        assert_eq!(fm["project"].as_str(), Some("CO"), "project should be 'CO'");
+        assert_eq!(
+            fm["story_type"].as_str(),
+            Some("user-story"),
+            "original type preserved in story_type"
+        );
+        assert_eq!(
+            fm["created"].as_str(),
+            Some("2026-01-15T00:00:00Z"),
+            "created mapped from created_at"
+        );
+        assert_eq!(
+            fm["modified"].as_str(),
+            Some("2026-02-01T00:00:00Z"),
+            "modified mapped from updated_at"
+        );
+        assert!(fm["tags"].is_array(), "labels should be mapped to tags");
+    }
+
+    #[test]
+    fn test_seed_co_universe_tasks_creates_project_and_tasks() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let seed_dir = tempfile::tempdir().unwrap();
+        std::fs::write(seed_dir.path().join("CO-1.md"), make_co_task_md(1, "todo")).unwrap();
+        std::fs::write(seed_dir.path().join("CO-2.md"), make_co_task_md(2, "done")).unwrap();
+        // Documentation file — must not become a task
+        std::fs::write(seed_dir.path().join("CLAUDE.md"), "# Docs\nNot a task.").unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        storage.seed_co_universe_tasks(seed_dir.path());
+
+        let project = storage.get_project("CO");
+        assert!(project.is_some(), "CO project should exist after seeding");
+        assert_eq!(project.unwrap().key, "CO");
+
+        let tasks = storage.list_tasks("CO");
+        assert_eq!(tasks.len(), 2, "only CO-N.md files should become tasks");
+        let t1 = tasks.iter().find(|t| t.id == 1).expect("CO-1 missing");
+        assert_eq!(t1.key, "CO-1");
+        let t2 = tasks.iter().find(|t| t.id == 2).expect("CO-2 missing");
+        assert_eq!(t2.status, crate::models::TaskStatus::Done);
+        // CLAUDE.md must not appear as a task
+        assert!(
+            !tasks
+                .iter()
+                .any(|t| t.title.to_lowercase().contains("docs")),
+            "CLAUDE.md must not be seeded as a task"
+        );
+    }
+
+    #[test]
+    fn test_seed_co_universe_tasks_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let seed_dir = tempfile::tempdir().unwrap();
+        std::fs::write(seed_dir.path().join("CO-1.md"), make_co_task_md(1, "todo")).unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        storage.seed_co_universe_tasks(seed_dir.path());
+        storage.seed_co_universe_tasks(seed_dir.path()); // second run
+
+        let tasks = storage.list_tasks("CO");
+        assert_eq!(tasks.len(), 1, "second run must not duplicate tasks");
     }
 }
