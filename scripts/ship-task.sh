@@ -15,6 +15,7 @@
 #   0  PR opened
 #   1  invalid args / worktree not found / nothing to ship
 #   2  rebase conflict (user must resolve manually)
+#   3  auto-resolve reduced branch to origin/main (empty commit dropped by rebase)
 
 set -u
 
@@ -144,6 +145,20 @@ while [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]]; do
     exit 2
   fi
 done
+
+# Post-rebase safety check: detect when auto-resolve dropped the task commit entirely.
+# Git silently drops empty commits during rebase, leaving HEAD == origin/main.
+BRANCH_HEAD=$(git rev-parse HEAD)
+MAIN_HEAD=$(git rev-parse origin/main)
+if [[ "$BRANCH_HEAD" == "$MAIN_HEAD" ]]; then
+    echo "ERROR: After auto-resolve, branch is identical to origin/main." >&2
+    echo "       The task's commit was dropped as empty. This is the rebase-empty bug." >&2
+    echo "       Manual recovery: reset the branch, cherry-pick the original commit," >&2
+    echo "       and resolve conflicts preserving the task's intent." >&2
+    echo "       Original commit SHA (from reflog):" >&2
+    git reflog --pretty='%h %s' | grep -m1 "commit:" >&2
+    exit 3
+fi
 
 # Read task title + conventional-commit prefix from spec file
 TASK_TITLE="$TASK_ID"
