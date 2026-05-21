@@ -110,8 +110,11 @@ export function buildAssetViewerHtml(universe, entry) {
     </div>`;
 }
 
-// CO-242: if the asset code container is present, fetch the text and mount a RO CodeMirror.
-async function mountAssetCodeEditor(zoomBody) {
+// CO-242/CO-245: fetch code text and mount CodeMirror for an asset.code entry.
+// When `opts.editable` is true and `opts.onSave` is provided, the editor is
+// read-write; otherwise it falls back to read-only mode.
+async function mountAssetCodeEditor(zoomBody, opts) {
+    opts = opts || {};
     const container = zoomBody.querySelector('#co-asset-code-container');
     if (!container) return;
     const assetUrl = container.dataset.assetUrl;
@@ -121,7 +124,17 @@ async function mountAssetCodeEditor(zoomBody) {
         const resp = await fetch(assetUrl);
         const text = resp.ok ? await resp.text() : `Erro ao carregar: ${resp.status}`;
         container.innerHTML = '';
-        if (window.CoEditor) {
+        if (window.CoEditor && window.CoEditor.initCodeEditor) {
+            // CO-245: use the code editor (with language detection) for all
+            // asset.code entries. Read-only unless caller passes onSave.
+            const editorInst = await window.CoEditor.initCodeEditor(container, {
+                content: text,
+                filename,
+                readOnly: !opts.editable,
+                onSave: opts.editable ? opts.onSave : undefined,
+            });
+            if (editorInst) container._codeEditorInst = editorInst;
+        } else if (window.CoEditor) {
             window.CoEditor.initEditor(container, { content: text, readOnly: true });
         } else {
             container.innerHTML = `<pre style="padding:16px;overflow:auto;white-space:pre-wrap;font-size:.85rem"><code>${esc(text)}</code></pre>`;
@@ -512,19 +525,71 @@ export async function openZoomModal(entry, startInEditMode) {
 
     const zoomBody = document.getElementById('co-zoom-body');
 
+    // CO-245: save handler for inline code editor edits inside the zoom modal.
+    async function saveCodeEntry(newContent) {
+        const saveBtn = document.getElementById('co-zoom-save-code');
+        if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
+        try {
+            const mime = (fullEntry.frontmatter || {}).mime || 'text/plain';
+            const res = await window.fetch(
+                `/api/v1/universes/${encodeURIComponent(fetchUniverse)}/vault/${(fullEntry.path || '').split('/').map(encodeURIComponent).join('/')}`,
+                {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: { 'Content-Type': mime },
+                    body: newContent,
+                }
+            );
+            if (res.ok) {
+                _showToast(window.t ? window.t('saved') : 'Salvo', 'success');
+            } else if (res.status === 403) {
+                _showToast('Sem permissão para salvar', 'warning');
+            } else {
+                _showToast('Erro ao salvar', 'error');
+            }
+        } catch (_) {
+            _showToast('Erro ao salvar', 'error');
+        } finally {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
+        }
+    }
+
     function renderView() {
         // CO-242: asset entries (PDF, image, video, code, binary) have a dedicated
         // viewer — skip the markdown rendering path entirely.
         if (isAssetEntry(fullEntry)) {
             zoomBody.className = 'co-zoom-body co-asset-view';
-            zoomBody.innerHTML = buildAssetViewerHtml(fetchUniverse, fullEntry);
             const et = fullEntry.entry_type || (fullEntry.frontmatter || {}).type || '';
+            if (et === 'asset.code') {
+                // CO-245: code entries show an editable editor with Ctrl+S save +
+                // an explicit Save button in the zoom toolbar.
+                const canEdit = !state.isTemplate && canEditCurrentUniverse();
+                zoomBody.innerHTML = buildAssetViewerHtml(fetchUniverse, fullEntry);
+                // Inject save button into the zoom toolbar (only once).
+                const actionsEl = document.querySelector('.co-zoom-actions');
+                if (actionsEl && canEdit && !document.getElementById('co-zoom-save-code')) {
+                    const saveCodeBtn = document.createElement('button');
+                    saveCodeBtn.id = 'co-zoom-save-code';
+                    saveCodeBtn.className = 'co-zoom-action';
+                    saveCodeBtn.title = 'Salvar (Ctrl+S)';
+                    saveCodeBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px">save</span>';
+                    saveCodeBtn.addEventListener('click', () => {
+                        const inst = zoomBody.querySelector('#co-asset-code-container')?._codeEditorInst;
+                        if (inst) saveCodeEntry(inst.getValue());
+                    });
+                    actionsEl.insertBefore(saveCodeBtn, actionsEl.firstChild);
+                }
+                mountAssetCodeEditor(zoomBody, {
+                    editable: canEdit,
+                    onSave: (content) => saveCodeEntry(content),
+                });
+                return;
+            }
+            zoomBody.innerHTML = buildAssetViewerHtml(fetchUniverse, fullEntry);
             if (et === 'asset.pdf' || (fullEntry.frontmatter || {}).mime === 'application/pdf') {
                 initPdfViewerActions(zoomBody);
-            } else if (et === 'asset.code') {
-                mountAssetCodeEditor(zoomBody);
             }
-            // Asset entries are read-only — no dblclick-to-edit.
+            // Other asset types (image, video, binary) are read-only — no edit.
             return;
         }
 
