@@ -5,6 +5,32 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.19.0] — 2026-05-21 — release
+
+## CO-258 — co-auto agent prompts — forbid CHANGELOG.md + Cargo.toml mutations
+
+Agents now write pending changelog notes to `CHANGELOG-PENDING/<TASK-ID>.md` instead of
+modifying `Cargo.toml` or `CHANGELOG.md` directly. The release commit consolidates all
+pending notes via `scripts/release-commit.sh`.
+
+- `dev/co-auto/src/auto.rs`: execution context now includes a **Forbidden Files** section
+  listing `Cargo.toml`, `co-cli/Cargo.toml`, and `CHANGELOG.md`, with a format spec for
+  the pending note.
+- `CLAUDE.md`: versioning policy updated — agents must not touch the three release files.
+- `CHANGELOG-PENDING/`: new directory; agents drop one `<TASK-ID>.md` file per task here.
+- `scripts/release-commit.sh`: new script that bumps versions, consolidates pending notes
+  into a single CHANGELOG entry, deletes the pending files, and commits.
+- `scripts/ship-task.sh`: removed auto-resolve rules for `Cargo.toml` and `CHANGELOG.md`
+  (they must not appear in the conflict set anymore).
+
+### Why
+
+Every parallel co-auto pair ran today conflicted on exactly these two files (Cargo.toml +
+CHANGELOG.md) because each agent independently bumped the version and prepended a changelog
+block. Both mutations are purely procedural (no engineering content), so pulling them out of
+agent scope eliminates the dominant source of rebase conflicts when running tasks in parallel.
+
+
 ## [2.16.2] — 2026-05-21 — Splitter mirror behavior in obsidian-mode (CO-255)
 
 ### Fixed — conteúdo split-pane drag direction in obsidian-mode
