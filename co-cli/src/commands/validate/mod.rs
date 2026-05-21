@@ -11,4 +11,5 @@
 //!   co validate item my-task  # Validate specific item
 
 pub mod all;
+pub mod deploy;
 pub mod item;

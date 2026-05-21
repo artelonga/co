@@ -1,0 +1,11 @@
+version: 1
+target: cloudflare-pages
+domain: meu-portfolio.co.app
+runtime:
+  kind: static
+  build:
+    command: co build
+    output: dist/
+telemetry:
+  sink: co-central
+  sampling: 1.0

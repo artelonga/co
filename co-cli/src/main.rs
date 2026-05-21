@@ -781,6 +781,19 @@ enum ValidateAction {
         /// Content name/id to validate
         name: String,
     },
+    /// Validate a deploy.yaml manifest
+    ///
+    /// Checks the manifest against the deploy.yaml v1 schema and reports
+    /// errors with file path, line number, and field path.
+    ///
+    /// Examples:
+    ///   co validate deploy               # validate ./deploy.yaml
+    ///   co validate deploy myapp/deploy.yaml
+    Deploy {
+        /// Path to deploy.yaml (default: deploy.yaml in current directory)
+        #[arg(default_value = "deploy.yaml")]
+        path: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1074,6 +1087,7 @@ fn main() {
         Commands::Validate { action } => match action {
             ValidateAction::All => commands::validate::all::run(),
             ValidateAction::Item { name } => commands::validate::item::run(&name),
+            ValidateAction::Deploy { path } => commands::validate::deploy::run(&path),
         },
         Commands::Agents { action, query } => {
             let agents_action = match action {

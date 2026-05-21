@@ -1,0 +1,12 @@
+version: 1
+target: vercel
+domain: my-app.vercel.app
+runtime:
+  kind: node
+  build:
+    command: npm run build
+    output: .next
+bindings:
+  secrets:
+    - NEXT_PUBLIC_API_URL
+    - DATABASE_URL

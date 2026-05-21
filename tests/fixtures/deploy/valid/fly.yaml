@@ -1,0 +1,11 @@
+version: 1
+target: fly
+domain: my-app.fly.dev
+runtime:
+  kind: rust
+scaling:
+  min: 1
+  max: 5
+backup:
+  schedule: daily
+  retention: 7d
