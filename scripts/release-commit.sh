@@ -100,4 +100,13 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
 )"
 
+# CO-260: populate changelog_cache for the new release.
+# Calls the local dev server if running; silently skips otherwise.
+DEV_URL="${CO_DEV_URL:-http://localhost:3000}"
+if curl -sf "$DEV_URL/api/health" >/dev/null 2>&1; then
+  echo "Reindexing changelog cache on $DEV_URL…"
+  curl -sf -X POST "$DEV_URL/api/v1/admin/changelog/reindex" \
+    -H 'Content-Type: application/json' || true
+fi
+
 echo "Released $NEW — $THEME"

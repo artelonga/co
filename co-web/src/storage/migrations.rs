@@ -1828,5 +1828,42 @@ impl Storage {
                     .expect("CO-241 backfill update");
             }
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 47 {
+            // CO-260: changelog_cache — pre-computed per-entry PR-size data.
+            // Populated by scripts/release-commit.sh + POST /api/v1/admin/changelog/reindex.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS changelog_cache (
+                        version    TEXT NOT NULL,
+                        ticket     TEXT NOT NULL,
+                        entry_type TEXT NOT NULL DEFAULT 'feat',
+                        title      TEXT NOT NULL DEFAULT '',
+                        pr_number  INTEGER,
+                        pr_size    INTEGER,
+                        additions  INTEGER,
+                        deletions  INTEGER,
+                        commit_sha TEXT,
+                        author     TEXT,
+                        indexed_at INTEGER NOT NULL DEFAULT 0,
+                        PRIMARY KEY (version, ticket)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_changelog_cache_version
+                        ON changelog_cache(version);
+                    CREATE INDEX IF NOT EXISTS idx_changelog_cache_type
+                        ON changelog_cache(entry_type);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (47);",
+                )
+                .expect("migration v47: changelog_cache");
+        }
     }
 }

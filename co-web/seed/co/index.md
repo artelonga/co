@@ -26,6 +26,7 @@ O código vive em [github.com/artelonga/co](https://github.com/artelonga/co) e c
 
 ## Documentação
 
+- [Changelog](/changelog) — histórico de versões com filtros por tipo, tamanho de PR e intervalo.
 - [Segurança](/seguranca) — modelo de ameaças, criptografia e cenários de ataque.
 - [Infraestrutura](/infra) — deploy, backups, CDN e observabilidade.
 - [Renderers](/renderers) — Mermaid, CodeMirror, PDF e outros.

@@ -193,6 +193,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // prefers them over the param capture.
     let co_routes = Router::new()
         .route("/", get(serve_co_index))
+        // CO-260: standalone cross-version changelog viewer page
+        .route(
+            "/changelog",
+            get(crate::changelog_routes::serve_changelog_page),
+        )
         .route("/admin", get(crate::admin_routes::serve_admin_page))
         .route("/repl", get(crate::repl_routes::serve_repl_page))
         .route(
@@ -349,6 +354,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(crate::oidc_routes::openid_configuration),
         )
         .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json))
+        // CO-260: cross-version changelog viewer API
+        .nest("/api/v1", crate::changelog_routes::router())
+        .nest(
+            "/api/v1/admin",
+            crate::changelog_routes::admin_router()
+                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
+        )
         .nest("/api/v1", crate::search_routes::router())
         .nest(
             "/api/v1/auth/recovery",

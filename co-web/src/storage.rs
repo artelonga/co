@@ -135,6 +135,7 @@ impl Storage {
 }
 
 pub(crate) mod api_tokens;
+pub(crate) mod changelog;
 pub(crate) mod chat;
 pub(crate) mod clone_ops;
 pub(crate) mod dashboard;
