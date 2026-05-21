@@ -5,6 +5,140 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.20.0] — 2026-05-21 — Wave A — interactive changelog + MODULES.md + co auth CLI + unified file listing
+
+## CO-129 — Jujutsu-shaped changelog renderer (op-log → commit DAG)
+
+Added `GET /api/v1/universes/{slug}/oplog` — a new endpoint that reads
+`entry_events` and returns them as grouped "commit nodes" (events with the
+same `request_id` are collapsed into one node).  Each node carries an `id`,
+`seq`, `ts_micros`, `author_id`, `node_type` (`commit` | `promote` |
+`conflict` | `revert`), a human-readable `summary`, a `changes` list, and
+a `parents` array for DAG edge rendering.
+
+Added a **Histórico** tab to the CO board UI that renders the op-log as a
+Jujutsu-style vertical DAG:
+
+- SVG spine + dot nodes (distinct shapes/colours per node type)
+- HTML overlay rows with short ID, author, timestamp, and change summary
+- Node click opens a side panel with the full change list and a
+  **Restaurar até aqui** button that calls `POST /revert`
+- Conflict nodes (from promote operations with `conflicts > 0`) appear in red
+- Branch labels rendered when present on a node
+- Virtualized via CSS `content-visibility: auto` — 1000-node DAG renders
+  well under 200 ms
+- Theme-aware: uses only CSS custom properties (`--accent`, `--border`,
+  `--card-bg`, `--text`, `--text-muted`)
+
+### Why
+
+§C.3 of the SR plan named a jujutsu-style history view as a first-class v1
+requirement.  The CO op-log (CO-61/CO-95) already records every change as an
+append-only event stream; this task wires a renderer that exposes that history
+to the user in the mental model they explicitly requested.
+
+## CO-225 — Document AppState composition pattern + add a MODULES.md
+
+Expanded `co-web/src/MODULES.md` from the single directory-pattern stub to a
+full five-pattern reference covering the server-decomposition work from CO-215
+through CO-223. Cross-linked from `docs/architecture/as-is.md` and `CLAUDE.md`
+so both contributors and reviewers have a single source of truth.
+
+### Why
+
+Several patterns were established across CO-215..CO-223 (directory modules,
+sub-state segregation, typed extractors, event bus, worker trait) but lived
+only in individual PR descriptions. New contributors and PR reviewers had no
+single document to point to when checking whether new code follows the
+established conventions.
+
+## CO-236 — co auth — CLI commands for centralized password reset + API token lifecycle
+
+Added `co auth` subcommand suite to `co-cli`, replacing the four-step curl-based
+password-recovery flow with a single interactive command. All password prompts use
+hidden input (never echoed or logged); credentials are stored in
+`~/.config/co/credentials` with mode 600.
+
+### New commands
+
+| Command | Description |
+|---------|-------------|
+| `co auth login [--email E] [--save-token]` | Interactive password login; optionally creates + saves 90-day API token |
+| `co auth reset-password [--email E]` | Full forgot-password flow: send code → verify → set new password → auto-login |
+| `co auth change-password` | Change password for the current session |
+| `co auth status` | Print auth state; exits 0 when authenticated, 1 otherwise |
+| `co auth token create [--name N] [--save]` | Create a 90-day API token |
+| `co auth token list [--json]` | List tokens in table or JSON format |
+| `co auth token revoke <id>` | Revoke a token (with confirmation) |
+| `co auth logout [--revoke-token]` | Clear local credentials; optionally revoke server-side |
+
+### Storage
+
+`~/.config/co/credentials` (TOML, mode 600):
+```toml
+[default]
+base_url = "https://co.artelonga.com.br"
+session = "eyJ..."            # JWT (7 days, for management ops)
+session_expires_at = "..."
+token = "co_<40chars>"        # API token (90 days, for scripting)
+token_id = "tok_..."
+expires_at = "..."
+user_id = "usr_..."
+email = "..."
+display_name = "..."
+
+[uat]
+base_url = "https://co-artelonga-uat.fly.dev"
+token = "co_..."
+```
+
+Multiple profiles are supported via `--profile <name>`.
+
+### Why
+
+The existing recovery flow required four sequential `curl` invocations with
+codes pasted across terminal windows — error-prone and undiscoverable for
+non-engineers. This wraps all nine endpoints (CO-165 forgot-password + CO-35
+API tokens) into a typed, safe CLI surface that can later be wired into the
+Settings UI.
+
+No server-side changes — all endpoints already existed.
+
+## CO-242 — Unified file listing — surface all file types in universe entries (PDF, image, video, code)
+
+Every uploaded asset is now a first-class entry in the unified entries table, visible
+alongside markdown pages, tasks, and events.
+
+### What changed
+
+- **Migration v13** backfills `entries` rows for all existing `assets` rows using path
+  `attachments/<sha256>` and entry type `asset.pdf | asset.image | asset.video |
+  asset.code | asset.binary` derived from the MIME column.
+
+- **POST /assets** creates both an `assets` row and an `entries` row in a single
+  transaction. `content_count` is refreshed from the actual entry count after each
+  upload.
+
+- **PUT /vault/{*path}** now accepts binary payloads (detected via `Content-Type`).
+  Binary content creates an `assets` blob + `entries` row in one transaction at the
+  specified vault path. The vault router's body limit is raised to 50 MB to match the
+  asset API cap.
+
+- **GET /entries?type=asset.*** — the entries API now supports a `.*` wildcard suffix
+  for prefix-matching entry types, so all asset subtypes are returned in one query.
+
+- **Frontend** — the Conteúdo view gains an _Arquivos_ section listing all asset
+  entries with MIME badge and size. Clicking an asset card opens the zoom viewer which
+  dispatches by type: pdf.js for PDFs, `<img>` for images, `<video>` for video, and
+  CodeMirror read-only for code files.
+
+### Why
+
+§6 (folders encapsulate features) + §1 (composition — assets become a kind of entry):
+a universe should be a single home for all content, not markdown-only with assets in a
+separate API silo.
+
+
 ## [2.19.0] — 2026-05-21 — release
 
 ## CO-258 — co-auto agent prompts — forbid CHANGELOG.md + Cargo.toml mutations
