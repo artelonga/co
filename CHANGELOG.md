@@ -5,6 +5,26 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.13.3] — 2026-05-21 — CRITICAL hotfix: `serve_deep_link` was serving HTML for static assets
+
+### Fixed — `/variants/a/app.js` returned HTML, breaking the entire SPA
+
+CO-232's `serve_deep_link` handler is registered on `/{slug}/{*subpath}`. The route also matches:
+- `/variants/a/app.js`
+- `/variants/a/modules/*.js`
+- `/shared/style.css`
+- `/pdfjs/build/pdf.js`
+
+For all of these, the handler served `index.html` (the SPA shell) instead of delegating to the static-file handler. The browser tried to parse the HTML as a JavaScript module, hit a MIME-type mismatch, and **the entire SPA failed to bootstrap**. Symptom: every "Carregando..." stayed stuck forever, sidebar empty, top bar minimal — because no client code ran at all.
+
+This explained why 2.13.1 (sidebar fallback) and 2.13.2 (anonymous getProjects via v1) appeared to have no effect: the JS file containing those fixes was never even successfully loaded.
+
+**Fix**: `serve_deep_link` now calls `looks_like_static_asset(uri.path())` first and delegates to `serve_variant_file` for asset paths. Mirrors the same guard `serve_co_index` already had for the single-segment `/{slug}` route. Confirmed `/variants/a/app.js` now returns `application/javascript` after deploy.
+
+### Why this slipped past CO-232 review
+
+The `entry_exists_for_subpath` logic correctly handles the entry-or-no-entry distinction, but **no test exercised the static-asset path**. The CO-232 tests covered known and unknown entry slugs but didn't have a `/variants/...` or `/shared/...` case. The 2.12.2 hotfix (universe-doesn't-exist → 200) made the regression louder because it removed the prior 404 that would have at least let the browser's fallback resolver try something different.
+
 ## [2.13.2] — 2026-05-21 — Hotfix: anonymous project list 401 → board never renders
 
 ### Fixed — `api.getProjects()` hit auth-gated legacy endpoint

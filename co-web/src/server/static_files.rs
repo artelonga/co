@@ -168,8 +168,19 @@ fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str
 pub(super) async fn serve_deep_link(
     Path((universe_slug, subpath)): Path<(String, String)>,
     headers: HeaderMap,
+    uri: Uri,
     State(state): State<AppState>,
 ) -> Response {
+    // 2.13.3 hotfix: serve_deep_link previously served the SPA shell unconditionally
+    // for `/{slug}/{*subpath}`. That matches `/variants/a/app.js`, `/shared/style.css`,
+    // `/pdfjs/build/pdf.js` etc. — all static assets — returning HTML instead of JS/CSS.
+    // The browser then fails to parse the SPA bundle (MIME error), no JS runs, the
+    // app shows "Carregando..." forever. Delegate to the static-file handler when
+    // the path looks like an asset (matches `looks_like_static_asset`).
+    if looks_like_static_asset(uri.path()) {
+        return serve_variant_file(headers, uri, State(state)).await;
+    }
+
     let variant = extract_variant(&headers, &state.core.config);
     let embed_path = format!("variants/{}/index.html", variant);
     let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
