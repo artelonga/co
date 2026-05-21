@@ -71,6 +71,9 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // Seed admin-owned content universes (artelonga, rfq, co) so they
     // appear in the sidebar without manual creation after every deploy.
     storage.seed_admin_content_universes();
+    // CO-261: placeholder pages in sister-repo universes until Wave B/C
+    // wires their work/<space>/ task sync.
+    storage.reseed_sister_repo_stubs();
     // Timeline trio (`tempo`, `humanity`, `universo`). Always re-seed —
     // the JSON manifests in the binary are the source of truth, and
     // `upsert_entry_row` makes overwriting safe.
