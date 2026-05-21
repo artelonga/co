@@ -51,6 +51,7 @@ pub mod processos;
 pub mod proposal_routes;
 pub mod push_routes;
 pub mod query_dsl;
+pub mod query_routes;
 pub mod quilombo_models;
 pub mod quilombo_permissoes;
 pub mod quilombo_routes;

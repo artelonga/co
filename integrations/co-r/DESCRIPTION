@@ -1,0 +1,15 @@
+Package: co.r
+Title: CO Universe DuckDB Interface
+Version: 0.1.0
+Authors@R: person("CO", "Contributors", role = c("aut", "cre"),
+    email = "dev@co.artelonga.com.br")
+Description: Query CO universe data via DuckDB/SQLite from R.
+    Connects to a per-universe data.db either from a local data directory
+    or by downloading a snapshot from the CO API.
+License: MIT
+Imports:
+    DBI,
+    duckdb,
+    httr
+Encoding: UTF-8
+RoxygenNote: 7.3.1

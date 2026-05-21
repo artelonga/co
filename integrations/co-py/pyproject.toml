@@ -1,0 +1,15 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "co-py"
+version = "0.1.0"
+description = "Query CO universe data via DuckDB"
+requires-python = ">=3.9"
+dependencies = [
+    "duckdb>=0.9",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/co_py"]
