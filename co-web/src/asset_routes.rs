@@ -32,7 +32,7 @@ use crate::server::AppState;
 /// Phase 1 hard cap. Larger files require chunked-AEAD streaming (deferred
 /// to CO-149 + CO-148 Phase 6). The cap also keeps memory bounded since we
 /// hold the whole body in RAM during sha256 + write.
-const MAX_ASSET_BYTES: usize = 50 * 1024 * 1024;
+pub const MAX_ASSET_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(Serialize)]
 pub struct AssetUploadResponse {
@@ -78,9 +78,34 @@ fn now_ns() -> i64 {
     })
 }
 
+/// Map a MIME type to a CO-242 asset entry type.
+pub fn mime_to_asset_entry_type(mime: &str) -> &'static str {
+    if mime == "application/pdf" {
+        "asset.pdf"
+    } else if mime.starts_with("image/") {
+        "asset.image"
+    } else if mime.starts_with("video/") {
+        "asset.video"
+    } else if mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json"
+                | "application/javascript"
+                | "application/typescript"
+                | "application/xml"
+                | "application/yaml"
+                | "application/x-yaml"
+        )
+    {
+        "asset.code"
+    } else {
+        "asset.binary"
+    }
+}
+
 /// Sniff a mime from the bytes (best-effort) or fall back to the supplied
 /// `Content-Type` header / `application/octet-stream`.
-fn detect_mime(bytes: &[u8], content_type: Option<&str>) -> String {
+pub fn detect_mime(bytes: &[u8], content_type: Option<&str>) -> String {
     // Cheap manual sniffing of the most common formats — we don't pull in
     // a new dep for Phase 1. The `Content-Type` header takes precedence
     // because the client knows best for cases like `text/markdown` and
@@ -249,12 +274,33 @@ pub async fn upload_asset(
     let cipher_size = ciphertext.len() as i64;
     let now = now_ns();
 
+    let entry_path = format!("attachments/{sha256}");
+    let entry_type = mime_to_asset_entry_type(&mime);
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let title = q
+        .filename
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| &sha256[..16]);
+    let fm_json = serde_json::json!({
+        "type": entry_type,
+        "mime": mime,
+        "asset_sha256": sha256,
+        "size_bytes": size,
+        "filename": q.filename.as_deref().unwrap_or(""),
+    });
+    let fm_json_str = fm_json.to_string();
+
     {
         let guard = conn
             .lock()
             .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        // CO-242: wrap asset row + entries row in one transaction.
         guard
-            .execute(
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| AppError::Internal(format!("begin asset tx: {e}")))?;
+        let tx_result: rusqlite::Result<()> = (|| {
+            guard.execute(
                 "INSERT OR REPLACE INTO assets \
                  (sha256, blob_path, mime, size_bytes, filename, created_at_ns, created_by, \
                   refcount, nonce, cipher_size, encrypted) \
@@ -272,8 +318,64 @@ pub async fn upload_asset(
                     &nonce[..],
                     cipher_size,
                 ],
+            )?;
+            // CO-242: create (or update) the matching entries row so this asset
+            // appears in GET /entries and in the unified content count.
+            guard.execute(
+                "INSERT INTO entries \
+                   (path, universe_key, entry_type, title, \
+                    frontmatter_json, payload, body, body_hash, \
+                    body_lines, body_words, body_chars, \
+                    created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, '', '', 0, 0, 0, ?6, ?6) \
+                 ON CONFLICT(universe_key, path) DO UPDATE SET \
+                   entry_type = excluded.entry_type, \
+                   title = excluded.title, \
+                   frontmatter_json = excluded.frontmatter_json, \
+                   payload = excluded.payload, \
+                   updated_at = excluded.updated_at",
+                rusqlite::params![
+                    &entry_path,
+                    &universe_key,
+                    entry_type,
+                    title,
+                    &fm_json_str,
+                    &now_iso,
+                ],
+            )?;
+            guard
+                .execute(
+                    "INSERT INTO entries_fts (universe_key, path, title, body) \
+                     VALUES (?1, ?2, ?3, '')",
+                    rusqlite::params![&universe_key, &entry_path, title],
+                )
+                .ok();
+            Ok(())
+        })();
+        match tx_result {
+            Ok(()) => guard
+                .execute_batch("COMMIT")
+                .map_err(|e| AppError::Internal(format!("commit asset tx: {e}")))?,
+            Err(e) => {
+                let _ = guard.execute_batch("ROLLBACK");
+                return Err(AppError::Internal(format!("insert asset + entry row: {e}")));
+            }
+        }
+        // CO-242: refresh content_count so the universe page count includes assets.
+        let actual_count: Option<i64> = guard
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1",
+                rusqlite::params![&universe_key],
+                |row| row.get(0),
             )
-            .map_err(|e| AppError::Internal(format!("insert asset row: {e}")))?;
+            .ok();
+        if let Some(n) = actual_count {
+            let meta = state.core.storage.lock();
+            let _ = meta.conn().execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                rusqlite::params![n, &universe_key],
+            );
+        }
     }
 
     // CO-156: emit asset.upload telemetry
