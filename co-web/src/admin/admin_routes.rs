@@ -383,7 +383,7 @@ pub async fn serve_admin_page(headers: HeaderMap) -> Response {
         .into_response()
 }
 
-const ADMIN_PAGE_HTML: &str = include_str!("../static/variants/a/admin.html");
+const ADMIN_PAGE_HTML: &str = include_str!("../../static/variants/a/admin.html");
 
 // ---------------------------------------------------------------------------
 // Router

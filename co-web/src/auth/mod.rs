@@ -879,6 +879,10 @@ pub fn new_code_entry(user_id: Option<String>, code: String) -> VerifyCodeEntry 
 /// CO-222: typed extractor hierarchy (`AuthedUser`, `OwnerOf`, `AdminUser`, `TokenOrJwtUser`).
 pub mod extractors;
 
+pub mod onboarding_routes;
+pub mod recovery_crypto;
+pub mod recovery_routes;
+
 #[cfg(test)]
 mod tests {
     use super::*;

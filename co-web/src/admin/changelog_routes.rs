@@ -20,8 +20,8 @@ use crate::storage::changelog::ChangelogCacheRow;
 // Embedded assets
 // ---------------------------------------------------------------------------
 
-const CHANGELOG_MD: &str = include_str!("../../CHANGELOG.md");
-const CHANGELOG_PAGE_HTML: &str = include_str!("../static/variants/a/changelog.html");
+const CHANGELOG_MD: &str = include_str!("../../../CHANGELOG.md");
+const CHANGELOG_PAGE_HTML: &str = include_str!("../../static/variants/a/changelog.html");
 
 // " — " separator used throughout CHANGELOG.md (space + U+2014 em-dash + space)
 const SEP: &str = " \u{2014} ";

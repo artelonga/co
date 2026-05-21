@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::server::AppState;
 
-const REGISTRY_YAML: &str = include_str!("../e2e/interactions/registry.yaml");
+const REGISTRY_YAML: &str = include_str!("../../e2e/interactions/registry.yaml");
 
 const HTTP_METHODS: &[&str] = &["get", "put", "post", "delete", "patch", "head", "options"];
 

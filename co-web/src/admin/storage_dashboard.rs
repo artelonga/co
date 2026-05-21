@@ -455,7 +455,7 @@ pub fn universe_router() -> Router<AppState> {
 // Static HTML page
 // ---------------------------------------------------------------------------
 
-const STORAGE_HTML: &str = include_str!("../static/shared/storage.html");
+const STORAGE_HTML: &str = include_str!("../../static/shared/storage.html");
 
 pub async fn serve_storage_page() -> Response {
     let mut resp = Response::new(STORAGE_HTML.into());

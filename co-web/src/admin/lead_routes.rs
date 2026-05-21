@@ -574,7 +574,7 @@ pub async fn serve_leads_page(headers: HeaderMap) -> Response {
         .into_response()
 }
 
-const LEADS_PAGE_HTML: &str = include_str!("../static/variants/a/leads.html");
+const LEADS_PAGE_HTML: &str = include_str!("../../static/variants/a/leads.html");
 
 // ---------------------------------------------------------------------------
 // Background retention task (CO-183 LGPD 24-month purge)
