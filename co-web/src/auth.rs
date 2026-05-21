@@ -828,14 +828,18 @@ pub async fn universe_writer_gate(
         if universe.owner_id == user_id {
             true
         } else {
-            storage
+            let is_member = storage
                 .conn()
                 .query_row(
                     "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
                     rusqlite::params![&slug, &user_id],
                     |_| Ok(true),
                 )
-                .unwrap_or(false)
+                .unwrap_or(false);
+            // CO-253: subscribers of public-subscribable universes can also write.
+            is_member
+                || (universe.visibility == "public-subscribable"
+                    && storage.is_subscribed(&user_id, &slug))
         }
     };
 
