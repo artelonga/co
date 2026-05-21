@@ -47,3 +47,6 @@ co-backups/
 
 # MaxMind GeoLite2 data — required attribution, large binary
 GeoLite2-*.mmdb
+
+# CO-243: LSP rust build artifacts
+co-lsp/target/
