@@ -108,10 +108,11 @@ if [[ -n "$SPEC_LOCAL" ]]; then
   fi
 fi
 
-# Rebase on origin/main, auto-resolving common conflict patterns:
+# Rebase on origin/main, auto-resolving known-safe conflict patterns:
 #   - work/<space>/X.md  (spec status sync)  → ours (this branch's, now 'done')
-#   - CHANGELOG.md       (release notes)     → theirs (latest from main + we'll re-append)
 #   - Cargo.lock         (build state)       → theirs (regenerate)
+# CHANGELOG.md and Cargo.toml are never touched by agents (CO-258); if they appear
+# in a conflict, treat as unhandled and require manual resolution.
 echo "Rebasing on origin/main (auto-resolving metadata conflicts)..."
 git rebase origin/main 2>&1 | tail -3 || true
 while [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]]; do
@@ -121,15 +122,9 @@ while [[ -n "$(git diff --name-only --diff-filter=U 2>/dev/null)" ]]; do
     if [[ "$f" == work/*/*.md ]]; then
       echo "    $f → ours (spec)"
       git checkout --ours -- "$f"
-    elif [[ "$f" == "CHANGELOG.md" || "$f" == "Cargo.lock" ]]; then
-      echo "    $f → theirs (regenerable/append-only)"
+    elif [[ "$f" == "Cargo.lock" ]]; then
+      echo "    $f → theirs (regenerable)"
       git checkout --theirs -- "$f"
-    elif [[ "$f" == "Cargo.toml" ]]; then
-      # Cargo.toml version conflict: keep the higher version from the task branch
-      # by taking ours (the task's). If main has a higher version, the user should
-      # manually verify.
-      echo "    $f → ours (task's version bump)"
-      git checkout --ours -- "$f"
     else
       echo "    $f → no auto-resolve; aborting" >&2
       git rebase --abort 2>&1 | head -1 >&2

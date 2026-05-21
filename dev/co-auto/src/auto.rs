@@ -633,6 +633,18 @@ fn build_context(
         Use conventional commits: the task specifies the commit message format.\n\
         Run `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt` before committing.\n\
         After completing all criteria, commit with the specified message.\n\n\
+        ## Forbidden Files\n\n\
+        DO NOT modify any of these files — they are owned by the release commit only:\n\
+        - `Cargo.toml`\n\
+        - `co-cli/Cargo.toml`\n\
+        - `CHANGELOG.md`\n\n\
+        Write your changelog entry to `CHANGELOG-PENDING/{key}.md` instead:\n\n\
+        ```markdown\n\
+        ## {key} — {title}\n\n\
+        <describe what changed and why>\n\n\
+        ### Why\n\
+        <optional — rationale or motivation>\n\
+        ```\n\n\
         ## Test Isolation Rules\n\n\
         - All tests MUST run without opening network ports. Use in-process test servers \
         (e.g., `axum::test::TestClient`, `tower::ServiceExt`) instead of spawning HTTP listeners.\n\
