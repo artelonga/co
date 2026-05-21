@@ -56,6 +56,81 @@ export function shouldRenderInlinePdf(entry) {
     );
 }
 
+// CO-242: true when this entry is a unified asset (PDF, image, video, code, binary).
+export function isAssetEntry(entry) {
+    const et = entry.entry_type || (entry.frontmatter || {}).type || '';
+    return et.startsWith('asset.');
+}
+
+// CO-242: build the asset viewer HTML for a given asset entry.
+export function buildAssetViewerHtml(universe, entry) {
+    const fm = entry.frontmatter || {};
+    const et = entry.entry_type || fm.type || 'asset.binary';
+    const sha256 = fm.asset_sha256 || '';
+    const filename = fm.filename || entry.title || entry.path || '';
+    const mime = fm.mime || '';
+    const assetUrl = sha256
+        ? `/api/v1/universes/${encodeURIComponent(universe)}/assets/${encodeURIComponent(sha256)}`
+        : '';
+
+    if (et === 'asset.pdf' || mime === 'application/pdf') {
+        return assetUrl ? buildPdfViewerHtml(assetUrl, filename) : `<p>PDF sem URL</p>`;
+    }
+    if (et === 'asset.image' || mime.startsWith('image/')) {
+        return assetUrl
+            ? `<div style="text-align:center;padding:16px"><img src="${esc(assetUrl)}" alt="${esc(filename)}" style="max-width:100%;max-height:70vh;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.15)"></div>`
+            : `<p>Imagem sem URL</p>`;
+    }
+    if (et === 'asset.video' || mime.startsWith('video/')) {
+        return assetUrl
+            ? `<div style="text-align:center;padding:16px"><video controls src="${esc(assetUrl)}" style="max-width:100%;max-height:70vh;border-radius:8px"></video></div>`
+            : `<p>Vídeo sem URL</p>`;
+    }
+    // asset.code — placeholder; actual CodeMirror mount happens in mountAssetCodeEditor()
+    if (et === 'asset.code') {
+        return `<div id="co-asset-code-container" data-asset-url="${esc(assetUrl)}" data-filename="${esc(filename)}" style="min-height:300px">
+            <div class="loading-spinner" style="padding:32px"><div class="spinner"></div></div>
+        </div>`;
+    }
+    // asset.binary or unknown — download link
+    const sizeHuman = (() => {
+        const b = fm.size_bytes || 0;
+        if (b < 1024) return `${b} B`;
+        if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
+        return `${(b / 1048576).toFixed(2)} MB`;
+    })();
+    return `<div style="display:flex;flex-direction:column;align-items:center;padding:48px 24px;gap:16px">
+        <span class="material-symbols-outlined" style="font-size:64px;color:var(--color-muted,#888)">attach_file</span>
+        <div style="font-size:1rem;font-weight:600">${esc(filename)}</div>
+        <div style="font-size:.85rem;color:var(--color-muted,#888)">${esc(mime || 'application/octet-stream')} · ${esc(sizeHuman)}</div>
+        ${assetUrl ? `<a href="${esc(assetUrl)}" download="${esc(filename)}" class="btn btn-secondary">
+            <span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">download</span>
+            Baixar arquivo
+        </a>` : ''}
+    </div>`;
+}
+
+// CO-242: if the asset code container is present, fetch the text and mount a RO CodeMirror.
+async function mountAssetCodeEditor(zoomBody) {
+    const container = zoomBody.querySelector('#co-asset-code-container');
+    if (!container) return;
+    const assetUrl = container.dataset.assetUrl;
+    const filename = container.dataset.filename || '';
+    if (!assetUrl) { container.innerHTML = '<p>Arquivo sem URL</p>'; return; }
+    try {
+        const resp = await fetch(assetUrl);
+        const text = resp.ok ? await resp.text() : `Erro ao carregar: ${resp.status}`;
+        container.innerHTML = '';
+        if (window.CoEditor) {
+            window.CoEditor.initEditor(container, { content: text, readOnly: true });
+        } else {
+            container.innerHTML = `<pre style="padding:16px;overflow:auto;white-space:pre-wrap;font-size:.85rem"><code>${esc(text)}</code></pre>`;
+        }
+    } catch (err) {
+        container.innerHTML = `<p style="color:red">Erro: ${esc(String(err))}</p>`;
+    }
+}
+
 export function buildPdfViewerHtml(pdfUrl, filename) {
     const viewerSrc = `/pdfjs/web/viewer.html?file=${encodeURIComponent(pdfUrl)}`;
     const dlName = filename || 'documento.pdf';
@@ -438,6 +513,21 @@ export async function openZoomModal(entry, startInEditMode) {
     const zoomBody = document.getElementById('co-zoom-body');
 
     function renderView() {
+        // CO-242: asset entries (PDF, image, video, code, binary) have a dedicated
+        // viewer — skip the markdown rendering path entirely.
+        if (isAssetEntry(fullEntry)) {
+            zoomBody.className = 'co-zoom-body co-asset-view';
+            zoomBody.innerHTML = buildAssetViewerHtml(fetchUniverse, fullEntry);
+            const et = fullEntry.entry_type || (fullEntry.frontmatter || {}).type || '';
+            if (et === 'asset.pdf' || (fullEntry.frontmatter || {}).mime === 'application/pdf') {
+                initPdfViewerActions(zoomBody);
+            } else if (et === 'asset.code') {
+                mountAssetCodeEditor(zoomBody);
+            }
+            // Asset entries are read-only — no dblclick-to-edit.
+            return;
+        }
+
         const md = window.CoMarkdown;
         let html = md ? md.renderMarkdown(fullEntry.body || '') : esc(fullEntry.body || '');
         if (md && md.resolveWikilinks) html = md.resolveWikilinks(html, state.currentUniverseSlug);
@@ -812,11 +902,13 @@ export async function renderConteudo() {
 
     try { await _loadEditorBundle(); } catch (_) {}
 
-    const [taskEntries, eventEntries, pageEntries, clipEntries, allEntries] = await Promise.all([
+    const [taskEntries, eventEntries, pageEntries, clipEntries, assetEntries, allEntries] = await Promise.all([
         api.getUniverseEntries(slug, 'task'),
         api.getUniverseEntries(slug, 'event'),
         api.getUniverseEntries(slug, 'page'),
         api.getUniverseEntries(slug, 'clip'),
+        // CO-242: unified asset listing — all asset.* subtypes
+        api.getUniverseEntries(slug, 'asset.*'),
         api.getUniverseEntries(slug),
     ]);
 
@@ -827,7 +919,7 @@ export async function renderConteudo() {
     //                                regular content listings.
     const isHiddenPath = (p) =>
         (p || '').startsWith('_drafts/') || (p || '').startsWith('_proposals/');
-    for (const arr of [taskEntries, eventEntries, pageEntries, clipEntries, allEntries]) {
+    for (const arr of [taskEntries, eventEntries, pageEntries, clipEntries, assetEntries, allEntries]) {
         for (let i = arr.length - 1; i >= 0; i--) {
             if (isHiddenPath(arr[i].path)) arr.splice(i, 1);
         }
@@ -838,6 +930,7 @@ export async function renderConteudo() {
         ...eventEntries.map(e => e.path),
         ...pageEntries.map(e => e.path),
         ...clipEntries.map(e => e.path),
+        ...assetEntries.map(e => e.path),
     ]);
     const CONTEUDO_BACKEND_TYPES = new Set(['state', 'branch', 'proposal', 'merge']);
     for (const e of allEntries) {
@@ -1043,6 +1136,40 @@ export async function renderConteudo() {
           }).join('')
         : '<p class="conteudo-empty">Nenhum clipe</p>';
 
+    // CO-242: asset cards — icon + filename + mime badge, click to open viewer.
+    const assetTypeIcon = (et) => {
+        if (et === 'asset.pdf') return 'picture_as_pdf';
+        if (et === 'asset.image') return 'image';
+        if (et === 'asset.video') return 'videocam';
+        if (et === 'asset.code') return 'code';
+        return 'attach_file';
+    };
+    const assetsBodyHtml = assetEntries.length
+        ? assetEntries.map(e => {
+            const fm = entryFm(e);
+            const et = e.entry_type || fm.type || 'asset.binary';
+            const mime = fm.mime || '';
+            const sizeHuman = (() => {
+                const b = fm.size_bytes || 0;
+                if (b < 1024) return `${b} B`;
+                if (b < 1048576) return `${(b / 1024).toFixed(1)} KB`;
+                return `${(b / 1048576).toFixed(2)} MB`;
+            })();
+            return `<div class="conteudo-card conteudo-card-clickable co-asset-card"
+                        data-entry-path="${esc(e.path)}"
+                        data-entry-title="${esc(entryTitle(e))}">
+                <div class="conteudo-card-title" style="display:flex;align-items:center;gap:8px">
+                    <span class="material-symbols-outlined" style="font-size:18px;color:var(--color-muted,#888)">${assetTypeIcon(et)}</span>
+                    ${esc(entryTitle(e))}
+                </div>
+                <div class="conteudo-card-footer">
+                    <span class="conteudo-card-date" style="font-size:.75rem">${esc(mime)}</span>
+                    <span class="conteudo-card-date">${esc(sizeHuman)}</span>
+                </div>
+            </div>`;
+          }).join('')
+        : '';
+
     const addContentBtn = state.isTemplate
         ? ''
         : `<button class="btn btn-secondary btn-sm co-add-content" id="btn-add-content" style="margin-left:auto;font-size:12px">+ ${window.t ? window.t('add_content') : 'Adicionar conteúdo'}</button>`;
@@ -1052,6 +1179,8 @@ export async function renderConteudo() {
         sectionHtml('tarefas', 'Tarefas', taskEntries.length, tasksBodyHtml, false, 'Redundante ao Kanban'),
         sectionHtml('eventos', 'Próximos Eventos', upcomingEvents.length, eventsBodyHtml, false, null),
         clipEntries.length ? sectionHtml('clipes', 'Clipes', clipEntries.length, clipsBodyHtml, false, null) : '',
+        // CO-242: assets section — only shown when the universe has uploaded files.
+        assetEntries.length ? sectionHtml('arquivos', 'Arquivos', assetEntries.length, assetsBodyHtml, false, null) : '',
     ].join('');
 
     const totalEntries = allEntries.length;

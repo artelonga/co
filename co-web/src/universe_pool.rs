@@ -319,7 +319,7 @@ impl UniversePool {
 // Universe-level migrations
 // ---------------------------------------------------------------------------
 
-fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
+fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     conn.execute_batch(UNIVERSE_SCHEMA)
         .expect("universe schema migration");
 
@@ -468,6 +468,58 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
         )
         .expect("universe schema_version v12");
     }
+    if v < 13 {
+        // CO-242: backfill entries rows for existing assets so they appear in the
+        // unified listing. One row per asset using path = 'attachments/<sha256>'.
+        // entry_type is derived from the MIME column. INSERT OR IGNORE so re-running
+        // the migration on an already-migrated DB is a no-op.
+        let type_case = "CASE \
+            WHEN mime = 'application/pdf' THEN 'asset.pdf' \
+            WHEN mime LIKE 'image/%' THEN 'asset.image' \
+            WHEN mime LIKE 'video/%' THEN 'asset.video' \
+            WHEN mime LIKE 'text/%' \
+              OR mime IN ('application/json','application/javascript','application/typescript',\
+                          'application/xml','application/yaml','application/x-yaml') \
+              THEN 'asset.code' \
+            ELSE 'asset.binary' \
+        END";
+        conn.execute(
+            &format!(
+                "INSERT OR IGNORE INTO entries \
+                   (path, universe_key, entry_type, title, \
+                    frontmatter_json, payload, body, body_hash, \
+                    body_lines, body_words, body_chars, \
+                    created_at, updated_at) \
+                 SELECT \
+                   'attachments/' || sha256, \
+                   ?1, \
+                   {type_case}, \
+                   COALESCE(filename, substr(sha256, 1, 16)), \
+                   json_object( \
+                     'type', {type_case}, \
+                     'mime', mime, \
+                     'asset_sha256', sha256, \
+                     'size_bytes', size_bytes, \
+                     'filename', COALESCE(filename, '') \
+                   ), \
+                   json_object( \
+                     'type', {type_case}, \
+                     'mime', mime, \
+                     'asset_sha256', sha256, \
+                     'size_bytes', size_bytes, \
+                     'filename', COALESCE(filename, '') \
+                   ), \
+                   '', '', 0, 0, 0, \
+                   datetime(created_at_ns / 1000000000, 'unixepoch'), \
+                   datetime(created_at_ns / 1000000000, 'unixepoch') \
+                 FROM assets"
+            ),
+            rusqlite::params![universe_key],
+        )
+        .expect("CO-242 migration v13: backfill asset entries");
+        conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])
+            .expect("universe schema_version v13");
+    }
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
     // computed", so we re-run the computation for all rows where body_chars = 0.
@@ -497,8 +549,9 @@ fn run_universe_migrations(conn: &Connection, _universe_key: &str) {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn run_universe_migrations_for_test(conn: &Connection) {
+/// Exposed for integration tests that need a fully-migrated per-universe DB.
+#[doc(hidden)]
+pub fn run_universe_migrations_for_test(conn: &Connection) {
     run_universe_migrations(conn, "test-universe");
 }
 

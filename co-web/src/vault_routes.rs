@@ -318,6 +318,187 @@ fn parse_markdown_content(content: &str) -> (JsonValue, String) {
     }
 }
 
+/// CO-242: handle a binary vault PUT — write blob + create asset + entries rows atomically.
+async fn put_vault_binary(
+    state: &AppState,
+    universe_key: &str,
+    path: &str,
+    content_type: Option<&str>,
+    bytes: axum::body::Bytes,
+) -> Result<axum::response::Response, AppError> {
+    use sha2::{Digest, Sha256};
+
+    if bytes.len() > crate::asset_routes::MAX_ASSET_BYTES {
+        return Err(AppError::BadRequest(format!(
+            "Asset too large ({} > {} bytes)",
+            bytes.len(),
+            crate::asset_routes::MAX_ASSET_BYTES
+        )));
+    }
+
+    let mime = crate::asset_routes::detect_mime(&bytes, content_type);
+    let entry_type = crate::asset_routes::mime_to_asset_entry_type(&mime);
+
+    let sha256 = {
+        let mut h = Sha256::new();
+        h.update(&bytes);
+        let digest = h.finalize();
+        let mut out = String::with_capacity(64);
+        for b in digest.iter() {
+            use std::fmt::Write as _;
+            let _ = write!(out, "{b:02x}");
+        }
+        out
+    };
+
+    let filename = path.split('/').next_back().unwrap_or("").to_string();
+    let now_ns = chrono::Utc::now()
+        .timestamp_nanos_opt()
+        .unwrap_or_else(|| chrono::Utc::now().timestamp() * 1_000_000_000);
+    let now_iso = chrono::Utc::now().to_rfc3339();
+
+    let (universe_dir, conn) = {
+        let storage = lock_storage(state);
+        storage
+            .get_universe(universe_key)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
+        (
+            storage.universe_pool.universe_dir(universe_key),
+            storage.universe_conn(universe_key),
+        )
+    };
+
+    let blob_dir = universe_dir
+        .join("blobs")
+        .join(&sha256[0..2])
+        .join(&sha256[2..4]);
+    std::fs::create_dir_all(&blob_dir)
+        .map_err(|e| AppError::Internal(format!("create blob dir: {e}")))?;
+    let blob_path_full = blob_dir.join(&sha256);
+
+    let (ciphertext, nonce) = crate::asset_crypto::encrypt_blob(&bytes, universe_key, &sha256)
+        .map_err(|e| AppError::Internal(format!("encrypt blob: {e}")))?;
+
+    let tmp = blob_path_full.with_extension("tmp");
+    std::fs::write(&tmp, &ciphertext)
+        .map_err(|e| AppError::Internal(format!("write blob: {e}")))?;
+    std::fs::rename(&tmp, &blob_path_full)
+        .map_err(|e| AppError::Internal(format!("rename blob: {e}")))?;
+
+    let rel_blob_path = format!("blobs/{}/{}/{}", &sha256[0..2], &sha256[2..4], &sha256);
+    let size = bytes.len() as i64;
+    let cipher_size = ciphertext.len() as i64;
+
+    let fm = serde_json::json!({
+        "type": entry_type,
+        "mime": mime,
+        "asset_sha256": sha256,
+        "size_bytes": size,
+        "filename": filename,
+    });
+    let fm_json_str = fm.to_string();
+    let title = if filename.is_empty() {
+        &sha256[..16]
+    } else {
+        &filename
+    };
+
+    {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        guard
+            .execute_batch("BEGIN IMMEDIATE")
+            .map_err(|e| AppError::Internal(format!("begin binary vault tx: {e}")))?;
+        let tx: rusqlite::Result<()> = (|| {
+            guard.execute(
+                "INSERT OR REPLACE INTO assets \
+                 (sha256, blob_path, mime, size_bytes, filename, created_at_ns, created_by, \
+                  refcount, nonce, cipher_size, encrypted) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, \
+                  COALESCE((SELECT refcount FROM assets WHERE sha256 = ?1), 0), \
+                  ?7, ?8, 1)",
+                rusqlite::params![
+                    &sha256,
+                    &rel_blob_path,
+                    &mime,
+                    size,
+                    &filename,
+                    now_ns,
+                    &nonce[..],
+                    cipher_size,
+                ],
+            )?;
+            guard.execute(
+                "INSERT INTO entries \
+                   (path, universe_key, entry_type, title, \
+                    frontmatter_json, payload, body, body_hash, \
+                    body_lines, body_words, body_chars, \
+                    created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?5, '', '', 0, 0, 0, ?6, ?6) \
+                 ON CONFLICT(universe_key, path) DO UPDATE SET \
+                   entry_type = excluded.entry_type, \
+                   title = excluded.title, \
+                   frontmatter_json = excluded.frontmatter_json, \
+                   payload = excluded.payload, \
+                   updated_at = excluded.updated_at",
+                rusqlite::params![
+                    path,
+                    universe_key,
+                    entry_type,
+                    title,
+                    &fm_json_str,
+                    &now_iso,
+                ],
+            )?;
+            guard
+                .execute(
+                    "INSERT INTO entries_fts (universe_key, path, title, body) VALUES (?1, ?2, ?3, '')",
+                    rusqlite::params![universe_key, path, title],
+                )
+                .ok();
+            Ok(())
+        })();
+        match tx {
+            Ok(()) => guard
+                .execute_batch("COMMIT")
+                .map_err(|e| AppError::Internal(format!("commit binary vault tx: {e}")))?,
+            Err(e) => {
+                let _ = guard.execute_batch("ROLLBACK");
+                return Err(AppError::Internal(format!("binary vault insert: {e}")));
+            }
+        }
+        let actual_count: Option<i64> = guard
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = ?1",
+                rusqlite::params![universe_key],
+                |r| r.get(0),
+            )
+            .ok();
+        if let Some(n) = actual_count {
+            let meta = lock_storage(state);
+            let _ = meta.conn().execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                rusqlite::params![n, universe_key],
+            );
+        }
+    }
+
+    let stat = make_stat(Some(&now_iso), Some(&now_iso), size as usize);
+    use axum::http::StatusCode;
+    Ok((
+        StatusCode::CREATED,
+        Json(VaultFile {
+            path: path.to_string(),
+            content: String::new(),
+            frontmatter: fm,
+            tags: vec![],
+            stat,
+        }),
+    )
+        .into_response())
+}
+
 /// 1.50.0: write a structured-data file (yaml/toml/json) verbatim to the
 /// universe's filesystem root, with no markdown frontmatter wrap. Used by
 /// `put_vault_file` when the path matches `is_raw_data_file`. Caller is
@@ -633,15 +814,54 @@ pub async fn get_vault_file(
     }))
 }
 
+/// Returns true when the Content-Type indicates binary (non-text) content that
+/// should be stored as a CO-242 asset entry rather than a markdown vault note.
+fn is_binary_vault_content(content_type: Option<&str>) -> bool {
+    let Some(ct) = content_type else { return false };
+    let base = ct.split(';').next().unwrap_or(ct).trim();
+    !base.is_empty()
+        && !base.starts_with("text/")
+        && !matches!(
+            base,
+            "application/json"
+                | "application/yaml"
+                | "application/x-yaml"
+                | "application/toml"
+                | "application/javascript"
+                | "application/typescript"
+                | "application/xml"
+        )
+}
+
 /// PUT /api/v1/universes/:slug/vault/*path
-/// Create or overwrite a file. Body is raw markdown text.
+///
+/// For text content (markdown, YAML, JSON, …) behaves as before: write the
+/// vault note and update the entries index.
+///
+/// CO-242: for binary content (PDF, image, video, …) — detected via
+/// Content-Type — write a blob asset + a unified entries row in one
+/// transaction, mirroring what POST /assets does but addressed by path.
 pub async fn put_vault_file(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
     headers: HeaderMap,
-    body: String,
+    body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+
+    // CO-242: route binary uploads through the asset + entries writer.
+    let ct = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok());
+    if is_binary_vault_content(ct) {
+        return put_vault_binary(&state, &slug, &path, ct, body).await;
+    }
+
+    let body = String::from_utf8(body.to_vec()).map_err(|_| {
+        AppError::BadRequest(
+            "Vault PUT: body is not valid UTF-8; set Content-Type for binary uploads".into(),
+        )
+    })?;
 
     // 1.50.0: write structured-data files (.yaml/.yml/.toml/.json) verbatim
     // to disk so downstream parsers (e.g., manifest reader on
@@ -1523,6 +1743,8 @@ pub async fn revoke_api_token(
 /// Static routes (tags, tree, search, clip) must appear in the router BEFORE
 /// the `*path` wildcard — Axum gives static segments priority over wildcards.
 pub fn vault_router() -> Router<AppState> {
+    // CO-242: vault PUT accepts binary blobs up to 50 MB (same cap as asset
+    // uploads). Override the global 1 MB DefaultBodyLimit for this router.
     Router::new()
         // Fixed sub-paths — registered first for static priority
         .route("/{slug}/vault/", get(list_vault_files))
@@ -1539,6 +1761,9 @@ pub fn vault_router() -> Router<AppState> {
                 .patch(patch_vault_file)
                 .delete(delete_vault_file),
         )
+        .layer(axum::extract::DefaultBodyLimit::max(
+            crate::asset_routes::MAX_ASSET_BYTES,
+        ))
 }
 
 /// API token management routes (nested under /v1/auth, JWT-protected).
