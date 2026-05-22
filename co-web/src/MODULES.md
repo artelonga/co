@@ -210,7 +210,37 @@ sup.spawn(JobQueueWorker::new(state.clone()));
 
 ---
 
-## 6. SPA Module Map (CO-259)
+## 6. Platform vs. Universes Architecture Map (CO-265)
+
+`co-web/src/` is split into two distinct layers:
+
+**Platform** — reusable infrastructure shared by all universes:
+
+| Directory | Purpose |
+|-----------|---------|
+| `auth/` | Authentication, extractors, onboarding, recovery |
+| `content/` | Entries, vault, relations, references, universe CRUD |
+| `social/` | Chat, DMs, invitations, notifications, sync/WS |
+| `admin/` | Admin dashboard, gestão API, telemetry, UAT |
+| `integrations/` | Email, GitHub, Google, OIDC, webhooks |
+| `platform/` | Cross-cutting infra: config, error, events, embedding, workers |
+
+**Universes** (`universes/`) — universe-specific extensions not part of the CO platform:
+
+| Directory | Universe | Purpose |
+|-----------|---------|---------|
+| `universes/quilombo/` | quilomboaraucaria.org | Processos, permissões, telemetria, storage |
+| `universes/game/` | Yggdrasil | Leaderboard models + routes |
+
+**Rule:** if a Rust module is specific to one universe (data models, custom routes, business logic that only applies to that universe's content), it belongs under `universes/<slug>/`. If it is reusable by any universe, it belongs in one of the platform directories above.
+
+**Re-exports:** `lib.rs` re-exports each universe sub-module at the crate root (e.g. `pub use universes::quilombo::quilombo_routes`) so existing `crate::quilombo_routes` call sites continue to compile unchanged.
+
+**Future:** v2 will extract each `universes/<slug>/` into its own `co-universes-<slug>` crate (tracked as CO-N).
+
+---
+
+## 7. SPA Module Map (CO-259)
 
 The three central SPA modules in `co-web/static/variants/a/modules/` were split
 into folder-based submodules. Each `.js` proxy at the old path re-exports from
@@ -257,7 +287,7 @@ New view-state fields go in `state/views.js`; universe helpers go in
 
 ---
 
-## 7. R2 Deployer Feature Gate (CO-263)
+## 8. R2 Deployer Feature Gate (CO-263)
 
 `StaticOnR2Adapter` (in `core/src/deploy.rs`) and its AWS SDK dependencies are
 gated behind the `deploy-r2` Cargo feature to keep the default binary free of

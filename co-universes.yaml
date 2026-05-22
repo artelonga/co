@@ -37,6 +37,7 @@ universes:
     local: ~/projects/quilomboaraucaria
     visibility: public-subscribable
     description: Plataforma comunitária do Quilombo Araucária
+    rust_module: universes/quilombo   # co-web/src/universes/quilombo/ — processos, permissoes, storage
 
   - slug: rfq
     name: RFQ Gateway
