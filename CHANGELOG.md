@@ -5,6 +5,69 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.24.0] — 2026-05-21 — Wave E — route folder promotion + visibility fix + R2 feature gate
+
+## CO-224 — Promote routes into context folders (auth)
+
+Reorganized `co-web/src/` from ~90 flat `.rs` files into eight context folders:
+`auth/`, `content/`, `social/`, `admin/`, `integrations/`, `platform/`, `quilombo/`, `game/`.
+`storage.rs` and `auth.rs` were converted to `mod.rs` pattern.
+All original `crate::module_name` paths remain valid via re-exports in `lib.rs`.
+
+### Why
+
+The flat layout made it impossible to understand module ownership at a glance.
+Grouping by context (auth, content, social, admin, integrations, platform, quilombo, game)
+aligns the source tree with the domain boundaries and makes onboarding and code navigation
+significantly easier without changing any public API or call sites.
+
+## CO-262 — Fix CO-261 entries visibility — seed walker inserts rows but /entries API returns 0
+
+The `seed_co_universe_tasks` walker (CO-261) was writing entry paths at root level
+(`CO-1.md`, `projects/CO/_project.md`). The `co` universe uses the `public/` convention
+introduced in 2.7.20: anonymous visitors only see entries whose path starts with `public/`.
+This made all 238 seeded task entries invisible to the entries API for unauthenticated callers,
+even though the rows existed in the database and `content_count` reflected the correct 927.
+
+### Fix
+
+Prefix all entry paths written by `seed_co_universe_tasks` with `public/`:
+- Project entry: `projects/CO/_project.md` → `public/projects/CO/_project.md`
+- Task entries: `CO-N.md` → `public/CO-N.md`
+
+This aligns the write side with the read-side visibility filter. Existing rows at the old
+root-level paths are orphaned but harmless; the new `public/` rows satisfy the filter and
+surface correctly through `GET /api/v1/universes/co/entries`.
+
+### Why
+
+The `PUBLIC_CONVENTION_UNIVERSES` filter was added intentionally so the `co` universe can
+hold both public transparency content (`public/*`) and future private content. The seed
+walker was not updated to respect this convention, causing a silent write/read mismatch.
+
+## CO-263 — Feature-gate R2 deployer adapter to avoid AWS SDK bloat in default build
+
+`StaticOnR2Adapter` and its AWS SDK dependencies (`aws-sdk-s3`, `aws-config`) are
+now gated behind a new `deploy-r2` Cargo feature in the `core` crate. The default
+build compiles without any AWS SDK code. Enabling `--features deploy-r2` restores
+the full adapter.
+
+When the feature is off, `from_credentials` returns a disabled stub adapter whose
+deploy/rollback calls fail at runtime with a clear "rebuild with --features deploy-r2"
+message, so `co-cli` still compiles cleanly without source changes.
+
+`co-web` (the production binary) uses `core` with default features, so the deployed
+binary no longer carries the AWS SDK. `MODULES.md` documents how to re-enable the
+feature for the future deploy.yaml → R2 push pipeline (CO-N+).
+
+### Why
+
+CO-134 shipped `StaticOnR2Adapter` as groundwork for the UAT-revert deploy pipeline,
+but no production path calls it yet. Every release build was compiling and linking the
+entire AWS SDK chain — ~3 MB of binary weight and a forced Dockerfile rust 1.90→1.94
+bump — for zero current benefit.
+
+
 ## [2.23.0] — 2026-05-21 — Wave D — work/*.md sync + cross-version changelog viewer
 
 ## CO-243 — VS Code (and LSP) integration — open universe as remote workspace
