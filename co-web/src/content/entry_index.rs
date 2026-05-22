@@ -633,6 +633,38 @@ impl<'a> EntryIndex<'a> {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
+    /// Query all entries whose path starts with `prefix` (CO-264 folder-prefix filter).
+    ///
+    /// Used by `GET /api/v1/universes/{slug}/entries?path_prefix=public/` to list
+    /// all entries under a folder prefix.  Results are ordered by path ascending.
+    pub fn query_by_path_prefix(
+        &self,
+        universe_key: &str,
+        prefix: &str,
+        limit: Option<usize>,
+    ) -> anyhow::Result<Vec<EntryRow>> {
+        let effective_limit = limit.unwrap_or(5_000).min(50_000) as i64;
+        // Escape LIKE wildcards in the prefix itself.
+        let like_pattern = format!(
+            "{}%",
+            prefix
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
+        let mut stmt = self.conn.prepare(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
+             created_at, updated_at \
+             FROM entries WHERE universe_key = ?1 AND path LIKE ?2 ESCAPE '\\' \
+             ORDER BY path ASC LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(
+            params![universe_key, like_pattern, effective_limit],
+            row_to_entry_row,
+        )?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     /// Execute a parameterized SQL query and return matching [`EntryRow`]s.
     ///
     /// Used by the CO-74 query DSL to run compiled graph queries.
@@ -1034,5 +1066,50 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM entry_dates", [], |r| r.get(0))
             .unwrap();
         assert_eq!(count, 0, "no manifest = no rows indexed");
+    }
+
+    // CO-264: path_prefix filter
+    #[test]
+    fn test_query_by_path_prefix_returns_matching_entries() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        insert_entry(&conn, "uni", "public/a.md", "page", r#"{"type":"page"}"#);
+        insert_entry(&conn, "uni", "public/b.md", "page", r#"{"type":"page"}"#);
+        insert_entry(&conn, "uni", "private/c.md", "page", r#"{"type":"page"}"#);
+        insert_entry(&conn, "uni", "CHANGELOG.md", "page", r#"{"type":"page"}"#);
+
+        let public = idx.query_by_path_prefix("uni", "public/", None).unwrap();
+        assert_eq!(public.len(), 2);
+        assert!(public.iter().all(|e| e.path.starts_with("public/")));
+
+        let all = idx.query_by_path_prefix("uni", "", None).unwrap();
+        assert_eq!(all.len(), 4, "empty prefix returns all entries");
+    }
+
+    #[test]
+    fn test_query_by_path_prefix_empty_when_no_match() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        insert_entry(&conn, "uni", "public/a.md", "page", r#"{"type":"page"}"#);
+
+        let result = idx.query_by_path_prefix("uni", "work/", None).unwrap();
+        assert!(result.is_empty(), "no entries under work/");
+    }
+
+    #[test]
+    fn test_query_by_path_prefix_respects_limit() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        for i in 0..10 {
+            insert_entry(
+                &conn,
+                "uni",
+                &format!("public/{i}.md"),
+                "page",
+                r#"{"type":"page"}"#,
+            );
+        }
+        let result = idx.query_by_path_prefix("uni", "public/", Some(3)).unwrap();
+        assert_eq!(result.len(), 3);
     }
 }

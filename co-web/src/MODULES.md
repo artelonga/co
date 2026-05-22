@@ -287,3 +287,45 @@ cargo build -p co-web --features co/deploy-r2
 
 **When to enable:** wire this feature in the future `deploy.yaml`-driven UAT
 revert flow (CO-N+). Until that pipeline is active, keep it disabled.
+
+---
+
+## 8. File-Compat Layer (CO-264)
+
+Every CO universe behaves like a **filesystem-shaped wiki**. Well-known filenames
+at any folder level have canonical rendering semantics:
+
+| File path | Renders as |
+|-----------|------------|
+| `index.md` | Folder home page |
+| `CHANGELOG.md` | Universe/folder changelog |
+| `README.md` | Universe/folder documentation |
+| `LICENSE.md` | Universe/folder license |
+
+### URL conventions
+
+| URL pattern | Resolution |
+|-------------|------------|
+| `/<universe>/changelog` | Renders the `CHANGELOG.md` entry (case-insensitive alias) |
+| `/<universe>/readme` | Renders `README.md` |
+| `/<universe>/license` | Renders `LICENSE.md` or `LICENSE` |
+| `/<universe>/<folder>/` | Renders `<folder>/index.md` if present; otherwise folder listing |
+
+### Backend: `path_prefix` query parameter
+
+`GET /api/v1/universes/{slug}/entries?path_prefix=public/` returns all entries
+whose path starts with `public/`. The filter is applied by
+`EntryIndex::query_by_path_prefix` in `co-web/src/content/entry_index.rs`.
+
+### Seeder: root-level well-known files
+
+`Storage::reseed_co_root_files(root_dir)` (in `co-web/src/storage/seed.rs`)
+seeds `CHANGELOG.md`, `README.md`, and `LICENSE.md` from the repo root into
+the `co` universe as `page` entries on every boot. Called from
+`run_co142_refresh` in `seed_orchestrator.rs`.
+
+### SPA routing
+
+`maybeOpenEntryFromUrl` in `app.js` extends the candidate list with well-known
+file aliases so `/co/changelog` fetches `CHANGELOG.md` and `/co/public/` fetches
+`public/index.md` before falling back to the 404 view.

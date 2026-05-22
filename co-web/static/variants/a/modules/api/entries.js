@@ -25,3 +25,10 @@ export async function getEntriesByDate(slug, semantic, from, to) {
 export async function getUniverseManifest(slug) {
     return apiFetch(`/api/v1/universes/${slug}/manifest`, {}, true);
 }
+
+// CO-264: list entries whose path starts with `prefix` (e.g. `public/`).
+export async function getEntriesByPathPrefix(slug, prefix) {
+    const url = `/api/v1/universes/${encodeURIComponent(slug)}/entries?path_prefix=${encodeURIComponent(prefix)}`;
+    const r = await apiFetch(url, {}, true);
+    return (r && r.entries) || [];
+}

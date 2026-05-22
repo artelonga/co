@@ -299,6 +299,9 @@ async function maybeOpenEntryFromUrl(universeSlug) {
     let entryPath = readEntryPathFromUrl(universeSlug);
     if (!entryPath) { maybeOpenPageFromUrl(universeSlug); return; }
     if (entryPath.startsWith('entries/')) entryPath = entryPath.slice('entries/'.length);
+
+    const lower = entryPath.replace(/\/$/, '').toLowerCase();
+
     // Try the literal entry path, then the canonical seed-page location
     // `content/<slug>.md` — most public seed pages (seguranca, licensa,
     // infra, etc.) live under `content/` so a bare `/template/seguranca`
@@ -309,6 +312,21 @@ async function maybeOpenEntryFromUrl(universeSlug) {
         `content/${entryPath}.md`,
         `content/${entryPath}`,
     ];
+
+    // CO-264: folder-level index.md for trailing-slash paths (e.g. `/co/public/`).
+    if (entryPath.endsWith('/')) {
+        candidates.unshift(`${entryPath}index.md`);
+    }
+
+    // CO-264: well-known file aliases — map short URL segment to canonical filename.
+    if (lower === 'changelog') {
+        candidates.push('CHANGELOG.md', 'changelog.md');
+    } else if (lower === 'readme') {
+        candidates.push('README.md', 'readme.md');
+    } else if (lower === 'license') {
+        candidates.push('LICENSE.md', 'LICENSE');
+    }
+
     for (const p of candidates) {
         try {
             const encodedPath = p.split('/').map(encodeURIComponent).join('/');
@@ -320,7 +338,7 @@ async function maybeOpenEntryFromUrl(universeSlug) {
             }
         } catch (_) {}
     }
-    const stem = entryPath.split('/').pop().replace(/\.md$/i, '');
+    const stem = entryPath.replace(/\/$/, '').split('/').pop().replace(/\.md$/i, '');
     try {
         const res = await apiFetch(`/api/v1/universes/${encodeURIComponent(universeSlug)}/entries?q=${encodeURIComponent(stem)}&limit=5`);
         if (res && res.entries && res.entries.length > 0) {
@@ -330,8 +348,34 @@ async function maybeOpenEntryFromUrl(universeSlug) {
             return;
         }
     } catch (_) {}
+
+    // CO-264: show a helpful empty state for the /changelog path when no CHANGELOG.md exists.
+    if (lower === 'changelog') {
+        showChangelogNotFoundView(universeSlug);
+        return;
+    }
+
     // CO-232: entry not found — show 404 view instead of silently landing on universe home.
     showNotFoundView(universeSlug);
+}
+
+// CO-264: render an empty state when /<universe>/changelog has no CHANGELOG.md entry.
+function showChangelogNotFoundView(universeSlug) {
+    const existing = document.getElementById('co-not-found-view');
+    if (existing) existing.remove();
+    const view = document.createElement('div');
+    view.id = 'co-not-found-view';
+    view.className = 'not-found-view';
+    view.innerHTML =
+        `<div class="not-found-container">` +
+        `<h2 style="margin-bottom:8px">CHANGELOG não encontrado</h2>` +
+        `<p style="color:var(--text-muted,#888);margin-bottom:16px">` +
+        `Este universo ainda não tem um CHANGELOG. ` +
+        `Crie um arquivo <code>CHANGELOG.md</code> no nível raiz.</p>` +
+        `<a href="/${esc(universeSlug)}" class="btn btn-secondary">← Voltar ao universo</a>` +
+        `</div>`;
+    const app = document.getElementById('app');
+    if (app) app.appendChild(view);
 }
 
 // ===== View switching =====

@@ -130,6 +130,13 @@ pub fn run_co142_refresh(config: &WebConfig) {
         // universe's entries at path tasks/<filename>.
         let mut storage = Storage::new(&config.data_dir);
         storage.seed_co_universe_tasks(seed_src);
+        // CO-264: also seed well-known root-level files (CHANGELOG.md,
+        // README.md, LICENSE.md) from the parent of the seed dir.
+        // In Docker: /app/seed-co/../ = /app/ — requires COPY of those
+        // files in the Dockerfile. Falls through silently when absent.
+        if let Some(root) = seed_src.parent() {
+            storage.reseed_co_root_files(root);
+        }
     }
 }
 
