@@ -5,6 +5,47 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.28.0] — 2026-05-22 — Wave I — final visibility chain + LICENSE complete
+
+## CO-270 — Items list final fix — audit middleware chain; identify silent-empty wrapper for anonymous
+
+`universe_visibility_gate` (CO-161) only passed anonymous requests through for
+`is_public || is_template` universes. Public-subscribable universes have
+`is_public = false`, so anonymous callers were blocked at the middleware layer
+before reaching `list_entries`, even though `filter_public_for_anon` (CO-268)
+had already been fixed to expose all entries for these universes.
+
+Added `|| universe.visibility == "public-subscribable"` to the early-return
+condition in `universe_visibility_gate`. Writes remain protected by
+`universe_writer_gate`, which already enforces subscription checks for
+public-subscribable universes (CO-253).
+
+### Why
+
+CO-261 seeded 1173 entries into the `co` universe. CO-262/CO-266/CO-268 fixed
+successive layers (write paths, count divergence, path-filter bypass), but
+the middleware gate was the last layer silently dropping all items for anonymous
+callers. This fix closes the chain.
+
+## CO-271 — Fix LICENSE seed: copy root files into runtime Docker image
+
+`/co/license` returned 404 in prod despite CO-269 being deployed because
+`CHANGELOG.md`, `README.md`, and `LICENSE` were only `COPY`'d in the builder
+stage of the multi-stage Dockerfile. The runtime stage (`FROM debian:trixie-slim`)
+never received them, so `reseed_co_root_files` found no files at `/app/` on boot.
+
+Fix: added `COPY CHANGELOG.md README.md LICENSE /app/` to the runtime stage.
+Also added `co-web/tests/seed_root_files_tests.rs` with two smoke tests — one
+asserting `LICENSE` (bare filename) seeds as `LICENSE.md`, one verifying no
+regression on `CHANGELOG.md` and `README.md`.
+
+### Why
+
+Multi-stage Docker builds only carry artifacts you explicitly copy between
+stages. CO-269 wired the seed logic correctly but missed promoting the files
+from builder to runtime — a one-line Docker oversight that silenced the route.
+
+
 ## [2.27.0] — 2026-05-22 — Wave H — items visibility + LICENSE seed
 
 ## CO-268 — List items filter — items SELECT is stricter than COUNT for anonymous (post-CO-266)
