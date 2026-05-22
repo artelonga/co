@@ -1316,4 +1316,34 @@ mod tests {
         // Should not panic when no files are found
         storage.reseed_co_root_files(empty_dir.path());
     }
+
+    // CO-269: reseed_co_root_files seeds LICENSE (no extension) as LICENSE.md
+    #[test]
+    fn test_reseed_co_root_files_seeds_license() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let root_dir = tempfile::tempdir().unwrap();
+
+        // The real repo has `LICENSE` without extension — write the bare name.
+        std::fs::write(
+            root_dir.path().join("LICENSE"),
+            "GNU AFFERO GENERAL PUBLIC LICENSE\nVersion 3, 19 November 2007\n",
+        )
+        .unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        storage.reseed_co_root_files(root_dir.path());
+
+        let co_uc = storage.universe_pool.get_or_open("co");
+        let uc_guard = co_uc.lock().unwrap();
+        let idx = crate::entry_index::EntryIndex::new(&uc_guard);
+
+        let license = idx.get("co", "LICENSE.md").unwrap();
+        assert!(
+            license.is_some(),
+            "LICENSE entry must be seeded as LICENSE.md"
+        );
+        let license = license.unwrap();
+        assert_eq!(license.entry_type, "page");
+    }
 }

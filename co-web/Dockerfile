@@ -61,7 +61,9 @@ COPY dev/ dev/
 COPY co-agent/ co-agent/
 # CO-260: changelog_routes.rs include_str!("../../CHANGELOG.md") needs the file
 # at workspace root inside the build context.
-COPY CHANGELOG.md ./
+# CO-269: README.md and LICENSE are also needed so reseed_co_root_files can
+# seed them into the co universe at runtime (/app/ is the root_dir in Docker).
+COPY CHANGELOG.md README.md LICENSE ./
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
