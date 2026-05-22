@@ -1865,5 +1865,38 @@ impl Storage {
                 )
                 .expect("migration v47: changelog_cache");
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 48 {
+            // CO-267: entry_origin — distinguishes seed-walker writes ('walker')
+            // from co-sync push writes ('synced') in the meta-DB entries table.
+            // Per-universe data.db gets the same column via universe_pool v14.
+            ensure_column(
+                &self.conn,
+                "entries",
+                "entry_origin",
+                "TEXT NOT NULL DEFAULT ''",
+            )
+            .expect("migration v48: entries.entry_origin");
+            self.conn
+                .execute_batch("INSERT OR IGNORE INTO schema_version (version) VALUES (48);")
+                .expect("migration v48: schema_version");
+        }
+        // CO-267 unconditional backfill — drift-safe guard.
+        ensure_column(
+            &self.conn,
+            "entries",
+            "entry_origin",
+            "TEXT NOT NULL DEFAULT ''",
+        )
+        .expect("CO-267 backfill: entries.entry_origin");
     }
 }

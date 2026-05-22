@@ -264,6 +264,76 @@ impl<'a> EntryIndex<'a> {
         Ok(())
     }
 
+    /// Upsert an entry written via the Vault API (`co-sync push` or PUT handler).
+    ///
+    /// Sets `entry_origin = 'synced'` and always overwrites. The seed walker
+    /// uses `upsert_entry_row` (schema.rs) which guards against overwriting
+    /// synced entries on the next boot.
+    pub fn upsert_synced(&self, universe_key: &str, entry: &Entry) -> anyhow::Result<()> {
+        let fm_json = serde_json::to_string(&entry.frontmatter)?;
+        let title: Option<&str> = entry.frontmatter.get("title").and_then(|v| v.as_str());
+        let created_at = entry
+            .frontmatter
+            .get("created")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let updated_at = entry
+            .frontmatter
+            .get("modified")
+            .and_then(|v| v.as_str())
+            .map(String::from)
+            .or_else(|| created_at.clone());
+
+        let body_lines = entry.body.lines().count() as i64;
+        let body_words = entry.body.split_whitespace().count() as i64;
+        let body_chars = entry.body.chars().count() as i64;
+
+        self.conn.execute(
+            "INSERT INTO entries \
+               (path, universe_key, entry_type, title, frontmatter_json, payload, \
+                body, body_hash, body_lines, body_words, body_chars, \
+                created_at, updated_at, entry_origin) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 'synced')
+             ON CONFLICT(universe_key, path) DO UPDATE SET
+               entry_type = excluded.entry_type,
+               title = excluded.title,
+               frontmatter_json = excluded.frontmatter_json,
+               payload = excluded.payload,
+               body = excluded.body,
+               body_hash = excluded.body_hash,
+               body_lines = excluded.body_lines,
+               body_words = excluded.body_words,
+               body_chars = excluded.body_chars,
+               created_at = excluded.created_at,
+               updated_at = excluded.updated_at,
+               entry_origin = 'synced'",
+            params![
+                entry.path,
+                universe_key,
+                entry.entry_type,
+                title,
+                fm_json,
+                entry.body,
+                entry.body_hash,
+                body_lines,
+                body_words,
+                body_chars,
+                created_at,
+                updated_at,
+            ],
+        )?;
+
+        self.conn
+            .execute(
+                "INSERT INTO entries_fts (universe_key, path, title, body)
+             VALUES (?1, ?2, ?3, ?4)",
+                params![universe_key, entry.path, title.unwrap_or(""), entry.body],
+            )
+            .ok();
+
+        Ok(())
+    }
+
     /// Remove a single entry from the index.
     pub fn remove(&self, universe_key: &str, path: &str) -> anyhow::Result<()> {
         self.conn.execute(

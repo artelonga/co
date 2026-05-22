@@ -50,3 +50,38 @@ universes:
     local: ~/projects/time
     visibility: public-subscribable
     description: Single universe for every time-stamped event — moon phases, eclipses, equinoxes, plus internal CRUD/telemetry. Absorbs the topologia fragments.
+
+# ---------------------------------------------------------------------------
+# CO-267: cross-repo push configuration
+#
+# Sister repos declare a similar `syncs:` block in *their own*
+# co-universes.yaml and run `co-sync push` in CI on every merge to main.
+# The entries below are *examples* — add to the sister repos, not here.
+#
+# Token: one CO Vault API token per repo, stored as the GH secret CO_VAULT_TOKEN.
+# Generate: POST /api/v1/auth/token (or co-web admin UI → Settings → API tokens).
+# ---------------------------------------------------------------------------
+#
+# Example for ~/projects/yggdrasil/co-universes.yaml:
+#
+# server: https://co.artelonga.com.br
+# syncs:
+#   - source: work/yggdrasil/
+#     target: yggdrasil
+#     include: ["*.md"]
+#     exclude: ["CLAUDE.md", ".gitkeep"]
+#   - source: CHANGELOG.md
+#     target: yggdrasil
+#   - source: README.md
+#     target: yggdrasil
+#
+# Example for ~/projects/rfq-gateway/co-universes.yaml:
+#
+# server: https://co.artelonga.com.br
+# syncs:
+#   - source: work/rfq/
+#     target: rfq
+#     include: ["*.md"]
+#     exclude: ["CLAUDE.md", ".gitkeep"]
+#   - source: CHANGELOG.md
+#     target: rfq

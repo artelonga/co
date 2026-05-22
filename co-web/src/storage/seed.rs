@@ -1064,56 +1064,12 @@ impl Storage {
         }
     }
 
-    /// CO-261: seed a placeholder content page in each sister-repo universe
-    /// (yggdrasil, rfq) to indicate that the `work/<space>/` sync is not yet
-    /// wired. Wave B/C of CO-261 will replace these with the real task board.
-    ///
-    /// Idempotent — upserts the same path on every boot.
+    /// CO-267 (replaces CO-261 Wave B stubs): sister-repo tasks are now pushed
+    /// via `co-sync push` from each repo's CI on every merge to main. The
+    /// Vault API marks those entries `entry_origin = 'synced'` so subsequent
+    /// boots don't overwrite them. No stub seeding needed.
     pub fn reseed_sister_repo_stubs(&mut self) {
-        let now_str = Utc::now().to_rfc3339();
-        const STUBS: &[(&str, &str, &str, &str)] = &[
-            (
-                "yggdrasil",
-                "content/sister-repo-sync.md",
-                "Yggdrasil task sync not yet wired — CO-261 Wave B",
-                "The Yggdrasil dev board (`work/yggdrasil/*.md`) is not yet synced to this universe.\n\n\
-                 **Coming in CO-261 Wave B:** a file-watcher and bidirectional Vault sync will \
-                 reflect YG-1..YG-N tasks here on every deploy.\n\n\
-                 See the [CO Development Board](/co) for the roadmap.",
-            ),
-            (
-                "rfq",
-                "content/sister-repo-sync.md",
-                "RFQ task sync not yet wired — CO-261 Wave B",
-                "The RFQ Gateway dev board (`work/rfq/*.md`) is not yet synced to this universe.\n\n\
-                 **Coming in CO-261 Wave B:** a file-watcher and bidirectional Vault sync will \
-                 reflect RFQ-1..RFQ-N tasks here on every deploy.\n\n\
-                 See the [CO Development Board](/co) for the roadmap.",
-            ),
-        ];
-        for (universe_key, path, title, body) in STUBS {
-            if self.get_universe(universe_key).is_none() {
-                continue;
-            }
-            let universe_root = self.universe_root(universe_key);
-            let fm = json!({
-                "type": "page",
-                "title": title,
-                "created": now_str,
-                "modified": now_str,
-            });
-            let entry = make_entry(path, fm, body);
-            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
-                tracing::warn!("CO-261 stub: write {universe_key}/{path}: {e}");
-                continue;
-            }
-            let uc = self.universe_pool.get_or_open(universe_key);
-            let uc_guard = uc.lock().expect("universe conn lock");
-            if let Err(e) = upsert_entry_row(&uc_guard, universe_key, &entry) {
-                tracing::warn!("CO-261 stub: upsert {universe_key}/{path}: {e}");
-            }
-        }
-        tracing::info!("CO-261: sister-repo sync stubs seeded for yggdrasil/rfq");
+        // no-op — stubs replaced by CI-driven co-sync push (CO-267)
     }
 }
 

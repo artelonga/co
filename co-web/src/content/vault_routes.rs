@@ -621,7 +621,7 @@ fn index_raw_vault_file(
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
     let index = EntryIndex::new(&uc_guard);
     index
-        .upsert(universe_key, &entry)
+        .upsert_synced(universe_key, &entry)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let row = index
         .get(universe_key, path)
@@ -688,7 +688,7 @@ pub(crate) fn write_vault_entry(
         let tx_result: Result<(), AppError> = {
             let index = EntryIndex::new(&uc_guard);
             index
-                .upsert(universe_key, &entry)
+                .upsert_synced(universe_key, &entry)
                 .map_err(|e| AppError::Internal(e.to_string()))
                 .and_then(|()| {
                     if let Ok(fm_json) = serde_json::to_string(&entry.frontmatter) {
@@ -967,7 +967,7 @@ pub async fn put_vault_file(
                 .map_err(|_| AppError::Internal("universe conn lock".into()))?;
             let index = EntryIndex::new(&uc_guard);
             index
-                .upsert(&slug, &entry)
+                .upsert_synced(&slug, &entry)
                 .map_err(|e| AppError::Internal(e.to_string()))?;
             index
                 .get(&slug, &path)
