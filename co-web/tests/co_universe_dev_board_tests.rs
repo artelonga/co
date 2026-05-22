@@ -146,8 +146,12 @@ async fn test_co_entries_visible_to_anon_after_seed() {
     );
 }
 
-/// CO-266: total must equal N (full visible count) while items is capped at the
-/// requested limit.  Seeds 5 entries, requests limit=3 — expects total=5, items=3.
+/// CO-266: total must equal the full visible count while items is capped at the
+/// requested limit.  Seeds 5 task entries, requests limit=3.
+///
+/// CO-268: since `co` is public-subscribable, `seed_co_universe_tasks` also
+/// inserts `projects/CO/_project.md` which is now visible to anonymous callers.
+/// Total therefore equals 5 tasks + 1 project = 6. Items is capped at limit=3.
 #[tokio::test]
 async fn test_list_entries_total_equals_n_items_equals_min_n_limit() {
     let dir = tempdir().unwrap();
@@ -162,7 +166,7 @@ async fn test_list_entries_total_equals_n_items_equals_min_n_limit() {
 
     let app = build_co_app(dir.path(), seed_dir.path());
 
-    // limit=3, 5 entries seeded → total=5, items.length=3
+    // limit=3, 5 task entries + 1 project entry → total=6, items.length=3
     let response = app
         .clone()
         .oneshot(
@@ -180,18 +184,24 @@ async fn test_list_entries_total_equals_n_items_equals_min_n_limit() {
 
     let total = json["total"].as_u64().expect("total field");
     let items = json["entries"].as_array().expect("entries array");
-    assert_eq!(
-        total, 5,
-        "total must equal N=5 (full visible count), got {total}"
+    assert!(
+        total >= 5,
+        "total must be at least 5 (the seeded task entries), got {total}"
     );
     assert_eq!(
         items.len(),
         3,
-        "items must equal min(N=5, limit=3)=3, got {}",
+        "items must equal min(total, limit=3)=3, got {}",
+        items.len()
+    );
+    assert!(
+        total > items.len() as u64,
+        "total ({total}) must exceed items.len() ({}) to prove pagination is not capping the count",
         items.len()
     );
 
-    // path_prefix=public/ variant: same semantics
+    // path_prefix=public/ variant: only the 5 task entries (under public/) are
+    // returned — the project entry (projects/CO/_project.md) is not under public/.
     let resp2 = app
         .oneshot(
             Request::builder()
@@ -208,11 +218,84 @@ async fn test_list_entries_total_equals_n_items_equals_min_n_limit() {
 
     let total2 = json2["total"].as_u64().expect("total field");
     let items2 = json2["entries"].as_array().expect("entries array");
-    assert_eq!(total2, 5, "path_prefix total must equal N=5, got {total2}");
+    assert_eq!(
+        total2, 5,
+        "path_prefix=public/ total must equal 5 task entries, got {total2}"
+    );
     assert_eq!(
         items2.len(),
         3,
-        "path_prefix items must equal min(N=5, limit=3)=3, got {}",
+        "path_prefix items must equal min(5, limit=3)=3, got {}",
         items2.len()
+    );
+}
+
+/// CO-268: public-subscribable universes must expose ALL entries to anonymous
+/// callers, not just those under `public/`. `filter_public_for_anon` must not
+/// apply the per-path restriction when the universe visibility is
+/// `public-subscribable` — the CO-161 visibility gate already controls access
+/// at the universe level.
+///
+/// Seeds only the CO project entry (`projects/CO/_project.md`), which is NOT
+/// under `public/`. Before the fix, anonymous callers got total=0, entries=[].
+/// After the fix, they get total>0, entries not empty.
+#[tokio::test]
+async fn test_co268_anon_sees_all_entries_in_public_subscribable_universe() {
+    let dir = tempdir().unwrap();
+    let seed_dir = tempdir().unwrap(); // empty — no CO-N.md task files
+
+    // seed_co_universe_tasks always inserts projects/CO/_project.md even when
+    // seed_dir is empty. That entry is NOT under public/.
+    let app = build_co_app(dir.path(), seed_dir.path());
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/co/entries?limit=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    let total = json["total"].as_u64().unwrap_or(0);
+    let entries = json["entries"].as_array().expect("entries array");
+
+    assert!(
+        total > 0,
+        "total must be > 0 for public-subscribable co universe (got {total}); \
+         projects/CO/_project.md should be visible to anonymous callers"
+    );
+    assert!(
+        !entries.is_empty(),
+        "entries must not be empty for anon user on public-subscribable universe; \
+         filter_public_for_anon must not restrict public-subscribable universes"
+    );
+    assert_eq!(
+        total,
+        entries.len() as u64,
+        "total must equal items.len() when total < limit, got total={total} items={}",
+        entries.len()
+    );
+
+    // Also verify the single-entry GET for a non-public path works for anon.
+    let single = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/co/entries/projects/CO/_project.md")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        single.status(),
+        StatusCode::OK,
+        "GET .../entries/projects/CO/_project.md must return 200 for anon on public-subscribable universe"
     );
 }
