@@ -35,7 +35,9 @@ playwright/.cache/
 # Runtime content (cloned at boot, NOT committed)
 co-web/seed-co/
 co-web/data/
-quilombo/
+/quilombo/
+co-web/quilombo/
+!co-web/src/quilombo/
 data/
 
 # Local backup artifacts (scripts/backup-prod-local.sh).
