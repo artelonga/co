@@ -2,13 +2,14 @@
 pub mod admin;
 pub mod auth;
 pub mod content;
-pub mod game;
 pub mod integrations;
 pub mod platform;
-pub mod quilombo;
 pub mod server;
 pub mod social;
 pub mod storage;
+
+// Universe-specific extensions
+pub mod universes;
 
 // Re-exports — every crate::module_name path that existed before the reorganization
 // continues to resolve, so no call sites need to change.
@@ -104,14 +105,14 @@ pub use platform::wae;
 pub use platform::worker_supervisor;
 pub use platform::workers;
 
-// quilombo context
-pub use quilombo::processos;
-pub use quilombo::quilombo_models;
-pub use quilombo::quilombo_permissoes;
-pub use quilombo::quilombo_routes;
-pub use quilombo::quilombo_storage;
-pub use quilombo::quilombo_telemetria;
+// universes — quilombo (quilomboaraucaria.org backend)
+pub use universes::quilombo::processos;
+pub use universes::quilombo::quilombo_models;
+pub use universes::quilombo::quilombo_permissoes;
+pub use universes::quilombo::quilombo_routes;
+pub use universes::quilombo::quilombo_storage;
+pub use universes::quilombo::quilombo_telemetria;
 
-// game context
-pub use game::game_models;
-pub use game::game_routes;
+// universes — game (yggdrasil leaderboard)
+pub use universes::game::game_models;
+pub use universes::game::game_routes;
