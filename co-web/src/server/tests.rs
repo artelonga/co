@@ -719,6 +719,130 @@ async fn test_deep_link_known_slug_returns_200() {
     assert_eq!(resp.status(), StatusCode::OK, "known slug must return 200");
 }
 
+// --- CO-270: public-subscribable visibility gate fix ---
+
+/// CO-270: anonymous GET on a public-subscribable universe must return
+/// total > 0 AND items matching the requested limit.
+///
+/// Before the fix, universe_visibility_gate checked only `is_public ||
+/// is_template`, so public-subscribable universes (is_public=false,
+/// visibility='public-subscribable') returned 401 to anonymous callers.
+#[tokio::test]
+async fn test_anon_list_entries_public_subscribable_universe() {
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let dir = tempdir().unwrap();
+
+    let slug = "pub-sub-test";
+    {
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        let now = chrono::Utc::now().to_rfc3339();
+
+        storage
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, \
+                  content_count, visibility) \
+                 VALUES (?1, 'Pub-Sub Test', '', 'system', ?2, 0, 0, 5, 'public-subscribable')",
+                rusqlite::params![slug, now],
+            )
+            .unwrap();
+
+        let uc = storage.universe_conn(slug);
+        let guard = uc.lock().unwrap();
+        let index = crate::entry_index::EntryIndex::new(&guard);
+        for i in 1..=5_u32 {
+            let entry = crate::entry_index::make_entry(
+                &format!("tasks/{i}.md"),
+                serde_json::json!({"type": "task", "title": format!("Task {i}")}),
+                &format!("body {i}"),
+            );
+            index.upsert(slug, &entry).unwrap();
+        }
+    }
+
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/universes/{slug}/entries?limit=3"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "anonymous GET on public-subscribable universe must return 200"
+    );
+
+    let body = body_str(resp.into_body()).await;
+    let json: serde_json::Value = serde_json::from_str(&body)
+        .unwrap_or_else(|e| panic!("response is not JSON: {e}\nbody: {body}"));
+
+    let total = json["total"].as_u64().unwrap_or(0);
+    let items = json["entries"]
+        .as_array()
+        .unwrap_or_else(|| panic!("'entries' must be an array; body: {body}"));
+
+    assert!(
+        total > 0,
+        "total must be > 0 for public-subscribable universe; got {total}\nbody: {body}"
+    );
+    assert_eq!(
+        items.len(),
+        3,
+        "limit=3 must yield exactly 3 items; got {}\nbody: {body}",
+        items.len()
+    );
+}
+
+/// CO-270: private universes must still block anonymous reads after the fix.
+#[tokio::test]
+async fn test_anon_list_entries_private_universe_blocked() {
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    let dir = tempdir().unwrap();
+
+    let slug = "private-test";
+    {
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        let now = chrono::Utc::now().to_rfc3339();
+        storage
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, \
+                  content_count, visibility) \
+                 VALUES (?1, 'Private Test', '', 'system', ?2, 0, 0, 0, 'private')",
+                rusqlite::params![slug, now],
+            )
+            .unwrap();
+    }
+
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri(format!("/api/v1/universes/{slug}/entries"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::UNAUTHORIZED,
+        "anonymous GET on private universe must return 401"
+    );
+}
+
 /// `/{universe}/{*subpath}` for a non-existent universe must return 404.
 #[tokio::test]
 async fn test_deep_link_nonexistent_universe_returns_404() {

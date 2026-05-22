@@ -749,7 +749,9 @@ pub async fn universe_visibility_gate(
         }
     };
 
-    if universe.is_public || universe.is_template {
+    // CO-270: public-subscribable universes are readable by anonymous visitors.
+    // Only writes are restricted (universe_writer_gate handles that separately).
+    if universe.is_public || universe.is_template || universe.visibility == "public-subscribable" {
         return Ok(next.run(req).await);
     }
 
