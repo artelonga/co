@@ -91,6 +91,13 @@ COPY --from=builder /usr/src/co/target/release/co-web /app/co-web
 # On every boot the server copies /app/seed-co/ → /data/co/ (copy_dir_all).
 COPY work/co/ /app/seed-co/
 
+# CO-271: seed well-known root files into the runtime image so
+# reseed_co_root_files (called on every boot) can find them at /app/.
+# NOTE: these were previously only COPY'd in the builder stage (for
+# include_str! compilation), but the runtime stage never received them —
+# causing /co/license to return 404 in prod despite CO-269 being deployed.
+COPY CHANGELOG.md README.md LICENSE /app/
+
 # Content repos are cloned at runtime (CO-50), NOT bundled in image.
 # The server clones from GitHub on first boot into /data/repos/.
 
