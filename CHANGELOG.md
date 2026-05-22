@@ -5,6 +5,54 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.27.0] — 2026-05-22 — Wave H — items visibility + LICENSE seed
+
+## CO-268 — List items filter — items SELECT is stricter than COUNT for anonymous (post-CO-266)
+
+`filter_public_for_anon` now skips the `public/` path restriction for
+`public-subscribable` universes. Anonymous callers of the `co` universe (and
+any other `public-subscribable` universe in `PUBLIC_CONVENTION_UNIVERSES`) can
+now see all entries, not just those whose path starts with `public/`.
+
+`is_public_for_anon` (used by `GET .../entries/*path`) receives the same fix so
+single-entry lookups at non-`public/` paths also return 200 instead of 404 for
+anonymous callers on public-subscribable universes.
+
+Both handlers (`list_entries` and `get_entry`) now look up the universe's
+`visibility` field alongside the existing `universe_conn` call — a single
+extra storage read that is amortized with the connection lookup.
+
+### Why
+
+The CO-161 visibility gate middleware already controls which anonymous callers
+can reach a universe at all. Applying a second, per-path `public/` filter on
+top of that gate was redundant and wrong for `public-subscribable` universes:
+it caused `total > 0` while `items = []` when entries were not seeded under
+the `public/` prefix (e.g. `projects/CO/_project.md`), breaking the kanban
+and conteúdo views on `/co` for anonymous visitors.
+
+## CO-269 — Seed LICENSE.md into /co universe (currently 404 at /co/license)
+
+`reseed_co_root_files` already listed `LICENSE` in its candidate array (added in
+CO-264), but the Docker build context never copied the file into `/app/`, so the
+seed walker found nothing to upsert at runtime.
+
+Changed `co-web/Dockerfile` to `COPY CHANGELOG.md README.md LICENSE ./` alongside
+the pre-existing `CHANGELOG.md` copy, making all three well-known root files
+available to `reseed_co_root_files` when it runs inside the container.
+
+Added `test_reseed_co_root_files_seeds_license`: writes a bare `LICENSE` file
+(no extension, matching the real repo file) to a temp dir, calls
+`reseed_co_root_files`, and asserts the resulting `LICENSE.md` entry exists in
+the `co` universe with `entry_type = "page"`.
+
+### Why
+
+The `/co/license` route returned 404 because the Dockerfile omitted `LICENSE`
+from the build context.  The fix is a single-line Dockerfile change; the seed
+logic was already correct.
+
+
 ## [2.26.0] — 2026-05-22 — Wave G — list visibility fix + cross-repo sync
 
 ## CO-266 — List endpoint visibility — total counts correctly but items array empty for anonymous
