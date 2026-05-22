@@ -106,6 +106,8 @@ pub struct EntryListQuery {
     pub semantic: Option<String>,
     /// CO-164: number of top-K results to return for semantic/similar queries (default 10).
     pub k: Option<usize>,
+    /// CO-264: filter entries by path prefix (e.g. `public/` returns all `public/*` entries).
+    pub path_prefix: Option<String>,
 }
 
 /// CO-164: query parameters for the `/similar` endpoint.
@@ -287,6 +289,11 @@ pub async fn list_entries(
         // CO-164: semantic similarity search (optionally combined with FTS for hybrid).
         let k = q.k.unwrap_or(10).min(200);
         semantic_search_entries(&state, &slug, &uc_guard, sem_query, k, q.q.as_deref())
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else if let Some(ref prefix) = q.path_prefix {
+        // CO-264: folder-prefix filter — return all entries under a given folder.
+        index
+            .query_by_path_prefix(&slug, prefix, q.limit)
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref fts_query) = q.q {
         index

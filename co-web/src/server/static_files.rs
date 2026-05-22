@@ -134,7 +134,11 @@ fn universe_exists(state: &AppState, universe_slug: &str) -> bool {
 ///
 /// Mirrors `maybeOpenEntryFromUrl` candidates in `app.js`. Returns `false` when
 /// the universe does not exist, when the per-universe connection cannot be acquired,
-/// or when none of the four candidate paths are present in the entry index.
+/// or when none of the candidate paths are present in the entry index.
+///
+/// CO-264: also checks well-known file aliases (CHANGELOG.md for `changelog`,
+/// README.md for `readme`, LICENSE.md for `license`) and folder-level index.md
+/// when the subpath ends with a trailing slash.
 fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str) -> bool {
     let uc = {
         let storage = state.core.storage.lock();
@@ -147,12 +151,38 @@ fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str
         return false;
     };
     let index = crate::entry_index::EntryIndex::new(&uc_guard);
-    let candidates = [
+
+    let mut candidates: Vec<String> = vec![
         format!("{subpath}.md"),
         subpath.to_string(),
         format!("content/{subpath}.md"),
         format!("content/{subpath}"),
     ];
+
+    // CO-264: folder-level index.md for trailing-slash paths (e.g. `public/`).
+    if subpath.ends_with('/') {
+        candidates.push(format!("{subpath}index.md"));
+        candidates.push(format!("{subpath}index"));
+    }
+
+    // CO-264: well-known file aliases (case-insensitive subpath match).
+    let lower = subpath.to_lowercase();
+    match lower.as_str() {
+        "changelog" => {
+            candidates.push("CHANGELOG.md".to_string());
+            candidates.push("changelog.md".to_string());
+        }
+        "readme" => {
+            candidates.push("README.md".to_string());
+            candidates.push("readme.md".to_string());
+        }
+        "license" => {
+            candidates.push("LICENSE.md".to_string());
+            candidates.push("LICENSE".to_string());
+        }
+        _ => {}
+    }
+
     candidates
         .iter()
         .any(|p| index.get(universe_slug, p).ok().flatten().is_some())

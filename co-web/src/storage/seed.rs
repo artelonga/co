@@ -1000,6 +1000,70 @@ impl Storage {
         );
     }
 
+    /// CO-264: seed top-of-repo well-known files (CHANGELOG.md, README.md, LICENSE.md)
+    /// into the `co` universe as `page` entries.
+    ///
+    /// `root_dir` is the directory containing these files — the repo root in
+    /// local dev, or `/app/` in Docker (when `COPY CHANGELOG.md README.md /app/`
+    /// is present in the Dockerfile). Falls through silently when no file is found.
+    ///
+    /// Idempotent: uses `upsert_entry_row`. Called on every boot from
+    /// `run_co142_refresh` so the bundled docs stay in sync with the binary.
+    pub fn reseed_co_root_files(&mut self, root_dir: &std::path::Path) {
+        if self.get_universe("co").is_none() {
+            return;
+        }
+        let now_str = Utc::now().to_rfc3339();
+        let universe_root = self.universe_root("co");
+
+        // (candidate filenames, canonical entry path)
+        let candidates: &[(&[&str], &str)] = &[
+            (
+                &["CHANGELOG.md", "changelog.md", "Changelog.md"],
+                "CHANGELOG.md",
+            ),
+            (&["README.md", "readme.md", "Readme.md"], "README.md"),
+            (
+                &["LICENSE.md", "LICENSE", "license.md", "License.md"],
+                "LICENSE.md",
+            ),
+        ];
+
+        for (file_candidates, entry_path) in candidates {
+            let content = file_candidates
+                .iter()
+                .find_map(|fname| std::fs::read_to_string(root_dir.join(fname)).ok());
+            let content = match content {
+                Some(c) => c,
+                None => continue,
+            };
+            // Infer title from first H1 heading or use the filename stem.
+            let title = content
+                .lines()
+                .find(|l| l.starts_with("# "))
+                .map(|l| l.trim_start_matches('#').trim().to_string())
+                .unwrap_or_else(|| entry_path.trim_end_matches(".md").to_string());
+            let fm = json!({
+                "type": "page",
+                "title": title,
+                "created": now_str,
+                "modified": now_str,
+            });
+            let entry = make_entry(entry_path, fm, &content);
+            if let Err(e) = co::entry::write_entry(&universe_root, &entry) {
+                tracing::warn!("CO-264: failed to write co/{entry_path}: {e}");
+                continue;
+            }
+            let co_uc = self.universe_pool.get_or_open("co");
+            let uc_guard = co_uc.lock().expect("co universe conn lock");
+            if let Err(e) = upsert_entry_row(&uc_guard, "co", &entry) {
+                tracing::warn!("CO-264: failed to upsert co/{entry_path}: {e}");
+            } else {
+                tracing::info!("CO-264: seeded co/{entry_path} from {}", root_dir.display());
+            }
+        }
+    }
+
     /// CO-261: seed a placeholder content page in each sister-repo universe
     /// (yggdrasil, rfq) to indicate that the `work/<space>/` sync is not yet
     /// wired. Wave B/C of CO-261 will replace these with the real task board.
@@ -1226,5 +1290,74 @@ mod tests {
 
         let tasks = storage.list_tasks("CO");
         assert_eq!(tasks.len(), 1, "second run must not duplicate tasks");
+    }
+
+    // CO-264: reseed_co_root_files
+    #[test]
+    fn test_reseed_co_root_files_seeds_changelog_and_readme() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let root_dir = tempfile::tempdir().unwrap();
+
+        std::fs::write(
+            root_dir.path().join("CHANGELOG.md"),
+            "# Changelog\n\n## v1.0.0\n\nFirst release.",
+        )
+        .unwrap();
+        std::fs::write(
+            root_dir.path().join("README.md"),
+            "# My Project\n\nProject readme.",
+        )
+        .unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        storage.reseed_co_root_files(root_dir.path());
+
+        let co_uc = storage.universe_pool.get_or_open("co");
+        let uc_guard = co_uc.lock().unwrap();
+        let idx = crate::entry_index::EntryIndex::new(&uc_guard);
+
+        let changelog = idx.get("co", "CHANGELOG.md").unwrap();
+        assert!(changelog.is_some(), "CHANGELOG.md must be seeded");
+        let changelog = changelog.unwrap();
+        assert_eq!(changelog.entry_type, "page");
+        assert_eq!(changelog.title.as_deref(), Some("Changelog"));
+
+        let readme = idx.get("co", "README.md").unwrap();
+        assert!(readme.is_some(), "README.md must be seeded");
+    }
+
+    #[test]
+    fn test_reseed_co_root_files_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let root_dir = tempfile::tempdir().unwrap();
+        std::fs::write(root_dir.path().join("CHANGELOG.md"), "# Changelog\n\nv1.").unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        storage.reseed_co_root_files(root_dir.path());
+        storage.reseed_co_root_files(root_dir.path()); // second run — must not panic or duplicate
+
+        let co_uc = storage.universe_pool.get_or_open("co");
+        let uc_guard = co_uc.lock().unwrap();
+        let count: i64 = uc_guard
+            .query_row(
+                "SELECT COUNT(*) FROM entries WHERE universe_key = 'co' AND path = 'CHANGELOG.md'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "idempotent: exactly one CHANGELOG.md row");
+    }
+
+    #[test]
+    fn test_reseed_co_root_files_silently_skips_missing_files() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let empty_dir = tempfile::tempdir().unwrap();
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        // Should not panic when no files are found
+        storage.reseed_co_root_files(empty_dir.path());
     }
 }
