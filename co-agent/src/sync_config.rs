@@ -13,10 +13,40 @@ use serde::{Deserialize, Serialize};
 // co-universes.yaml  (repo-level, committed)
 // ---------------------------------------------------------------------------
 
+/// One-shot sync entry used by `co-sync push` in CI pipelines.
+///
+/// Sister repos declare these in their own `co-universes.yaml`:
+/// ```yaml
+/// syncs:
+///   - source: work/yggdrasil/
+///     target: yggdrasil
+///     include: ["*.md"]
+///     exclude: ["CLAUDE.md", ".gitkeep"]
+///   - source: CHANGELOG.md
+///     target: yggdrasil
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct SyncEntry {
+    /// Local path (file or directory) relative to co-universes.yaml.
+    pub source: String,
+    /// CO universe slug to push into.
+    pub target: String,
+    /// Glob patterns to include (e.g. `["*.md"]`). Empty = include all.
+    #[serde(default)]
+    pub include: Vec<String>,
+    /// Glob patterns to exclude (e.g. `["CLAUDE.md", ".gitkeep"]`).
+    #[serde(default)]
+    pub exclude: Vec<String>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct UniverseRegistry {
     pub server: String,
+    #[serde(default)]
     pub universes: Vec<UniverseDecl>,
+    /// One-shot push specs for CI use (`co-sync push`).
+    #[serde(default)]
+    pub syncs: Vec<SyncEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1,11 +1,15 @@
-//! `co-sync` — content universe sync daemon.
+//! `co-sync` — content universe sync daemon + CI push tool.
 //!
 //! Reads `co-universes.yaml` (searched upward from cwd).
-//! For each declared universe: ensures it exists, sets parent, pushes all
-//! local files, reindexes, then watches for changes.
 //!
-//! Usage:  co-sync <token>
-//! Token:  co.artelonga.com.br/co/settings/sync  (one time)
+//! **Daemon mode** (`co-sync <token>`):
+//!   For each declared universe: ensures it exists, sets parent, pushes all
+//!   local files, reindexes, then watches for changes via WebSocket.
+//!
+//! **Push mode** (`co-sync push --config co-universes.yaml`, token from `CO_TOKEN`):
+//!   One-shot CI push. Reads `syncs:` entries, walks source folders, skips
+//!   files whose SHA-256 hash is unchanged (cached in `~/.co/push-cache.json`),
+//!   PUTs changed files to the CO Vault API, then exits.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -13,8 +17,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
-use clap::Parser;
-use co_agent::sync_config::{SyncConfig, UniverseRegistry};
+use clap::{Parser, Subcommand};
+use co_agent::sync_config::{SyncConfig, SyncEntry, UniverseRegistry};
 use co_agent::watcher::{SyncWatcher, WatcherConfig};
 use notify::RecursiveMode;
 use notify::Watcher as _;
@@ -39,8 +43,24 @@ const IGNORE_NAMES: &[&str] = &[
     about = "Sync content universes — reads co-universes.yaml"
 )]
 struct Cli {
-    /// API token from co.artelonga.com.br/co/settings/sync
-    token: String,
+    #[command(subcommand)]
+    cmd: Option<Cmd>,
+    /// API token for daemon mode (co.artelonga.com.br/co/settings/sync)
+    token: Option<String>,
+}
+
+#[derive(Subcommand)]
+enum Cmd {
+    /// One-shot CI push: reads `syncs:` from co-universes.yaml and PUTs
+    /// changed files to the CO Vault API. Skips unchanged files (SHA-256 cache).
+    Push {
+        /// CO Vault API token (or set CO_TOKEN env var)
+        #[arg(env = "CO_TOKEN")]
+        token: String,
+        /// Path to co-universes.yaml (default: search upward from cwd)
+        #[arg(long)]
+        config: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -54,13 +74,34 @@ async fn main() -> Result<()> {
         .init();
 
     let cli = Cli::parse();
+
+    match cli.cmd {
+        Some(Cmd::Push { token, config }) => {
+            let cwd = std::env::current_dir()?;
+            let registry_path = match config {
+                Some(p) => p,
+                None => UniverseRegistry::find(&cwd)
+                    .context("co-universes.yaml not found (searched upward from cwd)")?,
+            };
+            let registry = UniverseRegistry::load(&registry_path)?;
+            let registry_dir = registry_path.parent().unwrap_or(&cwd).to_path_buf();
+            return run_push(&registry, &registry_dir, &token).await;
+        }
+        None => {}
+    }
+
+    let token = cli.token.context(
+        "token required in daemon mode — usage: co-sync <token>\n\
+         For CI push mode use: co-sync push (CO_TOKEN env var)",
+    )?;
+
     let cwd = std::env::current_dir()?;
     let registry_path = UniverseRegistry::find(&cwd).context("co-universes.yaml not found")?;
     let registry_dir = registry_path.parent().unwrap_or(&cwd).to_path_buf();
     info!("Registry: {}", registry_path.display());
 
     let registry = UniverseRegistry::load(&registry_path)?;
-    save_token(&cli.token, &registry.server)?;
+    save_token(&token, &registry.server)?;
 
     let http = Arc::new(
         reqwest::Client::builder()
@@ -70,7 +111,7 @@ async fn main() -> Result<()> {
 
     // Step 1: ensure all universes exist with correct parents
     for decl in &registry.universes {
-        ensure_universe(decl, &registry.server, &cli.token, &http).await;
+        ensure_universe(decl, &registry.server, &token, &http).await;
     }
 
     // Step 2: sync universes that have local content
@@ -108,7 +149,7 @@ async fn main() -> Result<()> {
 
     let mut handles = Vec::new();
     for (slug, root) in syncable {
-        let token = cli.token.clone();
+        let token = token.clone();
         let server = registry.server.clone();
         let ws_url = ws_url.clone();
         let http = Arc::clone(&http);
@@ -424,6 +465,231 @@ fn save_token(token: &str, server: &str) -> Result<()> {
     });
     cfg.token = token.to_string();
     cfg.save(&path)
+}
+
+// ---------------------------------------------------------------------------
+// push mode — one-shot CI sync
+// ---------------------------------------------------------------------------
+
+/// Hash cache stored at `~/.co/push-cache.json`.
+/// Maps `"{slug}/{rel_path}"` → SHA-256 hex of last-uploaded content.
+type PushCache = HashMap<String, String>;
+
+fn push_cache_path() -> PathBuf {
+    dirs_next::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".co")
+        .join("push-cache.json")
+}
+
+fn load_push_cache() -> PushCache {
+    let p = push_cache_path();
+    std::fs::read_to_string(&p)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_push_cache(cache: &PushCache) {
+    let p = push_cache_path();
+    if let Some(dir) = p.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(cache) {
+        let _ = std::fs::write(&p, json.as_bytes());
+    }
+}
+
+/// Returns `true` if the file's content matches the cached SHA-256.
+fn is_unchanged(cache: &PushCache, cache_key: &str, content: &[u8]) -> bool {
+    let hash = format!("{:x}", Sha256::digest(content));
+    cache.get(cache_key).is_some_and(|h| *h == hash)
+}
+
+fn current_hash(content: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(content))
+}
+
+/// Returns true if `name` matches any of the glob patterns (e.g. `"*.md"`).
+/// Empty pattern list → matches everything (include all).
+fn matches_patterns(name: &str, patterns: &[String]) -> bool {
+    if patterns.is_empty() {
+        return true;
+    }
+    patterns.iter().any(|p| glob_match(p, name))
+}
+
+/// Minimal glob matcher supporting `*` (any chars) and `?` (one char).
+fn glob_match(pattern: &str, name: &str) -> bool {
+    let mut p = pattern.chars().peekable();
+    let mut n = name.chars().peekable();
+    glob_match_inner(&mut p, &mut n)
+}
+
+fn glob_match_inner(
+    p: &mut std::iter::Peekable<std::str::Chars<'_>>,
+    n: &mut std::iter::Peekable<std::str::Chars<'_>>,
+) -> bool {
+    loop {
+        match p.peek() {
+            None => return n.peek().is_none(),
+            Some('*') => {
+                p.next();
+                if p.peek().is_none() {
+                    return true; // trailing `*` matches remainder
+                }
+                // try matching from every position in n
+                let rest_p: String = p.clone().collect();
+                let rest_n: String = n.clone().collect();
+                for i in 0..=rest_n.len() {
+                    let mut pp = rest_p.chars().peekable();
+                    let mut nn = rest_n[i..].chars().peekable();
+                    if glob_match_inner(&mut pp, &mut nn) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+            Some('?') => {
+                p.next();
+                if n.next().is_none() {
+                    return false;
+                }
+            }
+            Some(&pc) => {
+                p.next();
+                match n.next() {
+                    Some(nc) if nc == pc => {}
+                    _ => return false,
+                }
+            }
+        }
+    }
+}
+
+/// One-shot push: walk each `syncs:` entry, skip unchanged files, PUT the rest.
+async fn run_push(registry: &UniverseRegistry, registry_dir: &Path, token: &str) -> Result<()> {
+    if registry.syncs.is_empty() {
+        warn!("No `syncs:` entries in co-universes.yaml — nothing to push");
+        return Ok(());
+    }
+
+    let http = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()?;
+    let mut cache = load_push_cache();
+    let mut total_pushed = 0usize;
+    let mut total_skipped = 0usize;
+
+    for sync in &registry.syncs {
+        let source = resolve_path(&sync.source, registry_dir);
+        info!("push: {} → {}", source.display(), sync.target);
+
+        let files = collect_sync_files(&source, sync);
+        for (abs_path, rel_path) in files {
+            let cache_key = format!("{}/{}", sync.target, rel_path);
+            let Ok(content) = std::fs::read(&abs_path) else {
+                warn!("push: cannot read {}", abs_path.display());
+                continue;
+            };
+            if is_unchanged(&cache, &cache_key, &content) {
+                total_skipped += 1;
+                continue;
+            }
+            let url = format!(
+                "{}/api/v1/universes/{}/vault/{}",
+                registry.server, sync.target, rel_path
+            );
+            match http
+                .put(&url)
+                .bearer_auth(token)
+                .body(content.clone())
+                .send()
+                .await
+            {
+                Ok(r) if r.status().is_success() || r.status().as_u16() == 200 => {
+                    cache.insert(cache_key, current_hash(&content));
+                    total_pushed += 1;
+                    info!("push: ✓ {}/{}", sync.target, rel_path);
+                }
+                Ok(r) => {
+                    warn!("push: {} {} → {}", sync.target, rel_path, r.status());
+                }
+                Err(e) => {
+                    warn!("push: {} {} error: {e}", sync.target, rel_path);
+                }
+            }
+        }
+    }
+
+    save_push_cache(&cache);
+    info!(
+        "push done: {} uploaded, {} skipped (unchanged)",
+        total_pushed, total_skipped
+    );
+    Ok(())
+}
+
+/// Resolve a source path from a sync entry (relative to registry dir, or `~/`).
+fn resolve_path(raw: &str, registry_dir: &Path) -> PathBuf {
+    if raw.starts_with("~/") {
+        dirs_next::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join(raw.strip_prefix("~/").unwrap_or(raw))
+    } else if std::path::Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        registry_dir.join(raw)
+    }
+}
+
+/// Collect (abs_path, rel_path) pairs for a sync entry.
+///
+/// If `source` is a file, returns just that file.
+/// If `source` is a directory, walks recursively applying include/exclude.
+fn collect_sync_files(source: &Path, sync: &SyncEntry) -> Vec<(PathBuf, String)> {
+    let mut out = Vec::new();
+    if source.is_file() {
+        let name = source.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if should_include(name, &sync.include, &sync.exclude) {
+            out.push((source.to_path_buf(), name.to_string()));
+        }
+        return out;
+    }
+    collect_sync_dir(source, source, sync, &mut out);
+    out
+}
+
+fn collect_sync_dir(root: &Path, dir: &Path, sync: &SyncEntry, out: &mut Vec<(PathBuf, String)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if is_ignored(&path) {
+            continue;
+        }
+        if path.is_dir() {
+            collect_sync_dir(root, &path, sync, out);
+        } else if path.is_file() {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            if !should_include(name, &sync.include, &sync.exclude) {
+                continue;
+            }
+            if let Ok(rel) = path.strip_prefix(root) {
+                let rel_str = rel.to_string_lossy().replace('\\', "/");
+                out.push((path, rel_str));
+            }
+        }
+    }
+}
+
+fn should_include(name: &str, include: &[String], exclude: &[String]) -> bool {
+    // Exclude wins over include
+    if !exclude.is_empty() && matches_patterns(name, exclude) {
+        return false;
+    }
+    matches_patterns(name, include)
 }
 
 fn is_binary_ext(ext: &str) -> bool {

@@ -1,0 +1,53 @@
+# CO-267: sync-to-co.yml — push work/*.md files to CO universe on every merge.
+#
+# Copy this file to your sister repo's .github/workflows/sync-to-co.yml and
+# adapt the `syncs:` section in your repo's co-universes.yaml accordingly.
+#
+# Prerequisites:
+#   1. Add a co-universes.yaml to your repo root (see co-universes.yaml.example
+#      in the CO repo, or the examples at the bottom of co/co-universes.yaml).
+#   2. Generate a CO Vault API token:
+#        POST https://co.artelonga.com.br/api/v1/auth/token
+#        (or via the CO web admin → Settings → API tokens)
+#   3. Add the token as a GitHub secret named CO_VAULT_TOKEN in your repo.
+
+name: Sync work/ to CO universe
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "work/**"
+      - "CHANGELOG.md"
+      - "README.md"
+
+jobs:
+  sync-to-co:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/co-sync
+          key: ${{ runner.os }}-co-sync-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-co-sync-
+
+      - name: Install co-sync
+        run: |
+          if ! command -v co-sync &> /dev/null; then
+            cargo install co-sync --git https://github.com/artelonga/co --locked
+          fi
+
+      - name: Push work/ to CO universe
+        run: co-sync push
+        env:
+          CO_TOKEN: ${{ secrets.CO_VAULT_TOKEN }}

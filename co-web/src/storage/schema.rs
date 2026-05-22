@@ -197,9 +197,16 @@ pub(crate) fn upsert_entry_row(
         .map(String::from)
         .or_else(|| created_at.clone());
 
+    // CO-267: set entry_origin = 'walker' for seed-walker writes, and skip
+    // the update if the existing row was already written by co-sync push
+    // (entry_origin = 'synced'). SQLite's DO UPDATE WHERE: when the WHERE
+    // evaluates to false the conflicting row is left unchanged (equivalent
+    // to INSERT OR IGNORE for that conflict).
     conn.execute(
-        "INSERT INTO entries (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO entries \
+           (path, universe_key, entry_type, title, frontmatter_json, \
+            body, body_hash, created_at, updated_at, entry_origin) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 'walker')
          ON CONFLICT(universe_key, path) DO UPDATE SET
            entry_type = excluded.entry_type,
            title = excluded.title,
@@ -207,7 +214,9 @@ pub(crate) fn upsert_entry_row(
            body = excluded.body,
            body_hash = excluded.body_hash,
            created_at = excluded.created_at,
-           updated_at = excluded.updated_at",
+           updated_at = excluded.updated_at,
+           entry_origin = 'walker'
+         WHERE entries.entry_origin != 'synced'",
         params![
             entry.path,
             universe_key,

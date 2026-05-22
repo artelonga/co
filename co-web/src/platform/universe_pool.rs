@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS entries (
     body_chars        INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT,
     updated_at        TEXT,
+    entry_origin      TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (universe_key, path)
 );
 CREATE INDEX IF NOT EXISTS idx_entries_type    ON entries(universe_key, entry_type);
@@ -520,6 +521,20 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])
             .expect("universe schema_version v13");
     }
+    if v < 14 {
+        // CO-267: entry_origin — distinguishes seed-walker writes ('walker')
+        // from co-sync push writes ('synced'). Default '' for existing rows
+        // (treated as walker-equivalent by the upsert guard).
+        ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''");
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (14)",
+            [],
+        )
+        .expect("universe schema_version v14");
+    }
+    // CO-267 unconditional backfill — same drift-safe guard as CO-241.
+    ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''");
+
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
     // computed", so we re-run the computation for all rows where body_chars = 0.
