@@ -1,5 +1,6 @@
 // CO-262: entries seeded by CO-261 walker must be visible to anonymous visitors
 // via GET /api/v1/universes/co/entries.
+// CO-266: total must reflect the full visible count; items must be the paginated slice.
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -142,5 +143,76 @@ async fn test_co_entries_visible_to_anon_after_seed() {
         single.status(),
         StatusCode::OK,
         "GET .../entries/public/CO-1.md must return 200 for anon visitor"
+    );
+}
+
+/// CO-266: total must equal N (full visible count) while items is capped at the
+/// requested limit.  Seeds 5 entries, requests limit=3 — expects total=5, items=3.
+#[tokio::test]
+async fn test_list_entries_total_equals_n_items_equals_min_n_limit() {
+    let dir = tempdir().unwrap();
+    let seed_dir = tempdir().unwrap();
+    for i in 1u64..=5 {
+        std::fs::write(
+            seed_dir.path().join(format!("CO-{i}.md")),
+            make_co_task_md(i, "todo"),
+        )
+        .unwrap();
+    }
+
+    let app = build_co_app(dir.path(), seed_dir.path());
+
+    // limit=3, 5 entries seeded → total=5, items.length=3
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/co/entries?limit=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    let total = json["total"].as_u64().expect("total field");
+    let items = json["entries"].as_array().expect("entries array");
+    assert_eq!(
+        total, 5,
+        "total must equal N=5 (full visible count), got {total}"
+    );
+    assert_eq!(
+        items.len(),
+        3,
+        "items must equal min(N=5, limit=3)=3, got {}",
+        items.len()
+    );
+
+    // path_prefix=public/ variant: same semantics
+    let resp2 = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/co/entries?path_prefix=public%2F&limit=3")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp2.status(), StatusCode::OK);
+    let bytes2 = resp2.into_body().collect().await.unwrap().to_bytes();
+    let json2: serde_json::Value = serde_json::from_slice(&bytes2).unwrap();
+
+    let total2 = json2["total"].as_u64().expect("total field");
+    let items2 = json2["entries"].as_array().expect("entries array");
+    assert_eq!(total2, 5, "path_prefix total must equal N=5, got {total2}");
+    assert_eq!(
+        items2.len(),
+        3,
+        "path_prefix items must equal min(N=5, limit=3)=3, got {}",
+        items2.len()
     );
 }

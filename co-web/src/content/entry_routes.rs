@@ -285,15 +285,19 @@ pub async fn list_entries(
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
     let index = crate::entry_index::EntryIndex::new(&uc_guard);
 
+    // CO-266: limit is applied in memory after filter_public_for_anon so that
+    // `total` reflects the full visible count and `items` is the paginated slice.
+    // Queries that carry their own internal cap (FTS=100, date=5000, semantic=k)
+    // are left unchanged; only the user-limit-aware paths pass None here.
     let entries = if let Some(ref sem_query) = q.semantic {
         // CO-164: semantic similarity search (optionally combined with FTS for hybrid).
         let k = q.k.unwrap_or(10).min(200);
         semantic_search_entries(&state, &slug, &uc_guard, sem_query, k, q.q.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref prefix) = q.path_prefix {
-        // CO-264: folder-prefix filter — return all entries under a given folder.
+        // CO-264: folder-prefix filter — fetch all matching; limit applied below.
         index
-            .query_by_path_prefix(&slug, prefix, q.limit)
+            .query_by_path_prefix(&slug, prefix, None)
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref fts_query) = q.q {
         index
@@ -306,11 +310,10 @@ pub async fn list_entries(
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else {
         let entry_type = q.entry_type.as_deref().unwrap_or("");
-        let limit = q.limit;
         if entry_type.is_empty() {
-            // list all
+            // list all — fetch all; limit applied below.
             index
-                .query_with_limit(&slug, "", &serde_json::json!({}), limit)
+                .query_with_limit(&slug, "", &serde_json::json!({}), None)
                 .or_else(|_| Ok::<Vec<EntryRow>, anyhow::Error>(vec![]))
                 .unwrap_or_default()
         } else {
@@ -320,7 +323,7 @@ pub async fn list_entries(
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
             index
-                .query_with_limit(&slug, entry_type, &filter, limit)
+                .query_with_limit(&slug, entry_type, &filter, None)
                 .map_err(|e| AppError::Internal(e.to_string()))?
         }
     };
@@ -389,6 +392,11 @@ pub async fn list_entries(
     // step.
     let entries = filter_public_for_anon(&state, &headers, &slug, entries);
 
+    // CO-266: total = full visible count; entries = paginated slice.
+    let effective_limit = q.limit.unwrap_or(5_000).min(50_000);
+    let total = entries.len();
+    let entries: Vec<EntryRow> = entries.into_iter().take(effective_limit).collect();
+
     if accept_protobuf(&headers) {
         // Encode as protobuf EntryList
         use prost::Message;
@@ -396,7 +404,7 @@ pub async fn list_entries(
             entries.iter().map(entry_row_to_proto).collect();
         let list = co::proto::entry::EntryList {
             entries: proto_entries,
-            total: entries.len() as u64,
+            total: total as u64,
         };
         let mut buf = Vec::new();
         list.encode(&mut buf)
@@ -413,7 +421,6 @@ pub async fn list_entries(
         );
         Ok(resp)
     } else {
-        let total = entries.len();
         let mut resp = Json(EntryListResponse { entries, total }).into_response();
         resp.headers_mut().insert(
             axum::http::header::CACHE_CONTROL,
