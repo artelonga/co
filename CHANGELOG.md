@@ -5,6 +5,79 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.25.0] — 2026-05-22 — Wave F — recursive universe file-compat (CO-264) + extract universes/ subtree (CO-265)
+
+## CO-264 — Universe = recursive folder tree — per-universe CHANGELOG, index.md, README.md at every level; folder-prefix filtering
+
+Every CO universe now behaves like a filesystem-shaped wiki. Well-known filenames
+(`CHANGELOG.md`, `index.md`, `README.md`, `LICENSE.md`) have canonical rendering
+at any folder level.
+
+### What changed
+
+**Backend — `path_prefix` query parameter**
+
+`GET /api/v1/universes/{slug}/entries?path_prefix=<prefix>` returns only entries
+whose path starts with `<prefix>`. Implemented in `EntryIndex::query_by_path_prefix`
+and wired through `EntryListQuery` in `entry_routes.rs`.
+
+**Backend — folder-level URL resolution**
+
+`entry_exists_for_subpath` in `static_files.rs` now recognises:
+- `changelog` (case-insensitive) → checks `CHANGELOG.md`, `changelog.md`
+- `readme` → checks `README.md`, `readme.md`
+- `license` → checks `LICENSE.md`, `LICENSE`
+- Trailing-slash paths (e.g. `public/`) → checks `public/index.md`
+
+This makes `/co/changelog` return HTTP 200 when `CHANGELOG.md` is seeded and
+`/co/public/` resolve to the folder's `index.md`.
+
+**Backend — seeder for root-level docs**
+
+`Storage::reseed_co_root_files(root_dir)` seeds `CHANGELOG.md`, `README.md`, and
+`LICENSE.md` from the repo root into the `co` universe as `page` entries on every
+boot. Called from `run_co142_refresh` in `seed_orchestrator.rs`.
+
+**Frontend — `maybeOpenEntryFromUrl` extended**
+
+The SPA's URL-to-entry resolver now prepends `{folder}/index.md` for trailing-slash
+paths and appends well-known file aliases (`CHANGELOG.md`, `README.md`, etc.) to
+the candidate list. When `/changelog` resolves to nothing, a helpful empty state is
+shown: "Este universo ainda não tem um CHANGELOG."
+
+**Frontend — `getEntriesByPathPrefix` API helper**
+
+Added `getEntriesByPathPrefix(slug, prefix)` to `api/entries.js` for folder
+navigation in the SPA.
+
+**Tests — new Playwright spec**
+
+`co-web/e2e/recursive-universe.spec.ts` asserts `path_prefix` filtering, changelog
+routing, and trailing-slash folder resolution.
+
+**Documentation**
+
+Section 8 (File-Compat Layer) added to `co-web/src/MODULES.md`.
+
+### Why
+
+The session-end user report: *"changelog not showing up in universes, should read
+from CHANGELOG or not found, just like home should read from index.md and subsequent
+folders as well, nested, hierarchical, recursive universes should guarantee file
+compatibility at any level."* This is the architecture vision implicit in CO-141,
+CO-251, CO-252, CO-261 — now made explicit as a unified file-compat contract.
+
+## CO-265 — Extract universe-specific modules out of co-web/src/ — separate co (platform) from universes (extensions)
+
+Moved `co-web/src/quilombo/` and `co-web/src/game/` into `co-web/src/universes/quilombo/` and `co-web/src/universes/game/` respectively. Added `co-web/src/universes/mod.rs` to declare both sub-modules. Updated `lib.rs` to declare `pub mod universes` and re-export all universe sub-modules at the crate root so existing `crate::quilombo_*` and `crate::game_*` import paths continue to compile unchanged.
+
+Documented the platform-vs-universes split in MODULES.md §6 (Architecture Map). Annotated `quilomboaraucaria` in `co-universes.yaml` with its `rust_module` path for future plugin registration.
+
+### Why
+
+CO-224 placed `quilombo/` and `game/` at the same depth as `auth/`, `content/`, and `platform/`, implying they are peers. They are not: `quilombo/` is the backend for quilomboaraucaria.org (one specific universe) and `game/` is the leaderboard for Yggdrasil (another specific universe). Grouping them under `universes/` makes the platform-vs-extension boundary visible at directory level without any behavior change.
+
+
 ## [2.24.0] — 2026-05-21 — Wave E — route folder promotion + visibility fix + R2 feature gate
 
 ## CO-224 — Promote routes into context folders (auth)
