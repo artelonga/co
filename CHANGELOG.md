@@ -5,6 +5,64 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.26.0] — 2026-05-22 — Wave G — list visibility fix + cross-repo sync
+
+## CO-266 — List endpoint visibility — total counts correctly but items array empty for anonymous
+
+`GET /api/v1/universes/co/entries` (and `?path_prefix=public/`) now returns
+`total` as the **full visible count** and `entries` as the **paginated slice**
+(capped at `limit`).  Previously both were computed from the same post-limit
+vector, so requesting `limit=3` against 5 visible entries yielded
+`total=3, items=[3]` instead of the correct `total=5, items=[3]`.
+
+### Why
+
+The SQL-level `LIMIT` was applied inside `query_by_path_prefix` and
+`query_with_limit` before `filter_public_for_anon` ran.  Both `total` and
+`items` were then set from `entries.len()` — the limited, filtered count — so
+`total` could never exceed `limit`, breaking pagination semantics and masking
+the real number of visible entries.
+
+The fix fetches all matching rows (passing `None` for limit to the query
+methods, which already default to a 5 000 row cap), applies
+`filter_public_for_anon`, records `total = all_filtered.len()`, then truncates
+to the user's `limit` for the `items` array.
+
+## CO-267 — CO-261 phase B — cross-repo sync (yggdrasil/rfq/qb/artelonga work folders → CO universes)
+
+Added `co-sync push` — a one-shot CI mode that reads `syncs:` entries from
+`co-universes.yaml`, walks the declared source folders, skips unchanged files
+(SHA-256 hash cache at `~/.co/push-cache.json`), and PUTs changed files to the
+CO Vault API. Sister repos (yggdrasil, rfq, quilomboaraucaria, artelonga) run
+this on every merge to main via a GH Action, making their `work/<space>/*.md`
+tasks visible in the corresponding CO universe.
+
+Backend changes:
+- `entry_origin` column added to `entries` tables (meta DB migration v48,
+  per-universe migration v14). Vault PUT writes `entry_origin = 'synced'`; the
+  boot-time seed walker writes `entry_origin = 'walker'` and skips overwriting
+  any row already marked `synced`.
+- CO-261 placeholder stubs for yggdrasil/rfq removed — real task entries from
+  CI push replace them.
+
+Tool changes:
+- `co-sync push [token]` subcommand with `CO_TOKEN` env-var support.
+- `co-universes.yaml` extended with a `syncs:` section; `SyncEntry` struct
+  supports `include`/`exclude` glob patterns.
+- `.github/workflow-templates/sync-to-co.yml` — copy-paste GH Action for
+  sister repos.
+- Integration tests in `co-agent/tests/push_hash_skip.rs` verify the
+  hash-skip logic and include/exclude filtering against a mock Vault API.
+
+### Why
+
+CO-261 phase A synced the local `/co` universe from `work/co/` at boot time.
+Sister repos are separate git repositories; Docker filesystem isolation prevents
+boot-time walks of their paths. The push-from-CI model (option C in the CO-261
+spec) is the correct solution: each repo owns its data and pushes on merge.
+The `entry_origin` guard ensures a server restart never clobbers CI-pushed data.
+
+
 ## [2.25.0] — 2026-05-22 — Wave F — recursive universe file-compat (CO-264) + extract universes/ subtree (CO-265)
 
 ## CO-264 — Universe = recursive folder tree — per-universe CHANGELOG, index.md, README.md at every level; folder-prefix filtering
