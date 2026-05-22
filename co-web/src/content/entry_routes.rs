@@ -194,6 +194,10 @@ fn accept_protobuf(headers: &HeaderMap) -> bool {
 // callers see everything they had access to before. The current
 // allowlist is below; future iteration generalizes this to a per-
 // universe flag + recursive subuniverse mapping.
+//
+// CO-268: public-subscribable universes bypass this filter — the
+// visibility gate middleware (CO-161) already controls universe-level
+// access, so adding a per-path restriction on top is wrong.
 // ---------------------------------------------------------------------------
 
 const PUBLIC_CONVENTION_UNIVERSES: &[&str] = &["co"];
@@ -211,14 +215,21 @@ fn is_public_path(path: &str) -> bool {
 }
 
 /// Strip non-public entries when the caller is anon AND the universe
-/// uses the `public/` convention. Pure function; doesn't touch the DB.
+/// uses the `public/` convention AND the universe is not public-subscribable.
+///
+/// `universe_is_pub_sub` must be `true` when the universe's `visibility`
+/// field equals `"public-subscribable"`. In that case the path filter is
+/// skipped: the visibility gate (CO-161) already controls who can reach
+/// the universe, so restricting individual entry paths is redundant.
 fn filter_public_for_anon(
     state: &AppState,
     headers: &HeaderMap,
     slug: &str,
+    universe_is_pub_sub: bool,
     entries: Vec<EntryRow>,
 ) -> Vec<EntryRow> {
-    if !is_public_convention(slug) || !caller_is_anon(state, headers) {
+    // CO-268: public-subscribable universes expose all entries to anon callers.
+    if !is_public_convention(slug) || !caller_is_anon(state, headers) || universe_is_pub_sub {
         return entries;
     }
     entries
@@ -227,8 +238,15 @@ fn filter_public_for_anon(
         .collect()
 }
 
-fn is_public_for_anon(state: &AppState, headers: &HeaderMap, slug: &str, path: &str) -> bool {
-    if !is_public_convention(slug) || !caller_is_anon(state, headers) {
+fn is_public_for_anon(
+    state: &AppState,
+    headers: &HeaderMap,
+    slug: &str,
+    universe_is_pub_sub: bool,
+    path: &str,
+) -> bool {
+    // CO-268: public-subscribable universes expose all entries to anon callers.
+    if !is_public_convention(slug) || !caller_is_anon(state, headers) || universe_is_pub_sub {
         return true;
     }
     is_public_path(path)
@@ -276,9 +294,15 @@ pub async fn list_entries(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
-    let uc = {
+    // CO-268: also look up the universe's visibility so filter_public_for_anon
+    // can bypass the public/ path restriction for public-subscribable universes.
+    let (uc, universe_is_pub_sub) = {
         let storage = lock_storage(&state);
-        storage.universe_conn(&slug)
+        let is_pub_sub = storage
+            .get_universe(&slug)
+            .map(|u| u.visibility == "public-subscribable")
+            .unwrap_or(false);
+        (storage.universe_conn(&slug), is_pub_sub)
     };
     let uc_guard = uc
         .lock()
@@ -388,9 +412,8 @@ pub async fn list_entries(
     // `public/` folder convention, anon visitors only see entries
     // under `public/`. Owners/members see everything they always did.
     // The convention is opt-in per universe via the static list below;
-    // generalizing to a recursive sub-universe mechanism is the next
-    // step.
-    let entries = filter_public_for_anon(&state, &headers, &slug, entries);
+    // CO-268 generalizes: public-subscribable universes bypass the filter.
+    let entries = filter_public_for_anon(&state, &headers, &slug, universe_is_pub_sub, entries);
 
     // CO-266: total = full visible count; entries = paginated slice.
     let effective_limit = q.limit.unwrap_or(5_000).min(50_000);
@@ -552,9 +575,15 @@ pub async fn get_entry(
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
-    let uc = {
+    // CO-268: also look up the universe's visibility so is_public_for_anon
+    // can bypass the public/ path restriction for public-subscribable universes.
+    let (uc, universe_is_pub_sub) = {
         let storage = lock_storage(&state);
-        storage.universe_conn(&slug)
+        let is_pub_sub = storage
+            .get_universe(&slug)
+            .map(|u| u.visibility == "public-subscribable")
+            .unwrap_or(false);
+        (storage.universe_conn(&slug), is_pub_sub)
     };
     let uc_guard = uc
         .lock()
@@ -569,7 +598,8 @@ pub async fn get_entry(
     // `public/` convention only expose entries under `public/` to
     // anon visitors. 404 mimics the not-found shape so we don't
     // leak the existence of private paths.
-    if !is_public_for_anon(&state, &headers, &slug, &path) {
+    // CO-268: public-subscribable universes bypass this per-path filter.
+    if !is_public_for_anon(&state, &headers, &slug, universe_is_pub_sub, &path) {
         return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
     }
 
