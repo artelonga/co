@@ -5,6 +5,70 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.29.0] — 2026-05-23 — Wave J — kanban dogfooding + deploy dashboard + agent context budget
+
+## CO-272 — Kanban view shows entries-as-tasks, not just legacy projects — close the dogfooding gap
+
+Added a new `GET /api/v1/universes/{slug}/dev-tasks` endpoint that maps entries
+from the `work/` folder (entry_type in user-story/task/epic) to a flat task
+shape. The kanban SPA now merges these dev-tasks into `state.tasks` for
+public-subscribable universes, so visiting `/co`, `/artelonga`,
+`/quilomboaraucaria`, etc. renders the actual CO-N/AL-N/QB-N work items as
+kanban cards grouped by status (todo/in_progress/done/blocked).
+
+### Why
+
+Since CO-261 the entries were correctly synced but every universe's kanban
+still rendered the legacy hardcoded project containers.  CO-272 closes both
+the data layer (entries exist) and the view layer (kanban renders them).
+
+## CO-273 — Centralized deployment dashboard — machines + sizes + statuses + versions across all units
+
+Added a single-pane-of-glass deployment dashboard at `/admin/deployments` showing the runtime state of all 6 deployable units (co, artelonga, quilombo, yggdrasil, rfq, comunicacao).
+
+- New table `deployment_snapshots` (migration v49): one row per unit, updated by background worker
+- New background worker `DeploymentSnapshotWorker` (5 min interval): fans out in parallel across all 6 units using `tokio::join!`, probing the Fly.io machines API (`CO_FLY_API_TOKEN` env var) and each unit's `/api/health` endpoint
+- New API endpoints:
+  - `GET /api/v1/admin/deployments` — returns cached snapshot data for all 6 units
+  - `POST /api/v1/admin/deployments/refresh` — triggers immediate re-probe and returns fresh data
+- New admin page at `/admin/deployments`: dark-themed table showing unit, URL, version, machine ID, region, VM size, state, last deploy date, and health status; click a row to expand full details; "Atualizar agora" button for manual refresh
+- Worker handles Fly API errors, network failures, and missing token gracefully (each unit probed independently)
+
+### Why
+
+Operator needs one glance to answer: which units are up, what size are they running on, when was the last deploy, is anything behind? Previously required 5+ separate `flyctl status` + `curl /api/health` invocations.
+
+## CO-274 — co-auto context budget — cut from ~150k chars to ~30k via skills + per-universe CLAUDE.md
+
+`dev/co-auto/src/auto.rs` now routes to a **minimal context path** when
+`data_dir/CLAUDE.md` (the per-space guide) exists, replacing the old
+always-loaded 5-layer bundle with three focused layers:
+
+1. **Per-space CLAUDE.md** (≤3k chars) — replaces the 15k root CLAUDE.md
+2. **Skills** (≤4k chars) — loaded on-demand based on task labels
+3. **Task spec** (≤5k chars) — the actual ticket
+
+Target budget: ~12k chars per task, down from ~45k+ (≈75% reduction).
+
+New files:
+- `skills/rust-architecture.md` — loaded for any `module:*` label (non-SPA/deploy)
+- `skills/spa-conventions.md` — loaded for `module:spa`, `module:editor`, `module:ui`
+- `skills/deploy-runbook.md` — loaded for `module:deploy`, `module:infra`
+- `skills/migration-template.md` — reference skill for DB migrations
+- `skills/playwright-pattern.md` — loaded for `type:test`
+- `work/co/CLAUDE.md` rewritten as slim (≤3k chars) CO development guide
+
+The legacy full-context path remains as a fallback for spaces without a
+per-space CLAUDE.md.
+
+### Why
+
+Each co-auto session was loading 150k+ tokens (5 layers × ~30k chars +
+system prompt + tools). Context this large drives up hallucination rate,
+burns usage limits, and buries the relevant signal in noise. The per-space
+routing + skill loader reduces to ~12k chars of task-focused context.
+
+
 ## [2.28.0] — 2026-05-22 — Wave I — final visibility chain + LICENSE complete
 
 ## CO-270 — Items list final fix — audit middleware chain; identify silent-empty wrapper for anonymous
