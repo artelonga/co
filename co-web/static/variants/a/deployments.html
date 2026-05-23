@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO — Deployments</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#4caf50;--yellow:#ff9800;--red:#e57373;--blue:#4fc3f7}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif;padding:20px;max-width:1200px}
+h1{font-size:1.4rem;margin-bottom:4px;color:var(--accent)}
+.ts{font-size:.7rem;color:var(--dim);margin-bottom:16px;display:flex;gap:12px;align-items:center}
+.btn{background:var(--accent);color:#fff;border:none;border-radius:6px;padding:5px 14px;cursor:pointer;font-size:.75rem}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px;overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:12px;white-space:nowrap}
+th{text-align:left;padding:6px 10px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:6px 10px;border-bottom:1px solid var(--border)}
+tr:last-child td{border:none}
+tr.detail-row td{background:var(--bg);font-family:monospace;font-size:.7rem;color:var(--dim);padding:8px 10px;white-space:normal;word-break:break-all}
+tr.unit-row{cursor:pointer}
+tr.unit-row:hover td{background:#1a1a2e}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px}
+.dot-ok{background:var(--green)}
+.dot-unreachable{background:var(--red)}
+.dot-unknown{background:var(--dim)}
+.dot-stale{background:var(--yellow)}
+.dot-synced{background:var(--blue)}
+.dot-na{background:var(--dim)}
+.dot-started{background:var(--green)}
+.dot-stopped{background:var(--red)}
+.dot-suspended{background:var(--yellow)}
+.err{color:var(--red);margin-top:8px;font-size:.75rem}
+a{color:var(--blue);text-decoration:none}
+a:hover{text-decoration:underline}
+</style>
+</head>
+<body>
+<h1>Deployments</h1>
+<div class="ts">
+  <span id="as-of">Carregando…</span>
+  <button class="btn" id="refresh-btn" onclick="triggerRefresh()">Atualizar agora</button>
+</div>
+
+<div class="card">
+  <table>
+    <thead>
+      <tr>
+        <th>Unit</th>
+        <th>URL</th>
+        <th>Versão</th>
+        <th>Machine ID</th>
+        <th>Region</th>
+        <th>Tamanho VM</th>
+        <th>Estado</th>
+        <th>Último deploy</th>
+        <th>Saúde</th>
+      </tr>
+    </thead>
+    <tbody id="units-body">
+      <tr><td colspan="9" style="color:var(--dim);text-align:center;padding:20px">Carregando…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="err" id="err-msg" style="display:none"></div>
+
+<script>
+var pollTimer;
+
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function statusDot(health){
+  var cls='dot-unknown';
+  if(health==='ok'||health==='started')cls='dot-ok';
+  else if(health==='unreachable'||health==='stopped')cls='dot-'+health;
+  else if(health==='stale')cls='dot-stale';
+  else if(health==='synced')cls='dot-synced';
+  else if(health==='n/a')cls='dot-na';
+  return '<span class="dot '+cls+'"></span>';
+}
+
+function machineShort(id){
+  if(!id)return '—';
+  return id.length>8?id.slice(0,8)+'…':id;
+}
+
+function imageShort(img){
+  if(!img)return '—';
+  var parts=img.split(':');
+  var tag=parts[parts.length-1]||'';
+  return tag.length>12?tag.slice(0,12)+'…':tag||'—';
+}
+
+function relTime(iso){
+  if(!iso)return '—';
+  var diff=Math.floor((Date.now()-new Date(iso).getTime())/1000);
+  if(diff<60)return diff+'s atrás';
+  if(diff<3600)return Math.floor(diff/60)+'min atrás';
+  if(diff<86400)return Math.floor(diff/3600)+'h atrás';
+  return Math.floor(diff/86400)+'d atrás';
+}
+
+function render(data){
+  var now=new Date(data.refreshed_at);
+  document.getElementById('as-of').textContent='Atualizado: '+now.toLocaleString('pt-BR');
+  hide_err();
+
+  var tb=document.getElementById('units-body');
+  if(!data.units||!data.units.length){
+    tb.innerHTML='<tr><td colspan="9" style="color:var(--dim);text-align:center">Sem dados</td></tr>';
+    return;
+  }
+
+  tb.innerHTML=data.units.map(function(u,i){
+    var stateText=u.state||'—';
+    var healthDot=statusDot(u.health_status);
+    var deployRel=relTime(u.last_deploy_at);
+    var row='<tr class="unit-row" onclick="toggleDetail('+i+')" id="row-'+i+'">';
+    row+='<td><strong>'+esc(u.display)+'</strong></td>';
+    row+='<td><a href="'+esc(u.url)+'" target="_blank">'+esc(u.url.replace(/^https?:\/\//,''))+'</a></td>';
+    row+='<td>'+(u.version||'—')+'</td>';
+    row+='<td title="'+esc(u.machine_id)+'">'+machineShort(u.machine_id)+'</td>';
+    row+='<td>'+(u.region||'—')+'</td>';
+    row+='<td>'+(u.vm_size||'—')+'</td>';
+    row+='<td>'+statusDot(stateText)+stateText+'</td>';
+    row+='<td title="'+esc(u.last_deploy_at)+'">'+deployRel+'</td>';
+    row+='<td>'+healthDot+(u.health_status||'—')+'</td>';
+    row+='</tr>';
+    row+='<tr class="detail-row" id="detail-'+i+'" style="display:none"><td colspan="9">';
+    row+='<strong>Machine ID:</strong> '+esc(u.machine_id||'—')+'<br>';
+    row+='<strong>Image:</strong> '+esc(u.image||'—')+'<br>';
+    row+='<strong>Último deploy:</strong> '+esc(u.last_deploy_at||'—')+'<br>';
+    if(u.error_msg)row+='<strong style="color:var(--red)">Erro:</strong> '+esc(u.error_msg)+'<br>';
+    if(u.snapshot_at)row+='<strong>Snapshot at:</strong> '+new Date(u.snapshot_at*1000).toLocaleString('pt-BR');
+    row+='</td></tr>';
+    return row;
+  }).join('');
+}
+
+function toggleDetail(i){
+  var d=document.getElementById('detail-'+i);
+  if(d)d.style.display=d.style.display==='none'?'':'none';
+}
+
+async function load(){
+  try{
+    var r=await fetch('/api/v1/admin/deployments');
+    if(r.status===401||r.status===403){location.href='/';return;}
+    if(!r.ok){show_err('Erro '+r.status);return;}
+    var d=await r.json();
+    render(d);
+  }catch(e){show_err('Falha: '+e.message);}
+}
+
+async function triggerRefresh(){
+  var btn=document.getElementById('refresh-btn');
+  btn.disabled=true;
+  btn.textContent='Atualizando…';
+  try{
+    var r=await fetch('/api/v1/admin/deployments/refresh',{method:'POST'});
+    if(!r.ok){show_err('Refresh falhou: '+r.status);return;}
+    var d=await r.json();
+    render(d);
+  }catch(e){show_err('Falha: '+e.message);}
+  finally{
+    btn.disabled=false;
+    btn.textContent='Atualizar agora';
+  }
+}
+
+function show_err(msg){var e=document.getElementById('err-msg');e.textContent=msg;e.style.display='';}
+function hide_err(){document.getElementById('err-msg').style.display='none';}
+
+load();
+</script>
+</body>
+</html>

@@ -1898,5 +1898,28 @@ impl Storage {
             "TEXT NOT NULL DEFAULT ''",
         )
         .expect("CO-267 backfill: entries.entry_origin");
+
+        if current_version < 49 {
+            // CO-273: deployment_snapshots — one row per deployable unit, updated by worker.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS deployment_snapshots (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        unit TEXT NOT NULL UNIQUE,
+                        snapshot_at INTEGER NOT NULL DEFAULT 0,
+                        machine_id TEXT NOT NULL DEFAULT '',
+                        region TEXT NOT NULL DEFAULT '',
+                        vm_size TEXT NOT NULL DEFAULT '',
+                        state TEXT NOT NULL DEFAULT '',
+                        image TEXT NOT NULL DEFAULT '',
+                        version TEXT NOT NULL DEFAULT '',
+                        last_deploy_at TEXT NOT NULL DEFAULT '',
+                        health_status TEXT NOT NULL DEFAULT 'unknown',
+                        error_msg TEXT NOT NULL DEFAULT ''
+                    );
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (49);",
+                )
+                .expect("migration v49: deployment_snapshots");
+        }
     }
 }

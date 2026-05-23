@@ -3,6 +3,7 @@ pub mod ab_routes;
 pub mod baseline;
 pub mod cache;
 pub mod config;
+pub mod deployment_snapshot_worker;
 pub mod doc_gen;
 pub mod embedding;
 pub mod embedding_index;

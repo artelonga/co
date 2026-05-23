@@ -563,6 +563,7 @@ pub async fn start_server(config: WebConfig) {
             Err(e) => tracing::error!("webhook worker init failed: {e}"),
         }
         sup.spawn(crate::workers::JobQueueWorker::new(state.clone()));
+        sup.spawn(crate::workers::DeploymentSnapshotWorker::new(state.clone()));
     }
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
