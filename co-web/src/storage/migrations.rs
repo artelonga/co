@@ -1921,5 +1921,37 @@ impl Storage {
                 )
                 .expect("migration v49: deployment_snapshots");
         }
+
+        if current_version < 50 {
+            // CO-275: agent_sessions — one row per co-auto invocation, for kanban provenance.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS agent_sessions (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_id TEXT NOT NULL,
+                        universe_key TEXT NOT NULL,
+                        started_at INTEGER NOT NULL,
+                        finished_at INTEGER NOT NULL,
+                        duration_ms INTEGER NOT NULL,
+                        exit_code INTEGER NOT NULL,
+                        tokens_in INTEGER,
+                        tokens_out INTEGER,
+                        tool_calls TEXT,
+                        skills_loaded TEXT,
+                        context_chars INTEGER,
+                        final_commit_sha TEXT,
+                        pr_number INTEGER,
+                        model TEXT,
+                        co_auto_version TEXT,
+                        raw_log_blob_sha TEXT
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_task_id
+                        ON agent_sessions(task_id);
+                    CREATE INDEX IF NOT EXISTS idx_agent_sessions_universe_started
+                        ON agent_sessions(universe_key, started_at);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (50);",
+                )
+                .expect("migration v50: agent_sessions");
+        }
     }
 }

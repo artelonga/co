@@ -21,6 +21,7 @@ pub use auth::recovery_crypto;
 pub use auth::recovery_routes;
 
 // content context
+pub use content::agent_session_routes;
 pub use content::asset_crypto;
 pub use content::asset_routes;
 pub use content::blob_routes;

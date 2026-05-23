@@ -43,6 +43,8 @@ export function renderKanban() {
     setupDragDrop();
     setupCardClicks();
     setupSubtreeToggles();
+    // CO-275: lazy-load agent session footers; fire-and-forget
+    loadAgentSessionFooters();
 }
 
 export function renderTaskCard(task) {
@@ -70,7 +72,7 @@ export function renderTaskCard(task) {
     const descSnippet = rawPreview.length > 100 ? rawPreview.slice(0, 100) + '…' : rawPreview;
 
     return `
-        <div class="task-card" draggable="true" data-task-id="${task.id}">
+        <div class="task-card" draggable="true" data-task-id="${task.id}" data-task-key="${esc(task.key)}">
             <div class="task-card-header">
                 <span class="task-key">${esc(task.key)}</span>
                 ${parentKey ? `<span class="task-parent-key">${esc(parentKey)}</span>` : ''}
@@ -83,7 +85,80 @@ export function renderTaskCard(task) {
                 ${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}
             </div>
             ${subtaskHtml}
+            <div class="agent-session-footer" data-loaded="false"></div>
         </div>`;
+}
+
+/** Format milliseconds as "Xm" or "Xs" for the session footer. */
+function fmtDuration(ms) {
+    const s = Math.round(ms / 1000);
+    return s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`;
+}
+
+/** Format a number with a K suffix if ≥ 1000. */
+function fmtNum(n) {
+    return n >= 1000 ? `${Math.round(n / 1000)}k` : String(n);
+}
+
+/** Render the footer line from a session object returned by the API. */
+function renderSessionFooter(session) {
+    if (!session) return '';
+    const dur = fmtDuration(session.duration_ms || 0);
+    const tokens = (session.tokens_in || session.tokens_out)
+        ? `· ${fmtNum((session.tokens_in || 0) + (session.tokens_out || 0))} tok`
+        : '';
+    const tools = session.tool_calls
+        ? (() => {
+            try {
+                const tc = typeof session.tool_calls === 'string'
+                    ? JSON.parse(session.tool_calls)
+                    : session.tool_calls;
+                const parts = Object.entries(tc)
+                    .map(([k, v]) => `${v}${k[0]}`)
+                    .join('/');
+                return parts ? `· ${parts}` : '';
+            } catch { return ''; }
+        })()
+        : '';
+    const sha = session.final_commit_sha
+        ? `· <span class="session-sha">${esc(session.final_commit_sha)}</span>`
+        : '';
+    const pr = session.pr_number
+        ? `· <span class="session-pr">#${session.pr_number}</span>`
+        : '';
+    return `<div class="agent-session-footer loaded" title="Last agent run">
+        <span class="session-run-icon">⚙</span>
+        ${dur} ${tokens} ${tools} ${sha} ${pr}
+    </div>`;
+}
+
+/** Lazy-load agent-session footers for all visible cards after render. */
+export async function loadAgentSessionFooters() {
+    const footers = document.querySelectorAll('.agent-session-footer[data-loaded="false"]');
+    if (!footers.length) return;
+    const fetches = Array.from(footers).map(async (el) => {
+        const card = el.closest('[data-task-key]');
+        if (!card) return;
+        const taskKey = card.dataset.taskKey;
+        if (!taskKey) return;
+        el.dataset.loaded = 'pending';
+        try {
+            const universeKey = state.currentUniverse || 'co';
+            const resp = await fetch(
+                `/api/v1/agent/sessions/latest?task_id=${encodeURIComponent(taskKey)}`
+            );
+            if (!resp.ok) return;
+            const session = await resp.json();
+            if (session) {
+                el.outerHTML = renderSessionFooter(session);
+            } else {
+                el.remove();
+            }
+        } catch {
+            el.remove();
+        }
+    });
+    await Promise.allSettled(fetches);
 }
 
 export function renderSubtaskKanbanItem(task) {

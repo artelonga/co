@@ -1,3 +1,4 @@
+pub mod agent_session_routes;
 pub mod asset_crypto;
 pub mod asset_routes;
 pub mod blob_routes;

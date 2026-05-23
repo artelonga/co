@@ -366,6 +366,18 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::changelog_routes::admin_router()
                 .layer(axum::middleware::from_fn(crate::auth::require_auth)),
         )
+        // CO-275: agent session endpoints
+        // GET is public (kanban lazy-loads); POST requires vault token or JWT.
+        .nest("/api/v1", crate::agent_session_routes::router())
+        .nest(
+            "/api/v1",
+            crate::agent_session_routes::authed_router().layer(
+                axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::auth::require_auth_with_token,
+                ),
+            ),
+        )
         .nest("/api/v1", crate::search_routes::router())
         .nest(
             "/api/v1/auth/recovery",
