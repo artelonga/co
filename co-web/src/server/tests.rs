@@ -843,9 +843,13 @@ async fn test_anon_list_entries_private_universe_blocked() {
     );
 }
 
-/// `/{universe}/{*subpath}` for a non-existent universe must return 404.
+/// `/{universe}/{*subpath}` for a non-existent universe must return 200
+/// so the SPA can render its own client-side routes (e.g. `/entrar/`,
+/// `/sobre/`, `/termos/`). The CO-232 hotfix in 2.12.2 (b8ed778) made
+/// this deliberate; only return 404 when the universe exists but the
+/// entry within it does not (covered by `test_deep_link_unknown_slug_returns_404`).
 #[tokio::test]
-async fn test_deep_link_nonexistent_universe_returns_404() {
+async fn test_deep_link_nonexistent_universe_returns_200() {
     unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
@@ -862,7 +866,7 @@ async fn test_deep_link_nonexistent_universe_returns_404() {
 
     assert_eq!(
         resp.status(),
-        StatusCode::NOT_FOUND,
-        "non-existent universe deep-link must return 404"
+        StatusCode::OK,
+        "non-existent universe deep-link must return 200 (SPA route fallback per CO-232 2.12.2)"
     );
 }
