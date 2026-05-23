@@ -11,4 +11,4 @@
 
 pub mod auto;
 
-pub use auto::{AutoConfig, run};
+pub use auto::{AutoConfig, resolve_task_id, run};

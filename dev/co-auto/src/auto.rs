@@ -1734,6 +1734,87 @@ impl Pipeline {
     }
 }
 
+// ==================== TASK KEY RESOLVER ====================
+
+fn lookup_prefix_table(space: &str) -> Option<&'static str> {
+    match space {
+        "co" => Some("CO"),
+        "yggdrasil" => Some("YG"),
+        "rfq" => Some("RFQ"),
+        "qb" => Some("QB"),
+        "artelonga" => Some("AL"),
+        _ => None,
+    }
+}
+
+fn read_universe_yaml_prefix(workdir: &Path, space: &str) -> Option<String> {
+    for parent in &["work", "data"] {
+        let path = workdir.join(parent).join(space).join("_universe.yaml");
+        if let Ok(content) = fs::read_to_string(&path)
+            && let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content)
+            && let Some(prefix) = yaml
+                .as_mapping()
+                .and_then(|m| m.get(serde_yaml::Value::String("task_prefix".into())))
+                .and_then(|v| v.as_str())
+        {
+            return Some(prefix.to_string());
+        }
+    }
+    None
+}
+
+fn infer_prefix_from_existing_files(workdir: &Path, space: &str) -> Option<String> {
+    for parent in &["work", "data"] {
+        let dir = workdir.join(parent).join(space);
+        if !dir.is_dir() {
+            continue;
+        }
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let s = name.to_string_lossy();
+                if !s.ends_with(".md") {
+                    continue;
+                }
+                let stem = &s[..s.len() - 3];
+                if let Some(dash) = stem.find('-') {
+                    let prefix = &stem[..dash];
+                    let num = &stem[dash + 1..];
+                    if !prefix.is_empty()
+                        && prefix.chars().all(|c| c.is_ascii_uppercase())
+                        && !num.is_empty()
+                        && num.chars().all(|c| c.is_ascii_digit())
+                    {
+                        return Some(prefix.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Resolve a bare number or full key to a canonical task key.
+///
+/// - If `input` contains `-`, it is already a full key: return `input.to_uppercase()`.
+/// - Otherwise, infer the prefix from the space and return `{prefix}-{input}`.
+///
+/// Prefix resolution order:
+/// 1. `<workdir>/work/<space>/_universe.yaml` → `task_prefix` field
+/// 2. Hardcoded table (`co → CO`, `yggdrasil → YG`, `rfq → RFQ`, `qb → QB`, `artelonga → AL`)
+/// 3. First `<PREFIX>-N.md` file found in `<workdir>/work/<space>/`
+/// 4. Fallback: `space.to_uppercase()`
+pub fn resolve_task_id(input: &str, space: &str, workdir: &Path) -> String {
+    if input.contains('-') {
+        return input.to_uppercase();
+    }
+    let prefix = read_universe_yaml_prefix(workdir, space)
+        .or_else(|| lookup_prefix_table(space).map(str::to_string))
+        .or_else(|| infer_prefix_from_existing_files(workdir, space))
+        .unwrap_or_else(|| space.to_uppercase());
+    format!("{}-{}", prefix, input)
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
