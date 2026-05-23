@@ -1,66 +1,89 @@
 ---
 type: doc
-title: CLAUDE.md
+title: CLAUDE.md — CO Dev Guide
 ---
 
-# CO Platform — Board de Desenvolvimento
+# CO Platform — Development Guide
 
-Universe de rastreamento de desenvolvimento do CO. Contém todas as user-stories,
-epics, processos e eventos de CO-1 a CO-161+.
+## Overview
 
-## Universe
+**Stack**: Rust (axum, rusqlite, serde) + TypeScript SPA + SQLite + Fly.io
 
-- **Slug**: `co`
-- **API base**: `/api/v1/universes/co`
-- **Viewer**: `/co/co`
-- **Visibility**: public-subscribable
+## Git Conventions
 
-## Estrutura
+### Branch naming
 
 ```
-work/co/
-├── CO-1.md … CO-161.md   # user-stories e epics
-├── ROADMAP*.md            # roteiros de release
-├── SPRINT-*.md            # planejamento de sprint
-├── SPEC-*.md              # especificações
-└── _universe.yaml         # schema CO
+feat/CO-<n>-<short-desc>
+fix/CO-<n>-<short-desc>
+refactor/CO-<n>-<short-desc>
 ```
 
-## Content types
+### Commits (conventional)
 
-- `user-story` — requisito com critérios de aceite BDD (CO-N.md)
-- `epic` — agrupamento de user-stories relacionadas
-- `task` — subtarefa de uma user-story
-- `event` — marco ou evento do projeto
-- `page` — página de documentação / roadmap
-- `reference` — referência bibliográfica
-- `process` — processo de desenvolvimento
+```
+feat(scope): description
+fix(scope): description
+refactor(scope): description
+chore(scope): description
+```
 
-## Status do projeto
+Footer: `Co-Authored-By: Claude <noreply@anthropic.com>`
 
-- **Versão atual**: 1.42.0
-- **Total de tasks**: 161+
-- **Branch principal**: `main`
+## Forbidden Files — DO NOT Modify
 
-## API
+- `Cargo.toml` (workspace version)
+- `co-cli/Cargo.toml` (binary version)
+- `CHANGELOG.md`
+
+Write changelog entry to `CHANGELOG-PENDING/<TASK-ID>.md` instead.
+
+## TDD
+
+1. **RED**: write failing test first — `cargo test` should fail
+2. **GREEN**: minimal implementation — `cargo test` passes
+3. **REFACTOR**: clean up before commit
 
 ```bash
-# Listar todas as user-stories
-curl /api/v1/universes/co/entries?type=user-story
-
-# Tasks done
-curl /api/v1/universes/co/entries?type=user-story&filter={"status":"done"}
-
-# Buscar
-curl /api/v1/universes/co/entries?q=visibility+gate
-
-# Re-indexar após sync
-curl -X POST /api/v1/universes/co/reindex -H "Authorization: Bearer $TOKEN"
+cargo test                        # all tests
+cargo clippy -- -D warnings       # must be clean
+cargo fmt                         # auto-format
 ```
 
-## Convenções
+## Module Map
 
-- Cada CO-N.md tem `id: N` no frontmatter
-- Status: `todo` | `in_progress` | `done` | `blocked` | `cancelled`
-- Labels: `type:feat` (minor bump) | `type:fix` (patch) | `type:chore` (no bump)
-- `parent: N` referencia o epic pai
+| Module | Path | Notes |
+|--------|------|-------|
+| Core types | `core/src/` | Shared library |
+| CLI | `co-cli/src/` | Commands |
+| Web server | `co-web/src/` | Axum routes + storage |
+| SPA | `co-web/static/variants/a/` | TypeScript |
+| co-auto | `dev/co-auto/src/` | Agent pipeline |
+
+## Key Patterns
+
+### Adding a route
+
+1. Handler in `co-web/src/routes/{module}_routes.rs`
+2. Register in `co-web/src/server/router.rs`
+3. Integration test in same file (use `tower::ServiceExt`, no real port)
+
+### Database migrations
+
+Add file to `co-web/src/db/migrations/v{N}_{name}.sql`:
+```sql
+ALTER TABLE entries ADD COLUMN col TEXT NOT NULL DEFAULT '';
+```
+
+Never swallow SELECT errors on new columns with `.ok()` — let missing columns fail loudly.
+
+### AppState
+
+Use `parking_lot::Mutex<Storage>` (not `std::sync::Mutex`). Never hold the lock across an `await` point.
+
+## Test Isolation
+
+- No real network ports — use `tower::ServiceExt` in-process
+- Never bind `0.0.0.0` — use `127.0.0.1`
+- Use `tempfile::tempdir()` for test databases
+- Set `JWT_SECRET=test-secret` in test setup

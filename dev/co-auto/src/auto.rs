@@ -164,10 +164,17 @@ pub fn run(config: AutoConfig) -> Result<()> {
         // 2. BUILD CONTEXT
         let wd = config.workdir.as_ref().map(|w| Path::new(w.as_str()));
         let context = build_context(&task, &data_dir, &tasks, wd)?;
+        let layer_count = context.split("\n\n---\n\n").count();
+        let path_label = if data_dir.join("CLAUDE.md").exists() {
+            "minimal"
+        } else {
+            "full"
+        };
         println!(
-            "  {} Context: {} layers, {} chars",
+            "  {} Context: {} path, {} layers, {} chars",
             "◆".dimmed(),
-            5,
+            path_label,
+            layer_count,
             context.len()
         );
 
@@ -550,16 +557,122 @@ fn select_next_task(tasks: &[Task]) -> Option<Task> {
 
 // ==================== CONTEXT BUILDER ====================
 
+/// Returns skill text blocks relevant to the task based on its labels.
+/// Each skill is a markdown file from `{workspace_root}/skills/`.
+fn skills_for_task(task: &Task, workspace_root: &Path) -> Vec<String> {
+    let skills_dir = workspace_root.join("skills");
+    let mut names: Vec<&str> = vec![];
+
+    for label in &task.labels {
+        match label.as_str() {
+            "module:spa" | "module:editor" | "module:ui" => names.push("spa-conventions"),
+            "module:deploy" | "module:infra" => names.push("deploy-runbook"),
+            "type:test" => names.push("playwright-pattern"),
+            l if l.starts_with("module:") => names.push("rust-architecture"),
+            _ => {}
+        }
+    }
+
+    names.sort_unstable();
+    names.dedup();
+
+    names
+        .into_iter()
+        .filter_map(|name| {
+            let path = skills_dir.join(format!("{name}.md"));
+            fs::read_to_string(&path)
+                .ok()
+                .map(|content| format!("## Skill: {name}\n\n{content}"))
+        })
+        .collect()
+}
+
+fn execution_instructions(task: &Task) -> String {
+    format!(
+        "## Execution Instructions\n\n\
+        **YOUR TASK IS: {key} — {title}**\n\n\
+        IMPORTANT: Only implement {key}. Do NOT implement or modify any other task.\n\
+        Dependencies listed in the roadmap (e.g., 'Depends On: GP-8') mean those tasks \
+        are ALREADY DONE and merged into main. Their code is already in the codebase. \
+        Do not look for them or re-implement them.\n\n\
+        Follow the acceptance criteria exactly. Each `- [ ]` item is a required deliverable.\n\
+        Use conventional commits: the task specifies the commit message format.\n\
+        Run `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt` before committing.\n\
+        After completing all criteria, commit with the specified message.\n\n\
+        ## Forbidden Files\n\n\
+        DO NOT modify any of these files — they are owned by the release commit only:\n\
+        - `Cargo.toml`\n\
+        - `co-cli/Cargo.toml`\n\
+        - `CHANGELOG.md`\n\n\
+        Write your changelog entry to `CHANGELOG-PENDING/{key}.md` instead:\n\n\
+        ```markdown\n\
+        ## {key} — {title}\n\n\
+        <describe what changed and why>\n\n\
+        ### Why\n\
+        <optional — rationale or motivation>\n\
+        ```\n\n\
+        ## Test Isolation Rules\n\n\
+        - All tests MUST run without opening network ports. Use in-process test servers \
+        (e.g., `axum::test::TestClient`, `tower::ServiceExt`) instead of spawning HTTP listeners.\n\
+        - Never bind to `0.0.0.0`. If a test requires a port, bind to `127.0.0.1` only.\n\
+        - Use temp directories for test databases (e.g., `tempfile::tempdir()`) — never write to \
+        user paths.\n\
+        - Tests must be fully deterministic: no sleeps, no real network calls, no system time dependencies.\n\
+        - Set `JWT_SECRET=test-secret` and `RUST_LOG=off` in test harness setup.",
+        key = task.key,
+        title = task.title,
+    )
+}
+
+/// Minimal context: per-space CLAUDE.md + task-relevant skills + task spec.
+/// Budget: ≤3k (guide) + ≤4k (skills) + ≤5k (task) ≈ 12k chars.
+fn build_context_minimal(
+    task: &Task,
+    workspace_root: &Path,
+    space_claude: &Path,
+) -> Result<String> {
+    let mut layers = Vec::new();
+
+    let space_content = fs::read_to_string(space_claude)?;
+    layers.push(format!(
+        "## Development Conventions (CLAUDE.md)\n\n{}",
+        space_content
+    ));
+
+    for skill in skills_for_task(task, workspace_root) {
+        layers.push(skill);
+    }
+
+    let task_content = fs::read_to_string(&task.file_path)?;
+    layers.push(format!(
+        "## Current Task: {} — {}\n\n{}",
+        task.key, task.title, task_content
+    ));
+
+    layers.push(execution_instructions(task));
+
+    Ok(layers.join("\n\n---\n\n"))
+}
+
 fn build_context(
     task: &Task,
     data_dir: &Path,
     all_tasks: &[Task],
     workdir: Option<&Path>,
 ) -> Result<String> {
+    let workspace_root = find_workspace_root(data_dir);
+
+    // Per-space CLAUDE.md routing: data_dir/CLAUDE.md takes priority over root CLAUDE.md.
+    // When present, use minimal context (guide + skills + task spec only).
+    let space_claude = data_dir.join("CLAUDE.md");
+    if space_claude.exists() {
+        return build_context_minimal(task, &workspace_root, &space_claude);
+    }
+
+    // Legacy fallback: full 5-layer context (root CLAUDE.md + all supporting docs).
     let mut layers = Vec::new();
 
     // Layer 1: CLAUDE.md conventions (check workdir first, then workspace root)
-    let workspace_root = find_workspace_root(data_dir);
     let claude_md = workdir
         .map(|w| w.join("CLAUDE.md"))
         .filter(|p| p.exists())
@@ -621,41 +734,7 @@ fn build_context(
         ));
     }
 
-    // Final instruction with test isolation rules
-    layers.push(format!(
-        "## Execution Instructions\n\n\
-        **YOUR TASK IS: {key} — {title}**\n\n\
-        IMPORTANT: Only implement {key}. Do NOT implement or modify any other task.\n\
-        Dependencies listed in the roadmap (e.g., 'Depends On: GP-8') mean those tasks \
-        are ALREADY DONE and merged into main. Their code is already in the codebase. \
-        Do not look for them or re-implement them.\n\n\
-        Follow the acceptance criteria exactly. Each `- [ ]` item is a required deliverable.\n\
-        Use conventional commits: the task specifies the commit message format.\n\
-        Run `cargo test`, `cargo clippy -- -D warnings`, and `cargo fmt` before committing.\n\
-        After completing all criteria, commit with the specified message.\n\n\
-        ## Forbidden Files\n\n\
-        DO NOT modify any of these files — they are owned by the release commit only:\n\
-        - `Cargo.toml`\n\
-        - `co-cli/Cargo.toml`\n\
-        - `CHANGELOG.md`\n\n\
-        Write your changelog entry to `CHANGELOG-PENDING/{key}.md` instead:\n\n\
-        ```markdown\n\
-        ## {key} — {title}\n\n\
-        <describe what changed and why>\n\n\
-        ### Why\n\
-        <optional — rationale or motivation>\n\
-        ```\n\n\
-        ## Test Isolation Rules\n\n\
-        - All tests MUST run without opening network ports. Use in-process test servers \
-        (e.g., `axum::test::TestClient`, `tower::ServiceExt`) instead of spawning HTTP listeners.\n\
-        - Never bind to `0.0.0.0`. If a test requires a port, bind to `127.0.0.1` only.\n\
-        - Use temp directories for test databases (e.g., `tempfile::tempdir()`) — never write to \
-        user paths.\n\
-        - Tests must be fully deterministic: no sleeps, no real network calls, no system time dependencies.\n\
-        - Set `JWT_SECRET=test-secret` and `RUST_LOG=off` in test harness setup.",
-        key = task.key,
-        title = task.title,
-    ));
+    layers.push(execution_instructions(task));
 
     Ok(layers.join("\n\n---\n\n"))
 }
@@ -1771,5 +1850,67 @@ mod tests {
         let result = exec.execute(&task, &context, &tmp).unwrap();
         assert!(result.success);
         assert!(result.stdout.contains("hello-from-shell-exec"));
+    }
+
+    #[test]
+    fn context_budget_minimal_path_under_30k() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
+        let tmp = std::env::temp_dir().join(format!("co-auto-budget-{ts}"));
+        let data_dir = tmp.join("work").join("co");
+        fs::create_dir_all(&data_dir).unwrap();
+
+        // Per-space CLAUDE.md (~1.5k chars)
+        fs::write(
+            data_dir.join("CLAUDE.md"),
+            "# CO Dev Guide\n\n\
+             ## Git\n\
+             - Branch: `feat/CO-N-desc`\n\
+             - Commits: conventional (`feat(scope):`, `fix(scope):`, etc.)\n\n\
+             ## TDD\n\
+             1. Write failing test\n\
+             2. Minimal impl\n\
+             3. Refactor\n\n\
+             ```bash\n\
+             cargo test\n\
+             cargo clippy -- -D warnings\n\
+             cargo fmt\n\
+             ```\n\n\
+             ## Forbidden files\n\
+             - `Cargo.toml`, `co-cli/Cargo.toml`, `CHANGELOG.md`\n\
+             - Write changelog entry to `CHANGELOG-PENDING/<TASK-ID>.md`\n\n\
+             ## Module map\n\
+             | Module | Location |\n\
+             |--------|----------|\n\
+             | Core types | `core/src/` |\n\
+             | CLI | `co-cli/src/` |\n\
+             | Web server | `co-web/src/` |\n\
+             | SPA | `co-web/static/variants/a/` |\n",
+        )
+        .unwrap();
+
+        // Task file (~300 chars)
+        let task_path = data_dir.join("CO-999.md");
+        fs::write(
+            &task_path,
+            "---\nid: 999\ntitle: Budget test\nstatus: todo\npriority: medium\nlabels:\n  - module:co-auto\n---\n\nDo a small thing.\n\n## Acceptance\n- [ ] It works.\n",
+        )
+        .unwrap();
+
+        let mut task = mk_task(999, "CO-999", "Budget test");
+        task.labels = vec!["module:co-auto".into()];
+        task.file_path = task_path;
+
+        let context = build_context(&task, &data_dir, &[], None).unwrap();
+
+        let _ = fs::remove_dir_all(&tmp);
+
+        assert!(
+            context.len() < 30_000,
+            "context budget exceeded: {} chars (max 30_000)",
+            context.len()
+        );
     }
 }
