@@ -5,6 +5,70 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.30.0] — 2026-05-23 — agent telemetry + co-auto ergonomics
+
+## CO-275 — Agent session events — capture tokens/tools/skills/duration per co-auto run; surface on kanban cards
+
+Added end-to-end observability for co-auto invocations: every Claude Code run
+now emits a structured session record (duration, exit code, token counts, tool
+call distribution, skills loaded, commit SHA, PR number) and persists it to a
+new `agent_sessions` table. The kanban view lazy-loads the latest session for
+each card and shows a compact footer line.
+
+### Changes
+
+- **Migration v50**: `agent_sessions` table with two indexes (task_id,
+  universe+started_at).
+- **Storage module**: `co-web/src/storage/agent_sessions.rs` — `insert`,
+  `list`, `latest` methods.
+- **Event bus**: new `DomainEvent::AgentSessionComplete` variant + `AgentSession`
+  filter.
+- **API endpoints**:
+  - `POST /api/v1/agent/sessions` — vault token or JWT auth; co-auto posts here.
+  - `GET  /api/v1/agent/sessions?task_id=...` — public list (kanban reads).
+  - `GET  /api/v1/agent/sessions/latest?task_id=...` — most recent session.
+- **co-auto**: captures wall-clock duration, exit code, stdout token counts,
+  stderr tool calls, HEAD SHA, skills loaded, context size; POSTs to
+  `CO_SESSION_ENDPOINT` (requires `CO_SESSION_TOKEN`). Graceful degradation:
+  parse failures produce `null` fields, POST failure prints a warning but never
+  aborts the run.
+- **Kanban**: each task card gets an `agent-session-footer` placeholder; after
+  render, lazy fetch populates loaded footers with "14m · 18k tok · 8R/5E · abc1234 · #89".
+- **Tests**: 2 integration tests (POST+GET lifecycle, null on missing task) +
+  Playwright spec asserting 401 on unauthenticated POST and footer render.
+
+### Why
+
+Every CO-N card on the kanban is now its own receipt: what it cost, how it was
+built, which skills it consumed. Combined with CO-273 (deployment dashboard) and
+CO-260 (changelog viewer), operators have a fully queryable history of every
+artifact the platform produces.
+
+## CO-276 — co-auto CLI simplification — positional task arg, smarter defaults, drop redundant flags
+
+`co-auto` now accepts a bare task number as a positional argument, making the common case dramatically shorter:
+
+```
+# Before (6 flags + 7 values)
+co-auto --workdir ~/projects/co --space co --task CO-272 --cycle --max-tasks 1 --auto-pr --timeout 1800
+
+# After
+co-auto 272
+```
+
+Changes:
+
+- **Positional `task_arg`**: `co-auto 272` or `co-auto CO-272` — both equivalent to `--task CO-272`. Positional takes priority over `--task` when both are provided.
+- **Prefix inference**: bare numbers are expanded to full keys via `resolve_task_id`. Priority: `_universe.yaml task_prefix` field → hardcoded table (`co→CO`, `yggdrasil→YG`, `rfq→RFQ`, `qb→QB`, `artelonga→AL`) → first `PREFIX-N.md` file scan → uppercase(space).
+- **`--auto-pr` default flipped to `true`**: PR is opened after every successful task unless `--no-pr` is passed.
+- **`--timeout` default raised from 600s to 1800s**: matches typical task duration (15–25 min).
+- **All existing long-form invocations remain valid** — no breakage.
+
+### Why
+
+After ~30 co-auto invocations in a session, the per-invocation cognitive tax of 6 flags × 2 tokens each (flag + value) adds up. Simplifying the common path to a single positional argument is a high-ROI ergonomic improvement with zero behavior change for existing scripts.
+
+
 ## [2.29.0] — 2026-05-23 — Wave J — kanban dogfooding + deploy dashboard + agent context budget
 
 ## CO-272 — Kanban view shows entries-as-tasks, not just legacy projects — close the dogfooding gap
