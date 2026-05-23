@@ -199,6 +199,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(crate::changelog_routes::serve_changelog_page),
         )
         .route("/admin", get(crate::admin_routes::serve_admin_page))
+        .route(
+            "/admin/deployments",
+            get(crate::deployment_dashboard::serve_deployments_page),
+        )
         .route("/repl", get(crate::repl_routes::serve_repl_page))
         .route(
             "/storage",
@@ -337,6 +341,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .nest("/api/v1/ab", ab_admin)
         .nest("/api/v1/cache", cache_api)
         .nest("/api/v1/admin", admin_dashboard_api)
+        .nest("/api/v1/admin", crate::deployment_dashboard::router())
         .nest("/api/v1/admin", crate::storage_dashboard::router())
         .nest("/api/v1/me", crate::storage_dashboard::me_router())
         .nest(

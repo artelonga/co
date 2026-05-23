@@ -203,3 +203,35 @@ impl Worker for JobQueueWorker {
         crate::job_queue::tick(&self.state).await
     }
 }
+
+// ---------------------------------------------------------------------------
+// 6. DeploymentSnapshotWorker
+//    Probes each deployable unit's Fly.io machines API and /api/health every
+//    5 minutes and persists the result to `deployment_snapshots` (CO-273).
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct DeploymentSnapshotWorker {
+    state: AppState,
+}
+
+impl DeploymentSnapshotWorker {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Worker for DeploymentSnapshotWorker {
+    fn name(&self) -> &'static str {
+        "deployment_snapshot"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(300) // 5 minutes
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        crate::deployment_snapshot_worker::tick(&self.state).await
+    }
+}
