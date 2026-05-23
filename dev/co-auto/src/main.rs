@@ -19,8 +19,7 @@ use colored::Colorize;
 )]
 struct Cli {
     /// Repository root containing `work/<space>/` task specs.
-    /// Defaults to current working directory. Also where the executor
-    /// (Claude Code) runs and commits land.
+    /// Defaults to current working directory.
     #[arg(short, long, env = "CO_WORKDIR")]
     workdir: Option<String>,
 
@@ -29,43 +28,52 @@ struct Cli {
     #[arg(short, long, env = "CO_SPACE")]
     space: Option<String>,
 
-    /// Execute a specific task (e.g., CO-66). Without this, the next
-    /// unblocked task by priority is picked.
+    /// Execute a specific task by flag (e.g., `--task CO-66`). See also
+    /// the positional `task_arg` for the short form.
     #[arg(short, long)]
     task: Option<String>,
 
-    /// Cycle through tasks continuously
+    /// Cycle through tasks continuously.
     #[arg(long)]
     cycle: bool,
 
-    /// Dry run (show what would execute without running)
+    /// Dry run (show what would execute without running).
     #[arg(long)]
     dry_run: bool,
 
-    /// Maximum tasks to process
+    /// Maximum tasks to process.
     #[arg(long)]
     max_tasks: Option<usize>,
 
-    /// Enable Claude Code agent teams for parallel execution
+    /// Enable Claude Code agent teams for parallel execution.
     #[arg(long)]
     teams: bool,
 
-    /// Model to use (default: sonnet)
+    /// Model to use.
     #[arg(long, default_value = "sonnet")]
     model: String,
 
-    /// Timeout per task in seconds
-    #[arg(long, default_value = "600")]
+    /// Timeout per task in seconds (default: 1800 = 30 min).
+    #[arg(long, default_value = "1800")]
     timeout: u64,
 
-    /// Run headless (invisible -p mode instead of interactive session)
+    /// Run headless (invisible -p mode instead of interactive session).
     #[arg(long)]
     headless: bool,
 
-    /// After each successful task, automatically push the branch and open a PR via `gh`.
-    /// Delegates to `scripts/ship-task.sh <TASK-ID>` if present in the workdir's parent CO repo.
-    #[arg(long)]
+    /// Push branch + open PR after each successful task (on by default).
+    /// Passing this flag is a no-op; use `--no-pr` to disable.
+    #[arg(long, default_value_t = true)]
     auto_pr: bool,
+
+    /// Skip the automatic PR step.
+    #[arg(long)]
+    no_pr: bool,
+
+    /// Task to execute: bare number (`272`) or full key (`CO-272`).
+    /// Expanded to a full key using the space's prefix (`co` → `CO-272`).
+    /// When omitted, the next unblocked task is picked automatically.
+    task_arg: Option<String>,
 }
 
 /// Resolve the workdir: explicit arg, env var, or current directory.
@@ -155,9 +163,18 @@ fn main() {
         let workdir = resolve_workdir(cli.workdir.as_deref())?;
         let (space, data_dir) = resolve_space(&workdir, cli.space.as_deref())?;
 
+        // Resolve task: positional arg takes priority over --task flag.
+        // Bare numbers (e.g., "272") are expanded to full keys ("CO-272")
+        // using the space's prefix.
+        let task_id = cli
+            .task_arg
+            .as_deref()
+            .map(|arg| co_auto::resolve_task_id(arg, &space, &workdir))
+            .or_else(|| cli.task.clone());
+
         let config = co_auto::AutoConfig {
             space,
-            task_id: cli.task,
+            task_id,
             cycle: cli.cycle,
             dry_run: cli.dry_run,
             max_tasks: cli.max_tasks,
@@ -168,7 +185,7 @@ fn main() {
             data_dir: Some(data_dir.to_string_lossy().into_owned()),
             workspace: None,
             interactive: !cli.headless,
-            auto_pr: cli.auto_pr,
+            auto_pr: cli.auto_pr && !cli.no_pr,
         };
 
         co_auto::run(config)
