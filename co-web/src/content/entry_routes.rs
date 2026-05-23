@@ -1433,6 +1433,126 @@ pub async fn entry_history_handler(
     }))
 }
 
+// ---------------------------------------------------------------------------
+// CO-272: dev-tasks — entries-as-tasks for the kanban view
+// ---------------------------------------------------------------------------
+
+/// Query params for `GET /{slug}/dev-tasks`.
+#[derive(Debug, Deserialize)]
+pub struct DevTasksQuery {
+    /// Optional status filter (e.g. `?status=done`).
+    pub status: Option<String>,
+    /// Max tasks to return. Defaults to 500; capped at 5 000.
+    pub limit: Option<usize>,
+}
+
+/// A single entry mapped to the task shape expected by the kanban.
+#[derive(Debug, Serialize)]
+pub struct DevTask {
+    /// Ticket key synthesized from path: `work/co/CO-261.md` → `CO-261`.
+    pub key: String,
+    pub title: String,
+    pub status: String,
+    pub priority: String,
+    pub task_type: String,
+    pub description: String,
+    pub path: String,
+    pub created_at: Option<String>,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DevTasksResponse {
+    pub tasks: Vec<DevTask>,
+    pub total: usize,
+}
+
+/// Synthesize a ticket key from a vault-relative path.
+/// `work/co/CO-261.md` → `CO-261`; `work/artelonga/AL-50.md` → `AL-50`.
+fn key_from_path(path: &str) -> String {
+    path.rsplit('/')
+        .next()
+        .unwrap_or(path)
+        .trim_end_matches(".md")
+        .to_string()
+}
+
+/// GET /api/v1/universes/:slug/dev-tasks
+///
+/// Returns entries from `work/` that have entry_type in ('user-story', 'task',
+/// 'epic'), mapped to a flat task shape so the kanban can render them without
+/// knowing about the entry model.  Anonymous callers can reach this endpoint on
+/// public-subscribable universes (visibility gate is already applied by the
+/// universe_visibility_gate middleware).
+pub async fn list_dev_tasks(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<DevTasksQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let uc = {
+        let storage = lock_storage(&state);
+        storage.universe_conn(&slug)
+    };
+    let uc_guard = uc
+        .lock()
+        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
+    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let limit = q.limit.unwrap_or(500).min(5_000);
+    let work_entries = index
+        .query_by_path_prefix(&slug, "work/", Some(limit))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    const DEV_TASK_TYPES: &[&str] = &["user-story", "task", "epic"];
+
+    let tasks: Vec<DevTask> = work_entries
+        .into_iter()
+        .filter(|e| DEV_TASK_TYPES.contains(&e.entry_type.as_str()))
+        .filter_map(|e| {
+            let status = e
+                .frontmatter
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("todo")
+                .to_string();
+
+            if q.status.as_deref().is_some_and(|f| f != status) {
+                return None;
+            }
+
+            Some(DevTask {
+                key: key_from_path(&e.path),
+                title: e.title.clone().unwrap_or_else(|| key_from_path(&e.path)),
+                status,
+                priority: e
+                    .frontmatter
+                    .get("priority")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("medium")
+                    .to_string(),
+                task_type: e
+                    .frontmatter
+                    .get("type")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&e.entry_type)
+                    .to_string(),
+                description: e.body,
+                path: e.path,
+                created_at: e.created_at,
+                updated_at: e.updated_at,
+            })
+        })
+        .collect();
+
+    let total = tasks.len();
+    let mut resp = Json(DevTasksResponse { tasks, total }).into_response();
+    resp.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    Ok(resp)
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         // Specific paths must come before wildcard
@@ -1442,6 +1562,8 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/entries/popular", get(popular_entries))
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))
+        // CO-272: entries-as-tasks for the kanban dogfooding loop
+        .route("/{slug}/dev-tasks", get(list_dev_tasks))
         .route("/{slug}/entries", get(list_entries).post(create_entry))
         // CO-164: similar entries — uses ?path= query param to avoid catch-all conflict
         .route("/{slug}/entries/similar", get(similar_entries))
@@ -1525,6 +1647,38 @@ fn json_value_to_proto(val: &JsonValue) -> co::proto::entry::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// key_from_path strips directory prefix and .md extension.
+    #[test]
+    fn test_key_from_path() {
+        assert_eq!(key_from_path("work/co/CO-261.md"), "CO-261");
+        assert_eq!(key_from_path("work/artelonga/AL-50.md"), "AL-50");
+        assert_eq!(key_from_path("work/qb/QB-23.md"), "QB-23");
+        assert_eq!(key_from_path("CO-1.md"), "CO-1");
+    }
+
+    /// DevTasksResponse serializes with the expected shape.
+    #[test]
+    fn test_dev_tasks_response_serializes() {
+        let resp = DevTasksResponse {
+            tasks: vec![DevTask {
+                key: "CO-272".to_string(),
+                title: "Kanban shows dev tasks".to_string(),
+                status: "done".to_string(),
+                priority: "critical".to_string(),
+                task_type: "feat".to_string(),
+                description: "body text".to_string(),
+                path: "work/co/CO-272.md".to_string(),
+                created_at: None,
+                updated_at: None,
+            }],
+            total: 1,
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["tasks"][0]["key"], "CO-272");
+        assert_eq!(json["tasks"][0]["status"], "done");
+    }
 
     /// EntryHistoryResponse serializes with the expected shape.
     #[test]

@@ -444,9 +444,44 @@ async function selectProject(key) {
     render();
 }
 
+// CO-272: map a dev-task (entry-as-task) to the legacy task shape expected by
+// the kanban and modal, using a djb2-derived stable integer id.
+function _devTaskId(path) {
+    let h = 5381;
+    for (let i = 0; i < path.length; i++) h = (((h << 5) + h) ^ path.charCodeAt(i)) >>> 0;
+    return (h % 9_000_000) + 1_000_000;
+}
+
+function _mapDevTask(dt) {
+    return {
+        id: _devTaskId(dt.path),
+        key: dt.key,
+        title: dt.title,
+        status: dt.status,
+        priority: dt.priority,
+        description: dt.description,
+        labels: [],
+        due_date: null,
+        assignee: null,
+        parent: null,
+        archived: false,
+        created_at: dt.created_at,
+        updated_at: dt.updated_at,
+    };
+}
+
 async function refreshTasks() {
     if (state.currentProject) {
         state.tasks = await api.getTasks(state.currentProject.key, { archived: state.showArchived });
+    }
+    // CO-272: merge dev-tasks for public-subscribable universes so the kanban
+    // shows actual work/ entries (CO-N, AL-N, QB-N, ...) alongside legacy tasks.
+    const slug = state.currentUniverseSlug;
+    if (state.universeInfo?.visibility === 'public-subscribable' && slug) {
+        const devTasks = await api.getDevTasks(slug);
+        if (devTasks.length > 0) {
+            state.tasks = [...state.tasks, ...devTasks.map(_mapDevTask)];
+        }
     }
 }
 
