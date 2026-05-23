@@ -13,10 +13,16 @@ use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::universe;
+
 /// Auto command configuration
 pub struct AutoConfig {
     pub space: String,
     pub task_id: Option<String>,
+    /// Sub-universe key selected via `-u <key>` (e.g. `"shandara"`).
+    /// When set, bare task numbers are expanded with the subspace prefix and
+    /// task loading is scoped to the subspace directory.
+    pub subspace_key: Option<String>,
     pub cycle: bool,
     pub dry_run: bool,
     pub max_tasks: Option<usize>,
@@ -97,8 +103,8 @@ struct AgentSessionRecord {
     co_auto_version: Option<String>,
 }
 
-pub fn run(config: AutoConfig) -> Result<()> {
-    let data_dir = if let Some(ref dir) = config.data_dir {
+pub fn run(mut config: AutoConfig) -> Result<()> {
+    let mut data_dir = if let Some(ref dir) = config.data_dir {
         PathBuf::from(dir)
     } else if let Some(ref ws) = config.workspace {
         PathBuf::from(ws).join("data").join(&config.space)
@@ -107,6 +113,28 @@ pub fn run(config: AutoConfig) -> Result<()> {
     } else {
         find_data_dir(&config.space)?
     };
+
+    // Discover subspaces and route data_dir / task_id based on `-u` / prefix.
+    let workdir_path = config.workdir.as_ref().map(PathBuf::from);
+    let subspaces = workdir_path
+        .as_deref()
+        .map(|wd| universe::discover_subspaces(wd, &config.space))
+        .unwrap_or_default();
+
+    if let Some(wd) = workdir_path.as_deref() {
+        if let Some(raw_tid) = config.task_id.clone() {
+            // Expand bare number with subspace prefix when -u is active.
+            let input = expand_task_input(&raw_tid, config.subspace_key.as_deref(), &subspaces);
+            let rt = universe::resolve_task_id(&input, &config.space, wd, &subspaces)?;
+            data_dir = rt.subspace.abs_path.clone();
+            config.task_id = Some(rt.key);
+        } else if let Some(ref uk) = config.subspace_key.clone() {
+            match subspaces.iter().find(|s| s.key == uk.as_str()) {
+                Some(sub) => data_dir = sub.abs_path.clone(),
+                None => anyhow::bail!("subspace '{}' not found in space '{}'", uk, config.space),
+            }
+        }
+    }
 
     if !data_dir.exists() {
         anyhow::bail!(
@@ -1489,15 +1517,38 @@ fn find_workspace_root(data_dir: &Path) -> PathBuf {
 }
 
 fn load_project_key(data_dir: &Path) -> Result<String> {
+    // Try project.yaml first (legacy format with "key:" field).
     let project_yaml = data_dir.join("project.yaml");
-    let content =
-        fs::read_to_string(&project_yaml).context("No project.yaml found in space directory")?;
-    let yaml: serde_yaml::Value = serde_yaml::from_str(&content)?;
-    yaml.as_mapping()
-        .and_then(|m| m.get(serde_yaml::Value::String("key".into())))
-        .and_then(|v| v.as_str())
-        .map(String::from)
-        .context("project.yaml missing 'key' field")
+    if project_yaml.exists() {
+        let content = fs::read_to_string(&project_yaml).context("read project.yaml")?;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&content)?;
+        if let Some(key) = yaml
+            .as_mapping()
+            .and_then(|m| m.get(serde_yaml::Value::String("key".into())))
+            .and_then(|v| v.as_str())
+        {
+            return Ok(key.to_string());
+        }
+    }
+
+    // Fall back to _universe.yaml task_prefix (sub-universes without project.yaml).
+    let universe_yaml = data_dir.join("_universe.yaml");
+    if universe_yaml.exists() {
+        let content = fs::read_to_string(&universe_yaml).context("read _universe.yaml")?;
+        let yaml: serde_yaml::Value = serde_yaml::from_str(&content)?;
+        if let Some(prefix) = yaml
+            .as_mapping()
+            .and_then(|m| m.get(serde_yaml::Value::String("task_prefix".into())))
+            .and_then(|v| v.as_str())
+        {
+            return Ok(prefix.to_string());
+        }
+    }
+
+    anyhow::bail!(
+        "space directory '{}' has neither project.yaml (key:) nor _universe.yaml (task_prefix:)",
+        data_dir.display()
+    )
 }
 
 fn nanoid() -> String {
@@ -2018,83 +2069,23 @@ impl Pipeline {
 
 // ==================== TASK KEY RESOLVER ====================
 
-fn lookup_prefix_table(space: &str) -> Option<&'static str> {
-    match space {
-        "co" => Some("CO"),
-        "yggdrasil" => Some("YG"),
-        "rfq" => Some("RFQ"),
-        "qb" => Some("QB"),
-        "artelonga" => Some("AL"),
-        _ => None,
-    }
-}
-
-fn read_universe_yaml_prefix(workdir: &Path, space: &str) -> Option<String> {
-    for parent in &["work", "data"] {
-        let path = workdir.join(parent).join(space).join("_universe.yaml");
-        if let Ok(content) = fs::read_to_string(&path)
-            && let Ok(yaml) = serde_yaml::from_str::<serde_yaml::Value>(&content)
-            && let Some(prefix) = yaml
-                .as_mapping()
-                .and_then(|m| m.get(serde_yaml::Value::String("task_prefix".into())))
-                .and_then(|v| v.as_str())
-        {
-            return Some(prefix.to_string());
-        }
-    }
-    None
-}
-
-fn infer_prefix_from_existing_files(workdir: &Path, space: &str) -> Option<String> {
-    for parent in &["work", "data"] {
-        let dir = workdir.join(parent).join(space);
-        if !dir.is_dir() {
-            continue;
-        }
-        if let Ok(entries) = fs::read_dir(&dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let s = name.to_string_lossy();
-                if !s.ends_with(".md") {
-                    continue;
-                }
-                let stem = &s[..s.len() - 3];
-                if let Some(dash) = stem.find('-') {
-                    let prefix = &stem[..dash];
-                    let num = &stem[dash + 1..];
-                    if !prefix.is_empty()
-                        && prefix.chars().all(|c| c.is_ascii_uppercase())
-                        && !num.is_empty()
-                        && num.chars().all(|c| c.is_ascii_digit())
-                    {
-                        return Some(prefix.to_string());
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-/// Resolve a bare number or full key to a canonical task key.
+/// Expand a bare task number to a prefixed key when `-u <subspace>` is active.
 ///
-/// - If `input` contains `-`, it is already a full key: return `input.to_uppercase()`.
-/// - Otherwise, infer the prefix from the space and return `{prefix}-{input}`.
-///
-/// Prefix resolution order:
-/// 1. `<workdir>/work/<space>/_universe.yaml` → `task_prefix` field
-/// 2. Hardcoded table (`co → CO`, `yggdrasil → YG`, `rfq → RFQ`, `qb → QB`, `artelonga → AL`)
-/// 3. First `<PREFIX>-N.md` file found in `<workdir>/work/<space>/`
-/// 4. Fallback: `space.to_uppercase()`
-pub fn resolve_task_id(input: &str, space: &str, workdir: &Path) -> String {
-    if input.contains('-') {
-        return input.to_uppercase();
+/// If `raw` already contains `-`, it is returned unchanged. Otherwise, when a
+/// `subspace_key` is given and a matching [`Subspace`] is found in the tree,
+/// the number is prefixed: `"1"` + shandara → `"SHN-1"`.
+fn expand_task_input(
+    raw: &str,
+    subspace_key: Option<&str>,
+    subspaces: &[universe::Subspace],
+) -> String {
+    if !raw.contains('-')
+        && let Some(uk) = subspace_key
+        && let Some(sub) = subspaces.iter().find(|s| s.key == uk)
+    {
+        return format!("{}-{}", sub.prefix, raw);
     }
-    let prefix = read_universe_yaml_prefix(workdir, space)
-        .or_else(|| lookup_prefix_table(space).map(str::to_string))
-        .or_else(|| infer_prefix_from_existing_files(workdir, space))
-        .unwrap_or_else(|| space.to_uppercase());
-    format!("{}-{}", prefix, input)
+    raw.to_string()
 }
 
 // ============================================================================

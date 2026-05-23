@@ -10,5 +10,7 @@
 //! so the procedural pipeline can be swapped piece-by-piece.
 
 pub mod auto;
+pub mod universe;
 
-pub use auto::{AutoConfig, resolve_task_id, run};
+pub use auto::{AutoConfig, run};
+pub use universe::{ResolvedTask, Subspace, discover_subspaces, resolve_task_id};

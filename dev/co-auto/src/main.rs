@@ -70,8 +70,15 @@ struct Cli {
     #[arg(long)]
     no_pr: bool,
 
+    /// Sub-universe to target within the current space.
+    /// Use when the space hosts multiple sub-universes with distinct prefixes,
+    /// e.g. `-u shandara 1` → `SHN-1` inside `work/yggdrasil/shandara/`.
+    #[arg(short = 'u', long, value_name = "KEY", alias = "subspace")]
+    universe: Option<String>,
+
     /// Task to execute: bare number (`272`) or full key (`CO-272`).
     /// Expanded to a full key using the space's prefix (`co` → `CO-272`).
+    /// With `-u <key>`, a bare number uses the sub-universe's prefix instead.
     /// When omitted, the next unblocked task is picked automatically.
     task_arg: Option<String>,
 }
@@ -163,18 +170,15 @@ fn main() {
         let workdir = resolve_workdir(cli.workdir.as_deref())?;
         let (space, data_dir) = resolve_space(&workdir, cli.space.as_deref())?;
 
-        // Resolve task: positional arg takes priority over --task flag.
-        // Bare numbers (e.g., "272") are expanded to full keys ("CO-272")
-        // using the space's prefix.
-        let task_id = cli
-            .task_arg
-            .as_deref()
-            .map(|arg| co_auto::resolve_task_id(arg, &space, &workdir))
-            .or_else(|| cli.task.clone());
+        // Positional task arg takes priority over --task flag.
+        // Prefix expansion (bare "272" → "CO-272") and subspace routing happen
+        // inside run() after discover_subspaces() so that -u prefix is applied.
+        let task_id = cli.task_arg.as_deref().map(str::to_string).or(cli.task);
 
         let config = co_auto::AutoConfig {
             space,
             task_id,
+            subspace_key: cli.universe,
             cycle: cli.cycle,
             dry_run: cli.dry_run,
             max_tasks: cli.max_tasks,
