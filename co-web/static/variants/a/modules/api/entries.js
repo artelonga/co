@@ -32,3 +32,14 @@ export async function getEntriesByPathPrefix(slug, prefix) {
     const r = await apiFetch(url, {}, true);
     return (r && r.entries) || [];
 }
+
+// CO-272: fetch entries-as-tasks from work/ for the kanban dev-board view.
+export async function getDevTasks(slug, opts) {
+    let url = `/api/v1/universes/${encodeURIComponent(slug)}/dev-tasks`;
+    const params = [];
+    if (opts?.status) params.push(`status=${encodeURIComponent(opts.status)}`);
+    if (opts?.limit) params.push(`limit=${opts.limit}`);
+    if (params.length) url += '?' + params.join('&');
+    const r = await apiFetch(url, {}, true);
+    return (r && r.tasks) || [];
+}
