@@ -52,6 +52,20 @@ pub enum DomainEvent {
         user_id: String,
         filename: Option<String>,
     },
+    /// CO-275: emitted by co-auto after each claude invocation completes.
+    AgentSessionComplete {
+        task_id: String,
+        universe_key: String,
+        duration_ms: u64,
+        tokens_in: Option<u64>,
+        tokens_out: Option<u64>,
+        tool_calls: std::collections::HashMap<String, u32>,
+        skills_loaded: Vec<String>,
+        context_chars: u64,
+        exit_code: i32,
+        final_commit_sha: Option<String>,
+        pr_number: Option<u32>,
+    },
 }
 
 /// Coarse-grained filter for `Bus::subscribe`.
@@ -63,6 +77,7 @@ pub enum EventFilter {
     Asset,
     InvitationAccepted,
     ProposalDecided,
+    AgentSession,
 }
 
 impl EventFilter {
@@ -84,6 +99,9 @@ impl EventFilter {
             }
             EventFilter::ProposalDecided => {
                 matches!(event, DomainEvent::ProposalDecided { .. })
+            }
+            EventFilter::AgentSession => {
+                matches!(event, DomainEvent::AgentSessionComplete { .. })
             }
         }
     }

@@ -135,6 +135,7 @@ impl Storage {
     }
 }
 
+pub mod agent_sessions;
 pub(crate) mod api_tokens;
 pub(crate) mod changelog;
 pub(crate) mod chat;
@@ -157,6 +158,7 @@ pub(crate) mod tasks;
 pub(crate) mod universe;
 pub(crate) mod users;
 
+pub use agent_sessions::{AgentSession, NewAgentSession};
 pub use onboarding::derive_usuario_from_email;
 
 pub use invitations::Invitation;

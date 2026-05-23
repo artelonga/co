@@ -7,7 +7,7 @@
 use anyhow::{Context, Result};
 use chrono::Utc;
 use colored::Colorize;
-use serde_json;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write as IoWrite;
 use std::path::{Path, PathBuf};
@@ -54,6 +54,47 @@ struct RunTracker {
     started_at: String,
     tasks_completed: Vec<String>,
     tasks_failed: Vec<String>,
+}
+
+/// Result from a Claude Code subprocess invocation.
+struct ClaudeOutput {
+    /// Whether the process exited 0.
+    success: bool,
+    /// Exit code from the OS, or -1 if unavailable.
+    exit_code: i32,
+    /// Captured stdout (headless mode only; empty in interactive mode).
+    stdout: String,
+    /// Captured stderr (headless mode only; empty in interactive mode).
+    stderr: String,
+}
+
+/// One agent-session record, posted to the CO endpoint after each run.
+#[derive(Debug, Serialize, Deserialize)]
+struct AgentSessionRecord {
+    task_id: String,
+    universe_key: String,
+    started_at: i64,
+    finished_at: i64,
+    duration_ms: i64,
+    exit_code: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tokens_in: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tokens_out: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_calls: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skills_loaded: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_chars: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    final_commit_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pr_number: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    co_auto_version: Option<String>,
 }
 
 pub fn run(config: AutoConfig) -> Result<()> {
@@ -231,7 +272,10 @@ pub fn run(config: AutoConfig) -> Result<()> {
 
         // 4. EXECUTE via Claude Code
 
-        let success = launch_claude(
+        let spawn_time = Utc::now().timestamp();
+        let wall_start = std::time::Instant::now();
+
+        let claude_out = launch_claude(
             &context,
             &workdir,
             config.teams,
@@ -241,6 +285,10 @@ pub fn run(config: AutoConfig) -> Result<()> {
             &task.key,
             &task.title,
         )?;
+
+        let duration_ms = wall_start.elapsed().as_millis() as i64;
+        let finish_time = Utc::now().timestamp();
+        let success = claude_out.success;
 
         if success {
             // 5. REVIEW acceptance criteria
@@ -388,6 +436,26 @@ pub fn run(config: AutoConfig) -> Result<()> {
             );
             tracker.tasks_failed.push(task.key.clone());
         }
+
+        // CO-275: emit agent-session record (best-effort — never fails the run)
+        let session = AgentSessionRecord {
+            task_id: task.key.clone(),
+            universe_key: space_to_universe(&config.space),
+            started_at: spawn_time,
+            finished_at: finish_time,
+            duration_ms,
+            exit_code: claude_out.exit_code,
+            tokens_in: parse_token_count(&claude_out.stdout, "input"),
+            tokens_out: parse_token_count(&claude_out.stdout, "output"),
+            tool_calls: parse_tool_calls(&claude_out.stderr),
+            skills_loaded: Some(skills_for_session(&task, &find_workspace_root(&data_dir))),
+            context_chars: Some(context.len() as i64),
+            final_commit_sha: read_head_sha(&workdir),
+            pr_number: parse_pr_number(&claude_out.stdout),
+            model: Some(config.model.clone()),
+            co_auto_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+        };
+        post_session_to_co(&session);
 
         // Restore git-crypt filters after task completes
         if has_git_crypt_wt {
@@ -751,7 +819,7 @@ fn launch_claude(
     interactive: bool,
     task_key: &str,
     task_title: &str,
-) -> Result<bool> {
+) -> Result<ClaudeOutput> {
     // Write context to a temp file to avoid CLI arg length limits
     let context_file = workdir.join(".claude").join("co-auto-context.md");
     fs::create_dir_all(context_file.parent().unwrap())?;
@@ -798,7 +866,13 @@ fn launch_claude(
         // Clean up context file
         let _ = fs::remove_file(&context_file);
 
-        Ok(status.success())
+        let code = status.code().unwrap_or(-1);
+        Ok(ClaudeOutput {
+            success: status.success(),
+            exit_code: code,
+            stdout: String::new(), // interactive mode — stdout goes to terminal
+            stderr: String::new(),
+        })
     } else {
         println!("  {} Launching Claude Code (headless)...", "◆".cyan());
 
@@ -829,7 +903,13 @@ fn launch_claude(
         // Clean up context file
         let _ = fs::remove_file(&context_file);
 
-        Ok(output.status.success())
+        let exit_code = output.status.code().unwrap_or(-1);
+        Ok(ClaudeOutput {
+            success: output.status.success(),
+            exit_code,
+            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        })
     }
 }
 
@@ -1448,6 +1528,208 @@ fn ensure_teams_enabled() -> Result<()> {
         "⚠".yellow()
     );
     Ok(())
+}
+
+// ==================== SESSION CAPTURE ====================
+
+/// Map a co-auto space name to the universe key used in the CO database.
+/// Defaults to the space name itself (e.g., "co" → "co").
+fn space_to_universe(space: &str) -> String {
+    space.to_string()
+}
+
+/// Return the current HEAD commit SHA in the given working directory.
+/// Returns None on any error (e.g., not a git repo, nothing committed).
+fn read_head_sha(workdir: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(workdir)
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let sha = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if sha.is_empty() { None } else { Some(sha) }
+    } else {
+        None
+    }
+}
+
+/// Parse input or output token count from Claude's stdout.
+/// Claude Code prints summary lines like:
+///   "Tokens: input=5000 output=3000 cache_read=0 cache_write=0"
+/// or in some versions: "Input tokens: 5000"
+/// Graceful degradation: returns None if pattern not found.
+fn parse_token_count(stdout: &str, kind: &str) -> Option<i64> {
+    // Pattern 1: "input=5000" / "output=3000" in a Tokens: summary line
+    let prefix = format!("{}=", kind);
+    for line in stdout
+        .lines()
+        .filter(|l| l.contains("Tokens:") || l.contains("tokens:"))
+    {
+        if let Some(pos) = line.find(&prefix) {
+            let rest = &line[pos + prefix.len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i64>() {
+                return Some(n);
+            }
+        }
+    }
+    // Pattern 2: "Input tokens: 5000" / "Output tokens: 3000"
+    let label = match kind {
+        "input" => "Input tokens:",
+        "output" => "Output tokens:",
+        _ => return None,
+    };
+    for line in stdout.lines().filter(|l| l.contains(label)) {
+        if let Some(pos) = line.find(label) {
+            let rest = line[pos + label.len()..].trim();
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Parse tool call counts from Claude's stderr.
+/// Claude Code's stderr has lines like: "Tool: Edit ..." or "  Tool use: Read"
+/// Returns a JSON object {"Read": 8, "Edit": 5} or None if nothing parseable.
+fn parse_tool_calls(stderr: &str) -> Option<serde_json::Value> {
+    let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for line in stderr.lines() {
+        // Match "Tool: <Name>" or "Tool use: <Name>" patterns
+        let tool_name = if let Some(rest) = line.trim().strip_prefix("Tool:") {
+            rest.split_whitespace().next().map(str::to_string)
+        } else if let Some(rest) = line.trim().strip_prefix("Tool use:") {
+            rest.split_whitespace().next().map(str::to_string)
+        } else {
+            None
+        };
+        if let Some(name) = tool_name {
+            // Filter to known tool names to avoid garbage
+            match name.as_str() {
+                "Read" | "Edit" | "Write" | "Bash" | "Glob" | "Grep" | "Agent" | "WebFetch"
+                | "WebSearch" | "NotebookEdit" => {
+                    *counts.entry(name).or_insert(0) += 1;
+                }
+                _ => {}
+            }
+        }
+    }
+    if counts.is_empty() {
+        None
+    } else {
+        Some(serde_json::to_value(counts).unwrap_or(serde_json::Value::Null))
+    }
+}
+
+/// Parse a PR number from Claude's stdout.
+/// Looks for patterns like "https://github.com/.../pull/89" or "#89".
+fn parse_pr_number(stdout: &str) -> Option<i64> {
+    for line in stdout.lines() {
+        // GitHub PR URL pattern
+        if let Some(pos) = line.find("/pull/") {
+            let rest = &line[pos + "/pull/".len()..];
+            let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(n) = digits.parse::<i64>() {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+/// Get the skill names loaded for a given task (mirrors skills_for_task).
+fn skills_for_session(task: &Task, workspace_root: &Path) -> serde_json::Value {
+    let names: Vec<String> = {
+        let mut v: Vec<&str> = vec![];
+        for label in &task.labels {
+            match label.as_str() {
+                "module:spa" | "module:editor" | "module:ui" => v.push("spa-conventions"),
+                "module:deploy" | "module:infra" => v.push("deploy-runbook"),
+                "type:test" => v.push("playwright-pattern"),
+                l if l.starts_with("module:") => v.push("rust-architecture"),
+                _ => {}
+            }
+        }
+        v.sort_unstable();
+        v.dedup();
+        // Only include skills that actually exist on disk
+        v.into_iter()
+            .filter(|name| {
+                workspace_root
+                    .join("skills")
+                    .join(format!("{name}.md"))
+                    .exists()
+            })
+            .map(String::from)
+            .collect()
+    };
+    serde_json::to_value(names).unwrap_or(serde_json::Value::Array(vec![]))
+}
+
+/// POST the session record to the CO endpoint. Best-effort: warns on failure,
+/// never panics or returns an error that could abort the run.
+/// Requires env vars:
+///   CO_SESSION_ENDPOINT — e.g. "https://co-artelonga.fly.dev"
+///   CO_SESSION_TOKEN    — vault API token
+fn post_session_to_co(session: &AgentSessionRecord) {
+    let endpoint = match std::env::var("CO_SESSION_ENDPOINT") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return, // silently skip when not configured
+    };
+    let token = match std::env::var("CO_SESSION_TOKEN") {
+        Ok(v) if !v.is_empty() => v,
+        _ => return, // silently skip when not configured
+    };
+
+    let json = match serde_json::to_string(session) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("  {} agent session serialize error: {}", "⚠".yellow(), e);
+            return;
+        }
+    };
+
+    let url = format!("{}/api/v1/agent/sessions", endpoint.trim_end_matches('/'));
+
+    let result = Command::new("curl")
+        .args([
+            "-s",
+            "-X",
+            "POST",
+            "-H",
+            &format!("Authorization: Bearer {}", token),
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &json,
+            "--max-time",
+            "10",
+            "--retry",
+            "1",
+            &url,
+        ])
+        .output();
+
+    match result {
+        Ok(o) if o.status.success() => {
+            println!("  {} agent session recorded", "◆".dimmed());
+        }
+        Ok(o) => {
+            let body = String::from_utf8_lossy(&o.stdout);
+            eprintln!(
+                "  {} agent session POST failed ({}): {}",
+                "⚠".yellow(),
+                o.status,
+                body.trim()
+            );
+        }
+        Err(e) => {
+            eprintln!("  {} agent session POST error: {}", "⚠".yellow(), e);
+        }
+    }
 }
 
 fn save_tracker(tracker: &RunTracker) -> Result<()> {
