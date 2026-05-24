@@ -289,6 +289,81 @@ body {
     outline: none;
 }
 
+/* ===== CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools) ===== */
+.sidebar-platforms {
+    padding: 4px 8px 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.sidebar-platforms-label,
+.sidebar-tools-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.35);
+    padding: 4px 4px 6px;
+}
+.sidebar-platforms-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.sidebar-platform-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    color: rgba(255,255,255,0.65);
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+}
+.sidebar-platform-item:hover {
+    background: var(--sidebar-hover);
+    color: #fff;
+}
+.sidebar-platform-item.active {
+    background: rgba(99,102,241,0.18);
+    color: #fff;
+    font-weight: 500;
+}
+.sidebar-platform-ext {
+    margin-left: auto;
+    font-size: 11px;
+    opacity: 0.55;
+    flex-shrink: 0;
+}
+.sidebar-this-universe {
+    /* Visual breathing room around the existing universe nav so the three
+       sections read as distinct strata, not one continuous list. */
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.sidebar-tools {
+    padding: 8px 8px 4px;
+    /* Muted treatment: smaller, lower-contrast — these are operator
+       affordances, not end-user destinations. */
+    opacity: 0.85;
+}
+.sidebar-tools-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+.sidebar-tool-item {
+    display: block;
+    padding: 5px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    text-decoration: none;
+    transition: background 0.12s, color 0.12s;
+}
+.sidebar-tool-item:hover {
+    background: var(--sidebar-hover);
+    color: rgba(255,255,255,0.85);
+}
+
 .sidebar-item-key {
     font-family: var(--font-mono);
     font-size: 12px;

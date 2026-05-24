@@ -255,6 +255,12 @@
             'sidebar.invite.accepted': 'Convite aceito!',
             'sidebar.invite.decline': 'Recusar',
             'sidebar.discover.subscribe': 'Inscrever-se',
+            // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools)
+            'sidebar.section.platforms': 'Plataformas',
+            'sidebar.section.this_universe': 'Este universo',
+            'sidebar.section.tools': 'Ferramentas',
+            'sidebar.tool.deployments': 'Implantações',
+            'sidebar.tool.changelog': 'Histórico',
             // CO-253: Subscribe prompt
             'subscribe.prompt.logged_in': 'Para criar/editar conteúdo neste universo, inscreva-se primeiro.',
             'subscribe.cta': 'Inscrever-se nesse universo',
@@ -623,6 +629,12 @@
             'sidebar.invite.accepted': 'Invitation accepted!',
             'sidebar.invite.decline': 'Decline',
             'sidebar.discover.subscribe': 'Subscribe',
+            // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools)
+            'sidebar.section.platforms': 'Platforms',
+            'sidebar.section.this_universe': 'This universe',
+            'sidebar.section.tools': 'Tools',
+            'sidebar.tool.deployments': 'Deployments',
+            'sidebar.tool.changelog': 'Changelog',
             // CO-253: Subscribe prompt
             'subscribe.prompt.logged_in': 'To create/edit content in this universe, subscribe first.',
             'subscribe.cta': 'Subscribe to this universe',
