@@ -5,6 +5,198 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.30.2] — 2026-05-24 — template seed fix + sidebar IA + Fly baseline + JWT race fix
+
+## CO-277 — Recursive subspace addressing — sub-universe task resolution in co-auto
+
+`co-auto` now discovers and routes tasks across nested sub-universes. A bare
+prefix like `SHN-1` resolves to `work/yggdrasil/shandara/SHN-1.md` without
+requiring the caller to spell out the nesting; ambiguous prefixes produce a
+friendly "specify -u \<key\>" error.
+
+### Changes
+
+- New module `dev/co-auto/src/universe.rs`:
+  - `Subspace` struct (key, rel_path, abs_path, prefix, parent, version)
+  - `ResolvedTask` struct (key, subspace, spec_path)
+  - `discover_subspaces(workdir, space) -> Vec<Subspace>` — recursive walker
+    that reads every `_universe.yaml` up to depth 8, skipping `.worktrees`,
+    `.git`, `node_modules`, `target`, `CHANGELOG-PENDING`
+  - `resolve_task_id(input, space, workdir, subspaces) -> Result<ResolvedTask>`
+    — prefix-aware resolver; falls back to legacy string logic when subspaces
+    is empty (full backward compatibility)
+
+- `dev/co-auto/src/auto.rs`:
+  - `AutoConfig` gains `subspace_key: Option<String>` (the `-u <key>` value)
+  - `run()` calls `discover_subspaces` once at startup; redirects `data_dir`
+    to the resolved subspace path so task loading and context building are
+    scoped correctly
+  - `load_project_key` falls back to `_universe.yaml.task_prefix` so
+    sub-universes without `project.yaml` work out of the box
+  - Old `lookup_prefix_table`, `read_universe_yaml_prefix`,
+    `infer_prefix_from_existing_files`, and `resolve_task_id` removed from
+    `auto.rs` (logic moved to `universe.rs`)
+
+- `dev/co-auto/src/main.rs`:
+  - New `-u / --universe` flag (alias `--subspace`) targets a sub-universe
+  - Raw task arg is now forwarded unchanged to `run()`; expansion happens
+    inside `run()` after `discover_subspaces`, so `-u shandara 1` correctly
+    expands to `SHN-1`
+
+- 25 new tests across `tests/recursive_resolver.rs` and
+  `tests/discover_subspaces.rs`; existing `tests/prefix_resolver.rs` updated
+  for the new `resolve_task_id` signature
+
+### Why
+
+The yggdrasil roadmap hosts multiple sub-universes (YG, SHN, TGM, GDT…) under
+a single space. CO-276 assumed one prefix per space; this change extends the
+resolver to walk the full tree so all sub-universes are runnable with the same
+`co-auto <KEY>` ergonomics.
+
+## CO-279 — Fix template seed regression + default project for every universe
+
+Restores the template universe's onboarding project to `CO` (reverting the
+short-lived `TUTORIAL` rename that landed 2026-05-04 in commit 6f34b62) and
+adds an idempotent default-project hook so every non-template universe lands
+with at least one `projects/*/_project.md` entry — eliminating the
+"no project found" dead-end yuri reported for his private universe.
+
+### Changes
+
+- `co-web/src/storage/seed.rs`:
+  - `seed_template_universe()` writes the tutorial project under
+    `projects/CO/_project.md` with `key: "CO"` again (was `TUTORIAL`), so
+    `is_project_in_template("CO")` correctly returns true and the
+    `guard_template` check fires before any panic-able op — 500s on
+    template writes are now the intended 403s.
+  - The 9 onboarding tasks live under `projects/CO/N.md` again with
+    `project: "CO"`, restoring the contract `clone_universe` and the 4
+    `template_tests.rs` checks have always assumed.
+  - New `seed_default_project_if_missing(universe_key)` — idempotent helper
+    that adds a `{first-4-of-key uppercased}P` project (matching the
+    `create_universe` convention) when the universe has zero projects.
+  - New `backfill_default_projects()` — walks every non-template /
+    non-anon-clone / non-timeline / non-`co` universe and runs the helper.
+  - `seed_admin_content_universes()` now calls the helper for each admin
+    universe except `co` (whose canonical `CO` project is seeded later by
+    `seed_co_universe_tasks`), so `artelonga`, `rfq`, `language`, `mbya`,
+    `topologia`, and `time` ship with their default project from boot one.
+  - `migrate_template_project_rename()` inverted: it now drops any stale
+    `projects/TUTORIAL/*` entries left over from a DB that booted under the
+    broken CO-254 code, and clears the matching `project_universe_index`
+    row, so `seed_template_universe` re-seeds the canonical `CO` rows.
+
+- `co-web/src/server/seed_orchestrator.rs`:
+  - `run_startup_seeds()` calls `backfill_default_projects()` immediately
+    after `seed_admin_content_universes()` so existing user universes
+    bootstrapped via `seed-prod-universes.sh` (yuri's workspace etc.)
+    inherit the same default-project guarantee on the next deploy.
+  - Comment on `migrate_template_project_rename` updated to reflect the
+    inverted intent.
+
+- `co-web/tests/template_tests.rs`:
+  - New `test_seed_default_project_is_idempotent_and_seeds_when_missing`
+    — asserts `seed_admin_content_universes` produces an `ARTEP` default
+    project in the `artelonga` universe and that re-running the helper is
+    a no-op.
+  - New `test_backfill_default_projects_skips_templates_and_anon_clones`
+    — asserts the boot-time backfill never adds a second project to the
+    template universe.
+  - The 4 originally-failing tests (`test_template_has_sample_tasks`,
+    `test_template_projects_public`, `test_write_to_template_forbidden`,
+    `test_update_template_task_forbidden`) now pass without modification
+    because the seed contract they assume is restored.
+
+### Why
+
+CI on `main` has been red since the 2026-05-04 commit `6f34b62 fix: universe
+hierarchy + co rename + pdf error UX` renamed the template tutorial project
+`CO → TUTORIAL` without updating the tests, the cloning contract, or the
+production data. Five shipped tickets (CO-272..CO-276 across v2.29.0 +
+v2.30.0) have been stuck behind the failing pipeline.
+
+Reverting the rename to `CO` aligns the seed with the production-deployed
+shape (prod is two versions behind main and still serves `CO`), the existing
+clone/test/route contracts, and the user's expectation that the legacy
+`/api/projects/CO/tasks` endpoint resolves the same way it always has — the
+`co` universe's CO dev board wins routing via `rebuild_project_universe_index`,
+exactly as before.
+
+The default-project helper closes a parallel gap: admin-seeded universes
+(artelonga, rfq, mbya, …) and any pre-1.x personal universe could otherwise
+exist as a `universes` row with no `projects/_project.md` entry, leaving the
+SPA's kanban view stranded on "no project found".
+
+## CO-280 Phase 1 — sidebar restructure (Platforms / This universe / Tools)
+
+Restructure the SPA sidebar into three labeled sections so users can immediately
+distinguish the three IA layers that were previously rendered as one flat list:
+
+1. **Platforms** (top) — hardcoded list of the 5 sister deployable units
+   (co, artelonga, quilombo, yggdrasil, rfq). External-link icon shown when
+   a platform's URL differs from `window.location.origin`; click opens that
+   platform in a new tab.
+2. **This universe** (middle) — the existing universe + project nav, now
+   under a clearly labeled section header ("Este universo" / "This universe").
+   Behavior preserved; only the surrounding header changes.
+3. **Tools** (bottom, muted) — dev/operator affordances (Deployments,
+   Changelog). Visually de-emphasized so they read as operator tools rather
+   than end-user destinations.
+
+### Why
+
+Two user-reported symptoms shared the same root cause — the sidebar mixed three
+distinct IA layers (deployable platforms, content universes, dev tools) with no
+visual distinction:
+
+- "5 sub-universes part of whole, clarify and review" — sister deployables
+  rendered identically to projects inside the current universe.
+- "sidebar.co_dev_ship button is weird" — dev/operator affordances sat
+  alongside end-user navigation with no signal of their audience.
+
+Phase 1 introduces the three-section scaffolding so future phases (breadcrumbs,
+sub-universe tree, individual tool audits) have a stable home. CO-277's
+recursive sub-universe tree (Phase 4) and Phase 2's breadcrumbs are deferred to
+follow-up tickets.
+
+### Files
+
+- `co-web/static/variants/a/index.html` — three section containers in the
+  sidebar (`#sidebar-platforms-section`, `.sidebar-this-universe`,
+  `#sidebar-tools-section`).
+- `co-web/static/variants/a/modules/sidebar/platforms.js` — new module,
+  hardcoded `PLATFORMS` list + `renderPlatforms()`.
+- `co-web/static/variants/a/modules/sidebar/tools.js` — new module,
+  `renderTools()` with deployments + changelog links.
+- `co-web/static/variants/a/modules/sidebar/render.js` — calls
+  `renderPlatforms()` + `renderTools()` from `renderSidebar()`.
+- `co-web/static/variants/a/modules/sidebar/index.js` — public re-exports.
+- `co-web/static/variants/a/style.css` — `.sidebar-platforms`,
+  `.sidebar-tools`, `.sidebar-platform-item`, `.sidebar-tool-item` styling.
+- `co-web/static/shared/i18n.js` — pt + en keys for the three section labels
+  and tool labels.
+- `co-web/e2e/co-280-sidebar-sections.spec.ts` — asserts all three sections
+  render and that tool items never leak into `#project-list`.
+
+## CO-281 — Phase 0 baseline snapshot
+
+Captured the current Fly.io deployment baseline for the 5 deployable apps
+(plus the unconfirmed `artelonga-dev` variant) to `docs/infra/fly-baseline-2026-05.md`.
+This is pure measurement — no `fly.toml` edits, no deploys — and gives Phases
+1-4 a fixed reference point to measure savings against.
+
+### Why
+
+Per CO-281, before changing any sizing we wanted a written snapshot of every
+app's machine size, `auto_stop_machines` setting, `min_machines_running`, and
+estimated monthly cost. The baseline already surfaces useful signal: real
+total is ~$24-26/mo for machines (vs the spec's $13-15/mo pre-flight guess),
+dominated by `quilombo-araucaria` running at 2 GB always-on for its video
+upload workload — meaning Phase 1's target band is reachable from
+`min_machines_running` flips alone, before any embedding-sidecar extraction.
+
+
 ## [2.30.0] — 2026-05-23 — agent telemetry + co-auto ergonomics
 
 ## CO-275 — Agent session events — capture tokens/tools/skills/duration per co-auto run; surface on kanban cards
