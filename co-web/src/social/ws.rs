@@ -791,7 +791,8 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        let secret = "test-secret-co31";
+        // Must match the JWT_SECRET set at line ~724 (CO-295: all co-web tests use "test-jwt-secret").
+        let secret = "test-jwt-secret";
         let (tok1, _) = sign_jwt("user1", "a@test.com", "free", secret).unwrap();
         let (tok2, _) = sign_jwt("user2", "b@test.com", "free", secret).unwrap();
 
