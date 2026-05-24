@@ -603,7 +603,9 @@ mod tests {
     use crate::storage::Storage;
 
     // Must match the secret used by all other co-web tests to avoid env-var races.
-    const TEST_SECRET: &str = "test-secret";
+    // push_routes.rs `isolate_env()` and `make_jwt()` both write "test-jwt-secret";
+    // mismatched secrets caused parallel-test 401 flakes (PR #94/95/96 CI runs 2026-05-23).
+    const TEST_SECRET: &str = "test-jwt-secret";
 
     fn set_jwt_secret() {
         // Safety: tests share the same process; we always write the same value.
