@@ -415,6 +415,61 @@ async fn test_yggdrasil_authenticated_access_ok() {
     );
 }
 
+// --- CO-279: every non-template universe must have a default project ---
+
+/// Every authenticated-user / admin-owned universe must contain at least one
+/// project on first access. Pre-CO-279 a private universe could exist as a
+/// `universes` row with no `projects/*/_project.md` entry, which rendered the
+/// "no project found" dead-end in the SPA.
+#[tokio::test]
+async fn test_seed_default_project_is_idempotent_and_seeds_when_missing() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+
+    // 1. Universe row exists but no project.
+    storage.seed_admin_content_universes();
+
+    // The 'artelonga' universe should now have a default project (ARTEP).
+    let projects = storage.list_projects_for_universe("artelonga");
+    assert_eq!(
+        projects.len(),
+        1,
+        "every admin-content universe should seed a default project"
+    );
+    assert_eq!(projects[0].key, "ARTEP");
+
+    // 2. Second call is a no-op (already has a project).
+    assert!(
+        !storage.seed_default_project_if_missing("artelonga"),
+        "re-running on a universe with projects must be a no-op"
+    );
+    let projects2 = storage.list_projects_for_universe("artelonga");
+    assert_eq!(projects2.len(), 1, "no duplicate default projects");
+}
+
+#[tokio::test]
+async fn test_backfill_default_projects_skips_templates_and_anon_clones() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path().to_str().unwrap());
+    storage.seed_template_universe();
+    storage.seed_admin_content_universes();
+    // Templates must be excluded — they have their own seeded project (CO).
+    let template_projects = storage.list_projects_for_universe("template");
+    assert_eq!(template_projects.len(), 1);
+    assert_eq!(template_projects[0].key, "CO");
+
+    // Re-running backfill must not seed a second project into the template
+    // nor into anon clones.
+    let _ = storage.backfill_default_projects();
+    let template_projects2 = storage.list_projects_for_universe("template");
+    assert_eq!(
+        template_projects2.len(),
+        1,
+        "template universe project count must not change after backfill"
+    );
+    assert_eq!(template_projects2[0].key, "CO");
+}
+
 /// CO-38: non-yggdrasil public universes (template) remain accessible without login.
 #[tokio::test]
 async fn test_template_still_accessible_without_login() {
