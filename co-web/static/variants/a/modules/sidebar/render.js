@@ -6,6 +6,9 @@ import {
     renderSectionHtml, renderUniverseItemHtml, buildChildMap,
     renderInviteRowHtml, renderDiscoverableItemHtml,
 } from './sections.js';
+// CO-280 Phase 1: Platforms + Tools sections are siblings of the universe nav.
+import { renderPlatforms } from './platforms.js';
+import { renderTools } from './tools.js';
 
 // Callbacks injected by app.js to break circular deps
 let _bootAppForUniverse = () => {};
@@ -32,6 +35,12 @@ let _setUniverseSlugInUrl = () => {};
 export function injectSetUniverseSlugInUrl(fn) { _setUniverseSlugInUrl = fn; }
 
 export function renderSidebar() {
+    // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools).
+    // Platforms + Tools render into their own nav containers; the existing
+    // universe + project list rendering stays scoped to #project-list.
+    renderPlatforms();
+    renderTools();
+
     const list = document.querySelector('#project-list');
     const t = window.t || (k => k);
 
