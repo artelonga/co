@@ -118,10 +118,10 @@ fn file_size(path: &Path) -> u64 {
 fn disk_stats(path: &Path) -> (u64, u64) {
     match nix::sys::statvfs::statvfs(path) {
         Ok(stat) => {
-            let frsize = stat.fragment_size() as u64;
+            let frsize = stat.fragment_size();
             (
-                stat.blocks() as u64 * frsize,
-                stat.blocks_available() as u64 * frsize,
+                stat.blocks() * frsize,
+                stat.blocks_available() * frsize,
             )
         }
         Err(e) => {
