@@ -119,10 +119,7 @@ fn disk_stats(path: &Path) -> (u64, u64) {
     match nix::sys::statvfs::statvfs(path) {
         Ok(stat) => {
             let frsize = stat.fragment_size();
-            (
-                stat.blocks() * frsize,
-                stat.blocks_available() * frsize,
-            )
+            (stat.blocks() * frsize, stat.blocks_available() * frsize)
         }
         Err(e) => {
             tracing::warn!("statvfs({path:?}) failed: {e}");
