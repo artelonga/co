@@ -14,7 +14,8 @@ use crate::storage::Storage;
 fn isolate_env() {
     unsafe {
         std::env::set_var("CO_RECOVERY_KEY", "test-recovery-key-co190");
-        std::env::set_var("JWT_SECRET", "test-jwt-secret-co190");
+        // All co-web tests MUST share "test-jwt-secret" (CO-295) to avoid races.
+        std::env::set_var("JWT_SECRET", "test-jwt-secret");
         std::env::set_var("RUST_LOG", "off");
     }
 }

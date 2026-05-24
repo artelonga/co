@@ -720,8 +720,9 @@ mod tests {
         use tokio_tungstenite::connect_async;
         use tokio_tungstenite::tungstenite::Message as WsMsg;
 
-        // Safety: tests run in a single process; no concurrent env reads.
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-co31") };
+        // Safety: tests run in a single process. All co-web tests MUST use
+        // "test-jwt-secret" to avoid parallel-test JWT clobbering (see CO-295).
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
 
         let tmp = tempfile::TempDir::new().unwrap();
         let storage = Storage::new(tmp.path());
