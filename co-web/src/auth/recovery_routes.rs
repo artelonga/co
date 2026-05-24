@@ -145,7 +145,8 @@ struct ChangePasswordRequest {
 // -------------------------------------------------------------------------
 
 /// Validate a `return_to` URL for the `/recover` redirect.
-/// Only `*.artelonga.com.br` and `quilomboaraucaria.com.br` are accepted.
+/// Accepts `*.artelonga.com.br`, `quilomboaraucaria.com.br`, and localhost
+/// (for `co serve` local distribution — CO-282).
 /// Called server-side from `server::serve_recover` and mirrored client-side
 /// in `login.js::isAllowedReturnTo`.
 pub(crate) fn is_allowed_return_to(url: &str) -> bool {
@@ -159,7 +160,9 @@ pub(crate) fn is_allowed_return_to(url: &str) -> bool {
     let Some(host) = extract_host(url) else {
         return false;
     };
-    host == "quilomboaraucaria.com.br"
+    host == "localhost"
+        || host == "127.0.0.1"
+        || host == "quilomboaraucaria.com.br"
         || host == "quilomboaraucaria.org"
         || host == "artelonga.com.br"
         || host.ends_with(".artelonga.com.br")

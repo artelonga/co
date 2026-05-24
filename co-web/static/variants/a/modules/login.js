@@ -500,10 +500,13 @@ export function setupLoginModal() {
     }
 
     // CO-172: validate a return_to URL against the artelonga safelist.
+    // CO-282: also allow localhost / 127.0.0.1 for `co serve` local distribution.
     function isAllowedReturnTo(url) {
         try {
             const { hostname } = new URL(url);
-            return hostname === 'quilomboaraucaria.com.br'
+            return hostname === 'localhost'
+                || hostname === '127.0.0.1'
+                || hostname === 'quilomboaraucaria.com.br'
                 || hostname === 'artelonga.com.br'
                 || hostname.endsWith('.artelonga.com.br');
         } catch (_) { return false; }

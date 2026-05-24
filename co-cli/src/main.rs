@@ -433,6 +433,37 @@ enum Commands {
     /// Displays a loading animation followed by title slides.
     Teaser,
 
+    /// Start the CO web server locally (localhost-first distribution)
+    ///
+    /// Binds to 127.0.0.1 by default so the server is only reachable from
+    /// this machine. Use --public to expose on the local network (warns).
+    /// Data is stored in the platform data dir (~/.local/share/co on Linux,
+    /// ~/Library/Application Support/co on macOS) unless --data-dir is set.
+    ///
+    /// Examples:
+    ///   co serve                          # default: 127.0.0.1:54321
+    ///   co serve --open                   # also opens the default browser
+    ///   co serve --port 8080              # custom port
+    ///   co serve --data-dir ~/my-co       # custom data directory
+    ///   co serve --public                 # bind 0.0.0.0 (prints a warning)
+    Serve {
+        /// Server port
+        #[arg(short, long, env = "CO_SERVE_PORT", default_value_t = 54321)]
+        port: u16,
+
+        /// Data directory for SQLite + universe files (default: platform data dir / co)
+        #[arg(short, long, env = "CO_SERVE_DATA")]
+        data_dir: Option<std::path::PathBuf>,
+
+        /// Open the default browser after the server starts
+        #[arg(long)]
+        open: bool,
+
+        /// Bind to 0.0.0.0 instead of 127.0.0.1 (exposes to local network — prints a warning)
+        #[arg(long)]
+        public: bool,
+    },
+
     /// Start the project management board (web UI)
     ///
     /// Launches a local web server with Kanban/Calendar views.
@@ -1291,6 +1322,21 @@ fn main() {
         Commands::Analyze { name, verbose } => commands::analyze::run(&name, verbose),
         Commands::Help { topic } => commands::help::run(topic.as_deref()),
         Commands::Teaser => commands::teaser::run(),
+        Commands::Serve {
+            port,
+            data_dir,
+            open,
+            public,
+        } => {
+            let resolved = data_dir
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| {
+                    dirs::data_local_dir()
+                        .map(|d| d.join("co").to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "./co-data".to_string())
+                });
+            commands::serve::run(port, resolved, public, open);
+        }
         Commands::Board {
             action,
             port,
