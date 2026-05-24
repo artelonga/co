@@ -6,8 +6,9 @@ use crate::storage::Storage;
 pub fn run_startup_seeds(config: &WebConfig) {
     let mut storage = Storage::new(&config.data_dir);
     let had_template = storage.template_exists();
-    // CO-254: rename tutorial project CO → TUTORIAL on existing installs
-    // before seed_template_universe checks for the new path.
+    // CO-279: undo the never-shipped CO-254 rename (CO → TUTORIAL) by
+    // dropping any stale `projects/TUTORIAL/*` entries from the template
+    // before `seed_template_universe` re-seeds `CO` on fresh installs.
     storage.migrate_template_project_rename();
     storage.seed_template_universe();
     storage.reseed_template_content_pages();
@@ -71,6 +72,15 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // Seed admin-owned content universes (artelonga, rfq, co) so they
     // appear in the sidebar without manual creation after every deploy.
     storage.seed_admin_content_universes();
+    // CO-279: backfill a default project for every non-template universe
+    // that has zero projects. Closes the "no project found" dead-end on
+    // existing universes (yuri's private universe, sister-deployables, etc.)
+    // that pre-date the create_universe default-project hook or were
+    // imported via the seed-prod-universes.sh bootstrap script.
+    let n_seeded = storage.backfill_default_projects();
+    if n_seeded > 0 {
+        tracing::info!("CO-279: seeded default project in {n_seeded} empty universe(s)");
+    }
     // CO-261: placeholder pages in sister-repo universes until Wave B/C
     // wires their work/<space>/ task sync.
     storage.reseed_sister_repo_stubs();

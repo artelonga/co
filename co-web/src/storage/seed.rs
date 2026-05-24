@@ -54,7 +54,10 @@ impl Storage {
         }
 
         // Check if project entry already exists (query per-universe DB — CO-77).
-        let proj_path = "projects/TUTORIAL/_project.md";
+        // CO-279: the template's tutorial project key is `CO` (matches production
+        // data + the cloning contract). A short-lived 2026-05-04 rename to
+        // `TUTORIAL` broke 4 template_tests.rs tests and was reverted here.
+        let proj_path = "projects/CO/_project.md";
         let template_uc = self.universe_pool.get_or_open("template");
         let already_seeded: bool = {
             let uc_guard = template_uc.lock().expect("template universe conn lock");
@@ -75,7 +78,7 @@ impl Storage {
         // Create project entry
         let proj_fm = json!({
             "type": "project",
-            "key": "TUTORIAL",
+            "key": "CO",
             "title": "Tutorial — comece por aqui",
             "status": "active",
             "next_id": 10,
@@ -95,9 +98,14 @@ impl Storage {
             let uc_guard = template_uc.lock().expect("template universe conn lock");
             let _ = upsert_entry_row(&uc_guard, "template", &proj_entry);
         }
-        // Register in project_universe_index so get_project() works
+        // Register in project_universe_index so get_project() works.
+        // In production the `co` universe also seeds a `CO` project; the
+        // rebuild_project_universe_index pass (clone_ops.rs) sorts `template`
+        // as low-priority so the `co` universe wins the routing for the
+        // legacy `/api/projects/CO/tasks` endpoint. Tests only seed the
+        // template universe, so this INSERT registers `CO → template`.
         let _ = self.conn.execute(
-            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES ('TUTORIAL', 'template')",
+            "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) VALUES ('CO', 'template')",
             [],
         );
 
@@ -221,7 +229,7 @@ impl Storage {
                     .format("%Y-%m-%d")
                     .to_string()
             });
-            let task_path = format!("projects/TUTORIAL/{}.md", t.id);
+            let task_path = format!("projects/CO/{}.md", t.id);
             let labels: Vec<serde_json::Value> = t.labels.iter().map(|l| json!(l)).collect();
             let task_fm = json!({
                 "type": "task",
@@ -236,7 +244,7 @@ impl Storage {
                 "modified": updated_at,
                 "archived": false,
                 "assignee": null,
-                "project": "TUTORIAL"
+                "project": "CO"
             });
             let task_entry = make_entry(&task_path, task_fm, t.description);
             let _ = co::entry::write_entry(&universe_root, &task_entry);
@@ -390,11 +398,17 @@ impl Storage {
         }
     }
 
-    /// CO-254: rename the tutorial project from `CO` to `TUTORIAL` on existing
-    /// installs. Template is ephemeral (CO-49) so we simply drop the old entries
-    /// and let `seed_template_universe` re-seed fresh with the new key.
+    /// CO-279: clean up stale `projects/TUTORIAL/*` entries from the template
+    /// universe. The short-lived CO-254 rename (CO → TUTORIAL, landed
+    /// 2026-05-04, reverted by CO-279) left `TUTORIAL` rows in any DB that
+    /// booted under the broken code. The canonical project key is `CO` again,
+    /// so drop the orphans here and let `seed_template_universe` re-seed `CO`
+    /// when missing.
     ///
-    /// Idempotent: no-op when old `projects/CO/_project.md` is already absent.
+    /// Idempotent: no-op when `projects/TUTORIAL/_project.md` is already absent.
+    /// The function name is preserved for ABI compatibility with the
+    /// `seed_orchestrator` call site; effective behavior is now an inverse
+    /// cleanup of the never-shipped CO-254 rename.
     pub fn migrate_template_project_rename(&mut self) {
         if !self.template_exists() {
             return;
@@ -405,7 +419,7 @@ impl Storage {
             let old_exists: bool = uc_guard
                 .query_row(
                     "SELECT COUNT(*) FROM entries \
-                     WHERE universe_key = 'template' AND path = 'projects/CO/_project.md'",
+                     WHERE universe_key = 'template' AND path = 'projects/TUTORIAL/_project.md'",
                     [],
                     |row| row.get::<_, i64>(0),
                 )
@@ -416,7 +430,7 @@ impl Storage {
             }
             let mut stmt = match uc_guard.prepare(
                 "SELECT path FROM entries \
-                 WHERE universe_key = 'template' AND path LIKE 'projects/CO/%'",
+                 WHERE universe_key = 'template' AND path LIKE 'projects/TUTORIAL/%'",
             ) {
                 Ok(s) => s,
                 Err(_) => return,
@@ -444,9 +458,16 @@ impl Storage {
                 params![path],
             );
         }
+        // Drop the stale routing index row so the rebuild pass picks up the
+        // re-seeded `CO → template` mapping on this same boot.
+        let _ = self.conn.execute(
+            "DELETE FROM project_universe_index \
+             WHERE project_key = 'TUTORIAL' AND universe_key = 'template'",
+            [],
+        );
         tracing::info!(
-            "CO-254: dropped {} stale CO tutorial entries from template; \
-             will re-seed as TUTORIAL on next seed_template_universe call",
+            "CO-279: dropped {} stale TUTORIAL entries from template; \
+             will re-seed as CO on next seed_template_universe call",
             paths_to_delete.len()
         );
     }
@@ -814,7 +835,124 @@ impl Storage {
                  VALUES (?1, ?2, ?3, 'system', ?4, 0, ?5, ?6, 'scholarly-light', 'board', 0, ?7)",
                 rusqlite::params![key, name, desc, now, is_public_bit, vis, parent],
             );
+            // CO-279: every admin-content universe needs a default project so
+            // "/co/<key>" never renders the "no project found" dead-end. The
+            // `co` universe is the exception — `seed_co_universe_tasks` runs
+            // later and seeds its own `CO` project from /app/seed-co/.
+            if key != "co" {
+                self.seed_default_project_if_missing(key);
+            }
         }
+    }
+
+    /// CO-279: ensure a universe has at least one project entry so the kanban
+    /// board never lands on the "no project found" empty state.
+    ///
+    /// Idempotent — returns false (no-op) when the universe already has any
+    /// project. The project key follows the same `{first-4-of-universe-key
+    /// uppercased}P` convention as `create_universe`, so it stays globally
+    /// unique against the `project_universe_index` PK without colliding with
+    /// neighbour universes' defaults.
+    ///
+    /// Returns true when a new default project was created.
+    pub fn seed_default_project_if_missing(&mut self, universe_key: &str) -> bool {
+        // Skip if the universe row itself doesn't exist yet — the caller is
+        // expected to invoke this AFTER ensuring the universe is seeded.
+        if self.get_universe(universe_key).is_none() {
+            return false;
+        }
+        // Skip if any project entry already lives in this universe.
+        if !self.list_projects_for_universe(universe_key).is_empty() {
+            return false;
+        }
+        let proj_key: String = format!(
+            "{}P",
+            universe_key
+                .to_uppercase()
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric())
+                .take(4)
+                .collect::<String>()
+        );
+        if proj_key.len() < 2 {
+            // Universe key has no usable alphanumerics — refuse silently
+            // rather than emit an unusable single-letter project key.
+            return false;
+        }
+        let now_str = Utc::now().to_rfc3339();
+        let proj_path = format!("projects/{}/_project.md", proj_key);
+        let proj_fm = json!({
+            "type": "project",
+            "key": proj_key,
+            "title": "Bem-vindo",
+            "status": "active",
+            "next_id": 1,
+            "created": now_str,
+            "modified": now_str,
+            "archived": false,
+            "tags": []
+        });
+        let proj_entry = make_entry(&proj_path, proj_fm, "");
+        let universe_root = self.universe_root(universe_key);
+        let _ = co::entry::write_entry(&universe_root, &proj_entry);
+        {
+            let uc = self.universe_pool.get_or_open(universe_key);
+            let uc_guard = uc.lock().expect("universe conn lock");
+            let _ = upsert_entry_row(&uc_guard, universe_key, &proj_entry);
+        }
+        let _ = self.conn.execute(
+            "INSERT OR IGNORE INTO project_universe_index \
+             (project_key, universe_key) VALUES (?1, ?2)",
+            params![proj_key, universe_key],
+        );
+        tracing::info!(
+            "CO-279: seeded default project '{}' in universe '{}'",
+            proj_key,
+            universe_key
+        );
+        true
+    }
+
+    /// CO-279: walk every non-template universe and seed a default project
+    /// when missing. Returns the number of universes that received a new
+    /// project. Idempotent — universes that already have any project are
+    /// no-ops.
+    ///
+    /// Skips:
+    /// - template universes (templates are read-only / cloned, not user-driven)
+    /// - anonymous-clone universes (`anon-*`, `u-*`) — these are short-lived
+    ///   demo clones and the clone path already inherits the template's
+    ///   project
+    /// - timeline universes (tempo / humanity / universo) — content lives
+    ///   under `events/`, not `projects/`
+    /// - the `co` universe — its canonical project (`CO`) is seeded later
+    ///   by `seed_co_universe_tasks` from `/app/seed-co/`; pre-seeding a
+    ///   `COP` placeholder here would leave the universe with two projects
+    pub fn backfill_default_projects(&mut self) -> usize {
+        let candidates: Vec<String> = {
+            let mut stmt = match self.conn.prepare(
+                "SELECT key FROM universes \
+                 WHERE is_template = 0 \
+                   AND key NOT LIKE 'anon-%' \
+                   AND key NOT LIKE 'u-%' \
+                   AND key NOT IN ('tempo', 'humanity', 'universo', 'co')",
+            ) {
+                Ok(s) => s,
+                Err(_) => return 0,
+            };
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .into_iter()
+                .flatten()
+                .filter_map(|r| r.ok())
+                .collect()
+        };
+        let mut seeded = 0usize;
+        for key in &candidates {
+            if self.seed_default_project_if_missing(key) {
+                seeded += 1;
+            }
+        }
+        seeded
     }
 
     pub fn seed_co_dev_universe(&mut self) {
