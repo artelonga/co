@@ -296,18 +296,13 @@ pub async fn list_entries(
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     // CO-268: also look up the universe's visibility so filter_public_for_anon
     // can bypass the public/ path restriction for public-subscribable universes.
-    let (uc, universe_is_pub_sub) = {
-        let storage = lock_storage(&state);
-        let is_pub_sub = storage
-            .get_universe(&slug)
-            .map(|u| u.visibility == "public-subscribable")
-            .unwrap_or(false);
-        (storage.universe_conn(&slug), is_pub_sub)
-    };
-    let uc_guard = uc
-        .lock()
-        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    // CO-290: go through the Storage trait instead of direct connection access.
+    let universe_is_pub_sub = state
+        .core
+        .storage_trait
+        .get_universe(&slug)
+        .map(|u| u.visibility == "public-subscribable")
+        .unwrap_or(false);
 
     // CO-266: limit is applied in memory after filter_public_for_anon so that
     // `total` reflects the full visible count and `items` is the paginated slice.
@@ -315,30 +310,42 @@ pub async fn list_entries(
     // are left unchanged; only the user-limit-aware paths pass None here.
     let entries = if let Some(ref sem_query) = q.semantic {
         // CO-164: semantic similarity search (optionally combined with FTS for hybrid).
+        // Uses EmbeddingIndex alongside EntryIndex — still needs the raw connection.
         let k = q.k.unwrap_or(10).min(200);
+        let uc = state.core.storage_trait.universe_conn(&slug);
+        let uc_guard = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
         semantic_search_entries(&state, &slug, &uc_guard, sem_query, k, q.q.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref prefix) = q.path_prefix {
         // CO-264: folder-prefix filter — fetch all matching; limit applied below.
-        index
-            .query_by_path_prefix(&slug, prefix, None)
+        state
+            .core
+            .storage_trait
+            .list_entries_by_prefix(&slug, prefix, None)
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref fts_query) = q.q {
-        index
-            .search(&slug, fts_query)
+        state
+            .core
+            .storage_trait
+            .search_entries(&slug, fts_query)
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else if let Some(ref semantic) = q.date_semantic {
         // CO-73: date-semantic range query
-        index
-            .query_by_date(&slug, semantic, q.from.as_deref(), q.to.as_deref())
+        state
+            .core
+            .storage_trait
+            .list_entries_by_date(&slug, semantic, q.from.as_deref(), q.to.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?
     } else {
         let entry_type = q.entry_type.as_deref().unwrap_or("");
         if entry_type.is_empty() {
             // list all — fetch all; limit applied below.
-            index
-                .query_with_limit(&slug, "", &serde_json::json!({}), None)
-                .or_else(|_| Ok::<Vec<EntryRow>, anyhow::Error>(vec![]))
+            state
+                .core
+                .storage_trait
+                .list_entries(&slug, "", &serde_json::json!({}), None)
                 .unwrap_or_default()
         } else {
             let filter = q
@@ -346,8 +353,10 @@ pub async fn list_entries(
                 .as_deref()
                 .and_then(|s| serde_json::from_str(s).ok())
                 .unwrap_or(serde_json::json!({}));
-            index
-                .query_with_limit(&slug, entry_type, &filter, None)
+            state
+                .core
+                .storage_trait
+                .list_entries(&slug, entry_type, &filter, None)
                 .map_err(|e| AppError::Internal(e.to_string()))?
         }
     };
@@ -364,8 +373,10 @@ pub async fn list_entries(
                 "as_of must be a path under states/ (got '{as_of}')"
             )));
         }
-        let state_row = index
-            .get(&slug, as_of)
+        let state_row = state
+            .core
+            .storage_trait
+            .get_entry(&slug, as_of)
             .map_err(|e| AppError::Internal(format!("get state: {e}")))?
             .ok_or_else(|| {
                 AppError::BadRequest(format!("state '{as_of}' not found in '{slug}'"))
@@ -386,7 +397,6 @@ pub async fn list_entries(
         let allowed_paths: std::collections::HashSet<&str> =
             manifest.iter().map(|(p, _, _)| p.as_str()).collect();
 
-        let storage_for_blobs = lock_storage(&state);
         entries
             .into_iter()
             .filter(|e| allowed_paths.contains(e.path.as_str()))
@@ -396,7 +406,7 @@ pub async fn list_entries(
                 // body for the historical one. Otherwise leave as-is
                 // (path-fidelity fallback).
                 if let Some(h) = body_hash_by_path.get(e.path.as_str())
-                    && let Some(bytes) = storage_for_blobs.get_blob(h)
+                    && let Some(bytes) = state.core.storage_trait.get_blob(h)
                     && let Ok(historical) = String::from_utf8(bytes)
                 {
                     e.body = historical;
@@ -507,16 +517,11 @@ pub async fn list_entry_tags(
     Path(slug): Path<String>,
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
-    let uc = {
-        let storage = lock_storage(&state);
-        storage.universe_conn(&slug)
-    };
-    let uc_guard = uc
-        .lock()
-        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-    let index = crate::entry_index::EntryIndex::new(&uc_guard);
-    let tags = index
-        .tags(&slug)
+    // CO-290: go through the Storage trait.
+    let tags = state
+        .core
+        .storage_trait
+        .list_entry_tags(&slug)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let mut resp = Json(tags).into_response();
     resp.headers_mut().insert(
@@ -533,17 +538,12 @@ pub async fn entry_tree(
     Query(q): Query<TreeQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
-    let uc = {
-        let storage = lock_storage(&state);
-        storage.universe_conn(&slug)
-    };
-    let uc_guard = uc
-        .lock()
-        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    // CO-290: go through the Storage trait.
     let entry_type = q.entry_type.as_deref().unwrap_or("page");
-    let tree = index
-        .tree(&slug, entry_type)
+    let tree = state
+        .core
+        .storage_trait
+        .entry_tree(&slug, entry_type)
         .map_err(|e| AppError::Internal(e.to_string()))?;
     let mut resp = Json(tree).into_response();
     resp.headers_mut().insert(
@@ -577,20 +577,18 @@ pub async fn get_entry(
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     // CO-268: also look up the universe's visibility so is_public_for_anon
     // can bypass the public/ path restriction for public-subscribable universes.
-    let (uc, universe_is_pub_sub) = {
-        let storage = lock_storage(&state);
-        let is_pub_sub = storage
-            .get_universe(&slug)
-            .map(|u| u.visibility == "public-subscribable")
-            .unwrap_or(false);
-        (storage.universe_conn(&slug), is_pub_sub)
-    };
-    let uc_guard = uc
-        .lock()
-        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
-    let index = crate::entry_index::EntryIndex::new(&uc_guard);
-    let entry = index
-        .get(&slug, &path)
+    // CO-290: go through the Storage trait instead of direct connection access.
+    let universe_is_pub_sub = state
+        .core
+        .storage_trait
+        .get_universe(&slug)
+        .map(|u| u.visibility == "public-subscribable")
+        .unwrap_or(false);
+
+    let entry = state
+        .core
+        .storage_trait
+        .get_entry(&slug, &path)
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", path)))?;
 
@@ -639,7 +637,12 @@ pub async fn get_entry(
         Ok(resp)
     } else {
         // CO-74: include outbound FK relations in entry detail for board relation-aware views.
+        // Uses the escape-hatch universe_conn since RelationIndex needs the raw connection.
         let relations = {
+            let uc = state.core.storage_trait.universe_conn(&slug);
+            let uc_guard = uc
+                .lock()
+                .map_err(|_| AppError::Internal("universe conn lock".into()))?;
             crate::relation_index::RelationIndex::new(&uc_guard)
                 .outbound(&slug, &path)
                 .unwrap_or_default()

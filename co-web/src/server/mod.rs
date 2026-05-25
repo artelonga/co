@@ -374,12 +374,7 @@ pub async fn start_server(config: WebConfig) {
         std::sync::Arc::new(crate::geo::GeoDb::open(&path))
     };
 
-    let core = Arc::new(CoreState {
-        storage: parking_lot::Mutex::new(storage),
-        config: config.clone(),
-        auth_store: Mutex::new(auth_store),
-        event_bus: crate::events::Bus::new(),
-    });
+    let core = Arc::new(CoreState::from_storage(storage, config.clone(), auth_store));
     let realtime = Arc::new(RealtimeState {
         doc_rooms: crate::ws::new_room_manager(),
         sync_rooms: crate::sync_ws::new_sync_room_manager(),

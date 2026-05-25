@@ -629,30 +629,26 @@ mod tests {
         let game_db = tmp.path().join("game.db");
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
+        let config = WebConfig {
+            port: 0,
+            data_dir: tmp.path().to_string_lossy().into(),
+            static_dir: "co-web/static".into(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: "plugins".into(),
+            game_db_path: None,
+            universo_dir: tmp.path().join("universes").to_string_lossy().into(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "prod".into(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        };
         let state: crate::server::AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState {
-                storage: parking_lot::Mutex::new(storage),
-                config: WebConfig {
-                    port: 0,
-                    data_dir: tmp.path().to_string_lossy().into(),
-                    static_dir: "co-web/static".into(),
-                    default_variant: "a".into(),
-                    experiments: false,
-                    plugins_dir: "plugins".into(),
-                    game_db_path: None,
-                    universo_dir: tmp.path().join("universes").to_string_lossy().into(),
-                    gestao_github_admins: vec![],
-                    universe_key: None,
-                    co_env: "prod".into(),
-                    wae_endpoint: None,
-                    wae_api_key: None,
-                    cookie_domain: None,
-                    quilombo_legacy_login: true,
-                    bypass_rate_limit: false,
-                },
-                auth_store: StdMutex::new(auth_store),
-                event_bus: crate::events::Bus::new(),
-            }),
+            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
             realtime: Arc::new(RealtimeState {
                 doc_rooms: new_room_manager(),
                 sync_rooms: crate::sync_ws::new_sync_room_manager(),
@@ -732,30 +728,26 @@ mod tests {
         let game_db = tmp.path().join("game.db");
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
+        let config = WebConfig {
+            port: 0,
+            data_dir: tmp.path().to_string_lossy().into(),
+            static_dir: "co-web/static".into(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: "plugins".into(),
+            game_db_path: None,
+            universo_dir: tmp.path().join("universes").to_string_lossy().into(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "prod".into(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        };
         let state: crate::server::AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState {
-                storage: parking_lot::Mutex::new(storage),
-                config: WebConfig {
-                    port: 0,
-                    data_dir: tmp.path().to_string_lossy().into(),
-                    static_dir: "co-web/static".into(),
-                    default_variant: "a".into(),
-                    experiments: false,
-                    plugins_dir: "plugins".into(),
-                    game_db_path: None,
-                    universo_dir: tmp.path().join("universes").to_string_lossy().into(),
-                    gestao_github_admins: vec![],
-                    universe_key: None,
-                    co_env: "prod".into(),
-                    wae_endpoint: None,
-                    wae_api_key: None,
-                    cookie_domain: None,
-                    quilombo_legacy_login: true,
-                    bypass_rate_limit: false,
-                },
-                auth_store: StdMutex::new(auth_store),
-                event_bus: crate::events::Bus::new(),
-            }),
+            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
             realtime: Arc::new(RealtimeState {
                 doc_rooms: new_room_manager(),
                 sync_rooms: crate::sync_ws::new_sync_room_manager(),

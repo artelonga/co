@@ -11,10 +11,33 @@ use crate::storage::Storage;
 // ---------------------------------------------------------------------------
 
 pub struct CoreState {
-    pub storage: parking_lot::Mutex<Storage>,
+    pub storage: Arc<parking_lot::Mutex<Storage>>,
+    pub storage_trait: Arc<dyn crate::infra::storage::Storage>,
     pub config: crate::config::WebConfig,
     pub auth_store: Mutex<AuthStore>,
     pub event_bus: crate::events::Bus,
+}
+
+impl CoreState {
+    /// Convenience constructor: wraps `storage` in an `Arc<Mutex>` and wires
+    /// up `storage_trait` (SqliteStorage sharing the same inner Arc).
+    pub fn from_storage(
+        storage: Storage,
+        config: crate::config::WebConfig,
+        auth_store: AuthStore,
+    ) -> Self {
+        let storage = Arc::new(parking_lot::Mutex::new(storage));
+        let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
+            crate::infra::storage::SqliteStorage::from_arc(Arc::clone(&storage)),
+        );
+        Self {
+            storage,
+            storage_trait,
+            config,
+            auth_store: Mutex::new(auth_store),
+            event_bus: crate::events::Bus::new(),
+        }
+    }
 }
 
 pub struct RealtimeState {

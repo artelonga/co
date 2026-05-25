@@ -44,12 +44,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
     );
     let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
     let state: AppState = AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: crate::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: crate::ws::new_room_manager(),
             sync_rooms: crate::sync_ws::new_sync_room_manager(),

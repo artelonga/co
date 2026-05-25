@@ -48,12 +48,7 @@ pub fn make_state(dir: &std::path::Path) -> AppState {
         Arc::new(game_core::storage::Storage::open(&game_db_path).expect("open test game storage"));
     let (embedding_tx, _rx) = crate::embedding_worker::channel();
     AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: crate::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: crate::ws::new_room_manager(),
             sync_rooms: crate::sync_ws::new_sync_room_manager(),
