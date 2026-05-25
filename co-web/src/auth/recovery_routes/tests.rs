@@ -15,8 +15,8 @@ use crate::storage::Storage;
 // Set a deterministic env for crypto ops in tests.
 fn isolate_env() {
     unsafe {
-        std::env::set_var("CO_RECOVERY_KEY", "test-recovery-key-for-tests");
-        std::env::set_var("JWT_SECRET", "test-jwt-secret");
+        std::env::set_var("CO_RECOVERY_KEY", "test-recovery-key");
+        std::env::set_var("JWT_SECRET", "test-secret");
     }
 }
 
@@ -112,9 +112,9 @@ fn insert_test_user(dir: &std::path::Path, email: &str, password: Option<&str>) 
 
 /// Build a JWT for a test user.
 fn make_jwt(user_id: &str) -> String {
-    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
     let (token, _) =
-        crate::auth::sign_jwt(user_id, "test@example.com", "player", "test-jwt-secret").unwrap();
+        crate::auth::sign_jwt(user_id, "test@example.com", "player", "test-secret").unwrap();
     token
 }
 

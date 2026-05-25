@@ -109,15 +109,23 @@ test.describe("Sharing gate: anonymous universe is private", () => {
   });
 
   test("GET /api/v1/universes/:slug returns 403 for anonymous universe without owner cookie", async ({
-    request,
+    playwright,
   }) => {
     const slug = `share-private-${Date.now()}`;
-    await request.post("/api/v1/universes/template/clone", {
+    const baseURL = process.env.BASE_URL ?? "http://localhost:3000";
+
+    // Clone in a separate context so its cookies don't reach the no-cookie check.
+    const cloneCtx = await playwright.request.newContext({ baseURL });
+    await cloneCtx.post(`/api/v1/universes/template/clone`, {
       data: { key: slug, name: "Private Test", description: "" },
     });
+    await cloneCtx.dispose();
 
-    // A fresh request context without the owner cookie should be forbidden
-    const res = await request.get(`/api/v1/universes/${slug}`);
+    // Fresh context (no cookies) — must be denied.
+    const freshCtx = await playwright.request.newContext({ baseURL });
+    const res = await freshCtx.get(`/api/v1/universes/${slug}`);
+    await freshCtx.dispose();
+
     // 403 = sharing gate blocks anonymous universe for non-owners
     // 404 = route only returns owned/public universes
     expect([403, 404]).toContain(res.status());
@@ -130,18 +138,17 @@ test.describe("Sharing gate: anonymous universe is private", () => {
     // Navigating to /co/:slug with that cookie should serve the page.
     const slug = `share-owner-${Date.now()}`;
 
-    // Clone via the page so the cookie is set automatically
-    await page.goto("/co", { waitUntil: "networkidle" });
-    await page.locator("#btn-criar-universo").click();
-    await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
+    // Clone via page.request so the Set-Cookie headers land in the browser's
+    // cookie store (not in the APIRequestContext like the `request` fixture).
+    const cloneRes = await page.request.post(`/api/v1/universes/template/clone`, {
+      data: { key: slug, name: "Owner Test Universe", description: "" },
+    });
+    expect([200, 201]).toContain(cloneRes.status());
 
-    await page.locator("#criar-name").fill("Owner Test Universe");
-    await page.locator("#criar-slug").fill(slug);
-    await page.locator("#criar-form").dispatchEvent("submit");
+    // Navigate — the browser sends the owner cookie automatically.
+    await page.goto(`/co/${slug}`, { waitUntil: "networkidle" });
 
-    await page.waitForURL(/\/co\/[a-z0-9-]+/, { timeout: 15_000 });
-
-    // The page returned a 200 since we're the owner
+    // The SPA should serve the page (not redirect away).
     expect(page.url()).toContain(`/co/${slug}`);
   });
 });
