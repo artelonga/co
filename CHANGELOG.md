@@ -5,6 +5,88 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.31.0] — 2026-05-26 — test pyramid + secrets trait + e2e fixture auth
+
+## CO-290 — Storage trait abstraction + SqliteStorage impl
+
+Introduces `co_web::infra::storage::Storage` trait backed by `SqliteStorage`,
+decoupling entry-reading routes from direct SQLite connection access.
+
+### What changed
+
+- New `co-web/src/infra/storage.rs`: `Storage` trait (`get_universe`, `get_entry`,
+  `list_entries`, `search_entries`, `list_entries_by_date`, `list_entries_by_prefix`,
+  `list_entry_tags`, `entry_tree`, `put_entry`, `delete_entry`, `universe_conn`).
+- `SqliteStorage` wraps `Arc<parking_lot::Mutex<crate::storage::Storage>>` via
+  `from_arc`, sharing the same mutex as `CoreState.storage` (no duplicate connections).
+- `CoreState` gains `storage_trait: Arc<dyn Storage>` and a `from_storage` constructor
+  that wires both fields from a single `Storage` value — ~40 construction sites updated.
+- `entry_routes.rs` reading handlers (`list_entries`, `get_entry`, `list_entry_tags`,
+  `entry_tree`) now go through `state.core.storage_trait.*` methods rather than locking
+  `CoreState.storage` and calling `EntryIndex` directly.
+
+### Why
+
+CO-284-A milestone: establish the trait boundary so future backends (in-memory, S3,
+Postgres) can swap in without touching route logic.
+
+## CO-295 — Secrets provider trait (env-var default)
+
+Centralizes all secret reads (JWT_SECRET, VAPID_PUBLIC_KEY, CO_RECOVERY_KEY) behind a
+`SecretsProvider` trait. `EnvSecretsProvider` is the production default; `StaticSecretsProvider`
+is injected in tests, eliminating parallel-test races caused by `std::env::set_var`.
+
+### Why
+
+Parallel Tokio tests that called `set_var("JWT_SECRET", ...)` could interfere with each
+other, causing intermittent auth failures in CI. With a trait-backed provider, each test
+router carries its own secret without touching the process environment.
+
+### Changes
+
+- New `co-web/src/infra/secrets.rs`: `SecretsProvider` trait, `EnvSecretsProvider`, `StaticSecretsProvider`
+- `CoreState` gains `secrets: Arc<dyn SecretsProvider>`; `from_storage_with_secrets()` for test injection
+- `require_auth` middleware reads JWT secret from `state.core.secrets` instead of `std::env::var`
+- `recovery_crypto` functions take `&dyn SecretsProvider` (no longer reads env directly)
+- `vapid_public_key_handler` reads VAPID key from `state.core.secrets`
+- `server/tests.rs` (10 tests), `push_routes` (5 tests), `agent_session_routes` (2 tests)
+  all migrated to `StaticSecretsProvider` — no `set_var` calls remain in those modules
+
+## CO-302 — Test pyramid restructure: parallelize e2e, add component layer, cut redundancy
+
+Restructured the test suite from a flat e2e-only pyramid into three distinct
+layers: lib tests (Rust), component tests (Vitest + happy-dom), and e2e tests
+(Playwright). E2e suite thinned from 257 to 71 tests; component layer added
+with 120 tests covering DOM behavior without a browser.
+
+### Changes
+
+- **Phase 1 — Parallelise**: Playwright workers bumped 1 → 4 in CI; sharding
+  scaffold commented in `ci.yml` for easy enablement; `testIgnore` excludes
+  `archived/`, `wave-2/`, `interactions/` directories.
+
+- **Phase 2 — Local runner**: `scripts/co-test` (bash) with subcommands
+  `smoke`, `e2e`, `components`, `lib`, `review`. Auto-starts co-web on port
+  54321 for `smoke`/`e2e`, tears it down on exit. `--since <ref>` flag limits
+  run to changed spec files.
+
+- **Phase 3 — Redundancy cut**: 11 files archived to `e2e/archived/`
+  (CO-N acceptance specs, uat-flow, design-audit, theme-coverage,
+  deployment-dashboard). 3 auth specs consolidated into `e2e/auth.spec.ts`
+  (10 tests). 8 large spec files thinned (board-ux: 42→3, integration: 30→5,
+  pipeline-workflow: 26→4, subtask-tree: 21→2, theme: 10→3, i18n: 8→3,
+  changelog-viewer: 10→4, co-landing: 10→5, codemirror: 9→3,
+  recursive-universe: 8→4, responsive: 10→5). Component test layer created:
+  12 files, 120 `it()` tests, self-contained DOM fixtures, no production
+  imports.
+
+- **Phase 4 — Guard rails**: CI step "E2E test-count summary" prints counts
+  per file and emits a warning annotation on any file >30 tests.
+  `scripts/co-test review --fail-on-bloat` exits 1 for local enforcement.
+  `co-web/tests/manifest.yaml` tracks all active spec files.
+  `co-web/e2e/README.md` documents layer conventions and local run commands.
+
+
 ## [2.30.2] — 2026-05-24 — template seed fix + sidebar IA + Fly baseline + JWT race fix
 
 ## CO-277 — Recursive subspace addressing — sub-universe task resolution in co-auto
