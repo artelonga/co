@@ -73,6 +73,14 @@ impl WebConfig {
     pub fn is_uat(&self) -> bool {
         self.co_env == "uat"
     }
+
+    /// Returns true when UAT-login (`POST /api/v1/auth/uat-login`) should be
+    /// reachable. Accepts `uat` (deployed UAT) and `test` (e2e local server
+    /// boot via `co-web/e2e/global-setup.ts`). Used by Playwright fixtures to
+    /// authenticate apiContext.
+    pub fn allows_uat_login(&self) -> bool {
+        self.co_env == "uat" || self.co_env == "test"
+    }
 }
 
 impl From<Args> for WebConfig {

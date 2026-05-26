@@ -283,9 +283,11 @@ pub async fn start_server(config: WebConfig) {
     seed_orchestrator::run_startup_seeds(&config);
     seed_orchestrator::run_co142_refresh(&config);
 
-    // CO-44: UAT-specific startup — runs only when CO_ENV=uat.
-    let uat_reset_just_happened = if config.is_uat() {
-        tracing::info!("UAT mode enabled (CO_ENV=uat)");
+    // CO-44 + e2e: UAT startup runs when CO_ENV=uat OR CO_ENV=test.
+    // Test env seeds yuri@uat.local so playwright fixtures can authenticate
+    // their apiContext via uat-login.
+    let uat_reset_just_happened = if config.allows_uat_login() {
+        tracing::info!("UAT/test mode enabled (CO_ENV={})", config.co_env);
         uat_boot::uat_startup(&config)
     } else {
         false
