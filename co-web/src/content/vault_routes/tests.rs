@@ -856,7 +856,7 @@ fn test_code_file_mime_known_extensions() {
 async fn test_vault_put_python_file_indexes_as_asset_code() {
     let dir = tempdir().unwrap();
     unsafe {
-        std::env::set_var("JWT_SECRET", "test-secret");
+        std::env::set_var("JWT_SECRET", "test-jwt-secret");
     }
     let router = build_test_router(dir.path());
     let bearer = test_bearer();

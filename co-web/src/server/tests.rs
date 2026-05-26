@@ -276,7 +276,7 @@ fn test_seed_admin_user_from_env_hash_drift_updates() {
 #[tokio::test]
 async fn test_rate_limit_anonymous_reads_returns_429() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -311,7 +311,7 @@ async fn test_rate_limit_anonymous_reads_returns_429() {
 #[tokio::test]
 async fn test_rate_limit_429_has_retry_after_header() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -343,7 +343,7 @@ async fn test_rate_limit_429_has_retry_after_header() {
 #[tokio::test]
 async fn test_rate_limit_admin_api_token_resolves_to_admin_tier() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -399,7 +399,7 @@ async fn test_rate_limit_admin_api_token_resolves_to_admin_tier() {
 #[tokio::test]
 async fn test_authed_user_storage_unlimited_post_tier_collapse() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -433,7 +433,7 @@ async fn test_authed_user_storage_unlimited_post_tier_collapse() {
         id
     };
 
-    let jwt = crate::auth::sign_jwt(&user_id, "quota@test.local", "user", "test-secret")
+    let jwt = crate::auth::sign_jwt(&user_id, "quota@test.local", "user", "test-jwt-secret")
         .unwrap()
         .0;
 
@@ -464,7 +464,7 @@ async fn test_authed_user_storage_unlimited_post_tier_collapse() {
 #[tokio::test]
 async fn test_admin_override_quota_bypasses_universe_quota() {
     // SAFETY: single-threaded test setup, no concurrent set_var calls.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 
@@ -484,7 +484,7 @@ async fn test_admin_override_quota_bypasses_universe_quota() {
             .unwrap();
     }
 
-    let jwt = crate::auth::sign_jwt(user_id, "admin@test.local", "admin", "test-secret")
+    let jwt = crate::auth::sign_jwt(user_id, "admin@test.local", "admin", "test-jwt-secret")
         .unwrap()
         .0;
 
@@ -671,7 +671,7 @@ fn setup_universe_with_entry(dir: &std::path::Path, universe_slug: &str, entry_p
 /// `/{universe}/{unknown-slug}` must return 404.
 #[tokio::test]
 async fn test_deep_link_unknown_slug_returns_404() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     setup_universe_with_entry(dir.path(), "testuniv", "content/existing-page.md");
     let app = build_test_router(dir.path());
@@ -696,7 +696,7 @@ async fn test_deep_link_unknown_slug_returns_404() {
 /// `/{universe}/{known-slug}` must return 200 and the SPA shell.
 #[tokio::test]
 async fn test_deep_link_known_slug_returns_200() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     setup_universe_with_entry(dir.path(), "testuniv2", "content/existing-page.md");
     let app = build_test_router(dir.path());
@@ -724,7 +724,7 @@ async fn test_deep_link_known_slug_returns_200() {
 /// visibility='public-subscribable') returned 401 to anonymous callers.
 #[tokio::test]
 async fn test_anon_list_entries_public_subscribable_universe() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
 
     let slug = "pub-sub-test";
@@ -799,7 +799,7 @@ async fn test_anon_list_entries_public_subscribable_universe() {
 /// CO-270: private universes must still block anonymous reads after the fix.
 #[tokio::test]
 async fn test_anon_list_entries_private_universe_blocked() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
 
     let slug = "private-test";
@@ -845,7 +845,7 @@ async fn test_anon_list_entries_private_universe_blocked() {
 /// entry within it does not (covered by `test_deep_link_unknown_slug_returns_404`).
 #[tokio::test]
 async fn test_deep_link_nonexistent_universe_returns_200() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let app = build_test_router(dir.path());
 

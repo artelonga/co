@@ -275,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn post_and_get_session() {
         // SAFETY: single-threaded test, no concurrent set_var
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-275") };
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
 
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
@@ -345,7 +345,7 @@ mod tests {
 
     #[tokio::test]
     async fn latest_returns_null_when_no_sessions() {
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-275") };
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
 
