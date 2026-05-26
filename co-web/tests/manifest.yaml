@@ -1,0 +1,53 @@
+# CO-302: Test manifest — all active spec files tracked here.
+# Adding a *.spec.ts with >30 tests requires explicit override in PR description.
+
+e2e:
+  smoke:
+    - e2e/smoke.spec.ts
+
+  per_feature:
+    - e2e/anonymous-bootstrap.spec.ts
+    - e2e/auth.spec.ts
+    - e2e/board-drag.spec.ts
+    - e2e/board-ux.spec.ts
+    - e2e/changelog-viewer.spec.ts
+    - e2e/co-landing.spec.ts
+    - e2e/codemirror.spec.ts
+    - e2e/deep-link-404.spec.ts
+    - e2e/i18n.spec.ts
+    - e2e/integration.spec.ts
+    - e2e/pipeline-workflow.spec.ts
+    - e2e/recursive-universe.spec.ts
+    - e2e/responsive.spec.ts
+    - e2e/seed-links.spec.ts
+    - e2e/static-assets.spec.ts
+    - e2e/subtask-tree.spec.ts
+    - e2e/theme.spec.ts
+    - e2e/universe.spec.ts
+
+  archived:
+    - e2e/archived/auth-crdt.spec.ts
+    - e2e/archived/co-270-pub-sub-entries.spec.ts
+    - e2e/archived/co-272-dev-tasks.spec.ts
+    - e2e/archived/co-275-agent-sessions.spec.ts
+    - e2e/archived/co-280-sidebar-sections.spec.ts
+    - e2e/archived/deployment-dashboard.spec.ts
+    - e2e/archived/design-audit.spec.ts
+    - e2e/archived/theme-coverage.spec.ts
+    - e2e/archived/uat-flow.spec.ts
+    - e2e/archived/unsubscribed-access.spec.ts
+    - e2e/archived/usage-gate.spec.ts
+
+component:
+  - components/__tests__/calendar-grid.test.ts
+  - components/__tests__/empty-states.test.ts
+  - components/__tests__/i18n.test.ts
+  - components/__tests__/keyboard-shortcuts.test.ts
+  - components/__tests__/responsive-layout.test.ts
+  - components/__tests__/search-filter.test.ts
+  - components/__tests__/sidebar.test.ts
+  - components/__tests__/subtask-tree.test.ts
+  - components/__tests__/task-modal.test.ts
+  - components/__tests__/theme-switcher.test.ts
+  - components/__tests__/timeline-controls.test.ts
+  - components/__tests__/view-tabs.test.ts
