@@ -219,7 +219,10 @@ async fn test_verify_consumed_code_returns_410() {
 
     let storage = Storage::new(dir.path().to_str().unwrap());
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash = crate::recovery_crypto::compute_lookup_hash(
+        &email_normalized,
+        &crate::infra::secrets::EnvSecretsProvider,
+    );
 
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
     storage
@@ -260,7 +263,10 @@ async fn test_verify_expired_code_returns_410() {
 
     let storage = Storage::new(dir.path().to_str().unwrap());
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash = crate::recovery_crypto::compute_lookup_hash(
+        &email_normalized,
+        &crate::infra::secrets::EnvSecretsProvider,
+    );
 
     // Expire immediately (in the past).
     let expires_at = (chrono::Utc::now() - chrono::Duration::seconds(1)).to_rfc3339();
@@ -298,7 +304,10 @@ async fn test_wrong_code_lockout_after_5_attempts() {
 
     let storage = Storage::new(dir.path().to_str().unwrap());
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash = crate::recovery_crypto::compute_lookup_hash(
+        &email_normalized,
+        &crate::infra::secrets::EnvSecretsProvider,
+    );
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
     // Store a real argon2 hash so verify actually runs.
     let code_hash = {
@@ -422,7 +431,10 @@ async fn test_email_rate_limit() {
 
     let storage = Storage::new(dir.path().to_str().unwrap());
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash = crate::recovery_crypto::compute_lookup_hash(
+        &email_normalized,
+        &crate::infra::secrets::EnvSecretsProvider,
+    );
 
     // Insert 5 onboarding code rows to simulate reaching the limit.
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(10)).to_rfc3339();
