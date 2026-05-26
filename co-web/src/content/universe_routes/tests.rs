@@ -6,7 +6,7 @@ use crate::storage::Storage;
 
 fn make_storage() -> (Storage, tempfile::TempDir) {
     // SAFETY: single-threaded test environment.
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let dir = tempdir().unwrap();
     let storage = Storage::new(dir.path());
     (storage, dir)
@@ -175,9 +175,9 @@ async fn test_themes_available_anonymous() {
 /// Real logged-in user sees Modern + 4 free palettes + 8 variants + custom editor.
 #[tokio::test]
 async fn test_themes_available_logged_in() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (token, _) =
-        crate::auth::sign_jwt("usr_real", "user@example.com", "player", "test-secret").unwrap();
+        crate::auth::sign_jwt("usr_real", "user@example.com", "player", "test-jwt-secret").unwrap();
 
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
@@ -197,8 +197,8 @@ async fn test_themes_available_logged_in() {
 /// Anon-tier user (cookie JWT with tier="anon") sees only free palettes.
 #[tokio::test]
 async fn test_themes_available_anon_cookie() {
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
-    let (token, _) = crate::auth::sign_jwt("anon-abc123", "", "anon", "test-secret").unwrap();
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    let (token, _) = crate::auth::sign_jwt("anon-abc123", "", "anon", "test-jwt-secret").unwrap();
 
     let mut headers = axum::http::HeaderMap::new();
     headers.insert(
@@ -278,12 +278,7 @@ fn make_universe_router(
         Arc::new(game_core::storage::Storage::open(&game_db_path).expect("game storage"));
     let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
     let state: AppState = AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: crate::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: crate::ws::new_room_manager(),
             sync_rooms: crate::sync_ws::new_sync_room_manager(),
@@ -325,7 +320,7 @@ async fn test_theme_css_returns_ok() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
     let (router, _tmp) = make_universe_router(storage, dir.path());
 
@@ -362,7 +357,7 @@ async fn test_theme_css_all_required_tokens() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
     let (router, _tmp) = make_universe_router(storage, dir.path());
 
@@ -392,7 +387,7 @@ async fn test_theme_css_changes_when_theme_changes() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (mut storage, dir) = make_storage();
 
     // Set theme to scholarly-dark
@@ -437,7 +432,7 @@ async fn test_theme_css_404_for_missing_universe() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
     let (router, _tmp) = make_universe_router(storage, dir.path());
 
@@ -460,7 +455,7 @@ async fn test_theme_css_etag_304() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
     let (router, _tmp) = make_universe_router(storage, dir.path());
 
@@ -817,7 +812,7 @@ async fn test_create_universe_duplicate_key_returns_409() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (mut storage, dir) = make_storage();
 
     // Pre-create the universe directly in storage.
@@ -834,8 +829,13 @@ async fn test_create_universe_duplicate_key_returns_409() {
 
     let (router, _tmp) = make_universe_router(storage, dir.path());
 
-    let (token, _) =
-        crate::auth::sign_jwt("usr_owner", "owner@example.com", "player", "test-secret").unwrap();
+    let (token, _) = crate::auth::sign_jwt(
+        "usr_owner",
+        "owner@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
 
     let payload = serde_json::json!({
         "key": "dupe-uni",
@@ -868,7 +868,7 @@ async fn test_update_universe_request_and_response_typed() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
 
     // Insert a test user and universe for the owner
@@ -883,8 +883,13 @@ async fn test_update_universe_request_and_response_typed() {
         .unwrap();
 
     let (router, _tmp) = make_universe_router(storage, dir.path());
-    let (token, _) =
-        crate::auth::sign_jwt("usr_update", "update@example.com", "player", "test-secret").unwrap();
+    let (token, _) = crate::auth::sign_jwt(
+        "usr_update",
+        "update@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
 
     let payload = serde_json::json!({
         "key": "upd-uni",
@@ -945,7 +950,7 @@ async fn test_delete_universe_returns_typed_response() {
     use axum::http::Request;
     use tower::ServiceExt;
 
-    unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     let (storage, dir) = make_storage();
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -960,7 +965,7 @@ async fn test_delete_universe_returns_typed_response() {
 
     let (router, _tmp) = make_universe_router(storage, dir.path());
     let (token, _) =
-        crate::auth::sign_jwt("usr_del", "del@example.com", "player", "test-secret").unwrap();
+        crate::auth::sign_jwt("usr_del", "del@example.com", "player", "test-jwt-secret").unwrap();
 
     // Create a universe to delete
     let create_resp = router

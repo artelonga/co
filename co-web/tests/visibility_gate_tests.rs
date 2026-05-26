@@ -105,12 +105,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: co_web::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: co_web::ws::new_room_manager(),
             sync_rooms: co_web::sync_ws::new_sync_room_manager(),
@@ -218,12 +213,7 @@ async fn test_owner_on_private_universe_gets_200() {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: co_web::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: co_web::ws::new_room_manager(),
             sync_rooms: co_web::sync_ws::new_sync_room_manager(),
@@ -302,12 +292,7 @@ async fn test_non_member_on_private_universe_gets_403() {
         game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
     );
     let state: AppState = AppState::new(AppStateInner {
-        core: Arc::new(CoreState {
-            storage: parking_lot::Mutex::new(storage),
-            config,
-            auth_store: Mutex::new(auth_store),
-            event_bus: co_web::events::Bus::new(),
-        }),
+        core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
         realtime: Arc::new(RealtimeState {
             doc_rooms: co_web::ws::new_room_manager(),
             sync_rooms: co_web::sync_ws::new_sync_room_manager(),

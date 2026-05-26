@@ -238,12 +238,7 @@ mod tests {
         );
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
         let state: AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState {
-                storage: parking_lot::Mutex::new(storage),
-                config,
-                auth_store: Mutex::new(auth_store),
-                event_bus: crate::events::Bus::new(),
-            }),
+            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
             realtime: Arc::new(RealtimeState {
                 doc_rooms: crate::ws::new_room_manager(),
                 sync_rooms: crate::sync_ws::new_sync_room_manager(),
@@ -280,7 +275,7 @@ mod tests {
     #[tokio::test]
     async fn post_and_get_session() {
         // SAFETY: single-threaded test, no concurrent set_var
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-275") };
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
 
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
@@ -350,7 +345,7 @@ mod tests {
 
     #[tokio::test]
     async fn latest_returns_null_when_no_sessions() {
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret-275") };
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
 

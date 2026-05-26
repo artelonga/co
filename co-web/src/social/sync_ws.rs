@@ -645,13 +645,9 @@ mod tests {
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
+        let config = test_config(tmp.path());
         let state: crate::server::AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState {
-                storage: parking_lot::Mutex::new(storage),
-                config: test_config(tmp.path()),
-                auth_store: Mutex::new(auth_store),
-                event_bus: crate::events::Bus::new(),
-            }),
+            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
             realtime: Arc::new(RealtimeState {
                 doc_rooms: crate::ws::new_room_manager(),
                 sync_rooms: new_sync_room_manager(),
@@ -808,13 +804,9 @@ mod tests {
         let game_storage = Arc::new(game_core::storage::Storage::open(&game_db).unwrap());
 
         let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
+        let config = test_config(&data_dir);
         let state: crate::server::AppState = AppState::new(AppStateInner {
-            core: Arc::new(CoreState {
-                storage: parking_lot::Mutex::new(storage),
-                config: test_config(&data_dir),
-                auth_store: Mutex::new(auth_store),
-                event_bus: crate::events::Bus::new(),
-            }),
+            core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
             realtime: Arc::new(RealtimeState {
                 doc_rooms: crate::ws::new_room_manager(),
                 sync_rooms: new_sync_room_manager(),
