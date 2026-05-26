@@ -695,7 +695,7 @@ pub(super) async fn uat_login_handler(
     State(state): State<AppState>,
     Json(req): Json<PasswordLoginRequest>,
 ) -> Result<Response, AppError> {
-    if !state.core.config.is_uat() {
+    if !state.core.config.allows_uat_login() {
         return Err(AppError::NotFound("Not found".into()));
     }
     password_login_handler(State(state), Json(req)).await

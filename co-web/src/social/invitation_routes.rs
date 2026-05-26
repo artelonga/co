@@ -42,21 +42,27 @@ pub fn universe_invitation_router() -> Router<AppState> {
 }
 
 /// Standalone invitation routes (public preview + auth-per-route accept).
-pub fn invitation_router() -> Router<AppState> {
+pub fn invitation_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/{token}", get(preview_invitation_handler))
         .route(
             "/{token}/accept",
-            post(accept_invitation_handler).layer(middleware::from_fn(crate::auth::require_auth)),
+            post(accept_invitation_handler).layer(middleware::from_fn_with_state(
+                state,
+                crate::auth::require_auth,
+            )),
         )
 }
 
 /// Routes that nest under /api/v1/me (auth required).
-pub fn me_invitations_router() -> Router<AppState> {
+pub fn me_invitations_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/invitations", get(me_invitations_handler))
         .route("/invitations/accept", post(me_accept_invitation_handler))
-        .layer(middleware::from_fn(crate::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ))
 }
 
 // ---------------------------------------------------------------------------

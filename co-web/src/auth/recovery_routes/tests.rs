@@ -21,6 +21,13 @@ fn isolate_env() {
     }
 }
 
+fn test_secrets() -> std::sync::Arc<dyn crate::infra::secrets::SecretsProvider> {
+    crate::infra::secrets::StaticSecretsProvider::new([
+        ("CO_RECOVERY_KEY", "test-recovery-key-for-tests"),
+        ("JWT_SECRET", "test-jwt-secret"),
+    ])
+}
+
 fn test_config(dir: &std::path::Path) -> WebConfig {
     WebConfig {
         port: 3000,
@@ -366,8 +373,10 @@ async fn test_list_channels_after_add_verify() {
 
     // Insert and verify a channel directly.
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user7@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user7@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user7@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user7@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -433,8 +442,10 @@ async fn test_forgot_password_verify_wrong_code() {
 
     // Set up a verified channel and a reset_password verification.
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user9@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user9@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user9@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user9@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -495,8 +506,10 @@ async fn test_reset_password_with_valid_token() {
     let token_hash = sha256_hex(raw_token);
     let expires_at = (chrono::Utc::now() + chrono::Duration::minutes(15)).to_rfc3339();
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user10@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user10@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user10@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user10@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -545,8 +558,10 @@ async fn test_reset_password_expired_token() {
     let token_hash = sha256_hex(raw_token);
     let expires_at = "2000-01-01T00:00:00Z"; // Past.
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user11@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user11@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user11@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user11@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -727,7 +742,8 @@ async fn test_rate_limit_add_channel_5_per_hour() {
     let storage = Storage::new(dir.path().to_str().unwrap());
     for i in 0..5 {
         let (ct, nonce) =
-            crate::recovery_crypto::encrypt_channel_value(b"extra@example.com").unwrap();
+            crate::recovery_crypto::encrypt_channel_value(b"extra@example.com", &*test_secrets())
+                .unwrap();
         let lhash = format!("fakehash{i}");
         let ch_id = storage
             .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
@@ -768,8 +784,10 @@ async fn test_delete_channel_correct_password() {
     let token = make_jwt(&user_id);
 
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user15@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user15@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user15@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user15@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -806,8 +824,10 @@ async fn test_delete_channel_wrong_password() {
     let token = make_jwt(&user_id);
 
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user16@example.com").unwrap();
-    let lhash = crate::recovery_crypto::compute_lookup_hash("user16@example.com");
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user16@example.com", &*test_secrets())
+            .unwrap();
+    let lhash = crate::recovery_crypto::compute_lookup_hash("user16@example.com", &*test_secrets());
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
         .unwrap();
@@ -841,7 +861,9 @@ async fn test_lockout_after_3_wrong_attempts() {
 
     let code_hash = hash_code("correct").unwrap();
     let storage = Storage::new(dir.path().to_str().unwrap());
-    let (ct, nonce) = crate::recovery_crypto::encrypt_channel_value(b"user17@example.com").unwrap();
+    let (ct, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(b"user17@example.com", &*test_secrets())
+            .unwrap();
     let channel_id = storage
         .create_recovery_channel(&user_id, "email", ct, nonce, "lhash17")
         .unwrap();
@@ -918,8 +940,9 @@ async fn test_e2e_reset_password_happy_path() {
         let normalized =
             crate::recovery_crypto::normalize_channel_value("email", "e2e@example.com");
         let (ct, nonce) =
-            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes()).unwrap();
-        let lhash = crate::recovery_crypto::compute_lookup_hash(&normalized);
+            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes(), &*test_secrets())
+                .unwrap();
+        let lhash = crate::recovery_crypto::compute_lookup_hash(&normalized, &*test_secrets());
         let channel_id = storage
             .create_recovery_channel(&user_id, "email", ct, nonce, &lhash)
             .unwrap();
@@ -1249,8 +1272,9 @@ async fn test_reset_propagates_to_quilombo() {
         let normalized =
             crate::recovery_crypto::normalize_channel_value("email", "lua@example.com");
         let (ct, nonce) =
-            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes()).unwrap();
-        let lhash = crate::recovery_crypto::compute_lookup_hash(&normalized);
+            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes(), &*test_secrets())
+                .unwrap();
+        let lhash = crate::recovery_crypto::compute_lookup_hash(&normalized, &*test_secrets());
         let channel_id = storage
             .create_recovery_channel(&co_id, "email", ct, nonce, &lhash)
             .unwrap();

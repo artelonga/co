@@ -1255,7 +1255,7 @@ pub async fn get_universe_theme_css(
         .into_response()
 }
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
         // CO-41: specific literal route must come before /{slug} wildcard
@@ -1303,7 +1303,10 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/jobs/doc-gen", post(submit_doc_gen_job))
         // Bulk template apply + hub generation (owner-scoped, auth via require_auth)
         .route("/apply-template-all", post(apply_template_all))
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ));
 
     Router::new().merge(public_routes).merge(protected_routes)
 }

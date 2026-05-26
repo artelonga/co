@@ -56,7 +56,7 @@ fn lookup_quilombo_user(storage: &Storage, user_id: &str) -> Result<Usuario, App
 
 // --- Router ---
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     let public = Router::new()
         // Auth
         .route("/auth/login", post(login_handler))
@@ -120,7 +120,7 @@ pub fn router() -> Router<AppState> {
         .route("/admin/atividades", get(listar_atividades_handler))
         // CO-166: link quilombo account to a CO user account
         .route("/auth/link-co-account", post(link_co_account_handler))
-        .layer(middleware::from_fn(auth::require_auth));
+        .layer(middleware::from_fn_with_state(state, auth::require_auth));
 
     Router::new().merge(public).merge(authenticated)
 }

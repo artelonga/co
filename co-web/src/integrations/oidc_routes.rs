@@ -660,12 +660,15 @@ pub async fn userinfo_handler(
 // OAuth sub-router (mounted at /oauth)
 // ---------------------------------------------------------------------------
 
-pub fn oauth_router() -> Router<AppState> {
+pub fn oauth_router(state: AppState) -> Router<AppState> {
     // /authorize requires authentication (session cookie or Bearer JWT).
     // /token and /userinfo use their own credential validation (client_secret / access_token).
     let authorized = Router::new()
         .route("/authorize", get(authorize_handler))
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ));
 
     Router::new()
         .merge(authorized)

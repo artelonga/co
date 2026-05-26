@@ -123,6 +123,28 @@ jobs:
           CO_BYPASS_RATE_LIMIT: "1"
         run: npx playwright test --project=chromium-desktop
 
+      - name: E2E test-count summary
+        if: always()
+        working-directory: co-web
+        run: |
+          echo "=== E2E tests per file ==="
+          total=0
+          bloat=0
+          for f in e2e/*.spec.ts; do
+            count=$(grep -c '^\s*test(' "$f" 2>/dev/null || echo 0)
+            total=$((total + count))
+            if [ "$count" -gt 30 ]; then
+              echo "⚠ $count  $f  (>30)"
+              bloat=$((bloat + 1))
+            else
+              echo "  $count  $f"
+            fi
+          done
+          echo "--- total: $total e2e tests ---"
+          if [ "$bloat" -gt 0 ]; then
+            echo "::warning::$bloat spec file(s) exceed 30-test limit — run scripts/co-test review --fail-on-bloat locally"
+          fi
+
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,3 +152,10 @@ jobs:
           name: playwright-report
           path: co-web/playwright-report/
           retention-days: 14
+
+# CO-302: CI sharding scaffold (uncomment to split e2e into N parallel shards)
+# strategy:
+#   matrix:
+#     shard: [1, 2, 3, 4]
+# Run step:
+#   run: npx playwright test --project=chromium-desktop --shard=${{ matrix.shard }}/4

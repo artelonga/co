@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# co-test — local test runner for co-web
+# Usage: co-test <subcommand> [flags]
+#   smoke        run smoke.spec.ts against local server (starts server if needed)
+#   e2e          run all e2e tests against local server
+#   components   run Vitest component tests (no server needed)
+#   lib          run cargo unit/integration tests
+#   review       print per-file test counts and suspected redundancy
+#
+# Flags (apply to smoke/e2e):
+#   --since <ref>   only run test files changed since <ref> (git diff)
+#
+# review flags:
+#   --fail-on-bloat   exit 1 if any spec file exceeds 30 tests
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+WEB_DIR="$REPO_ROOT/co-web"
+PORT=54321
+SERVER_PID=""
+
+die() { echo "co-test: $*" >&2; exit 1; }
+
+# ── Server lifecycle ────────────────────────────────────────────────────────────
+
+start_server() {
+  local binary="$REPO_ROOT/target/debug/co-web"
+  [[ -f "$binary" ]] || die "co-web binary not found — run: cargo build -p co-web"
+
+  CO_DATA_DIR="$WEB_DIR/data" \
+  JWT_SECRET="local-test-secret" \
+  CO_ENV="test" \
+  CO_BYPASS_RATE_LIMIT="1" \
+  RUST_LOG="co_web=warn" \
+    "$binary" --port "$PORT" &
+  SERVER_PID=$!
+
+  # Wait for server to be ready (up to 15s)
+  local attempts=0
+  until curl -sf "http://localhost:$PORT/api/health" >/dev/null 2>&1; do
+    sleep 0.5
+    attempts=$((attempts + 1))
+    [[ $attempts -lt 30 ]] || die "server did not start within 15s"
+  done
+  echo "co-test: server ready at http://localhost:$PORT (pid $SERVER_PID)"
+}
+
+stop_server() {
+  [[ -n "$SERVER_PID" ]] && kill "$SERVER_PID" 2>/dev/null || true
+}
+
+trap stop_server EXIT
+
+# ── Subcommands ─────────────────────────────────────────────────────────────────
+
+cmd_smoke() {
+  start_server
+  BASE_URL="http://localhost:$PORT" \
+    npx --prefix "$WEB_DIR" playwright test \
+      --project=chromium-desktop \
+      "$WEB_DIR/e2e/smoke.spec.ts"
+}
+
+cmd_e2e() {
+  local since=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --since) since="$2"; shift 2 ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
+  local spec_args=()
+  if [[ -n "$since" ]]; then
+    while IFS= read -r f; do
+      [[ "$f" == e2e/*.spec.ts ]] && spec_args+=("$REPO_ROOT/co-web/$f")
+    done < <(cd "$REPO_ROOT" && git diff --name-only "$since" -- 'co-web/e2e/*.spec.ts')
+    [[ ${#spec_args[@]} -gt 0 ]] || { echo "co-test: no e2e spec changes since $since"; exit 0; }
+  fi
+
+  start_server
+  BASE_URL="http://localhost:$PORT" \
+    npx --prefix "$WEB_DIR" playwright test \
+      --project=chromium-desktop \
+      "${spec_args[@]}"
+}
+
+cmd_components() {
+  cd "$WEB_DIR"
+  npm run test:components
+}
+
+cmd_lib() {
+  cd "$REPO_ROOT"
+  cargo test --workspace
+}
+
+cmd_review() {
+  local fail_on_bloat=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --fail-on-bloat) fail_on_bloat=1; shift ;;
+      *) die "unknown flag: $1" ;;
+    esac
+  done
+
+  echo ""
+  echo "=== E2E tests per file ==="
+  local total_e2e=0 bloat_count=0
+  for f in "$WEB_DIR"/e2e/*.spec.ts; do
+    local name count
+    name="$(basename "$f")"
+    count=$(grep -c '^\s*test(' "$f" 2>/dev/null || echo 0)
+    total_e2e=$((total_e2e + count))
+    if [[ "$count" -gt 30 ]]; then
+      echo "  ⚠ $count  e2e/$name  (exceeds 30-test limit)"
+      bloat_count=$((bloat_count + 1))
+    else
+      echo "    $count  e2e/$name"
+    fi
+  done
+  echo ""
+  echo "  Total active e2e: $total_e2e"
+
+  echo ""
+  echo "=== Component tests per file ==="
+  local total_comp=0
+  for f in "$WEB_DIR"/components/__tests__/*.test.ts; do
+    [[ -f "$f" ]] || continue
+    local name count
+    name="$(basename "$f")"
+    count=$(grep -c '^\s*it(' "$f" 2>/dev/null || echo 0)
+    total_comp=$((total_comp + count))
+    echo "    $count  components/__tests__/$name"
+  done
+  echo ""
+  echo "  Total component: $total_comp"
+
+  echo ""
+  echo "=== Archived specs ==="
+  local archived_count=0
+  for f in "$WEB_DIR"/e2e/archived/*.spec.ts; do
+    [[ -f "$f" ]] || continue
+    echo "    $(basename "$f")"
+    archived_count=$((archived_count + 1))
+  done
+  echo "  $archived_count archived files (not run in CI)"
+
+  echo ""
+  echo "=== Suspected redundancy ==="
+  # Flag specs with >1 test covering the same route
+  grep -h '^\s*test(' "$WEB_DIR"/e2e/*.spec.ts 2>/dev/null | \
+    sort | uniq -d | head -5 | sed 's/^/  /'
+
+  if [[ $fail_on_bloat -eq 1 && $bloat_count -gt 0 ]]; then
+    echo ""
+    echo "co-test: FAIL — $bloat_count file(s) exceed 30-test limit" >&2
+    exit 1
+  fi
+}
+
+# ── Dispatch ────────────────────────────────────────────────────────────────────
+
+[[ $# -gt 0 ]] || die "usage: co-test <smoke|e2e|components|lib|review> [flags]"
+
+subcmd="$1"; shift
+case "$subcmd" in
+  smoke)      cmd_smoke "$@" ;;
+  e2e)        cmd_e2e "$@" ;;
+  components) cmd_components "$@" ;;
+  lib)        cmd_lib "$@" ;;
+  review)     cmd_review "$@" ;;
+  *)          die "unknown subcommand: $subcmd" ;;
+esac

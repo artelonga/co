@@ -20,11 +20,22 @@ export interface TestFixtures {
 // --- Fixtures ---
 
 export const test = base.extend<TestFixtures>({
-  /** API context pointed at the base URL */
+  /** API context pointed at the base URL, authenticated as the test admin.
+   *  Server boots with CO_ENV=test (see e2e/global-setup.ts) which enables
+   *  uat-login + seeds yuri@uat.local. The login response sets a session
+   *  cookie on the context — subsequent requests carry it automatically. */
   apiContext: async ({ playwright }, use) => {
-    const ctx = await playwright.request.newContext({
-      baseURL: "http://localhost:3000",
+    const baseURL = process.env.BASE_URL ?? "http://localhost:3000";
+    const ctx = await playwright.request.newContext({ baseURL });
+    const loginRes = await ctx.post("/api/v1/auth/uat-login", {
+      data: { email: "yuri@uat.local", password: "uat" },
     });
+    if (!loginRes.ok()) {
+      throw new Error(
+        `apiContext fixture: uat-login failed (${loginRes.status()}). ` +
+          `Server must boot with CO_ENV=test or CO_ENV=uat to enable this path.`,
+      );
+    }
     await use(ctx);
     await ctx.dispose();
   },
