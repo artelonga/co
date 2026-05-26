@@ -21,6 +21,45 @@ test.describe("Auth API", () => {
     expect(body.message).toBeTruthy();
   });
 
+  // CO-303: magic-code flow end-to-end using inline dev_code
+  test("onboard-with-email returns dev_code in test env and verify succeeds", async ({
+    request,
+  }) => {
+    const email = `devcode-e2e-${Date.now()}@test.local`;
+
+    // Step 1: request onboarding code
+    const sendRes = await request.post("/api/v1/auth/onboard-with-email", {
+      data: { email },
+    });
+    expect(sendRes.status()).toBe(202);
+    const sendBody = await sendRes.json();
+    expect(sendBody.sent).toBe(true);
+    // dev_code must be present (server runs with CO_ENV=test)
+    expect(typeof sendBody.dev_code).toBe("string");
+    expect(sendBody.dev_code).toHaveLength(6);
+
+    // Step 2: verify with the inline code
+    const verifyRes = await request.post(
+      "/api/v1/auth/onboard-with-email/verify",
+      { data: { email, code: sendBody.dev_code } },
+    );
+    expect(verifyRes.status()).toBe(200);
+    const verifyBody = await verifyRes.json();
+    expect(verifyBody.user_id).toBeTruthy();
+    expect(verifyBody.email).toBe(email);
+  });
+
+  // CO-303: GET /api/v1/auth/login-options
+  test("login-options returns expected shape", async ({ request }) => {
+    const res = await request.get("/api/v1/auth/login-options");
+    expect(res.status()).toBe(200);
+    const body = await res.json();
+    expect(body.magic_code).toBe(true);
+    // In CO_ENV=test password tab is enabled
+    expect(typeof body.password).toBe("boolean");
+    expect(typeof body.google).toBe("boolean");
+  });
+
   test("POST /api/v1/auth/logout clears the session cookie", async ({
     request,
   }) => {

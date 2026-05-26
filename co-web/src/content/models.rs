@@ -676,6 +676,11 @@ pub struct LoginRequest {
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub message: String,
+    /// CO-303: populated in non-prod envs (`is_local_or_test()`) so developers
+    /// can complete magic-code login through the UI without email delivery.
+    /// Never set in production.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dev_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

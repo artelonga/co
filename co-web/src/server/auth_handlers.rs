@@ -31,6 +31,17 @@ pub(super) struct GoogleStatusResponse {
     pub configured: bool,
 }
 
+/// CO-303: Available login methods for this deployment.
+/// The SPA calls `GET /api/v1/auth/login-options` on modal mount and renders
+/// only the supported paths (magic-code is always available; password and
+/// Google are conditional).
+#[derive(Debug, serde::Serialize)]
+pub(super) struct LoginOptionsResponse {
+    pub magic_code: bool,
+    pub password: bool,
+    pub google: bool,
+}
+
 // --- Experiment Handlers ---
 
 pub(super) async fn get_variant(
@@ -140,8 +151,13 @@ pub(super) async fn login_handler(
         tracing::warn!("Failed to send verification email to {email}: {e}");
     }
 
+    // CO-303: surface code inline in non-prod envs so localhost devs can
+    // complete login through the UI without email delivery.
+    let dev_code = state.core.config.is_local_or_test().then(|| code.clone());
+
     Ok(Json(LoginResponse {
         message: "If registered, a code has been sent to your email".into(),
+        dev_code,
     }))
 }
 
@@ -711,6 +727,25 @@ pub(super) async fn google_status_handler() -> Json<GoogleStatusResponse> {
     Json(GoogleStatusResponse { configured })
 }
 
+/// CO-303: `GET /api/v1/auth/login-options` — available authentication methods.
+///
+/// The SPA calls this on modal mount to decide which sign-in tabs to render:
+/// - `magic_code`: always true (email/code is the primary path)
+/// - `password`: true when `allows_uat_login()` (CO_ENV=uat|test) — reveals
+///   the "Admin sign-in (password)" tab in non-prod environments
+/// - `google`: true when Google OAuth env vars are configured
+pub(super) async fn login_options_handler(
+    State(state): State<AppState>,
+) -> Json<LoginOptionsResponse> {
+    let google =
+        std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
+    Json(LoginOptionsResponse {
+        magic_code: true,
+        password: state.core.config.allows_uat_login(),
+        google,
+    })
+}
+
 // --- CO-206: cross-apex SSO handover ---
 
 #[derive(serde::Deserialize)]
@@ -792,5 +827,45 @@ mod tests {
         let r = GoogleStatusResponse { configured: false };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["configured"], false);
+    }
+
+    /// CO-303: LoginOptionsResponse serializes correctly.
+    #[test]
+    fn test_login_options_response_serializes() {
+        let r = LoginOptionsResponse {
+            magic_code: true,
+            password: false,
+            google: false,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["magic_code"], true);
+        assert_eq!(json["password"], false);
+        assert_eq!(json["google"], false);
+    }
+
+    /// CO-303: dev_code is absent from LoginResponse when not set.
+    #[test]
+    fn test_login_response_dev_code_omitted_when_none() {
+        let r = crate::models::LoginResponse {
+            message: "sent".into(),
+            dev_code: None,
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["message"], "sent");
+        assert!(
+            json.get("dev_code").is_none(),
+            "dev_code must be absent in prod"
+        );
+    }
+
+    /// CO-303: dev_code is included in LoginResponse when set.
+    #[test]
+    fn test_login_response_dev_code_present() {
+        let r = crate::models::LoginResponse {
+            message: "sent".into(),
+            dev_code: Some("123456".into()),
+        };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["dev_code"], "123456");
     }
 }
