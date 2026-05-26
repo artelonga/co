@@ -728,8 +728,130 @@ fn test_admin_origin_breakdown_direct() {
     assert_eq!(test_count, 4);
 }
 
+// =========================================================================
+// CO-303 tests
+// =========================================================================
+
 // -------------------------------------------------------------------------
-// Test CO-205-8: CORS preflight on auth endpoint returns allow-credentials
+// Test CO-303-1: dev_code present in non-prod env (CO_ENV=test)
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_onboard_dev_code_present_in_test_env() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+
+    // Override config to test env.
+    let mut config = test_config(dir.path());
+    config.co_env = "test".into();
+    let storage = Storage::new(&config.data_dir);
+    let experiment = ExperimentStore::new(&config.data_dir);
+    let auth_store = crate::auth::AuthStore::new(dir.path()).unwrap();
+    let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+    let game_db_path = dir.path().join("game_test2.db");
+    let game_storage = Arc::new(
+        game_core::storage::Storage::open(&game_db_path).expect("Failed to open test game storage"),
+    );
+    let (embedding_tx, _) = crate::embedding_worker::channel();
+    let state = crate::server::AppState::new(crate::server::AppStateInner {
+        core: Arc::new(CoreState::from_storage_with_secrets(
+            storage,
+            config,
+            auth_store,
+            crate::infra::secrets::StaticSecretsProvider::new([("JWT_SECRET", "test-jwt-secret")]),
+        )),
+        realtime: Arc::new(RealtimeState {
+            doc_rooms: crate::ws::new_room_manager(),
+            sync_rooms: crate::sync_ws::new_sync_room_manager(),
+            chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+            chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+        }),
+        index: Arc::new(IndexState {
+            cache: crate::cache::CacheLayer::new(),
+            embeddings: std::sync::Arc::new(crate::embedding::EmbeddingService::disabled()),
+            embedding_tx,
+        }),
+        integrations: Arc::new(IntegrationsState {
+            mail,
+            geo: std::sync::Arc::new(crate::geo::GeoDb::disabled()),
+            plugin_registry: game_core::plugin::PluginRegistry::new(),
+            game_storage,
+            wae: crate::wae::WaeEmitter::new(None, None),
+            jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+            rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+            experiment: Mutex::new(experiment),
+            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        }),
+    });
+    let router = crate::server::build_router(state, None);
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/onboard-with-email",
+            serde_json::json!({ "email": "dev@test.co" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let body = json_body(resp.into_body()).await;
+    assert!(
+        body["dev_code"].is_string(),
+        "dev_code must be present in CO_ENV=test, got: {body}"
+    );
+    let code = body["dev_code"].as_str().unwrap();
+    assert_eq!(code.len(), 6, "dev_code must be 6 digits, got: {code}");
+}
+
+// -------------------------------------------------------------------------
+// Test CO-303-2: dev_code absent in prod env (CO_ENV=prod, default)
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_onboard_dev_code_absent_in_prod_env() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path()); // uses co_env="prod"
+
+    let resp = router
+        .oneshot(post_json(
+            "/api/v1/auth/onboard-with-email",
+            serde_json::json!({ "email": "prod@test.co" }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::ACCEPTED);
+    let body = json_body(resp.into_body()).await;
+    assert!(
+        body.get("dev_code").is_none(),
+        "dev_code must be absent in prod, got: {body}"
+    );
+}
+
+// -------------------------------------------------------------------------
+// Test CO-303-3: GET /api/v1/auth/login-options reflects env correctly
+// -------------------------------------------------------------------------
+#[tokio::test]
+async fn test_login_options_prod_no_password() {
+    isolate_env();
+    let dir = tempdir().unwrap();
+    let router = build_test_router(dir.path()); // co_env="prod"
+
+    let resp = router
+        .oneshot(
+            axum::http::Request::builder()
+                .method("GET")
+                .uri("/api/v1/auth/login-options")
+                .body(axum::body::Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = json_body(resp.into_body()).await;
+    assert_eq!(body["magic_code"], true);
+    assert_eq!(body["password"], false, "password must be false in prod");
+}
+
+// -------------------------------------------------------------------------
+// Test CO-303-4: CORS preflight on auth endpoint returns allow-credentials
 // -------------------------------------------------------------------------
 #[tokio::test]
 async fn test_cors_preflight_returns_allow_credentials() {

@@ -47,6 +47,10 @@ struct OnboardRequest {
 struct OnboardResponse {
     sent: bool,
     expires_at: String,
+    /// CO-303: populated in non-prod envs so the SPA can display the code
+    /// inline and auto-fill the code input. Never set in production.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dev_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -280,12 +284,17 @@ async fn onboard_handler(
         redact_email(&email)
     );
 
+    // CO-303: surface code inline in non-prod envs so localhost devs can
+    // complete login through the UI without email delivery.
+    let dev_code = state.core.config.is_local_or_test().then(|| code.clone());
+
     // 6. Return 202 with sent=true (even for unknown emails).
     Ok((
         StatusCode::ACCEPTED,
         axum::Json(OnboardResponse {
             sent: true,
             expires_at,
+            dev_code,
         }),
     )
         .into_response())

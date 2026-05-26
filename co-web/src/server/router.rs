@@ -26,7 +26,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/v1/auth/google/status", get(google_status_handler))
         .nest("/v1/auth", crate::oauth_google::router())
         // CO-44: compat alias — returns 404 in prod
-        .route("/v1/auth/uat-login", post(uat_login_handler));
+        .route("/v1/auth/uat-login", post(uat_login_handler))
+        // CO-303: login-options tells the SPA which auth tabs to render
+        .route("/v1/auth/login-options", get(login_options_handler));
 
     let board_public = Router::new()
         .route("/projects/{key}", get(get_project))

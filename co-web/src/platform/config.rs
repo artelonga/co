@@ -81,6 +81,61 @@ impl WebConfig {
     pub fn allows_uat_login(&self) -> bool {
         self.co_env == "uat" || self.co_env == "test"
     }
+
+    /// Returns true in every non-production environment.
+    ///
+    /// When true, magic-code login responses include the generated code inline
+    /// (CO-303: `dev_code` field) so developers can complete login without
+    /// email delivery. Production sets `CO_ENV=prod` explicitly.
+    pub fn is_local_or_test(&self) -> bool {
+        matches!(self.co_env.as_str(), "test" | "uat" | "dev" | "local" | "")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_env(env: &str) -> WebConfig {
+        WebConfig {
+            port: 3000,
+            data_dir: String::new(),
+            static_dir: String::new(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: String::new(),
+            game_db_path: None,
+            universo_dir: String::new(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: env.to_string(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        }
+    }
+
+    #[test]
+    fn is_local_or_test_non_prod_envs() {
+        for env in &["test", "uat", "dev", "local", ""] {
+            assert!(
+                config_with_env(env).is_local_or_test(),
+                "expected is_local_or_test() == true for CO_ENV={env:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_local_or_test_prod_returns_false() {
+        for env in &["prod", "production", "staging"] {
+            assert!(
+                !config_with_env(env).is_local_or_test(),
+                "expected is_local_or_test() == false for CO_ENV={env:?}"
+            );
+        }
+    }
 }
 
 impl From<Args> for WebConfig {

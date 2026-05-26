@@ -11,6 +11,9 @@ let _hideTemplateBanner = () => {};
 let _showToast = () => {};
 let _loadMeUniverses = async () => {};
 
+// CO-303: last dev_code returned by onboard-with-email (non-prod only).
+let _lastDevCode = null;
+
 export function injectLoginCallbacks(callbacks) {
     _render = callbacks.render;
     _bootAppForUniverse = callbacks.bootAppForUniverse;
@@ -180,12 +183,32 @@ export function setupLoginModal() {
                 if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); }
                 return false;
             }
+            // CO-303: capture dev_code if server is in non-prod mode.
+            _lastDevCode = null;
+            try {
+                const data = await resp.json();
+                if (data && data.dev_code) _lastDevCode = data.dev_code;
+            } catch (_) {}
             return true;
         } catch (_) {
             if (errEl) { errEl.textContent = window.t('onboard_error'); errEl.classList.remove('hidden'); }
             return false;
         } finally {
             if (btnOnboardContinue) { btnOnboardContinue.disabled = false; btnOnboardContinue.textContent = window.t('onboard_continue'); }
+        }
+    }
+
+    // CO-303: show or hide the dev-code banner and auto-fill the code input.
+    function applyDevCode() {
+        const banner = document.getElementById('dev-code-banner');
+        const codeInput = document.getElementById('onboard-code');
+        const codeValue = document.getElementById('dev-code-value');
+        if (_lastDevCode && banner && codeInput && codeValue) {
+            codeValue.textContent = _lastDevCode;
+            banner.classList.remove('hidden');
+            codeInput.value = _lastDevCode;
+        } else if (banner) {
+            banner.classList.add('hidden');
         }
     }
 
@@ -198,6 +221,8 @@ export function setupLoginModal() {
                 const sentToEl = document.getElementById('onboard-sent-to');
                 if (sentToEl) sentToEl.textContent = window.t('onboard_sent_to').replace('{email}', email);
                 showLoginStep('login-step-code');
+                // CO-303: show inline code in non-prod envs.
+                applyDevCode();
                 document.getElementById('onboard-code')?.focus();
                 startResendCooldown();
             }
@@ -254,7 +279,11 @@ export function setupLoginModal() {
     if (btnOnboardResend) {
         btnOnboardResend.addEventListener('click', async () => {
             const ok = await sendOnboardCode(_onboardEmail);
-            if (ok) startResendCooldown();
+            if (ok) {
+                // CO-303: update banner with the newly generated code.
+                applyDevCode();
+                startResendCooldown();
+            }
         });
     }
 
@@ -301,6 +330,26 @@ export function setupLoginModal() {
             document.getElementById('oauth-providers-signup')?.classList.remove('hidden');
         } catch (_) { /* leave hidden on any error */ }
     })();
+
+    // CO-303: probe login-options and reveal the admin sign-in tab in non-prod envs.
+    (async () => {
+        try {
+            const r = await fetch('/api/v1/auth/login-options');
+            if (!r.ok) return;
+            const opts = await r.json();
+            if (opts.password) {
+                document.getElementById('admin-signin-row')?.classList.remove('hidden');
+            }
+        } catch (_) { /* leave hidden on any error */ }
+    })();
+
+    const btnAdminSignin = document.getElementById('btn-admin-signin');
+    if (btnAdminSignin) {
+        btnAdminSignin.addEventListener('click', () => {
+            showLoginStep('login-step-password');
+            document.getElementById('login-usuario')?.focus();
+        });
+    }
 
     if (btnLogout) {
         btnLogout.addEventListener('click', async () => {

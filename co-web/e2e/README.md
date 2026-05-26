@@ -65,3 +65,28 @@ scripts/co-test review --fail-on-bloat
 ## Archived specs
 
 Files in `e2e/archived/` proved a feature shipped and are kept for reference. They are **not run** by CI or `scripts/co-test`. To restore a spec, move it back to `e2e/`.
+
+## Auth fixtures — migration path (CO-303)
+
+The `apiContext` fixture in `fixtures.ts` currently authenticates via
+`POST /api/v1/auth/uat-login` — a hidden backdoor only available when
+`CO_ENV=uat|test`. This covers the happy-auth path in CI but exercises a code
+path real users never touch.
+
+After CO-303, the server returns `dev_code` inline in
+`POST /api/v1/auth/onboard-with-email` responses when `CO_ENV=test`. Migrating
+fixtures to this path would give e2e full coverage on the production login flow:
+
+```ts
+// Future: higher-fidelity auth fixture (CO-303-B)
+const sendRes = await ctx.post('/api/v1/auth/onboard-with-email', {
+  data: { email: 'yuri@uat.local' },
+});
+const { dev_code } = await sendRes.json();
+await ctx.post('/api/v1/auth/onboard-with-email/verify', {
+  data: { email: 'yuri@uat.local', code: dev_code },
+});
+```
+
+This migration is tracked as **CO-303-B**. The current `uat-login` fixture is
+kept for backwards compatibility until that follow-up ships.
