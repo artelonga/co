@@ -16,7 +16,7 @@ use crate::server::AppState;
 // Router
 // ---------------------------------------------------------------------------
 
-pub fn me_notifications_router() -> Router<AppState> {
+pub fn me_notifications_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/notifications", get(list_notifications_handler))
         .route(
@@ -29,7 +29,10 @@ pub fn me_notifications_router() -> Router<AppState> {
         )
         .route("/notification-preferences", get(get_preferences_handler))
         .route("/notification-preferences", put(put_preferences_handler))
-        .layer(middleware::from_fn(crate::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ))
 }
 
 // ---------------------------------------------------------------------------

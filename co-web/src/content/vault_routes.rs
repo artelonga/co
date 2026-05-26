@@ -1915,12 +1915,15 @@ pub fn vault_router() -> Router<AppState> {
 }
 
 /// API token management routes (nested under /v1/auth, JWT-protected).
-pub fn token_router() -> Router<AppState> {
+pub fn token_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/token", post(create_api_token))
         .route("/tokens", get(list_api_tokens))
         .route("/tokens/{id}", delete(revoke_api_token))
-        .layer(axum::middleware::from_fn(crate::auth::require_auth))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ))
 }
 
 // ---------------------------------------------------------------------------

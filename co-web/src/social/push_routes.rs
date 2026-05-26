@@ -27,7 +27,7 @@ pub fn vapid_router() -> Router<AppState> {
 }
 
 /// Auth-required routes nested under /api/v1/me
-pub fn me_push_router() -> Router<AppState> {
+pub fn me_push_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/push-subscriptions", post(subscribe_handler))
         .route("/push-subscriptions", get(list_subscriptions_handler))
@@ -35,7 +35,10 @@ pub fn me_push_router() -> Router<AppState> {
             "/push-subscriptions/{id}",
             delete(delete_subscription_handler),
         )
-        .layer(middleware::from_fn(crate::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ))
 }
 
 // ---------------------------------------------------------------------------
@@ -65,8 +68,14 @@ pub struct ListSubscriptionsResponse {
 // ---------------------------------------------------------------------------
 
 /// GET /api/v1/notifications/vapid-public-key (anonymous)
-async fn vapid_public_key_handler() -> Result<impl IntoResponse, AppError> {
-    let key = std::env::var("VAPID_PUBLIC_KEY").unwrap_or_default();
+async fn vapid_public_key_handler(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let key = state
+        .core
+        .secrets
+        .get("VAPID_PUBLIC_KEY")
+        .unwrap_or_default();
     if key.is_empty() {
         return Err(AppError::NotFound("VAPID not configured".into()));
     }
@@ -157,14 +166,14 @@ mod tests {
     use crate::experiment::ExperimentStore;
     use crate::storage::Storage;
 
-    fn isolate_env() {
-        unsafe {
-            std::env::set_var("JWT_SECRET", "test-jwt-secret");
-            std::env::set_var(
+    fn test_secrets() -> std::sync::Arc<dyn crate::infra::secrets::SecretsProvider> {
+        crate::infra::secrets::StaticSecretsProvider::new([
+            ("JWT_SECRET", "test-jwt-secret"),
+            (
                 "VAPID_PUBLIC_KEY",
                 "BLxCtest_vapid_public_key_base64url_encoded",
-            );
-        }
+            ),
+        ])
     }
 
     fn test_config(dir: &std::path::Path) -> WebConfig {
@@ -201,7 +210,12 @@ mod tests {
         let (embedding_tx, _rx) = crate::embedding_worker::channel();
         let state: crate::server::AppState =
             crate::server::AppState::new(crate::server::AppStateInner {
-                core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
+                core: Arc::new(CoreState::from_storage_with_secrets(
+                    storage,
+                    config,
+                    auth_store,
+                    test_secrets(),
+                )),
                 realtime: Arc::new(RealtimeState {
                     doc_rooms: crate::ws::new_room_manager(),
                     sync_rooms: crate::sync_ws::new_sync_room_manager(),
@@ -245,7 +259,6 @@ mod tests {
     }
 
     fn make_jwt(user_id: &str) -> String {
-        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
         let (token, _) =
             crate::auth::sign_jwt(user_id, "test@example.com", "player", "test-jwt-secret")
                 .unwrap();
@@ -263,7 +276,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_vapid_endpoint_returns_configured_key() {
-        isolate_env();
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
 
@@ -292,7 +304,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_upsert_returns_201() {
-        isolate_env();
         let dir = tempdir().unwrap();
         let user_id = insert_user(dir.path(), "sub201@example.com");
         let token = make_jwt(&user_id);
@@ -332,7 +343,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_subscribe_idempotent_by_endpoint() {
-        isolate_env();
         let dir = tempdir().unwrap();
         let user_id = insert_user(dir.path(), "idem@example.com");
         let token = make_jwt(&user_id);
@@ -388,7 +398,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_delete_subscription_204() {
-        isolate_env();
         let dir = tempdir().unwrap();
         let user_id = insert_user(dir.path(), "del204@example.com");
         let token = make_jwt(&user_id);
@@ -437,7 +446,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_list_subscriptions_for_user() {
-        isolate_env();
         let dir = tempdir().unwrap();
         let user_id = insert_user(dir.path(), "listpush@example.com");
         let token = make_jwt(&user_id);

@@ -6,11 +6,17 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/v1/auth/verify", post(verify_handler))
         .route(
             "/v1/auth/me",
-            get(me_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+            get(me_handler).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::auth::require_auth,
+            )),
         )
         .route(
             "/v1/auth/stats",
-            get(user_stats_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+            get(user_stats_handler).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::auth::require_auth,
+            )),
         )
         .route("/v1/auth/logout", post(logout_handler))
         // CO-85: password-based login (any env, user must have password_hash set)
@@ -43,7 +49,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/projects/{key}/tasks/{id}/comments", post(create_comment))
         .route("/projects/{key}/tasks/bulk-update", post(bulk_update_tasks))
         .route("/projects/{key}/tasks/bulk-delete", post(bulk_delete_tasks))
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require_auth,
+        ));
 
     let experiment_api = Router::new()
         .route("/experiment/variant", get(get_variant).post(switch_variant))
@@ -82,7 +91,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/v1/games/{game_name}/stats",
             get(game_routes::get_game_stats),
         )
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            crate::auth::require_auth,
+        ));
 
     // CO-205: mirror_request() echoes the caller's Origin so `credentials: 'include'`
     // works for any safelisted origin (artelonga.com.br → co.artelonga.com.br).
@@ -105,7 +117,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             HeaderName::from_static("x-admin-override-quota"),
         ]);
 
-    let quilombo_api = crate::quilombo_routes::router();
+    let quilombo_api = crate::quilombo_routes::router(state.clone());
 
     let github_token_cache = crate::github_auth::new_token_cache();
     let allowed_admins =
@@ -131,21 +143,26 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::Extension(allowed_admins));
 
     let telemetry_public = crate::telemetry::router();
-    let universe_api = crate::universe_routes::router();
+    let universe_api = crate::universe_routes::router(state.clone());
 
-    let universe_invitation_api = crate::invitation_routes::universe_invitation_router()
-        .layer(axum::middleware::from_fn(crate::auth::require_auth));
-    let invitation_api = crate::invitation_routes::invitation_router();
+    let universe_invitation_api = crate::invitation_routes::universe_invitation_router().layer(
+        axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+    );
+    let invitation_api = crate::invitation_routes::invitation_router(state.clone());
 
-    let chat_api =
-        crate::chat::chat_router().layer(axum::middleware::from_fn(crate::auth::require_auth));
+    let chat_api = crate::chat::chat_router().layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::auth::require_auth,
+    ));
 
-    let dm_api =
-        crate::dm_routes::dm_router().layer(axum::middleware::from_fn(crate::auth::require_auth));
+    let dm_api = crate::dm_routes::dm_router().layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        crate::auth::require_auth,
+    ));
 
     let themes_api = crate::universe_routes::themes_router();
     let vault_api = crate::vault_routes::vault_router();
-    let token_api = crate::vault_routes::token_router();
+    let token_api = crate::vault_routes::token_router(state.clone());
     let entry_api = crate::entry_routes::router();
     let relation_api = crate::relation_routes::router();
     let asset_api = crate::asset_routes::asset_router();
@@ -175,7 +192,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         ));
 
     let log_drain_api = crate::log_drain_routes::router();
-    let uat_api = crate::uat_routes::router();
+    let uat_api = crate::uat_routes::router(state.clone());
     let dev_board_api = crate::dev_board::router();
     let cache_api = Router::new().route("/stats", get(cache_stats_handler));
 
@@ -225,7 +242,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-206: issues a short-lived ES256 handover token for cross-apex SSO.
         .route(
             "/auth/co-handover",
-            get(co_handover_handler).layer(axum::middleware::from_fn(crate::auth::require_auth)),
+            get(co_handover_handler).layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::auth::require_auth,
+            )),
         )
         .route("/invitations/{token}", get(serve_co_index))
         // CO-170: friendly PT/EN aliases for the timeline composite view.
@@ -256,142 +276,151 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));
 
-    let oauth_api = crate::oidc_routes::oauth_router();
+    let oauth_api = crate::oidc_routes::oauth_router(state.clone());
     let analytics_public_api = crate::analytics_public::router();
     let admin_dashboard_api = crate::admin_routes::api_router();
     let leads_public_api = crate::lead_routes::public_router();
     let leads_admin_api = crate::lead_routes::admin_router();
 
-    let mut router = Router::new()
-        .merge(ws_route)
-        .merge(sync_ws_route)
-        .merge(chat_ws_route)
-        .merge(co_routes)
-        .nest("/api", board_public)
-        .nest("/api", board_protected)
-        .nest("/api", auth_api)
-        .nest("/api", experiment_api)
-        .nest("/api", game_public)
-        .nest("/api", game_protected)
-        .nest("/api/v1/quilombo", quilombo_api)
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            crate::telemetry::telemetry_middleware,
-        ))
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            crate::quilombo_telemetria::telemetry_middleware,
-        ))
-        .layer(axum::middleware::from_fn(
-            crate::quilombo_telemetria::csrf_middleware,
-        ))
-        .layer(axum::middleware::from_fn(
-            crate::quilombo_telemetria::canonical_host_middleware,
-        ))
-        .nest("/api/v1/gestao", gestao_api)
-        .nest("/api/v1/gestao", webhook_admin)
-        // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
-        .nest("/api/v1/admin", dev_board_api)
-        .nest("/api/v1/universes", universe_api)
-        .nest("/api/v1/universes", universe_invitation_api)
-        .nest("/api/v1/invitations", invitation_api)
-        .nest("/api/v1/universes", chat_api)
-        .nest("/api/v1", dm_api)
-        .nest(
-            "/api/v1/me",
-            crate::invitation_routes::me_invitations_router(),
-        )
-        .nest(
-            "/api/v1/me",
-            crate::notification_routes::me_notifications_router(),
-        )
-        .merge(crate::push_routes::vapid_router())
-        .nest("/api/v1/me", crate::push_routes::me_push_router())
-        .route(
-            "/api/v1/me/universes",
-            axum::routing::get(crate::universe_routes::me_universes_handler)
-                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
-        )
-        .nest("/api/v1/universes", universe_content_api)
-        // CO-244: read-only SQL query — auth required, but outside writer gate
-        // since POST here is a query (not a mutation).
-        .nest(
-            "/api/v1/universes",
-            crate::query_routes::router()
-                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
-        )
-        // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
-        // enforces its own auth + path constraints.
-        .nest("/api/v1/universes", crate::proposal_routes::inline_router())
-        .nest("/api/v1/me", crate::proposal_routes::inbox_router())
-        // 1.75.0: blob CAS API — accepts JWT or long-lived API token.
-        .nest(
-            "/api/v1",
-            crate::blob_routes::router().layer(axum::middleware::from_fn_with_state(
+    let mut router =
+        Router::new()
+            .merge(ws_route)
+            .merge(sync_ws_route)
+            .merge(chat_ws_route)
+            .merge(co_routes)
+            .nest("/api", board_public)
+            .nest("/api", board_protected)
+            .nest("/api", auth_api)
+            .nest("/api", experiment_api)
+            .nest("/api", game_public)
+            .nest("/api", game_protected)
+            .nest("/api/v1/quilombo", quilombo_api)
+            .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
-                crate::auth::require_auth_with_token,
-            )),
-        )
-        .nest("/api/v1/auth", token_api)
-        .nest("/api/v1/themes", themes_api)
-        .nest("/v1/log-drains/vercel", log_drain_api)
-        .nest("/api/v1/uat", uat_api)
-        .nest("/api/v1/telemetry", telemetry_public)
-        .nest("/api/v1/admin", telemetry_admin)
-        .nest("/api/v1/ab", ab_admin)
-        .nest("/api/v1/cache", cache_api)
-        .nest("/api/v1/admin", admin_dashboard_api)
-        .nest("/api/v1/admin", crate::deployment_dashboard::router())
-        .nest("/api/v1/admin", crate::storage_dashboard::router())
-        .nest("/api/v1/me", crate::storage_dashboard::me_router())
-        .nest(
-            "/api/v1/universes",
-            crate::storage_dashboard::universe_router(),
-        )
-        .nest("/api/v1/analytics/public", analytics_public_api)
-        .nest("/api/v1", leads_public_api)
-        .nest("/api/v1/admin", leads_admin_api)
-        .nest("/api/v1/processos", crate::processos::router())
-        .nest("/oauth", oauth_api)
-        .nest("/api/v1/gestao/oauth", gestao_oauth_api)
-        .route(
-            "/.well-known/openid-configuration",
-            get(crate::oidc_routes::openid_configuration),
-        )
-        .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json))
-        // CO-260: cross-version changelog viewer API
-        .nest("/api/v1", crate::changelog_routes::router())
-        .nest(
-            "/api/v1/admin",
-            crate::changelog_routes::admin_router()
-                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
-        )
-        // CO-275: agent session endpoints
-        // GET is public (kanban lazy-loads); POST requires vault token or JWT.
-        .nest("/api/v1", crate::agent_session_routes::router())
-        .nest(
-            "/api/v1",
-            crate::agent_session_routes::authed_router().layer(
-                axum::middleware::from_fn_with_state(
+                crate::telemetry::telemetry_middleware,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::quilombo_telemetria::telemetry_middleware,
+            ))
+            .layer(axum::middleware::from_fn(
+                crate::quilombo_telemetria::csrf_middleware,
+            ))
+            .layer(axum::middleware::from_fn(
+                crate::quilombo_telemetria::canonical_host_middleware,
+            ))
+            .nest("/api/v1/gestao", gestao_api)
+            .nest("/api/v1/gestao", webhook_admin)
+            // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
+            .nest("/api/v1/admin", dev_board_api)
+            .nest("/api/v1/universes", universe_api)
+            .nest("/api/v1/universes", universe_invitation_api)
+            .nest("/api/v1/invitations", invitation_api)
+            .nest("/api/v1/universes", chat_api)
+            .nest("/api/v1", dm_api)
+            .nest(
+                "/api/v1/me",
+                crate::invitation_routes::me_invitations_router(state.clone()),
+            )
+            .nest(
+                "/api/v1/me",
+                crate::notification_routes::me_notifications_router(state.clone()),
+            )
+            .merge(crate::push_routes::vapid_router())
+            .nest(
+                "/api/v1/me",
+                crate::push_routes::me_push_router(state.clone()),
+            )
+            .route(
+                "/api/v1/me/universes",
+                axum::routing::get(crate::universe_routes::me_universes_handler).layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+                ),
+            )
+            .nest("/api/v1/universes", universe_content_api)
+            // CO-244: read-only SQL query — auth required, but outside writer gate
+            // since POST here is a query (not a mutation).
+            .nest(
+                "/api/v1/universes",
+                crate::query_routes::router().layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::auth::require_auth,
+                )),
+            )
+            // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
+            // enforces its own auth + path constraints.
+            .nest("/api/v1/universes", crate::proposal_routes::inline_router())
+            .nest("/api/v1/me", crate::proposal_routes::inbox_router())
+            // 1.75.0: blob CAS API — accepts JWT or long-lived API token.
+            .nest(
+                "/api/v1",
+                crate::blob_routes::router().layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     crate::auth::require_auth_with_token,
+                )),
+            )
+            .nest("/api/v1/auth", token_api)
+            .nest("/api/v1/themes", themes_api)
+            .nest("/v1/log-drains/vercel", log_drain_api)
+            .nest("/api/v1/uat", uat_api)
+            .nest("/api/v1/telemetry", telemetry_public)
+            .nest("/api/v1/admin", telemetry_admin)
+            .nest("/api/v1/ab", ab_admin)
+            .nest("/api/v1/cache", cache_api)
+            .nest("/api/v1/admin", admin_dashboard_api)
+            .nest("/api/v1/admin", crate::deployment_dashboard::router())
+            .nest("/api/v1/admin", crate::storage_dashboard::router())
+            .nest("/api/v1/me", crate::storage_dashboard::me_router())
+            .nest(
+                "/api/v1/universes",
+                crate::storage_dashboard::universe_router(),
+            )
+            .nest("/api/v1/analytics/public", analytics_public_api)
+            .nest("/api/v1", leads_public_api)
+            .nest("/api/v1/admin", leads_admin_api)
+            .nest("/api/v1/processos", crate::processos::router())
+            .nest("/oauth", oauth_api)
+            .nest("/api/v1/gestao/oauth", gestao_oauth_api)
+            .route(
+                "/.well-known/openid-configuration",
+                get(crate::oidc_routes::openid_configuration),
+            )
+            .route("/.well-known/jwks.json", get(crate::oidc_routes::jwks_json))
+            // CO-260: cross-version changelog viewer API
+            .nest("/api/v1", crate::changelog_routes::router())
+            .nest(
+                "/api/v1/admin",
+                crate::changelog_routes::admin_router().layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
                 ),
-            ),
-        )
-        .nest("/api/v1", crate::search_routes::router())
-        .nest(
-            "/api/v1/auth/recovery",
-            crate::recovery_routes::recovery_router()
-                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
-        )
-        .nest(
-            "/api/v1/auth",
-            crate::recovery_routes::forgot_password_router(),
-        )
-        .nest(
-            "/api/v1/auth",
-            crate::onboarding_routes::onboarding_router(),
-        );
+            )
+            // CO-275: agent session endpoints
+            // GET is public (kanban lazy-loads); POST requires vault token or JWT.
+            .nest("/api/v1", crate::agent_session_routes::router())
+            .nest(
+                "/api/v1",
+                crate::agent_session_routes::authed_router().layer(
+                    axum::middleware::from_fn_with_state(
+                        state.clone(),
+                        crate::auth::require_auth_with_token,
+                    ),
+                ),
+            )
+            .nest("/api/v1", crate::search_routes::router())
+            .nest(
+                "/api/v1/auth/recovery",
+                crate::recovery_routes::recovery_router().layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+                ),
+            )
+            .nest(
+                "/api/v1/auth",
+                crate::recovery_routes::forgot_password_router(state.clone()),
+            )
+            .nest(
+                "/api/v1/auth",
+                crate::onboarding_routes::onboarding_router(),
+            );
 
     if let Some(plugin_router) = plugin_routes {
         router = router.nest("/api/v1/plugins", plugin_router);

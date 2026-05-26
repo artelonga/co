@@ -174,7 +174,8 @@ async fn onboard_handler(
     }
 
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", &email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash =
+        crate::recovery_crypto::compute_lookup_hash(&email_normalized, &*state.core.secrets);
 
     // 2. Rate limit: 5 codes per email per hour.
     let one_hour_ago = (Utc::now() - chrono::Duration::hours(1)).to_rfc3339();
@@ -304,7 +305,8 @@ async fn onboard_verify_handler(
     }
 
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", &email);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash =
+        crate::recovery_crypto::compute_lookup_hash(&email_normalized, &*state.core.secrets);
 
     // 1. Look up active code.
     let oc = {

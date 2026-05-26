@@ -93,8 +93,17 @@ struct ErrorResponse {
 }
 
 /// Reads `JWT_SECRET` from the environment, falling back to a development default.
+///
+/// Prefer `jwt_secret_from` when a `SecretsProvider` is available (e.g., in handlers).
 pub fn jwt_secret() -> String {
     std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
+}
+
+/// Reads `JWT_SECRET` from the given provider, falling back to a development default.
+pub fn jwt_secret_from(secrets: &dyn crate::infra::secrets::SecretsProvider) -> String {
+    secrets
+        .get("JWT_SECRET")
+        .unwrap_or_else(|| "dev-secret-change-me".into())
 }
 
 // ---------------------------------------------------------------------------
@@ -348,8 +357,14 @@ pub fn extract_session_cookie(headers: &axum::http::HeaderMap) -> Option<String>
 ///
 /// JWT-only — does NOT accept API tokens. For routes that should accept API
 /// tokens too (e.g., paths a long-lived background worker hits), use
-/// `require_auth_with_token` (state-aware variant).
-pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response, Response> {
+/// `require_auth_with_token`.
+///
+/// Mount via `axum::middleware::from_fn_with_state(state.clone(), require_auth)`.
+pub async fn require_auth(
+    axum::extract::State(state): axum::extract::State<crate::server::AppState>,
+    mut req: Request<Body>,
+    next: Next,
+) -> Result<Response, Response> {
     let token = req
         .headers()
         .get("authorization")
@@ -359,7 +374,7 @@ pub async fn require_auth(mut req: Request<Body>, next: Next) -> Result<Response
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret();
+    let secret = jwt_secret_from(&*state.core.secrets);
     let validation = Validation::new(Algorithm::HS256);
 
     let token_data = decode::<Claims>(
@@ -399,7 +414,7 @@ pub async fn require_auth_with_token(
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret();
+    let secret = jwt_secret_from(&*state.core.secrets);
     let validation = Validation::new(Algorithm::HS256);
     if let Ok(data) = decode::<Claims>(
         &token,

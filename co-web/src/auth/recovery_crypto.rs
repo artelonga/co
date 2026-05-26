@@ -15,31 +15,28 @@ use chacha20poly1305::{
     aead::{Aead, AeadCore, KeyInit, OsRng},
 };
 
+use crate::infra::secrets::SecretsProvider;
+
 const ENC_CONTEXT: &[u8] = b"co-recovery-enc-v1\0";
 const LKP_CONTEXT: &[u8] = b"co-recovery-lkp-v1\0";
 
-/// 32-byte master key from env. `CO_RECOVERY_KEY` is canonical; falls back to
-/// `JWT_SECRET` so dev environments work without extra setup.
-fn master_key() -> [u8; 32] {
-    let raw = std::env::var("CO_RECOVERY_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .unwrap_or_else(|_| "dev-secret-change-me".to_string());
+fn master_key(secrets: &dyn SecretsProvider) -> [u8; 32] {
+    let raw = secrets
+        .get("CO_RECOVERY_KEY")
+        .or_else(|| secrets.get("JWT_SECRET"))
+        .unwrap_or_else(|| "dev-secret-change-me".to_string());
     *blake3::hash(raw.as_bytes()).as_bytes()
 }
 
-/// Encryption subkey — used by ChaCha20-Poly1305 to encrypt/decrypt channel values.
-fn enc_subkey() -> [u8; 32] {
-    let master = master_key();
+fn enc_subkey(secrets: &dyn SecretsProvider) -> [u8; 32] {
+    let master = master_key(secrets);
     let mut hasher = Hasher::new_keyed(&master);
     hasher.update(ENC_CONTEXT);
     *hasher.finalize().as_bytes()
 }
 
-/// Lookup subkey — used by BLAKE3 keyed hash to produce the deterministic
-/// lookup hash stored in `value_lookup_hash` (allows DB index lookups without
-/// decrypting the stored ciphertext).
-fn lkp_subkey() -> [u8; 32] {
-    let master = master_key();
+fn lkp_subkey(secrets: &dyn SecretsProvider) -> [u8; 32] {
+    let master = master_key(secrets);
     let mut hasher = Hasher::new_keyed(&master);
     hasher.update(LKP_CONTEXT);
     *hasher.finalize().as_bytes()
@@ -47,8 +44,11 @@ fn lkp_subkey() -> [u8; 32] {
 
 /// Encrypt a channel value. Returns `(ciphertext, nonce)`.
 /// Nonce is 12 random bytes; store alongside the row.
-pub fn encrypt_channel_value(plaintext: &[u8]) -> Result<(Vec<u8>, [u8; 12]), String> {
-    let key = enc_subkey();
+pub fn encrypt_channel_value(
+    plaintext: &[u8],
+    secrets: &dyn SecretsProvider,
+) -> Result<(Vec<u8>, [u8; 12]), String> {
+    let key = enc_subkey(secrets);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
     let nonce = ChaCha20Poly1305::generate_nonce(&mut OsRng);
     let ciphertext = cipher
@@ -60,8 +60,12 @@ pub fn encrypt_channel_value(plaintext: &[u8]) -> Result<(Vec<u8>, [u8; 12]), St
 }
 
 /// Decrypt a channel value. Returns the plaintext bytes.
-pub fn decrypt_channel_value(ciphertext: &[u8], nonce: &[u8; 12]) -> Result<Vec<u8>, String> {
-    let key = enc_subkey();
+pub fn decrypt_channel_value(
+    ciphertext: &[u8],
+    nonce: &[u8; 12],
+    secrets: &dyn SecretsProvider,
+) -> Result<Vec<u8>, String> {
+    let key = enc_subkey(secrets);
     let cipher = ChaCha20Poly1305::new(Key::from_slice(&key));
     let nonce = Nonce::from_slice(nonce);
     cipher
@@ -71,8 +75,8 @@ pub fn decrypt_channel_value(ciphertext: &[u8], nonce: &[u8; 12]) -> Result<Vec<
 
 /// Compute the deterministic lookup hash for a normalized channel value.
 /// Returns a 64-character hex string.
-pub fn compute_lookup_hash(normalized_value: &str) -> String {
-    let key = lkp_subkey();
+pub fn compute_lookup_hash(normalized_value: &str, secrets: &dyn SecretsProvider) -> String {
+    let key = lkp_subkey(secrets);
     let mut hasher = Hasher::new_keyed(&key);
     hasher.update(normalized_value.as_bytes());
     hasher.finalize().to_hex().to_string()
@@ -148,27 +152,28 @@ pub fn mask_channel_value(channel_type: &str, value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::infra::secrets::StaticSecretsProvider;
 
-    fn isolate_env() {
-        unsafe { std::env::set_var("CO_RECOVERY_KEY", "test-recovery-key") };
+    fn test_secrets() -> std::sync::Arc<dyn SecretsProvider> {
+        StaticSecretsProvider::new([("CO_RECOVERY_KEY", "test-recovery-key")])
     }
 
     #[test]
     fn round_trip() {
-        isolate_env();
+        let secrets = test_secrets();
         let plaintext = b"test-email@example.com";
-        let (ct, nonce) = encrypt_channel_value(plaintext).unwrap();
+        let (ct, nonce) = encrypt_channel_value(plaintext, &*secrets).unwrap();
         assert_ne!(ct, plaintext);
-        let pt = decrypt_channel_value(&ct, &nonce).unwrap();
+        let pt = decrypt_channel_value(&ct, &nonce, &*secrets).unwrap();
         assert_eq!(pt, plaintext);
     }
 
     #[test]
     fn hash_deterministic() {
-        isolate_env();
-        let h1 = compute_lookup_hash("alice@example.com");
-        let h2 = compute_lookup_hash("alice@example.com");
-        let h3 = compute_lookup_hash("bob@example.com");
+        let secrets = test_secrets();
+        let h1 = compute_lookup_hash("alice@example.com", &*secrets);
+        let h2 = compute_lookup_hash("alice@example.com", &*secrets);
+        let h3 = compute_lookup_hash("bob@example.com", &*secrets);
         assert_eq!(h1, h2);
         assert_ne!(h1, h3);
         assert_eq!(h1.len(), 64);

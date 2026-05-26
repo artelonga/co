@@ -297,7 +297,10 @@ impl Storage {
         if normalized.is_empty() {
             return Ok(());
         }
-        let lookup_hash = crate::recovery_crypto::compute_lookup_hash(&normalized);
+        let lookup_hash = crate::recovery_crypto::compute_lookup_hash(
+            &normalized,
+            &crate::infra::secrets::EnvSecretsProvider,
+        );
         let now = Utc::now().to_rfc3339();
 
         // Existing row for this (user, email)? Just bring it up to verified.
@@ -319,9 +322,11 @@ impl Storage {
             return Ok(());
         }
 
-        let (ciphertext, nonce) =
-            crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes())
-                .map_err(|e| anyhow::anyhow!("encrypt email for recovery channel: {e}"))?;
+        let (ciphertext, nonce) = crate::recovery_crypto::encrypt_channel_value(
+            normalized.as_bytes(),
+            &crate::infra::secrets::EnvSecretsProvider,
+        )
+        .map_err(|e| anyhow::anyhow!("encrypt email for recovery channel: {e}"))?;
         let id = format!("rc_{}", nanoid::nanoid!(10));
         self.conn.execute(
             "INSERT INTO user_recovery_channels \

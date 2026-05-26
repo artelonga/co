@@ -375,9 +375,12 @@ fn add_bytes_to_tar<W: std::io::Write>(
 // Router
 // ---------------------------------------------------------------------------
 
-pub fn router() -> Router<AppState> {
+pub fn router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/changes", get(changes_handler))
         .route("/export-patch", post(export_patch_handler))
-        .layer(axum::middleware::from_fn(crate::auth::require_auth))
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            crate::auth::require_auth,
+        ))
 }

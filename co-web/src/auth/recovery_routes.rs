@@ -44,7 +44,7 @@ pub fn recovery_router() -> Router<AppState> {
 }
 
 /// Public routes for forgot/reset password. No auth required.
-pub fn forgot_password_router() -> Router<AppState> {
+pub fn forgot_password_router(state: AppState) -> Router<AppState> {
     Router::new()
         .route("/forgot-password", post(forgot_password_handler))
         .route(
@@ -54,8 +54,10 @@ pub fn forgot_password_router() -> Router<AppState> {
         .route("/reset-password", post(reset_password_handler))
         .route(
             "/change-password",
-            post(change_password_handler)
-                .layer(axum::middleware::from_fn(crate::auth::require_auth)),
+            post(change_password_handler).layer(axum::middleware::from_fn_with_state(
+                state,
+                crate::auth::require_auth,
+            )),
         )
 }
 
@@ -372,10 +374,12 @@ async fn add_channel_handler(
         return Err(AppError::BadRequest("Channel value cannot be empty".into()));
     }
 
-    let lookup_hash = crate::recovery_crypto::compute_lookup_hash(&normalized);
+    let lookup_hash =
+        crate::recovery_crypto::compute_lookup_hash(&normalized, &*state.core.secrets);
 
-    let (ciphertext, nonce) = crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes())
-        .map_err(AppError::Internal)?;
+    let (ciphertext, nonce) =
+        crate::recovery_crypto::encrypt_channel_value(normalized.as_bytes(), &*state.core.secrets)
+            .map_err(AppError::Internal)?;
 
     let channel_id = {
         let storage = lock_storage(&state);
@@ -522,9 +526,12 @@ async fn list_channels_handler(
 
     let mut responses = Vec::with_capacity(channels.len());
     for ch in &channels {
-        let plaintext =
-            crate::recovery_crypto::decrypt_channel_value(&ch.value_ciphertext, &ch.value_nonce)
-                .unwrap_or_else(|_| b"???".to_vec());
+        let plaintext = crate::recovery_crypto::decrypt_channel_value(
+            &ch.value_ciphertext,
+            &ch.value_nonce,
+            &*state.core.secrets,
+        )
+        .unwrap_or_else(|_| b"???".to_vec());
         let value_str = String::from_utf8_lossy(&plaintext).to_string();
         let masked = crate::recovery_crypto::mask_channel_value(&ch.channel_type, &value_str);
         responses.push(crate::models::RecoveryChannelResponse {
@@ -651,6 +658,7 @@ async fn forgot_password_handler(
             let plaintext = crate::recovery_crypto::decrypt_channel_value(
                 &ch.value_ciphertext,
                 &ch.value_nonce,
+                &*state.core.secrets,
             )
             .unwrap_or_else(|_| b"???".to_vec());
             let value_str = String::from_utf8_lossy(&plaintext).to_string();
@@ -985,6 +993,7 @@ async fn find_user_for_recovery_pair(
     // boot-time backfill or lazy-bridge step, so this catches both paths.
     let email_lookup = crate::recovery_crypto::compute_lookup_hash(
         &crate::recovery_crypto::normalize_channel_value("email", email),
+        &*state.core.secrets,
     );
 
     let storage = state.core.storage.lock();
@@ -1073,7 +1082,8 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
 
     // Try as email through CO's verified-channel index (post-bridge users).
     let email_normalized = crate::recovery_crypto::normalize_channel_value("email", trimmed);
-    let email_hash = crate::recovery_crypto::compute_lookup_hash(&email_normalized);
+    let email_hash =
+        crate::recovery_crypto::compute_lookup_hash(&email_normalized, &*state.core.secrets);
     if let Some(ch) = storage.find_verified_channel_by_lookup_hash("email", &email_hash) {
         return Some(ch.user_id);
     }
@@ -1123,7 +1133,10 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
     for ct in ["sms", "whatsapp"] {
         let phone_normalized = crate::recovery_crypto::normalize_channel_value(ct, trimmed);
         if !phone_normalized.is_empty() {
-            let phone_hash = crate::recovery_crypto::compute_lookup_hash(&phone_normalized);
+            let phone_hash = crate::recovery_crypto::compute_lookup_hash(
+                &phone_normalized,
+                &*state.core.secrets,
+            );
             if let Some(ch) = storage.find_verified_channel_by_lookup_hash(ct, &phone_hash) {
                 return Some(ch.user_id);
             }

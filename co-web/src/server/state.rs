@@ -16,6 +16,8 @@ pub struct CoreState {
     pub config: crate::config::WebConfig,
     pub auth_store: Mutex<AuthStore>,
     pub event_bus: crate::events::Bus,
+    /// CO-295: runtime secrets provider (env-var in prod, static in tests).
+    pub secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
 }
 
 impl CoreState {
@@ -25,6 +27,22 @@ impl CoreState {
         storage: Storage,
         config: crate::config::WebConfig,
         auth_store: AuthStore,
+    ) -> Self {
+        Self::from_storage_with_secrets(
+            storage,
+            config,
+            auth_store,
+            Arc::new(crate::infra::secrets::EnvSecretsProvider),
+        )
+    }
+
+    /// Like [`from_storage`] but injects a custom `SecretsProvider` — use in
+    /// tests to supply a `StaticSecretsProvider` instead of reading env vars.
+    pub fn from_storage_with_secrets(
+        storage: Storage,
+        config: crate::config::WebConfig,
+        auth_store: AuthStore,
+        secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
     ) -> Self {
         let storage = Arc::new(parking_lot::Mutex::new(storage));
         let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
@@ -36,6 +54,7 @@ impl CoreState {
             config,
             auth_store: Mutex::new(auth_store),
             event_bus: crate::events::Bus::new(),
+            secrets,
         }
     }
 }
