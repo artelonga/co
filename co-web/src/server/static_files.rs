@@ -36,25 +36,19 @@ pub(super) async fn serve_co_index(
         return serve_variant_file(headers, uri, State(state)).await;
     }
 
-    // Pretty URLs: `/seguranca` → 307 → `/template/seguranca` when the
-    // first path segment matches a known seed page slug. Lets the
-    // marketing surface hand out short URLs without touching the
-    // universe routing. Falls through to the regular SPA serve when
-    // the slug isn't on the list.
+    // Pretty URLs: `/<slug>` → 307 → canonical universe path.
+    // Template pages (sobre, termos, …) → `/template/<slug>`.
+    // co/public pages (seguranca, licensa, …) → `/co/public/<slug>`.
+    // Falls through to the regular SPA serve when the slug isn't on either list.
     if let Some(slug) = uri.path().strip_prefix('/').and_then(|p| {
         if p.is_empty() || p.contains('/') {
             None
         } else {
             Some(p)
         }
-    }) && crate::pretty_urls::is_seed_page_slug(slug)
+    }) && let Some(target) = crate::pretty_urls::slug_redirect_target(slug)
     {
-        // 2.7.20: transparency content moved to `co::public/*` so the
-        // canonical landing is `/co/public/<slug>`. Anon visitors only
-        // see entries under `public/` in `co`; the rest of the dev
-        // board is hidden until they log in.
-        return axum::response::Redirect::temporary(&format!("/co/public/{}", slug))
-            .into_response();
+        return axum::response::Redirect::temporary(&target).into_response();
     }
 
     let variant = extract_variant(&headers, &state.core.config);

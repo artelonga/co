@@ -75,7 +75,7 @@ Faremos esforços razoáveis para manter o serviço operacional. Manutenções p
 
 ## 8. Privacidade e segurança
 
-- O tratamento de dados pessoais segue a [Política de Privacidade](/co?page=privacidade).
+- O tratamento de dados pessoais segue a [Política de Privacidade](/privacidade).
 - Conteúdo é protegido por TLS em trânsito e controle de acesso por universo.
 - **Cifragem dos corpos em repouso ainda não está implementada** (roadmap v3.0 — CO-86). Operadores da instância gerenciada conseguem tecnicamente acessar conteúdo no servidor. Para conteúdo sensível, use auto-hospedagem.
 

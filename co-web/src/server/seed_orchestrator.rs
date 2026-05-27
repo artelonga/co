@@ -37,12 +37,6 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // Always reseed yggdrasil content pages so updates land for
     // existing installs (mirrors reseed_template_content_pages).
     storage.reseed_yggdrasil_content_pages();
-    // 2.7.20: transparency content (seguranca, licensa, infra*, …)
-    // moved from `template::content/*` to `co::public/*`. Reseed
-    // unconditionally on every boot; one-time cleanup removes the
-    // stale template copies. After cleanup runs successfully the
-    // moved-pages list is a no-op.
-    storage.reseed_co_public_pages();
     storage.cleanup_template_moved_pages();
     // CO-142 Phase C: hard-delete deprecated co-dev / co-experience rows on every boot.
     storage.delete_deprecated_universes();
@@ -72,6 +66,16 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // Seed admin-owned content universes (artelonga, rfq, co) so they
     // appear in the sidebar without manual creation after every deploy.
     storage.seed_admin_content_universes();
+    // CO-305: reseed co::public/* AFTER seed_admin_content_universes creates
+    // the `co` universe row. On clean boot, the `co` universe doesn't exist
+    // when this ran earlier (before line 44), so reseed_co_public_pages()
+    // returned early and left CHANGELOG.md / public/index.md / seguranca etc.
+    // unseeded — causing /co/changelog and /co/public/ to 404 in CI.
+    // 2.7.20: transparency content (seguranca, licensa, infra*, …)
+    // moved from `template::content/*` to `co::public/*`. Reseed
+    // unconditionally on every boot; one-time cleanup above removes the
+    // stale template copies.
+    storage.reseed_co_public_pages();
     // CO-279: backfill a default project for every non-template universe
     // that has zero projects. Closes the "no project found" dead-end on
     // existing universes (yuri's private universe, sister-deployables, etc.)

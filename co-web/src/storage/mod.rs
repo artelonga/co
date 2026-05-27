@@ -47,6 +47,8 @@ const SEED_INFRA_CO_MD: &str = include_str!("../../seed/co/public/infra-co.md");
 // public seed. Users get those docs by subscribing to the universe.
 const SEED_TX_LOG_MD: &str = include_str!("../../seed/co/public/transaction-log.md");
 const SEED_CONTA_MD: &str = include_str!("../../seed/co/public/conta-e-mensagens.md");
+const SEED_CO_PUBLIC_INDEX_MD: &str = include_str!("../../seed/co/public/index.md");
+const SEED_CO_CHANGELOG_MD: &str = include_str!("../../seed/co/CHANGELOG.md");
 const SEED_CO_INDEX_MD: &str = include_str!("../../seed/co/index.md");
 const SEED_YGGDRASIL_INDEX_MD: &str = include_str!("../../seed/yggdrasil/index.md");
 

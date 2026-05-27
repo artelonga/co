@@ -35,7 +35,7 @@ test.describe("Changelog API", () => {
     const { versions } = await res.json();
     for (const v of versions) {
       const hasFeat = (v.entries ?? []).some(
-        (e: { type: string }) => e.type === "feat",
+        (e: { entry_type: string }) => e.entry_type === "feat",
       );
       if (v.entries?.length > 0) expect(hasFeat).toBe(true);
     }
