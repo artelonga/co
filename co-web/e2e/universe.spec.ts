@@ -3,15 +3,18 @@
  *
  * Covers:
  *   - Clicking "Criar universo" → filling name/slug → submitting form
- *   - Redirect to /co/:slug after creation
+ *   - Redirect to /<slug> after creation (SPA pushState, not /co/:slug)
  *   - Resulting board is editable (not read-only like the template)
+ *
+ * Note (CO-304): template banner lives at "/" (template universe). "/co" boots
+ * the co dev board which has no template banner — navigate to "/" instead.
  */
 
 import { test, expect } from "./fixtures";
 
 test.describe("Universe creation: submit form → redirect → editable board", () => {
   test("clicking 'Criar universo' opens the criar modal", async ({ page }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     await expect(page.locator("#template-banner")).toBeVisible();
 
     await page.locator("#btn-criar-universo").click();
@@ -23,7 +26,7 @@ test.describe("Universe creation: submit form → redirect → editable board", 
   });
 
   test("typing a name auto-fills the slug input", async ({ page }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-criar-universo").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
 
@@ -38,8 +41,8 @@ test.describe("Universe creation: submit form → redirect → editable board", 
     expect(slugValue).toMatch(/^[a-z0-9-]+$/);
   });
 
-  test("submitting the criar form redirects to /co/:slug", async ({ page }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+  test("submitting the criar form redirects to /<slug>", async ({ page }) => {
+    await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-criar-universo").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
 
@@ -49,15 +52,15 @@ test.describe("Universe creation: submit form → redirect → editable board", 
 
     await page.locator("#criar-form").dispatchEvent("submit");
 
-    // Should redirect to the new universe URL
-    await page.waitForURL(/\/co\/[a-z0-9-]+/, { timeout: 15_000 });
-    expect(page.url()).toContain("/co/");
+    // SPA uses pushState(slug) → URL becomes /<slug>, not /co/<slug>
+    await page.waitForURL(`**/${slug}`, { timeout: 15_000 });
+    expect(page.url()).toContain(`/${slug}`);
   });
 
   test("after universe creation the board is editable: '+ Nova Tarefa' button visible", async ({
     page,
   }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-criar-universo").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
 
@@ -66,7 +69,7 @@ test.describe("Universe creation: submit form → redirect → editable board", 
     await page.locator("#criar-slug").fill(slug);
     await page.locator("#criar-form").dispatchEvent("submit");
 
-    await page.waitForURL(/\/co\/[a-z0-9-]+/, { timeout: 15_000 });
+    await page.waitForURL(`**/${slug}`, { timeout: 15_000 });
 
     // In an owned universe the New Task button should appear
     const newBtn = page.locator("#btn-new-task");
@@ -76,7 +79,7 @@ test.describe("Universe creation: submit form → redirect → editable board", 
   test("after universe creation the template banner is NOT shown (board is owned)", async ({
     page,
   }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-criar-universo").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
 
@@ -85,7 +88,7 @@ test.describe("Universe creation: submit form → redirect → editable board", 
     await page.locator("#criar-slug").fill(slug);
     await page.locator("#criar-form").dispatchEvent("submit");
 
-    await page.waitForURL(/\/co\/[a-z0-9-]+/, { timeout: 15_000 });
+    await page.waitForURL(`**/${slug}`, { timeout: 15_000 });
 
     // Template banner should be hidden on the owned universe
     const banner = page.locator("#template-banner");
@@ -95,7 +98,7 @@ test.describe("Universe creation: submit form → redirect → editable board", 
   test("cancelling the criar modal closes it without navigating", async ({
     page,
   }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+    await page.goto("/", { waitUntil: "networkidle" });
     const initialUrl = page.url();
 
     await page.locator("#btn-criar-universo").click();

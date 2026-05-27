@@ -77,9 +77,7 @@ test.describe("Drag: move task card between kanban columns", () => {
     const card = page.locator(`.task-card[data-task-id="${task.id}"]`);
     await expect(card).toBeVisible();
 
-    const doneCol = page
-      .locator('.kanban-column[data-status="done"]')
-      .or(page.locator(".kanban-column").filter({ hasText: "Done" }));
+    const doneCol = page.locator('.kanban-column[data-status="done"]');
 
     await card.dragTo(doneCol);
 

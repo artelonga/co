@@ -66,6 +66,67 @@ scripts/co-test review --fail-on-bloat
 
 Files in `e2e/archived/` proved a feature shipped and are kept for reference. They are **not run** by CI or `scripts/co-test`. To restore a spec, move it back to `e2e/`.
 
+## Selector conventions (CO-304)
+
+### Always prefer `data-testid` over class selectors
+
+Class names like `.empty-state` are reused across views for loading placeholders,
+"no items" messages, and error states. Playwright finds the wrong element or the
+first of N matches and times out.
+
+**Rule: if a class selector would match more than one element, add a `data-testid`
+attribute to the SPA template and use `[data-testid="..."]` in tests instead.**
+
+```ts
+// Bad — .empty-state matches loading placeholders, kanban empties, etc.
+await expect(page.locator(".empty-state")).toBeVisible();
+
+// Good — uniquely identifies the "no project selected" initial state
+await expect(page.locator('[data-testid="no-project-selected"]')).toBeVisible();
+```
+
+Existing `data-testid` attributes in the SPA:
+
+| `data-testid` value | Element | When visible |
+|---|---|---|
+| `no-project-selected` | `<div class="empty-state">` in `#content` | Before any project is clicked |
+| `content-loading` | `<div id="loading-spinner">` | While tasks are loading |
+
+### Use `waitForBoardReady` before interacting with board content
+
+`waitForBoardReady(page)` (in `helpers.ts`) combines `networkidle` + kanban DOM
+visibility. Call it after `selectProject`:
+
+```ts
+import { waitForBoardReady } from "./helpers";
+
+test("my board test", async ({ page, seedProject }) => {
+  await navigateTo(page, "/");
+  await selectProject(page, seedProject.key);  // internally calls waitForBoardReady
+  // board is now ready — safe to query .task-card, drag, etc.
+});
+```
+
+`selectProject` already calls `waitForBoardReady` internally, so most tests
+only need `selectProject`. Call `waitForBoardReady` directly if you navigate
+to a pre-selected project URL.
+
+### Seed required state explicitly — never rely on dirty data
+
+Tests that assume "a project with tasks exists" will pass on a dirty local DB
+and fail in CI's clean boot. Use the `seedProject` fixture with `seedTasks`:
+
+```ts
+test("shows tasks in todo column", async ({ page, seedProject }) => {
+  await seedProject.seedTasks([
+    { title: "My task", status: "todo" },
+  ]);
+  await navigateTo(page, "/");
+  await selectProject(page, seedProject.key);
+  await expect(page.locator(".task-card")).toBeVisible();
+});
+```
+
 ## Auth fixtures — migration path (CO-303)
 
 The `apiContext` fixture in `fixtures.ts` currently authenticates via
