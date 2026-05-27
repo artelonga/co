@@ -18,8 +18,10 @@ test.describe("Auth API contract", () => {
   test("POST /v1/auth/login returns 200 (never reveals user existence)", async ({
     request,
   }) => {
+    // Unique email per run so repeated test runs don't hit the per-address rate limit.
+    const email = `ratelimit-probe-${Date.now()}@notregistered.example.com`;
     const res = await request.post("/api/v1/auth/login", {
-      data: { email: "nobody@notregistered.example.com" },
+      data: { email },
     });
     expect(res.status()).toBe(200);
   });

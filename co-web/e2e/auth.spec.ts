@@ -13,8 +13,10 @@ test.describe("Auth API", () => {
   test("POST /api/v1/auth/login returns 200 for any email", async ({
     request,
   }) => {
+    // Unique email per run so repeated test runs don't hit the per-address rate limit.
+    const email = `ratelimit-probe-${Date.now()}@notregistered.example.com`;
     const res = await request.post("/api/v1/auth/login", {
-      data: { email: "nobody@notregistered.example.com" },
+      data: { email },
     });
     expect(res.status()).toBe(200);
     const body = await res.json();
@@ -81,9 +83,9 @@ test.describe("Auth API", () => {
 // ─── Anonymous ownership ──────────────────────────────────────────────────────
 
 test.describe("Anonymous ownership", () => {
-  test("clone returns owner_id with anon- prefix", async ({ apiContext }) => {
+  test("clone returns owner_id with anon- prefix", async ({ anonContext }) => {
     const slug = `anon-${Date.now()}`;
-    const res = await apiContext.post("/api/v1/universes/template/clone", {
+    const res = await anonContext.post("/api/v1/universes/template/clone", {
       data: { key: slug, name: "Anon Test", description: "" },
     });
     expect([200, 201]).toContain(res.status());
@@ -92,10 +94,10 @@ test.describe("Anonymous ownership", () => {
   });
 
   test("clone returns a session cookie for the anonymous owner", async ({
-    apiContext,
+    anonContext,
   }) => {
     const slug = `anon-cookie-${Date.now()}`;
-    const res = await apiContext.post("/api/v1/universes/template/clone", {
+    const res = await anonContext.post("/api/v1/universes/template/clone", {
       data: { key: slug, name: "Cookie Test", description: "" },
     });
     expect([200, 201]).toContain(res.status());
