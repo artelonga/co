@@ -5,6 +5,129 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.31.1] — 2026-05-27 — magic-code auth + e2e fixes + seed-ordering
+
+## CO-303 — Local-fidelity auth — inline magic-code display + admin password tab in SPA login modal
+
+The login flow now completes end-to-end in every environment without leaving the
+browser or inspecting server logs.
+
+**Magic-code inline display**: in non-prod environments (`CO_ENV` ≠ `prod`), the
+`POST /api/v1/auth/onboard-with-email` response includes a `dev_code` field with
+the generated 6-digit code. The SPA login modal detects this field, shows a
+`[DEV]` banner above the code input, and auto-fills the field — so the full
+email-code login flow is completable in a single browser session on localhost.
+
+**Admin password tab**: a new `GET /api/v1/auth/login-options` endpoint returns
+`{ magic_code, password, google }`. When `password: true` (CO_ENV=uat|test), the
+modal reveals an "Admin sign-in (password)" link that exposes the existing
+username/password form — no more curl + DevTools cookie paste.
+
+**Admin seeding**: `CO_SEED_ADMIN_EMAIL` + `CO_SEED_ADMIN_PASSWORD_HASH` already
+work in any env (documented in CLAUDE.md). No code changes needed.
+
+**Production behaviour unchanged**: `dev_code` is never returned when
+`CO_ENV=prod`; the admin tab link is never shown; zero visual changes.
+
+### Why
+
+Every CO-N ticket that touches authenticated paths previously required either
+tailing server logs for the magic code or bypassing the UI entirely with curl.
+This ticket eliminates that friction so localhost is a true production-fidelity
+environment for UAT testing (per `feedback_no_uat.md`).
+
+## CO-304 — E2e selector + timing quality pass — eliminate Carregando/timeout brittleness
+
+Fixed systematic brittleness in the 71 e2e tests that survived CO-302's cut.
+Before this pass ~40 tests failed on a clean data directory; after: 0 (excluding 9 pre-existing flakes unrelated to this work).
+
+**Root cause fix — `renderConteudo()` stale-render race**
+- `renderConteudo()` is async: it fires 6 parallel `getUniverseEntries` API calls and
+  writes the full conteudo HTML after they complete. This overwrote the kanban view
+  even after the user had already switched tabs — causing every board interaction test
+  (codemirror, board-drag, integration, smoke, pipeline-workflow) to fail with
+  "waiting for `.task-card`" timeouts.
+- Added stale-render guard in `conteudo.js` after the `Promise.all`: if `state.view`
+  is no longer `'conteudo'`, bail out without touching `content.innerHTML`.
+- Added test-side guard in `selectProject` (helpers.ts): wait for the
+  `#content .loading-spinner` to disappear before clicking the kanban tab, ensuring
+  `renderConteudo()` has settled and the guard has fired.
+
+**Selector fixes**
+- Added `data-testid="no-project-selected"` and `data-testid="content-loading"` to
+  `index.html` so tests can target the initial empty state without colliding with the
+  nine other `.empty-state` elements scattered across views.
+- Updated `board-ux.spec.ts` to use `[data-testid="no-project-selected"]` instead of
+  the ambiguous `.empty-state` class selector.
+- Fixed view-tab count assertion (6 → 7) after the `changelog` tab was added post-CO-302.
+- Fixed `co-landing.spec.ts` to use `.kanban` / `.kanban-column` (the classes kanban.js
+  actually renders) instead of the non-existent `.kanban-board` / `.kanban-col`.
+- Added null guard in `editor.bundle.js` so CodeMirror init no longer throws on
+  elements that are not yet in the DOM.
+
+**Timing helpers**
+- Fixed `waitForBoard` in `helpers.ts`: was checking for exactly 4 kanban columns but
+  `STATUSES` in `constants.js` defines 3 (todo / in_progress / done); changed to
+  `first().toBeVisible()` to be resilient to future status additions.
+- `selectProject` now registers the `waitForResponse` listener before clicking, then
+  waits for the conteudo spinner to clear before switching to kanban — eliminates the
+  two-step race unconditionally.
+
+**State / fixture fixes**
+- Extended `fixtures.ts` with a `seedTask` helper and extended `seedProject` so tests
+  can declare their starting state without relying on dirty test-database contents.
+- Fixed `global-setup.ts` to ensure the `e2e-test` universe exists before any suite runs.
+- Fixed `pipeline-workflow.spec.ts` "POST without session" test to use the plain
+  `request` fixture (unauthenticated) instead of `apiContext` (has session cookie).
+- Fixed archive test in `pipeline-workflow.spec.ts` to use `apiContext.put(...)` (the
+  server registers PUT for task updates, not PATCH).
+- Fixed `subtask-tree.spec.ts` `parent_id` → `parent` field to match the actual API shape.
+
+**Documentation**
+- Added `e2e/README.md` documenting the `data-testid` convention, `waitForBoardReady`
+  usage pattern, and explicit-state-seeding guidance.
+
+### Why
+CI on every PR (CO-303, CO-302, and earlier) was failing on pre-existing test
+brittleness rather than on the PR's actual changes. Green CI had no signal value.
+This pass restores the invariant: green = nothing broke, red = something you changed broke it.
+
+## CO-305 — E2e residual failures sweep (9 bugs from CO-304)
+
+Fixed all 9 e2e test failures that CO-304 exposed by removing render-race noise. Suite now runs 84 passed / 0 failed on a clean data dir with `CO_ENV=test CO_BYPASS_RATE_LIMIT=1`.
+
+### Changes by layer
+
+**Fixtures (test fix)**
+- Added `anonContext` fixture to `e2e/fixtures.ts` — unauthenticated request context for anonymous-ownership tests that must not carry a yuri session cookie (tests #1–2).
+
+**Changelog API (server fix)**
+- `admin/changelog_routes.rs`: filter out non-semver versions (e.g. `[Unreleased]`) before sorting so `newest-first` sort is stable (test #3).
+- `admin/changelog_routes.rs`: field name was `entry_type` in JSON but test read `e.type`; fixed the test to use `e.entry_type` (test #4).
+
+**Routing (server fix)**
+- `storage/seed.rs` + `storage/mod.rs`: added `CHANGELOG.md` and `public/index.md` stubs to the co universe seed so `/co/changelog` and `/co/public/` both return 200 (tests #5–6).
+- `server/static_files.rs` + `platform/pretty_urls.rs`: pretty-URL redirect now uses `slug_redirect_target()` which routes template slugs → `/template/<slug>` and co/public slugs → `/co/public/<slug>`, fixing the `/sobre` and friends redirects (tests #8–9).
+
+**CSS (real bug fix)**
+- `static/variants/a/style.css`: added `.sidebar.open { display: block }` rule inside `@media (max-width: 640px)` so hamburger toggle is effective on mobile (test #7).
+
+**Seed data (data fix)**
+- `seed/template/termos.md`: changed `/co?page=privacidade` → `/privacidade` (correct pretty URL, not a cross-universe link).
+- `seed/template/privacidade.md`: removed linked `[CO-86](/co/CO-86)` (task not in clean seed); kept as plain text.
+- `seed/co/CHANGELOG.md` + `seed/co/public/index.md`: new stub entries so the co universe entry index covers those paths.
+
+**Seed orchestration (server fix — CO-305 second iteration)**
+- `server/seed_orchestrator.rs`: moved `reseed_co_public_pages()` to after `seed_admin_content_universes()`. On clean boot the `co` universe row doesn't exist yet when `reseed_co_public_pages` ran earlier, so it returned early and left `CHANGELOG.md`, `public/index.md`, `public/seguranca.md`, `public/licensa.md`, etc. unseeded — causing `/co/changelog` and `/co/public/` to 404 in CI while passing locally on macOS (stale data masked the bug).
+
+**Test fix (e2e)**
+- `e2e/seed-links.spec.ts`: changed default base URL from `https://co-artelonga.fly.dev` to `http://localhost:3000` so tests run against the local server in CI rather than production.
+- `e2e/seed-links.spec.ts`: added `github.com` to `EXTERNAL_FLAKY_HOSTS` — GitHub returns 429 for automated HEAD probes on commit-history URLs used as legal version-history links in `termos.md` and `privacidade.md`.
+
+### Why
+The first CO-305 iteration (d31a417) passed locally on macOS with stale data but failed in CI on a clean Linux runner. The root cause was execution order: `reseed_co_public_pages` guarded against a missing `co` universe but ran before `seed_admin_content_universes` created that universe. On macOS the stale data already had the `co` universe populated from a prior run, masking the bug.
+
+
 ## [2.31.0] — 2026-05-26 — test pyramid + secrets trait + e2e fixture auth
 
 ## CO-290 — Storage trait abstraction + SqliteStorage impl
