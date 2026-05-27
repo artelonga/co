@@ -2371,6 +2371,27 @@ body {
 @media (max-width: 640px) {
     .app { grid-template-columns: 1fr; }
     .sidebar { display: none; }
+    .sidebar.open {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 280px;
+        height: 100%;
+        z-index: 100;
+        overflow-y: auto;
+    }
+    .sidebar-overlay { display: none; }
+    .sidebar-overlay.visible {
+        display: block;
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 99;
+    }
     .kanban { grid-template-columns: 1fr; }
     .header { padding: 10px 12px; gap: 6px; }
     .header-left { flex: 1 0 100%; }

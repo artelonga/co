@@ -10,6 +10,12 @@ import { test, expect, request } from "@playwright/test";
  *   BASE_URL=https://co-artelonga.fly.dev npx playwright test e2e/seed-links.spec.ts
  */
 
+// Template-universe pages only. Transparency/security pages (seguranca-*,
+// licensa, renderers, infra-*) live in co::public/* since 2.7.20 and are
+// NOT accessible via /api/v1/universes/template/entries/content/<slug>.md.
+// Cross-repo infra pages (infra-yggdrasil, infra-quilomboaraucaria,
+// infra-rfq-gateway) belong in their respective universes and are
+// intentionally absent from the template seed.
 const SEED_PAGE_SLUGS = [
   "sobre",
   "termos",
@@ -18,17 +24,6 @@ const SEED_PAGE_SLUGS = [
   "linhas-do-tempo",
   "co-plataforma",
   "guia",
-  "seguranca",
-  "seguranca-dependencias",
-  "seguranca-cenarios",
-  "seguranca-vapid",
-  "licensa",
-  "renderers",
-  "infra",
-  "infra-co",
-  "infra-yggdrasil",
-  "infra-quilomboaraucaria",
-  "infra-rfq-gateway",
 ];
 
 const KNOWN_UNIVERSE_SLUGS = ["template", "co", "yggdrasil", "tempo", "humanity", "universo"];
@@ -155,8 +150,19 @@ test.describe("Seed page links resolve", () => {
           target = pathPart;
         }
 
-        const res = await ctx.get(target, { maxRedirects: 5 });
-        const code = res.status();
+        let res = await ctx.get(target, { maxRedirects: 5 });
+        let code = res.status();
+        // SPA URLs like /co/public/licensa don't carry a .md suffix, but the
+        // entries REST API requires it. Try .md then content/.md as fallbacks.
+        if ((code < 200 || code >= 400) && !target.endsWith(".md")) {
+          const r2 = await ctx.get(`${target}.md`, { maxRedirects: 5 });
+          if (r2.status() >= 200 && r2.status() < 400) code = r2.status();
+        }
+        if ((code < 200 || code >= 400) && target.includes("/entries/") && !target.includes("/entries/content/")) {
+          const withContent = target.replace("/entries/", "/entries/content/") + ".md";
+          const r3 = await ctx.get(withContent, { maxRedirects: 5 });
+          if (r3.status() >= 200 && r3.status() < 400) code = r3.status();
+        }
         if (code < 200 || code >= 400) {
           failures.push(`[${ref.source}] internal ${ref.url} → ${target} → ${code}`);
         }
@@ -233,7 +239,7 @@ test.describe("Seed page links resolve", () => {
     await ctx.dispose();
   });
 
-  test("template tutorial project is keyed TUTORIAL, not CO", async () => {
+  test("template tutorial project is keyed CO (CO-279 revert)", async () => {
     const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
     const ctx = await request.newContext({ baseURL: base });
 
@@ -243,20 +249,21 @@ test.describe("Seed page links resolve", () => {
     const projects = await res.json();
     expect(Array.isArray(projects), "projects should be an array").toBe(true);
 
-    const tutorialProject = projects.find(
-      (p: { key: string }) => p.key === "TUTORIAL",
-    );
-    expect(
-      tutorialProject,
-      "template should have a project keyed TUTORIAL",
-    ).toBeDefined();
-
+    // CO-279: canonical key is CO (CO-254 briefly renamed to TUTORIAL, reverted).
     const coProject = projects.find(
       (p: { key: string }) => p.key === "CO",
     );
     expect(
       coProject,
-      "template should NOT have a project keyed CO (CO belongs to the co universe)",
+      "template should have a project keyed CO",
+    ).toBeDefined();
+
+    const tutorialProject = projects.find(
+      (p: { key: string }) => p.key === "TUTORIAL",
+    );
+    expect(
+      tutorialProject,
+      "template should NOT have a stale TUTORIAL project (cleaned up by CO-279)",
     ).toBeUndefined();
 
     await ctx.dispose();

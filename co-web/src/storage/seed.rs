@@ -8,11 +8,12 @@ use super::Storage;
 use super::schema::{seed_page_body, seed_page_frontmatter, split_frontmatter, upsert_entry_row};
 
 use super::{
-    SEED_CO_INDEX_MD, SEED_CO_PLATAFORMA_MD, SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD,
-    SEED_INFRA_CO_MD, SEED_INFRA_MD, SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD,
-    SEED_RENDERERS_MD, SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD,
-    SEED_SEGURANCA_DEPS_MD, SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD,
-    SEED_TEMPLATE_INDEX_MD, SEED_TERMOS_MD, SEED_TX_LOG_MD,
+    SEED_CO_CHANGELOG_MD, SEED_CO_INDEX_MD, SEED_CO_PLATAFORMA_MD, SEED_CO_PUBLIC_INDEX_MD,
+    SEED_CONTA_MD, SEED_DADOS_RASTREADOS_MD, SEED_GUIA_MD, SEED_INFRA_CO_MD, SEED_INFRA_MD,
+    SEED_LICENSA_MD, SEED_LINHAS_DO_TEMPO_MD, SEED_PRIVACIDADE_MD, SEED_RENDERERS_MD,
+    SEED_SEGURANCA_CENARIOS_MD, SEED_SEGURANCA_CRIPTO_MD, SEED_SEGURANCA_DEPS_MD,
+    SEED_SEGURANCA_MD, SEED_SEGURANCA_VAPID_MD, SEED_SOBRE_MD, SEED_TEMPLATE_INDEX_MD,
+    SEED_TERMOS_MD, SEED_TX_LOG_MD,
 };
 
 impl Storage {
@@ -333,6 +334,12 @@ impl Storage {
 
         for (path, md) in [
             ("index.md", SEED_CO_INDEX_MD),
+            // CO-305: CHANGELOG.md stub — lets /co/changelog resolve to 200 HTML
+            // (serve_deep_link checks for CHANGELOG.md in the entry index).
+            ("CHANGELOG.md", SEED_CO_CHANGELOG_MD),
+            // CO-305: public/index.md — lets /co/public/ (trailing slash) resolve
+            // to 200 HTML via the folder-level index.md candidate in entry_exists_for_subpath.
+            ("public/index.md", SEED_CO_PUBLIC_INDEX_MD),
             ("public/seguranca.md", SEED_SEGURANCA_MD),
             ("public/seguranca-dependencias.md", SEED_SEGURANCA_DEPS_MD),
             ("public/seguranca-cenarios.md", SEED_SEGURANCA_CENARIOS_MD),

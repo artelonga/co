@@ -363,6 +363,10 @@ pub async fn get_changelog(
         versions.retain(|v| !v.entries.is_empty());
     }
 
+    // Drop non-semver entries like [Unreleased] — they have no numeric version
+    // to sort against and would sort arbitrarily (string compare vs semver).
+    versions.retain(|v| parse_semver(&v.version).is_some());
+
     // Always sort versions newest-first
     versions.sort_by(|a, b| semver_cmp(&b.version, &a.version));
 

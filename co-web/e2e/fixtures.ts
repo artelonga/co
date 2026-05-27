@@ -20,6 +20,8 @@ export interface SeedProject {
 export interface TestFixtures {
   /** Pre-configured API context for direct REST calls */
   apiContext: APIRequestContext;
+  /** Unauthenticated API context — no session cookie, no login */
+  anonContext: APIRequestContext;
   /** Current UI variant (a-h), defaults to "a" */
   variant: string;
   /** A fresh test project created via API before each test.
@@ -50,6 +52,16 @@ export const test = base.extend<TestFixtures>({
           `Server must boot with CO_ENV=test or CO_ENV=uat to enable this path.`,
       );
     }
+    await use(ctx);
+    await ctx.dispose();
+  },
+
+  /** Unauthenticated API context — fresh context with no session cookie.
+   *  Use this for tests that verify anonymous/unauthenticated behaviour
+   *  so they are not affected by the session cookie set by apiContext. */
+  anonContext: async ({ playwright }, use) => {
+    const baseURL = process.env.BASE_URL ?? "http://localhost:3000";
+    const ctx = await playwright.request.newContext({ baseURL });
     await use(ctx);
     await ctx.dispose();
   },

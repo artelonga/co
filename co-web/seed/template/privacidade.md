@@ -50,7 +50,7 @@ Detalhe exaustivo em [Dados Rastreados](/template/dados-rastreados).
 - **Universos privados retornam 404** para quem não tem permissão (CO-49).
 - **Sem terceiros embedados** — sem CDN, sem Google Analytics, sem Facebook Pixel, sem Hotjar, sem Sentry remoto.
 
-**Honestidade sobre cifragem em repouso:** corpos de notas/tarefas estão em texto puro no SQLite hoje. O operador da instância tecnicamente consegue ler conteúdo se acessar o servidor. Roadmap [CO-86](/co/CO-86) implementa cifragem ChaCha20-Poly1305 derivada da sua senha — até lá, conteúdo sensível deve ir em auto-hospedagem.
+**Honestidade sobre cifragem em repouso:** corpos de notas/tarefas estão em texto puro no SQLite hoje. O operador da instância tecnicamente consegue ler conteúdo se acessar o servidor. Roadmap CO-86 implementa cifragem ChaCha20-Poly1305 derivada da sua senha — até lá, conteúdo sensível deve ir em auto-hospedagem.
 
 ## 4. Cookies
 
