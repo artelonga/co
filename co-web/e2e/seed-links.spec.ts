@@ -36,6 +36,9 @@ const EXTERNAL_FLAKY_HOSTS = new Set<string>([
   // GitHub returns 429 for automated HEAD probes on commit-history URLs
   // (used in termos.md and privacidade.md as legal version-history links).
   "github.com",
+  // Fly.io edge returns TLS alert 80 (internal error) on HEAD probes
+  // from GitHub Actions runner IP ranges — link is valid for real browsers.
+  "artelonga.com.br",
 ]);
 
 function extractMarkdownLinks(body: string): string[] {
