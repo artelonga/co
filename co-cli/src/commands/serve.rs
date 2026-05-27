@@ -20,7 +20,7 @@ pub fn run(port: u16, data_dir: String, public: bool, open: bool) {
         default_variant: "a".to_string(),
         experiments: true,
         plugins_dir: "plugins".to_string(),
-        game_db_path: None,
+        game_db_path: std::env::var("GAME_DB_PATH").ok(),
         universo_dir,
         gestao_github_admins: vec![],
         universe_key: None,
