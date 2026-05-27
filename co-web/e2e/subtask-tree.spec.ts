@@ -7,7 +7,6 @@ import { test, expect } from "./fixtures";
 import {
   navigateTo,
   selectProject,
-  waitForBoard,
   waitForTable,
   createTask,
 } from "./helpers";
@@ -25,12 +24,11 @@ test.describe("Subtask: kanban view", () => {
   }) => {
     const parent = await createTask(apiContext, seedProject.key, { title: "Parent task" });
     await apiContext.post(`/api/projects/${seedProject.key}/tasks`, {
-      data: { title: "Child task", parent_id: parent.id },
+      data: { title: "Child task", parent: parent.id },
     });
 
     await navigateTo(page, "/");
     await selectProject(page, seedProject.key);
-    await waitForBoard(page);
 
     const toggle = page.locator(
       `.task-card[data-task-id="${parent.id}"] .subtask-toggle`,
@@ -48,12 +46,11 @@ test.describe("Subtask: table view", () => {
   }) => {
     const parent = await createTask(apiContext, seedProject.key, { title: "Table parent" });
     await apiContext.post(`/api/projects/${seedProject.key}/tasks`, {
-      data: { title: "Table child", parent_id: parent.id },
+      data: { title: "Table child", parent: parent.id },
     });
 
     await navigateTo(page, "/");
     await selectProject(page, seedProject.key);
-    await waitForBoard(page);
 
     await page.locator('#view-tabs .view-tab[data-view="table"]').click();
     await waitForTable(page);

@@ -36,8 +36,9 @@ test.describe("Responsive: mobile 375×812", () => {
     await expect(page.locator("#hamburger-btn")).toBeVisible();
   });
 
-  test("/co hero renders on mobile", async ({ page }) => {
-    await page.goto("/co", { waitUntil: "networkidle" });
+  test("template hero renders on mobile", async ({ page }) => {
+    // Template banner lives at "/" — "/co" boots the co dev universe (no banner)
+    await page.goto("/", { waitUntil: "networkidle" });
     await expect(page.locator("#template-banner")).toBeVisible();
   });
 

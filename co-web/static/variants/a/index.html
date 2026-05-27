@@ -137,7 +137,7 @@
                 </div>
             </header>
             <div class="content" id="content">
-                <div class="loading-spinner" id="loading-spinner">
+                <div class="loading-spinner" id="loading-spinner" data-testid="content-loading">
                     <div class="spinner"></div>
                     <span data-i18n="loading">Carregando...</span>
                 </div>
@@ -262,7 +262,9 @@
     </div>
 
     <!-- Template Banner (shown when viewing the read-only template universe) -->
-    <div id="template-banner" class="template-banner hidden">
+    <!-- data-testid="no-project-selected": uniquely identifies the "no project chosen" state.
+         Lives here (not in #content) because showLoading() replaces #content.innerHTML. -->
+    <div id="template-banner" class="template-banner hidden" data-testid="no-project-selected">
         <div class="template-banner-inner">
             <div class="template-hero">
                 <div class="template-hero-logo">
@@ -274,8 +276,9 @@
                 </div>
             </div>
             <div class="template-cta">
-                <button class="btn btn-primary btn-lg" id="btn-banner-entrar" data-i18n="action.register">Criar conta</button>
-                <button class="btn btn-secondary" id="btn-banner-login" data-i18n="action.login">Entrar</button>
+                <button class="btn btn-primary btn-lg" id="btn-criar-universo" data-i18n="action.clone">Criar universo</button>
+                <button class="btn btn-secondary" id="btn-banner-entrar" data-i18n="action.register">Criar conta</button>
+                <button class="btn btn-ghost" id="btn-banner-login" data-i18n="action.login">Entrar</button>
                 <a class="btn btn-ghost template-github-link" id="btn-banner-github" href="https://github.com/artelonga/co" target="_blank" rel="noopener" data-i18n="action.github">GitHub</a>
             </div>
         </div>

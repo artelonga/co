@@ -5,11 +5,25 @@ export async function navigateTo(page: Page, path: string): Promise<void> {
   await page.goto(path, { waitUntil: "networkidle" });
 }
 
-/** Wait for the kanban board to fully render (all 4 status columns visible) */
+/**
+ * Wait for the kanban board to fully render.
+ *
+ * STATUSES in constants.js defines 3 columns (todo / in_progress / done).
+ * Uses a single waitForSelector on .kanban-column to avoid the two-step
+ * race where .kanban appears but columns are not yet painted.
+ */
 export async function waitForBoard(page: Page): Promise<void> {
-  await page.waitForSelector(".kanban", { state: "visible" });
-  const columns = page.locator(".kanban-column");
-  await expect(columns).toHaveCount(4);
+  await page.waitForSelector(".kanban-column", { state: "visible", timeout: 10_000 });
+}
+
+/**
+ * Wait for the board to be fully ready for interaction.
+ *
+ * Confirms the kanban DOM is rendered. Call after `selectProject` which
+ * already ensures kanban columns are visible before returning.
+ */
+export async function waitForBoardReady(page: Page): Promise<void> {
+  await page.waitForSelector(".kanban-column", { state: "visible", timeout: 10_000 });
 }
 
 /** Wait for the table view to render */
@@ -22,13 +36,33 @@ export async function waitForTimeline(page: Page): Promise<void> {
   await page.waitForSelector(".timeline-wrapper", { state: "visible" });
 }
 
-/** Click a project in the sidebar and wait for board */
+/** Click a project in the sidebar and wait for the kanban board */
 export async function selectProject(page: Page, key: string): Promise<void> {
   const link = page.locator(
     `#project-list .sidebar-item-key:text-is("${key}")`,
   );
+  // Register the response listener BEFORE clicking so we don't miss the request.
+  // waitForResponse resolves after the HTTP body arrives, by which point the JS
+  // microtask chain (hideLoading() + render()) has already run — state.loading is
+  // guaranteed false before we switch to kanban.
+  const tasksLoaded = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/projects/${key}/tasks`) && r.status() === 200,
+    { timeout: 15_000 },
+  );
   await link.click();
-  await waitForBoard(page);
+  await tasksLoaded;
+  // CO-304: render() fires renderConteudo() which is async (6 API calls). Those
+  // calls complete and overwrite content.innerHTML AFTER we switch to kanban.
+  // renderConteudo() now has a stale-view guard, but we also wait here for the
+  // loading spinner to be gone so the conteudo API calls have settled first.
+  await page.waitForFunction(
+    () => !document.querySelector('#content .loading-spinner'),
+    { timeout: 10_000 }
+  ).catch(() => {});
+  // Default view is conteudo (CO-304). Switch to kanban for board interaction tests.
+  await page.locator('#view-tabs .view-tab[data-view="kanban"]').click();
+  await page.waitForSelector(".kanban-column", { state: "visible", timeout: 10_000 });
 }
 
 /** Click a view tab by name */

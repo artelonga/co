@@ -19,10 +19,12 @@ test.describe("i18n: language toggle", () => {
     test.skip(count === 0, "lang toggle not found");
 
     const initialText = await langBtn.textContent();
-    if (initialText?.includes("English")) {
-      await langBtn.click(); // switch to en
+    // Normalize to PT first: if currently in EN (button shows "Português"), switch back.
+    if (!initialText?.includes("English")) {
+      await langBtn.click(); // was in EN — switch to PT
     }
-    await langBtn.click(); // now switch to pt
+    // Now in PT (button "English") — click once to go PT→EN
+    await langBtn.click();
     await expect(langBtn).toContainText(/português/i);
   });
 

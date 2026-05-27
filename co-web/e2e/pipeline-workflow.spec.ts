@@ -18,11 +18,12 @@ test.beforeEach(async ({ page }) => {
 });
 
 test.describe("Auth: unauthenticated writes rejected", () => {
-  test("POST tasks without bearer token returns 401", async ({
-    apiContext,
+  test("POST tasks without session returns 401", async ({
+    request,  // unauthenticated plain context — no uat-login cookie
     seedProject,
   }) => {
-    const res = await apiContext.post(
+    // `request` carries no session; `seedProject` uses apiContext internally.
+    const res = await request.post(
       `/api/projects/${seedProject.key}/tasks`,
       { data: { title: "blocked" } },
     );
@@ -81,10 +82,12 @@ test.describe("Archive", () => {
   }) => {
     const task = await createTask(apiContext, seedProject.key, { title: "Archive task" });
 
-    // Archive via API
-    await apiContext.patch(`/api/projects/${seedProject.key}/tasks/${task.id}`, {
-      data: { status: "done", archived: true },
-    });
+    // Archive via PUT (server registers PUT /projects/{key}/tasks/{id}, not PATCH)
+    const archiveRes = await apiContext.put(
+      `/api/projects/${seedProject.key}/tasks/${task.id}`,
+      { data: { title: task.title, status: "done", archived: true } },
+    );
+    expect([200, 204]).toContain(archiveRes.status());
 
     await navigateTo(page, "/");
     await selectProject(page, seedProject.key);

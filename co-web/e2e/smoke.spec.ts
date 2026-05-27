@@ -1,5 +1,5 @@
 import { test, expect } from "./fixtures";
-import { navigateTo, waitForBoard, createTask, getTaskCount } from "./helpers";
+import { navigateTo, createTask, getTaskCount, selectProject } from "./helpers";
 
 test.describe("Smoke tests", () => {
   test("server is running and healthy", async ({ apiContext }) => {
@@ -32,17 +32,9 @@ test.describe("Smoke tests", () => {
     // Create a task so the board isn't empty
     await createTask(apiContext, seedProject.key, { title: "Smoke task" });
 
-    // Navigate to the app root
+    // Navigate to the app root and select the seeded project
     await navigateTo(page, "/");
-
-    // Click on the seeded project in the sidebar
-    const projectLink = page.locator(
-      `#project-list .sidebar-item-key:text-is("${seedProject.key}")`,
-    );
-    await projectLink.click();
-
-    // Wait for the kanban board to appear
-    await waitForBoard(page);
+    await selectProject(page, seedProject.key);
 
     // Should have at least 1 task card
     const count = await getTaskCount(page);

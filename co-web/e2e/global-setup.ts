@@ -6,6 +6,33 @@ const HEALTH_URL = `http://localhost:${SERVER_PORT}/api/health`;
 const MAX_WAIT_MS = 60_000;
 const POLL_INTERVAL_MS = 500;
 
+/** Create the shared e2e-test universe owned by yuri (idempotent — 409 is OK).
+ *  Board fixture tests create projects inside this universe so they appear in
+ *  the authenticated sidebar without a per-universe-key universe per test. */
+async function ensureTestUniverse(base: string): Promise<void> {
+  try {
+    const loginRes = await fetch(`${base}/api/v1/auth/uat-login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: "yuri@uat.local", password: "uat" }),
+    });
+    if (!loginRes.ok) return; // uat-login not enabled (non-test env)
+    const cookie = loginRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    await fetch(`${base}/api/v1/universes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({
+        key: "e2e-test",
+        name: "E2E Test",
+        description: "Shared universe for Playwright board fixture tests",
+      }),
+    });
+    // 409 Conflict (already exists) is expected and fine — no throw.
+  } catch {
+    // Non-fatal: tests fall back to the fixture's inline auth + universe check.
+  }
+}
+
 async function isServerHealthy(): Promise<boolean> {
   try {
     const res = await fetch(HEALTH_URL);
@@ -42,10 +69,13 @@ async function globalSetup(): Promise<void> {
     return;
   }
 
+  const base = `http://localhost:${SERVER_PORT}`;
+
   // Check if a healthy server is already running
   if (await isServerHealthy()) {
     console.log("co-web server already running on port", SERVER_PORT);
     process.env.CO_WEB_EXTERNAL = "true";
+    await ensureTestUniverse(base);
     return;
   }
 
@@ -97,6 +127,7 @@ async function globalSetup(): Promise<void> {
 
   await waitForServer();
   console.log("co-web server ready on port", SERVER_PORT);
+  await ensureTestUniverse(base);
 }
 
 export default globalSetup;

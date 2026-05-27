@@ -977,6 +977,10 @@ export async function renderConteudo() {
         api.getUniverseEntries(slug),
     ]);
 
+    // CO-304: stale-render guard — if the user switched views while entries were
+    // loading, bail out to avoid overwriting the active view (kanban, table, etc.)
+    if (state.view !== 'conteudo') return;
+
     // Hide editor scratch files from every section:
     //   `_drafts/<entry-path>`     — write-ahead-log (createDetailController.renderEdit)
     //   `_proposals/<id>.md`       — inline-proposal queue (proposal_routes.rs); these

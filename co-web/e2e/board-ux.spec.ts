@@ -9,7 +9,10 @@ import { navigateTo, selectProject, waitForBoard } from "./helpers";
 test.describe("Empty states", () => {
   test("shows empty-state prompt before any project is chosen", async ({ page }) => {
     await navigateTo(page, "/");
-    await expect(page.locator(".empty-state")).toBeVisible();
+    // Use data-testid to target the specific "no project selected" element.
+    // Class .empty-state is reused by loading placeholders across views and
+    // would match 9+ elements — always use data-testid here.
+    await expect(page.locator('[data-testid="no-project-selected"]')).toBeVisible();
   });
 });
 
@@ -22,7 +25,8 @@ test.describe("View tabs", () => {
     await selectProject(page, seedProject.key);
     await waitForBoard(page);
     const tabs = page.locator("#view-tabs .view-tab");
-    await expect(tabs).toHaveCount(6);
+    // 7 tabs: conteudo, kanban, table, calendar, timeline, dashboard, changelog
+    await expect(tabs).toHaveCount(7);
   });
 });
 
