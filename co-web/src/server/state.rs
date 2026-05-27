@@ -18,6 +18,8 @@ pub struct CoreState {
     pub event_bus: crate::events::Bus,
     /// CO-295: runtime secrets provider (env-var in prod, static in tests).
     pub secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
+    /// CO-296: auth provider for JWT issuance and verification.
+    pub auth_provider: Arc<dyn crate::infra::auth::AuthProvider>,
 }
 
 impl CoreState {
@@ -48,6 +50,9 @@ impl CoreState {
         let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
             crate::infra::storage::SqliteStorage::from_arc(Arc::clone(&storage)),
         );
+        let auth_provider: Arc<dyn crate::infra::auth::AuthProvider> = Arc::new(
+            crate::infra::auth::LocalJwtProvider::new(Arc::clone(&secrets)),
+        );
         Self {
             storage,
             storage_trait,
@@ -55,6 +60,7 @@ impl CoreState {
             auth_store: Mutex::new(auth_store),
             event_bus: crate::events::Bus::new(),
             secrets,
+            auth_provider,
         }
     }
 }

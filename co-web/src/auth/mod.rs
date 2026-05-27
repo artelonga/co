@@ -374,23 +374,23 @@ pub async fn require_auth(
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret_from(&*state.core.secrets);
-    let validation = Validation::new(Algorithm::HS256);
+    let claims = state
+        .core
+        .auth_provider
+        .verify_token(&crate::infra::auth::Token(token))
+        .await
+        .map_err(|e| {
+            let msg = e.to_string();
+            if msg == "Token expired" {
+                unauthorized("Token expired")
+            } else if msg == "Invalid token signature" {
+                unauthorized("Invalid token signature")
+            } else {
+                unauthorized("Invalid token")
+            }
+        })?;
 
-    let token_data = decode::<Claims>(
-        &token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    )
-    .map_err(|e| match e.kind() {
-        jsonwebtoken::errors::ErrorKind::ExpiredSignature => unauthorized("Token expired"),
-        jsonwebtoken::errors::ErrorKind::InvalidSignature => {
-            unauthorized("Invalid token signature")
-        }
-        _ => unauthorized("Invalid token"),
-    })?;
-
-    req.extensions_mut().insert(UserId(token_data.claims.sub));
+    req.extensions_mut().insert(UserId(claims.user_id));
     Ok(next.run(req).await)
 }
 
@@ -414,14 +414,13 @@ pub async fn require_auth_with_token(
         .or_else(|| extract_session_cookie(req.headers()))
         .ok_or_else(|| unauthorized("Missing or malformed Authorization header"))?;
 
-    let secret = jwt_secret_from(&*state.core.secrets);
-    let validation = Validation::new(Algorithm::HS256);
-    if let Ok(data) = decode::<Claims>(
-        &token,
-        &DecodingKey::from_secret(secret.as_bytes()),
-        &validation,
-    ) {
-        req.extensions_mut().insert(UserId(data.claims.sub));
+    if let Ok(claims) = state
+        .core
+        .auth_provider
+        .verify_token(&crate::infra::auth::Token(token.clone()))
+        .await
+    {
+        req.extensions_mut().insert(UserId(claims.user_id));
         return Ok(next.run(req).await);
     }
 

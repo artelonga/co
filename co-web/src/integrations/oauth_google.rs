@@ -273,15 +273,23 @@ async fn callback_handler(
     }
 
     // 5. Issue session cookie.
-    let (session_token, _expires_at) = crate::auth::sign_jwt(
-        &user.id,
-        &user.email,
-        &user.tier,
-        &crate::auth::jwt_secret(),
-    )
-    .map_err(|e| AppError::Internal(e.to_string()))?;
+    let session_token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user.id.clone(),
+                email: user.email.clone(),
+                tier: user.tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     let cookie = crate::auth::build_session_cookie(
-        &session_token,
+        session_token.as_str(),
         state.core.config.cookie_domain.as_deref(),
         604800,
     );
