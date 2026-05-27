@@ -14,7 +14,7 @@ use tower_http::trace::TraceLayer;
 
 use chrono::Utc;
 
-use crate::auth::{AuthStore, generate_code, new_code_entry, sign_jwt};
+use crate::auth::{AuthStore, generate_code, new_code_entry};
 use crate::baseline;
 use crate::config::WebConfig;
 use crate::error::AppError;

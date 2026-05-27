@@ -822,12 +822,26 @@ async fn reset_password_handler(
             .ok_or_else(|| AppError::Internal("User not found".into()))?
     };
 
-    let jwt_secret = crate::auth::jwt_secret();
-    let (token, _expires_at) =
-        crate::auth::sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+    let token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user.id.clone(),
+                email: user.email.clone(),
+                tier: user.tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+    let cookie = format!(
+        "session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800",
+        token.as_str()
+    );
 
     // CO-186: short-lived (60s) ES256-signed handover token in the body.
     // SPA appends it to the redirect when `return_to` ends in
@@ -929,12 +943,26 @@ async fn change_password_handler(
             .ok_or_else(|| AppError::Internal("User not found".into()))?
     };
 
-    let jwt_secret = crate::auth::jwt_secret();
-    let (token, _expires_at) =
-        crate::auth::sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
-            .map_err(|e| AppError::Internal(e.to_string()))?;
+    let token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user.id.clone(),
+                email: user.email.clone(),
+                tier: user.tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    let cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800");
+    let cookie = format!(
+        "session={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800",
+        token.as_str()
+    );
 
     Ok((
         StatusCode::OK,

@@ -239,8 +239,23 @@ pub(super) async fn verify_handler(
         }
     };
 
-    let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret".to_string());
-    let (token, expires_at) = sign_jwt(&user_id, &email, &tier, &jwt_secret)?;
+    let token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user_id.clone(),
+                email: email.clone(),
+                tier: tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let expires_at = Utc::now()
+        + chrono::Duration::seconds(crate::infra::auth::DEFAULT_TOKEN_TTL.as_secs() as i64);
 
     // Delete used code.
     {
@@ -249,7 +264,7 @@ pub(super) async fn verify_handler(
     }
 
     let cookie = crate::auth::build_session_cookie(
-        &token,
+        token.as_str(),
         state.core.config.cookie_domain.as_deref(),
         604800,
     );
@@ -487,12 +502,26 @@ pub(super) async fn password_login_handler(
     .await
     .map_err(|_| AppError::Internal("Task join error".into()))??;
 
-    let jwt_secret = crate::auth::jwt_secret();
-    let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
+    let token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user.id.clone(),
+                email: user.email.clone(),
+                tier: user.tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
+    let expires_at = Utc::now()
+        + chrono::Duration::seconds(crate::infra::auth::DEFAULT_TOKEN_TTL.as_secs() as i64);
 
     let cookie = crate::auth::build_session_cookie(
-        &token,
+        token.as_str(),
         state.core.config.cookie_domain.as_deref(),
         604800,
     );
@@ -656,11 +685,25 @@ pub(super) async fn signup_handler(
     };
 
     // --- session cookie ---
-    let jwt_secret = crate::auth::jwt_secret();
-    let (token, expires_at) = sign_jwt(&user.id, &user.email, &user.tier, &jwt_secret)
+    let token = state
+        .core
+        .auth_provider
+        .issue_token(
+            crate::infra::auth::UserClaims {
+                user_id: user.id.clone(),
+                email: user.email.clone(),
+                tier: user.tier.clone(),
+                usuario: String::new(),
+                papel: String::new(),
+            },
+            crate::infra::auth::DEFAULT_TOKEN_TTL,
+        )
+        .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
+    let expires_at = Utc::now()
+        + chrono::Duration::seconds(crate::infra::auth::DEFAULT_TOKEN_TTL.as_secs() as i64);
     let cookie = crate::auth::build_session_cookie(
-        &token,
+        token.as_str(),
         state.core.config.cookie_domain.as_deref(),
         604800,
     );
