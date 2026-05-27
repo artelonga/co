@@ -33,7 +33,9 @@ const KNOWN_UNIVERSE_SLUGS = ["template", "co", "yggdrasil", "tempo", "humanity"
 // them so we don't fail on the noise. Anything outside this list is
 // expected to return 2xx/3xx.
 const EXTERNAL_FLAKY_HOSTS = new Set<string>([
-  // (empty for now — populate when we hit a flaky host)
+  // GitHub returns 429 for automated HEAD probes on commit-history URLs
+  // (used in termos.md and privacidade.md as legal version-history links).
+  "github.com",
 ]);
 
 function extractMarkdownLinks(body: string): string[] {
@@ -61,7 +63,7 @@ function classify(url: string): "external" | "internal" | "anchor" | "other" {
 
 test.describe("Seed page links resolve", () => {
   test("every link in every seeded template page returns 2xx/3xx", async () => {
-    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const base = process.env.BASE_URL ?? "http://localhost:3000";
     const ctx = await request.newContext({ baseURL: base });
 
     // 1. Pull each seed page body via the public entries API.
@@ -216,7 +218,7 @@ test.describe("Seed page links resolve", () => {
   });
 
   test("popular endpoint returns at least 5 entries for template universe", async () => {
-    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const base = process.env.BASE_URL ?? "http://localhost:3000";
     const ctx = await request.newContext({ baseURL: base });
 
     const res = await ctx.get(
@@ -240,7 +242,7 @@ test.describe("Seed page links resolve", () => {
   });
 
   test("template tutorial project is keyed CO (CO-279 revert)", async () => {
-    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const base = process.env.BASE_URL ?? "http://localhost:3000";
     const ctx = await request.newContext({ baseURL: base });
 
     const res = await ctx.get("/api/v1/universes/template/projects");
@@ -270,7 +272,7 @@ test.describe("Seed page links resolve", () => {
   });
 
   test("pretty-URL redirects land on /template/<slug>", async ({}) => {
-    const base = process.env.BASE_URL ?? "https://co-artelonga.fly.dev";
+    const base = process.env.BASE_URL ?? "http://localhost:3000";
     const ctx = await request.newContext({ baseURL: base });
 
     for (const slug of SEED_PAGE_SLUGS) {
