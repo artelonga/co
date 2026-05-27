@@ -258,9 +258,19 @@ async fn shutdown_signal() {
     tracing::info!("Shutdown signal received, finishing requests...");
 }
 
+/// Start the web server with the given config, bound to the given host.
+/// Use `"0.0.0.0"` for public/Fly deployments and `"127.0.0.1"` for local `co serve`.
+pub async fn start_server_on(config: WebConfig, bind_host: &str) {
+    start_server_inner(config, bind_host).await;
+}
+
 /// Start the web server with the given config.
 /// This is the main entry point used by both `co-web` binary and `co board` subcommand.
 pub async fn start_server(config: WebConfig) {
+    start_server_inner(config, "0.0.0.0").await;
+}
+
+async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -534,8 +544,9 @@ pub async fn start_server(config: WebConfig) {
 
     let app = build_router(state.clone(), plugin_routes);
 
-    let addr = format!("0.0.0.0:{}", config.port);
-    tracing::info!("\n  Project Board\n  http://localhost:{}\n", config.port);
+    let addr = format!("{}:{}", bind_host, config.port);
+    let display_url = format!("http://127.0.0.1:{}", config.port);
+    tracing::info!("\n  Project Board\n  {}\n", display_url);
 
     // CO-164: spawn embedding OS thread + load model after server binds.
     crate::embedding_worker::spawn(embedding_rx, state.clone());

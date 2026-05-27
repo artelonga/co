@@ -19,6 +19,30 @@
 
 ---
 
+## Run locally
+
+The fastest way to run CO on your own machine — no Docker, no Fly account, no Rust toolchain required:
+
+```bash
+# macOS / Linux — one-line install
+curl -fsSL https://co.artelonga.com.br/install.sh | sh
+
+# Start the server and open in your default browser
+co serve --open
+```
+
+CO binds to `127.0.0.1:54321` by default. Your data lives in the platform data dir (`~/.local/share/co` on Linux, `~/Library/Application Support/co` on macOS). Everything runs offline against a local SQLite database.
+
+```bash
+co serve --port 8080              # custom port
+co serve --data-dir ~/my-co       # custom data directory
+co serve --public                 # expose on local network (prints a warning)
+```
+
+Pre-built binaries are available for macOS (Intel + Apple Silicon), Linux (x86_64 + ARM64), and Windows (x86_64) on the [releases page](https://github.com/artelonga/co/releases).
+
+---
+
 ## Quick Start
 
 ### Option A — CLI (Rust)

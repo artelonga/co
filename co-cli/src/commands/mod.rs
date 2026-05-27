@@ -26,6 +26,7 @@ pub mod new;
 pub mod query;
 pub mod repo;
 pub mod schema;
+pub mod serve;
 pub mod show;
 pub mod space;
 pub mod status;
