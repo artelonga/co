@@ -8,6 +8,10 @@
 //! | theme_css  | ETag (content hash)             | Arc<String> (CSS)   |
 //! | query      | SHA-256(params+slug+mhash)      | Arc<Vec<u8>> (JSON) |
 //!
+//! Each cache is built on [`InProcessLruCache`] (CO-293), which implements the
+//! generic [`Cache<K, V>`] trait. Capacity is configurable per cache via
+//! `CO_CACHE_<NAME>_MAX_ENTRIES` environment variables.
+//!
 //! Stampede protection: `ManifestCache::get_or_fill` uses a per-slug async
 //! mutex so that N concurrent cache-misses for the same slug result in exactly
 //! one fill call; the rest wait and share the cached result.
@@ -18,12 +22,12 @@
 //! the invalidation (e.g. a future Redis pub/sub bridge).
 
 use std::collections::HashMap;
-use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
 
-use lru::LruCache;
 use serde::Serialize;
+
+use crate::infra::cache::InProcessLruCache;
 
 const L1_CAPACITY: usize = 10_000;
 
@@ -104,13 +108,14 @@ impl CacheCounters {
 
 /// L1 in-process cache for parsed universe manifests (`_universe.yaml`).
 ///
-/// Singleflight coalescing: when multiple tasks concurrently miss the cache for
-/// the same slug, only one executes the fill closure; the rest wait on an async
-/// mutex and share the result once the fill completes.
+/// Backed by [`InProcessLruCache`] (CO-293). Singleflight coalescing: when
+/// multiple tasks concurrently miss the cache for the same slug, only one
+/// executes the fill closure; the rest wait on an async mutex and share the
+/// result once the fill completes.
 pub struct ManifestCache {
-    lru: Mutex<LruCache<String, Arc<co::manifest::Manifest>>>,
+    cache: InProcessLruCache<String, Arc<co::manifest::Manifest>>,
     /// Per-slug async mutex used as a singleflight gate.
-    inflight: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    inflight: std::sync::Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     pub counters: CacheCounters,
 }
 
@@ -123,21 +128,18 @@ impl Default for ManifestCache {
 impl ManifestCache {
     pub fn new() -> Self {
         Self {
-            lru: Mutex::new(LruCache::new(
-                NonZeroUsize::new(L1_CAPACITY).expect("L1_CAPACITY > 0"),
-            )),
-            inflight: Mutex::new(HashMap::new()),
+            cache: InProcessLruCache::from_env("manifest", L1_CAPACITY),
+            inflight: std::sync::Mutex::new(HashMap::new()),
             counters: CacheCounters::new(),
         }
     }
 
     /// Synchronous get — fast path, no singleflight.
     pub fn get(&self, slug: &str) -> Option<Arc<co::manifest::Manifest>> {
-        let mut lru = self.lru.lock().unwrap();
-        match lru.get(slug) {
+        match self.cache.get_sync(slug) {
             Some(v) => {
                 self.counters.record_hit();
-                Some(Arc::clone(v))
+                Some(v)
             }
             None => {
                 self.counters.record_miss();
@@ -148,18 +150,14 @@ impl ManifestCache {
 
     /// Insert into the LRU, tracking evictions.
     pub fn insert(&self, slug: String, manifest: co::manifest::Manifest) {
-        let mut lru = self.lru.lock().unwrap();
-        let cap = lru.cap().get();
-        let will_evict = lru.len() == cap && !lru.contains(&slug);
-        lru.put(slug, Arc::new(manifest));
-        if will_evict {
+        if self.cache.put_and_detect_eviction(slug, Arc::new(manifest)) {
             self.counters.record_eviction();
         }
     }
 
     /// Remove a slug from the cache (called on universe update / manifest write).
     pub fn invalidate(&self, slug: &str) {
-        self.lru.lock().unwrap().pop(slug);
+        self.cache.invalidate_sync(slug);
     }
 
     /// Get or fill with singleflight coalescing.
@@ -211,7 +209,7 @@ impl ManifestCache {
                 drop(guard);
                 self.inflight.lock().unwrap().remove(&slug);
 
-                // Return from LRU to hand back the Arc that was just inserted.
+                // Return from cache to hand back the Arc that was just inserted.
                 manifest_opt.and_then(|_| self.get(&slug))
             }
             Err(_) => {
@@ -231,11 +229,12 @@ impl ManifestCache {
 
 /// L1 in-process cache for generated theme CSS.
 ///
-/// Keyed by ETag (a hash of theme-preset + custom-tokens). When the universe
-/// config changes, the ETag changes, so old entries are never served again and
-/// will be evicted by LRU over time. No active invalidation needed.
+/// Backed by [`InProcessLruCache`] (CO-293). Keyed by ETag (a hash of
+/// theme-preset + custom-tokens). When the universe config changes, the ETag
+/// changes, so old entries are never served again and will be evicted by LRU
+/// over time. No active invalidation needed.
 pub struct ThemeCssCache {
-    lru: Mutex<LruCache<String, Arc<String>>>,
+    cache: InProcessLruCache<String, Arc<String>>,
     pub counters: CacheCounters,
 }
 
@@ -248,19 +247,16 @@ impl Default for ThemeCssCache {
 impl ThemeCssCache {
     pub fn new() -> Self {
         Self {
-            lru: Mutex::new(LruCache::new(
-                NonZeroUsize::new(L1_CAPACITY).expect("L1_CAPACITY > 0"),
-            )),
+            cache: InProcessLruCache::from_env("theme-css", L1_CAPACITY),
             counters: CacheCounters::new(),
         }
     }
 
     pub fn get(&self, etag: &str) -> Option<Arc<String>> {
-        let mut lru = self.lru.lock().unwrap();
-        match lru.get(etag) {
+        match self.cache.get_sync(etag) {
             Some(v) => {
                 self.counters.record_hit();
-                Some(Arc::clone(v))
+                Some(v)
             }
             None => {
                 self.counters.record_miss();
@@ -270,11 +266,7 @@ impl ThemeCssCache {
     }
 
     pub fn insert(&self, etag: String, css: String) {
-        let mut lru = self.lru.lock().unwrap();
-        let cap = lru.cap().get();
-        let will_evict = lru.len() == cap && !lru.contains(&etag);
-        lru.put(etag, Arc::new(css));
-        if will_evict {
+        if self.cache.put_and_detect_eviction(etag, Arc::new(css)) {
             self.counters.record_eviction();
         }
     }
@@ -286,14 +278,15 @@ impl ThemeCssCache {
 
 /// L1 query result cache.
 ///
-/// Key: `query_cache_key(params, universe_key, manifest_hash)` — a SHA-256 hex
+/// Backed by [`InProcessLruCache`] (CO-293). Key:
+/// `query_cache_key(params, universe_key, manifest_hash)` — a SHA-256 hex
 /// string that uniquely identifies a query against a specific universe schema
 /// version. Value: serialized JSON bytes.
 ///
 /// Invalidation: call `invalidate_prefix(slug + ":")` — this removes all keys
 /// that were tagged with the universe slug when built via `prefixed_key`.
 pub struct QueryCache {
-    lru: Mutex<LruCache<String, Arc<Vec<u8>>>>,
+    cache: InProcessLruCache<String, Arc<Vec<u8>>>,
     pub counters: CacheCounters,
 }
 
@@ -306,19 +299,16 @@ impl Default for QueryCache {
 impl QueryCache {
     pub fn new() -> Self {
         Self {
-            lru: Mutex::new(LruCache::new(
-                NonZeroUsize::new(L1_CAPACITY).expect("L1_CAPACITY > 0"),
-            )),
+            cache: InProcessLruCache::from_env("query", L1_CAPACITY),
             counters: CacheCounters::new(),
         }
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<Vec<u8>>> {
-        let mut lru = self.lru.lock().unwrap();
-        match lru.get(key) {
+        match self.cache.get_sync(key) {
             Some(v) => {
                 self.counters.record_hit();
-                Some(Arc::clone(v))
+                Some(v)
             }
             None => {
                 self.counters.record_miss();
@@ -328,11 +318,7 @@ impl QueryCache {
     }
 
     pub fn insert(&self, key: String, value: Vec<u8>) {
-        let mut lru = self.lru.lock().unwrap();
-        let cap = lru.cap().get();
-        let will_evict = lru.len() == cap && !lru.contains(&key);
-        lru.put(key, Arc::new(value));
-        if will_evict {
+        if self.cache.put_and_detect_eviction(key, Arc::new(value)) {
             self.counters.record_eviction();
         }
     }
@@ -340,15 +326,7 @@ impl QueryCache {
     /// Remove all entries whose key starts with `prefix`.
     /// Used for universe-level invalidation: call with `"{slug}:"`.
     pub fn invalidate_prefix(&self, prefix: &str) {
-        let mut lru = self.lru.lock().unwrap();
-        let keys: Vec<String> = lru
-            .iter()
-            .filter(|(k, _)| k.starts_with(prefix))
-            .map(|(k, _)| k.clone())
-            .collect();
-        for k in keys {
-            lru.pop(&k);
-        }
+        self.cache.remove_where(|k| k.starts_with(prefix));
     }
 }
 
