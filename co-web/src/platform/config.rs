@@ -66,6 +66,16 @@ pub struct WebConfig {
     /// middleware passes every request through unconditionally. Set via
     /// `CO_BYPASS_RATE_LIMIT=1`. Has no effect outside `CO_ENV=test`.
     pub bypass_rate_limit: bool,
+    /// CO-298: when true, enable staging-mode simulation decorators
+    /// (latency injection, blob fault injection, cache eviction pressure,
+    /// worker failure injection). Set via `co serve --staging`.
+    pub staging: bool,
+    /// CO-298: base latency added to every storage call and HTTP request (ms).
+    /// Default: 50. Set via `co serve --staging-latency-ms`.
+    pub staging_latency_ms: u64,
+    /// CO-298: fraction of blob ops that return a simulated error.
+    /// Default: 0.05 (5%). Set via `co serve --staging-error-rate`.
+    pub staging_error_rate: f64,
 }
 
 impl WebConfig {
@@ -114,6 +124,9 @@ mod tests {
             cookie_domain: None,
             quilombo_legacy_login: true,
             bypass_rate_limit: false,
+            staging: false,
+            staging_latency_ms: 50,
+            staging_error_rate: 0.05,
         }
     }
 
@@ -167,6 +180,9 @@ impl From<Args> for WebConfig {
             bypass_rate_limit: std::env::var("CO_BYPASS_RATE_LIMIT")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            staging: false,
+            staging_latency_ms: 50,
+            staging_error_rate: 0.05,
         }
     }
 }

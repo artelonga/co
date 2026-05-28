@@ -21,6 +21,9 @@ pub fn run(port: u16, data: String, static_dir: String, default_variant: String)
         cookie_domain: std::env::var("CO_COOKIE_DOMAIN").ok(),
         quilombo_legacy_login: true,
         bypass_rate_limit: false,
+        staging: false,
+        staging_latency_ms: 50,
+        staging_error_rate: 0.05,
     };
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to create tokio runtime");

@@ -645,6 +645,9 @@ mod tests {
             cookie_domain: None,
             quilombo_legacy_login: true,
             bypass_rate_limit: false,
+            staging: false,
+            staging_latency_ms: 50,
+            staging_error_rate: 0.05,
         };
         let storage = crate::storage::Storage::new(&config.data_dir);
         let experiment = crate::experiment::ExperimentStore::new(&config.data_dir);
