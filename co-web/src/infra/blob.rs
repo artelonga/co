@@ -19,7 +19,6 @@ use std::sync::Arc;
 // ---------------------------------------------------------------------------
 
 /// Metadata returned by a successful `put`.
-#[derive(Debug)]
 pub struct BlobMeta {
     /// Content key (sha256 hex or arbitrary client-supplied key).
     pub key: String,
@@ -215,14 +214,8 @@ enum BlobBackendKind {
 /// specific universe directory / key. The `Local` variant stores blobs under
 /// `<universe_dir>/blobs/…`; the `R2` variant uses the universe key as a
 /// prefix in the bucket.
-///
-/// When `staging_error_rate` is set via [`BlobBackend::with_staging_error_rate`],
-/// `for_universe` wraps the returned store with a
-/// [`crate::infra::staging::FlakyBlobStore`] that injects errors at that rate.
 pub struct BlobBackend {
     kind: BlobBackendKind,
-    /// CO-298: when Some, for_universe wraps the store with FlakyBlobStore.
-    staging_error_rate: Option<f64>,
 }
 
 impl BlobBackend {
@@ -230,15 +223,7 @@ impl BlobBackend {
     pub fn local() -> Self {
         Self {
             kind: BlobBackendKind::Local,
-            staging_error_rate: None,
         }
-    }
-
-    /// Enable staging fault injection: `for_universe` will wrap the store with
-    /// [`crate::infra::staging::FlakyBlobStore`] at the given error rate.
-    pub fn with_staging_error_rate(mut self, rate: f64) -> Self {
-        self.staging_error_rate = Some(rate);
-        self
     }
 
     /// Cloudflare R2 backend (requires `blob-r2` feature).
@@ -246,20 +231,16 @@ impl BlobBackend {
     pub fn r2(s3: Arc<dyn co::deploy::S3Backend>, bucket: String) -> Self {
         Self {
             kind: BlobBackendKind::R2 { s3, bucket },
-            staging_error_rate: None,
         }
     }
 
     /// Return a `BlobStore` scoped to a single universe.
-    ///
-    /// When [`BlobBackend::with_staging_error_rate`] was called, the returned
-    /// store is wrapped with [`crate::infra::staging::FlakyBlobStore`].
     pub fn for_universe(
         &self,
         universe_dir: &std::path::Path,
         #[cfg_attr(not(feature = "blob-r2"), allow(unused_variables))] universe_key: &str,
     ) -> Arc<dyn BlobStore> {
-        let store: Arc<dyn BlobStore> = match &self.kind {
+        match &self.kind {
             BlobBackendKind::Local => Arc::new(LocalFsBlobStore::new(universe_dir.join("blobs"))),
             #[cfg(feature = "blob-r2")]
             BlobBackendKind::R2 { s3, bucket } => Arc::new(R2BlobStore {
@@ -267,11 +248,6 @@ impl BlobBackend {
                 bucket: bucket.clone(),
                 prefix: universe_key.to_string(),
             }),
-        };
-        if let Some(rate) = self.staging_error_rate {
-            Arc::new(crate::infra::staging::FlakyBlobStore::new(store, rate))
-        } else {
-            store
         }
     }
 }

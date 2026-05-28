@@ -269,9 +269,6 @@ fn make_universe_router(
         cookie_domain: None,
         quilombo_legacy_login: true,
         bypass_rate_limit: false,
-        staging: false,
-        staging_latency_ms: 50,
-        staging_error_rate: 0.05,
     };
     let experiment = ExperimentStore::new(dir);
     let auth_store = crate::auth::AuthStore::new(dir).unwrap();

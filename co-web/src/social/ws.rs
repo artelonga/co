@@ -646,9 +646,6 @@ mod tests {
             cookie_domain: None,
             quilombo_legacy_login: true,
             bypass_rate_limit: false,
-            staging: false,
-            staging_latency_ms: 50,
-            staging_error_rate: 0.05,
         };
         let state: crate::server::AppState = AppState::new(AppStateInner {
             core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
@@ -748,9 +745,6 @@ mod tests {
             cookie_domain: None,
             quilombo_legacy_login: true,
             bypass_rate_limit: false,
-            staging: false,
-            staging_latency_ms: 50,
-            staging_error_rate: 0.05,
         };
         let state: crate::server::AppState = AppState::new(AppStateInner {
             core: Arc::new(CoreState::from_storage(storage, config, auth_store)),
