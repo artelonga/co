@@ -1,6 +1,39 @@
 use crate::config::WebConfig;
 use crate::storage::Storage;
 
+/// CO-310: resolve the seed-co source directory across deployment modes.
+///
+/// Order:
+/// 1. `CO_SEED_CO_DIR` env var (explicit override)
+/// 2. `/app/seed-co` (Fly Docker image — set by Dockerfile)
+/// 3. Walk up from current dir looking for `work/co/` (local dev checkout)
+///
+/// Returns `None` if none of the above resolve to an existing directory.
+pub(crate) fn resolve_seed_co_dir() -> Option<std::path::PathBuf> {
+    if let Ok(env_path) = std::env::var("CO_SEED_CO_DIR") {
+        let p = std::path::PathBuf::from(env_path);
+        if p.exists() {
+            return Some(p);
+        }
+    }
+    let fly_path = std::path::PathBuf::from("/app/seed-co");
+    if fly_path.exists() {
+        return Some(fly_path);
+    }
+    // Walk up from CWD looking for work/co (typical dev: cargo run from repo root).
+    let mut dir = std::env::current_dir().ok()?;
+    for _ in 0..6 {
+        let candidate = dir.join("work").join("co");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if !dir.pop() {
+            break;
+        }
+    }
+    None
+}
+
 /// Recursively copy all files from `src` into `dst`, creating directories as needed.
 pub(super) fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dst)?;
@@ -132,20 +165,21 @@ pub fn uat_startup(config: &WebConfig) -> bool {
     }
 
     // --- Seed co-dev tasks from bundled data ---
+    // CO-310: resolve seed source across Fly (/app/seed-co), env override, or
+    // local dev checkout (walk up to work/co/) so the dev board is populated
+    // on every environment, not just Fly.
     let co_dir = data_dir.join("co");
     if !co_dir.exists() {
-        let seed_src = std::path::Path::new("/app/seed-co");
-        if seed_src.exists() {
-            match copy_dir_all(seed_src, &co_dir) {
-                Ok(()) => tracing::info!("UAT: seeded co-dev tasks from /app/seed-co"),
+        match resolve_seed_co_dir() {
+            Some(seed_src) => match copy_dir_all(&seed_src, &co_dir) {
+                Ok(()) => tracing::info!("UAT: seeded co-dev tasks from {}", seed_src.display()),
                 Err(e) => tracing::warn!("UAT: could not seed co-dev tasks: {e}"),
-            }
-        } else {
-            tracing::warn!(
-                "UAT: /app/seed-co not found — co-dev board will be empty. \
-                 Add co task files manually at {}/co/",
-                config.data_dir
-            );
+            },
+            None => tracing::warn!(
+                "UAT: no seed-co source found (tried CO_SEED_CO_DIR, /app/seed-co, \
+                 and ancestors of cwd for work/co/) — co-dev board will be empty. \
+                 Set CO_SEED_CO_DIR or run from a co repo checkout."
+            ),
         }
     }
 
