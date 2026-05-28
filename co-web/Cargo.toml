@@ -66,6 +66,10 @@ path = "src/bin/import_quilombo.rs"
 name = "split_db"
 path = "src/bin/split_db.rs"
 
+[features]
+default = []
+blob-r2 = ["co/deploy-r2"]
+
 [dev-dependencies]
 tempfile = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

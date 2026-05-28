@@ -20,6 +20,8 @@ pub struct CoreState {
     pub secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
     /// CO-296: auth provider for JWT issuance and verification.
     pub auth_provider: Arc<dyn crate::infra::auth::AuthProvider>,
+    /// CO-294: blob storage backend (local FS by default; R2 via blob-r2 feature).
+    pub blob_backend: Arc<crate::infra::blob::BlobBackend>,
 }
 
 impl CoreState {
@@ -46,6 +48,28 @@ impl CoreState {
         auth_store: AuthStore,
         secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
     ) -> Self {
+        Self::from_storage_full(
+            storage,
+            config,
+            auth_store,
+            secrets,
+            crate::infra::blob::BlobBackend::local(),
+        )
+    }
+
+    /// Full constructor — injects both a `SecretsProvider` and a `BlobBackend`.
+    ///
+    /// Used at boot time (via `blob_backend_from_env`) when a non-local
+    /// backend is configured. Tests and other call-sites that do not care
+    /// about blob backend can use [`from_storage_with_secrets`] which
+    /// defaults to `BlobBackend::local()`.
+    pub fn from_storage_full(
+        storage: Storage,
+        config: crate::config::WebConfig,
+        auth_store: AuthStore,
+        secrets: Arc<dyn crate::infra::secrets::SecretsProvider>,
+        blob_backend: crate::infra::blob::BlobBackend,
+    ) -> Self {
         let storage = Arc::new(parking_lot::Mutex::new(storage));
         let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
             crate::infra::storage::SqliteStorage::from_arc(Arc::clone(&storage)),
@@ -61,6 +85,7 @@ impl CoreState {
             event_bus: crate::events::Bus::new(),
             secrets,
             auth_provider,
+            blob_backend: Arc::new(blob_backend),
         }
     }
 }

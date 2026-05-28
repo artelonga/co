@@ -723,6 +723,24 @@ impl AwsS3Backend {
     pub fn new(client: aws_sdk_s3::Client) -> Self {
         Self { client }
     }
+
+    /// Build a client pre-configured for Cloudflare R2 using S3-compatible credentials.
+    pub async fn from_r2_credentials(
+        account_id: &str,
+        access_key_id: &str,
+        secret_access_key: &str,
+    ) -> Self {
+        use aws_sdk_s3::config::{Credentials, Region};
+        let creds = Credentials::new(access_key_id, secret_access_key, None, None, "r2");
+        let endpoint = format!("https://{account_id}.r2.cloudflarestorage.com");
+        let config = aws_sdk_s3::config::Builder::new()
+            .credentials_provider(creds)
+            .endpoint_url(&endpoint)
+            .region(Region::new("auto"))
+            .force_path_style(true)
+            .build();
+        Self::new(aws_sdk_s3::Client::from_conf(config))
+    }
 }
 
 #[cfg(feature = "deploy-r2")]
