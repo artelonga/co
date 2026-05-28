@@ -129,28 +129,31 @@ pub fn run_startup_seeds(config: &WebConfig) {
 /// The seed dir is injected at Docker build time (COPY work/co/ /app/seed-co/).
 /// This keeps the dev board in sync with repo state without writing back.
 pub fn run_co142_refresh(config: &WebConfig) {
+    // CO-310: use resolve_seed_co_dir() so this works on Fly (/app/seed-co),
+    // local dev (walks up to work/co/), or via CO_SEED_CO_DIR env override.
     let co_dir = std::path::Path::new(&config.data_dir).join("co");
-    let seed_src = std::path::Path::new("/app/seed-co");
-    if seed_src.exists() {
-        match super::uat_boot::copy_dir_all(seed_src, &co_dir) {
-            Ok(()) => tracing::info!("CO-142: refreshed data/co/ from /app/seed-co/"),
-            Err(e) => tracing::warn!("CO-142: could not refresh data/co/: {e}"),
-        }
-        // CO-142 follow-up (2026-05-02): Phase E populated /data/co/ for
-        // the dev_board admin scan, but the SPA's /co/co board reads from
-        // the per-universe `entries` table — which stayed empty, hence
-        // user report "co has 0 entries, we have 140 tasks". This pass
-        // bridges the gap by upserting each CO-*.md into the `co`
-        // universe's entries at path tasks/<filename>.
-        let mut storage = Storage::new(&config.data_dir);
-        storage.seed_co_universe_tasks(seed_src);
-        // CO-264: also seed well-known root-level files (CHANGELOG.md,
-        // README.md, LICENSE.md) from the parent of the seed dir.
-        // In Docker: /app/seed-co/../ = /app/ — requires COPY of those
-        // files in the Dockerfile. Falls through silently when absent.
-        if let Some(root) = seed_src.parent() {
-            storage.reseed_co_root_files(root);
-        }
+    let Some(seed_src) = super::uat_boot::resolve_seed_co_dir() else {
+        return;
+    };
+    match super::uat_boot::copy_dir_all(&seed_src, &co_dir) {
+        Ok(()) => tracing::info!(
+            "CO-142: refreshed data/co/ from {}",
+            seed_src.display()
+        ),
+        Err(e) => tracing::warn!("CO-142: could not refresh data/co/: {e}"),
+    }
+    // CO-142 follow-up (2026-05-02): Phase E populated /data/co/ for
+    // the dev_board admin scan, but the SPA's /co/co board reads from
+    // the per-universe `entries` table — which stayed empty, hence
+    // user report "co has 0 entries, we have 140 tasks". This pass
+    // bridges the gap by upserting each CO-*.md into the `co`
+    // universe's entries at path tasks/<filename>.
+    let mut storage = Storage::new(&config.data_dir);
+    storage.seed_co_universe_tasks(&seed_src);
+    // CO-264: also seed well-known root-level files (CHANGELOG.md,
+    // README.md, LICENSE.md) from the parent of the seed dir.
+    if let Some(root) = seed_src.parent() {
+        storage.reseed_co_root_files(root);
     }
 }
 
