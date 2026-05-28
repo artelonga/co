@@ -362,11 +362,13 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     let mail_provider: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
     tracing::info!("Email: log provider (codes printed to stdout)");
 
-    // Initialize game-core encrypted storage
+    // Initialize game-core encrypted storage.
+    // CO-307: default to <data-dir>/game.db so each `co serve` instance has its
+    // own game DB. The old global default (~/Library/Application Support/game/game.db)
+    // made two concurrent servers impossible — they all fought for the same lock.
+    // GAME_DB_PATH env var still overrides for explicit control (used by CO-300 testkit).
     let game_db_path = config.game_db_path.clone().unwrap_or_else(|| {
-        let data_dir = dirs::data_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-        data_dir
-            .join("game")
+        std::path::Path::new(&config.data_dir)
             .join("game.db")
             .to_string_lossy()
             .to_string()
