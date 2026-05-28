@@ -6,8 +6,8 @@ import {
     renderSectionHtml, renderUniverseItemHtml, buildChildMap,
     renderInviteRowHtml, renderDiscoverableItemHtml,
 } from './sections.js';
-// CO-280 Phase 1: Platforms + Tools sections are siblings of the universe nav.
-import { renderPlatforms } from './platforms.js';
+// CO-311: Platforms section removed (was hardcoded cross-deployment links,
+// not actual universes — confused users). Tools section remains.
 import { renderTools } from './tools.js';
 
 // Callbacks injected by app.js to break circular deps
@@ -35,10 +35,9 @@ let _setUniverseSlugInUrl = () => {};
 export function injectSetUniverseSlugInUrl(fn) { _setUniverseSlugInUrl = fn; }
 
 export function renderSidebar() {
-    // CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools).
-    // Platforms + Tools render into their own nav containers; the existing
-    // universe + project list rendering stays scoped to #project-list.
-    renderPlatforms();
+    // CO-311: two-section sidebar (This universe / Tools). The old Platforms
+    // section was a hardcoded list of cross-deployment links — removed because
+    // users expected it to show universes, not external sites.
     renderTools();
 
     const list = document.querySelector('#project-list');

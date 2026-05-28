@@ -5,6 +5,5 @@ export { renderHeader, renderUsageCount, incrementLocalUsageCount, renderHeaderU
 export { renderUserBadge } from './badge.js';
 export { renderMiniCalendar, injectScrollToDate } from './mini-calendar.js';
 export { setupHamburgerMenu } from './wire.js';
-// CO-280 Phase 1: three-section sidebar (Platforms / This universe / Tools)
-export { renderPlatforms, PLATFORMS } from './platforms.js';
+// CO-311: Platforms section removed; Tools remains.
 export { renderTools } from './tools.js';
