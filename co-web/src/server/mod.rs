@@ -279,6 +279,25 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         )
         .init();
 
+    // CO-298: read staging config early so all decorator wiring below can use it.
+    let staging = crate::infra::staging::StagingConfig::from_config(
+        config.staging,
+        config.staging_latency_ms,
+        config.staging_error_rate,
+    );
+    if staging.is_active() {
+        tracing::warn!(
+            "co serve --staging: latency={}ms, error_rate={:.0}% \
+             (latency={}, faults={}, eviction={}, worker_failures={})",
+            staging.latency_ms,
+            staging.error_rate * 100.0,
+            staging.latency_enabled,
+            staging.fault_enabled,
+            staging.eviction_enabled,
+            staging.worker_failure_enabled,
+        );
+    }
+
     let storage = Storage::new(&config.data_dir);
 
     if !storage.has_data() {
@@ -387,6 +406,14 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     };
 
     let blob_backend = crate::infra::blob::blob_backend_from_env().await;
+    // CO-298: wrap blob backend with FlakyBlobStore when staging fault injection is active.
+    let blob_backend = if staging.fault_enabled {
+        blob_backend.with_staging_error_rate(staging.error_rate)
+    } else {
+        blob_backend
+    };
+    // CO-298: LatencyInjectedStorage is applied inside CoreState::from_storage_full
+    // (see state.rs) so storage_trait is already wrapped before we freeze it in Arc.
     let core = Arc::new(CoreState::from_storage_full(
         storage,
         config.clone(),
@@ -409,6 +436,16 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // during server startup.  After construction the concrete Arc is stored as
     // Arc<dyn WorkerExecutor> in IntegrationsState.
     let worker_executor = Arc::new(crate::infra::workers::InProcessExecutor::new());
+    // CO-298: wrap worker supervisor with RetryProneWorkerExecutor in staging mode.
+    let worker_supervisor: Arc<dyn crate::infra::workers::WorkerExecutor> =
+        if staging.worker_failure_enabled {
+            Arc::new(crate::infra::staging::RetryProneWorkerExecutor::new(
+                Arc::clone(&worker_executor) as Arc<dyn crate::infra::workers::WorkerExecutor>,
+                staging.error_rate,
+            ))
+        } else {
+            Arc::clone(&worker_executor) as Arc<dyn crate::infra::workers::WorkerExecutor>
+        };
     let integrations = Arc::new(IntegrationsState {
         mail: mail_provider,
         geo,
@@ -418,8 +455,7 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         jwt_key,
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         experiment: Mutex::new(experiment),
-        worker_supervisor: Arc::clone(&worker_executor)
-            as Arc<dyn crate::infra::workers::WorkerExecutor>,
+        worker_supervisor,
     });
     let state: AppState = AppState::new(AppStateInner {
         core,
@@ -554,7 +590,33 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
 
-    let app = build_router(state.clone(), plugin_routes);
+    let mut app = build_router(state.clone(), plugin_routes);
+
+    // CO-298: add per-request latency middleware when staging latency is enabled.
+    // This makes even lightweight endpoints (e.g. /api/health) measurably slower,
+    // surfacing timing-sensitive code paths in pre-deploy verification.
+    if staging.latency_enabled {
+        let latency = std::time::Duration::from_millis(staging.latency_ms);
+        app = app.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| async move {
+                tokio::time::sleep(latency).await;
+                next.run(req).await
+            },
+        ));
+    }
+
+    // CO-298: spawn cache eviction background task when staging eviction is active.
+    if staging.eviction_enabled {
+        let cache = Arc::clone(&state.index.cache);
+        let eviction_rate = staging.error_rate;
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_secs(5));
+            loop {
+                interval.tick().await;
+                cache.evict_staging(eviction_rate);
+            }
+        });
+    }
 
     let addr = format!("{}:{}", bind_host, config.port);
     let display_url = format!("http://127.0.0.1:{}", config.port);

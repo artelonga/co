@@ -446,6 +446,8 @@ enum Commands {
     ///   co serve --port 8080              # custom port
     ///   co serve --data-dir ~/my-co       # custom data directory
     ///   co serve --public                 # bind 0.0.0.0 (prints a warning)
+    ///   co serve --staging                # inject latency + faults (pre-deploy verification)
+    ///   co serve --staging --staging-latency-ms 50 --staging-error-rate 0.1
     Serve {
         /// Server port
         #[arg(short, long, env = "CO_SERVE_PORT", default_value_t = 54321)]
@@ -462,6 +464,23 @@ enum Commands {
         /// Bind to 0.0.0.0 instead of 127.0.0.1 (exposes to local network — prints a warning)
         #[arg(long)]
         public: bool,
+
+        /// Enable staging simulation: latency injection + fault injection + cache eviction
+        /// pressure. Equivalent to setting CO_STAGING=1.
+        /// Opt out individual plugs: CO_STAGING_LATENCY=false, CO_STAGING_FAULT_INJECTION=false,
+        /// CO_STAGING_EVICTION=false, CO_STAGING_WORKER_FAILURE=false.
+        #[arg(long)]
+        staging: bool,
+
+        /// Artificial latency added to every storage call and HTTP request (ms).
+        /// Only active when --staging is set or CO_STAGING=1.
+        #[arg(long, default_value_t = 50, env = "CO_STAGING_LATENCY_MS")]
+        staging_latency_ms: u64,
+
+        /// Fraction of blob ops and worker enqueues that return errors (0.0–1.0).
+        /// Only active when --staging is set or CO_STAGING=1.
+        #[arg(long, default_value_t = 0.05, env = "CO_STAGING_ERROR_RATE")]
+        staging_error_rate: f64,
     },
 
     /// Start the project management board (web UI)
@@ -1327,6 +1346,9 @@ fn main() {
             data_dir,
             open,
             public,
+            staging,
+            staging_latency_ms,
+            staging_error_rate,
         } => {
             let resolved = data_dir
                 .map(|p| p.to_string_lossy().into_owned())
@@ -1335,7 +1357,15 @@ fn main() {
                         .map(|d| d.join("co").to_string_lossy().into_owned())
                         .unwrap_or_else(|| "./co-data".to_string())
                 });
-            commands::serve::run(port, resolved, public, open);
+            commands::serve::run(
+                port,
+                resolved,
+                public,
+                open,
+                staging,
+                staging_latency_ms,
+                staging_error_rate,
+            );
         }
         Commands::Board {
             action,

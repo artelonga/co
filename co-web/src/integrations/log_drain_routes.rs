@@ -176,6 +176,9 @@ mod tests {
             cookie_domain: None,
             quilombo_legacy_login: true,
             bypass_rate_limit: false,
+            staging: false,
+            staging_latency_ms: 50,
+            staging_error_rate: 0.05,
         };
         let storage = Storage::new(&config.data_dir);
         let experiment = ExperimentStore::new(&config.data_dir);
