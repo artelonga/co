@@ -74,7 +74,7 @@ fn build_test_app(dir: &std::path::Path) -> axum::Router {
             jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
             rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
             experiment: Mutex::new(experiment),
-            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+            worker_supervisor: co_web::infra::workers::InProcessExecutor::new_arc(),
         }),
     });
     build_router(state, None)

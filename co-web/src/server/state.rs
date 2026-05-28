@@ -99,9 +99,11 @@ pub struct IntegrationsState {
     /// CO-80: token-bucket rate limiter shared across request handlers.
     pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
     pub experiment: Mutex<ExperimentStore>,
-    /// CO-223: unified worker lifecycle supervisor — tracks last-tick timestamps
-    /// and exposes `/api/v1/admin/workers/status`.
-    pub worker_supervisor: crate::worker_supervisor::WorkerSupervisor,
+    /// CO-292: pluggable worker executor — wraps CO-223's WorkerSupervisor for
+    /// periodic workers and adds one-off enqueue/cancel/status operations.
+    /// Default impl is InProcessExecutor; future impls (NATS, Temporal) plug in
+    /// without touching domain code.
+    pub worker_supervisor: std::sync::Arc<dyn crate::infra::workers::WorkerExecutor>,
 }
 
 // ---------------------------------------------------------------------------
