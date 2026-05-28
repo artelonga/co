@@ -129,7 +129,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
             jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
             rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
             experiment: Mutex::new(experiment),
-            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+            worker_supervisor: co_web::infra::workers::InProcessExecutor::new_arc(),
         }),
     });
 
@@ -237,7 +237,7 @@ async fn test_owner_on_private_universe_gets_200() {
             jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
             rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
             experiment: Mutex::new(experiment),
-            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+            worker_supervisor: co_web::infra::workers::InProcessExecutor::new_arc(),
         }),
     });
 
@@ -316,7 +316,7 @@ async fn test_non_member_on_private_universe_gets_403() {
             jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
             rate_limiter: Mutex::new(co_web::rate_limit::RateLimiter::new()),
             experiment: Mutex::new(experiment),
-            worker_supervisor: co_web::worker_supervisor::WorkerSupervisor::new(),
+            worker_supervisor: co_web::infra::workers::InProcessExecutor::new_arc(),
         }),
     });
 

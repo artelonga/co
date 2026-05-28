@@ -82,7 +82,7 @@ fn build_test_router(dir: &std::path::Path) -> axum::Router {
             jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
             rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
             experiment: Mutex::new(experiment),
-            worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+            worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
         }),
     });
     crate::server::build_router(state, None)

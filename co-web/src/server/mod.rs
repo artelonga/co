@@ -398,6 +398,10 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         embeddings,
         embedding_tx,
     });
+    // CO-292: create a concrete InProcessExecutor so we can call spawn_worker()
+    // during server startup.  After construction the concrete Arc is stored as
+    // Arc<dyn WorkerExecutor> in IntegrationsState.
+    let worker_executor = Arc::new(crate::infra::workers::InProcessExecutor::new());
     let integrations = Arc::new(IntegrationsState {
         mail: mail_provider,
         geo,
@@ -407,7 +411,8 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         jwt_key,
         rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
         experiment: Mutex::new(experiment),
-        worker_supervisor: crate::worker_supervisor::WorkerSupervisor::new(),
+        worker_supervisor: Arc::clone(&worker_executor)
+            as Arc<dyn crate::infra::workers::WorkerExecutor>,
     });
     let state: AppState = AppState::new(AppStateInner {
         core,
@@ -555,23 +560,21 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // Server health check passes immediately; model becomes available ~10–60s later.
     Arc::clone(&state.index.embeddings).load_deferred(model_dir);
 
-    // CO-223: register all five workers with the supervisor.
-    // The supervisor runs each in an isolated tokio::spawn so panics in one
-    // worker never bring down siblings or poison the shared storage lock.
+    // CO-292: register all workers through InProcessExecutor.spawn_worker().
+    // Panics in one worker never bring down siblings or poison the shared
+    // storage lock (CO-223 panic-isolation guarantee is preserved).
     {
-        let sup = &state.integrations.worker_supervisor;
-
-        sup.spawn(crate::workers::EmbeddingWorker::new(
+        worker_executor.spawn_worker(crate::workers::EmbeddingWorker::new(
             state.index.embedding_tx.clone(),
         ));
-        sup.spawn(crate::workers::EmailWorker::new(state.clone()));
-        sup.spawn(crate::workers::PushWorker::new(state.clone()));
+        worker_executor.spawn_worker(crate::workers::EmailWorker::new(state.clone()));
+        worker_executor.spawn_worker(crate::workers::PushWorker::new(state.clone()));
         match crate::workers::WebhookWorker::new(state.clone()) {
-            Ok(w) => sup.spawn(w),
+            Ok(w) => worker_executor.spawn_worker(w),
             Err(e) => tracing::error!("webhook worker init failed: {e}"),
         }
-        sup.spawn(crate::workers::JobQueueWorker::new(state.clone()));
-        sup.spawn(crate::workers::DeploymentSnapshotWorker::new(state.clone()));
+        worker_executor.spawn_worker(crate::workers::JobQueueWorker::new(state.clone()));
+        worker_executor.spawn_worker(crate::workers::DeploymentSnapshotWorker::new(state.clone()));
     }
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
