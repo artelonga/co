@@ -744,6 +744,38 @@ fn test_subscribe_unsubscribe_flow() {
     );
 }
 
+/// CO-314: list_subscribed_universes returns subscribed rows (not silently empty).
+/// Regression test for the param-count bug where the query referenced `?1`
+/// three times but passed three positional params, which rusqlite rejected
+/// as "Wrong number of parameters passed to query. Got 2, needed 1" and
+/// dropped every row. The SPA's Subscribe button looked broken because
+/// /me/universes returned subscribed:[] even with rows in the DB.
+#[test]
+fn test_list_subscribed_universes_returns_rows() {
+    let (mut storage, _dir) = make_storage();
+    storage
+        .create_universe(
+            crate::models::CreateUniverse {
+                key: "pub-sub".into(),
+                name: "Public Sub".into(),
+                description: String::new(),
+            },
+            "owner-1",
+        )
+        .unwrap();
+    set_visibility(&storage, "pub-sub", "public-subscribable");
+
+    storage.subscribe_universe("user-a", "pub-sub").unwrap();
+
+    let subscribed = storage.list_subscribed_universes("user-a");
+    assert_eq!(
+        subscribed.len(),
+        1,
+        "list_subscribed_universes must return subscribed rows"
+    );
+    assert_eq!(subscribed[0].universe.key, "pub-sub");
+}
+
 /// Cannot subscribe to a private universe.
 #[test]
 fn test_cannot_subscribe_to_private_universe() {

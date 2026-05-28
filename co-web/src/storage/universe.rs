@@ -452,15 +452,21 @@ impl Storage {
                 return Vec::new();
             }
         };
-        let rows: Vec<_> = match stmt.query_map(params![user_id, user_id, user_id], |row| {
-            self.row_to_universe_with_role(row)
-        }) {
-            Ok(r) => r.filter_map(|x| x.ok()).collect(),
-            Err(e) => {
-                tracing::error!("list_subscribed_universes query: {e}");
-                return Vec::new();
-            }
-        };
+        // CO-314: the query references `?1` in three places but rusqlite
+        // counts distinct placeholders, not occurrences. Passing three
+        // params for one slot errored as "Wrong number of parameters
+        // passed to query. Got 2, needed 1" and dropped every row —
+        // every subscribe attempt looked like it failed in the SPA even
+        // though the DB write succeeded. Pass exactly one; SQLite reuses
+        // it for every `?1` reference.
+        let rows: Vec<_> =
+            match stmt.query_map(params![user_id], |row| self.row_to_universe_with_role(row)) {
+                Ok(r) => r.filter_map(|x| x.ok()).collect(),
+                Err(e) => {
+                    tracing::error!("list_subscribed_universes query: {e}");
+                    return Vec::new();
+                }
+            };
         self.attach_parent_key(rows)
     }
 
