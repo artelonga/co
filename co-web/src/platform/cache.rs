@@ -377,20 +377,6 @@ impl CacheLayer {
         self.invalidation_tx.subscribe()
     }
 
-    /// CO-298: Probabilistic cache flush used by staging mode.
-    ///
-    /// With probability `eviction_rate`, clears the manifest and query caches to
-    /// simulate eviction pressure on a memory-constrained cache backend.
-    /// Called by a background task in `co serve --staging`.
-    pub fn evict_staging(&self, eviction_rate: f64) {
-        if rand::random::<f64>() < eviction_rate {
-            self.manifest.cache.invalidate_all_sync();
-        }
-        if rand::random::<f64>() < eviction_rate {
-            self.query.cache.invalidate_all_sync();
-        }
-    }
-
     /// Typed metrics snapshot (hit rate, eviction rate per layer).
     pub fn stats(&self) -> CacheStats {
         CacheStats {

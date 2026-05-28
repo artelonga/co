@@ -71,23 +71,9 @@ impl CoreState {
         blob_backend: crate::infra::blob::BlobBackend,
     ) -> Self {
         let storage = Arc::new(parking_lot::Mutex::new(storage));
-        let mut storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
+        let storage_trait: Arc<dyn crate::infra::storage::Storage> = Arc::new(
             crate::infra::storage::SqliteStorage::from_arc(Arc::clone(&storage)),
         );
-
-        // CO-298: wrap storage with LatencyInjectedStorage when staging latency is active.
-        let staging = crate::infra::staging::StagingConfig::from_config(
-            config.staging,
-            config.staging_latency_ms,
-            config.staging_error_rate,
-        );
-        if staging.latency_enabled {
-            storage_trait = Arc::new(crate::infra::staging::LatencyInjectedStorage::new(
-                storage_trait,
-                staging.latency_ms,
-            ));
-        }
-
         let auth_provider: Arc<dyn crate::infra::auth::AuthProvider> = Arc::new(
             crate::infra::auth::LocalJwtProvider::new(Arc::clone(&secrets)),
         );

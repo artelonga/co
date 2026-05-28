@@ -1,15 +1,7 @@
 use co_web::config::WebConfig;
 use co_web::server::start_server_on;
 
-pub fn run(
-    port: u16,
-    data_dir: String,
-    public: bool,
-    open: bool,
-    staging: bool,
-    staging_latency_ms: u64,
-    staging_error_rate: f64,
-) {
+pub fn run(port: u16, data_dir: String, public: bool, open: bool) {
     let bind_host = if public {
         eprintln!("Warning: --public binds to 0.0.0.0 — this exposes CO on your local network.");
         eprintln!("  Anyone on your network can reach this server.");
@@ -17,19 +9,6 @@ pub fn run(
     } else {
         "127.0.0.1"
     };
-
-    if staging {
-        eprintln!(
-            "⚠  staging mode: latency={}ms, error-rate={:.0}%",
-            staging_latency_ms,
-            staging_error_rate * 100.0
-        );
-        eprintln!(
-            "   Opt out individual plugs: CO_STAGING_LATENCY=false, \
-             CO_STAGING_FAULT_INJECTION=false, CO_STAGING_EVICTION=false, \
-             CO_STAGING_WORKER_FAILURE=false"
-        );
-    }
 
     let url = format!("http://127.0.0.1:{}", port);
     let universo_dir = format!("{}/universes", data_dir);
@@ -45,15 +24,15 @@ pub fn run(
         universo_dir,
         gestao_github_admins: vec![],
         universe_key: None,
-        co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
+        // CO-309: `co serve` is by definition local. Default to "local" so
+        // uat-login / admin login modal / dev-friendly defaults are on out of
+        // the box. Deployed `co-web` still defaults to "prod" via WebConfig::from(Args).
+        co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "local".into()),
         wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
         wae_api_key: std::env::var("WAE_API_KEY").ok(),
         cookie_domain: None,
         quilombo_legacy_login: true,
         bypass_rate_limit: false,
-        staging,
-        staging_latency_ms,
-        staging_error_rate,
     };
 
     eprintln!("✓ co {} listening on {}", env!("CARGO_PKG_VERSION"), url);

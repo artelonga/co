@@ -29,9 +29,6 @@ fn test_config(dir: &std::path::Path) -> WebConfig {
         cookie_domain: None,
         quilombo_legacy_login: true,
         bypass_rate_limit: false,
-        staging: false,
-        staging_latency_ms: 50,
-        staging_error_rate: 0.05,
     }
 }
 
