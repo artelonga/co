@@ -9,6 +9,7 @@
 
 # Runtime data directories
 data/
+co-web/data*/
 
 # Database files (runtime state — never commit)
 *.db
@@ -52,3 +53,4 @@ GeoLite2-*.mmdb
 
 # CO-243: LSP rust build artifacts
 co-lsp/target/
+{,/}data-test-co305/
