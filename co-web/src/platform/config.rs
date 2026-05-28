@@ -85,11 +85,16 @@ impl WebConfig {
     }
 
     /// Returns true when UAT-login (`POST /api/v1/auth/uat-login`) should be
-    /// reachable. Accepts `uat` (deployed UAT) and `test` (e2e local server
-    /// boot via `co-web/e2e/global-setup.ts`). Used by Playwright fixtures to
-    /// authenticate apiContext.
+    /// reachable. Accepts:
+    /// - `uat` (deployed UAT)
+    /// - `test` (e2e local server boot via `co-web/e2e/global-setup.ts`)
+    /// - `self.staging` (CO-308: `co serve --staging` — local prod-equivalent dev)
+    ///
+    /// Used by Playwright fixtures to authenticate apiContext, by the SPA
+    /// login modal to decide whether to show the admin/password tab, and by
+    /// local developers running `--staging` to log in as `yuri@uat.local`.
     pub fn allows_uat_login(&self) -> bool {
-        self.co_env == "uat" || self.co_env == "test"
+        self.co_env == "uat" || self.co_env == "test" || self.staging
     }
 
     /// Returns true in every non-production environment.
