@@ -386,7 +386,14 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         std::sync::Arc::new(crate::geo::GeoDb::open(&path))
     };
 
-    let core = Arc::new(CoreState::from_storage(storage, config.clone(), auth_store));
+    let blob_backend = crate::infra::blob::blob_backend_from_env().await;
+    let core = Arc::new(CoreState::from_storage_full(
+        storage,
+        config.clone(),
+        auth_store,
+        Arc::new(crate::infra::secrets::EnvSecretsProvider),
+        blob_backend,
+    ));
     let realtime = Arc::new(RealtimeState {
         doc_rooms: crate::ws::new_room_manager(),
         sync_rooms: crate::sync_ws::new_sync_room_manager(),

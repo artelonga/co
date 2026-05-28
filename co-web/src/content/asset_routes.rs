@@ -65,6 +65,11 @@ pub struct AssetMeta {
 // ---------------------------------------------------------------------------
 
 /// Build the on-disk path for a blob: `<universe-dir>/blobs/<aa>/<bb>/<sha256>`.
+///
+/// Kept for backward-compat path computations (e.g. `rel_blob_path` stored in
+/// the DB) and for the test that asserts the sharding scheme. Production blob
+/// I/O now goes through `BlobStore::put/get/delete`.
+#[allow(dead_code)]
 fn blob_path(universe_dir: &std::path::Path, sha256: &str) -> PathBuf {
     let aa = &sha256[0..2];
     let bb = &sha256[2..4];
@@ -223,11 +228,14 @@ pub async fn upload_asset(
         )
     };
 
-    let blob_path = blob_path(&universe_dir, &sha256);
+    let blob_store = state
+        .core
+        .blob_backend
+        .for_universe(&universe_dir, &universe_key);
 
-    // Idempotency: if the row exists we trust the on-disk blob too. If the
-    // row is missing but the file is present (rare; partial write) we'll
-    // overwrite both atomically below.
+    // Idempotency: if the row exists we trust the stored blob too. If the
+    // row is missing but the blob is present (rare; partial write) we'll
+    // overwrite both below.
     let existing: Option<(String, i64)> = {
         let guard = conn
             .lock()
@@ -242,7 +250,7 @@ pub async fn upload_asset(
     };
 
     if let Some((existing_mime, existing_size)) = existing
-        && blob_path.exists()
+        && blob_store.exists(&sha256).await.unwrap_or(false)
     {
         return Ok(Json(AssetUploadResponse {
             sha256: sha256.clone(),
@@ -252,22 +260,15 @@ pub async fn upload_asset(
         }));
     }
 
-    if let Some(parent) = blob_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AppError::Internal(format!("create blob dir: {e}")))?;
-    }
-
     // CO-148: encrypt at rest. Bytes on disk are ChaCha20-Poly1305 ciphertext;
     // sha256 is still of the plaintext (content identity is content, not envelope).
     let (ciphertext, nonce) = crate::asset_crypto::encrypt_blob(&body, &universe_key, &sha256)
         .map_err(|e| AppError::Internal(format!("encrypt blob: {e}")))?;
 
-    // Atomic write: write to temp then rename (POSIX atomic on the same FS).
-    let tmp_path = blob_path.with_extension("tmp");
-    std::fs::write(&tmp_path, &ciphertext)
-        .map_err(|e| AppError::Internal(format!("write blob: {e}")))?;
-    std::fs::rename(&tmp_path, &blob_path)
-        .map_err(|e| AppError::Internal(format!("rename blob: {e}")))?;
+    blob_store
+        .put(&sha256, &ciphertext)
+        .await
+        .map_err(|e| AppError::Internal(format!("blob put: {e}")))?;
 
     let rel_blob_path = format!("blobs/{}/{}/{}", &sha256[0..2], &sha256[2..4], &sha256);
     let size = body.len() as i64;
@@ -439,6 +440,11 @@ pub async fn get_asset(
         )
     };
 
+    let blob_store = state
+        .core
+        .blob_backend
+        .for_universe(&universe_dir, &universe_key);
+
     // CO-148: row now carries nonce + encrypted flag; nonce is empty for
     // legacy plaintext rows (encrypted=0).
     type Row = (String, String, i64, Option<Vec<u8>>, i64);
@@ -464,7 +470,7 @@ pub async fn get_asset(
             .ok()
     };
 
-    let (blob_rel_path, mime, _size, nonce_blob, encrypted) =
+    let (_blob_rel_path, mime, _size, nonce_blob, encrypted) =
         row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
 
     // CO-145 fix: 304 short-circuit must run AFTER row existence check, not
@@ -487,8 +493,9 @@ pub async fn get_asset(
             .unwrap());
     }
 
-    let blob_path = universe_dir.join(&blob_rel_path);
-    let raw = std::fs::read(&blob_path)
+    let raw = blob_store
+        .get(&sha256)
+        .await
         .map_err(|e| AppError::NotFound(format!("Asset bytes missing: {e}")))?;
 
     // Phase 1 plaintext rows (encrypted=0) pass through unchanged. Phase 3
@@ -617,6 +624,11 @@ pub async fn delete_asset(
         )
     };
 
+    let blob_store = state
+        .core
+        .blob_backend
+        .for_universe(&universe_dir, &universe_key);
+
     let row: Option<(String, i64)> = {
         let guard = conn
             .lock()
@@ -630,7 +642,7 @@ pub async fn delete_asset(
             .ok()
     };
 
-    let (blob_rel_path, refcount) = row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
+    let (_blob_rel_path, refcount) = row.ok_or_else(|| AppError::NotFound("Asset".into()))?;
     if refcount > 0 {
         return Err(AppError::Conflict(format!(
             "Asset still referenced ({refcount} entries); refcount must be 0 to delete"
@@ -649,8 +661,7 @@ pub async fn delete_asset(
             .map_err(|e| AppError::Internal(format!("delete asset row: {e}")))?;
     }
 
-    let blob_path = universe_dir.join(&blob_rel_path);
-    let _ = std::fs::remove_file(&blob_path); // best-effort
+    let _ = blob_store.delete(&sha256).await; // best-effort
 
     // CO-156: emit asset.delete telemetry
     crate::telemetry::emit_crud_event(
