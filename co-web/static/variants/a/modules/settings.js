@@ -54,17 +54,18 @@ export function withTimeout(promise, ms, label) {
 // ===== Theme loading =====
 export function loadThemeCss(slug) {
     if (!slug) return;
-    // 2.7.29: prefer the user's explicit palette pick when set;
-    // otherwise fall back to the universe's stored theme_preset (via
-    // state.universeConfig), then to 'modern'. Previously this
-    // function auto-set localStorage to 'modern' which then shadowed
-    // every universe-level theme choice.
+    // CO-313: theme is global per-user, not per-universe. The user picks once
+    // via the header switcher (writes co_user_palette); that pick applies to
+    // every universe they visit. Without a pick, default is 'modern'.
+    // The universe's own theme_preset is intentionally ignored — per-universe
+    // theme switching surprised users who expected one consistent look across
+    // their boards.
     let preset = null;
     try {
         preset = localStorage.getItem('co_user_palette');
     } catch (_) {}
     if (!preset) {
-        preset = state.universeConfig?.theme_preset || 'modern';
+        preset = 'modern';
     }
     const v = (window._coBootTs ||= Math.floor(Date.now() / 1000));
     const href = `/api/v1/themes/${encodeURIComponent(preset)}?v=${v}`;
@@ -126,12 +127,10 @@ export function applyUniverseConfig(config) {
     state.universeConfig = config;
     const slug = state.currentUniverseSlug;
 
-    // 2.7.29: don't auto-set co_user_palette to 'modern' on first load.
-    // The previous behavior shadowed every universe's saved
-    // theme_preset because userPalette was always non-null. Now
-    // userPalette stays null until the user explicitly picks a palette
-    // via the header switcher; the universe's stored theme_preset wins
-    // by default.
+    // CO-313: theme is global per-user. Ignore config.theme_preset on switch —
+    // the user's chosen palette (or 'modern' by default) applies to every
+    // universe. Per-universe theme switching surprised users; this gives a
+    // consistent look across all their boards.
     const userPalette = localStorage.getItem('co_user_palette');
 
     localStorage.removeItem('co_named_palette');
@@ -139,7 +138,7 @@ export function applyUniverseConfig(config) {
 
     if (slug) loadThemeCss(slug);
 
-    const effectivePreset = userPalette || config.theme_preset || 'modern';
+    const effectivePreset = userPalette || 'modern';
     const paletteKey = THEME_PALETTE_MAP[effectivePreset] ?? '';
     if (paletteKey) {
         document.documentElement.setAttribute('data-palette', paletteKey);
