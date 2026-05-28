@@ -172,10 +172,7 @@ pub fn uat_startup(config: &WebConfig) -> bool {
     if !co_dir.exists() {
         match resolve_seed_co_dir() {
             Some(seed_src) => match copy_dir_all(&seed_src, &co_dir) {
-                Ok(()) => tracing::info!(
-                    "UAT: seeded co-dev tasks from {}",
-                    seed_src.display()
-                ),
+                Ok(()) => tracing::info!("UAT: seeded co-dev tasks from {}", seed_src.display()),
                 Err(e) => tracing::warn!("UAT: could not seed co-dev tasks: {e}"),
             },
             None => tracing::warn!(

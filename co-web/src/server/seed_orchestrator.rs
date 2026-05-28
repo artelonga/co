@@ -136,10 +136,7 @@ pub fn run_co142_refresh(config: &WebConfig) {
         return;
     };
     match super::uat_boot::copy_dir_all(&seed_src, &co_dir) {
-        Ok(()) => tracing::info!(
-            "CO-142: refreshed data/co/ from {}",
-            seed_src.display()
-        ),
+        Ok(()) => tracing::info!("CO-142: refreshed data/co/ from {}", seed_src.display()),
         Err(e) => tracing::warn!("CO-142: could not refresh data/co/: {e}"),
     }
     // CO-142 follow-up (2026-05-02): Phase E populated /data/co/ for
