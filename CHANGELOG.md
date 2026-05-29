@@ -5,6 +5,246 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.32.0] — 2026-05-29 — localhost-first distribution + trait foundation + subscribe fix
+
+## CO-282 — Localhost distribution — `co serve` + browser auto-launch + Tauri shell roadmap
+
+Added `co serve` subcommand for localhost-first distribution of the CO platform.
+The same Rust binary that runs on Fly.io can now be invoked locally with a single command.
+
+### What changed
+
+- **`co serve`** — new CLI subcommand that starts the embedded co-web server on `127.0.0.1:54321` (configurable)
+- **`--open`** — opens the user's default browser after the server starts (macOS: `open`, Linux: `xdg-open`, Windows: `start`)
+- **`--port`** — custom port (env: `CO_SERVE_PORT`)
+- **`--data-dir`** — custom data directory for SQLite + universe files; defaults to platform data dir (`~/.local/share/co` on Linux, `~/Library/Application Support/co` on macOS)
+- **`--public`** — binds to `0.0.0.0` instead of `127.0.0.1` with a security warning
+- **Server refactor** — `start_server_on(config, bind_host)` in `co-web` allows the bind address to be controlled by the caller; `start_server` retains its existing `0.0.0.0` default for Fly deployments
+- **SPA audit** — `isAllowedReturnTo()` in `login.js` and `is_allowed_return_to()` in `recovery_routes.rs` now accept `localhost` and `127.0.0.1` so password-reset flows work under `co serve`
+- **GitHub Actions release workflow** — `.github/workflows/release.yml` builds and uploads binaries for 5 targets: `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`
+- **Install one-liner** — `scripts/install.sh` for `curl | sh` install on macOS and Linux
+- **README** — new "Run locally" section with the one-line install command
+
+### Why
+
+The CO binary already had 90% of what a local distribution needs — embedded SPA, SQLite storage, all auth flows. What was missing was the developer ergonomics: a `serve` subcommand, a sensible default port and data dir, browser auto-launch, and release artifacts. This PR delivers Phase 1 of the localhost distribution roadmap; Phase 2 (Tauri desktop shell) and Phase 3 (mobile) are deferred until Phase 1 adoption is measured.
+
+## CO-292 — CO-284-C — Worker executor trait (formalize CO-223 with enqueue/cancel)
+
+Introduces the `WorkerExecutor` trait in `co-web/src/infra/workers.rs` as the
+pluggable abstraction over background-job execution.  Extends CO-223's
+tick-based `Worker` + `WorkerSupervisor` with one-off operations:
+
+- `enqueue(Job)` — spawns a tokio task, returns an abort-capable `JobHandle`
+- `run_now(Job)` — executes a job inline (useful in tests and triggered one-shots)
+- `cancel(JobHandle)` — aborts a running task; status transitions to `Cancelled`
+- `status(JobHandle)` — current `Running / Completed / Failed / Cancelled` state
+
+`Job` wraps any async closure or a single `Worker::tick` call via
+`Job::from_worker_tick`, making all six concrete worker impls (embedding,
+notification_email, notification_push, webhook, job_queue, deployment_snapshot)
+usable through the trait without modification.
+
+`InProcessExecutor` is the default implementation.  It wraps `WorkerSupervisor`
+for periodic workers and adds `AbortHandle`-based tracking for one-off jobs.
+`AppState.integrations.worker_supervisor` is now `Arc<dyn WorkerExecutor>`;
+server startup holds the concrete `Arc<InProcessExecutor>` long enough to call
+`spawn_worker` before type-erasing to the trait object.
+
+### Why
+
+CO-284 calls for pluggable infrastructure so queue-backed executors (NATS,
+Temporal, k8s Jobs) can replace `tokio::spawn` without touching domain code.
+CO-292 establishes the trait contract; future sub-stories plug in alternative
+`WorkerExecutor` impls against the same interface.
+
+## CO-293 — Cache trait + in-process LRU default impl
+
+Introduced a generic `Cache<K, V>` async trait in `co-web/src/infra/cache.rs` and a
+default in-process implementation `InProcessLruCache<K, V>` backed by
+`parking_lot::Mutex<lru::LruCache<K, V>>`. All three existing specialized caches
+(`ManifestCache`, `ThemeCssCache`, `QueryCache`) now delegate their LRU storage to
+`InProcessLruCache`, replacing the raw `std::sync::Mutex<lru::LruCache>` fields.
+
+Per-cache capacity is configurable at startup via environment variables:
+`CO_CACHE_MANIFEST_MAX_ENTRIES`, `CO_CACHE_THEME_CSS_MAX_ENTRIES`,
+`CO_CACHE_QUERY_MAX_ENTRIES` (default: 10 000 each).
+
+### Why
+
+Foundation for future Redis/Memcached backends — a Redis impl can plug into the
+same `Cache<K, V>` trait without touching call sites. The trait is async so network
+backends compose naturally; the in-process default resolves the futures immediately.
+
+## CO-294 — CO-284-E — Blob store trait (standardize on top of CO-263's R2 adapter)
+
+Introduced `BlobStore` trait in `co-web/src/infra/blob.rs` with two implementations:
+`LocalFsBlobStore` (default, filesystem-backed) and `R2BlobStore` (Cloudflare R2 via
+the `blob-r2` Cargo feature). A `BlobBackend` selector reads `CO_BLOB_BACKEND` at boot
+and wires the appropriate backend. Migrated `asset_routes.rs` upload/get/delete blob
+ops to go through the trait instead of direct `std::fs` calls.
+
+### Why
+Decouples blob storage from the local filesystem so Cloudflare R2 (or any S3-compatible
+store) can be activated at boot via environment variables, without code changes.
+
+## CO-296 — CO-284-G — Auth provider trait (extract JWT flow, prepare for OAuth/SSO)
+
+Introduced `AuthProvider` trait in `co-web/src/infra/auth.rs` with `LocalJwtProvider` as the default implementation. The trait exposes four methods: `verify_credentials`, `issue_token`, `verify_token`, and `revoke`, abstracting the JWT signing and verification flow behind a single injectable interface.
+
+All login flows (magic-code verify, password-login, signup, onboarding, password-reset, change-password, Google OAuth callback) now issue session tokens via `state.core.auth_provider.issue_token(...)` instead of calling `crate::auth::sign_jwt` directly. The auth middleware (`require_auth`, `require_auth_with_token`) now verifies tokens via `auth_provider.verify_token(...)`. The provider is wired into `CoreState` and reads the signing key from CO-295's `SecretsProvider`.
+
+### Why
+
+Prepares the codebase for OAuth/SSO provider integration. Adding a future `OAuthProvider`, `GitHubProvider`, or `SAMLProvider` requires only a new `infra/auth.rs` implementation — no route handler changes needed.
+
+## CO-298 REVERT — remove `--staging` mode and fault-injection decorators
+
+Removes `co serve --staging` and the four simulation decorators (`LatencyInjectedStorage`, `FlakyBlobStore`, `EvictingCache`, `RetryProneWorkerExecutor`) added in CO-298.
+
+### Why
+Random fault injection across every request doesn't simulate real production failures — prod fails in specific shapes (a particular endpoint OOMs, R2 rate-limits one bucket, a worker deadlocks under specific load). 5% generic 503s just makes dev annoying without surfacing real bugs. Tested code paths should be exercised with targeted unit/integration tests at known choke points, not probabilistic always-on injection.
+
+Aligns with `feedback_no_uat.md` philosophy: direct-to-prod + smoke test + CHANGELOG rollback, rather than maintaining artificial intermediate environments that *feel* like fidelity but aren't.
+
+### What stays
+The trait foundation (`Storage`, `BlobStore`, `Cache`, `WorkerExecutor`, `AuthProvider`, `SecretsProvider`) and the TestServer testkit remain — those enable real backend swaps (R2 vs LocalFs, future OAuth, Redis cache, etc.). The decorators were the only piece reverted.
+
+## CO-300 — CO-284-K — `co::testkit::TestServer` (spawn real co serve instances for integration tests)
+
+Introduces `TestServer` in `co-web/tests/testkit.rs` — a test helper that spawns a
+real `co serve` subprocess on an ephemeral 127.0.0.1 port for integration testing.
+Tests import it via `mod testkit;` and get full HTTP access to the running server.
+
+Key capabilities:
+- `TestServer::start()` — default config (dev JWT secret, fresh tempdir)
+- `TestServer::start_with(config)` — custom JWT secret + optional `seed_sql` for
+  pre-inserting users / universes before the server boots
+- `TestServer::url(path)` — builds absolute URLs for reqwest calls
+- `TestServer::bearer()` — pre-signed `Bearer <JWT>` token valid for the server
+- `TestServer::client()` — `reqwest::Client` with cookie jar
+- Drop-based cleanup: kills the subprocess and wipes the tempdir on test exit
+
+The `co serve` command gains `GAME_DB_PATH` env-var support so each test instance
+gets its own isolated game database (prevents SQLite lock contention when tests run
+in parallel).
+
+Six integration tests in `testserver_tests.rs` exercise the real binary end-to-end:
+1. Health check — GET /api/health → `{"status":"ok"}`
+2. Template projects public — anonymous read returns CO project
+3. Write to template forbidden — authenticated POST returns 403
+4. Clone template — POST returns 201 + new universe key
+5. Vault write-and-read — PUT immediately visible in GET entries + Cache-Control: no-store
+6. Agent session POST + GET — session created and retrievable by task_id
+
+### Why
+In-process `build_test_router` tests skip the real binary's startup sequence and
+middleware ordering. TestServer-based tests catch bugs like auth middleware ordering
+and real HTTP serialization edge cases that tower::ServiceExt never exercises.
+
+## CO-306 — Whitelist artelonga.com.br in seed-links external HEAD probes
+
+CI runners hit `TLS alert 80 (internal error)` when HEAD-probing `https://artelonga.com.br/` (Fly.io edge rejects automated HEAD from GitHub Actions IP ranges). Added the host to `EXTERNAL_FLAKY_HOSTS` so the link-validation test treats it as a known-flaky probe target.
+
+### Why
+Pre-existing flake surfaced on PR #103 + #104. Link is valid for real browsers; only fails for automated HEAD from CI.
+
+## CO-307 — per-instance game DB default (fix multi-server lock contention)
+
+`co serve` now defaults the game DB to `<data-dir>/game.db` instead of the global `~/Library/Application Support/game/game.db`. The old default made it impossible to run two `co serve` instances at once — they fought for the same SQLite lock and the second one panicked with `Database already open`.
+
+### Why
+Hit while demoing `co serve --staging` alongside a stale debug server. Multi-instance dev workflows (`co serve` + `co serve --staging`, or per-test isolation) all need their own game DB. The `GAME_DB_PATH` env var (CO-300) still overrides for explicit control.
+
+### Migration
+If you had game data at the old global path, point the env var at it:
+
+```bash
+GAME_DB_PATH="$HOME/Library/Application Support/game/game.db" co serve
+```
+
+On Fly.io: new path is `/data/game.db` (on the persistent volume), so deployments now have durable game state instead of relying on `dirs::data_dir()` which resolved to non-persistent locations.
+
+## CO-309 — `co serve` defaults `CO_ENV=local`; `allows_uat_login()` accepts any non-prod env
+
+Two related changes to fix the "yuri@uat.local doesn't work on localhost" footgun surfaced today:
+
+1. `co serve` (CLI) now defaults `CO_ENV` to `"local"` instead of `"prod"`. The CLI is local by definition; defaulting to "prod" was an inverted footgun that locked down dev-friendly endpoints (uat-login, admin login modal, inline magic-code display) on every local server.
+
+2. `allows_uat_login()` now returns true for **any non-prod environment** (`uat`, `test`, `dev`, `local`, or unset) — same predicate as `is_local_or_test()`. Production sets `CO_ENV=prod` explicitly and remains the only deny case.
+
+### Effect
+- `co serve` → `yuri@uat.local`/`uat` login works out of the box
+- `co serve` → admin login tab is visible in the SPA modal
+- `co serve` → magic-code inline display (CO-303 `dev_code` field) works
+
+Production (deployed `co-web` binary on Fly.io) reads `CO_ENV=prod` from `fly.toml`/`fly.uat.toml` env vars and is unaffected.
+
+### Why
+The previous defaults treated "prod" as the safe fallback ("when unsure, lock things down"). In practice that meant local dev had to remember to set `CO_ENV=uat` to log in, and forgot every time. Better default: local-friendly out of the box, prod opted into explicitly at deploy time. The deploy config already does this — the CLI just needed to follow suit.
+
+## CO-310 — seed-co dir resolution works on localhost, not just Fly
+
+`co serve` on localhost now populates the co-dev board with task content from `work/co/` in the repo checkout instead of leaving the board empty.
+
+### The bug
+Both `uat_boot::uat_startup` and `seed_orchestrator::run_co142_refresh` hardcoded `Path::new("/app/seed-co")` — only exists in the Fly Docker image (COPY work/co/ /app/seed-co/). On localhost the path is missing and the seed step silently skips, so the co-dev board has zero tasks even though `work/co/` has 300+ task files. User reported "I can't find the actual tasks in any board" — they were never seeded.
+
+### Fix
+New helper `resolve_seed_co_dir()` checks in order:
+1. `CO_SEED_CO_DIR` env var (explicit override)
+2. `/app/seed-co` (Fly Docker)
+3. Walks up from cwd for `work/co/` (local dev — works from any subdirectory of the repo)
+
+Both seed sites use the helper. Warning message now lists all three resolution paths instead of just the Fly one.
+
+## CO-311 — remove confusing "Plataformas" sidebar section
+
+Removes the hardcoded "Plataformas" section from the SPA sidebar. It listed five sister deployments (co, artelonga, quilombo, yggdrasil, rfq) as cross-deployment links, but users expected the label to mean *universes* and got confused.
+
+The universe list immediately below ("Este universo" + Owned / Member / Subscribed / Discoverable buckets) is the actual source of truth for navigation. The cross-site links the platforms section provided are addressable via direct URLs.
+
+### Files changed
+- `co-web/static/variants/a/index.html` — remove `<div id="sidebar-platforms-section">`
+- `co-web/static/variants/a/modules/sidebar/render.js` — drop `renderPlatforms()` import + call
+- `co-web/static/variants/a/modules/sidebar/platforms.js` — deleted
+
+## CO-313 — global theme per user (no per-universe theme switching)
+
+Theme is now persisted per-user (`co_user_palette` in localStorage) and applies to every universe. The universe's stored `theme_preset` is no longer consulted on universe switch. Default is `modern` if the user has never picked.
+
+### Why
+User reported: "shifting universes changes theme — we want SELECT ONCE (default modern) and set that as default for all universes for now." Per-universe themes were surprising and confusing when working across multiple universes.
+
+### Files
+- `co-web/static/variants/a/modules/settings.js` — `loadThemeCss()` and `applyUniverseConfig()` no longer fall back to `universeConfig.theme_preset`
+
+### What didn't change
+- The header theme switcher still works (writes `co_user_palette`)
+- Per-universe `theme_preset` is still stored in the universe config — it's just not applied at the SPA level. A future spec can decide whether to keep that field or remove it entirely.
+
+## CO-314 — subscribe button now actually works (param-count bug)
+
+`list_subscribed_universes()` was silently returning an empty vec on every call, even when the user had real subscriptions in the database. The SPA's Subscribe button looked broken — clicking it succeeded server-side (`POST /api/v1/universes/:slug/subscribe` returned `204`), but `/api/v1/me/universes` kept reporting `subscribed: []` because the read query failed.
+
+### Root cause
+The SQL referenced `?1` three times (filter `s.user_id`, `u.owner_id`, and a subquery `user_id`) but the Rust code passed `params![user_id, user_id, user_id]` — three positional params for one numbered placeholder. rusqlite rejected this with:
+
+```
+ERROR list_subscribed_universes query:
+  Wrong number of parameters passed to query. Got 2, needed 1
+```
+
+The error was logged + swallowed (CO-191 non-panicking pattern), so the symptom was an empty subscribed list rather than a 500.
+
+### Fix
+- `co-web/src/storage/universe.rs:455` — pass `params![user_id]` (single param; SQLite reuses it for every `?1` reference)
+- `co-web/src/content/universe_routes/tests.rs` — new regression test `test_list_subscribed_universes_returns_rows`
+
+### Why this is the third "got 2, needed 1" class of bug
+The first was tests passing literal JWT secrets that didn't match (CO-295 fixed via SecretsProvider). The second was the "got 2, needed 1" warning in release-commit. This is the third: silent SQL-binding mismatches that swallow data. Worth a project-wide grep next pass for `params![x, x` patterns referencing numbered placeholders.
+
+
 ## [2.31.1] — 2026-05-27 — magic-code auth + e2e fixes + seed-ordering
 
 ## CO-303 — Local-fidelity auth — inline magic-code display + admin password tab in SPA login modal
