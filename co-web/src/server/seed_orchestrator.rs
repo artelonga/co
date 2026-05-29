@@ -125,6 +125,56 @@ pub fn run_startup_seeds(config: &WebConfig) {
     storage.recompute_content_counts();
 }
 
+/// CO-317: seed sister universes from local repos at `~/projects/<repo>/`.
+///
+/// For local dev: when the developer has the sister repos checked out next to
+/// the co repo, ingest their markdown into the matching universes so localhost
+/// shows the same content that would be on the deployed sister site.
+///
+/// Idempotent: skips a universe entirely when it already has > 5 entries
+/// (avoids re-fighting user-created content on every boot).
+///
+/// Override the projects root with `CO_LOCAL_REPOS_DIR=/path/to/parent` for
+/// developers who don't keep things under `~/projects/`.
+pub fn run_sister_repo_seeds(config: &WebConfig) {
+    // Mapping: universe key → local repo dir name.
+    let mappings: &[(&str, &str)] = &[
+        ("artelonga", "ArteLonga"),
+        ("quilomboaraucaria", "quilomboaraucaria"),
+        ("yggdrasil", "yggdrasil"),
+        ("rfq", "rfq-gateway"),
+        ("comunicacao", "comunicacao"),
+        ("mbya", "mbya"),
+        ("topologia", "topologia"),
+    ];
+    let projects_root = std::env::var("CO_LOCAL_REPOS_DIR")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join("projects")));
+    let Some(projects_root) = projects_root else {
+        return;
+    };
+    if !projects_root.exists() {
+        return;
+    }
+    let mut storage = Storage::new(&config.data_dir);
+    for (universe_key, repo_name) in mappings {
+        let repo_path = projects_root.join(repo_name);
+        if !repo_path.exists() {
+            continue;
+        }
+        // Skip if universe already has more than 5 entries — assumes it was
+        // seeded on a previous boot. Pass 0 here to force re-seed (e.g. after
+        // major repo changes).
+        storage.seed_universe_from_local_repo(
+            universe_key,
+            &repo_path,
+            &["docs", "content", "work"],
+            5,
+        );
+    }
+}
+
 /// CO-142 Phase E: refresh data/co/ from bundled /app/seed-co/ on every boot.
 /// The seed dir is injected at Docker build time (COPY work/co/ /app/seed-co/).
 /// This keeps the dev board in sync with repo state without writing back.
