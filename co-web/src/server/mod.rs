@@ -564,7 +564,22 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
     // CO-164: spawn embedding OS thread + load model after server binds.
     crate::embedding_worker::spawn(embedding_rx, state.clone());
-    crate::embedding_worker::boot_scan(state.clone());
+    // CO-315 Slice A: boot_scan walked every universe and queued every stale
+    // embedding (~350 jobs on the prod data set) on every cold start, even if
+    // no user ever touched those universes. Embeddings get queued naturally on
+    // file writes via entry_routes::enqueue_*, so this is a backfill safety
+    // net. Default OFF; opt in with CO_EMBEDDING_BOOT_SCAN=1 when you actually
+    // need to repair stale state after a long downtime.
+    if std::env::var("CO_EMBEDDING_BOOT_SCAN")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        crate::embedding_worker::boot_scan(state.clone());
+    } else {
+        tracing::info!(
+            "CO-315: embedding boot scan skipped (set CO_EMBEDDING_BOOT_SCAN=1 to enable backfill)"
+        );
+    }
     // Load the embedding model in the background so startup doesn't block on it.
     // Server health check passes immediately; model becomes available ~10–60s later.
     Arc::clone(&state.index.embeddings).load_deferred(model_dir);
