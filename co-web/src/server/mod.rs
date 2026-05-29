@@ -292,6 +292,10 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
     seed_orchestrator::run_startup_seeds(&config);
     seed_orchestrator::run_co142_refresh(&config);
+    // CO-317: ingest sister repos at `~/projects/<repo>/` (or $CO_LOCAL_REPOS_DIR)
+    // into their matching universes for localhost dev. Skips per-universe when
+    // already seeded (>5 entries). No-op on prod where the dir doesn't exist.
+    seed_orchestrator::run_sister_repo_seeds(&config);
 
     // CO-44 + e2e: UAT startup runs when CO_ENV=uat OR CO_ENV=test.
     // Test env seeds yuri@uat.local so playwright fixtures can authenticate

@@ -977,6 +977,109 @@ impl Storage {
     }
 
     /// Ingest CO-*.md ticket files from `/app/seed-co/` (or any source dir) into
+    /// CO-317: ingest `.md` files from a local repo into a universe.
+    ///
+    /// For local dev: when `~/projects/<repo>/docs/`, `<repo>/content/`, or
+    /// `<repo>/work/` contain markdown, mirror them into the matching universe
+    /// so localhost shows the same content the deployed universe would.
+    ///
+    /// Idempotent: skips entirely when the universe already has more than
+    /// `skip_if_count_above` entries (so this only does the initial seed and
+    /// doesn't fight user-created content on later boots). Pass `0` to always
+    /// re-ingest.
+    pub fn seed_universe_from_local_repo(
+        &mut self,
+        universe_key: &str,
+        repo_root: &std::path::Path,
+        subdirs: &[&str],
+        skip_if_count_above: i64,
+    ) {
+        if !repo_root.exists() {
+            return;
+        }
+        if self.get_universe(universe_key).is_none() {
+            tracing::warn!(
+                "seed_universe_from_local_repo: universe '{universe_key}' missing — skipped"
+            );
+            return;
+        }
+
+        if skip_if_count_above > 0 {
+            let existing: i64 = {
+                let uc = self.universe_pool.get_or_open(universe_key);
+                uc.lock()
+                    .ok()
+                    .and_then(|g| {
+                        g.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get::<_, i64>(0))
+                            .ok()
+                    })
+                    .unwrap_or(0)
+            };
+            if existing > skip_if_count_above {
+                return;
+            }
+        }
+
+        let universe_root = self.universe_root(universe_key);
+        let now_str = Utc::now().to_rfc3339();
+        let mut upserted = 0usize;
+
+        for subdir in subdirs {
+            let src = repo_root.join(subdir);
+            if !src.exists() {
+                continue;
+            }
+            for fs_path in walk_md_files(&src) {
+                let rel = match fs_path.strip_prefix(repo_root) {
+                    Ok(r) => r.to_path_buf(),
+                    Err(_) => continue,
+                };
+                let raw = match std::fs::read_to_string(&fs_path) {
+                    Ok(s) => s,
+                    Err(_) => continue,
+                };
+                let entry_path = rel.to_string_lossy().replace('\\', "/");
+                let entry = make_entry(
+                    &entry_path,
+                    seed_page_frontmatter(&raw, &now_str),
+                    seed_page_body(&raw),
+                );
+                if co::entry::write_entry(&universe_root, &entry).is_err() {
+                    continue;
+                }
+                let uc = self.universe_pool.get_or_open(universe_key);
+                let conn = match uc.lock() {
+                    Ok(c) => c,
+                    Err(_) => continue,
+                };
+                if upsert_entry_row(&conn, universe_key, &entry).is_ok() {
+                    upserted += 1;
+                }
+            }
+        }
+
+        if upserted > 0 {
+            let actual_count: i64 = {
+                let uc = self.universe_pool.get_or_open(universe_key);
+                uc.lock()
+                    .ok()
+                    .and_then(|g| {
+                        g.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get::<_, i64>(0))
+                            .ok()
+                    })
+                    .unwrap_or(upserted as i64)
+            };
+            let _ = self.conn.execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                rusqlite::params![actual_count, universe_key],
+            );
+            tracing::info!(
+                "CO-317: seeded {upserted} entries into '{universe_key}' from {} (universe now has {actual_count} total)",
+                repo_root.display()
+            );
+        }
+    }
+
     /// the `co` universe's entries table as board-compatible tasks under a
     /// "CO Development Board" project.
     ///
@@ -1221,6 +1324,41 @@ impl Storage {
 // ---------------------------------------------------------------------------
 // CO-261 helpers — free functions used by seed_co_universe_tasks
 // ---------------------------------------------------------------------------
+
+/// CO-317: recursively collect all `.md` files under `dir`. Skips common
+/// developer-tool directories (`.git`, `target`, `node_modules`, `.next`,
+/// `dist`, `build`) so we don't ingest 10k irrelevant readmes.
+pub(super) fn walk_md_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    fn is_skip_dir(name: &str) -> bool {
+        matches!(
+            name,
+            ".git" | "target" | "node_modules" | ".next" | "dist" | "build" | ".turbo" | "out"
+        )
+    }
+    let mut out = Vec::new();
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for entry in read.flatten() {
+        let p = entry.path();
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if p.is_dir() {
+            if is_skip_dir(&name) {
+                continue;
+            }
+            out.extend(walk_md_files(&p));
+            continue;
+        }
+        if p.extension().and_then(|s| s.to_str()) == Some("md") {
+            out.push(p);
+        }
+    }
+    out
+}
 
 /// Returns true if `filename` matches the `{PREFIX}-{DIGITS}.md` pattern
 /// (e.g. `CO-261.md`, `YG-62.md`, `RFQ-27.md`).
