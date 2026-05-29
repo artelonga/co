@@ -169,9 +169,18 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
         storage.seed_universe_from_local_repo(
             universe_key,
             &repo_path,
-            &["docs", "content", "work"],
+            // CO-318: docs/content for pages; work/ separately for tasks (next call).
+            &["docs", "content"],
             5,
         );
+        // CO-318: ingest work/<space>/{PREFIX}-N.md as kanban tasks. Each unique
+        // PREFIX becomes a project in the universe so the sidebar shows it.
+        // The `is_task_filename` filter inside seed_universe_work_tasks_from_local
+        // skips CLAUDE.md / ROADMAP.md / etc.
+        let work_dir = repo_path.join("work");
+        if work_dir.exists() {
+            storage.seed_universe_work_tasks_from_local(universe_key, &work_dir, 5);
+        }
     }
 }
 

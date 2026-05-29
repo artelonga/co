@@ -1080,6 +1080,153 @@ impl Storage {
         }
     }
 
+    /// CO-318: ingest `work/<space>/{PREFIX}-N.md` task specs from a local repo
+    /// into a universe as kanban-board-compatible tasks.
+    ///
+    /// Walks `<work_root>/<space>/` recursively for files matching
+    /// `{PREFIX}-{digits}.md`. The PREFIX (e.g. `AL`, `YG`, `RFQ`) becomes
+    /// the project key — each unique prefix gets a `projects/<PREFIX>/_project.md`
+    /// entry, then each task is upserted at `projects/<PREFIX>/<filename>` with
+    /// `type: task` + `project: <PREFIX>` so it appears in the kanban view.
+    ///
+    /// Idempotent: skips entirely when the universe already has more than
+    /// `skip_if_count_above` task entries.
+    pub fn seed_universe_work_tasks_from_local(
+        &mut self,
+        universe_key: &str,
+        work_root: &std::path::Path,
+        skip_if_count_above: i64,
+    ) {
+        if !work_root.exists() {
+            return;
+        }
+        if self.get_universe(universe_key).is_none() {
+            return;
+        }
+
+        if skip_if_count_above > 0 {
+            let existing: i64 = {
+                let uc = self.universe_pool.get_or_open(universe_key);
+                uc.lock()
+                    .ok()
+                    .and_then(|g| {
+                        g.query_row(
+                            "SELECT COUNT(*) FROM entries WHERE entry_type = 'task'",
+                            [],
+                            |r| r.get::<_, i64>(0),
+                        )
+                        .ok()
+                    })
+                    .unwrap_or(0)
+            };
+            if existing > skip_if_count_above {
+                return;
+            }
+        }
+
+        let universe_root = self.universe_root(universe_key);
+        let now_str = Utc::now().to_rfc3339();
+        let mut seeded_projects: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut upserted = 0usize;
+
+        for fs_path in walk_md_files(work_root) {
+            let filename = match fs_path.file_name().and_then(|n| n.to_str()) {
+                Some(n) => n.to_string(),
+                None => continue,
+            };
+            if !is_task_filename(&filename) {
+                continue;
+            }
+            // Project key = prefix before the final '-{digits}.md'.
+            let stem = match filename.strip_suffix(".md") {
+                Some(s) => s,
+                None => continue,
+            };
+            let project_key = match stem.rfind('-') {
+                Some(pos) => stem[..pos].to_string(),
+                None => continue,
+            };
+
+            // Seed project entry once per prefix.
+            if !seeded_projects.contains(&project_key) {
+                let proj_path = format!("projects/{}/_project.md", project_key);
+                let proj_fm = json!({
+                    "type": "project",
+                    "key": project_key,
+                    "title": format!("{} Board", project_key),
+                    "status": "active",
+                    "next_id": 1,
+                    "created": now_str,
+                    "modified": now_str,
+                    "archived": false,
+                    "tags": ["dev"],
+                });
+                let proj_entry = make_entry(
+                    &proj_path,
+                    proj_fm,
+                    &format!(
+                        "{} — tasks ingested from local repo work/ at boot (CO-318)",
+                        project_key
+                    ),
+                );
+                let _ = co::entry::write_entry(&universe_root, &proj_entry);
+                let uc = self.universe_pool.get_or_open(universe_key);
+                if let Ok(conn) = uc.lock() {
+                    let _ = upsert_entry_row(&conn, universe_key, &proj_entry);
+                }
+                let _ = self.conn.execute(
+                    "INSERT OR IGNORE INTO project_universe_index (project_key, universe_key) \
+                     VALUES (?1, ?2)",
+                    rusqlite::params![project_key, universe_key],
+                );
+                seeded_projects.insert(project_key.clone());
+            }
+
+            // Upsert the task itself under projects/<KEY>/<filename>.
+            let raw = match std::fs::read_to_string(&fs_path) {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            let entry_path = format!("projects/{}/{}", project_key, filename);
+            let entry = make_entry(
+                &entry_path,
+                work_task_frontmatter(&raw, &now_str, &project_key),
+                seed_page_body(&raw),
+            );
+            if co::entry::write_entry(&universe_root, &entry).is_err() {
+                continue;
+            }
+            let uc = self.universe_pool.get_or_open(universe_key);
+            if let Ok(conn) = uc.lock() {
+                if upsert_entry_row(&conn, universe_key, &entry).is_ok() {
+                    upserted += 1;
+                }
+            }
+        }
+
+        if upserted > 0 {
+            let actual_count: i64 = {
+                let uc = self.universe_pool.get_or_open(universe_key);
+                uc.lock()
+                    .ok()
+                    .and_then(|g| {
+                        g.query_row("SELECT COUNT(*) FROM entries", [], |r| r.get::<_, i64>(0))
+                            .ok()
+                    })
+                    .unwrap_or(upserted as i64)
+            };
+            let _ = self.conn.execute(
+                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+                rusqlite::params![actual_count, universe_key],
+            );
+            tracing::info!(
+                "CO-318: seeded {upserted} tasks across {} project(s) into '{universe_key}' from {}",
+                seeded_projects.len(),
+                work_root.display()
+            );
+        }
+    }
+
     /// the `co` universe's entries table as board-compatible tasks under a
     /// "CO Development Board" project.
     ///
