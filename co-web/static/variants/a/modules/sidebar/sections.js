@@ -44,17 +44,26 @@ export function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip)
     const chevron = hasKids
         ? `<span class="sidebar-universe-chevron" data-toggle="${esc(u.key)}" style="display:inline-block;width:14px;text-align:center;cursor:pointer;user-select:none">${expanded ? '▾' : '▸'}</span>`
         : '<span class="sidebar-universe-chevron-spacer" style="display:inline-block;width:14px"></span>';
+    // CO-319: helper that treats "key returned as-is" (untranslated) as falsy,
+    // so the fallback actually fires when a translation is missing. The old
+    // `t(k) || fallback` pattern silently rendered the raw key.
+    const tOr = (key, fallback) => {
+        if (!window.t) return fallback;
+        const v = window.t(key);
+        return (!v || v === key) ? fallback : v;
+    };
     const role = u.role;
     const roleChip = showRoleChip && role && !u._synthetic
-        ? `<span class="role-chip">${esc(window.t ? window.t('sidebar.role.' + role) || role : role)}</span>`
+        ? `<span class="role-chip">${esc(tOr('sidebar.role.' + role, role))}</span>`
         : '';
-    const ossChip = u.key === 'co'
-        ? `<span class="oss-chip">${esc(window.t ? window.t('sidebar.co_dev_chip') || 'código aberto' : 'código aberto')}</span>`
-        : '';
+    // CO-319: oss-chip removed — it was decorative ("código aberto" badge on
+    // the co universe) and its missing translation caused the raw key
+    // `sidebar.co_dev_chip` to render in the sidebar (user reported "weird"
+    // CO row). The universe name + role chip carry enough information.
     const subCount = hasKids ? ` (${kids.length})` : '';
     const syntheticClass = u._synthetic ? ' sidebar-universe-synthetic' : '';
     let html = `<div class="sidebar-item sidebar-universe-item${syntheticClass}${active}" data-universe="${esc(u.key)}" style="padding-left:${indent}px">
-        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}${ossChip}
+        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}
     </div>`;
     if (hasKids && expanded) {
         for (const k of kids) html += renderUniverseItemHtml(k, childrenByParent, depth + 1, showRoleChip);

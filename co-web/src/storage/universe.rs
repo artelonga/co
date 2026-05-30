@@ -476,12 +476,19 @@ impl Storage {
         limit: usize,
     ) -> Vec<crate::models::UniverseWithRole> {
         let mut stmt = match self.conn.prepare(
+            // CO-319: only public-subscribable universes should appear in the
+            // discoverable bucket. The previous `OR is_public = 1` clause let
+            // through `public-static` universes (the timeline trio: tempo,
+            // humanity, universo) which a user CANNOT subscribe to — clicking
+            // their Subscribe button returned 400 from the storage layer.
+            // Static universes remain reachable via direct URL (/tempo etc.);
+            // they just don't show up in this subscribe-context list.
             "SELECT u.key, u.name, u.description, u.owner_id, u.created_at, \
              u.is_template, u.is_public, u.content_count, \
              COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private'), \
              NULL AS role \
              FROM universes u \
-             WHERE (u.visibility = 'public-subscribable' OR u.is_public = 1) \
+             WHERE u.visibility = 'public-subscribable' \
                AND u.is_template = 0 \
                AND COALESCE(u.hidden, 0) = 0 \
              ORDER BY u.content_count DESC, u.name ASC",
