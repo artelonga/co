@@ -53,7 +53,8 @@ export function renderSidebar() {
             .forEach(u => allUniversesMap.set(u.key, u));
         universeHtml += renderSectionHtml(t('sidebar.section.owned'), me.owned, true, t('sidebar.section.owned.tooltip'), allUniversesMap);
         universeHtml += renderSectionHtml(t('sidebar.section.member'), me.member, true, t('sidebar.section.member.tooltip'), allUniversesMap);
-        universeHtml += renderSectionHtml(t('sidebar.section.subscribed'), me.subscribed, true, t('sidebar.section.subscribed.tooltip'), allUniversesMap);
+        // CO-320: pass showUnsubscribe=true so subscribed rows render a × button.
+        universeHtml += renderSectionHtml(t('sidebar.section.subscribed'), me.subscribed, true, t('sidebar.section.subscribed.tooltip'), allUniversesMap, true);
 
         if (me.invited && me.invited.length > 0) {
             universeHtml += `<div class="sidebar-universe-section sidebar-invited-section">
@@ -62,13 +63,16 @@ export function renderSidebar() {
             </div>`;
         }
 
+        // CO-320: Discoverable section removed from default sidebar — was
+        // confusing per user feedback ("we don't want to show all universes
+        // available unless user seeks"). Replaced with a compact "+ Buscar
+        // universos" button that opens a search prompt; users only see the
+        // discoverable list when they actively look for one to subscribe to.
         if (me.discoverable && me.discoverable.length > 0) {
-            const open = localStorage.getItem('co_sidebar_discover') === '1';
-            universeHtml += `<div class="sidebar-universe-section sidebar-discoverable-section">
-                <div class="sidebar-section-label sidebar-discover-toggle" data-toggle="discover" style="cursor:pointer">
-                    ${open ? '▾' : '▸'} ${esc(t('sidebar.section.discoverable'))}
-                </div>
-                ${open ? me.discoverable.map(u => renderDiscoverableItemHtml(u)).join('') : ''}
+            universeHtml += `<div class="sidebar-universe-section sidebar-discover-cta-section">
+                <button class="btn btn-sm btn-ghost sidebar-discover-search-btn" style="width:100%;justify-content:flex-start;font-size:12px;padding:6px 12px">
+                    + ${esc(t('sidebar.discover.find_button') === 'sidebar.discover.find_button' ? 'Buscar universos públicos' : t('sidebar.discover.find_button'))}
+                </button>
             </div>`;
         }
 
@@ -222,7 +226,7 @@ export function renderSidebar() {
         });
     });
 
-    // Discoverable subscribe buttons
+    // Discoverable subscribe buttons (still rendered when search opens)
     list.querySelectorAll('.discover-subscribe-btn').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -235,6 +239,48 @@ export function renderSidebar() {
                 renderSidebar();
             } catch (_) {
                 btn.disabled = false;
+            }
+        });
+    });
+
+    // CO-320: "Buscar universos públicos" search button — prompts for a key
+    // and POSTs subscribe. Quick MVP; replace with a modal+autocomplete in a
+    // follow-up when there are enough public universes to warrant browsing.
+    list.querySelectorAll('.sidebar-discover-search-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const me = state.meUniverses;
+            const opts = (me?.discoverable || []).map(u => `${u.key} — ${u.name || u.key}`).join('\n');
+            const promptText = `Universos públicos disponíveis:\n\n${opts}\n\nDigite a chave (key) do universo para inscrever:`;
+            const key = window.prompt(promptText);
+            if (!key) return;
+            try {
+                await apiFetch(`/api/v1/universes/${encodeURIComponent(key.trim())}/subscribe`, { method: 'POST' }, true);
+                await _loadMeUniverses();
+                renderSidebar();
+                if (_showToast) _showToast(`Inscrito em ${key.trim()}`, 'success');
+            } catch (err) {
+                if (_showToast) _showToast(`Não foi possível inscrever em ${key.trim()}`, 'error');
+            }
+        });
+    });
+
+    // CO-320: unsubscribe × button on subscribed-bucket rows.
+    list.querySelectorAll('.sidebar-unsubscribe-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const key = btn.dataset.key;
+            if (!key) return;
+            if (!window.confirm(`Cancelar inscrição em ${key}?`)) return;
+            btn.disabled = true;
+            try {
+                await apiFetch(`/api/v1/universes/${encodeURIComponent(key)}/subscribe`, { method: 'DELETE' }, true);
+                await _loadMeUniverses();
+                renderSidebar();
+                if (_showToast) _showToast(`Inscrição cancelada: ${key}`, 'success');
+            } catch (_) {
+                btn.disabled = false;
+                if (_showToast) _showToast('Falha ao cancelar inscrição', 'error');
             }
         });
     });
