@@ -5,6 +5,46 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.34.0] — 2026-05-30 — co launch + e2e localhost trial suite
+
+## CO-321 — E2e — localhost trial flow (subscribe / unsubscribe / sister repos / themes)
+
+Added `co-web/e2e/localhost-trial.spec.ts` with 7 Playwright test cases that gate regressions
+in the localhost trial flow surfaced across CO-313 through CO-320.
+
+The spec exercises: anonymous sidebar (no Plataformas/raw chip key/Descobríveis section),
+subscribe happy path (universe appears in subscribed bucket with × button), subscribe
+rejection for public-static universes, unsubscribe via × click, theme persistence across
+universe navigation, sister-repo seeding from CO_LOCAL_REPOS_DIR (pages + tasks, re-sync
+on restart), and discoverable list correctness (excludes static/private/own/subscribed).
+
+### Why
+
+Five separate user-reported bugs in the localhost trial reached demo because no single
+test exercised the full flow. This spec runs against the global test server and (for the
+sister-repo case) an ephemeral server with custom env vars — zero backend or SPA changes.
+
+## CO-322 — co launch — bootstrap a universe from the current repo (Fly-style)
+
+Added `co launch` command: run it inside any directory to provision a universe in
+localhost CO populated from that directory's content — same UX shape as `fly launch --now`.
+
+The command walks up from CWD to the git repo root (falls back to CWD if no `.git`),
+derives a universe key from the directory basename, creates the universe row if missing,
+seeds `docs/` and `content/` as pages via `seed_universe_from_local_repo`, seeds
+`work/{space}/{PREFIX}-N.md` files as kanban tasks via `seed_universe_work_tasks_from_local`,
+and prints a summary of pages + tasks provisioned.
+
+Flags: `--key`, `--name`, `--public` (marks `public-subscribable`), `--now` (starts server
+and opens browser on `/<key>`), `--port`, `--data-dir`. All re-runs are idempotent.
+
+### Why
+
+Following CO-310 → CO-320 the localhost flow works end-to-end. `co launch` is the missing
+onramp: without it, setting up a new universe from a repo required running `co serve`,
+navigating config, and waiting for boot-time sister-repo seeding to pick it up.
+
+
 ## [2.33.0] — 2026-05-30 — localhost trial sweep — local repo sync + sidebar UX + lazy embedding
 
 ## CO-315 Slice A — defer embedding boot scan (opt-in)
