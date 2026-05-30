@@ -251,7 +251,10 @@ export function renderSidebar() {
             e.stopPropagation();
             const me = state.meUniverses;
             const opts = (me?.discoverable || []).map(u => `${u.key} — ${u.name || u.key}`).join('\n');
-            const promptText = `Universos públicos disponíveis:\n\n${opts}\n\nDigite a chave (key) do universo para inscrever:`;
+            // CO-321: instruction text avoids the substring "universo" so e2e
+            // assertions on the listed keys aren't false-matched by prompt copy
+            // (the old phrase "do universo" matched the universo public-static key).
+            const promptText = `Universos públicos disponíveis:\n\n${opts}\n\nDigite a chave para inscrever-se:`;
             const key = window.prompt(promptText);
             if (!key) return;
             try {
