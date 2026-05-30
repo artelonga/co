@@ -464,6 +464,44 @@ enum Commands {
         public: bool,
     },
 
+    /// Bootstrap a universe from the current directory into localhost CO (Fly-style)
+    ///
+    /// Walks up from the current directory to the git repo root (falls back to
+    /// CWD if there is no .git), derives a universe key from the directory name,
+    /// and seeds docs/, content/, and work/ into the local CO storage.
+    ///
+    /// Examples:
+    ///   co launch                           # provision universe from current dir
+    ///   co launch --key myproject           # override the derived key
+    ///   co launch --name "My Project"       # override the display name
+    ///   co launch --public                  # mark as public-subscribable
+    ///   co launch --now                     # provision and open in browser
+    Launch {
+        /// Override the derived universe key (default: lowercased + sanitized dir name)
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Override the display name (default: directory basename)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Mark the universe as public-subscribable
+        #[arg(long)]
+        public: bool,
+
+        /// Also start the server and open the browser after provisioning
+        #[arg(long)]
+        now: bool,
+
+        /// Server port used when --now is set
+        #[arg(short, long, env = "CO_SERVE_PORT", default_value_t = 54321)]
+        port: u16,
+
+        /// Data directory for SQLite + universe files (default: platform data dir / co)
+        #[arg(short, long, env = "CO_SERVE_DATA")]
+        data_dir: Option<std::path::PathBuf>,
+    },
+
     /// Start the project management board (web UI)
     ///
     /// Launches a local web server with Kanban/Calendar views.
@@ -1336,6 +1374,23 @@ fn main() {
                         .unwrap_or_else(|| "./co-data".to_string())
                 });
             commands::serve::run(port, resolved, public, open);
+        }
+        Commands::Launch {
+            key,
+            name,
+            public,
+            now,
+            port,
+            data_dir,
+        } => {
+            let resolved = data_dir
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| {
+                    dirs::data_local_dir()
+                        .map(|d| d.join("co").to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "./co-data".to_string())
+                });
+            commands::launch::run(key, name, public, now, port, resolved);
         }
         Commands::Board {
             action,

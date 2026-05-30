@@ -19,6 +19,7 @@ pub mod index;
 pub mod init;
 pub mod lang;
 pub mod languages;
+pub mod launch;
 pub mod lead;
 pub mod list;
 pub mod locate;

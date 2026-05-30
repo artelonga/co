@@ -784,4 +784,65 @@ impl Storage {
         );
         (universes_scanned, entries_processed, blobs_added)
     }
+
+    /// CO-322: Upsert a universe row for `co launch`.
+    ///
+    /// Idempotent via INSERT OR IGNORE — re-running in the same directory never
+    /// creates a duplicate. If `public` is true the visibility is promoted to
+    /// `public-subscribable` even when the row already existed (so you can run
+    /// `co launch --public` on an existing private universe to make it public).
+    ///
+    /// Returns `true` when the row was newly inserted, `false` when it already
+    /// existed.
+    pub fn ensure_local_universe(&mut self, key: &str, name: &str, public: bool) -> bool {
+        let now_str = chrono::Utc::now().to_rfc3339();
+        let visibility = if public {
+            "public-subscribable"
+        } else {
+            "private"
+        };
+        let is_public: i64 = if public { 1 } else { 0 };
+
+        let inserted = self
+            .conn
+            .execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, visibility) \
+                 VALUES (?1, ?2, '', 'system', ?3, 0, ?4, ?5)",
+                rusqlite::params![key, name, now_str, is_public, visibility],
+            )
+            .unwrap_or(0);
+
+        if public && inserted == 0 {
+            let _ = self.conn.execute(
+                "UPDATE universes SET visibility = 'public-subscribable', is_public = 1 \
+                 WHERE key = ?1",
+                rusqlite::params![key],
+            );
+        }
+
+        inserted > 0
+    }
+
+    /// CO-322: Count entries in a universe by type for `co launch` summary output.
+    ///
+    /// Returns `(pages, tasks, projects)` where `pages` is all entries whose
+    /// `entry_type` is not `task` or `project`.
+    pub fn count_universe_entries(&self, universe_key: &str) -> (i64, i64, i64) {
+        let uc = self.universe_pool.get_or_open(universe_key);
+
+        let query_count = |sql: &str| -> i64 {
+            uc.lock()
+                .ok()
+                .and_then(|g| g.query_row(sql, [], |r| r.get::<_, i64>(0)).ok())
+                .unwrap_or(0)
+        };
+
+        let pages =
+            query_count("SELECT COUNT(*) FROM entries WHERE entry_type NOT IN ('task', 'project')");
+        let tasks = query_count("SELECT COUNT(*) FROM entries WHERE entry_type = 'task'");
+        let projects = query_count("SELECT COUNT(*) FROM entries WHERE entry_type = 'project'");
+
+        (pages, tasks, projects)
+    }
 }
