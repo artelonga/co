@@ -5,6 +5,146 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.33.0] — 2026-05-30 — localhost trial sweep — local repo sync + sidebar UX + lazy embedding
+
+## CO-315 Slice A — defer embedding boot scan (opt-in)
+
+`embedding_worker::boot_scan` walked every universe at startup and queued every stale embedding (~350 jobs on prod data). Cold-start cost was paid on every machine boot, even when no user ever touched most of those universes. Embeddings are queued naturally on file writes (via `entry_routes::enqueue_*`), so this was a backfill safety net, not a correctness requirement.
+
+### Change
+- Default behavior: skip `boot_scan` at startup. Log a one-line notice.
+- Opt-in backfill: set `CO_EMBEDDING_BOOT_SCAN=1` to restore the old behavior (useful after a long downtime to repair stale state).
+
+### Why
+First slice of a "lazy universe load" effort (CO-315). User flagged the cold-start work as non-scalable per user — this removes the single largest non-essential boot cost. Per-universe seeds, migrations, and content-count recompute will follow in slices B and C after we verify universe hierarchy + access auth on prod.
+
+### Impact
+- Cold start no longer queues N=350 jobs on a 16-universe prod data set
+- New writes still trigger embedding generation in real-time (no UX change)
+- If you ever lose embedding state and need to repair: `flyctl secrets set CO_EMBEDDING_BOOT_SCAN=1 -a co-artelonga`, restart machine once, then unset
+
+## CO-316 — drop x86_64-apple-darwin + aarch64-unknown-linux-gnu from release matrix
+
+The v2.32.0 release workflow failed on two platforms:
+
+- **x86_64-apple-darwin** — `ort` (ONNX Runtime via fastembed) stopped publishing prebuilt binaries for Intel Mac; Apple deprecated x86_64 macOS
+- **aarch64-unknown-linux-gnu** — the `cross` container lacks `libssl-dev` headers needed by `ort-sys`'s build script (transitively through `ureq → native-tls → openssl-sys`)
+
+Both platforms had near-zero self-hosting demand. Dropped from the matrix; build still ships for:
+- `aarch64-apple-darwin` (Apple Silicon)
+- `x86_64-unknown-linux-gnu` (most Linux)
+- `x86_64-pc-windows-msvc` (Windows)
+
+### Re-adding later
+- For ARM Linux: add a `Cross.toml` that pre-installs `libssl-dev`, or vendor openssl via the `openssl/vendored` feature
+- For Intel Mac: gate `fastembed` behind a feature flag and ship the CLI without embedding support (the model only matters for `co-web` server, which runs x86_64-linux on Fly)
+
+## CO-317 — local repos as universes (Option A: ingest at boot)
+
+`co serve` now ingests markdown content from local sister-repo checkouts into the matching universes at boot, so localhost shows the same content the deployed sister site would.
+
+### Mapping (hardcoded)
+
+| Universe | Local repo (under `~/projects/`) |
+|---|---|
+| `artelonga` | `ArteLonga/` |
+| `quilomboaraucaria` | `quilomboaraucaria/` |
+| `yggdrasil` | `yggdrasil/` |
+| `rfq` | `rfq-gateway/` |
+| `comunicacao` | `comunicacao/` |
+| `mbya` | `mbya/` |
+| `topologia` | `topologia/` |
+
+For each, walks `docs/`, `content/`, and `work/` subdirs (skipping `.git`, `target`, `node_modules`, etc.) and upserts every `.md` file as an entry in the matching universe.
+
+### Configuration
+- Override projects root: `CO_LOCAL_REPOS_DIR=/path/to/parent co serve`
+- Default: `~/projects/`
+
+### Idempotency
+Skips a universe when it already has more than 5 entries (assumes prior boot already seeded it). To force re-seed after major repo changes, delete the universe's per-universe DB at `<data-dir>/universes/<hash>/<key>/data.db` and restart.
+
+### Scope notes
+- This is **Option A** (ingest at boot, no live sync). Edits to repo files after boot require a server restart to reflect.
+- Option B (file-watcher sync) and Option C (universe-as-mount) deferred per discussion until A is verified for trial.
+- On prod (`/data/` doesn't have `~/projects/`), this is a no-op.
+
+### What unblocks
+Localhost trial — you can now click into any sister universe and see actual content rather than the empty-project placeholder.
+
+## CO-318 — sister repo work/ files become board tasks
+
+Extends CO-317 to make each sister universe's board work the same way the `co` board does:
+
+- `<repo>/docs/`, `<repo>/content/` → ingested as **page** entries (CO-317, unchanged — visible in the "Conteúdo" tab)
+- `<repo>/work/<space>/{PREFIX}-N.md` → ingested as **task** entries with `type: task` and `project: <PREFIX>` (visible in the "Kanban" tab)
+
+For each unique prefix found (`AL`, `YG`, `RFQ`, etc.) a `projects/<PREFIX>/_project.md` entry is created so the project shows up in the sidebar.
+
+### Effect (per universe, after first boot)
+
+| Universe | Source | Projects → Tasks visible on Kanban |
+|---|---|---|
+| `artelonga` | `~/projects/ArteLonga/work/artelonga/AL-*.md` | `AL` |
+| `yggdrasil` | `~/projects/yggdrasil/work/yggdrasil/YG-*.md` | `YG` |
+| `rfq` | `~/projects/rfq-gateway/work/rfq/RFQ-*.md` | `RFQ` |
+| `comunicacao` | `~/projects/comunicacao/work/` (if present) | derived |
+
+### Design
+- Each universe stays its own world (Option 1 model the user confirmed) — `co` board only shows CO-N tasks; `artelonga` board only shows AL-N tasks; no cross-universe federation
+- Pattern mirrors what `seed_co_universe_tasks` does for the `co` universe — generalized
+- Idempotent: per-universe skip when `task` entry count > 5
+- Same env override (`CO_LOCAL_REPOS_DIR`) and same no-op on prod
+
+## CO-319 — discoverable correctness + sister repo re-sync + sidebar polish
+
+Bundle of localhost-trial findings.
+
+### Fixed
+
+1. **Subscribe → 400 on timeline universes** (`tempo`, `humanity`, `universo`). The `list_discoverable_universes` SQL was `WHERE visibility='public-subscribable' OR is_public=1` — the second clause let `public-static` universes through, which storage's `subscribe_universe()` then rejected with `Universe '<x>' is not public-subscribable` (returning 400). Tightened to `visibility='public-subscribable'` only. Static universes remain reachable via direct URL (`/tempo` etc.); they just don't appear in subscribe-context lists.
+
+2. **Local-repo additions weren't picked up after first boot.** CO-317/CO-318 used a `skip_if_count_above: 5` gate so once a universe was seeded, new files added to `~/projects/<repo>/` never showed in localhost. Dropped the gate (passed `0` = always re-upsert). Upserts are idempotent — unchanged files are no-ops; new files appear next restart.
+
+3. **`sidebar.co_dev_chip` raw key showed on the CO sidebar row** (user screenshot: weird chip overflow). The pattern `window.t(key) || fallback` doesn't fire the fallback when `t` returns the key itself (string is truthy). Added `tOr(key, fallback)` helper. Also removed the `oss-chip` entirely — it was decorative ("código aberto" badge) and added clutter to the row.
+
+4. **`rfq` was seeded as `private`** so it never appeared in any user's sidebar. Marked `public-subscribable` with one-shot migration to flip existing rows.
+
+5. **`comunicacao` universe didn't exist in storage** — the matching sister repo at `~/projects/comunicacao/` couldn't be ingested by CO-317/318 because the storage row was missing. Added it to `seed_admin_content_universes` as `public-subscribable`.
+
+### Not fixed in this PR
+- Discoverable section visible by default (user wants it hidden behind a search action) — separate UX PR
+- No unsubscribe affordance on subscribed-bucket rows — separate UX PR
+- 281 vs 300+ co task count is working as designed (`is_task_filename` filter skips CLAUDE.md, ROADMAP.md, etc.)
+
+## CO-320 — discoverable hidden by default + unsubscribe affordance
+
+Two sidebar UX changes from localhost-trial feedback ("subscription is confusing").
+
+### Discoverable list hidden behind a search button
+
+The full "Descobríveis" section is gone. In its place, a small `+ Buscar universos públicos` button at the bottom of the universe nav. Clicking opens a `prompt()` listing all subscribable universes and lets the user type the key to subscribe.
+
+- MVP: native `prompt()` for now; a modal+autocomplete is the proper follow-up
+- The discoverable list is still computed server-side and returned in `/me/universes.discoverable` — only the rendering changed
+- "We don't want to show all universes available unless user seeks" — per user direction
+
+### Unsubscribe button on subscribed-bucket rows
+
+Each row in "Inscrito em" now has a small `×` button that:
+1. Confirms via `window.confirm`
+2. Calls `DELETE /api/v1/universes/<key>/subscribe`
+3. Reloads `/me/universes`
+4. Re-renders sidebar
+5. Shows a toast
+
+Renders only for non-synthetic rows in the subscribed bucket (owned/member rows don't get an unsubscribe button — those aren't subscriptions).
+
+### Files
+- `co-web/static/variants/a/modules/sidebar/render.js` — replace Descobríveis section with search button; add unsubscribe handler; add search button handler
+- `co-web/static/variants/a/modules/sidebar/sections.js` — add `showUnsubscribe` parameter to `renderUniverseItemHtml` / `renderSectionHtml`; render × when true
+
+
 ## [2.32.0] — 2026-05-29 — localhost-first distribution + trait foundation + subscribe fix
 
 ## CO-282 — Localhost distribution — `co serve` + browser auto-launch + Tauri shell roadmap
