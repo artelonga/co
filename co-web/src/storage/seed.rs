@@ -1126,7 +1126,8 @@ impl Storage {
 
         let universe_root = self.universe_root(universe_key);
         let now_str = Utc::now().to_rfc3339();
-        let mut seeded_projects: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut seeded_projects: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
         let mut upserted = 0usize;
 
         for fs_path in walk_md_files(work_root) {
