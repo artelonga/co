@@ -163,23 +163,15 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
         if !repo_path.exists() {
             continue;
         }
-        // Skip if universe already has more than 5 entries — assumes it was
-        // seeded on a previous boot. Pass 0 here to force re-seed (e.g. after
-        // major repo changes).
-        storage.seed_universe_from_local_repo(
-            universe_key,
-            &repo_path,
-            // CO-318: docs/content for pages; work/ separately for tasks (next call).
-            &["docs", "content"],
-            5,
-        );
-        // CO-318: ingest work/<space>/{PREFIX}-N.md as kanban tasks. Each unique
-        // PREFIX becomes a project in the universe so the sidebar shows it.
-        // The `is_task_filename` filter inside seed_universe_work_tasks_from_local
-        // skips CLAUDE.md / ROADMAP.md / etc.
+        // CO-319: pass 0 (never skip) so edits to local repo files are picked
+        // up on the next `co serve` restart. Previous threshold of 5 meant
+        // once a universe was seeded, new files added to ~/projects/<repo>/
+        // never showed in localhost. Upserts are idempotent — unchanged
+        // files are no-ops, new files appear.
+        storage.seed_universe_from_local_repo(universe_key, &repo_path, &["docs", "content"], 0);
         let work_dir = repo_path.join("work");
         if work_dir.exists() {
-            storage.seed_universe_work_tasks_from_local(universe_key, &work_dir, 5);
+            storage.seed_universe_work_tasks_from_local(universe_key, &work_dir, 0);
         }
     }
 }

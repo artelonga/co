@@ -790,7 +790,20 @@ impl Storage {
                 "rfq",
                 "RFQ Gateway",
                 "Plataforma de cotações e registro de negociações",
-                "private",
+                // CO-319: was "private" so it never appeared in any user's
+                // sidebar. RFQ Gateway is a public sister deployment (rfq.fly.dev)
+                // — mark public-subscribable so users can discover + subscribe.
+                "public-subscribable",
+                None,
+            ),
+            // CO-319: comunicacao universe — the matching sister repo at
+            // ~/projects/comunicacao/ exists and has docs+content; create the
+            // universe row so CO-317 sister-repo seeding can populate it.
+            (
+                "comunicacao",
+                "Comunicação",
+                "Comunicação — protocolos, infraestrutura e canais entre universos",
+                "public-subscribable",
                 None,
             ),
             // Language parent — groups mbya + topologia
@@ -850,6 +863,16 @@ impl Storage {
                 self.seed_default_project_if_missing(key);
             }
         }
+        // CO-319 one-shot migration: rfq was originally seeded as `private`
+        // (1.x line) so existing installs have it stuck that way — INSERT OR
+        // IGNORE above won't touch existing rows. This UPDATE targets only
+        // the rfq row and only when it's still in the wrong state, so it's
+        // safe to run on every boot without stomping user-set visibility.
+        let _ = self.conn.execute(
+            "UPDATE universes SET visibility = 'public-subscribable', is_public = 1 \
+             WHERE key = 'rfq' AND visibility = 'private'",
+            [],
+        );
     }
 
     /// CO-279: ensure a universe has at least one project entry so the kanban
