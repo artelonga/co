@@ -24,7 +24,7 @@ export function buildChildMap(universes, allUniversesMap = null) {
     return { childrenByParent, topLevel };
 }
 
-export function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip) {
+export function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip, showUnsubscribe = false) {
     const active = u.key === state.currentUniverseSlug ? ' active' : '';
     const kids = childrenByParent[u.key];
     const hasKids = !!(kids && kids.length);
@@ -56,28 +56,30 @@ export function renderUniverseItemHtml(u, childrenByParent, depth, showRoleChip)
     const roleChip = showRoleChip && role && !u._synthetic
         ? `<span class="role-chip">${esc(tOr('sidebar.role.' + role, role))}</span>`
         : '';
-    // CO-319: oss-chip removed — it was decorative ("código aberto" badge on
-    // the co universe) and its missing translation caused the raw key
-    // `sidebar.co_dev_chip` to render in the sidebar (user reported "weird"
-    // CO row). The universe name + role chip carry enough information.
+    // CO-320: × button to unsubscribe — only rendered when the row is in the
+    // subscribed bucket (showUnsubscribe=true). e.stopPropagation in the
+    // click handler prevents the surrounding row from navigating.
+    const unsubBtn = showUnsubscribe && !u._synthetic
+        ? `<button class="sidebar-unsubscribe-btn" data-key="${esc(u.key)}" title="${esc(tOr('sidebar.unsubscribe.title', 'Cancelar inscrição'))}" style="background:transparent;border:none;color:inherit;opacity:0.5;cursor:pointer;padding:2px 6px;font-size:14px;margin-left:4px">×</button>`
+        : '';
     const subCount = hasKids ? ` (${kids.length})` : '';
     const syntheticClass = u._synthetic ? ' sidebar-universe-synthetic' : '';
     let html = `<div class="sidebar-item sidebar-universe-item${syntheticClass}${active}" data-universe="${esc(u.key)}" style="padding-left:${indent}px">
-        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}
+        ${chevron}<span class="sidebar-item-name">${esc(u.name || u.key)}${subCount}</span>${roleChip}${unsubBtn}
     </div>`;
     if (hasKids && expanded) {
-        for (const k of kids) html += renderUniverseItemHtml(k, childrenByParent, depth + 1, showRoleChip);
+        for (const k of kids) html += renderUniverseItemHtml(k, childrenByParent, depth + 1, showRoleChip, showUnsubscribe);
     }
     return html;
 }
 
-export function renderSectionHtml(label, universes, showRoleChip, tooltip = '', allUniversesMap = null) {
+export function renderSectionHtml(label, universes, showRoleChip, tooltip = '', allUniversesMap = null, showUnsubscribe = false) {
     if (!universes || universes.length === 0) return '';
     const { childrenByParent, topLevel } = buildChildMap(universes, allUniversesMap);
     const titleAttr = tooltip ? ` title="${esc(tooltip)}"` : '';
     return `<div class="sidebar-universe-section">
         <div class="sidebar-section-label"${titleAttr}>${esc(label)}</div>
-        ${topLevel.map(u => renderUniverseItemHtml(u, childrenByParent, 0, showRoleChip)).join('')}
+        ${topLevel.map(u => renderUniverseItemHtml(u, childrenByParent, 0, showRoleChip, showUnsubscribe)).join('')}
     </div>`;
 }
 
