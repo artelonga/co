@@ -1197,10 +1197,10 @@ impl Storage {
                 continue;
             }
             let uc = self.universe_pool.get_or_open(universe_key);
-            if let Ok(conn) = uc.lock() {
-                if upsert_entry_row(&conn, universe_key, &entry).is_ok() {
-                    upserted += 1;
-                }
+            if let Ok(conn) = uc.lock()
+                && upsert_entry_row(&conn, universe_key, &entry).is_ok()
+            {
+                upserted += 1;
             }
         }
 
