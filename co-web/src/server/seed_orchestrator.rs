@@ -146,6 +146,9 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
         ("comunicacao", "comunicacao"),
         ("mbya", "mbya"),
         ("topologia", "topologia"),
+        // CO-323A: user's personal Obsidian vault → private yuri universe.
+        // Eventually serves yuri.artelonga.com.br (CO-323 subdomain spec).
+        ("yuri", "yuri"),
     ];
     let projects_root = std::env::var("CO_LOCAL_REPOS_DIR")
         .ok()
