@@ -163,15 +163,31 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
         }
     };
 
-    // CO-330 fallback: when CO_LOCAL_REPOS_DIR is set in env, derive
-    // <env>/<universe_key> for any universe that has no local_repo_path
-    // in the DB yet. Preserves CO-321's e2e test contract (which uses a
-    // tempdir env override) and gives a "all universes under this parent"
-    // dev mode without needing per-universe PATCH calls.
+    // CO-330 fallback: when CO_LOCAL_REPOS_DIR is set in env, it acts as the
+    // parent directory and we re-resolve every universe's path against it
+    // using the basename of the configured `local_repo_path`. Preserves the
+    // pre-CO-330 mapping convention (env_var = parent, mapping had relative
+    // name) so CO-321's e2e test (which writes <tempdir>/ArteLonga/docs/page.md
+    // and sets CO_LOCAL_REPOS_DIR=<tempdir>) keeps working without DB writes.
+    //
+    // Universes with NULL local_repo_path also get a chance: try
+    // <env>/<universe_key>.
     if let Ok(env_dir) = std::env::var("CO_LOCAL_REPOS_DIR") {
         let env_root = std::path::PathBuf::from(&env_dir);
         if env_root.exists() {
-            // Collect keys already covered by DB rows.
+            // Rewrite paths of universes already in `rows` to point at <env>/<basename>.
+            for (_k, path_str, _subdirs) in rows.iter_mut() {
+                if let Some(basename) = std::path::Path::new(&*path_str)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                {
+                    let candidate = env_root.join(basename);
+                    if candidate.exists() {
+                        *path_str = candidate.to_string_lossy().to_string();
+                    }
+                }
+            }
+            // Also pick up universes with NULL local_repo_path when <env>/<key> exists.
             let covered: std::collections::HashSet<String> =
                 rows.iter().map(|(k, _, _)| k.clone()).collect();
             let conn = storage.conn();
