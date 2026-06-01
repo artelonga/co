@@ -435,6 +435,23 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         integrations,
     });
 
+    // CO-329: initialise the analytics ring buffer and wire up its sources.
+    {
+        let buf = crate::observability::init_buffer();
+
+        // Domain event subscriber → analytics buffer.
+        let s = state.clone();
+        let buf2 = std::sync::Arc::clone(&buf);
+        tokio::spawn(async move {
+            let mut rx = s.core.event_bus.subscribe(crate::events::EventFilter::All);
+            while let Some(event) = rx.recv().await {
+                if let Some(ae) = crate::observability::from_domain_event(&event) {
+                    buf2.push(ae);
+                }
+            }
+        });
+    }
+
     // CO-220: spawn event bus listeners — decoupled cross-feature wiring.
     {
         // Notification listener: handles NotificationRequested events emitted by

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>CO Analytics</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#66bb6a;--blue:#4fc3f7;--red:#e57373;--yellow:#ffa726;--orange:#ff7043}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:12px/1.5 "SF Mono","Cascadia Code",monospace;padding:16px;max-width:1200px}
+h1{font-size:1.1rem;margin-bottom:2px;color:var(--accent);font-family:system-ui,sans-serif}
+.sub{font-size:.7rem;color:var(--dim);margin-bottom:14px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+@media(max-width:700px){.grid,.grid3{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:14px;overflow:hidden}
+.card-title{font-size:.65rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px;font-family:system-ui,sans-serif}
+.log{height:220px;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:2px}
+.log-row{display:flex;gap:8px;white-space:nowrap;font-size:11px}
+.log-ts{color:var(--dim);width:68px;flex-shrink:0}
+.log-method{width:36px;flex-shrink:0;color:var(--blue)}
+.log-status{width:30px;flex-shrink:0}
+.log-dur{width:50px;flex-shrink:0;color:var(--dim);text-align:right}
+.log-path{color:var(--text);overflow:hidden;text-overflow:ellipsis}
+.s2{color:var(--green)}
+.s3{color:var(--yellow)}
+.s4,.s5{color:var(--red)}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:4px 8px;color:var(--dim);border-bottom:1px solid var(--border);font-size:.65rem;letter-spacing:.05em;font-family:system-ui,sans-serif;font-weight:500}
+td{padding:4px 8px;border-bottom:1px solid var(--border);font-size:11px}
+tr:last-child td{border:none}
+.badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:.65rem}
+.badge-ok{background:#1a3a1a;color:var(--green)}
+.badge-err{background:#3a1a1a;color:var(--red)}
+.badge-idle{background:#1a1a2a;color:var(--dim)}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.stat{text-align:center;padding:10px 4px}
+.stat-val{font-size:1.5rem;font-weight:700;color:var(--accent)}
+.stat-lbl{font-size:.65rem;color:var(--dim);margin-top:2px;font-family:system-ui,sans-serif}
+.ai-row{display:flex;flex-direction:column;gap:6px}
+.ai-item{display:flex;gap:8px;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--border);font-size:11px}
+.ai-item:last-child{border:none}
+.ai-task{color:var(--accent);font-weight:600;width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}
+.ai-univ{color:var(--blue);width:80px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}
+.ai-dur{color:var(--dim);width:55px;text-align:right}
+.ai-tok{color:var(--dim)}
+.ai-code-ok{color:var(--green)}
+.ai-code-err{color:var(--red)}
+.err-row{display:flex;gap:8px;padding:4px 0;border-bottom:1px solid var(--border);font-size:11px}
+.err-row:last-child{border:none}
+.err-ts{color:var(--dim);width:68px;flex-shrink:0}
+.err-kind{color:var(--red);width:90px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis}
+.err-detail{color:var(--text);overflow:hidden;text-overflow:ellipsis}
+#status{font-size:.65rem;color:var(--dim);margin-bottom:10px}
+.dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--dim);margin-right:4px}
+.dot-ok{background:var(--green)}
+.dot-err{background:var(--red)}
+</style>
+</head>
+<body>
+<h1>CO Analytics</h1>
+<div class="sub" id="status"><span class="dot" id="dot"></span><span id="status-text">Conectando…</span></div>
+
+<div class="card" style="margin-bottom:12px">
+  <div class="card-title">Estatísticas de Requisições</div>
+  <div class="stats-grid">
+    <div class="stat"><div class="stat-val" id="st-1m">—</div><div class="stat-lbl">Req / 1 min</div></div>
+    <div class="stat"><div class="stat-val" id="st-5m">—</div><div class="stat-lbl">Req / 5 min</div></div>
+    <div class="stat"><div class="stat-val" id="st-1h">—</div><div class="stat-lbl">Req / 1 hora</div></div>
+    <div class="stat"><div class="stat-val" id="st-err">—</div><div class="stat-lbl">Erros 4xx/5xx</div></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Requisições Recentes</div>
+    <div class="log" id="req-log"><div style="color:var(--dim);font-size:11px">Aguardando…</div></div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Eventos de Domínio</div>
+    <div class="log" id="dom-log"><div style="color:var(--dim);font-size:11px">Aguardando…</div></div>
+  </div>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <div class="card-title">Workers em Execução</div>
+    <table>
+      <thead><tr><th>Worker</th><th>Ticks</th><th>Erros</th><th>Último tick</th><th>Status</th></tr></thead>
+      <tbody id="workers-body"><tr><td colspan="5" style="color:var(--dim);text-align:center;padding:12px">Aguardando snapshot…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Sessões de IA (recentes)</div>
+    <div class="ai-row" id="ai-list"><div style="color:var(--dim);font-size:11px">Aguardando…</div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Erros Recentes (4xx/5xx)</div>
+  <div id="err-list"><div style="color:var(--dim);font-size:11px">Nenhum erro registrado</div></div>
+</div>
+
+<script>
+// State
+var requests = [];
+var domainEvents = [];
+var aiSessions = [];
+var errors = [];
+var ws;
+var reconnectDelay = 2000;
+
+// Helpers
+function fmt(dt) {
+  if (!dt) return '';
+  var d = new Date(dt);
+  return d.toLocaleTimeString('pt-BR', { hour12: false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+}
+function ms(v) { return v < 1000 ? v + 'ms' : (v / 1000).toFixed(1) + 's'; }
+function esc(s) { return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function statusClass(s) {
+  if (s < 300) return 's2';
+  if (s < 400) return 's3';
+  return 's4';
+}
+function push(arr, item, max) {
+  arr.unshift(item);
+  if (arr.length > max) arr.length = max;
+}
+
+// Render
+function renderRequests() {
+  var el = document.getElementById('req-log');
+  if (!requests.length) { el.innerHTML = '<div style="color:var(--dim);font-size:11px">Aguardando…</div>'; return; }
+  el.innerHTML = requests.map(function(r) {
+    var sc = statusClass(r.status);
+    return '<div class="log-row">' +
+      '<span class="log-ts">' + fmt(r.ts) + '</span>' +
+      '<span class="log-method">' + esc(r.method) + '</span>' +
+      '<span class="log-status ' + sc + '">' + r.status + '</span>' +
+      '<span class="log-dur">' + ms(r.duration_ms) + '</span>' +
+      '<span class="log-path">' + esc(r.path) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function renderDomain() {
+  var el = document.getElementById('dom-log');
+  if (!domainEvents.length) { el.innerHTML = '<div style="color:var(--dim);font-size:11px">Aguardando…</div>'; return; }
+  el.innerHTML = domainEvents.map(function(e) {
+    return '<div class="log-row">' +
+      '<span class="log-ts">' + fmt(e.ts) + '</span>' +
+      '<span class="log-method" style="width:110px;color:var(--yellow)">' + esc(e.kind) + '</span>' +
+      '<span class="log-path">' + (e.universe_key ? '<span style="color:var(--blue)">' + esc(e.universe_key) + '</span> ' : '') + esc(e.detail) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function renderWorkers(workers) {
+  var el = document.getElementById('workers-body');
+  if (!workers || !workers.length) {
+    el.innerHTML = '<tr><td colspan="5" style="color:var(--dim);text-align:center;padding:12px">Nenhum worker registrado</td></tr>';
+    return;
+  }
+  el.innerHTML = workers.map(function(w) {
+    var badge = w.running ? '<span class="badge badge-ok">ativo</span>' : '<span class="badge badge-idle">parado</span>';
+    var last = w.last_tick_at ? fmt(w.last_tick_at) : '—';
+    var errCls = w.error_count > 0 ? 'color:var(--red)' : '';
+    return '<tr>' +
+      '<td>' + esc(w.name) + '</td>' +
+      '<td>' + w.tick_count + '</td>' +
+      '<td style="' + errCls + '">' + w.error_count + '</td>' +
+      '<td style="color:var(--dim)">' + last + '</td>' +
+      '<td>' + badge + '</td>' +
+      '</tr>';
+  }).join('');
+}
+
+function renderAI() {
+  var el = document.getElementById('ai-list');
+  if (!aiSessions.length) { el.innerHTML = '<div style="color:var(--dim);font-size:11px">Aguardando…</div>'; return; }
+  el.innerHTML = aiSessions.map(function(s) {
+    var tokStr = '';
+    if (s.tokens_in != null || s.tokens_out != null) {
+      tokStr = ' · <span class="ai-tok">↑' + (s.tokens_in || 0) + ' ↓' + (s.tokens_out || 0) + '</span>';
+    }
+    var codeEl = s.exit_code === 0
+      ? '<span class="ai-code-ok">✓</span>'
+      : '<span class="ai-code-err">✗ ' + s.exit_code + '</span>';
+    return '<div class="ai-item">' +
+      '<span class="ai-task" title="' + esc(s.task_id) + '">' + esc(s.task_id.slice(0,12)) + '</span>' +
+      '<span class="ai-univ">' + esc(s.universe_key) + '</span>' +
+      '<span class="ai-dur">' + ms(s.duration_ms) + '</span>' +
+      codeEl + tokStr +
+      '<span style="color:var(--dim);margin-left:auto">' + fmt(s.ts) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function renderErrors() {
+  var el = document.getElementById('err-list');
+  if (!errors.length) { el.innerHTML = '<div style="color:var(--dim);font-size:11px">Nenhum erro registrado</div>'; return; }
+  el.innerHTML = errors.map(function(e) {
+    return '<div class="err-row">' +
+      '<span class="err-ts">' + fmt(e.ts) + '</span>' +
+      '<span class="err-kind">' + e.status + ' ' + esc(e.method) + '</span>' +
+      '<span class="err-detail">' + esc(e.path) + '</span>' +
+      '</div>';
+  }).join('');
+}
+
+function renderStats() {
+  var now = Date.now();
+  var m1 = 0, m5 = 0, m60 = 0, err = 0;
+  requests.forEach(function(r) {
+    var age = now - new Date(r.ts).getTime();
+    if (age < 60000) m1++;
+    if (age < 300000) m5++;
+    if (age < 3600000) m60++;
+    if (r.status >= 400) err++;
+  });
+  document.getElementById('st-1m').textContent = m1;
+  document.getElementById('st-5m').textContent = m5;
+  document.getElementById('st-1h').textContent = m60;
+  document.getElementById('st-err').textContent = err;
+}
+
+function setStatus(text, ok) {
+  document.getElementById('status-text').textContent = text;
+  var dot = document.getElementById('dot');
+  dot.className = 'dot' + (ok === true ? ' dot-ok' : ok === false ? ' dot-err' : '');
+}
+
+// Event handling
+function onEvent(ev) {
+  if (ev.type === 'snapshot') {
+    (ev.events || []).forEach(function(e) { processEvent(e); });
+    return;
+  }
+  processEvent(ev);
+}
+
+function processEvent(ev) {
+  if (ev.type === 'request') {
+    push(requests, ev, 100);
+    if (ev.status >= 400) push(errors, ev, 10);
+    renderRequests();
+    renderErrors();
+    renderStats();
+  } else if (ev.type === 'domain' || ev.type === 'agent_session') {
+    if (ev.type === 'domain') {
+      push(domainEvents, ev, 100);
+      renderDomain();
+    } else {
+      push(aiSessions, ev, 20);
+      renderAI();
+    }
+  } else if (ev.type === 'worker_snapshot') {
+    renderWorkers(ev.workers);
+  }
+}
+
+// WebSocket connection
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var url = proto + '//' + location.host + '/api/v1/analytics/stream';
+  ws = new WebSocket(url);
+
+  ws.onopen = function() {
+    reconnectDelay = 2000;
+    setStatus('Conectado — recebendo eventos em tempo real', true);
+  };
+
+  ws.onmessage = function(e) {
+    try { onEvent(JSON.parse(e.data)); } catch(ex) { /* ignore parse errors */ }
+  };
+
+  ws.onclose = function(e) {
+    if (e.code === 1008 || e.code === 4001) {
+      setStatus('Não autorizado — faça login', false);
+      return;
+    }
+    setStatus('Desconectado — reconectando em ' + (reconnectDelay / 1000) + 's…', false);
+    setTimeout(connect, reconnectDelay);
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+  };
+
+  ws.onerror = function() {
+    setStatus('Erro na conexão WebSocket', false);
+  };
+}
+
+// Redirect to login if /analytics returns 401 on page load
+// (This page is served only when the user is authenticated, so this is defence-in-depth)
+window.addEventListener('unhandledrejection', function(e) { /* ignore */ });
+
+connect();
+</script>
+</body>
+</html>

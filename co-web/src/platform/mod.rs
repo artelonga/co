@@ -14,6 +14,7 @@ pub mod experiment;
 pub mod geo;
 pub mod index_manager;
 pub mod job_queue;
+pub mod observability;
 pub mod plugin_loader;
 pub mod pretty_urls;
 pub mod rate_limit;
