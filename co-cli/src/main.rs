@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 mod docs;
 mod i18n;
+mod vcs;
 
 #[derive(Parser)]
 #[command(name = "co")]
@@ -260,6 +261,28 @@ enum Commands {
         /// Query filters (field:value)
         #[arg(trailing_var_arg = true)]
         query: Vec<String>,
+    },
+
+    /// Manage git-backed installed tools (CO-331)
+    ///
+    /// Install, version-pin, update, and remove open-source tools as git checkouts.
+    ///
+    /// Examples:
+    ///   co tool add claude-code --from https://github.com/anthropics/claude-code --pin v2.0.0
+    ///   co tool add co-auto --from ~/projects/co-auto
+    ///   co tool list
+    ///   co tool update claude-code --pin v2.1.0
+    ///   co tool update --all
+    ///   co tool remove claude-code
+    ///   co tool verify
+    #[command(name = "tool")]
+    Tool {
+        #[command(subcommand)]
+        action: ToolSubcommand,
+
+        /// CO data directory (defaults to platform data dir / co)
+        #[arg(long, global = true, value_name = "DIR")]
+        data_dir: Option<std::path::PathBuf>,
     },
 
     /// List and manage tools
@@ -915,6 +938,48 @@ enum AgentsSubcommand {
     },
 }
 
+// CO-331: git-backed tool registry subcommands
+#[derive(Subcommand)]
+enum ToolSubcommand {
+    /// Register and clone a tool from a git URL or local path
+    Add {
+        /// Tool key (e.g. "claude-code")
+        key: String,
+        /// Remote git URL or local path
+        #[arg(long, value_name = "URL_OR_PATH")]
+        from: String,
+        /// Version to pin (tag, branch, or SHA)
+        #[arg(long)]
+        pin: Option<String>,
+    },
+    /// List installed tools with their version and state
+    List,
+    /// Update a tool's version pin or refresh follow-main tools
+    Update {
+        /// Tool key to update
+        key: Option<String>,
+        /// New version pin (tag, branch, or SHA)
+        #[arg(long)]
+        pin: Option<String>,
+        /// Switch this tool to always track origin/main
+        #[arg(long)]
+        follow_main: bool,
+        /// Refresh all tools with follow_main=true
+        #[arg(long)]
+        all: bool,
+    },
+    /// Remove a tool and delete its checkout
+    Remove {
+        /// Tool key to remove
+        key: String,
+    },
+    /// Verify each tool's checkout matches its lockfile SHA
+    Verify {
+        /// Verify only this tool (default: all)
+        key: Option<String>,
+    },
+}
+
 #[derive(Subcommand)]
 enum ToolsSubcommand {
     /// Show tool details
@@ -1207,6 +1272,47 @@ fn main() {
                 None => commands::agents::AgentsAction::List { query },
             };
             commands::agents::run(agents_action)
+        }
+        Commands::Tool { action, data_dir } => {
+            let resolved_data = data_dir
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|| {
+                    dirs::data_local_dir()
+                        .map(|d| d.join("co").to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "./co-data".to_string())
+                });
+            let tool_action = match action {
+                ToolSubcommand::Add { key, from, pin } => commands::tool::ToolAction::Add {
+                    key,
+                    from,
+                    pin,
+                    data_dir: resolved_data,
+                },
+                ToolSubcommand::List => commands::tool::ToolAction::List {
+                    data_dir: resolved_data,
+                },
+                ToolSubcommand::Update {
+                    key,
+                    pin,
+                    follow_main,
+                    all,
+                } => commands::tool::ToolAction::Update {
+                    key,
+                    pin,
+                    follow_main,
+                    all,
+                    data_dir: resolved_data,
+                },
+                ToolSubcommand::Remove { key } => commands::tool::ToolAction::Remove {
+                    key,
+                    data_dir: resolved_data,
+                },
+                ToolSubcommand::Verify { key } => commands::tool::ToolAction::Verify {
+                    key,
+                    data_dir: resolved_data,
+                },
+            };
+            commands::tool::run(tool_action)
         }
         Commands::Tools { action, query } => {
             let tools_action = match action {

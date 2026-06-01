@@ -1996,5 +1996,49 @@ impl Storage {
             "INTEGER NOT NULL DEFAULT 0",
         )
         .expect("CO-330 guard: universes.anon_published_only");
+
+        if current_version < 52 {
+            // CO-331: git-backed tool registry.
+            ensure_table(
+                &self.conn,
+                "tools",
+                "CREATE TABLE IF NOT EXISTS tools (
+                    key           TEXT PRIMARY KEY,
+                    name          TEXT NOT NULL,
+                    description   TEXT,
+                    remote_url    TEXT,
+                    local_path    TEXT,
+                    version_pin   TEXT,
+                    entry_command TEXT,
+                    installed_at  TEXT,
+                    last_updated  TEXT,
+                    follow_main   INTEGER NOT NULL DEFAULT 0,
+                    lockfile_sha  TEXT
+                );",
+            )
+            .expect("migration v52: tools table");
+            self.conn
+                .execute_batch("INSERT OR IGNORE INTO schema_version (version) VALUES (52);")
+                .expect("migration v52: schema_version");
+        }
+        // Drift-safe guard: tools table always exists after v52.
+        ensure_table(
+            &self.conn,
+            "tools",
+            "CREATE TABLE IF NOT EXISTS tools (
+                key           TEXT PRIMARY KEY,
+                name          TEXT NOT NULL,
+                description   TEXT,
+                remote_url    TEXT,
+                local_path    TEXT,
+                version_pin   TEXT,
+                entry_command TEXT,
+                installed_at  TEXT,
+                last_updated  TEXT,
+                follow_main   INTEGER NOT NULL DEFAULT 0,
+                lockfile_sha  TEXT
+            );",
+        )
+        .expect("CO-331 guard: tools table");
     }
 }
