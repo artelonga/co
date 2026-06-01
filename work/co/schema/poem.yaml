@@ -1,0 +1,14 @@
+type: poem
+category: writing
+description: "Um poema, em qualquer língua"
+properties:
+  title:
+    kind: text
+    required: true
+  author:
+    kind: text
+  language:
+    kind: text
+  references:
+    kind: object
+    description: "Fontes ou publicações onde o poema aparece"

@@ -1,0 +1,13 @@
+type: quote
+category: reference
+description: "Trecho citado de uma fonte"
+properties:
+  source:
+    kind: text
+    required: true
+  author:
+    kind: text
+  url:
+    kind: link
+  language:
+    kind: text

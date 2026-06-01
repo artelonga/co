@@ -101,6 +101,7 @@ pub use validate::{KNOWN_TYPES, Severity, ValidationContext, ValidationIssue};
 
 // Feature system exports
 pub use feature::schema::{FeatureSchema, PropertyDef, PropertyKind};
+pub use feature::type_registry::TypeCategoryRegistry;
 pub use feature::{Feature, FeatureRegistry};
 
 // Config system exports

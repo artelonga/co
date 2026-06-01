@@ -1,0 +1,14 @@
+type: url
+category: reference
+description: "Uma URL ou recurso web salvo como referência"
+properties:
+  title:
+    kind: text
+    required: true
+  url:
+    kind: link
+    required: true
+  retrieved:
+    kind: date
+  author:
+    kind: text

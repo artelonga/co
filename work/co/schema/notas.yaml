@@ -1,0 +1,18 @@
+type: notas
+category: reference
+description: "Transcrição ou referência a uma página de caderno físico"
+properties:
+  caderno_id:
+    kind: text
+    required: true
+    description: "Identificador do caderno (ex: 'black-2024', 'moleskine-vermelho')"
+  pagina:
+    kind: number
+    required: true
+    description: "Número da página no caderno físico"
+  data:
+    kind: date
+    description: "Data em que foi escrito (ISO 8601, opcional)"
+  language:
+    kind: text
+    description: "Código de língua (opcional); pode vincular a entradas da topologia"

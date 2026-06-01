@@ -1237,6 +1237,10 @@ pub async fn query_handler(
     let dsl_query = crate::query_dsl::parse(&params.q)
         .map_err(|e| AppError::BadRequest(format!("query parse error: {e}")))?;
 
+    // CO-325: expand category names (e.g. "music" → ["song", "album"]).
+    let categories = crate::query_dsl::default_type_categories();
+    let dsl_query = crate::query_dsl::resolve(dsl_query, &categories);
+
     let (sql, sql_params) = crate::query_dsl::compile(&dsl_query, &slug);
 
     let params_refs: Vec<&dyn rusqlite::types::ToSql> = sql_params
