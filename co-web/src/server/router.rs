@@ -169,6 +169,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let relation_api = crate::relation_routes::router();
     let asset_api = crate::asset_routes::asset_router();
     let reference_api = crate::reference_routes::reference_router();
+    // CO-335: graph endpoint
+    let graph_api = crate::graph_routes::router();
 
     // CO-161: single visibility + writer gate. Every route nested here inherits
     // the access-control check — no per-handler boilerplate needed.
@@ -178,6 +180,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .merge(relation_api)
         .merge(asset_api)
         .merge(reference_api)
+        .merge(graph_api)
         .merge(crate::state_routes::router())
         .merge(crate::branch_routes::router())
         .merge(crate::proposal_routes::router())
@@ -283,6 +286,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // the `{*subpath}` wildcard below, so add an explicit trailing-slash route
         // to serve the SPA shell. Without this, `/entrar/`, `/sobre/`, `/termos/` 404.
         .route("/{slug}/", get(serve_co_index))
+        // CO-335: universe graph viewer — must be before the {*subpath} wildcard.
+        .route("/{slug}/graph", get(serve_graph_page))
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));

@@ -5,6 +5,7 @@ pub mod blob_routes;
 pub mod branch_routes;
 pub mod entry_index;
 pub mod entry_routes;
+pub mod graph_routes;
 pub mod iceberg;
 pub mod models;
 pub mod obsidian_tasks;
