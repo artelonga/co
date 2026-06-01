@@ -171,6 +171,21 @@ fn chat_tools() -> Vec<ToolDef> {
                 "required": ["kind", "message"]
             }),
         ),
+        // CO-336: feedback status tool — lets the assistant report on open/resolved feedback
+        ToolDef::function(
+            "get_feedback_status",
+            "Get a summary of feedback status counts and recently addressed items for this universe. Optionally filter by entry path.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "entry_path": {
+                        "type": "string",
+                        "description": "Optional: limit status to a specific entry path (e.g. 'docs/about.md')"
+                    }
+                },
+                "required": []
+            }),
+        ),
     ]
 }
 
@@ -206,6 +221,108 @@ fn exec_submit_feedback(
         Ok(id) => serde_json::json!({"ok": true, "id": id}),
         Err(e) => serde_json::json!({"error": e.to_string()}),
     }
+}
+
+/// CO-336: get feedback status counts + recent addressed items.
+fn exec_get_feedback_status(
+    state: &AppState,
+    universe_key: &str,
+    args: &serde_json::Value,
+) -> serde_json::Value {
+    let entry_path = args["entry_path"].as_str();
+
+    let storage = state.core.storage.lock();
+    let conn = storage.conn();
+
+    // Count by status
+    let counts_result: Result<std::collections::HashMap<String, i64>, _> =
+        if let Some(ep) = entry_path {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT status, COUNT(*) FROM feedback \
+                 WHERE universe_key = ?1 AND entry_path = ?2 GROUP BY status",
+                )
+                .ok();
+            stmt.as_mut()
+                .and_then(|s| {
+                    s.query_map(rusqlite::params![universe_key, ep], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .ok_or(rusqlite::Error::InvalidQuery)
+        } else {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT status, COUNT(*) FROM feedback \
+                 WHERE universe_key = ?1 GROUP BY status",
+                )
+                .ok();
+            stmt.as_mut()
+                .and_then(|s| {
+                    s.query_map(rusqlite::params![universe_key], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                    })
+                    .ok()
+                    .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                })
+                .ok_or(rusqlite::Error::InvalidQuery)
+        };
+
+    let counts = counts_result.unwrap_or_default();
+
+    // Recent addressed items
+    let recent_fixes: Vec<serde_json::Value> = if let Some(ep) = entry_path {
+        conn.prepare(
+            "SELECT id, linked_summary, linked_ref, created_at FROM feedback \
+             WHERE universe_key = ?1 AND status = 'addressed' AND public_visible = 1 \
+             AND entry_path = ?2 ORDER BY created_at DESC LIMIT 5",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map(rusqlite::params![universe_key, ep], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0).unwrap_or_default(),
+                    "linked_summary": row.get::<_, Option<String>>(1).unwrap_or(None),
+                    "linked_ref": row.get::<_, Option<String>>(2).unwrap_or(None),
+                    "created_at": row.get::<_, i64>(3).unwrap_or(0),
+                }))
+            })
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default()
+    } else {
+        conn.prepare(
+            "SELECT id, linked_summary, linked_ref, created_at FROM feedback \
+             WHERE universe_key = ?1 AND status = 'addressed' AND public_visible = 1 \
+             ORDER BY created_at DESC LIMIT 5",
+        )
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map(rusqlite::params![universe_key], |row| {
+                Ok(serde_json::json!({
+                    "id": row.get::<_, String>(0).unwrap_or_default(),
+                    "linked_summary": row.get::<_, Option<String>>(1).unwrap_or(None),
+                    "linked_ref": row.get::<_, Option<String>>(2).unwrap_or(None),
+                    "created_at": row.get::<_, i64>(3).unwrap_or(0),
+                }))
+            })
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default()
+    };
+
+    serde_json::json!({
+        "open": counts.get("open").copied().unwrap_or(0),
+        "reviewed": counts.get("reviewed").copied().unwrap_or(0),
+        "addressed": counts.get("addressed").copied().unwrap_or(0),
+        "wont_fix": counts.get("wont-fix").copied().unwrap_or(0),
+        "duplicate": counts.get("duplicate").copied().unwrap_or(0),
+        "recent_fixes": recent_fixes,
+    })
 }
 
 /// Apply the published-only filter for anonymous callers.
@@ -423,6 +540,8 @@ fn execute_tool(
         "get_deployment_status" => exec_get_deployment_status(state),
         // CO-333: feedback submission from chat assistant
         "submit_feedback" => exec_submit_feedback(state, universe_key, &args),
+        // CO-336: feedback status summary
+        "get_feedback_status" => exec_get_feedback_status(state, universe_key, &args),
         _ => serde_json::json!({"error": format!("Unknown tool: {name}")}),
     }
 }
@@ -799,6 +918,87 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), S::FORBIDDEN);
+    }
+
+    #[test]
+    fn get_feedback_status_tool_returns_counts() {
+        // Build an in-memory state and verify the tool returns the correct structure.
+        let dir = tempdir().unwrap();
+        let config = crate::config::WebConfig {
+            port: 3000,
+            data_dir: dir.path().to_str().unwrap().to_string(),
+            static_dir: "co-web/static".to_string(),
+            default_variant: "a".to_string(),
+            experiments: false,
+            plugins_dir: "plugins".to_string(),
+            game_db_path: None,
+            universo_dir: "quilomboaraucaria".to_string(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "test".into(),
+            wae_api_key: None,
+            wae_endpoint: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        };
+        let storage = crate::storage::Storage::new(&config.data_dir);
+        // Insert some feedback rows
+        storage.conn().execute(
+            "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status, public_visible) \
+             VALUES ('fs1', 'test-u', 'feedback', 'open item', 1, 1000, 'open', 0)",
+            [],
+        ).unwrap();
+        storage.conn().execute(
+            "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status, public_visible) \
+             VALUES ('fs2', 'test-u', 'feedback', 'addressed', 1, 2000, 'addressed', 1)",
+            [],
+        ).unwrap();
+        drop(storage);
+
+        let auth_store = crate::auth::AuthStore::new(dir.path()).unwrap();
+        let (embedding_tx, _rx) = crate::embedding_worker::channel();
+        let game_db_path = dir.path().join("game_test.db");
+        let game_storage = std::sync::Arc::new(
+            game_core::storage::Storage::open(&game_db_path).expect("game storage"),
+        );
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let storage2 = crate::storage::Storage::new(dir.path().to_str().unwrap());
+        let state = crate::server::AppState::new(crate::server::AppStateInner {
+            core: Arc::new(crate::server::CoreState::from_storage(
+                storage2, config, auth_store,
+            )),
+            realtime: Arc::new(crate::server::RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(crate::server::IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx,
+            }),
+            integrations: Arc::new(crate::server::IntegrationsState {
+                mail,
+                geo: Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: std::sync::Mutex::new(crate::experiment::ExperimentStore::new(
+                    dir.path(),
+                )),
+                worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
+            }),
+        });
+
+        let result = exec_get_feedback_status(&state, "test-u", &serde_json::json!({}));
+        assert_eq!(result["open"], 1);
+        assert_eq!(result["addressed"], 1);
+        assert_eq!(result["wont_fix"], 0);
+        assert!(result["recent_fixes"].is_array());
     }
 
     #[tokio::test]
