@@ -1,6 +1,7 @@
 pub mod admin_routes;
 pub mod analytics_public;
 pub mod analytics_routes;
+pub mod changelog_parser;
 pub mod changelog_routes;
 pub mod deployment_dashboard;
 pub mod dev_board;

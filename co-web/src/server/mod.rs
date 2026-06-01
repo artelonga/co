@@ -668,6 +668,19 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         }
         worker_executor.spawn_worker(crate::workers::JobQueueWorker::new(state.clone()));
         worker_executor.spawn_worker(crate::workers::DeploymentSnapshotWorker::new(state.clone()));
+        // CO-334: parse sister-repo CHANGELOG.md files every 5 minutes.
+        worker_executor.spawn_worker(crate::workers::ReleaseNotesWorker::new(state.clone()));
+    }
+
+    // CO-334: run the first release-notes refresh at boot so the feed is populated
+    // immediately without waiting for the first 5-minute worker tick.
+    {
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            if let Err(e) = crate::changelog_routes::run_release_notes_refresh(&state_clone).await {
+                tracing::warn!("CO-334: boot release_notes refresh failed: {e}");
+            }
+        });
     }
 
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
