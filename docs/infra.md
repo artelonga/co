@@ -79,18 +79,21 @@ Quote/trade routing service.
 
 ### Artelonga Neuro — `artelonga-neuro`
 
-Deployed 6h ago — likely related to the yuri.artelonga.com.br LLM/AI vision (CO-328+).
+Static asset deployment for the Neuro design exploration / interactive feature set.
 
 - **Domain:** `neuro.artelonga.com.br` (issued)
-- **Build:** _not yet surveyed_; need to find which repo. Possibly a separate Neuro repo, possibly inside ArteLonga.
-- **Health:** `/health` → 404 (no health endpoint yet — same gap as Yggdrasil)
-- **Action item:** document its source repo + tech stack + intended role
+- **Source:** `~/projects/ArteLonga/neuro/` (subdirectory of the ArteLonga repo) — HTML/CSS/JS assets including `gallery.js`, `network.js`, `presentation.js`, `parse.js`, `references.js`, `stack.js`, `timeline.md`, plus design variants `neuro1/`, `neuro1a..c/`, `neuroaz/`, `neuroaz1/`
+- **Tech:** static frontend (no backend Rust/Node service); served via Fly's static asset hosting
+- **Health:** `/health` → 404 (no health endpoint — static-only)
+- **Role:** experimental UI surface for the "neuro" theme/feature; iterative design variants kept side-by-side for comparison
 
-### CO UAT — `co-artelonga-uat` (stale)
+### ~~CO UAT — `co-artelonga-uat`~~ (destroyed 2026-06-01)
 
-Per `feedback_no_uat.md` (memory), the UAT environment was deliberately dropped in favor of direct-to-prod + smoke-test workflow. Last deploy May 2 (a month stale).
+Per `feedback_no_uat.md` (memory), the UAT environment was deliberately dropped in favor of direct-to-prod + smoke-test workflow.
 
-- **Recommendation:** delete this app to save Fly capacity. `flyctl apps destroy co-artelonga-uat` (irreversible).
+- **Destroyed** 2026-06-01 via `flyctl apps destroy co-artelonga-uat --yes`
+- The associated `co_data` volume (1 GB) was reclaimed with the app
+- `fly.uat.toml` still exists in the co repo for historical reference; can be deleted in a follow-up
 
 ## Cross-cutting infrastructure conventions
 
@@ -151,15 +154,25 @@ All managed via `flyctl secrets set -a <app>`. JWT secrets, OAuth keys, SMTP cre
 
 ## Action items surfaced by this review
 
-| # | Item | Effort | Owner |
+| # | Item | Status | Effort |
 |---|---|---|---|
-| 1 | Add `/api/health` (CO shape) to Yggdrasil, Quilombo, RFQ, Neuro | ~1h each | per-repo |
-| 2 | Document Neuro's source repo + role | 30 min | yuri |
-| 3 | Delete stale `co-artelonga-uat` app | 5 min | yuri |
-| 4 | Delete stale `artelonga-rfq-gateway` if `rfq` is canonical | 5 min | yuri |
-| 5 | Clean up ArteLonga repo's `fly.toml` (dormant `app="artelonga-dev"`) | 10 min | yuri |
-| 6 | Automate Fly volume snapshots (or document manual cadence) | half day | platform |
-| 7 | CO-334 (changelog aggregator) — extend to also poll `/version` per sister | small follow-up | tracked in CO-334 |
+| 1 | Add `/api/health` (CO shape) to Yggdrasil, Quilombo, RFQ | open — per-repo PR | ~1h each |
+| 2 | Document Neuro's source repo + role | ✅ done (this doc) | — |
+| 3 | Delete stale `co-artelonga-uat` app | ✅ done 2026-06-01 | — |
+| 4 | Delete stale `artelonga-rfq-gateway` | **blocked — actively running** with 2 volumes; verify canonical before destroying | 5 min once confirmed |
+| 5 | Clean up ArteLonga repo's `fly.toml` (dormant `app="artelonga-dev"`) | open — needs commit in ArteLonga repo | 10 min |
+| 6 | Automate Fly volume snapshots | ✅ done via `scripts/fly-snapshots.sh` | — |
+| 7 | CO-334 — extend to also poll `/version` per sister | tracked as follow-up to CO-334 | small |
+| 8 | Yggdrasil `/version` endpoint (2.0.1) | tracked separately (other agent) | done |
+
+### #4 — blocked detail
+
+`artelonga-rfq-gateway` has 1 machine `started` + 2 `rfq_artifacts` volumes (per-machine). It looks like a duplicate or pre-rename version of `rfq`. **Do not destroy without verifying:**
+- Both apps deployed in mid-May ('rfq' May 20, 'artelonga-rfq-gateway' May 17)
+- DNS only points to `rfq.artelonga.com.br` (the `rfq` app)
+- `artelonga-rfq-gateway.fly.dev` is reachable but no custom domain is on it
+- Volumes contain JSONL ring buffers (inbound-/rejections-/fills-) — losing them = losing observability history for that machine
+- Safer: rsync the volume data out, THEN destroy
 
 ## Related
 
