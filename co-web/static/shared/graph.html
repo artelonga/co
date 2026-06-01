@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grafo — CO</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d12;
+    --surface: #1a1a24;
+    --border: #2a2a38;
+    --text: #e8e3d3;
+    --muted: #8c8674;
+    --accent: #d4af37;
+    --co-graph-node-default: #5a7a9a;
+    --co-graph-edge-color: rgba(180,190,220,0.18);
+    --co-graph-label-color: #c8d0dc;
+    --co-graph-sublabel-color: #8c8674;
+    --co-graph-hover-ring: #d4af37;
+    --co-graph-selected-ring: #d4af37;
+    --co-graph-grid-color: rgba(200,210,255,0.05);
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; overflow: hidden; }
+
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 48px;
+  }
+  header a { color: var(--muted); text-decoration: none; font-size: .85rem; }
+  header a:hover { color: var(--text); }
+  #universe-name { font-weight: 600; font-size: .95rem; }
+  #node-count { font-size: .8rem; color: var(--muted); }
+
+  #controls {
+    display: flex; align-items: center; gap: 8px;
+    margin-left: auto;
+  }
+  #controls select, #controls button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 4px 10px; font-size: .8rem; cursor: pointer;
+  }
+  #controls button:hover { border-color: var(--accent); }
+
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  #tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: .8rem;
+    max-width: 240px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 10;
+  }
+  #tooltip.show { opacity: 1; }
+  #tooltip .tt-title { font-weight: 600; margin-bottom: 3px; }
+  #tooltip .tt-type  { color: var(--muted); font-size: .75rem; }
+
+  #panel {
+    position: absolute;
+    right: 16px; top: 16px;
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: .85rem;
+    display: none;
+    z-index: 20;
+  }
+  #panel.show { display: block; }
+  #panel .p-close { float: right; cursor: pointer; color: var(--muted); font-size: 1.1rem; line-height: 1; }
+  #panel .p-close:hover { color: var(--text); }
+  #panel .p-title { font-weight: 600; font-size: .95rem; margin-bottom: 4px; padding-right: 20px; }
+  #panel .p-type  { color: var(--muted); font-size: .75rem; margin-bottom: 10px; }
+  #panel .p-body  { color: var(--text); line-height: 1.5; }
+
+  #status {
+    position: absolute;
+    bottom: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: .75rem;
+    color: var(--muted);
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  #fit-btn {
+    position: absolute;
+    bottom: 12px; right: 16px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: .8rem;
+    cursor: pointer;
+    color: var(--text);
+  }
+  #fit-btn:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="/">CO</a>
+    <span style="color:var(--border)">›</span>
+    <span id="universe-name">…</span>
+    <span id="node-count"></span>
+    <div id="controls">
+      <select id="type-filter"><option value="">Todos os tipos</option></select>
+      <button id="reload-btn">↺ Recarregar</button>
+    </div>
+  </header>
+  <div id="canvas-wrap">
+    <div id="tooltip"><div class="tt-title"></div><div class="tt-type"></div></div>
+    <div id="panel">
+      <span class="p-close" id="panel-close">×</span>
+      <div class="p-title" id="panel-title"></div>
+      <div class="p-type"  id="panel-type"></div>
+      <div class="p-body"  id="panel-body"></div>
+    </div>
+    <div id="status">carregando…</div>
+    <button id="fit-btn">Enquadrar tudo</button>
+  </div>
+</div>
+
+<script src="/lib/co-graph.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // Resolve universe slug from URL: /<slug>/graph → slug
+  var pathParts = window.location.pathname.replace(/^\//, '').split('/');
+  var slug = pathParts[0] || '';
+  if (!slug) { document.getElementById('status').textContent = 'URL inválida — slug não encontrado'; return; }
+
+  document.getElementById('universe-name').textContent = slug;
+  document.title = slug + ' — Grafo — CO';
+
+  var wrap      = document.getElementById('canvas-wrap');
+  var tooltip   = document.getElementById('tooltip');
+  var panel     = document.getElementById('panel');
+  var status    = document.getElementById('status');
+  var fitBtn    = document.getElementById('fit-btn');
+  var reloadBtn = document.getElementById('reload-btn');
+  var typeFilter = document.getElementById('type-filter');
+  var handle    = null;
+  var rawData   = { nodes: [], edges: [] };
+  var selectedId = null;
+
+  // Node colors by type
+  var TYPE_COLORS = {
+    task: '#7fa7d6', nota: '#8fcf9b', song: '#d2a0e0', poem: '#e0a96d',
+    person: '#d6a07f', place: '#7fc4d6', event: '#c0c070', default: '#8090a0',
+  };
+  function colorFor(type) { return TYPE_COLORS[type] || TYPE_COLORS.default; }
+
+  function buildGraphData(includeType) {
+    var filtered = rawData.nodes.filter(function (n) {
+      return !includeType || n.type === includeType;
+    });
+    var ids = new Set(filtered.map(function (n) { return n.id; }));
+    var edges = rawData.edges.filter(function (e) {
+      return ids.has(e.source) && ids.has(e.target);
+    });
+    return {
+      nodes: filtered.map(function (n) {
+        return {
+          id: n.id,
+          label: n.title || n.id,
+          color: colorFor(n.type),
+          size: 8,
+          selected: n.id === selectedId,
+          x: n._x, y: n._y, // preserve positions across filter changes
+        };
+      }),
+      edges: edges,
+    };
+  }
+
+  function showTooltip(node, sx, sy) {
+    var tt = tooltip;
+    tt.querySelector('.tt-title').textContent = node.title || node.id;
+    tt.querySelector('.tt-type').textContent  = node.type  || '';
+    tt.style.left = (sx + 12) + 'px';
+    tt.style.top  = (sy - 40) + 'px';
+    tt.classList.add('show');
+  }
+  function hideTooltip() { tooltip.classList.remove('show'); }
+
+  function showPanel(node) {
+    selectedId = node.id;
+    document.getElementById('panel-title').textContent = node.title || node.id;
+    document.getElementById('panel-type').textContent  = node.type  || '';
+    var fm = node.frontmatter || {};
+    var keys = Object.keys(fm).filter(function (k) { return k !== 'title' && k !== 'published'; });
+    var html = keys.map(function (k) {
+      var v = fm[k]; if (typeof v === 'object') v = JSON.stringify(v);
+      return '<div><strong>' + k + ':</strong> ' + String(v) + '</div>';
+    }).join('');
+    document.getElementById('panel-body').innerHTML = html || '<em>sem metadados</em>';
+    panel.classList.add('show');
+    if (handle) handle.update(buildGraphData(typeFilter.value));
+  }
+
+  document.getElementById('panel-close').addEventListener('click', function () {
+    selectedId = null;
+    panel.classList.remove('show');
+    if (handle) handle.update(buildGraphData(typeFilter.value));
+  });
+
+  function loadGraph() {
+    status.textContent = 'carregando…';
+    var url = '/api/v1/universes/' + encodeURIComponent(slug) + '/graph';
+    fetch(url, { credentials: 'include' })
+      .then(function (r) {
+        if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
+        return r.json();
+      })
+      .then(function (data) {
+        rawData = data;
+
+        // Populate type filter dropdown
+        var types = Array.from(new Set(data.nodes.map(function (n) { return n.type; }))).sort();
+        typeFilter.innerHTML = '<option value="">Todos os tipos (' + data.nodes.length + ')</option>';
+        types.forEach(function (t) {
+          var opt = document.createElement('option');
+          opt.value = t; opt.textContent = t;
+          typeFilter.appendChild(opt);
+        });
+
+        status.textContent = data.nodes.length + ' nós · ' + data.edges.length + ' arestas';
+        document.getElementById('node-count').textContent = '(' + data.nodes.length + ')';
+
+        var gd = buildGraphData('');
+        if (handle) {
+          handle.update(gd);
+        } else {
+          handle = co_graph.render(wrap, {
+            data: gd,
+            layout: 'force',
+            onNodeClick: function (node, sx, sy) {
+              // Find raw node for frontmatter
+              var raw = rawData.nodes.find(function (n) { return n.id === node.id; });
+              if (raw) showPanel(raw);
+            },
+            onNodeHover: function (node) {
+              if (node) {
+                // Get screen position via handle
+                var raw = rawData.nodes.find(function (n) { return n.id === node.id; });
+                var pos = handle.worldToScreen(node.x || 0, node.y || 0);
+                showTooltip(raw || node, pos[0], pos[1]);
+              } else {
+                hideTooltip();
+              }
+            },
+          });
+        }
+      })
+      .catch(function (err) {
+        status.textContent = 'Erro ao carregar: ' + err.message;
+      });
+  }
+
+  typeFilter.addEventListener('change', function () {
+    if (handle) handle.update(buildGraphData(typeFilter.value));
+  });
+
+  fitBtn.addEventListener('click', function () {
+    if (handle) handle.fit(true);
+  });
+
+  reloadBtn.addEventListener('click', loadGraph);
+
+  loadGraph();
+})();
+</script>
+</body>
+</html>

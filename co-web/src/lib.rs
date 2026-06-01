@@ -29,6 +29,7 @@ pub use content::blob_routes;
 pub use content::branch_routes;
 pub use content::entry_index;
 pub use content::entry_routes;
+pub use content::graph_routes;
 pub use content::iceberg;
 pub use content::models;
 pub use content::obsidian_tasks;
