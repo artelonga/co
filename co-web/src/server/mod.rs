@@ -558,6 +558,53 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         });
     }
 
+    // CO-327: desktop notification listener — macOS only, opt-out via env var.
+    // CO_DESKTOP_NOTIFY=off disables; default is on when running on macOS.
+    {
+        let desktop_notify_enabled = std::env::var("CO_DESKTOP_NOTIFY")
+            .map(|v| v.to_lowercase() != "off")
+            .unwrap_or(cfg!(target_os = "macos"));
+
+        if desktop_notify_enabled {
+            let s = state.clone();
+            let notifications_url = format!("http://127.0.0.1:{}/notifications", config.port);
+            tokio::spawn(async move {
+                use std::collections::HashMap;
+                use std::time::{Duration, Instant};
+                const DEBOUNCE: Duration = Duration::from_secs(1);
+
+                let mut rx = s
+                    .core
+                    .event_bus
+                    .subscribe(crate::events::EventFilter::Notification);
+                let mut last_sent: HashMap<String, Instant> = HashMap::new();
+
+                while let Some(event) = rx.recv().await {
+                    if let crate::events::DomainEvent::NotificationRequested {
+                        recipient_id,
+                        kind,
+                        ..
+                    } = event
+                    {
+                        let key = format!("{recipient_id}:{kind}");
+                        let now = Instant::now();
+                        let fresh = last_sent
+                            .get(&key)
+                            .is_none_or(|t| now.duration_since(*t) >= DEBOUNCE);
+                        if fresh {
+                            last_sent.insert(key, now);
+                            let (title, body) = crate::desktop_notify::format_notification(
+                                &kind,
+                                &notifications_url,
+                            );
+                            crate::desktop_notify::send(&title, &body, &notifications_url);
+                        }
+                    }
+                }
+            });
+        }
+    }
+
     let plugin_routes: Option<Router<AppState>> = None; // TODO: integrate plugin routes with AppState
 
     let app = build_router(state.clone(), plugin_routes);
