@@ -5,6 +5,49 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.38.0] — 2026-06-01 — graph engine + feedback traceability + cross-repo health parity
+
+## CO-335 — Centralized graph rendering — one primitive, content in CO, UI customization deferred
+
+Added `GET /api/v1/universes/<slug>/graph` endpoint that returns a standardized
+`{ nodes, edges }` shape for any universe's entries and their typed-FK relations
+(CO-74). Supports `?include_types`, `?relation`, `?root` + `?max_depth` BFS
+traversal, and `?published_only` filtering.
+
+Added `/lib/co-graph.js` — the canonical graph rendering primitive. Canvas-based,
+force-directed (or manual layout), built-in pan/zoom/hover/click/pinch,
+CSS-variable theming. Zero external dependencies. Published at
+`https://co.artelonga.com.br/lib/co-graph.js` so all sister sites share a
+single deployed copy.
+
+Added `/universe/<slug>/graph` standalone page powered by the new API and library.
+Works for any CO universe without configuration.
+
+Migrated ArteLonga neuro pages (`neuro/network.js`): deleted ~130 lines of
+physics/canvas/pan-zoom code; now calls `co_graph.render()`. Data definitions,
+expand/guided mode, info panel, and collaborative edges remain local.
+
+Migrated Yggdrasil comunicacao lexicon (`comunicacao.js`): deleted ~350 lines
+of canvas/rendering/pointer/zoom code; now calls `co_graph.render()` with
+`layout:'manual'`, grid background, and drag-to-persist via `onNodeMoveEnd`.
+Room/API/inspector/review/compose logic unchanged.
+
+### Why
+
+Two graph implementations were diverging (ArteLonga neuro + Yggdrasil comunicacao).
+A third (yuri.artelonga.com.br portfolio graph from CO-323) was planned. Centralizing
+before the third iteration prevents three permanently diverging codebases.
+The content layer (CO-325 typed references, CO-330 published filter) was already
+stable enough to host the graph engine as a first-class consumer.
+
+## CO-336 — Feedback → PR/commit traceable (open-source issue-tracker semantics)
+
+Each feedback entry now works like a lightweight GitHub issue: owners can link the specific commit or PR that resolved it, write a public owner response, and flip visibility to public so visitors can see the resolution trail. New status states (addressed, wont-fix, duplicate) complete the state machine with automatic public visibility for terminal states.
+
+### Why
+Yuri's vision: yuri.artelonga.com.br is a public-curated portfolio; visitor feedback that visibly leads to fixes builds trust and a discovery surface. CO-333 shipped the inbox; CO-336 makes it auditable.
+
+
 ## [2.37.0] — 2026-06-01 — feedback + cross-repo changelog aggregator + infra cleanup
 
 ## CO-333 — Feedback system — Yggdrasil-compatible, per-universe + per-entry locus
