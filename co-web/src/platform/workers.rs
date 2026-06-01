@@ -235,3 +235,35 @@ impl Worker for DeploymentSnapshotWorker {
         crate::deployment_snapshot_worker::tick(&self.state).await
     }
 }
+
+// ---------------------------------------------------------------------------
+// 7. ReleaseNotesWorker
+//    Parses sister-repo CHANGELOG.md files every 5 minutes and upserts the
+//    parsed releases into `release_notes` (CO-334).
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct ReleaseNotesWorker {
+    state: AppState,
+}
+
+impl ReleaseNotesWorker {
+    pub fn new(state: AppState) -> Self {
+        Self { state }
+    }
+}
+
+#[async_trait]
+impl Worker for ReleaseNotesWorker {
+    fn name(&self) -> &'static str {
+        "release_notes_refresh"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(300) // 5 minutes
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        crate::changelog_routes::run_release_notes_refresh(&self.state).await
+    }
+}

@@ -1,4 +1,6 @@
 //! GET /api/v1/changelog — cross-version changelog viewer (CO-260)
+//! GET /api/v1/changelog/feed — multi-repo interleaved feed (CO-334)
+//! GET /api/v1/changelog/repos — list known repos (CO-334)
 //! POST /api/v1/admin/changelog/reindex — rebuild cache from git log
 
 use std::collections::HashMap;
@@ -15,6 +17,9 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::server::AppState;
 use crate::storage::changelog::ChangelogCacheRow;
+use crate::storage::release_notes::ReleaseNoteRow;
+
+use super::changelog_parser::parse_keep_a_changelog;
 
 // ---------------------------------------------------------------------------
 // Embedded assets
@@ -31,7 +36,11 @@ const SEP: &str = " \u{2014} ";
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/changelog", get(get_changelog))
+    Router::new()
+        .route("/changelog", get(get_changelog))
+        // CO-334: multi-repo interleaved feed
+        .route("/changelog/feed", get(get_changelog_feed))
+        .route("/changelog/repos", get(get_changelog_repos))
 }
 
 pub fn admin_router() -> Router<AppState> {
@@ -397,6 +406,264 @@ pub async fn reindex_changelog(
         storage.upsert_changelog_cache_batch(&rows)?;
     }
     Ok(Json(serde_json::json!({ "indexed": count })))
+}
+
+// ---------------------------------------------------------------------------
+// CO-334 — Feed request/response types
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct FeedQuery {
+    pub repo: Option<String>,
+    pub since: Option<String>,
+    #[serde(default = "default_page")]
+    pub page: u32,
+    #[serde(default = "default_per_page")]
+    pub per_page: u32,
+}
+
+fn default_page() -> u32 {
+    1
+}
+fn default_per_page() -> u32 {
+    50
+}
+
+#[derive(Serialize)]
+pub struct FeedItem {
+    pub repo: String,
+    pub version: String,
+    pub date: String,
+    pub theme: Option<String>,
+    pub body_md: String,
+    pub body_html: String,
+}
+
+#[derive(Serialize)]
+pub struct FeedResponse {
+    pub page: u32,
+    pub per_page: u32,
+    pub items: Vec<FeedItem>,
+}
+
+#[derive(Serialize)]
+pub struct RepoInfo {
+    pub repo: String,
+    pub latest_version: String,
+    pub latest_date: String,
+}
+
+// ---------------------------------------------------------------------------
+// CO-334 — Minimal markdown → HTML renderer for changelog bodies
+// ---------------------------------------------------------------------------
+
+fn render_body_html(md: &str) -> String {
+    let mut html = String::with_capacity(md.len() + 256);
+    let mut in_list = false;
+
+    for line in md.lines() {
+        let t = line.trim();
+        if t.is_empty() {
+            if in_list {
+                html.push_str("</ul>");
+                in_list = false;
+            }
+            continue;
+        }
+        if let Some(h) = t.strip_prefix("### ") {
+            if in_list {
+                html.push_str("</ul>");
+                in_list = false;
+            }
+            html.push_str("<h3>");
+            html.push_str(&esc_html(h));
+            html.push_str("</h3>");
+        } else if let Some(h) = t.strip_prefix("## ") {
+            if in_list {
+                html.push_str("</ul>");
+                in_list = false;
+            }
+            html.push_str("<h2>");
+            html.push_str(&esc_html(h));
+            html.push_str("</h2>");
+        } else if let Some(item) = t.strip_prefix("- ").or_else(|| t.strip_prefix("* ")) {
+            if !in_list {
+                html.push_str("<ul>");
+                in_list = true;
+            }
+            html.push_str("<li>");
+            html.push_str(&esc_html(item));
+            html.push_str("</li>");
+        } else {
+            if in_list {
+                html.push_str("</ul>");
+                in_list = false;
+            }
+            html.push_str("<p>");
+            html.push_str(&esc_html(t));
+            html.push_str("</p>");
+        }
+    }
+    if in_list {
+        html.push_str("</ul>");
+    }
+    html
+}
+
+fn esc_html(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn row_to_feed_item(row: ReleaseNoteRow) -> FeedItem {
+    let body_html = render_body_html(&row.body_md);
+    FeedItem {
+        repo: row.repo,
+        version: row.version,
+        date: row.date,
+        theme: row.theme,
+        body_md: row.body_md,
+        body_html,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CO-334 — Release notes refresh orchestrator
+// ---------------------------------------------------------------------------
+
+/// Expands `~/` at the start of a path using the home directory.
+fn expand_home(path: &str) -> std::path::PathBuf {
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
+    }
+    std::path::PathBuf::from(path)
+}
+
+fn unix_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// Parses `notes` into `ReleaseNoteRow`s ready for DB insertion.
+fn notes_to_rows(
+    notes: Vec<crate::changelog_parser::ReleaseNote>,
+    now: i64,
+) -> Vec<ReleaseNoteRow> {
+    notes
+        .into_iter()
+        .map(|n| ReleaseNoteRow {
+            repo: n.repo,
+            version: n.version,
+            date: n.date.to_string(),
+            theme: n.theme,
+            body_md: n.body_md,
+            body_text: n.body_text,
+            ingested_at: now,
+        })
+        .collect()
+}
+
+/// Reads all configured sister-repo CHANGELOG.md files + CO's own embedded
+/// changelog, parses them, and upserts into `release_notes`. Idempotent.
+pub async fn run_release_notes_refresh(state: &AppState) -> anyhow::Result<()> {
+    let now = unix_now();
+
+    // 1. Ingest CO's own embedded CHANGELOG (no filesystem read needed).
+    {
+        let rows = notes_to_rows(parse_keep_a_changelog("co", CHANGELOG_MD), now);
+        let storage = state.core.storage.lock();
+        if let Err(e) = storage.upsert_release_notes_batch(&rows) {
+            tracing::warn!("release_notes: CO batch upsert failed: {e}");
+        }
+    }
+
+    // 2. Get all universe→repo path bindings (brief lock, then release).
+    let repo_paths = {
+        let storage = state.core.storage.lock();
+        storage.query_universe_repo_paths()
+    };
+
+    // 3. For each repo, read CHANGELOG.md from the filesystem and ingest.
+    for (universe_key, local_repo_path) in repo_paths {
+        let changelog_path = expand_home(&local_repo_path).join("CHANGELOG.md");
+        let content = match std::fs::read_to_string(&changelog_path) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::debug!(
+                    "release_notes: {universe_key}: no CHANGELOG.md at {}: {e}",
+                    changelog_path.display()
+                );
+                continue;
+            }
+        };
+
+        let notes = parse_keep_a_changelog(&universe_key, &content);
+        if notes.is_empty() {
+            continue;
+        }
+
+        let rows = notes_to_rows(notes, now);
+        let storage = state.core.storage.lock();
+        if let Err(e) = storage.upsert_release_notes_batch(&rows) {
+            tracing::warn!("release_notes: {universe_key} batch upsert failed: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// CO-334 — Feed handlers
+// ---------------------------------------------------------------------------
+
+pub async fn get_changelog_feed(
+    State(state): State<AppState>,
+    Query(params): Query<FeedQuery>,
+) -> Result<Json<FeedResponse>, AppError> {
+    let per_page = params.per_page.clamp(1, 200);
+    let page = params.page.max(1);
+
+    let rows = {
+        let storage = state.core.storage.lock();
+        storage.query_release_feed(
+            params.repo.as_deref(),
+            params.since.as_deref(),
+            page,
+            per_page,
+        )
+    };
+
+    let items = rows.into_iter().map(row_to_feed_item).collect();
+    Ok(Json(FeedResponse {
+        page,
+        per_page,
+        items,
+    }))
+}
+
+pub async fn get_changelog_repos(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<RepoInfo>>, AppError> {
+    let repos = {
+        let storage = state.core.storage.lock();
+        storage.query_release_repos()
+    };
+
+    let info = repos
+        .into_iter()
+        .map(|r| RepoInfo {
+            repo: r.repo,
+            latest_version: r.latest_version,
+            latest_date: r.latest_date,
+        })
+        .collect();
+
+    Ok(Json(info))
 }
 
 // ---------------------------------------------------------------------------

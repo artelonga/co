@@ -2093,5 +2093,48 @@ impl Storage {
                  CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);",
             )
             .expect("CO-333 guard: feedback indexes");
+
+        // CO-334: rebased on top of CO-333; bumped to v54 to avoid collision.
+        if current_version < 54 {
+            // CO-334: cross-repo release notes aggregation.
+            // Stores one row per (repo, version) from sister-repo CHANGELOG.md files.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS release_notes (
+                        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                        repo        TEXT    NOT NULL,
+                        version     TEXT    NOT NULL,
+                        date        TEXT    NOT NULL,
+                        theme       TEXT,
+                        body_md     TEXT    NOT NULL,
+                        body_text   TEXT    NOT NULL,
+                        ingested_at INTEGER NOT NULL,
+                        UNIQUE(repo, version)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_release_notes_date
+                        ON release_notes(date DESC);
+                    CREATE INDEX IF NOT EXISTS idx_release_notes_repo
+                        ON release_notes(repo, date DESC);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (54);",
+                )
+                .expect("migration v54: release_notes");
+        }
+        // Drift-safe guard: release_notes always exists after v54.
+        ensure_table(
+            &self.conn,
+            "release_notes",
+            "CREATE TABLE IF NOT EXISTS release_notes (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                repo        TEXT    NOT NULL,
+                version     TEXT    NOT NULL,
+                date        TEXT    NOT NULL,
+                theme       TEXT,
+                body_md     TEXT    NOT NULL,
+                body_text   TEXT    NOT NULL,
+                ingested_at INTEGER NOT NULL,
+                UNIQUE(repo, version)
+            );",
+        )
+        .expect("CO-334 guard: release_notes table");
     }
 }

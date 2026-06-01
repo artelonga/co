@@ -153,6 +153,7 @@ pub(crate) mod projects;
 pub mod push_subscriptions;
 pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
+pub(crate) mod release_notes;
 pub(crate) mod schema;
 pub(crate) mod seed;
 pub(crate) mod subscriptions;

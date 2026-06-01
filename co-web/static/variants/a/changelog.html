@@ -9,6 +9,7 @@
 <style>
 /* ======================================================
    CO-260 changelog viewer — standalone page styles
+   CO-334 multi-repo feed extension
    ====================================================== */
 *{box-sizing:border-box;margin:0;padding:0}
 body{
@@ -136,6 +137,52 @@ a:hover{text-decoration:underline}
   border-bottom:1px solid var(--border,#1e293b);
 }
 
+/* ── CO-334: repo badge ── */
+.cl-repo-badge{
+  font-size:11px;font-weight:600;padding:2px 8px;border-radius:999px;
+  white-space:nowrap;font-family:ui-monospace,monospace;
+}
+.cl-repo-badge[data-repo=co]               {background:#1e293b;color:#7dd3fc;border:1px solid #0284c7}
+.cl-repo-badge[data-repo=artelonga]        {background:#1f1535;color:#c4b5fd;border:1px solid #7c3aed}
+.cl-repo-badge[data-repo=quilomboaraucaria]{background:#1a2e1a;color:#86efac;border:1px solid #16a34a}
+.cl-repo-badge[data-repo=yggdrasil]        {background:#2d1a0e;color:#fbbf24;border:1px solid #d97706}
+.cl-repo-badge[data-repo=rfq]              {background:#1e2a3b;color:#93c5fd;border:1px solid #2563eb}
+/* fallback for unknown repos */
+.cl-repo-badge:not([data-repo]) {background:#1e293b;color:#94a3b8;border:1px solid #475569}
+
+/* ── CO-334: feed release block ── */
+.cl-feed-block{
+  margin-bottom:28px;
+  border:1px solid var(--border,#1e293b);
+  border-radius:10px;
+  overflow:hidden;
+}
+.cl-feed-header{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+  padding:12px 16px;
+  background:var(--card,#131929);
+  cursor:pointer;
+  user-select:none;
+}
+.cl-feed-header:hover{background:var(--card-alt,#0f172a)}
+.cl-feed-toggle{
+  margin-left:auto;font-size:11px;color:var(--text-muted,#94a3b8);
+}
+.cl-feed-body{
+  display:none;
+  padding:16px;
+  background:var(--bg,#0f172a);
+  border-top:1px solid var(--border,#1e293b);
+}
+.cl-feed-body.open{display:block}
+.cl-feed-body h2,.cl-feed-body h3{
+  font-size:13px;font-weight:600;color:var(--text-muted,#94a3b8);
+  margin:12px 0 6px;text-transform:uppercase;letter-spacing:.04em;
+}
+.cl-feed-body ul{margin:0 0 8px 16px;padding:0}
+.cl-feed-body li{font-size:13px;color:var(--text,#e2e8f0);margin-bottom:4px}
+.cl-feed-body p{font-size:13px;color:var(--text,#e2e8f0);margin-bottom:8px}
+
 /* ── empty / loading states ── */
 .cl-loading,.cl-empty{
   text-align:center;padding:48px;color:var(--text-muted,#94a3b8);font-size:14px
@@ -153,20 +200,33 @@ a:hover{text-decoration:underline}
 <body>
 <div class="cl-header">
   <span class="cl-logo"><a href="/">Co</a></span>
-  <span class="cl-title">Changelog — histórico de versões</span>
+  <span class="cl-title" id="cl-page-title">Changelog — todas as plataformas</span>
 </div>
 
 <div class="cl-controls">
-  <!-- Version range picker -->
+  <!-- CO-334: Repo filter dropdown -->
   <div class="cl-range">
+    <label>Repo</label>
+    <select id="cl-repo" class="cl-select">
+      <option value="">todos</option>
+      <option value="co">co</option>
+      <option value="artelonga">artelonga</option>
+      <option value="quilomboaraucaria">quilombo</option>
+      <option value="yggdrasil">yggdrasil</option>
+      <option value="rfq">rfq</option>
+    </select>
+  </div>
+
+  <!-- Version range picker (CO view only) -->
+  <div class="cl-range" id="cl-range-group" style="display:none">
     <label>De</label>
     <select id="cl-from" class="cl-select"><option value="">qualquer</option></select>
     <label>até</label>
     <select id="cl-to" class="cl-select"><option value="">qualquer</option></select>
   </div>
 
-  <!-- Type filter chips -->
-  <div class="cl-chips" id="cl-chips">
+  <!-- Type filter chips (CO view only) -->
+  <div class="cl-chips" id="cl-chips" style="display:none">
     <span style="font-size:12px;color:var(--text-muted,#94a3b8)">Tipo:</span>
     <button class="cl-chip active" data-type="feat">feat</button>
     <button class="cl-chip active" data-type="fix">fix</button>
@@ -175,8 +235,8 @@ a:hover{text-decoration:underline}
     <button class="cl-chip active" data-type="chore">chore</button>
   </div>
 
-  <!-- Sort selector -->
-  <div class="cl-sort-row">
+  <!-- Sort selector (CO view only) -->
+  <div class="cl-sort-row" id="cl-sort-group" style="display:none">
     <label style="font-size:13px;color:var(--text-muted,#94a3b8)">Ordenar:</label>
     <select id="cl-sort" class="cl-select">
       <option value="date">mais recente primeiro</option>
@@ -184,8 +244,8 @@ a:hover{text-decoration:underline}
     </select>
   </div>
 
-  <!-- View mode toggle -->
-  <div class="cl-view-toggle">
+  <!-- View mode toggle (CO view only) -->
+  <div class="cl-view-toggle" id="cl-view-toggle" style="display:none">
     <button class="cl-view-btn active" id="btn-view-sequential">Sequential</button>
     <button class="cl-view-btn" id="btn-view-grouped">Grouped</button>
   </div>
@@ -198,20 +258,117 @@ a:hover{text-decoration:underline}
 <script type="module">
 // ======================================================
 // CO-260 — Changelog viewer JS
+// CO-334 — Multi-repo feed extension
 // ======================================================
 
-const SEP_BAR_MAX_WIDTH = 120; // px for the largest PR size bar
+const SEP_BAR_MAX_WIDTH = 120;
 
-let _allVersions = [];  // raw data from API
-let _viewMode = 'sequential'; // 'sequential' | 'grouped'
+// ── state ──────────────────────────────────────────────────────────────────
+
+let _allVersions = [];       // CO-only view data
+let _viewMode = 'sequential';
 let _activeTypes = new Set(['feat','fix','refactor','docs','chore']);
 let _sort = 'date';
+let _selectedRepo = '';      // '' = feed view (all repos)
 
 function esc(s) {
     return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── fetch data ──────────────────────────────────────────────────────────────
+// ── repo detection ──────────────────────────────────────────────────────────
+
+function isFeedView() {
+    return _selectedRepo !== 'co' || _selectedRepo === '';
+}
+
+// ── UI show/hide helpers ────────────────────────────────────────────────────
+
+function updateControlVisibility() {
+    const coOnly = _selectedRepo === 'co';
+    document.getElementById('cl-range-group').style.display = coOnly ? '' : 'none';
+    document.getElementById('cl-chips').style.display = coOnly ? '' : 'none';
+    document.getElementById('cl-sort-group').style.display = coOnly ? '' : 'none';
+    document.getElementById('cl-view-toggle').style.display = coOnly ? '' : 'none';
+
+    const titleEl = document.getElementById('cl-page-title');
+    if (_selectedRepo === 'co') {
+        titleEl.textContent = 'Changelog — CO';
+    } else if (_selectedRepo) {
+        titleEl.textContent = `Changelog — ${_selectedRepo}`;
+    } else {
+        titleEl.textContent = 'Changelog — todas as plataformas';
+    }
+}
+
+// ── feed view ──────────────────────────────────────────────────────────────
+
+function repoLabel(repo) {
+    const labels = {
+        co: 'co',
+        artelonga: 'artelonga',
+        quilomboaraucaria: 'quilombo',
+        yggdrasil: 'yggdrasil',
+        rfq: 'rfq',
+    };
+    return labels[repo] || repo;
+}
+
+function renderFeedItem(item) {
+    const expanded = window.location.search.includes(`version=${encodeURIComponent(item.version)}`)
+        && window.location.search.includes(`repo=${encodeURIComponent(item.repo)}`);
+    return `<div class="cl-feed-block" id="feed-${esc(item.repo)}-${esc(item.version)}">
+        <div class="cl-feed-header" onclick="toggleFeedBody(this)">
+            <span class="cl-repo-badge" data-repo="${esc(item.repo)}">${esc(repoLabel(item.repo))}</span>
+            <span class="cl-version-tag" style="font-size:.85rem">${esc(item.version)}</span>
+            <span class="cl-version-date">${esc(item.date)}</span>
+            ${item.theme ? `<span class="cl-version-theme">${esc(item.theme)}</span>` : ''}
+            <span class="cl-feed-toggle">▸ expandir</span>
+        </div>
+        <div class="cl-feed-body${expanded ? ' open' : ''}">
+            ${item.body_html || '<p style="color:var(--text-muted,#94a3b8)">Sem notas de release.</p>'}
+        </div>
+    </div>`;
+}
+
+async function loadFeed() {
+    const body = document.getElementById('cl-body');
+    body.innerHTML = '<div class="cl-loading">Carregando feed…</div>';
+
+    const params = new URLSearchParams();
+    if (_selectedRepo) params.set('repo', _selectedRepo);
+    const url = '/api/v1/changelog/feed' + (params.toString() ? '?' + params : '');
+
+    try {
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const items = data.items || [];
+
+        if (!items.length) {
+            body.innerHTML = '<div class="cl-empty">Nenhum release encontrado.</div>';
+            return;
+        }
+
+        body.innerHTML = items.map(renderFeedItem).join('');
+
+        // Auto-expand deep-linked item
+        const sp = new URLSearchParams(window.location.search);
+        const linkRepo = sp.get('repo');
+        const linkVer = sp.get('version');
+        if (linkRepo && linkVer) {
+            const el = document.getElementById(`feed-${linkRepo}-${linkVer}`);
+            if (el) {
+                const b = el.querySelector('.cl-feed-body');
+                if (b) b.classList.add('open');
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+    } catch (err) {
+        body.innerHTML = `<div class="cl-empty">Erro ao carregar: ${esc(err.message)}</div>`;
+    }
+}
+
+// ── CO-only view (CO-260 unchanged) ──────────────────────────────────────────
 
 async function fetchChangelog(from, to) {
     const params = new URLSearchParams();
@@ -223,15 +380,12 @@ async function fetchChangelog(from, to) {
     return res.json();
 }
 
-// ── populate version selects ─────────────────────────────────────────────────
-
 function populateSelects(versions) {
     const fromEl = document.getElementById('cl-from');
     const toEl   = document.getElementById('cl-to');
     const savedFrom = fromEl.value;
     const savedTo   = toEl.value;
 
-    // Versions are already sorted newest-first
     const all = versions.map(v => v.version);
     const oldest = [...all].reverse();
 
@@ -252,8 +406,6 @@ function populateSelects(versions) {
     });
 }
 
-// ── max PR size (for bar scaling) ─────────────────────────────────────────────
-
 function maxPrSize(versions) {
     let max = 1;
     for (const v of versions) {
@@ -264,14 +416,9 @@ function maxPrSize(versions) {
     return max;
 }
 
-// ── filter & sort ─────────────────────────────────────────────────────────────
-
 function applyFilters(versions) {
     return versions
-        .map(v => ({
-            ...v,
-            entries: v.entries.filter(e => _activeTypes.has(e.entry_type)),
-        }))
+        .map(v => ({ ...v, entries: v.entries.filter(e => _activeTypes.has(e.entry_type)) }))
         .filter(v => v.entries.length > 0);
 }
 
@@ -282,8 +429,6 @@ function applySortEntries(versions) {
         entries: [...v.entries].sort((a,b) => (b.pr_size??0) - (a.pr_size??0)),
     }));
 }
-
-// ── render helpers ────────────────────────────────────────────────────────────
 
 function renderSizeBar(prSize, maxSize) {
     if (!prSize) return '';
@@ -308,7 +453,10 @@ function renderEntry(entry, maxSize) {
     </div>`;
 }
 
-// ── sequential view ───────────────────────────────────────────────────────────
+const TYPE_LABELS = {
+    feat:'Features', fix:'Bug fixes', refactor:'Refactors', docs:'Documentation', chore:'Chores',
+};
+const TYPE_ORDER = ['feat','fix','refactor','docs','chore'];
 
 function renderSequential(versions) {
     const maxSize = maxPrSize(versions);
@@ -326,20 +474,8 @@ function renderSequential(versions) {
     ).join('');
 }
 
-// ── grouped view ──────────────────────────────────────────────────────────────
-
-const TYPE_LABELS = {
-    feat:     'Features',
-    fix:      'Bug fixes',
-    refactor: 'Refactors',
-    docs:     'Documentation',
-    chore:    'Chores',
-};
-const TYPE_ORDER = ['feat','fix','refactor','docs','chore'];
-
 function renderGrouped(versions) {
     const maxSize = maxPrSize(versions);
-    // Collect entries per type across all versions
     const grouped = {};
     for (const v of versions) {
         for (const e of v.entries) {
@@ -347,15 +483,10 @@ function renderGrouped(versions) {
             grouped[e.entry_type].push({ ...e, _version: v.version, _date: v.date });
         }
     }
-
-    // Sort each group by pr_size desc when sort=size, otherwise by version desc (already ordered)
     const order = TYPE_ORDER.filter(t => grouped[t]?.length);
-
     return order.map(type => {
         let entries = grouped[type];
-        if (_sort === 'size') {
-            entries = [...entries].sort((a,b) => (b.pr_size??0) - (a.pr_size??0));
-        }
+        if (_sort === 'size') entries = [...entries].sort((a,b) => (b.pr_size??0) - (a.pr_size??0));
         return `<div class="cl-type-section">
             <div class="cl-type-header">${TYPE_LABELS[type] || type}</div>
             <div class="cl-entries">
@@ -372,31 +503,22 @@ function renderGrouped(versions) {
     }).join('');
 }
 
-// ── main render ───────────────────────────────────────────────────────────────
-
-function render() {
+function renderCoView() {
     const body = document.getElementById('cl-body');
     if (!_allVersions.length) {
         body.innerHTML = '<div class="cl-empty">Nenhuma versão encontrada.</div>';
         return;
     }
-
     let versions = applyFilters(_allVersions);
     versions = applySortEntries(versions);
-
     if (!versions.length) {
         body.innerHTML = '<div class="cl-empty">Nenhuma entrada para os filtros selecionados.</div>';
         return;
     }
-
-    body.innerHTML = _viewMode === 'grouped'
-        ? renderGrouped(versions)
-        : renderSequential(versions);
+    body.innerHTML = _viewMode === 'grouped' ? renderGrouped(versions) : renderSequential(versions);
 }
 
-// ── load data ─────────────────────────────────────────────────────────────────
-
-async function load() {
+async function loadCoView() {
     const from = document.getElementById('cl-from').value;
     const to   = document.getElementById('cl-to').value;
     const body = document.getElementById('cl-body');
@@ -405,20 +527,45 @@ async function load() {
         const data = await fetchChangelog(from || null, to || null);
         _allVersions = data.versions || [];
         populateSelects(data.versions || []);
-        render();
+        renderCoView();
     } catch (err) {
         body.innerHTML = `<div class="cl-empty">Erro ao carregar: ${esc(err.message)}</div>`;
     }
 }
 
+// ── main dispatcher ────────────────────────────────────────────────────────
+
+function load() {
+    updateControlVisibility();
+    if (_selectedRepo === 'co') {
+        loadCoView();
+    } else {
+        loadFeed();
+    }
+}
+
+// ── expand/collapse feed body ────────────────────────────────────────────────
+
+window.toggleFeedBody = function(header) {
+    const body = header.nextElementSibling;
+    const toggle = header.querySelector('.cl-feed-toggle');
+    const open = body.classList.toggle('open');
+    if (toggle) toggle.textContent = open ? '▾ recolher' : '▸ expandir';
+};
+
 // ── wire controls ─────────────────────────────────────────────────────────────
 
-document.getElementById('cl-from').addEventListener('change', load);
-document.getElementById('cl-to').addEventListener('change', load);
+document.getElementById('cl-repo').addEventListener('change', e => {
+    _selectedRepo = e.target.value;
+    load();
+});
+
+document.getElementById('cl-from').addEventListener('change', loadCoView);
+document.getElementById('cl-to').addEventListener('change', loadCoView);
 
 document.getElementById('cl-sort').addEventListener('change', e => {
     _sort = e.target.value;
-    render();
+    renderCoView();
 });
 
 document.getElementById('cl-chips').addEventListener('click', e => {
@@ -432,23 +579,32 @@ document.getElementById('cl-chips').addEventListener('click', e => {
         _activeTypes.add(type);
         chip.classList.add('active');
     }
-    render();
+    renderCoView();
 });
 
 document.getElementById('btn-view-sequential').addEventListener('click', () => {
     _viewMode = 'sequential';
     document.getElementById('btn-view-sequential').classList.add('active');
     document.getElementById('btn-view-grouped').classList.remove('active');
-    render();
+    renderCoView();
 });
 document.getElementById('btn-view-grouped').addEventListener('click', () => {
     _viewMode = 'grouped';
     document.getElementById('btn-view-grouped').classList.add('active');
     document.getElementById('btn-view-sequential').classList.remove('active');
-    render();
+    renderCoView();
 });
 
 // ── boot ─────────────────────────────────────────────────────────────────────
+
+// Support deep-link: /changelog?repo=yggdrasil&version=0.18.2
+const _urlParams = new URLSearchParams(window.location.search);
+const _urlRepo = _urlParams.get('repo') || '';
+if (_urlRepo) {
+    _selectedRepo = _urlRepo;
+    document.getElementById('cl-repo').value = _urlRepo;
+}
+
 load();
 </script>
 </body>
