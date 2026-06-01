@@ -32,6 +32,7 @@ pub mod show;
 pub mod space;
 pub mod status;
 pub mod teaser;
+pub mod tool;
 pub mod tools;
 pub mod translate;
 pub mod update;
