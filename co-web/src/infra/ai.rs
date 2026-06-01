@@ -7,7 +7,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Shared types
@@ -303,6 +303,292 @@ impl AiRouter {
 }
 
 // ---------------------------------------------------------------------------
+// Chat types — CO-332
+// ---------------------------------------------------------------------------
+
+/// A single message in a multi-turn chat conversation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<AssistantToolCall>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn system(content: impl Into<String>) -> Self {
+        Self {
+            role: "system".into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn user(content: impl Into<String>) -> Self {
+        Self {
+            role: "user".into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: None,
+        }
+    }
+
+    pub fn tool_result(tool_call_id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: "tool".into(),
+            content: Some(content.into()),
+            tool_calls: None,
+            tool_call_id: Some(tool_call_id.into()),
+        }
+    }
+}
+
+/// A tool call made by the assistant.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssistantToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolCallFunction,
+}
+
+/// The function component of a tool call.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    /// JSON-encoded arguments string (as returned by the model).
+    pub arguments: String,
+}
+
+/// Tool definition sent to the LLM (OpenAI function-calling format).
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolDef {
+    #[serde(rename = "type")]
+    pub tool_type: String,
+    pub function: ToolFunctionDef,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolFunctionDef {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+impl ToolDef {
+    pub fn function(name: &str, description: &str, parameters: serde_json::Value) -> Self {
+        Self {
+            tool_type: "function".into(),
+            function: ToolFunctionDef {
+                name: name.into(),
+                description: description.into(),
+                parameters,
+            },
+        }
+    }
+}
+
+/// The result of one LLM turn — either content text or tool calls.
+pub struct ChatTurn {
+    pub content: Option<String>,
+    pub tool_calls: Vec<AssistantToolCall>,
+    pub provider: String,
+}
+
+// ---------------------------------------------------------------------------
+// ChatProvider trait — CO-332
+// ---------------------------------------------------------------------------
+
+/// Trait for LLMs that support multi-turn chat with function calling.
+///
+/// CO-332: Implementations MUST NOT have `kind() == "claude"`.
+/// The `/chat` endpoint is reserved for non-Claude providers (Ollama, OpenAI).
+#[async_trait]
+pub trait ChatProvider: Send + Sync {
+    /// Stable provider identifier — MUST NOT be `"claude"`.
+    fn kind(&self) -> &'static str;
+
+    /// Execute one turn of a multi-turn conversation, optionally with tools.
+    async fn chat(&self, messages: &[ChatMessage], tools: &[ToolDef]) -> anyhow::Result<ChatTurn>;
+}
+
+// ---------------------------------------------------------------------------
+// OpenAiCompatChatProvider — Ollama + real OpenAI via the same format
+// ---------------------------------------------------------------------------
+
+/// Calls any OpenAI-compatible `/v1/chat/completions` endpoint.
+///
+/// - Ollama (local): `base_url = "http://localhost:11434"`, `api_key = None`
+/// - OpenAI (cloud): `base_url = "https://api.openai.com"`, `api_key = Some(key)`
+pub struct OpenAiCompatChatProvider {
+    kind: &'static str,
+    model: String,
+    base_url: String,
+    api_key: Option<String>,
+    client: reqwest::Client,
+}
+
+impl OpenAiCompatChatProvider {
+    pub fn ollama(base_url: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            kind: "ollama",
+            model: model.into(),
+            base_url: base_url.into(),
+            api_key: None,
+            client: reqwest::Client::new(),
+        }
+    }
+
+    pub fn openai(api_key: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            kind: "openai",
+            model: model.into(),
+            base_url: "https://api.openai.com".into(),
+            api_key: Some(api_key.into()),
+            client: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl ChatProvider for OpenAiCompatChatProvider {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    async fn chat(&self, messages: &[ChatMessage], tools: &[ToolDef]) -> anyhow::Result<ChatTurn> {
+        let url = format!("{}/v1/chat/completions", self.base_url);
+
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::to_value(tools)?;
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+
+        let mut req = self.client.post(&url).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| anyhow::anyhow!("Chat provider unreachable: {e}"))?;
+
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("Chat provider returned {status}: {text}");
+        }
+
+        let json: serde_json::Value = resp.json().await?;
+        let message = &json["choices"][0]["message"];
+
+        let content = message["content"].as_str().map(|s| s.to_string());
+
+        let tool_calls: Vec<AssistantToolCall> = message["tool_calls"]
+            .as_array()
+            .map(|calls| {
+                calls
+                    .iter()
+                    .filter_map(|c| serde_json::from_value(c.clone()).ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Ok(ChatTurn {
+            content,
+            tool_calls,
+            provider: self.kind.into(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MockChatProvider — for tests (never "claude")
+// ---------------------------------------------------------------------------
+
+pub struct MockChatProvider {
+    kind: &'static str,
+    content: String,
+}
+
+impl MockChatProvider {
+    /// Construct a mock chat provider. Panics if `kind == "claude"`.
+    pub fn mock(kind: &'static str, content: impl Into<String>) -> Arc<dyn ChatProvider> {
+        assert_ne!(kind, "claude", "MockChatProvider cannot impersonate claude");
+        Arc::new(Self {
+            kind,
+            content: content.into(),
+        })
+    }
+}
+
+#[async_trait]
+impl ChatProvider for MockChatProvider {
+    fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    async fn chat(
+        &self,
+        _messages: &[ChatMessage],
+        _tools: &[ToolDef],
+    ) -> anyhow::Result<ChatTurn> {
+        Ok(ChatTurn {
+            content: Some(self.content.clone()),
+            tool_calls: vec![],
+            provider: self.kind.into(),
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Factory — CO-332: /chat NEVER uses Claude
+// ---------------------------------------------------------------------------
+
+/// Build the public-facing chat provider for `POST /api/v1/chat/:slug`.
+///
+/// CO-332: This function MUST NOT return a Claude provider.
+/// Claude is reserved for Yuri's authenticated dev tooling (co-auto, CLI).
+/// Visitor-facing chat uses Ollama (default) or OpenAI (fallback).
+///
+/// Selection:
+/// - `CO_CHAT_FALLBACK=openai` + `OPENAI_API_KEY` → OpenAI
+/// - anything else → Ollama at `CO_OLLAMA_URL` (default: `http://localhost:11434`)
+pub fn build_chat_provider() -> Arc<dyn ChatProvider> {
+    let provider: Arc<dyn ChatProvider> =
+        match std::env::var("CO_CHAT_FALLBACK").as_deref().unwrap_or("") {
+            "openai" => {
+                let key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
+                let model = std::env::var("CO_CHAT_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into());
+                Arc::new(OpenAiCompatChatProvider::openai(key, model))
+            }
+            _ => {
+                let base_url = std::env::var("CO_OLLAMA_URL")
+                    .unwrap_or_else(|_| "http://localhost:11434".into());
+                let model =
+                    std::env::var("CO_CHAT_MODEL").unwrap_or_else(|_| "qwen2.5-coder:7b".into());
+                Arc::new(OpenAiCompatChatProvider::ollama(base_url, model))
+            }
+        };
+    debug_assert_ne!(
+        provider.kind(),
+        "claude",
+        "CO-332 invariant: /chat must never use Claude"
+    );
+    provider
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -388,5 +674,57 @@ mod tests {
         let s = p.status().await;
         assert!(!s.available);
         assert!(s.version.is_none());
+    }
+
+    // --- CO-332: ChatProvider tests ---
+
+    #[test]
+    fn build_chat_provider_is_never_claude() {
+        let p = build_chat_provider();
+        assert_ne!(
+            p.kind(),
+            "claude",
+            "CO-332: /chat provider must never be claude"
+        );
+    }
+
+    #[tokio::test]
+    async fn mock_chat_provider_returns_content() {
+        let p = MockChatProvider::mock("mock", "hello world");
+        let turn = p.chat(&[], &[]).await.unwrap();
+        assert_eq!(turn.content.as_deref(), Some("hello world"));
+        assert!(turn.tool_calls.is_empty());
+        assert_eq!(turn.provider, "mock");
+    }
+
+    #[tokio::test]
+    async fn mock_chat_provider_kind_is_not_claude() {
+        let p = MockChatProvider::mock("mock", "hi");
+        assert_ne!(p.kind(), "claude");
+    }
+
+    #[test]
+    fn chat_message_constructors() {
+        let sys = ChatMessage::system("hello");
+        assert_eq!(sys.role, "system");
+        assert_eq!(sys.content.as_deref(), Some("hello"));
+
+        let user = ChatMessage::user("world");
+        assert_eq!(user.role, "user");
+
+        let tool = ChatMessage::tool_result("id-1", "result");
+        assert_eq!(tool.role, "tool");
+        assert_eq!(tool.tool_call_id.as_deref(), Some("id-1"));
+    }
+
+    #[test]
+    fn tool_def_constructor() {
+        let t = ToolDef::function(
+            "search_entries",
+            "search content",
+            serde_json::json!({"type": "object", "properties": {}}),
+        );
+        assert_eq!(t.tool_type, "function");
+        assert_eq!(t.function.name, "search_entries");
     }
 }
