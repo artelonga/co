@@ -252,6 +252,44 @@ fn is_public_for_anon(
     is_public_path(path)
 }
 
+/// CO-330: strip entries whose `published` frontmatter field is not `true`
+/// when the universe has `anon_published_only=1` and the caller is anonymous.
+/// Owner / authenticated callers see all entries.
+fn filter_published_for_anon(
+    is_anon: bool,
+    anon_published_only: bool,
+    entries: Vec<EntryRow>,
+) -> Vec<EntryRow> {
+    if !is_anon || !anon_published_only {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|e| {
+            e.frontmatter
+                .get("published")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+/// CO-330: single-entry version — returns false when the entry is not visible
+/// to anonymous callers because the universe requires `published: true`.
+fn is_published_for_anon(
+    is_anon: bool,
+    anon_published_only: bool,
+    frontmatter: &serde_json::Value,
+) -> bool {
+    if !is_anon || !anon_published_only {
+        return true;
+    }
+    frontmatter
+        .get("published")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+}
+
 /// `Cache-Control` for anon GETs of stable public seed content.
 ///
 /// Returns Some(`public, max-age=60`) when the caller is anon AND the
@@ -296,12 +334,16 @@ pub async fn list_entries(
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     // CO-268: also look up the universe's visibility so filter_public_for_anon
     // can bypass the public/ path restriction for public-subscribable universes.
+    // CO-330: also fetch anon_published_only for the published-only filter.
     // CO-290: go through the Storage trait instead of direct connection access.
-    let universe_is_pub_sub = state
-        .core
-        .storage_trait
-        .get_universe(&slug)
+    let universe = state.core.storage_trait.get_universe(&slug);
+    let universe_is_pub_sub = universe
+        .as_ref()
         .map(|u| u.visibility == "public-subscribable")
+        .unwrap_or(false);
+    let anon_published_only = universe
+        .as_ref()
+        .map(|u| u.anon_published_only)
         .unwrap_or(false);
 
     // CO-266: limit is applied in memory after filter_public_for_anon so that
@@ -424,6 +466,11 @@ pub async fn list_entries(
     // The convention is opt-in per universe via the static list below;
     // CO-268 generalizes: public-subscribable universes bypass the filter.
     let entries = filter_public_for_anon(&state, &headers, &slug, universe_is_pub_sub, entries);
+
+    // CO-330: published-only filter — when the universe has anon_published_only=1,
+    // anonymous callers only see entries with frontmatter.published == true.
+    let is_anon = caller_is_anon(&state, &headers);
+    let entries = filter_published_for_anon(is_anon, anon_published_only, entries);
 
     // CO-266: total = full visible count; entries = paginated slice.
     let effective_limit = q.limit.unwrap_or(5_000).min(50_000);
@@ -577,12 +624,16 @@ pub async fn get_entry(
     // Visibility gate is enforced by universe_visibility_gate middleware (CO-161).
     // CO-268: also look up the universe's visibility so is_public_for_anon
     // can bypass the public/ path restriction for public-subscribable universes.
+    // CO-330: also fetch anon_published_only for the published-only filter.
     // CO-290: go through the Storage trait instead of direct connection access.
-    let universe_is_pub_sub = state
-        .core
-        .storage_trait
-        .get_universe(&slug)
+    let universe = state.core.storage_trait.get_universe(&slug);
+    let universe_is_pub_sub = universe
+        .as_ref()
         .map(|u| u.visibility == "public-subscribable")
+        .unwrap_or(false);
+    let anon_published_only = universe
+        .as_ref()
+        .map(|u| u.anon_published_only)
         .unwrap_or(false);
 
     let entry = state
@@ -598,6 +649,12 @@ pub async fn get_entry(
     // leak the existence of private paths.
     // CO-268: public-subscribable universes bypass this per-path filter.
     if !is_public_for_anon(&state, &headers, &slug, universe_is_pub_sub, &path) {
+        return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
+    }
+
+    // CO-330: published-only filter — anon callers cannot read unpublished entries.
+    let is_anon = caller_is_anon(&state, &headers);
+    if !is_published_for_anon(is_anon, anon_published_only, &entry.frontmatter) {
         return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
     }
 
@@ -1695,5 +1752,67 @@ mod tests {
         assert_eq!(json["path"], "projects/CO/1.md");
         assert_eq!(json["total"], 0);
         assert!(json["events"].is_array());
+    }
+
+    // CO-330: anon published-only filter tests
+    fn make_entry_row(path: &str, published: Option<bool>) -> EntryRow {
+        let fm = match published {
+            Some(v) => serde_json::json!({ "published": v }),
+            None => serde_json::json!({}),
+        };
+        EntryRow {
+            path: path.to_string(),
+            universe_key: "test".to_string(),
+            entry_type: "page".to_string(),
+            title: None,
+            frontmatter: fm,
+            body: String::new(),
+            body_hash: String::new(),
+            created_at: None,
+            updated_at: None,
+            _score: None,
+        }
+    }
+
+    #[test]
+    fn test_filter_published_for_anon_passthrough_when_disabled() {
+        let entries = vec![
+            make_entry_row("a.md", Some(true)),
+            make_entry_row("b.md", Some(false)),
+            make_entry_row("c.md", None),
+        ];
+        // anon_published_only=false → no filtering regardless of is_anon
+        let result = filter_published_for_anon(true, false, entries.clone());
+        assert_eq!(result.len(), 3);
+        // authenticated caller → no filtering even when flag is set
+        let result2 = filter_published_for_anon(false, true, entries);
+        assert_eq!(result2.len(), 3);
+    }
+
+    #[test]
+    fn test_filter_published_for_anon_filters_unpublished() {
+        let entries = vec![
+            make_entry_row("pub.md", Some(true)),
+            make_entry_row("draft.md", Some(false)),
+            make_entry_row("no-flag.md", None),
+        ];
+        let result = filter_published_for_anon(true, true, entries);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].path, "pub.md");
+    }
+
+    #[test]
+    fn test_is_published_for_anon() {
+        let published = serde_json::json!({ "published": true });
+        let draft = serde_json::json!({ "published": false });
+        let empty = serde_json::json!({});
+        // anon + flag=true: only published=true passes
+        assert!(is_published_for_anon(true, true, &published));
+        assert!(!is_published_for_anon(true, true, &draft));
+        assert!(!is_published_for_anon(true, true, &empty));
+        // authenticated: always passes
+        assert!(is_published_for_anon(false, true, &draft));
+        // flag disabled: always passes
+        assert!(is_published_for_anon(true, false, &draft));
     }
 }

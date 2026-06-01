@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS entries (
 );
 CREATE INDEX IF NOT EXISTS idx_entries_type    ON entries(universe_key, entry_type);
 CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(universe_key, updated_at);
+-- CO-330: supports anon published-only filter (json_extract over frontmatter_json).
+CREATE INDEX IF NOT EXISTS idx_entries_published
+    ON entries(universe_key, json_extract(frontmatter_json, '$.published'));
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     universe_key UNINDEXED,
@@ -534,6 +537,15 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     }
     // CO-267 unconditional backfill — same drift-safe guard as CO-241.
     ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''");
+    if v < 15 {
+        // CO-330: functional index on frontmatter_json.published for the anon published-only filter.
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_entries_published \
+             ON entries(universe_key, json_extract(frontmatter_json, '$.published')); \
+             INSERT OR IGNORE INTO schema_version (version) VALUES (15);",
+        )
+        .expect("universe schema_version v15");
+    }
 
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
