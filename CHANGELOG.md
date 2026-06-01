@@ -5,6 +5,124 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.36.0] — 2026-06-01 — yuri vision Wave 2/3 — LLM trait + tools as git repos + external assistant
+
+## CO-328 — Local LLM (macOS) + Claude Code hook integration
+
+New `AiProvider` trait in `co-web/src/infra/ai.rs` following the CO-296 `AuthProvider`
+pattern, with two production implementations:
+
+- **`OllamaProvider`** — calls `http://localhost:11434/api/generate` (default model:
+  `qwen2.5-coder:7b`). No data leaves the machine.
+- **`ClaudeCodeProvider`** — spawns `claude --print "<prompt>"` as a subprocess,
+  collects stdout, and returns the full response. Detects the binary at startup
+  via known install paths + `which claude`.
+
+Both are wired into `CoreState.ai_router` (`AiRouter`) at boot via
+`AiRouter::from_env()`. A `MockProvider` is available for deterministic tests.
+
+New endpoints (auth-gated with `require_auth`):
+
+- `POST /api/v1/ai/query` — body `{ "provider": "ollama"|"claude", "prompt": "..." }`.
+  Returns `{ "provider", "response" }` on success or 503 + an install hint when the
+  provider is unreachable.
+- `GET /api/v1/ai/status` — returns availability of Ollama and Claude Code
+  (`{ "ollama": { available, model, warm }, "claude": { available, version }, "active_sessions": [] }`).
+
+CO-327 desktop notification fires when a Claude session finishes. CO-329
+analytics buffer receives a `ai.query.{provider}` domain event on each successful
+query.
+
+### Why
+
+Yuri wants AI assistance on his own content without sending data to external APIs
+as the default. Ollama covers everyday local queries; Claude Code provides the
+heavier escalation path via the existing CLI.
+
+## CO-331 — Tools as git repos — npm-like install/version/conflict + jj-compatible
+
+Adds a first-class tool registry to CO: any open-source git repo can be installed
+as a versioned tool, version-pinned to a tag/SHA/branch or set to always track
+`origin/main`. Tools are stored in a new `tools` SQLite table (migration v52) and
+checked out under `<data-dir>/tools/<key>/`.
+
+### New CLI surface
+
+```
+co tool add <key> --from <url-or-local-path> [--pin <ref>]
+co tool list
+co tool update <key> [--pin <ref>] [--follow-main]
+co tool update --all          # refresh all follow_main=1 tools
+co tool remove <key>
+co tool verify [<key>]        # check checkout matches lockfile SHA
+```
+
+### Key behaviour
+
+- Remote URL → `git clone` into `<data-dir>/tools/<key>/`; local path → registered as-is.
+- Per-tool lockfile SHA (captured at install/update time) enables `co tool verify` drift detection.
+- `--follow-main` marks a tool for auto-refresh on `co tool update --all`.
+- Conflict warning when two tools share the same `entry_command` basename.
+
+### VCS abstraction (`co-cli/src/vcs/`)
+
+Detects `.jj/` to dispatch jujutsu operations (`jj git fetch`, `jj new <ref>`)
+instead of the default `git` equivalents. Initial `git clone` always uses git;
+jj detection applies to subsequent fetch/checkout/sha operations.
+
+### Why
+
+CO becomes the canonical integration surface for both content (universes, CO-330)
+and code (tools, CO-331). Users control versions, tooling is self-hostable, and the
+whole flow extends git natively while staying jujutsu-compatible.
+
+## CO-332 — External assistant — non-Claude LLM with deterministic tool routing for yuri.artelonga.com.br
+
+Added a public-facing AI chat endpoint backed by Ollama (default) or OpenAI fallback.
+The LLM retrieves content exclusively through deterministic tool calls against the CO
+storage layer — no RAG, no vector search, no hallucination risk on published content.
+
+### What changed
+
+- **`POST /api/v1/chat/:slug`** — SSE-streaming chat endpoint, anon-accessible for
+  publicly visible universes. The response streams `token`, `tool_start`, `tool_result`,
+  `done`, and `error` SSE events so the UI can show tool progress in real time.
+
+- **`GET /api/v1/deployments/status`** — public read of the `deployment_snapshots` table
+  (Fly.io sister-app state), used by the `get_deployment_status` tool.
+
+- **5 deterministic tools** wired to existing CO storage:
+  - `search_entries` — FTS or type-filtered entry listing, respects `anon_published_only`
+  - `get_entry` — single entry by path, applies visibility filter
+  - `list_types` — distinct published entry types in the universe
+  - `get_recent` — recently updated published entries
+  - `get_deployment_status` — reads `deployment_snapshots`
+
+- **`ChatProvider` trait** (`co-web/src/infra/ai.rs`) — multi-turn chat + function calling
+  abstraction over any OpenAI-compatible `/v1/chat/completions` endpoint.
+
+- **`OpenAiCompatChatProvider`** — handles both Ollama (local, no key) and real OpenAI
+  (cloud fallback). Configured via `CO_CHAT_FALLBACK=openai` + `OPENAI_API_KEY`.
+
+- **Anti-Claude guard** — `build_chat_provider()` and the `/chat` router assert at
+  compile time and startup that the chat provider kind is never `"claude"`.
+  Claude credits stay reserved for Yuri's authenticated dev work (co-auto, CLI).
+
+- **SPA chat widget** (`modules/assistant.js`) — floating button (bottom-right),
+  panel with message log and SSE streaming display, tool-call indicators, session
+  history in `sessionStorage`. Auto-detects universe slug from subdomain or URL path.
+
+- **CO-329 analytics** — every chat query emits a `Domain` event keyed
+  `chat.query.<tool_name>` with message length and latency.
+
+### Why
+
+Closes the loop on the yuri.artelonga.com.br vision: visitors get a conversational
+discovery surface over published content without burning Claude credits on visitor
+traffic. Deterministic tool routing eliminates hallucination on content data;
+the only fuzzy step is the LLM's tool selection decision.
+
+
 ## [2.35.0] — 2026-06-01 — yuri vision Wave 1 — subdomain + types + notas + messaging + macOS notify + /analytics + runtime bindings
 
 ## CO-323 — yuri.artelonga.com.br — subdomain routing to a single-universe view
