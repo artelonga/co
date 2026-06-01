@@ -91,6 +91,7 @@ pub use platform::baseline;
 pub use platform::cache;
 pub use platform::config;
 pub use platform::deployment_snapshot_worker;
+pub use platform::desktop_notify;
 pub use platform::doc_gen;
 pub use platform::embedding;
 pub use platform::embedding_index;
