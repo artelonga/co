@@ -1,10 +1,13 @@
-//! CO-333: Feedback system — Yggdrasil-compatible + per-entry locus.
+//! CO-333 + CO-336: Feedback system — Yggdrasil-compatible + per-entry locus + traceability.
 //!
 //! POST /api/v1/feedback                              — universe-wide (Yggdrasil compat)
 //! POST /api/v1/feedback/{universe}/{*entry_path}     — per-entry locus
 //! GET  /api/v1/feedback/{universe}                   — list; owner: all, anon: open sugestao
 //! GET  /api/v1/feedback/{universe}/entry/{*path}     — per-entry list (anon-safe)
-//! PATCH /api/v1/feedback/{id}                        — status update (owner-only)
+//! GET  /api/v1/feedback/{universe}/public            — public mural (addressed + wont-fix)
+//! GET  /api/v1/feedback/{universe}/{id}              — single item
+//! GET  /api/v1/feedback/all/public                   — cross-universe public mural
+//! PATCH /api/v1/feedback/{id}                        — update feedback (owner-only)
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
@@ -29,18 +32,26 @@ use crate::server::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/feedback", post(submit_universe_wide))
-        // GET = list universe; PATCH = update status (key is universe_key or feedback_id resp.)
+        // Cross-universe public mural — literal prefix avoids param conflicts
+        .route("/feedback/all/public", get(list_all_public_feedback))
+        // Universe list + patch update (key is universe_key for GET, feedback_id for PATCH)
         .route(
             "/feedback/{key}",
-            get(list_universe_feedback).patch(update_status),
+            get(list_universe_feedback).patch(update_feedback),
         )
-        .route(
-            "/feedback/{universe_key}/{*entry_path}",
-            post(submit_per_entry),
-        )
+        // Public mural — literal "public" segment
+        .route("/feedback/{universe_key}/public", get(list_public_mural))
+        // Single item — prefixed with "item/" to avoid wildcard conflict
+        .route("/feedback/{universe_key}/item/{id}", get(get_feedback_item))
+        // Per-entry listing (literal "entry/" segment to differentiate from wildcard POST)
         .route(
             "/feedback/{universe_key}/entry/{*entry_path}",
             get(list_entry_feedback),
+        )
+        // Per-entry submission (wildcard catches all entry paths including multi-segment)
+        .route(
+            "/feedback/{universe_key}/{*entry_path}",
+            post(submit_per_entry),
         )
 }
 
@@ -109,11 +120,21 @@ pub struct FeedbackItem {
     pub anonymous: bool,
     pub created_at: i64,
     pub status: String,
+    // CO-336 traceability fields
+    pub linked_ref: Option<String>,
+    pub linked_summary: Option<String>,
+    pub owner_response: Option<String>,
+    pub public_visible: bool,
 }
 
+/// CO-336: Body for PATCH /feedback/{id} — all fields optional.
 #[derive(Debug, Deserialize)]
-pub struct UpdateStatusBody {
-    pub status: String,
+pub struct UpdateFeedbackBody {
+    pub status: Option<String>,
+    pub linked_ref: Option<String>,
+    pub linked_summary: Option<String>,
+    pub owner_response: Option<String>,
+    pub public_visible: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -144,6 +165,29 @@ fn validate_kind(kind: &str) -> Result<(), AppError> {
             "kind must be 'feedback', 'duvida', or 'sugestao'; got '{kind}'"
         ))),
     }
+}
+
+/// Returns true when the given status is a terminal state.
+fn is_terminal_status(status: &str) -> bool {
+    matches!(status, "addressed" | "wont-fix" | "duplicate")
+}
+
+/// Validates that the new status is a legal transition from the current status.
+fn validate_status_transition(current: &str, new: &str) -> Result<(), AppError> {
+    match new {
+        "open" | "reviewed" | "addressed" | "wont-fix" | "duplicate" => {}
+        _ => {
+            return Err(AppError::BadRequest(format!(
+                "status must be one of: open, reviewed, addressed, wont-fix, duplicate; got '{new}'"
+            )));
+        }
+    }
+    if is_terminal_status(current) {
+        return Err(AppError::BadRequest(format!(
+            "status '{current}' is terminal and cannot be changed"
+        )));
+    }
+    Ok(())
 }
 
 fn universe_owner(state: &AppState, universe_key: &str) -> Result<String, AppError> {
@@ -224,6 +268,77 @@ fn maybe_forward(
     });
 }
 
+/// CO-336: Fire-and-forget background task to fetch a GitHub PR/commit title
+/// and store it in linked_summary (only if not already set).
+fn maybe_fetch_github_title(
+    state: AppState,
+    id: String,
+    linked_ref: String,
+    summary_already_set: bool,
+) {
+    if summary_already_set || !linked_ref.starts_with("https://github.com/") {
+        return;
+    }
+    tokio::spawn(async move {
+        if let Some(title) = fetch_github_title(&linked_ref).await {
+            let storage = state.core.storage.lock();
+            let _ = storage.conn().execute(
+                "UPDATE feedback SET linked_summary = ?1 WHERE id = ?2 AND linked_summary IS NULL",
+                rusqlite::params![title, id],
+            );
+        }
+    });
+}
+
+async fn fetch_github_title(url: &str) -> Option<String> {
+    let api_url = github_url_to_api_url(url)?;
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .user_agent("co-platform/1.0")
+        .build()
+        .ok()?;
+    let resp = client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github.v3+json")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let json: serde_json::Value = resp.json().await.ok()?;
+    json.get("title")
+        .and_then(|v| v.as_str())
+        .or_else(|| {
+            json.pointer("/commit/message")
+                .and_then(|v| v.as_str())
+                .and_then(|m| m.lines().next())
+        })
+        .map(String::from)
+}
+
+fn github_url_to_api_url(url: &str) -> Option<String> {
+    let path = url.strip_prefix("https://github.com/")?;
+    let parts: Vec<&str> = path.splitn(4, '/').collect();
+    if parts.len() < 4 {
+        return None;
+    }
+    match parts[2] {
+        "pull" => Some(format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            parts[0], parts[1], parts[3]
+        )),
+        "commit" => Some(format!(
+            "https://api.github.com/repos/{}/{}/commits/{}",
+            parts[0], parts[1], parts[3]
+        )),
+        _ => None,
+    }
+}
+
+const SELECT_COLS: &str = "id, universe_key, entry_path, kind, message, name, email, user_sub, \
+     anonymous, created_at, status, linked_ref, linked_summary, owner_response, public_visible";
+
 fn read_items(
     state: &AppState,
     sql: &str,
@@ -259,6 +374,10 @@ fn row_to_item(row: &rusqlite::Row<'_>) -> rusqlite::Result<FeedbackItem> {
         anonymous: row.get::<_, i64>(8)? != 0,
         created_at: row.get(9)?,
         status: row.get(10)?,
+        linked_ref: row.get(11)?,
+        linked_summary: row.get(12)?,
+        owner_response: row.get(13)?,
+        public_visible: row.get::<_, i64>(14)? != 0,
     })
 }
 
@@ -384,19 +503,21 @@ pub async fn list_universe_feedback(
     let items = if is_owner {
         read_items(
             &state,
-            "SELECT id, universe_key, entry_path, kind, message, name, email, user_sub, \
-             anonymous, created_at, status FROM feedback \
-             WHERE universe_key = ?1 ORDER BY created_at DESC",
+            &format!(
+                "SELECT {SELECT_COLS} FROM feedback \
+                 WHERE universe_key = ?1 ORDER BY created_at DESC"
+            ),
             &key,
             None,
         )?
     } else {
         read_items(
             &state,
-            "SELECT id, universe_key, entry_path, kind, message, name, email, user_sub, \
-             anonymous, created_at, status FROM feedback \
-             WHERE universe_key = ?1 AND kind = 'sugestao' AND status = 'open' \
-             ORDER BY created_at DESC",
+            &format!(
+                "SELECT {SELECT_COLS} FROM feedback \
+                 WHERE universe_key = ?1 AND kind = 'sugestao' AND status = 'open' \
+                 ORDER BY created_at DESC"
+            ),
             &key,
             None,
         )?
@@ -407,6 +528,7 @@ pub async fn list_universe_feedback(
 }
 
 /// GET /api/v1/feedback/{universe}/entry/{*path} — per-entry list (anon-safe).
+/// CO-336: Anon callers now also see public_visible=1 items (not just sugestao/open).
 pub async fn list_entry_feedback(
     State(state): State<AppState>,
     Path((universe_key, entry_path)): Path<(String, String)>,
@@ -419,19 +541,22 @@ pub async fn list_entry_feedback(
     let items = if is_owner {
         read_items(
             &state,
-            "SELECT id, universe_key, entry_path, kind, message, name, email, user_sub, \
-             anonymous, created_at, status FROM feedback \
-             WHERE universe_key = ?1 AND entry_path = ?2 ORDER BY created_at DESC",
+            &format!(
+                "SELECT {SELECT_COLS} FROM feedback \
+                 WHERE universe_key = ?1 AND entry_path = ?2 ORDER BY created_at DESC"
+            ),
             &universe_key,
             Some(&entry_path),
         )?
     } else {
         read_items(
             &state,
-            "SELECT id, universe_key, entry_path, kind, message, name, email, user_sub, \
-             anonymous, created_at, status FROM feedback \
-             WHERE universe_key = ?1 AND entry_path = ?2 \
-             AND kind = 'sugestao' AND status = 'open' ORDER BY created_at DESC",
+            &format!(
+                "SELECT {SELECT_COLS} FROM feedback \
+                 WHERE universe_key = ?1 AND entry_path = ?2 \
+                 AND (public_visible = 1 OR (kind = 'sugestao' AND status = 'open')) \
+                 ORDER BY created_at DESC"
+            ),
             &universe_key,
             Some(&entry_path),
         )?
@@ -441,32 +566,108 @@ pub async fn list_entry_feedback(
     Ok(axum::Json(FeedbackList { items, total }))
 }
 
-/// PATCH /api/v1/feedback/{id} — update status (owner-only).
-pub async fn update_status(
+/// GET /api/v1/feedback/{universe}/public — public mural.
+/// Lists addressed + wont-fix items where public_visible=1.
+/// Anon-accessible (no auth required).
+pub async fn list_public_mural(
+    State(state): State<AppState>,
+    Path(universe_key): Path<String>,
+) -> Result<impl IntoResponse, AppError> {
+    // Verify universe exists
+    universe_owner(&state, &universe_key)?;
+
+    let items = read_items(
+        &state,
+        &format!(
+            "SELECT {SELECT_COLS} FROM feedback \
+             WHERE universe_key = ?1 AND public_visible = 1 \
+             AND status IN ('addressed', 'wont-fix') \
+             ORDER BY created_at DESC"
+        ),
+        &universe_key,
+        None,
+    )?;
+
+    let total = items.len();
+    Ok(axum::Json(FeedbackList { items, total }))
+}
+
+/// GET /api/v1/feedback/all/public — cross-universe public mural.
+/// Lists all addressed + wont-fix public_visible items across all universes.
+pub async fn list_all_public_feedback(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, AppError> {
+    let storage = state.core.storage.lock();
+    let conn = storage.conn();
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {SELECT_COLS} FROM feedback \
+             WHERE public_visible = 1 AND status IN ('addressed', 'wont-fix') \
+             ORDER BY created_at DESC"
+        ))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let items: Vec<FeedbackItem> = stmt
+        .query_map([], row_to_item)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .filter_map(|r| r.ok())
+        .collect();
+    drop(stmt);
+    drop(storage);
+
+    let total = items.len();
+    Ok(axum::Json(FeedbackList { items, total }))
+}
+
+/// GET /api/v1/feedback/{universe_key}/{id} — get single feedback item.
+/// Owner sees all; anon sees only public_visible=1.
+pub async fn get_feedback_item(
+    State(state): State<AppState>,
+    Path((universe_key, id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let owner_id = universe_owner(&state, &universe_key)?;
+    let caller = crate::auth::resolve_user_id(&state, &headers);
+    let is_owner = caller.as_deref() == Some(owner_id.as_str());
+
+    let storage = state.core.storage.lock();
+    let conn = storage.conn();
+    let item = conn
+        .query_row(
+            &format!(
+                "SELECT {SELECT_COLS} FROM feedback \
+                 WHERE universe_key = ?1 AND id = ?2"
+            ),
+            rusqlite::params![universe_key, id],
+            row_to_item,
+        )
+        .map_err(|_| AppError::NotFound(format!("Feedback '{id}' not found")))?;
+    drop(storage);
+
+    if !is_owner && !item.public_visible {
+        return Err(AppError::NotFound(format!("Feedback '{id}' not found")));
+    }
+
+    Ok(axum::Json(item))
+}
+
+/// PATCH /api/v1/feedback/{id} — update feedback (owner-only).
+/// CO-336: extended from UpdateStatusBody to UpdateFeedbackBody.
+pub async fn update_feedback(
     State(state): State<AppState>,
     Path(id): Path<String>,
     headers: HeaderMap,
-    axum::Json(body): axum::Json<UpdateStatusBody>,
+    axum::Json(body): axum::Json<UpdateFeedbackBody>,
 ) -> Result<impl IntoResponse, AppError> {
-    match body.status.as_str() {
-        "open" | "reviewed" | "addressed" => {}
-        _ => {
-            return Err(AppError::BadRequest(format!(
-                "status must be 'open', 'reviewed', or 'addressed'; got '{}'",
-                body.status
-            )));
-        }
-    }
-
-    let universe_key: String = state
+    // Load the existing item to get current status and universe_key
+    let (current_status, universe_key): (String, String) = state
         .core
         .storage
         .lock()
         .conn()
         .query_row(
-            "SELECT universe_key FROM feedback WHERE id = ?1",
+            "SELECT status, universe_key FROM feedback WHERE id = ?1",
             rusqlite::params![id],
-            |row| row.get(0),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .map_err(|_| AppError::NotFound(format!("Feedback '{id}' not found")))?;
 
@@ -476,20 +677,115 @@ pub async fn update_status(
 
     if caller != owner_id {
         return Err(AppError::Forbidden(
-            "Only the universe owner can update feedback status".into(),
+            "Only the universe owner can update feedback".into(),
         ));
     }
 
-    state
-        .core
-        .storage
-        .lock()
-        .conn()
-        .execute(
-            "UPDATE feedback SET status = ?1 WHERE id = ?2",
-            rusqlite::params![body.status, id],
-        )
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // Validate status transition if status is being changed
+    if let Some(ref new_status) = body.status {
+        validate_status_transition(&current_status, new_status)?;
+
+        // wont-fix requires an owner_response in the body OR already set in DB
+        if new_status == "wont-fix" {
+            let has_response_in_body = body
+                .owner_response
+                .as_deref()
+                .is_some_and(|r| !r.trim().is_empty());
+            if !has_response_in_body {
+                // Check if there's already a response in DB
+                let existing_response: Option<String> = state
+                    .core
+                    .storage
+                    .lock()
+                    .conn()
+                    .query_row(
+                        "SELECT owner_response FROM feedback WHERE id = ?1",
+                        rusqlite::params![id],
+                        |row| row.get(0),
+                    )
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                if existing_response
+                    .as_deref()
+                    .map(|r| r.trim().is_empty())
+                    .unwrap_or(true)
+                {
+                    return Err(AppError::BadRequest(
+                        "owner_response is required when setting status to 'wont-fix'".into(),
+                    ));
+                }
+            }
+        }
+    }
+
+    // Build dynamic SET clause — only update provided fields
+    let mut set_clauses: Vec<String> = Vec::new();
+    let mut sql_params: Vec<Box<dyn rusqlite::ToSql>> = Vec::new();
+    let mut param_idx = 1usize;
+
+    if let Some(ref s) = body.status {
+        set_clauses.push(format!("status = ?{param_idx}"));
+        sql_params.push(Box::new(s.clone()));
+        param_idx += 1;
+
+        // Terminal states auto-set public_visible=1
+        if is_terminal_status(s) && body.public_visible != Some(false) {
+            set_clauses.push(format!("public_visible = ?{param_idx}"));
+            sql_params.push(Box::new(1i64));
+            param_idx += 1;
+        }
+    }
+
+    if let Some(ref lr) = body.linked_ref {
+        set_clauses.push(format!("linked_ref = ?{param_idx}"));
+        sql_params.push(Box::new(lr.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref ls) = body.linked_summary {
+        set_clauses.push(format!("linked_summary = ?{param_idx}"));
+        sql_params.push(Box::new(ls.clone()));
+        param_idx += 1;
+    }
+
+    if let Some(ref or_) = body.owner_response {
+        set_clauses.push(format!("owner_response = ?{param_idx}"));
+        sql_params.push(Box::new(or_.clone()));
+        param_idx += 1;
+    }
+
+    // Only set public_visible explicitly if we didn't already auto-set it from status
+    let auto_set_public = body
+        .status
+        .as_deref()
+        .is_some_and(|s| is_terminal_status(s) && body.public_visible != Some(false));
+    if !auto_set_public && let Some(pv) = body.public_visible {
+        set_clauses.push(format!("public_visible = ?{param_idx}"));
+        sql_params.push(Box::new(if pv { 1i64 } else { 0i64 }));
+        param_idx += 1;
+    }
+
+    if set_clauses.is_empty() {
+        // Nothing to update — return OK
+        return Ok(StatusCode::OK);
+    }
+
+    let set_sql = set_clauses.join(", ");
+    let sql = format!("UPDATE feedback SET {set_sql} WHERE id = ?{param_idx}");
+    sql_params.push(Box::new(id.clone()));
+
+    {
+        let storage = state.core.storage.lock();
+        let conn = storage.conn();
+        let params_refs: Vec<&dyn rusqlite::ToSql> =
+            sql_params.iter().map(|p| p.as_ref()).collect();
+        conn.execute(&sql, params_refs.as_slice())
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
+    // CO-336: fire-and-forget GitHub title fetch
+    if let Some(lr) = body.linked_ref {
+        maybe_fetch_github_title(state, id, lr, body.linked_summary.is_some());
+    }
 
     Ok(StatusCode::OK)
 }
@@ -885,5 +1181,300 @@ mod tests {
             .unwrap();
 
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-336 new tests
+    // -----------------------------------------------------------------------
+
+    // 7. PATCH with linked_ref — owner can link a PR/commit ref
+    #[tokio::test]
+    async fn test_patch_linked_ref_owner_200() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb7@example.com");
+        insert_universe(dir.path(), "fb_uni7", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status) \
+                     VALUES ('fb_id7', 'fb_uni7', 'feedback', 'hello', 1, 1000, 'open')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let token = test_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/feedback/fb_id7")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(
+                        r#"{"linked_ref":"commit:abc123","linked_summary":"Fix the bug","owner_response":"Done!"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let storage2 = Storage::new(dir.path().to_str().unwrap());
+        let (linked_ref, linked_summary, owner_response): (String, String, String) = storage2
+            .conn()
+            .query_row(
+                "SELECT linked_ref, linked_summary, owner_response FROM feedback WHERE id = 'fb_id7'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(linked_ref, "commit:abc123");
+        assert_eq!(linked_summary, "Fix the bug");
+        assert_eq!(owner_response, "Done!");
+    }
+
+    // 8. PATCH with wont-fix requires owner_response
+    #[tokio::test]
+    async fn test_patch_wont_fix_requires_response_400() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb8@example.com");
+        insert_universe(dir.path(), "fb_uni8", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status) \
+                     VALUES ('fb_id8', 'fb_uni8', 'feedback', 'hello', 1, 1000, 'open')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let token = test_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/feedback/fb_id8")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"status":"wont-fix"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // 9. addressed auto-sets public_visible=1
+    #[tokio::test]
+    async fn test_addressed_auto_public_visible() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb9@example.com");
+        insert_universe(dir.path(), "fb_uni9", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status, public_visible) \
+                     VALUES ('fb_id9', 'fb_uni9', 'feedback', 'hello', 1, 1000, 'open', 0)",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let token = test_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/feedback/fb_id9")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"status":"addressed"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let storage2 = Storage::new(dir.path().to_str().unwrap());
+        let (status, public_visible): (String, i64) = storage2
+            .conn()
+            .query_row(
+                "SELECT status, public_visible FROM feedback WHERE id = 'fb_id9'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "addressed");
+        assert_eq!(public_visible, 1);
+    }
+
+    // 10. State machine: terminal status cannot be changed
+    #[tokio::test]
+    async fn test_state_machine_terminal_reject() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb10@example.com");
+        insert_universe(dir.path(), "fb_uni10", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status) \
+                     VALUES ('fb_id10', 'fb_uni10', 'feedback', 'hello', 1, 1000, 'addressed')",
+                    [],
+                )
+                .unwrap();
+        }
+
+        let token = test_jwt(&owner_id);
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("PATCH")
+                    .uri("/api/v1/feedback/fb_id10")
+                    .header("content-type", "application/json")
+                    .header("authorization", format!("Bearer {token}"))
+                    .body(Body::from(r#"{"status":"open"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    // 11. Public mural lists addressed + wont-fix
+    #[tokio::test]
+    async fn test_public_mural_shows_addressed() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb11@example.com");
+        insert_universe(dir.path(), "fb_uni11", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            // public addressed item
+            storage.conn().execute(
+                "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status, public_visible) \
+                 VALUES ('id11a', 'fb_uni11', 'feedback', 'fixed!', 1, 1000, 'addressed', 1)",
+                [],
+            ).unwrap();
+            // private open item
+            storage.conn().execute(
+                "INSERT INTO feedback (id, universe_key, kind, message, anonymous, created_at, status, public_visible) \
+                 VALUES ('id11b', 'fb_uni11', 'feedback', 'private', 1, 2000, 'open', 0)",
+                [],
+            ).unwrap();
+        }
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/feedback/fb_uni11/public")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["items"][0]["id"], "id11a");
+        assert_eq!(json["items"][0]["status"], "addressed");
+    }
+
+    // 12. Public mural accessible anonymously (no auth token)
+    #[tokio::test]
+    async fn test_public_mural_anon_accessible() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb12@example.com");
+        insert_universe(dir.path(), "fb_uni12", &owner_id);
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/feedback/fb_uni12/public")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Should not return 401/403 — empty mural is fine
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["total"], 0);
+    }
+
+    // 13. Per-entry feedback strip shows public history for anon
+    #[tokio::test]
+    async fn test_per_entry_shows_public_history() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb13@example.com");
+        insert_universe(dir.path(), "fb_uni13", &owner_id);
+
+        {
+            let storage = Storage::new(dir.path().to_str().unwrap());
+            // public_visible=1 addressed
+            storage.conn().execute(
+                "INSERT INTO feedback (id, universe_key, entry_path, kind, message, anonymous, created_at, status, public_visible) \
+                 VALUES ('id13a', 'fb_uni13', 'docs/page.md', 'feedback', 'great fix', 1, 1000, 'addressed', 1)",
+                [],
+            ).unwrap();
+            // private open
+            storage.conn().execute(
+                "INSERT INTO feedback (id, universe_key, entry_path, kind, message, anonymous, created_at, status, public_visible) \
+                 VALUES ('id13b', 'fb_uni13', 'docs/page.md', 'feedback', 'secret', 1, 2000, 'open', 0)",
+                [],
+            ).unwrap();
+        }
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/feedback/fb_uni13/entry/docs/page.md")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let json = body_json(resp.into_body()).await;
+        // anon should see only public_visible=1 item
+        assert_eq!(json["total"], 1);
+        assert_eq!(json["items"][0]["id"], "id13a");
     }
 }

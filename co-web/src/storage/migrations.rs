@@ -2136,5 +2136,38 @@ impl Storage {
             );",
         )
         .expect("CO-334 guard: release_notes table");
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 55 {
+            // CO-336: traceability columns on feedback — linked PR/commit, owner
+            // response, and public visibility flag.
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE feedback ADD COLUMN linked_ref TEXT;
+                     ALTER TABLE feedback ADD COLUMN linked_summary TEXT;
+                     ALTER TABLE feedback ADD COLUMN owner_response TEXT;
+                     ALTER TABLE feedback ADD COLUMN public_visible INTEGER NOT NULL DEFAULT 0;
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (55);",
+                )
+                .expect("migration v55: feedback traceability columns");
+        }
+        // CO-336 drift-safe guard — ensure columns exist even if v55 was partially
+        // applied on an older instance (same pattern as CO-137/CO-333).
+        for sql in &[
+            "ALTER TABLE feedback ADD COLUMN linked_ref TEXT",
+            "ALTER TABLE feedback ADD COLUMN linked_summary TEXT",
+            "ALTER TABLE feedback ADD COLUMN owner_response TEXT",
+            "ALTER TABLE feedback ADD COLUMN public_visible INTEGER NOT NULL DEFAULT 0",
+        ] {
+            let _ = self.conn.execute(sql, []);
+        }
     }
 }

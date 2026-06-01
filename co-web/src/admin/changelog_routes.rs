@@ -429,6 +429,16 @@ fn default_per_page() -> u32 {
     50
 }
 
+/// CO-336: A feedback entry that is linked to a specific commit in the changelog.
+#[derive(Serialize, Clone)]
+pub struct FeedbackRef {
+    pub id: String,
+    pub universe_key: String,
+    pub message_preview: String,
+    pub status: String,
+    pub linked_ref: String,
+}
+
 #[derive(Serialize)]
 pub struct FeedItem {
     pub repo: String,
@@ -437,6 +447,8 @@ pub struct FeedItem {
     pub theme: Option<String>,
     pub body_md: String,
     pub body_html: String,
+    /// CO-336: feedback entries linked to commits that appear in this release.
+    pub feedback_refs: Vec<FeedbackRef>,
 }
 
 #[derive(Serialize)]
@@ -516,7 +528,7 @@ fn esc_html(s: &str) -> String {
         .replace('>', "&gt;")
 }
 
-fn row_to_feed_item(row: ReleaseNoteRow) -> FeedItem {
+fn row_to_feed_item(row: ReleaseNoteRow, feedback_refs: Vec<FeedbackRef>) -> FeedItem {
     let body_html = render_body_html(&row.body_md);
     FeedItem {
         repo: row.repo,
@@ -525,6 +537,7 @@ fn row_to_feed_item(row: ReleaseNoteRow) -> FeedItem {
         theme: row.theme,
         body_md: row.body_md,
         body_html,
+        feedback_refs,
     }
 }
 
@@ -638,7 +651,61 @@ pub async fn get_changelog_feed(
         )
     };
 
-    let items = rows.into_iter().map(row_to_feed_item).collect();
+    // CO-336: batch query to find feedback entries linked to commits in this feed.
+    // `linked_ref` uses the format `commit:<sha>`.
+    // 'commit:' is 7 chars, so `substr(f.linked_ref, 8)` gives the SHA.
+    // Best-effort: if changelog_cache is empty or query fails, feedback_refs = [].
+    let feedback_by_version: HashMap<String, Vec<FeedbackRef>> = {
+        let storage = state.core.storage.lock();
+        let conn = storage.conn();
+        let result = conn.prepare(
+            "SELECT cc.version, f.id, f.universe_key, \
+                    substr(f.message, 1, 100), f.status, f.linked_ref \
+             FROM feedback f \
+             JOIN changelog_cache cc ON cc.commit_sha = substr(f.linked_ref, 8) \
+             WHERE f.public_visible = 1 AND f.linked_ref LIKE 'commit:%' \
+               AND cc.commit_sha IS NOT NULL AND cc.commit_sha != ''",
+        );
+        match result {
+            Ok(mut stmt) => {
+                let refs_iter = stmt.query_map([], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?, // version
+                        FeedbackRef {
+                            id: row.get(1)?,
+                            universe_key: row.get(2)?,
+                            message_preview: row.get(3)?,
+                            status: row.get(4)?,
+                            linked_ref: row.get(5)?,
+                        },
+                    ))
+                });
+                match refs_iter {
+                    Ok(iter) => {
+                        let mut map: HashMap<String, Vec<FeedbackRef>> = HashMap::new();
+                        for item in iter.filter_map(|r| r.ok()) {
+                            map.entry(item.0).or_default().push(item.1);
+                        }
+                        map
+                    }
+                    Err(_) => HashMap::new(),
+                }
+            }
+            Err(_) => HashMap::new(),
+        }
+    };
+
+    let items = rows
+        .into_iter()
+        .map(|row| {
+            let refs = feedback_by_version
+                .get(&row.version)
+                .cloned()
+                .unwrap_or_default();
+            row_to_feed_item(row, refs)
+        })
+        .collect();
+
     Ok(Json(FeedResponse {
         page,
         per_page,
