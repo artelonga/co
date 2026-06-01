@@ -5,6 +5,148 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.35.0] — 2026-06-01 — yuri vision Wave 1 — subdomain + types + notas + messaging + macOS notify + /analytics + runtime bindings
+
+## CO-323 — yuri.artelonga.com.br — subdomain routing to a single-universe view
+
+Added HTTP middleware (`subdomain_routing_middleware`) that detects requests
+arriving via a `*.artelonga.com.br` subdomain (e.g. `yuri.artelonga.com.br`) and
+injects a `window.__CO_SUBDOMAIN_UNIVERSE__` bootstrap script into the SPA shell.
+
+The SPA reads this global on boot to:
+- Lock the current universe to the subdomain's universe key (bypassing URL parsing)
+- Apply the `co-single-universe-mode` CSS class, which hides the multi-universe
+  sidebar and hamburger button so the page shows only the pinned universe's content
+
+### Why
+Foundation for the yuri.artelonga.com.br personal sub-site. Visitors to
+`yuri.artelonga.com.br` get a clean, focused view of the `yuri` universe without
+CO's full multi-universe navigation. Other universes remain reachable at their normal
+paths on the main `co-artelonga.fly.dev` host.
+
+### Operator actions required
+- DNS: add `CNAME yuri → co-artelonga.fly.dev.` at the registrar
+- TLS: `flyctl certs add yuri.artelonga.com.br -a co-artelonga`
+- Cookies: `flyctl secrets set CO_COOKIE_DOMAIN=.artelonga.com.br -a co-artelonga`
+  (enables cross-subdomain sessions)
+
+See `docs/dns.md` for full setup instructions.
+
+## CO-323A — seed yuri Obsidian vault into yuri universe
+
+Adds `("yuri", "yuri")` to CO-317's sister-repo mapping so `~/projects/yuri/` (the user's personal Obsidian vault) gets ingested into the private `yuri` universe on every `co serve` boot.
+
+First seed entries (CO-325 type system preview):
+- `references/grace-kelly.md` — Mika quote with YouTube + Spotify links
+- `references/virtual-insanity.md` — Jamiroquai quote with YouTube + Spotify links
+
+Both files use Obsidian-compatible `> [!quote]` callouts (Jekyll-displayable too).
+
+### Why
+First slice of the yuri.artelonga.com.br vision (specs CO-323..329). Gets content seeded today; the subdomain routing + per-entry visibility tiers + AI + analytics features land via the spec series.
+
+### Frontmatter convention introduced
+- `type: song` — subtype of `music` category (CO-325)
+- `visibility: public` — per-entry tier (CO-324)
+- `references: { youtube, spotify }` — recursive composition (CO-325)
+- `author`, `year`, `album`, `tags` — standard bibliographic fields
+
+These are descriptive for now; query/filter machinery comes in CO-325.
+
+## CO-325 — Reference type system + recursive composition + notas abstraction
+
+Added a typed content schema for personal bibliography and notebook management.
+
+**New content types** (schema files in `work/co/schema/`):
+- `song`, `album` (category: music)
+- `poem`, `essay` (category: writing)
+- `video` (category: media)
+- `url`, `quote`, `notas` (category: reference)
+
+**Category aggregation** — `type:music` in the query DSL expands to
+`entry_type IN ('song', 'album')` at query time. Same for `writing`,
+`media`, `reference`.
+
+**Recursive `references` field** — entries store a free-form platform→url/path
+map under `references:` in frontmatter. Queryable via JSON path:
+`FROM song WHERE references.youtube IS NOT NULL`.
+
+**`notas` type** — physical notebook page transcriptions with required
+`caderno_id` (string) and `pagina` (integer) frontmatter fields; validated
+by the CLI `co validate` command.
+
+**Query DSL extensions** (`co-web/src/content/query_dsl.rs`):
+- Shorthand syntax: `type:X AND field:value`
+- Special keys: `type:`, `before:`, `after:`, `caderno_id:`, `author:`
+- New filter variants: `FieldNotNull` (`IS NOT NULL`), `DateBefore`, `DateAfter`
+- Dotted field paths allowed: `references.youtube IS NOT NULL`
+- `TypeCategoryRegistry` in `core/src/feature/type_registry.rs`
+
+### Why
+The yuri.artelonga.com.br index needs cross-type queries (all music,
+notas filtered by notebook, date ranges). Without the category system
+the query DSL could only filter by exact type.
+
+## CO-326 — Direct messaging — send to yuri@artelonga.com.br (email + in-app)
+
+Added `POST /api/v1/universes/{key}/messages` — a public contact form endpoint
+that delivers visitor messages to the universe owner via email (MailProvider) and
+as an in-app notification (`event_type = "direct_message"`).
+
+- Rate limit: 5 messages / hour per IP (sliding window, in-process token store)
+- Honeypot: silently drops requests where the `website` field is non-empty
+- Validates `from_email`, `from_name`, `subject`, `body` (all required)
+- Email formatted as `[CO] {subject}` with sender attribution in the body
+- Notification stored in `user_notifications` for the universe owner
+
+### Why
+
+yuri.artelonga.com.br needed a contact surface so visitors can reach out directly
+without having to locate an email address elsewhere.
+
+## CO-327 — macOS desktop notifications for CO events
+
+Adds native desktop notifications on macOS when CO events arrive while `co serve` is running. Notifications fire for incoming direct messages, chat messages, mentions, and universe invitations. A 1-second debounce per recipient prevents flooding when multiple events arrive together.
+
+Notifications are delivered via `terminal-notifier` (click opens the notifications page) when installed (`brew install terminal-notifier`), and fall back to `osascript` otherwise (URL shown in the notification body).
+
+Set `CO_DESKTOP_NOTIFY=off` to suppress all desktop notifications. The feature is a no-op on Linux and Windows.
+
+### Why
+
+The local LLM, claude-hook, and messaging features all benefit from out-of-browser awareness. Without notifications, active polling was required to catch new events.
+
+## CO-329 — /analytics non-indexed real-time telemetry + background-process visibility
+
+Added a live observability dashboard at `/analytics` (auth-gated, noindex) backed by a WebSocket stream at `WS /api/v1/analytics/stream`.
+
+- In-memory ring buffer retains the last 1000 telemetry events (HTTP requests, domain events, agent sessions, worker snapshots)
+- Dashboard shows: live request log, domain events, background worker table, recent AI sessions, rolling 1m/5m/1h stats and error list
+- Request middleware captures every HTTP path/method/status/latency into the buffer
+- Domain event subscriber converts event-bus events (entries, assets, invitations, proposals, agent sessions) into analytics events
+- Worker snapshots are polled every 5 s per connected WS client via `worker_supervisor.statuses()`
+
+### Why
+Yuri needs a real-time window into what CO is doing on his server — active workers, AI sessions, error rates — without relying on logs or external tooling.
+
+## CO-330 — Runtime universe→repo bindings + anon published-only filter (deploy-free)
+
+Migration v51 adds three nullable columns to `universes`:
+- `local_repo_path TEXT` — absolute path (with `~` expansion) of the local git repo to ingest on startup
+- `content_subdirs TEXT` — JSON array of subdirectory names to scan (e.g. `["docs","content"]`)
+- `anon_published_only INTEGER NOT NULL DEFAULT 0` — when 1, anonymous reads are restricted to entries with `published: true` in frontmatter
+
+Eight universe→repo bindings are backfilled at migration time (artelonga, quilomboaraucaria, yggdrasil, rfq, comunicacao, mbya, topologia, yuri). The `yuri` universe also gets `anon_published_only=1`.
+
+`seed_orchestrator::run_sister_repo_seeds` now reads bindings from the DB instead of a hardcoded array. Adding a new repo to CO no longer requires a code change or deploy — a `PATCH /api/v1/universes/<key>/source` call is enough.
+
+The new endpoint (`PATCH /api/v1/universes/:slug/source`, owner-only) lets the owner set or update all three fields at runtime. `co launch` auto-sets `local_repo_path` to the repo root so a freshly launched universe is pre-wired with no extra steps.
+
+### Why
+
+Hardcoded mappings violated the "any repo integrable database-only" principle (user feedback 2026-06-01). The `anon_published_only` flag unblocks yuri.artelonga.com.br: a single universe serves as private board (owner sees all) and public surface (anonymous readers see only published entries) without schema changes to `entries`.
+
+
 ## [2.34.0] — 2026-05-30 — co launch + e2e localhost trial suite
 
 ## CO-321 — E2e — localhost trial flow (subscribe / unsubscribe / sister repos / themes)
