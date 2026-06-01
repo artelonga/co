@@ -806,5 +806,24 @@
             </div>
         </div>
     </div>
+
+    <!-- CO-332: AI assistant chat widget -->
+    <div id="ai-assistant-widget" style="display:none">
+        <button id="ai-chat-btn" aria-label="Assistente IA" title="Assistente IA">
+            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <div id="ai-chat-panel" class="ai-chat-panel hidden" role="dialog" aria-label="Assistente de conteúdo">
+            <div class="ai-chat-header">
+                <span>Assistente</span>
+                <button id="ai-chat-close" aria-label="Fechar">✕</button>
+            </div>
+            <div id="ai-chat-messages" class="ai-chat-messages"></div>
+            <div class="ai-chat-input-row">
+                <input id="ai-chat-input" type="text" placeholder="Pergunte algo..." autocomplete="off" maxlength="500">
+                <button id="ai-chat-send">→</button>
+            </div>
+        </div>
+    </div>
+    <script type="module" src="/modules/assistant.js"></script>
 </body>
 </html>
