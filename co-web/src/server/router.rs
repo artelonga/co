@@ -209,11 +209,18 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         "/api/v1/universes/{slug}/chat/rooms/{room_slug}/ws",
         get(crate::chat::chat_ws_handler),
     );
+    // CO-329: Analytics real-time stream — auth done inside handler.
+    let analytics_ws_route = crate::analytics_routes::router();
 
     // All literal routes are registered before `/{slug}` so axum's matcher
     // prefers them over the param capture.
     let co_routes = Router::new()
         .route("/", get(serve_co_index))
+        // CO-329: real-time analytics dashboard (auth-gated, noindex)
+        .route(
+            "/analytics",
+            get(crate::analytics_routes::serve_analytics_page),
+        )
         // CO-260: standalone cross-version changelog viewer page
         .route(
             "/changelog",
@@ -291,6 +298,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(ws_route)
             .merge(sync_ws_route)
             .merge(chat_ws_route)
+            .merge(analytics_ws_route)
             .merge(co_routes)
             .nest("/api", board_public)
             .nest("/api", board_protected)
@@ -439,6 +447,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     }
 
     router = router.nest("/api/v1/interactions", crate::interactions::router());
+
+    // CO-329: analytics request tracking (runs inside rate-limit layer).
+    router = router.layer(axum::middleware::from_fn(
+        crate::observability::request_middleware,
+    ));
 
     // CO-80: rate limiting applied after ALL routes so it covers every endpoint.
     router = router.layer(axum::middleware::from_fn_with_state(

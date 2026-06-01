@@ -62,6 +62,7 @@ pub use social::ws;
 // admin context
 pub use admin::admin_routes;
 pub use admin::analytics_public;
+pub use admin::analytics_routes;
 pub use admin::changelog_routes;
 pub use admin::deployment_dashboard;
 pub use admin::dev_board;
@@ -100,6 +101,7 @@ pub use platform::experiment;
 pub use platform::geo;
 pub use platform::index_manager;
 pub use platform::job_queue;
+pub use platform::observability;
 pub use platform::plugin_loader;
 pub use platform::pretty_urls;
 pub use platform::rate_limit;
