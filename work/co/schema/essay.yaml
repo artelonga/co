@@ -1,0 +1,14 @@
+type: essay
+category: writing
+description: "Um ensaio ou artigo escrito"
+properties:
+  title:
+    kind: text
+    required: true
+  author:
+    kind: text
+  language:
+    kind: text
+  references:
+    kind: object
+    description: "Fontes citadas no ensaio"

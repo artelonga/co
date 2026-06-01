@@ -1,0 +1,14 @@
+type: album
+category: music
+description: "Uma coleção de músicas de um ou mais artistas"
+properties:
+  title:
+    kind: text
+    required: true
+  author:
+    kind: text
+  year:
+    kind: number
+  references:
+    kind: object
+    description: "Links para plataformas (spotify, bandcamp, etc.)"

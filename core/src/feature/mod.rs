@@ -7,6 +7,7 @@
 //! - Content files (.md) following standard frontmatter format
 
 pub mod schema;
+pub mod type_registry;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

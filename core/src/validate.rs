@@ -73,6 +73,15 @@ pub const KNOWN_TYPES: &[&str] = &[
     "user-story",
     "epic",
     "release",
+    // CO-325: media / writing / reference types
+    "song",
+    "album",
+    "poem",
+    "essay",
+    "video",
+    "url",
+    "quote",
+    "notas",
 ];
 
 impl ValidationContext {
@@ -155,6 +164,9 @@ struct ValidatableFrontmatter {
     id: Option<String>,
     language: Option<String>,
     scope: Option<String>,
+    // CO-325: notas-specific required fields
+    caderno_id: Option<String>,
+    pagina: Option<serde_yaml::Value>,
 }
 
 /// Validate a single content file
@@ -269,6 +281,19 @@ pub fn validate_file(path: &Path, ctx: &ValidationContext) -> Vec<ValidationIssu
                     content_type, lang_dir
                 ),
             ));
+        }
+
+        // CO-325: validate required frontmatter fields for notas type
+        if content_type == "notas" {
+            if frontmatter.caderno_id.is_none() {
+                issues.push(ValidationIssue::error(
+                    path,
+                    "notas requires field: caderno_id",
+                ));
+            }
+            if frontmatter.pagina.is_none() {
+                issues.push(ValidationIssue::error(path, "notas requires field: pagina"));
+            }
         }
 
         // Task 13.2.3: Validate required content sections for user-story and task types

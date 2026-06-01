@@ -1,0 +1,14 @@
+type: video
+category: media
+description: "Um vídeo de qualquer plataforma ou arquivo local"
+properties:
+  title:
+    kind: text
+    required: true
+  url:
+    kind: link
+  duration:
+    kind: text
+  references:
+    kind: object
+    description: "Links alternativos (youtube, vimeo, arquivo local, etc.)"

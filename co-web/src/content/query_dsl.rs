@@ -1,32 +1,53 @@
-//! CO-74: Query DSL — simple SQL-like language compiled to parameterized SQLite.
+//! CO-74 / CO-325: Query DSL — compiled to parameterized SQLite.
 //!
 //! # Syntax
+//!
+//! Two forms are accepted:
+//!
+//! ## FROM … WHERE … (original, CO-74)
 //!
 //! ```text
 //! FROM <type> [WHERE <cond> [AND <cond>]*] [LIMIT <n>]
 //!
-//! <cond> ::= <field> = <quoted>         -- exact frontmatter match
-//!          | <field> LIKE <quoted>       -- LIKE frontmatter match
-//!          | <field> INCLUDES <quoted>   -- entry_relations join (to_path LIKE %val%)
+//! <cond> ::= <field> = <quoted>              -- exact frontmatter match
+//!          | <field> LIKE <quoted>            -- LIKE frontmatter match
+//!          | <field> INCLUDES <quoted>        -- entry_relations join
+//!          | <field> IS NOT NULL              -- field presence check
 //! ```
 //!
-//! # Example
+//! ## Shorthand (CO-325)
 //!
 //! ```text
-//! FROM evento WHERE attendees INCLUDES "yuri" AND status = "confirmed" LIMIT 50
+//! [type:<type_or_category>] [AND key:value]*
+//!
+//! Special keys:
+//!   type:     — content type or category (music → song + album)
+//!   before:   — created_at < value
+//!   after:    — created_at > value
+//!   All other keys become  field = "value"  conditions.
+//! ```
+//!
+//! # Examples
+//!
+//! ```text
+//! FROM evento WHERE attendees INCLUDES "yuri"
+//! type:music AND author:"Yuri"
+//! type:notas AND caderno_id:"black-2024"
+//! before:2026-05-01 AND after:2025-01-01
+//! FROM song WHERE references.youtube IS NOT NULL
 //! ```
 //!
 //! # Safety
 //!
-//! All user-supplied values are bound via SQLite parameters (`?N`).  Field names
-//! are validated as safe identifiers (alphanumeric + `_` + `-`) before being
-//! interpolated into `json_extract` paths — they are never placed directly in
-//! the SQL identifier position.
+//! All user-supplied values are bound via SQLite parameters (`?N`).  Field
+//! names are validated: only alphanumeric + `_` + `-` + `.` are permitted
+//! before being interpolated into `json_extract` paths.
 //!
 //! # Scale
 //!
-//! Results are capped at 1 000 rows (CO-74 scale note).  An explicit `LIMIT`
-//! is clamped to this value silently.
+//! Results are capped at 1 000 rows.  An explicit `LIMIT` is clamped.
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -51,7 +72,7 @@ impl std::fmt::Display for QueryError {
             QueryError::TooComplex(msg) => write!(f, "query too complex: {msg}"),
             QueryError::UnsafeFieldName(name) => write!(
                 f,
-                "unsafe field name '{name}': must contain only alphanumeric chars, '-', or '_'"
+                "unsafe field name '{name}': must contain only alphanumeric chars, '-', '_', or '.'"
             ),
         }
     }
@@ -66,7 +87,14 @@ impl std::error::Error for QueryError {}
 /// Parsed representation of a DSL query.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DslQuery {
+    /// The type or category as written by the user (e.g. `"music"`).
     pub from_type: String,
+    /// Expanded type list after category resolution.
+    ///
+    /// Populated by [`resolve`]; supersedes `from_type` in [`compile`].
+    /// Empty means use `from_type` directly (or no type filter if `"*"`).
+    #[serde(default)]
+    pub from_types: Vec<String>,
     pub filters: Vec<DslFilter>,
     pub limit: usize,
 }
@@ -80,16 +108,175 @@ pub enum DslFilter {
     FieldLike { field: String, pattern: String },
     /// `field INCLUDES "target"` — join on `entry_relations` (to_path LIKE %target%).
     RelationIncludes { field: String, target: String },
+    /// `field IS NOT NULL` — check that a frontmatter field is present.
+    ///
+    /// For column fields (`created_at`, `updated_at`) uses the column directly.
+    FieldNotNull { field: String },
+    /// `before:<date>` — `created_at < value` (or json_extract for other fields).
+    DateBefore { field: String, value: String },
+    /// `after:<date>` — `created_at > value` (or json_extract for other fields).
+    DateAfter { field: String, value: String },
+}
+
+// ---------------------------------------------------------------------------
+// Category resolution
+// ---------------------------------------------------------------------------
+
+/// Default type-to-category mapping (derived from `work/co/schema/*.yaml`).
+///
+/// Returns a map of `category → [subtypes]` used by [`resolve`].
+pub fn default_type_categories() -> HashMap<String, Vec<String>> {
+    let mut m = HashMap::new();
+    m.insert(
+        "music".to_string(),
+        vec!["song".to_string(), "album".to_string()],
+    );
+    m.insert(
+        "writing".to_string(),
+        vec!["poem".to_string(), "essay".to_string()],
+    );
+    m.insert("media".to_string(), vec!["video".to_string()]);
+    m.insert(
+        "reference".to_string(),
+        vec!["url".to_string(), "quote".to_string(), "notas".to_string()],
+    );
+    m
+}
+
+/// Resolve a category name in `query.from_type` to its constituent types.
+///
+/// If `from_type` is a known category, `from_types` is populated with the
+/// expanded type list.  If it is already a specific type (or `"*"`), the
+/// query is returned unchanged.
+pub fn resolve(mut query: DslQuery, categories: &HashMap<String, Vec<String>>) -> DslQuery {
+    if let Some(types) = categories.get(&query.from_type) {
+        query.from_types = types.clone();
+    }
+    query
 }
 
 // ---------------------------------------------------------------------------
 // Parser
 // ---------------------------------------------------------------------------
 
-/// Parse a DSL query string into an [`DslQuery`] AST.
+/// Parse a DSL query string into a [`DslQuery`] AST.
+///
+/// Accepts both the `FROM … WHERE …` (CO-74) syntax and the `type:X AND
+/// field:value` shorthand (CO-325).  The FROM form is tried first; if the
+/// input does not start with `FROM` (case-insensitive), the shorthand parser
+/// is used.
 pub fn parse(input: &str) -> Result<DslQuery, QueryError> {
+    let trimmed = input.trim();
+    if trimmed
+        .split_whitespace()
+        .next()
+        .map(|w| w.eq_ignore_ascii_case("FROM"))
+        .unwrap_or(false)
+    {
+        let tokens = tokenize(trimmed)?;
+        parse_tokens(&tokens)
+    } else {
+        parse_shorthand(trimmed)
+    }
+}
+
+/// Parse the shorthand `type:X AND key:value` syntax.
+///
+/// Special keys: `type` (sets from_type), `before` / `after` (date range).
+/// All other keys become `FieldEq` conditions.
+pub fn parse_shorthand(input: &str) -> Result<DslQuery, QueryError> {
     let tokens = tokenize(input)?;
-    parse_tokens(&tokens)
+    if tokens.is_empty() {
+        return Err(QueryError::Parse("empty query".into()));
+    }
+
+    let mut from_type = "*".to_string();
+    let mut filters: Vec<DslFilter> = Vec::new();
+    let mut pos = 0;
+
+    while pos < tokens.len() {
+        // Skip AND keywords between terms
+        if let Token::Word(w) = &tokens[pos]
+            && w.eq_ignore_ascii_case("AND")
+        {
+            pos += 1;
+            continue;
+        }
+
+        match &tokens[pos] {
+            Token::Word(w) => {
+                if let Some(colon) = w.find(':') {
+                    let key = w[..colon].to_string();
+                    let inline_val = w[colon + 1..].to_string();
+                    pos += 1;
+
+                    let value = if !inline_val.is_empty() {
+                        inline_val
+                    } else {
+                        // value is the next token
+                        match tokens.get(pos) {
+                            Some(Token::Quoted(s)) => {
+                                let s = s.clone();
+                                pos += 1;
+                                s
+                            }
+                            Some(Token::Word(s)) => {
+                                let s = s.clone();
+                                pos += 1;
+                                s
+                            }
+                            Some(Token::Number(n)) => {
+                                let s = n.to_string();
+                                pos += 1;
+                                s
+                            }
+                            None => {
+                                return Err(QueryError::Parse(format!(
+                                    "expected value after '{key}:'"
+                                )));
+                            }
+                        }
+                    };
+
+                    match key.as_str() {
+                        "type" => from_type = value,
+                        "before" => filters.push(DslFilter::DateBefore {
+                            field: "created_at".to_string(),
+                            value,
+                        }),
+                        "after" => filters.push(DslFilter::DateAfter {
+                            field: "created_at".to_string(),
+                            value,
+                        }),
+                        _ => {
+                            validate_field_name(&key)?;
+                            filters.push(DslFilter::FieldEq { field: key, value });
+                        }
+                    }
+                } else {
+                    return Err(QueryError::Parse(format!(
+                        "expected key:value pair, got: '{w}'"
+                    )));
+                }
+            }
+            other => {
+                return Err(QueryError::Parse(format!("unexpected token: {other}")));
+            }
+        }
+    }
+
+    if filters.len() > 10 {
+        return Err(QueryError::TooComplex(
+            "max 10 filter conditions per query".into(),
+        ));
+    }
+
+    Ok(DslQuery {
+        from_type,
+        from_types: vec![],
+        filters,
+        limit: MAX_RESULT_ROWS,
+    })
 }
 
 #[derive(Debug, PartialEq)]
@@ -229,6 +416,7 @@ fn parse_tokens(tokens: &[Token]) -> Result<DslQuery, QueryError> {
 
     Ok(DslQuery {
         from_type,
+        from_types: vec![],
         filters,
         limit,
     })
@@ -238,43 +426,61 @@ fn parse_condition(tokens: &[Token], pos: &mut usize) -> Result<DslFilter, Query
     let field = take_word(tokens, pos, "field name")?;
     validate_field_name(&field)?;
 
-    let op = take_word(tokens, pos, "operator (=, LIKE, INCLUDES)")?;
+    let op = take_word(tokens, pos, "operator (=, LIKE, INCLUDES, IS)")?;
 
-    let value = match tokens.get(*pos) {
+    match op.to_ascii_uppercase().as_str() {
+        "=" => {
+            let value = take_value(tokens, pos, &op)?;
+            Ok(DslFilter::FieldEq { field, value })
+        }
+        "LIKE" => {
+            let pattern = take_value(tokens, pos, &op)?;
+            Ok(DslFilter::FieldLike { field, pattern })
+        }
+        "INCLUDES" => {
+            let target = take_value(tokens, pos, &op)?;
+            Ok(DslFilter::RelationIncludes { field, target })
+        }
+        "IS" => {
+            let not_kw = take_word(tokens, pos, "NOT")?;
+            if !not_kw.eq_ignore_ascii_case("NOT") {
+                return Err(QueryError::Parse(format!(
+                    "expected NOT after IS, got: '{not_kw}'"
+                )));
+            }
+            let null_kw = take_word(tokens, pos, "NULL")?;
+            if !null_kw.eq_ignore_ascii_case("NULL") {
+                return Err(QueryError::Parse(format!(
+                    "expected NULL after IS NOT, got: '{null_kw}'"
+                )));
+            }
+            Ok(DslFilter::FieldNotNull { field })
+        }
+        other => Err(QueryError::Parse(format!(
+            "unknown operator '{other}', expected =, LIKE, INCLUDES, or IS"
+        ))),
+    }
+}
+
+fn take_value(tokens: &[Token], pos: &mut usize, op: &str) -> Result<String, QueryError> {
+    match tokens.get(*pos) {
         Some(Token::Quoted(s)) => {
             let s = s.clone();
             *pos += 1;
-            s
+            Ok(s)
         }
         Some(Token::Word(s)) => {
             let s = s.clone();
             *pos += 1;
-            s
+            Ok(s)
         }
         Some(Token::Number(n)) => {
             let s = n.to_string();
             *pos += 1;
-            s
+            Ok(s)
         }
-        None => {
-            return Err(QueryError::Parse(format!(
-                "expected value after operator '{op}', got end of input"
-            )));
-        }
-    };
-
-    match op.to_ascii_uppercase().as_str() {
-        "=" => Ok(DslFilter::FieldEq { field, value }),
-        "LIKE" => Ok(DslFilter::FieldLike {
-            field,
-            pattern: value,
-        }),
-        "INCLUDES" => Ok(DslFilter::RelationIncludes {
-            field,
-            target: value,
-        }),
-        other => Err(QueryError::Parse(format!(
-            "unknown operator '{other}', expected =, LIKE, or INCLUDES"
+        None => Err(QueryError::Parse(format!(
+            "expected value after operator '{op}', got end of input"
         ))),
     }
 }
@@ -304,17 +510,33 @@ fn take_word(tokens: &[Token], pos: &mut usize, context: &str) -> Result<String,
     }
 }
 
-/// Field names coming from the DSL are interpolated into `json_extract` paths.
-/// Only alphanumeric characters, `_`, and `-` are permitted.
+/// Field names are interpolated into `json_extract` paths.
+/// Allowed: alphanumeric, `_`, `-`, `.` (dot enables nested paths like
+/// `references.youtube` → `$.references.youtube`).
 fn validate_field_name(field: &str) -> Result<(), QueryError> {
     if field.is_empty()
         || !field
             .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
     {
         Err(QueryError::UnsafeFieldName(field.to_string()))
     } else {
         Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Column-vs-JSON field handling
+// ---------------------------------------------------------------------------
+
+/// Fields that map to real columns (not JSON extraction).
+const COLUMN_FIELDS: &[&str] = &["created_at", "updated_at", "entry_type", "title", "path"];
+
+fn field_expr(field: &str) -> String {
+    if COLUMN_FIELDS.contains(&field) {
+        format!("e.{field}")
+    } else {
+        format!("json_extract(e.frontmatter_json, '$.{field}')")
     }
 }
 
@@ -326,12 +548,30 @@ fn validate_field_name(field: &str) -> Result<(), QueryError> {
 ///
 /// `?1` is always the `universe_key`.  The returned `params` vec is aligned
 /// with the `?N` placeholders in the SQL string.
+///
+/// Category expansion: if `query.from_types` is non-empty (populated by
+/// [`resolve`]), the SQL uses `IN (…)` instead of a single `=` check.
+/// If `query.from_type` is `"*"` or empty, no type filter is applied.
 pub fn compile(query: &DslQuery, universe_key: &str) -> (String, Vec<String>) {
     let mut params: Vec<String> = vec![universe_key.to_string()];
     let mut conditions: Vec<String> = vec!["e.universe_key = ?1".to_string()];
 
-    let type_idx = push_param(&mut params, &query.from_type);
-    conditions.push(format!("e.entry_type = ?{type_idx}"));
+    // Type filter — from_types (category expansion) takes precedence.
+    if !query.from_types.is_empty() {
+        let placeholders: Vec<String> = query
+            .from_types
+            .iter()
+            .map(|t| {
+                let idx = push_param(&mut params, t);
+                format!("?{idx}")
+            })
+            .collect();
+        conditions.push(format!("e.entry_type IN ({})", placeholders.join(", ")));
+    } else if !query.from_type.is_empty() && query.from_type != "*" {
+        let type_idx = push_param(&mut params, &query.from_type);
+        conditions.push(format!("e.entry_type = ?{type_idx}"));
+    }
+    // from_type == "*" or empty → no type filter
 
     let needs_distinct = query
         .filters
@@ -345,15 +585,11 @@ pub fn compile(query: &DslQuery, universe_key: &str) -> (String, Vec<String>) {
         match filter {
             DslFilter::FieldEq { field, value } => {
                 let idx = push_param(&mut params, value);
-                conditions.push(format!(
-                    "json_extract(e.frontmatter_json, '$.{field}') = ?{idx}"
-                ));
+                conditions.push(format!("{} = ?{idx}", field_expr(field)));
             }
             DslFilter::FieldLike { field, pattern } => {
                 let idx = push_param(&mut params, pattern);
-                conditions.push(format!(
-                    "json_extract(e.frontmatter_json, '$.{field}') LIKE ?{idx}"
-                ));
+                conditions.push(format!("{} LIKE ?{idx}", field_expr(field)));
             }
             DslFilter::RelationIncludes { field, target } => {
                 let alias = format!("r{join_idx}");
@@ -368,6 +604,17 @@ pub fn compile(query: &DslQuery, universe_key: &str) -> (String, Vec<String>) {
                 conditions.push(format!(
                     "{alias}.relation_type = ?{rel_idx} AND {alias}.to_path LIKE ?{target_idx}"
                 ));
+            }
+            DslFilter::FieldNotNull { field } => {
+                conditions.push(format!("{} IS NOT NULL", field_expr(field)));
+            }
+            DslFilter::DateBefore { field, value } => {
+                let idx = push_param(&mut params, value);
+                conditions.push(format!("{} < ?{idx}", field_expr(field)));
+            }
+            DslFilter::DateAfter { field, value } => {
+                let idx = push_param(&mut params, value);
+                conditions.push(format!("{} > ?{idx}", field_expr(field)));
             }
         }
     }
@@ -404,7 +651,7 @@ fn push_param(params: &mut Vec<String>, value: &str) -> usize {
 mod tests {
     use super::*;
 
-    // ---- parse ----
+    // ---- parse (FROM syntax) ----
 
     #[test]
     fn test_parse_minimal_from() {
@@ -460,6 +707,8 @@ mod tests {
 
     #[test]
     fn test_parse_missing_from_keyword() {
+        // Without FROM: falls through to shorthand parser; "evento" alone
+        // has no colon so shorthand fails.
         assert!(parse("evento WHERE status = \"todo\"").is_err());
     }
 
@@ -494,12 +743,118 @@ mod tests {
         );
     }
 
+    // ---- IS NOT NULL ----
+
+    #[test]
+    fn test_parse_is_not_null() {
+        let q = parse("FROM song WHERE references.youtube IS NOT NULL").unwrap();
+        assert_eq!(q.from_type, "song");
+        assert_eq!(
+            q.filters,
+            vec![DslFilter::FieldNotNull {
+                field: "references.youtube".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_dotted_field_name_allowed() {
+        let q = parse(r#"FROM song WHERE references.spotify = "https://open.spotify.com/foo""#)
+            .unwrap();
+        assert_eq!(
+            q.filters,
+            vec![DslFilter::FieldEq {
+                field: "references.spotify".to_string(),
+                value: "https://open.spotify.com/foo".to_string(),
+            }]
+        );
+    }
+
+    // ---- shorthand parser ----
+
+    #[test]
+    fn test_shorthand_type_only() {
+        let q = parse("type:music").unwrap();
+        assert_eq!(q.from_type, "music");
+        assert!(q.filters.is_empty());
+    }
+
+    #[test]
+    fn test_shorthand_type_with_author() {
+        let q = parse(r#"type:song AND author:"Yuri""#).unwrap();
+        assert_eq!(q.from_type, "song");
+        assert_eq!(
+            q.filters,
+            vec![DslFilter::FieldEq {
+                field: "author".to_string(),
+                value: "Yuri".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_shorthand_caderno_id() {
+        let q = parse(r#"type:notas AND caderno_id:"black-2024""#).unwrap();
+        assert_eq!(q.from_type, "notas");
+        assert_eq!(
+            q.filters,
+            vec![DslFilter::FieldEq {
+                field: "caderno_id".to_string(),
+                value: "black-2024".to_string(),
+            }]
+        );
+    }
+
+    #[test]
+    fn test_shorthand_before_after() {
+        let q = parse("type:notas AND before:2026-05-01 AND after:2025-01-01").unwrap();
+        assert_eq!(q.from_type, "notas");
+        assert_eq!(q.filters.len(), 2);
+        assert!(matches!(
+            &q.filters[0],
+            DslFilter::DateBefore { field, value }
+            if field == "created_at" && value == "2026-05-01"
+        ));
+        assert!(matches!(
+            &q.filters[1],
+            DslFilter::DateAfter { field, value }
+            if field == "created_at" && value == "2025-01-01"
+        ));
+    }
+
+    #[test]
+    fn test_shorthand_no_type_is_wildcard() {
+        let q = parse(r#"caderno_id:"black-2024""#).unwrap();
+        assert_eq!(q.from_type, "*");
+        assert_eq!(q.filters.len(), 1);
+    }
+
+    // ---- resolve (category expansion) ----
+
+    #[test]
+    fn test_resolve_category_expands_types() {
+        let cats = default_type_categories();
+        let q = parse("type:music").unwrap();
+        let q = resolve(q, &cats);
+        assert!(q.from_types.contains(&"song".to_string()));
+        assert!(q.from_types.contains(&"album".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_specific_type_unchanged() {
+        let cats = default_type_categories();
+        let q = parse("FROM song").unwrap();
+        let q = resolve(q, &cats);
+        assert!(q.from_types.is_empty(), "specific type should not expand");
+    }
+
     // ---- compile ----
 
     #[test]
     fn test_compile_minimal() {
         let q = DslQuery {
             from_type: "evento".to_string(),
+            from_types: vec![],
             filters: vec![],
             limit: 100,
         };
@@ -531,7 +886,6 @@ mod tests {
             sql.contains("DISTINCT"),
             "INCLUDES must use DISTINCT to avoid duplicates"
         );
-        // to_path pattern should be %yuri%
         assert!(params.iter().any(|p| p == "%yuri%"), "params: {params:?}");
     }
 
@@ -539,6 +893,7 @@ mod tests {
     fn test_compile_limit_in_sql() {
         let q = DslQuery {
             from_type: "evento".to_string(),
+            from_types: vec![],
             filters: vec![],
             limit: 42,
         };
@@ -552,9 +907,69 @@ mod tests {
             parse(r#"FROM evento WHERE attendees INCLUDES "yuri" AND attendees INCLUDES "ana""#)
                 .unwrap();
         let (sql, _) = compile(&q, "u1");
-        // Should have two JOIN clauses
         let join_count = sql.matches("JOIN entry_relations").count();
         assert_eq!(join_count, 2, "two INCLUDES = two JOINs, sql: {sql}");
         assert!(sql.contains("DISTINCT"));
+    }
+
+    #[test]
+    fn test_compile_category_uses_in_clause() {
+        let cats = default_type_categories();
+        let q = resolve(parse("type:music").unwrap(), &cats);
+        let (sql, params) = compile(&q, "u1");
+        assert!(
+            sql.contains("entry_type IN"),
+            "category should use IN clause, sql: {sql}"
+        );
+        assert!(params.contains(&"song".to_string()));
+        assert!(params.contains(&"album".to_string()));
+    }
+
+    #[test]
+    fn test_compile_wildcard_type_omits_type_filter() {
+        let q = parse(r#"caderno_id:"black-2024""#).unwrap();
+        let (sql, _) = compile(&q, "u1");
+        // The SELECT list always includes e.entry_type; we only check that
+        // neither `entry_type =` nor `entry_type IN` appears in the WHERE.
+        assert!(
+            !sql.contains("entry_type =") && !sql.contains("entry_type IN"),
+            "wildcard from_type should omit type filter, sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_compile_is_not_null() {
+        let q = parse("FROM song WHERE references.youtube IS NOT NULL").unwrap();
+        let (sql, _) = compile(&q, "u1");
+        assert!(
+            sql.contains("IS NOT NULL"),
+            "IS NOT NULL must appear in SQL, sql: {sql}"
+        );
+        assert!(
+            sql.contains("$.references.youtube"),
+            "dotted path must be in json_extract, sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_compile_date_before_uses_column() {
+        let q = parse("type:notas AND before:2026-05-01").unwrap();
+        let (sql, params) = compile(&q, "u1");
+        assert!(
+            sql.contains("e.created_at < "),
+            "before: should filter on created_at column, sql: {sql}"
+        );
+        assert!(params.contains(&"2026-05-01".to_string()));
+    }
+
+    #[test]
+    fn test_compile_date_after_uses_column() {
+        let q = parse("type:notas AND after:2025-01-01").unwrap();
+        let (sql, params) = compile(&q, "u1");
+        assert!(
+            sql.contains("e.created_at > "),
+            "after: should filter on created_at column, sql: {sql}"
+        );
+        assert!(params.contains(&"2025-01-01".to_string()));
     }
 }

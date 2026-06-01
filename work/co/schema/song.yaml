@@ -1,0 +1,14 @@
+type: song
+category: music
+description: "Uma composição musical, com zero ou mais fontes de referência"
+properties:
+  title:
+    kind: text
+    required: true
+  author:
+    kind: text
+  language:
+    kind: text
+  references:
+    kind: object
+    description: "Mapa livre de plataforma → URL ou caminho (youtube, spotify, mp3, etc.)"
