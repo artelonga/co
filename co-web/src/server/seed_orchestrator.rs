@@ -66,6 +66,22 @@ pub fn run_startup_seeds(config: &WebConfig) {
     // Seed admin-owned content universes (artelonga, rfq, co) so they
     // appear in the sidebar without manual creation after every deploy.
     storage.seed_admin_content_universes();
+    // CO-330: backfill local_repo_path on freshly-created admin universes.
+    // Must run AFTER seed_admin_content_universes — on a fresh DB the rows
+    // don't exist when migration v51 runs, so its UPDATEs no-op. Here we
+    // catch the just-created rows. Idempotent (WHERE local_repo_path IS NULL).
+    let _ = storage.conn().execute_batch(
+        r#"
+        UPDATE universes SET local_repo_path='~/projects/ArteLonga', content_subdirs='["docs","content"]' WHERE key='artelonga' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["docs","content"]' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/yggdrasil', content_subdirs='["docs","content"]' WHERE key='yggdrasil' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/mbya', content_subdirs='["docs","content"]' WHERE key='mbya' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/topologia', content_subdirs='["docs","content"]' WHERE key='topologia' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/yuri', content_subdirs='[""]', anon_published_only=1 WHERE key='yuri' AND local_repo_path IS NULL;
+        "#,
+    );
     // CO-305: reseed co::public/* AFTER seed_admin_content_universes creates
     // the `co` universe row. On clean boot, the `co` universe doesn't exist
     // when this ran earlier (before line 44), so reseed_co_public_pages()
