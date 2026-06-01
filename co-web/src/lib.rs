@@ -78,6 +78,7 @@ pub use admin::uat_routes;
 pub use integrations::ai_routes;
 pub use integrations::chat_routes;
 pub use integrations::email_smtp;
+pub use integrations::feedback_routes;
 pub use integrations::github_auth;
 pub use integrations::log_drain_routes;
 pub use integrations::oauth_google;

@@ -1,6 +1,7 @@
 pub mod ai_routes;
 pub mod chat_routes;
 pub mod email_smtp;
+pub mod feedback_routes;
 pub mod github_auth;
 pub mod log_drain_routes;
 pub mod oauth_google;

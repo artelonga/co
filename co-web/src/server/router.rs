@@ -452,6 +452,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // CO-332: Public chat + deployment-status endpoints (non-Claude LLM, no auth).
     router = router.nest("/api/v1", crate::chat_routes::router(state.clone()));
 
+    // CO-333: Feedback system (public submit, owner-only management).
+    router = router.nest("/api/v1", crate::feedback_routes::router());
+
     router = router.nest("/api/v1/interactions", crate::interactions::router());
 
     // CO-329: analytics request tracking (runs inside rate-limit layer).

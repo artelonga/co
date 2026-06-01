@@ -357,7 +357,8 @@ async function maybeOpenEntryFromUrl(universeSlug) {
             const entry = await apiFetch(`/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${encodedPath}`);
             if (entry && entry.path) {
                 window.history.replaceState({}, '', `/${universeSlug}`);
-                openZoomModal({ ...entry, _universeSlug: universeSlug }, false);
+                await openZoomModal({ ...entry, _universeSlug: universeSlug }, false);
+                injectFeedbackBadge(universeSlug, entry.path);
                 return;
             }
         } catch (_) {}
@@ -368,7 +369,8 @@ async function maybeOpenEntryFromUrl(universeSlug) {
         if (res && res.entries && res.entries.length > 0) {
             const exact = res.entries.find(e => (e.path || '').split('/').pop().replace(/\.md$/i, '').toLowerCase() === stem.toLowerCase()) || res.entries[0];
             window.history.replaceState({}, '', `/${universeSlug}`);
-            openZoomModal({ ...exact, _universeSlug: universeSlug }, false);
+            await openZoomModal({ ...exact, _universeSlug: universeSlug }, false);
+            injectFeedbackBadge(universeSlug, exact.path);
             return;
         }
     } catch (_) {}
@@ -376,6 +378,13 @@ async function maybeOpenEntryFromUrl(universeSlug) {
     // CO-264: show a helpful empty state for the /changelog path when no CHANGELOG.md exists.
     if (lower === 'changelog') {
         showChangelogNotFoundView(universeSlug);
+        return;
+    }
+
+    // CO-333: /<universe>/feedback → show feedback mural.
+    if (lower === 'feedback') {
+        window.history.replaceState({}, '', `/${universeSlug}`);
+        showFeedbackMural(universeSlug);
         return;
     }
 
@@ -400,6 +409,66 @@ function showChangelogNotFoundView(universeSlug) {
         `</div>`;
     const app = document.getElementById('app');
     if (app) app.appendChild(view);
+}
+
+// CO-333: inject unread-feedback badge into the zoom modal toolbar for the owner.
+function injectFeedbackBadge(universeSlug, entryPath) {
+    if (!state.me || !state.universeInfo) return;
+    if (state.me.id !== state.universeInfo.owner_id) return;
+    const actionsDiv = document.querySelector('#co-zoom-overlay .co-zoom-actions');
+    if (!actionsDiv || !entryPath) return;
+    import('./modules/feedback-panel.js').then(({ mountFeedbackBadge }) => {
+        mountFeedbackBadge(actionsDiv, universeSlug, entryPath);
+    }).catch(() => {});
+}
+
+// CO-333: render the feedback mural for a universe.
+async function showFeedbackMural(universeSlug) {
+    const existing = document.getElementById('co-feedback-mural');
+    if (existing) existing.remove();
+    const mural = document.createElement('div');
+    mural.id = 'co-feedback-mural';
+    mural.style.cssText = 'max-width:680px;margin:32px auto;padding:0 16px';
+    mural.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:20px">
+            <button onclick="this.closest('#co-feedback-mural').remove()" style="
+                background:none;border:1px solid var(--border,#d1d5db);border-radius:6px;
+                padding:5px 12px;cursor:pointer;font-size:13px">← Voltar</button>
+            <h2 style="margin:0;font-size:20px">Feedback — ${esc(universeSlug)}</h2>
+        </div>
+        <div id="co-feedback-mural-body" style="color:var(--text-muted,#888)">Carregando…</div>`;
+    const app = document.getElementById('app');
+    if (app) app.appendChild(mural);
+
+    try {
+        const data = await apiFetch(`/api/v1/feedback/${encodeURIComponent(universeSlug)}`, {}, true);
+        const body = mural.querySelector('#co-feedback-mural-body');
+        if (!data || !data.items || data.items.length === 0) {
+            body.innerHTML = '<p>Nenhum feedback público disponível.</p>';
+            return;
+        }
+        const kindLabel = { feedback: 'Comentário', duvida: 'Dúvida', sugestao: 'Sugestão' };
+        body.innerHTML = data.items.map(item => {
+            const ts = new Date(item.created_at * 1000).toLocaleString('pt-BR');
+            const from = item.name ? esc(item.name) : 'Anônimo';
+            const epLink = item.entry_path
+                ? `<a href="/${esc(universeSlug)}/${item.entry_path.split('/').map(encodeURIComponent).join('/')}" style="font-size:12px;color:var(--primary,#3b82f6)">${esc(item.entry_path)}</a>`
+                : '';
+            return `
+<div style="border:1px solid var(--border,#e5e7eb);border-radius:8px;padding:14px 16px;margin-bottom:12px">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">
+    <span style="font-size:11px;padding:2px 6px;border-radius:4px;background:var(--tag-bg,#f3f4f6)">${esc(kindLabel[item.kind] || item.kind)}</span>
+    <span style="font-size:12px;opacity:.65">${esc(from)}</span>
+    ${epLink}
+    <span style="font-size:11px;opacity:.4;margin-left:auto">${esc(ts)}</span>
+  </div>
+  <p style="margin:0;font-size:14px;line-height:1.5">${esc(item.message)}</p>
+</div>`;
+        }).join('');
+    } catch (err) {
+        const body = mural.querySelector('#co-feedback-mural-body');
+        if (body) body.innerHTML = `<p style="color:var(--error,#ef4444)">Erro: ${esc(err.message)}</p>`;
+    }
 }
 
 // ===== View switching =====
