@@ -147,12 +147,66 @@ fn chat_tools() -> Vec<ToolDef> {
                 "required": []
             }),
         ),
+        // CO-333: feedback submission from chat
+        ToolDef::function(
+            "submit_feedback",
+            "Submit feedback on behalf of the visitor. Use when the visitor explicitly wants to leave a comment (feedback), ask a question (duvida), or make a suggestion (sugestao). Extract the intent from the conversation.",
+            serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "kind": {
+                        "type": "string",
+                        "enum": ["feedback", "duvida", "sugestao"],
+                        "description": "Type: 'feedback' = general comment, 'duvida' = question, 'sugestao' = suggestion"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The feedback message, extracted or summarised from the visitor's words"
+                    },
+                    "entry_path": {
+                        "type": "string",
+                        "description": "Optional: path of the specific entry this feedback is about (e.g. 'public/songs/grace-kelly.md')"
+                    }
+                },
+                "required": ["kind", "message"]
+            }),
+        ),
     ]
 }
 
 // ---------------------------------------------------------------------------
 // Tool execution — deterministic, no hallucination
 // ---------------------------------------------------------------------------
+
+/// CO-333: submit feedback on behalf of the chat visitor.
+fn exec_submit_feedback(
+    state: &AppState,
+    universe_key: &str,
+    args: &serde_json::Value,
+) -> serde_json::Value {
+    let kind = args["kind"].as_str().unwrap_or("feedback");
+    let message = match args["message"].as_str() {
+        Some(m) if !m.trim().is_empty() => m.trim(),
+        _ => return serde_json::json!({"error": "message is required"}),
+    };
+    let entry_path = args["entry_path"].as_str();
+
+    match crate::feedback_routes::insert_feedback(
+        state,
+        crate::feedback_routes::FeedbackCreate {
+            universe_key,
+            entry_path,
+            kind,
+            message,
+            name: None,
+            email: None,
+            user_sub: None,
+        },
+    ) {
+        Ok(id) => serde_json::json!({"ok": true, "id": id}),
+        Err(e) => serde_json::json!({"error": e.to_string()}),
+    }
+}
 
 /// Apply the published-only filter for anonymous callers.
 fn filter_published(
@@ -367,6 +421,8 @@ fn execute_tool(
         "list_types" => exec_list_types(state, universe_key),
         "get_recent" => exec_get_recent(state, universe_key, &args),
         "get_deployment_status" => exec_get_deployment_status(state),
+        // CO-333: feedback submission from chat assistant
+        "submit_feedback" => exec_submit_feedback(state, universe_key, &args),
         _ => serde_json::json!({"error": format!("Unknown tool: {name}")}),
     }
 }

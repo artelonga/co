@@ -2040,5 +2040,58 @@ impl Storage {
             );",
         )
         .expect("CO-331 guard: tools table");
+
+        if current_version < 53 {
+            // CO-333: feedback table — Yggdrasil-compatible + per-entry locus.
+            // entry_path NULL = universe-wide (Yggdrasil compat); set = per-entry.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS feedback (
+                        id           TEXT    PRIMARY KEY,
+                        universe_key TEXT    NOT NULL,
+                        entry_path   TEXT,
+                        kind         TEXT    NOT NULL CHECK (kind IN ('feedback','duvida','sugestao')),
+                        message      TEXT    NOT NULL,
+                        name         TEXT,
+                        email        TEXT,
+                        user_sub     TEXT,
+                        anonymous    INTEGER NOT NULL,
+                        created_at   INTEGER NOT NULL,
+                        status       TEXT    NOT NULL DEFAULT 'open'
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_feedback_universe_path
+                        ON feedback(universe_key, entry_path, created_at);
+                    CREATE INDEX IF NOT EXISTS idx_feedback_status
+                        ON feedback(status);
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (53);",
+                )
+                .expect("migration v53: feedback table");
+        }
+        // CO-333 drift-safe guard.
+        ensure_table(
+            &self.conn,
+            "feedback",
+            "CREATE TABLE IF NOT EXISTS feedback (
+                id           TEXT    PRIMARY KEY,
+                universe_key TEXT    NOT NULL,
+                entry_path   TEXT,
+                kind         TEXT    NOT NULL,
+                message      TEXT    NOT NULL,
+                name         TEXT,
+                email        TEXT,
+                user_sub     TEXT,
+                anonymous    INTEGER NOT NULL,
+                created_at   INTEGER NOT NULL,
+                status       TEXT    NOT NULL DEFAULT 'open'
+            );",
+        )
+        .expect("CO-333 guard: feedback table");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_feedback_universe_path \
+                     ON feedback(universe_key, entry_path, created_at);
+                 CREATE INDEX IF NOT EXISTS idx_feedback_status ON feedback(status);",
+            )
+            .expect("CO-333 guard: feedback indexes");
     }
 }
