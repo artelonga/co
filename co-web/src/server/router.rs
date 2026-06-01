@@ -193,6 +193,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::auth::universe_visibility_gate,
         ));
 
+    let contact_api = crate::contact_routes::contact_router();
+
     let log_drain_api = crate::log_drain_routes::router();
     let uat_api = crate::uat_routes::router(state.clone());
     let dev_board_api = crate::dev_board::router();
@@ -339,6 +341,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                     axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
                 ),
             )
+            // CO-326: public contact form — no auth required
+            .nest("/api/v1/universes", contact_api)
             .nest("/api/v1/universes", universe_content_api)
             // CO-244: read-only SQL query — auth required, but outside writer gate
             // since POST here is a query (not a mutation).

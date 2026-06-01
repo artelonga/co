@@ -48,6 +48,7 @@ pub use content::vault_routes;
 
 // social context
 pub use social::chat;
+pub use social::contact_routes;
 pub use social::dm_routes;
 pub use social::invitation_routes;
 pub use social::notification_email_worker;
