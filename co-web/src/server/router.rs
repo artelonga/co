@@ -311,6 +311,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .layer(axum::middleware::from_fn(
                 crate::quilombo_telemetria::canonical_host_middleware,
             ))
+            // CO-323: detect *.artelonga.com.br subdomains and store universe key
+            // in request extensions so SPA-serving handlers can inject the bootstrap
+            // script that locks the client to a single-universe view.
+            .layer(axum::middleware::from_fn(
+                crate::server::subdomain_routing::subdomain_routing_middleware,
+            ))
             .nest("/api/v1/gestao", gestao_api)
             .nest("/api/v1/gestao", webhook_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.

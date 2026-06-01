@@ -829,6 +829,87 @@ async fn test_anon_list_entries_private_universe_blocked() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// CO-323: subdomain routing — single-universe SPA injection
+// ---------------------------------------------------------------------------
+
+/// A request with `Host: yuri.artelonga.com.br` to `/` must return the SPA
+/// shell with `window.__CO_SUBDOMAIN_UNIVERSE__='yuri'` injected.
+#[tokio::test]
+async fn test_subdomain_routing_injects_universe_script() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header("host", "yuri.artelonga.com.br")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_str(resp.into_body()).await;
+    assert!(
+        body.contains("window.__CO_SUBDOMAIN_UNIVERSE__='yuri'"),
+        "subdomain SPA must contain universe bootstrap script; body excerpt: {}",
+        &body[..body.len().min(500)]
+    );
+}
+
+/// A request with a non-subdomain host must NOT inject the universe script.
+#[tokio::test]
+async fn test_non_subdomain_host_no_script_injection() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header("host", "co-artelonga.fly.dev")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_str(resp.into_body()).await;
+    assert!(
+        !body.contains("__CO_SUBDOMAIN_UNIVERSE__"),
+        "non-subdomain host must not inject universe script"
+    );
+}
+
+/// Reserved subdomain `co.artelonga.com.br` must not inject the script.
+#[tokio::test]
+async fn test_reserved_subdomain_co_no_injection() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/")
+                .header("host", "co.artelonga.com.br")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = body_str(resp.into_body()).await;
+    assert!(
+        !body.contains("__CO_SUBDOMAIN_UNIVERSE__"),
+        "reserved 'co' subdomain must not inject universe script"
+    );
+}
+
 /// `/{universe}/{*subpath}` for a non-existent universe must return 200
 /// so the SPA can render its own client-side routes (e.g. `/entrar/`,
 /// `/sobre/`, `/termos/`). The CO-232 hotfix in 2.12.2 (b8ed778) made

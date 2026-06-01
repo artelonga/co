@@ -83,6 +83,14 @@ async function loadMeUniverses() {
 // ===== Tiny helpers that don't belong in any module =====
 
 function setUniverseSlugInUrl(slug) {
+    // CO-323: in subdomain mode the browser is already on the correct host
+    // (yuri.artelonga.com.br); don't push a new slug to the path.
+    if (window.__CO_SUBDOMAIN_UNIVERSE__) {
+        if (slug && slug !== 'template') {
+            try { localStorage.setItem('co_preferred_universe', slug); } catch (_) {}
+        }
+        return;
+    }
     // Store the universe slug in history state so popstate (browser back/
     // forward) can read it. Without this, back-button changes the URL but
     // no JS reacts and the user stays on the current universe. Bug
@@ -135,6 +143,10 @@ function hideTemplateBanner() {
 }
 
 function readUniverseSlugFromUrl() {
+    // CO-323: subdomain single-universe mode overrides URL-based detection.
+    // window.__CO_SUBDOMAIN_UNIVERSE__ is injected by the server when the
+    // request arrives via a *.artelonga.com.br subdomain.
+    if (window.__CO_SUBDOMAIN_UNIVERSE__) return window.__CO_SUBDOMAIN_UNIVERSE__;
     const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications'];
     if (window.location.pathname.match(/^\/yggdrasil\/[a-z0-9-]+/)) return 'yggdrasil';
     const m = window.location.pathname.match(/^\/([a-z0-9-]+)(\/|$)/);
@@ -143,6 +155,18 @@ function readUniverseSlugFromUrl() {
 }
 
 function readEntryPathFromUrl(universeSlug) {
+    // CO-323: in subdomain mode the URL path is relative to the universe root.
+    // e.g. yuri.artelonga.com.br/2026-05-31 → path '2026-05-31' in yuri universe.
+    if (window.__CO_SUBDOMAIN_UNIVERSE__ && window.__CO_SUBDOMAIN_UNIVERSE__ === universeSlug) {
+        const p = window.location.pathname;
+        if (!p || p === '/' || p === `/${universeSlug}`) return null;
+        // Also handle /yuri/... in case history.pushState added the slug prefix.
+        const withSlug = `/${universeSlug}/`;
+        const stripped = p.startsWith(withSlug)
+            ? p.slice(withSlug.length)
+            : p.slice(1); // strip leading /
+        return stripped ? stripped.replace(/\.md$/i, '') : null;
+    }
     const prefix = `/${universeSlug}/`;
     const p = window.location.pathname;
     if (!p.startsWith(prefix)) return null;
@@ -683,6 +707,13 @@ window.coOnChatMessageArrived = (_msg, _roomId) => {
 
 // ===== Entry point =====
 async function init() {
+    // CO-323: apply single-universe mode when the page is served from a
+    // *.artelonga.com.br subdomain (window.__CO_SUBDOMAIN_UNIVERSE__ is injected
+    // by the server). Hides the multi-universe sidebar via CSS class.
+    if (window.__CO_SUBDOMAIN_UNIVERSE__) {
+        document.body.classList.add('co-single-universe-mode');
+    }
+
     window.setLang(window.currentLang);
 
     const btnHeaderLang = document.getElementById('btn-header-lang');
