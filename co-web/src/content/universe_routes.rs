@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
-    routing::{delete, get, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use serde::{Deserialize, Serialize};
 
@@ -234,6 +234,7 @@ pub async fn list_public_universes(
                     let s: String = row.get(10).unwrap_or_default();
                     if s.is_empty() { None } else { Some(s) }
                 },
+                anon_published_only: false,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1255,6 +1256,103 @@ pub async fn get_universe_theme_css(
         .into_response()
 }
 
+/// CO-330: typed request for `PATCH /api/v1/universes/:slug/source`.
+/// All fields are optional — only provided ones are updated.
+#[derive(Debug, Deserialize)]
+pub struct PatchUniverseSourceRequest {
+    pub local_repo_path: Option<String>,
+    pub content_subdirs: Option<Vec<String>>,
+    pub anon_published_only: Option<bool>,
+}
+
+/// CO-330: response for `PATCH /api/v1/universes/:slug/source`.
+#[derive(Debug, Serialize)]
+pub struct PatchUniverseSourceResponse {
+    pub key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_repo_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_subdirs: Option<Vec<String>>,
+    pub anon_published_only: bool,
+}
+
+/// PATCH /api/v1/universes/:slug/source — update runtime repo binding (owner only).
+///
+/// Sets `local_repo_path`, `content_subdirs`, and/or `anon_published_only` on the
+/// universe row. These fields control which local repo is ingested on `co serve`
+/// startup and whether anonymous reads are limited to published entries.
+pub async fn patch_universe_source(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    user_id: UserId,
+    Json(body): Json<PatchUniverseSourceRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    // Verify universe exists and caller is the owner.
+    {
+        let storage = lock_storage(&state);
+        let universe = storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        if universe.owner_id != user_id.0 {
+            return Err(AppError::Forbidden(
+                "Only the owner can update universe source binding".into(),
+            ));
+        }
+    }
+
+    let subdirs_json = body
+        .content_subdirs
+        .as_ref()
+        .map(|v| serde_json::to_string(v).unwrap_or_default());
+
+    {
+        let storage = lock_storage(&state);
+        storage
+            .update_universe_source(
+                &slug,
+                body.local_repo_path.as_deref(),
+                subdirs_json.as_deref(),
+                body.anon_published_only,
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+    }
+
+    let (updated_anon_published_only, local_repo_path, content_subdirs) = {
+        let storage = lock_storage(&state);
+        let anon_flag = storage
+            .get_universe(&slug)
+            .map(|u| u.anon_published_only)
+            .unwrap_or(false);
+        let (path, subdirs) = storage
+            .conn()
+            .query_row(
+                "SELECT local_repo_path, content_subdirs FROM universes WHERE key = ?1",
+                rusqlite::params![slug],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<String>>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                    ))
+                },
+            )
+            .map(|(p, s)| {
+                let subdirs = s
+                    .as_deref()
+                    .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
+                (p, subdirs)
+            })
+            .unwrap_or((None, None));
+        (anon_flag, path, subdirs)
+    };
+
+    Ok(Json(PatchUniverseSourceResponse {
+        key: slug,
+        local_repo_path,
+        content_subdirs,
+        anon_published_only: updated_anon_published_only,
+    }))
+}
+
 pub fn router(state: AppState) -> Router<AppState> {
     // Public routes (no auth layer)
     let public_routes = Router::new()
@@ -1286,6 +1384,8 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/{slug}", put(update_universe).delete(delete_universe))
         .route("/{slug}/claim", post(claim_universe))
         .route("/{slug}/config", put(update_universe_config))
+        // CO-330: runtime repo binding (owner only)
+        .route("/{slug}/source", patch(patch_universe_source))
         // CO-49: subscription routes
         .route(
             "/{slug}/subscribe",

@@ -393,6 +393,10 @@ pub struct Universe {
     /// sidebar (e.g. timeline trio under `template`). `None` = top-level.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_key: Option<String>,
+    /// CO-330: when true, anonymous reads are restricted to entries with `published: true`
+    /// in their frontmatter. Owner/authenticated callers see all entries.
+    #[serde(default)]
+    pub anon_published_only: bool,
 }
 
 fn default_visibility() -> String {

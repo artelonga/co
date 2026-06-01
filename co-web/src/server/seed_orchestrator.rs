@@ -125,53 +125,69 @@ pub fn run_startup_seeds(config: &WebConfig) {
     storage.recompute_content_counts();
 }
 
-/// CO-317: seed sister universes from local repos at `~/projects/<repo>/`.
+/// CO-317: seed sister universes from local repos.
 ///
-/// For local dev: when the developer has the sister repos checked out next to
-/// the co repo, ingest their markdown into the matching universes so localhost
-/// shows the same content that would be on the deployed sister site.
+/// For local dev: ingest markdown from each universe's `local_repo_path` into
+/// the matching universe so localhost shows the same content that would be on
+/// the deployed sister site. Bindings are stored in the `universes` table
+/// (CO-330) — no hardcoded list. New repos can be added via
+/// `PATCH /api/v1/universes/<key>/source` without a deploy.
 ///
-/// Idempotent: skips a universe entirely when it already has > 5 entries
-/// (avoids re-fighting user-created content on every boot).
-///
-/// Override the projects root with `CO_LOCAL_REPOS_DIR=/path/to/parent` for
-/// developers who don't keep things under `~/projects/`.
+/// Idempotent: upserts are no-ops for unchanged files; new files appear on the
+/// next `co serve` restart.
 pub fn run_sister_repo_seeds(config: &WebConfig) {
-    // Mapping: universe key → local repo dir name.
-    let mappings: &[(&str, &str)] = &[
-        ("artelonga", "ArteLonga"),
-        ("quilomboaraucaria", "quilomboaraucaria"),
-        ("yggdrasil", "yggdrasil"),
-        ("rfq", "rfq-gateway"),
-        ("comunicacao", "comunicacao"),
-        ("mbya", "mbya"),
-        ("topologia", "topologia"),
-        // CO-323A: user's personal Obsidian vault → private yuri universe.
-        // Eventually serves yuri.artelonga.com.br (CO-323 subdomain spec).
-        ("yuri", "yuri"),
-    ];
-    let projects_root = std::env::var("CO_LOCAL_REPOS_DIR")
-        .ok()
-        .map(std::path::PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|h| h.join("projects")));
-    let Some(projects_root) = projects_root else {
-        return;
-    };
-    if !projects_root.exists() {
-        return;
-    }
     let mut storage = Storage::new(&config.data_dir);
-    for (universe_key, repo_name) in mappings {
-        let repo_path = projects_root.join(repo_name);
+
+    // Read universe→repo bindings from DB (CO-330).
+    let rows: Vec<(String, String, Option<String>)> = {
+        let conn = storage.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT key, local_repo_path, content_subdirs FROM universes \
+             WHERE local_repo_path IS NOT NULL AND COALESCE(hidden, 0) = 0",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("run_sister_repo_seeds: prepare failed: {e}");
+                return;
+            }
+        };
+        match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    };
+
+    for (universe_key, repo_path_str, subdirs_json) in &rows {
+        // Expand `~/` to the user home directory.
+        let repo_path = if let Some(rel) = repo_path_str.strip_prefix("~/") {
+            dirs::home_dir()
+                .map(|h| h.join(rel))
+                .unwrap_or_else(|| std::path::PathBuf::from(repo_path_str))
+        } else {
+            std::path::PathBuf::from(repo_path_str)
+        };
+
         if !repo_path.exists() {
             continue;
         }
+
+        // Parse content_subdirs; default to ["docs", "content"] on NULL/invalid.
+        let subdirs: Vec<String> = subdirs_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .filter(|v: &Vec<String>| !v.is_empty())
+            .unwrap_or_else(|| vec!["docs".into(), "content".into()]);
+        let subdirs_refs: Vec<&str> = subdirs.iter().map(|s| s.as_str()).collect();
+
         // CO-319: pass 0 (never skip) so edits to local repo files are picked
-        // up on the next `co serve` restart. Previous threshold of 5 meant
-        // once a universe was seeded, new files added to ~/projects/<repo>/
-        // never showed in localhost. Upserts are idempotent — unchanged
-        // files are no-ops, new files appear.
-        storage.seed_universe_from_local_repo(universe_key, &repo_path, &["docs", "content"], 0);
+        // up on the next `co serve` restart.
+        storage.seed_universe_from_local_repo(universe_key, &repo_path, &subdirs_refs, 0);
         let work_dir = repo_path.join("work");
         if work_dir.exists() {
             storage.seed_universe_work_tasks_from_local(universe_key, &work_dir, 0);

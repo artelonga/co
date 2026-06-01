@@ -85,6 +85,7 @@ impl Storage {
             requires_login: false,
             visibility: "private".into(),
             parent_key: None,
+            anon_published_only: false,
         })
     }
 
@@ -99,7 +100,8 @@ impl Storage {
             .conn
             .query_row(
                 "SELECT key, name, description, owner_id, created_at, is_template, is_public, content_count, \
-                 COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
+                 COALESCE(requires_login, 0), COALESCE(visibility, 'private'), \
+                 COALESCE(anon_published_only, 0) \
                  FROM universes WHERE key = ?1",
                 params![key],
                 |row| {
@@ -115,6 +117,7 @@ impl Storage {
                         requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                         parent_key: None,
+                        anon_published_only: row.get::<_, i64>(10).unwrap_or(0) != 0,
                     })
                 },
             )
@@ -129,6 +132,36 @@ impl Storage {
             .ok()
             .flatten();
         Some(universe)
+    }
+
+    /// CO-330: update runtime universe→repo binding fields (owner-only, all fields optional).
+    pub fn update_universe_source(
+        &self,
+        key: &str,
+        local_repo_path: Option<&str>,
+        content_subdirs: Option<&str>,
+        anon_published_only: Option<bool>,
+    ) -> rusqlite::Result<()> {
+        if let Some(path) = local_repo_path {
+            self.conn.execute(
+                "UPDATE universes SET local_repo_path = ?1 WHERE key = ?2",
+                rusqlite::params![path, key],
+            )?;
+        }
+        if let Some(subdirs) = content_subdirs {
+            self.conn.execute(
+                "UPDATE universes SET content_subdirs = ?1 WHERE key = ?2",
+                rusqlite::params![subdirs, key],
+            )?;
+        }
+        if let Some(published_only) = anon_published_only {
+            let v: i64 = if published_only { 1 } else { 0 };
+            self.conn.execute(
+                "UPDATE universes SET anon_published_only = ?1 WHERE key = ?2",
+                rusqlite::params![v, key],
+            )?;
+        }
+        Ok(())
     }
 
     pub fn list_universes_for_user(&self, user_id: &str) -> Vec<crate::models::Universe> {
@@ -174,6 +207,7 @@ impl Storage {
                     requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                     visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                     parent_key: None,
+                    anon_published_only: false,
                 })
             })
             .expect("Failed to list universes for user")
@@ -343,6 +377,7 @@ impl Storage {
                 requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
                 visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                 parent_key: None,
+                anon_published_only: false,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))

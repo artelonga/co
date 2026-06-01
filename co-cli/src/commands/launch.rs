@@ -29,6 +29,14 @@ pub fn run(
 
     storage.ensure_local_universe(&universe_key, &display_name, public);
 
+    // CO-330: wire the universe to its source directory so seed_orchestrator
+    // can re-ingest on the next `co serve` restart without a hardcoded list.
+    let repo_path_str = repo_root.to_string_lossy().to_string();
+    if let Err(e) = storage.update_universe_source(&universe_key, Some(&repo_path_str), None, None)
+    {
+        eprintln!("warning: could not set local_repo_path: {e}");
+    }
+
     storage.seed_universe_from_local_repo(&universe_key, &repo_root, &["docs", "content"], 0);
 
     let work_root = repo_root.join("work");

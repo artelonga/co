@@ -1953,5 +1953,48 @@ impl Storage {
                 )
                 .expect("migration v50: agent_sessions");
         }
+
+        if current_version < 51 {
+            // CO-330: runtime universe→repo bindings + anon published-only filter.
+            // Three additive columns on universes; nullable/default-safe.
+            ensure_column(&self.conn, "universes", "local_repo_path", "TEXT")
+                .expect("migration v51: universes.local_repo_path");
+            ensure_column(&self.conn, "universes", "content_subdirs", "TEXT")
+                .expect("migration v51: universes.content_subdirs");
+            ensure_column(
+                &self.conn,
+                "universes",
+                "anon_published_only",
+                "INTEGER NOT NULL DEFAULT 0",
+            )
+            .expect("migration v51: universes.anon_published_only");
+            // Backfill 8 known universe→repo bindings. All idempotent via
+            // `WHERE local_repo_path IS NULL` so re-runs are no-ops.
+            self.conn
+                .execute_batch(r#"
+                    UPDATE universes SET local_repo_path='~/projects/ArteLonga', content_subdirs='["docs","content"]' WHERE key='artelonga' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["docs","content"]' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/yggdrasil', content_subdirs='["docs","content"]' WHERE key='yggdrasil' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/mbya', content_subdirs='["docs","content"]' WHERE key='mbya' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/topologia', content_subdirs='["docs","content"]' WHERE key='topologia' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/yuri', content_subdirs='[""]', anon_published_only=1 WHERE key='yuri' AND local_repo_path IS NULL;
+                    INSERT OR IGNORE INTO schema_version (version) VALUES (51);
+                "#)
+                .expect("migration v51: repo backfill + schema_version");
+        }
+        // Drift-safe guard: ensure columns exist even if v51 was interrupted.
+        ensure_column(&self.conn, "universes", "local_repo_path", "TEXT")
+            .expect("CO-330 guard: universes.local_repo_path");
+        ensure_column(&self.conn, "universes", "content_subdirs", "TEXT")
+            .expect("CO-330 guard: universes.content_subdirs");
+        ensure_column(
+            &self.conn,
+            "universes",
+            "anon_published_only",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
+        .expect("CO-330 guard: universes.anon_published_only");
     }
 }

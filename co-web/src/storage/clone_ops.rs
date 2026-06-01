@@ -964,6 +964,7 @@ impl Storage {
             requires_login: false,
             visibility: "private".into(),
             parent_key: None,
+            anon_published_only: false,
         })
     }
 
@@ -1199,6 +1200,7 @@ impl Storage {
             requires_login: false,
             visibility: "private".into(),
             parent_key: None,
+            anon_published_only: false,
         })
     }
 }
