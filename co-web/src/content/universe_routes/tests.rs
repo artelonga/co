@@ -1057,9 +1057,18 @@ fn test_co330_migration_columns_and_source_update() {
             .unwrap()
             .unwrap_or(false)
     };
-    assert!(col_exists("local_repo_path"), "local_repo_path column missing");
-    assert!(col_exists("content_subdirs"), "content_subdirs column missing");
-    assert!(col_exists("anon_published_only"), "anon_published_only column missing");
+    assert!(
+        col_exists("local_repo_path"),
+        "local_repo_path column missing"
+    );
+    assert!(
+        col_exists("content_subdirs"),
+        "content_subdirs column missing"
+    );
+    assert!(
+        col_exists("anon_published_only"),
+        "anon_published_only column missing"
+    );
 
     // 2. Verify update_universe_source works on the default universe.
     storage
@@ -1071,8 +1080,13 @@ fn test_co330_migration_columns_and_source_update() {
         )
         .expect("update_universe_source must succeed");
 
-    let universe = storage.get_universe("default").expect("default universe must exist");
-    assert!(universe.anon_published_only, "anon_published_only must be true after update");
+    let universe = storage
+        .get_universe("default")
+        .expect("default universe must exist");
+    assert!(
+        universe.anon_published_only,
+        "anon_published_only must be true after update"
+    );
 
     // 3. Verify anon_published_only defaults to false for freshly created universes.
     let now = chrono::Utc::now().to_rfc3339();
@@ -1094,8 +1108,13 @@ fn test_co330_migration_columns_and_source_update() {
             "usr_co330",
         )
         .expect("create_universe must succeed");
-    let new_uni = storage.get_universe("co330-test").expect("co330-test must exist");
-    assert!(!new_uni.anon_published_only, "new universe must default to anon_published_only=false");
+    let new_uni = storage
+        .get_universe("co330-test")
+        .expect("co330-test must exist");
+    assert!(
+        !new_uni.anon_published_only,
+        "new universe must default to anon_published_only=false"
+    );
 }
 
 /// CO-330: PATCH /api/v1/universes/:slug/source — owner succeeds, non-owner gets 403.
@@ -1127,12 +1146,20 @@ async fn test_patch_universe_source_owner_and_403() {
         .unwrap();
 
     let (router, _tmp) = make_universe_router(storage, dir.path());
-    let (owner_token, _) =
-        crate::auth::sign_jwt("usr_owner", "owner@example.com", "player", "test-jwt-secret")
-            .unwrap();
-    let (other_token, _) =
-        crate::auth::sign_jwt("usr_other", "other@example.com", "player", "test-jwt-secret")
-            .unwrap();
+    let (owner_token, _) = crate::auth::sign_jwt(
+        "usr_owner",
+        "owner@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
+    let (other_token, _) = crate::auth::sign_jwt(
+        "usr_other",
+        "other@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
 
     // Create a universe owned by usr_owner.
     let create_resp = router
@@ -1152,8 +1179,7 @@ async fn test_patch_universe_source_owner_and_403() {
         .unwrap();
     assert_eq!(create_resp.status(), axum::http::StatusCode::CREATED);
 
-    let patch_body =
-        r#"{"local_repo_path":"~/projects/src-test","content_subdirs":["docs"],"anon_published_only":true}"#;
+    let patch_body = r#"{"local_repo_path":"~/projects/src-test","content_subdirs":["docs"],"anon_published_only":true}"#;
 
     // Owner PATCH → 200.
     let patch_resp = router
