@@ -51,6 +51,7 @@ pub mod router;
 pub mod seed_orchestrator;
 pub mod state;
 pub(crate) mod static_files;
+pub mod subdomain_routing;
 #[cfg(test)]
 mod tests;
 pub mod uat_boot;
@@ -229,7 +230,7 @@ async fn serve_recover(
         )
             .into_response();
     }
-    serve_co_index(headers, uri, State(state)).await
+    serve_co_index(headers, uri, State(state), None).await
 }
 
 async fn shutdown_signal() {

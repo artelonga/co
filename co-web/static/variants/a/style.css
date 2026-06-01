@@ -2368,6 +2368,17 @@ body {
     .hide-mobile { display: none; }
 }
 
+/* CO-323: single-universe mode — *.artelonga.com.br subdomain routing.
+ * Hides the multi-universe sidebar so the page shows only the pinned universe. */
+body.co-single-universe-mode .app {
+    grid-template-columns: 1fr;
+}
+body.co-single-universe-mode .sidebar,
+body.co-single-universe-mode .sidebar-overlay,
+body.co-single-universe-mode .hamburger-btn {
+    display: none !important;
+}
+
 @media (max-width: 640px) {
     .app { grid-template-columns: 1fr; }
     .sidebar { display: none; }

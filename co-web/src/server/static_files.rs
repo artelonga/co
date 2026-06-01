@@ -1,6 +1,43 @@
 #![allow(unused_imports)]
 use super::*;
 
+use axum::Extension;
+
+use crate::server::subdomain_routing::SubdomainUniverse;
+
+/// CO-323: inject `<script>window.__CO_SUBDOMAIN_UNIVERSE__='<slug>';</script>`
+/// just before `</body>` so the SPA boot sequence can detect single-universe mode
+/// and hide the multi-universe sidebar.
+fn inject_subdomain_script(html: Vec<u8>, universe_key: &str) -> Vec<u8> {
+    // Sanitize: universe keys are already validated as [a-z0-9-] in the middleware,
+    // but be explicit here to prevent any XSS via unexpected extension values.
+    let safe_key: String = universe_key
+        .chars()
+        .filter(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '-')
+        .collect();
+    if safe_key.is_empty() {
+        return html;
+    }
+    let script = format!("<script>window.__CO_SUBDOMAIN_UNIVERSE__='{safe_key}';</script>");
+    // Find the last occurrence of `</body>` (case-insensitive) and insert before it.
+    let needle = b"</body>";
+    if let Some(pos) = html
+        .windows(needle.len())
+        .rposition(|w| w.eq_ignore_ascii_case(needle))
+    {
+        let mut out = Vec::with_capacity(html.len() + script.len());
+        out.extend_from_slice(&html[..pos]);
+        out.extend_from_slice(script.as_bytes());
+        out.extend_from_slice(&html[pos..]);
+        out
+    } else {
+        // Fallback: append if no </body> found (shouldn't happen with our template).
+        let mut out = html;
+        out.extend_from_slice(script.as_bytes());
+        out
+    }
+}
+
 /// Returns `true` when the URL path looks like a static asset request
 /// (has a file extension somewhere, or starts with a known asset prefix).
 /// Used to keep `/{slug}` from swallowing `/style.css`, `/shared/foo.css`,
@@ -31,6 +68,7 @@ pub(super) async fn serve_co_index(
     headers: HeaderMap,
     uri: Uri,
     State(state): State<AppState>,
+    subdomain: Option<Extension<SubdomainUniverse>>,
 ) -> Response {
     if looks_like_static_asset(uri.path()) {
         return serve_variant_file(headers, uri, State(state)).await;
@@ -88,6 +126,13 @@ pub(super) async fn serve_co_index(
     }
 
     if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
+        // CO-323: inject subdomain universe script before serving the SPA shell.
+        let contents = if let Some(Extension(sub)) = subdomain {
+            inject_subdomain_script(contents, &sub.0)
+        } else {
+            contents
+        };
+
         let mut response = (
             StatusCode::OK,
             [
@@ -194,6 +239,7 @@ pub(super) async fn serve_deep_link(
     headers: HeaderMap,
     uri: Uri,
     State(state): State<AppState>,
+    subdomain: Option<Extension<SubdomainUniverse>>,
 ) -> Response {
     // 2.13.3 hotfix: serve_deep_link previously served the SPA shell unconditionally
     // for `/{slug}/{*subpath}`. That matches `/variants/a/app.js`, `/shared/style.css`,
@@ -211,6 +257,13 @@ pub(super) async fn serve_deep_link(
 
     let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) else {
         return (StatusCode::NOT_FOUND, "Not found").into_response();
+    };
+
+    // CO-323: inject subdomain universe script when request came via a subdomain.
+    let contents = if let Some(Extension(sub)) = subdomain {
+        inject_subdomain_script(contents, &sub.0)
+    } else {
+        contents
     };
 
     // CO-232 hotfix: when the slug is not a known universe, treat the URL as a
