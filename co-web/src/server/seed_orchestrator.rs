@@ -139,7 +139,7 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
     let mut storage = Storage::new(&config.data_dir);
 
     // Read universe→repo bindings from DB (CO-330).
-    let rows: Vec<(String, String, Option<String>)> = {
+    let mut rows: Vec<(String, String, Option<String>)> = {
         let conn = storage.conn();
         let mut stmt = match conn.prepare(
             "SELECT key, local_repo_path, content_subdirs FROM universes \
@@ -162,6 +162,35 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
             Err(_) => vec![],
         }
     };
+
+    // CO-330 fallback: when CO_LOCAL_REPOS_DIR is set in env, derive
+    // <env>/<universe_key> for any universe that has no local_repo_path
+    // in the DB yet. Preserves CO-321's e2e test contract (which uses a
+    // tempdir env override) and gives a "all universes under this parent"
+    // dev mode without needing per-universe PATCH calls.
+    if let Ok(env_dir) = std::env::var("CO_LOCAL_REPOS_DIR") {
+        let env_root = std::path::PathBuf::from(&env_dir);
+        if env_root.exists() {
+            // Collect keys already covered by DB rows.
+            let covered: std::collections::HashSet<String> =
+                rows.iter().map(|(k, _, _)| k.clone()).collect();
+            let conn = storage.conn();
+            if let Ok(mut stmt) = conn.prepare(
+                "SELECT key FROM universes WHERE local_repo_path IS NULL AND COALESCE(hidden, 0) = 0",
+            ) && let Ok(extra) = stmt.query_map([], |r| r.get::<_, String>(0))
+            {
+                for k in extra.flatten() {
+                    if covered.contains(&k) {
+                        continue;
+                    }
+                    let candidate = env_root.join(&k);
+                    if candidate.exists() {
+                        rows.push((k, candidate.to_string_lossy().to_string(), None));
+                    }
+                }
+            }
+        }
+    }
 
     for (universe_key, repo_path_str, subdirs_json) in &rows {
         // Expand `~/` to the user home directory.
