@@ -5,6 +5,42 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.37.0] — 2026-06-01 — feedback + cross-repo changelog aggregator + infra cleanup
+
+## CO-333 — Feedback system — Yggdrasil-compatible, per-universe + per-entry locus
+
+New feedback system that is API-compatible with Yggdrasil and extends it with per-entry scoping, status management, and federation.
+
+### What changed
+
+- **Migration v53**: `feedback` table in meta.db — includes all Yggdrasil columns (`universe_key`, `kind`, `message`, `name`, `email`, `user_sub`, `anonymous`, `created_at`) plus `entry_path` (NULL = universe-wide) and `status` (`open` / `reviewed` / `addressed`).
+- **Backend routes** (`co-web/src/integrations/feedback_routes.rs`):
+  - `POST /api/v1/feedback` — Yggdrasil-compatible universe-wide submission (`universe` in body)
+  - `POST /api/v1/feedback/{universe}/{*entry_path}` — per-entry locus
+  - `GET  /api/v1/feedback/{universe}` — list; owner sees all, anonymous sees only open `sugestao`
+  - `GET  /api/v1/feedback/{universe}/entry/{*path}` — per-entry list (anon-safe)
+  - `PATCH /api/v1/feedback/{id}` — status update (owner-only, 403 for others)
+- **Rate limiting**: 10 submissions/hour per IP (sliding window, in-process).
+- **Federation**: `CO_FEEDBACK_FORWARD_URL` env var → async fire-and-forget POST to Yggdrasil or any compatible endpoint.
+- **CO-332 chat tool `submit_feedback`**: visitors can leave feedback via the AI assistant; the tool inserts into the same `feedback` table.
+- **Owner notifications**: each submission triggers a `feedback_received` in-app notification to the universe owner.
+- **Frontend widget** (`feedback-widget.js`): floating button (bottom-left, avoids CO-332 chat widget), modal with kind selector / message / optional name+email / anon checkbox.
+- **Owner review panel** (`feedback-panel.js`): `mountFeedbackBadge` shows `📩 N` badge in the zoom-modal toolbar when open feedback exists; `mountFeedbackPanel` opens a side panel with status-change actions.
+- **Mural page**: `/<universe>/feedback` renders a public-facing mural (all open `sugestao` for anon, all feedback for owner).
+
+### Why
+
+Yggdrasil already has a feedback system; CO didn't. Closes the parity gap and enables yuri.artelonga.com.br visitors to leave notes on specific entries without using the chat assistant.
+
+## CO-334 — Cross-repo changelog aggregation — sister-repo releases interleaved into CO's changelog view
+
+Added a `release_notes` table (migration v53) and a background worker that reads each configured sister repo's `CHANGELOG.md` from its local clone and upserts the parsed versions into the DB. A new `GET /api/v1/changelog/feed` endpoint returns the interleaved results newest-first with optional `repo` and `since` filters. `GET /api/v1/changelog/repos` lists every known repo and its latest release. The `/changelog` page now defaults to the multi-repo feed view with a repo dropdown filter; selecting "co" switches back to the existing CO ticket-level view.
+
+### Why
+
+Yuri reviewing the platform wants one pane to see what's recent across all five sister deployables (CO, ArteLonga, Quilombo, Yggdrasil, RFQ) without opening each repo's CHANGELOG separately. The parser runs at boot and every 5 minutes so newly committed releases appear automatically.
+
+
 ## [2.36.0] — 2026-06-01 — yuri vision Wave 2/3 — LLM trait + tools as git repos + external assistant
 
 ## CO-328 — Local LLM (macOS) + Claude Code hook integration
