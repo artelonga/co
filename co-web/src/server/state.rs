@@ -22,6 +22,8 @@ pub struct CoreState {
     pub auth_provider: Arc<dyn crate::infra::auth::AuthProvider>,
     /// CO-294: blob storage backend (local FS by default; R2 via blob-r2 feature).
     pub blob_backend: Arc<crate::infra::blob::BlobBackend>,
+    /// CO-328: AI router — dispatches queries to Ollama or Claude Code.
+    pub ai_router: Arc<crate::infra::ai::AiRouter>,
 }
 
 impl CoreState {
@@ -77,6 +79,7 @@ impl CoreState {
         let auth_provider: Arc<dyn crate::infra::auth::AuthProvider> = Arc::new(
             crate::infra::auth::LocalJwtProvider::new(Arc::clone(&secrets)),
         );
+        let ai_router = Arc::new(crate::infra::ai::AiRouter::from_env());
         Self {
             storage,
             storage_trait,
@@ -86,6 +89,7 @@ impl CoreState {
             secrets,
             auth_provider,
             blob_backend: Arc::new(blob_backend),
+            ai_router,
         }
     }
 }
@@ -191,6 +195,12 @@ impl axum::extract::FromRef<AppState> for Arc<IndexState> {
 impl axum::extract::FromRef<AppState> for Arc<IntegrationsState> {
     fn from_ref(state: &AppState) -> Self {
         Arc::clone(&state.integrations)
+    }
+}
+
+impl axum::extract::FromRef<AppState> for Arc<crate::infra::ai::AiRouter> {
+    fn from_ref(state: &AppState) -> Self {
+        Arc::clone(&state.core.ai_router)
     }
 }
 

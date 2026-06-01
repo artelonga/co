@@ -446,6 +446,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         router = router.nest("/api/v1/plugins", plugin_router);
     }
 
+    // CO-328: AI provider endpoints (Ollama + Claude Code hook).
+    router = router.nest("/api/v1", crate::ai_routes::router(state.clone()));
+
     router = router.nest("/api/v1/interactions", crate::interactions::router());
 
     // CO-329: analytics request tracking (runs inside rate-limit layer).

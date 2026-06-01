@@ -1,3 +1,4 @@
+pub mod ai_routes;
 pub mod email_smtp;
 pub mod github_auth;
 pub mod log_drain_routes;
