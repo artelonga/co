@@ -1,4 +1,5 @@
 pub mod chat;
+pub mod contact_routes;
 pub mod dm_routes;
 pub mod invitation_routes;
 pub mod notification_email_worker;
