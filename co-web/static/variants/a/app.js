@@ -422,6 +422,15 @@ function injectFeedbackBadge(universeSlug, entryPath) {
     }).catch(() => {});
 }
 
+// CO-333: visitor-facing feedback widget. Bottom-left floating button visible
+// to all users (anon + authenticated) on every page. The widget self-initializes
+// on module load (mounts the floating button + attaches to window.CoFeedbackWidget),
+// so importing it is sufficient. Owners ALSO see the badge above on individual
+// entries (for in-locus review via feedback-panel.js).
+import('./modules/feedback-widget.js').catch((e) =>
+    console.warn('feedback widget load failed:', e),
+);
+
 // CO-333: render the feedback mural for a universe.
 async function showFeedbackMural(universeSlug) {
     const existing = document.getElementById('co-feedback-mural');
