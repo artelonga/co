@@ -267,3 +267,44 @@ impl Worker for ReleaseNotesWorker {
         crate::changelog_routes::run_release_notes_refresh(&self.state).await
     }
 }
+
+// ---------------------------------------------------------------------------
+// 8. RemoteSisterRepoWorker
+//    Clones/pulls remote sister repos and reseeds their content (CO-337).
+//    Default interval: 15 min. Override with CO_REMOTE_SYNC_INTERVAL_SECS.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct RemoteSisterRepoWorker {
+    config: crate::config::WebConfig,
+    interval_secs: u64,
+}
+
+impl RemoteSisterRepoWorker {
+    pub fn new(config: crate::config::WebConfig) -> Self {
+        let interval_secs = std::env::var("CO_REMOTE_SYNC_INTERVAL_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(900); // 15 minutes
+        Self {
+            config,
+            interval_secs,
+        }
+    }
+}
+
+#[async_trait]
+impl Worker for RemoteSisterRepoWorker {
+    fn name(&self) -> &'static str {
+        "remote_sister_repo_sync"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(self.interval_secs)
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        crate::server::seed_orchestrator::run_remote_sister_repo_seeds(&self.config);
+        Ok(())
+    }
+}

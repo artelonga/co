@@ -22,6 +22,7 @@ pub mod rate_limit;
 pub mod telemetry;
 pub mod theme_engine;
 pub mod universe_pool;
+pub mod vcs;
 pub mod wae;
 pub mod worker_supervisor;
 pub mod workers;
