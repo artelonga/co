@@ -5,6 +5,45 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.39.0] — 2026-06-03 — remote sister-repo sync (CO-337) + feedback widget wiring
+
+## CO-333 — wire the visitor-facing feedback widget into the SPA
+
+CO-333 shipped the feedback widget module (`feedback-widget.js`) but `app.js` only loaded `feedback-panel.js` (the owner-side in-locus review badge). The visitor-facing floating button was unreachable — orphan-import pattern, same shape as CO-311's platforms.js bug.
+
+### Fix
+Add a dynamic `import('./modules/feedback-widget.js')` in `app.js`. The widget self-initializes on module load (mounts the bottom-left floating button + attaches to `window.CoFeedbackWidget`), so the import alone wires it.
+
+### Effect
+- Anonymous + authenticated users now see the feedback button on every page
+- Click → modal → submit → POST `/api/v1/feedback` (CO-333's existing endpoint)
+- Owner-side in-locus badge (already wired via `feedback-panel.js`) unchanged
+
+## CO-337 — Remote sister-repo sync — universes pull content from remote git on prod
+
+CO universes can now optionally pull their content from a remote git URL on the
+production machine. This extends CO-330's `local_repo_path` mechanism to prod, where
+local checkouts don't exist.
+
+- Schema migration v56 adds `remote_url`, `remote_ref`, and `remote_last_sync`
+  (all nullable) to the `universes` table
+- New `vcs::clone` + `vcs::pull` helpers in co-web use the system `git` binary with
+  optional SSH key (`CO_GIT_SSH_KEY_PATH`) or HTTPS token (`CO_GIT_TOKEN`) auth
+- `run_remote_sister_repo_seeds` syncs each universe's remote repo at boot; resolution
+  order: local path wins when set + exists; otherwise remote is used
+- New `RemoteSisterRepoWorker` re-syncs remote repos every 15 min
+  (configurable via `CO_REMOTE_SYNC_INTERVAL_SECS`)
+- `PATCH /api/v1/universes/<key>/source` now accepts `remote_url` and `remote_ref`
+- Docs: `docs/sister-repo-sync.md` covers auth, cadence, env vars, and backfill steps
+
+### Why
+
+Sister-repo content (mbya lexicon, topologia adapters, comunicacao sources, ArteLonga
+refs) was reaching localhost only — prod got stubs at best. CO-337 finishes the
+"deploy-free content integration" principle from CO-330: any repo, any content, no
+Docker rebuild.
+
+
 ## [2.38.0] — 2026-06-01 — graph engine + feedback traceability + cross-repo health parity
 
 ## CO-335 — Centralized graph rendering — one primitive, content in CO, UI customization deferred
