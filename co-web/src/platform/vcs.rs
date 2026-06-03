@@ -113,17 +113,35 @@ mod tests {
     }
 
     /// Set up a local bare "origin" with one commit and return (origin_path, work_path).
+    ///
+    /// CO-337 CI fix: don't clone the empty bare repo (which fails on the GH
+    /// Actions runner where git's defaults differ). Instead, init `work` as a
+    /// fresh repo with explicit `main` branch + add remote + push. The bare
+    /// is also init'd with `--initial-branch=main` so HEAD resolves correctly
+    /// for subsequent clones in the tests under test.
     fn init_local_repo(tmp: &tempfile::TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
         let origin = tmp.path().join("origin.git");
         let work = tmp.path().join("work");
+
+        // Bare origin with main as initial branch (works on any git version
+        // that supports --initial-branch; available since git 2.28).
         Command::new("git")
-            .args(["init", "--bare", origin.to_str().unwrap()])
+            .args([
+                "init",
+                "--bare",
+                "--initial-branch=main",
+                origin.to_str().unwrap(),
+            ])
             .output()
             .expect("git init --bare");
+
+        // Init work fresh (no clone of empty bare — that misbehaves on CI).
+        std::fs::create_dir_all(&work).expect("create work dir");
         Command::new("git")
-            .args(["clone", origin.to_str().unwrap(), work.to_str().unwrap()])
+            .current_dir(&work)
+            .args(["init", "--initial-branch=main"])
             .output()
-            .expect("git clone");
+            .expect("git init work");
         for (k, v) in [("user.email", "test@co"), ("user.name", "CO Test")] {
             Command::new("git")
                 .current_dir(&work)
@@ -131,6 +149,12 @@ mod tests {
                 .output()
                 .expect("git config");
         }
+        Command::new("git")
+            .current_dir(&work)
+            .args(["remote", "add", "origin", origin.to_str().unwrap()])
+            .output()
+            .expect("git remote add");
+
         std::fs::write(work.join("README.md"), "hello").expect("write README");
         Command::new("git")
             .current_dir(&work)
@@ -144,7 +168,7 @@ mod tests {
             .expect("git commit");
         Command::new("git")
             .current_dir(&work)
-            .args(["push", "origin", "HEAD:main"])
+            .args(["push", "-u", "origin", "main"])
             .output()
             .expect("git push");
         (origin, work)
