@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-326",
+  "title": "Direct messaging — send to yuri@artelonga.com.br (email + in-app)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-326.md",
+  "branch": "feat/CO-326-direct-messaging-send-to-yuri-artelonga-",
+  "merge_sha": "87ef000b059e47a0ffe38763d3fdd90d2a3b7983",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/127",
+    "number": 127
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T15:33:32Z",
+  "files_changed": 6,
+  "lines_added": 539,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:messaging",
+    "module:notifications"
+  ],
+  "changelog_entry": null,
+  "summary": "As A visitor to yuri.artelonga.com.br who wants to reach out",
+  "co_auto_version": "0.1.0"
+}

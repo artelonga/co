@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-319",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-319-discoverable-and-reseed",
+  "merge_sha": "8a7e653a37e972d8ccbe9bc50154cb1af56cc480",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/121",
+    "number": 121
+  },
+  "started_at": null,
+  "merged_at": "2026-05-30T13:36:01Z",
+  "files_changed": 5,
+  "lines_added": 73,
+  "lines_removed": 22,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

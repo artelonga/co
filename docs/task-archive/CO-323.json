@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-323",
+  "title": "yuri.artelonga.com.br — subdomain routing to a single-universe view",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-323.md",
+  "branch": "feat/CO-323-yuri-artelonga-com-br-subdomain-routing-",
+  "merge_sha": "7fbd11083b82aaaccc18731d346e6d7b9abf5147",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/128",
+    "number": 128
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T15:39:58Z",
+  "files_changed": 10,
+  "lines_added": 399,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:routing",
+    "module:platform"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri (the user) wanting a personal sub-site backed by his private universe",
+  "co_auto_version": "0.1.0"
+}

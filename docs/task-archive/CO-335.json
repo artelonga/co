@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-335",
+  "title": "Centralized graph rendering — one primitive, content in CO, UI customization deferred",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-335.md",
+  "branch": "feat/CO-335-centralized-graph-rendering-one-primitiv",
+  "merge_sha": "2a92d41ab9670afebf376c6c99995575050c246b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/138",
+    "number": 138
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T22:15:16Z",
+  "files_changed": 9,
+  "lines_added": 1512,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:graph",
+    "module:platform",
+    "module:rendering"
+  ],
+  "changelog_entry": null,
+  "summary": "As A platform user with two existing graph implementations (ArteLonga's neuro/portfolio network + Yggdrasil's comunicacao lexicon)",
+  "co_auto_version": "0.1.0"
+}

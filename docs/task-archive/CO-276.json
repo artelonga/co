@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-276",
+  "title": "co-auto CLI simplification — positional task arg, smarter defaults, drop redundant flags",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-276.md",
+  "branch": "feat/CO-276-co-auto-cli-simplification-positional-ta",
+  "merge_sha": "60cd413333fb84277bd7646d03a65035a428ed80",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/92",
+    "number": 92
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-23T13:03:52Z",
+  "files_changed": 6,
+  "lines_added": 195,
+  "lines_removed": 19,
+  "labels": [
+    "type:refactor",
+    "module:co-auto",
+    "module:devex"
+  ],
+  "changelog_entry": null,
+  "summary": "A developer kicking co-auto runs (this session has run ~30; muscle memory matters)",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-332",
+  "title": "External assistant — non-Claude LLM with deterministic tool routing for yuri.artelonga.com.br",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-332.md",
+  "branch": "feat/CO-332-external-assistant-non-claude-llm-with-d",
+  "merge_sha": "663abf817c62b58de2e6faaee915d306d49c51da",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/134",
+    "number": 134
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T19:48:36Z",
+  "files_changed": 9,
+  "lines_added": 1588,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:ai",
+    "module:routing"
+  ],
+  "changelog_entry": null,
+  "summary": "As A visitor to yuri.artelonga.com.br wanting to navigate the site through conversation, AND Yuri wanting Claude reserved for his own dev work (co-auto, internal CLI tooling)",
+  "co_auto_version": "0.1.0"
+}

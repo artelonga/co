@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-325",
+  "title": "Reference type system + recursive composition + notas abstraction",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-325.md",
+  "branch": "feat/CO-325-reference-type-system-recursive-composit",
+  "merge_sha": "93f986b9334965a39edc5bbd26c6e2903ce0ffc9",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/130",
+    "number": 130
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T15:48:28Z",
+  "files_changed": 16,
+  "lines_added": 928,
+  "lines_removed": 54,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:schema"
+  ],
+  "changelog_entry": null,
+  "summary": "As A user maintaining a personal bibliography of mixed media (songs, poems, videos, notebook notes)",
+  "co_auto_version": "0.1.0"
+}

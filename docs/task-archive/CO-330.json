@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-330",
+  "title": "Runtime universe→repo bindings + anon published-only filter (deploy-free)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-330.md",
+  "branch": "feat/CO-330-runtime-universe-repo-bindings-anon-publ",
+  "merge_sha": "4bb3035fcc365092d9aae5124e1eb5427c632765",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/126",
+    "number": 126
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T14:53:47Z",
+  "files_changed": 14,
+  "lines_added": 654,
+  "lines_removed": 54,
+  "labels": [
+    "type:feat",
+    "module:storage",
+    "module:arch",
+    "module:routing"
+  ],
+  "changelog_entry": null,
+  "summary": "As A user who wants to (a) add new repos to CO without deploys and (b) host a single universe that mixes public/draft content (e.g., yuri.artelonga.com.br reading the published subset of the yuri vaul",
+  "co_auto_version": "0.1.0"
+}

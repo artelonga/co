@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""
+co-task — query tool for the task archive.
+
+Usage:
+  co-task list [--since YYYY-MM-DD] [--label LABEL] [--type TYPE] [--module MODULE]
+  co-task show   <TASK-ID>     full JSON
+  co-task summary <TASK-ID>    human-readable one-pager
+  co-task diff    <TASK-ID>    git show <merge_sha> --stat
+  co-task open    <TASK-ID>    open PR URL in browser
+
+Examples:
+  co-task list
+  co-task list --since 2026-05-01 --module storage
+  co-task show CO-279
+  co-task diff CO-279
+  co-task open CO-337
+"""
+
+import sys
+import os
+import json
+import glob
+import subprocess
+import re
+
+# ── ANSI colours ──────────────────────────────────────────────────────────────
+
+def c(code, text): return f"\033[{code}m{text}\033[0m" if sys.stdout.isatty() else text
+BOLD  = lambda t: c("1",   t)
+DIM   = lambda t: c("2",   t)
+CYAN  = lambda t: c("36",  t)
+GREEN = lambda t: c("32",  t)
+YELL  = lambda t: c("33",  t)
+RED   = lambda t: c("31",  t)
+MAG   = lambda t: c("35",  t)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def repo_root():
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True
+    )
+    return result.stdout.strip() if result.returncode == 0 else os.getcwd()
+
+def archive_dir():
+    return os.path.join(repo_root(), "docs", "task-archive")
+
+def load_all():
+    pattern = os.path.join(archive_dir(), "*.json")
+    archives = []
+    for path in sorted(glob.glob(pattern)):
+        try:
+            with open(path) as f:
+                archives.append(json.load(f))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return archives
+
+def load_one(task_id):
+    path = os.path.join(archive_dir(), f"{task_id}.json")
+    if not os.path.exists(path):
+        print(f"Error: no archive for {task_id} at {path}", file=sys.stderr)
+        print(f"  Run: scripts/archive-task.sh {task_id}", file=sys.stderr)
+        sys.exit(1)
+    with open(path) as f:
+        return json.load(f)
+
+def matches_filters(rec, since=None, label=None, typ=None, module=None):
+    if since:
+        merged = rec.get("merged_at") or rec.get("started_at") or ""
+        if merged and merged[:10] < since:
+            return False
+    if label:
+        labels = rec.get("labels", [])
+        if not any(label.lower() in l.lower() for l in labels):
+            return False
+    if typ:
+        if (rec.get("type") or "").lower() != typ.lower():
+            return False
+    if module:
+        labels = rec.get("labels", [])
+        spec_module = (rec.get("spec_path") or "").split("/")[1] if rec.get("spec_path") else ""
+        if not any(module.lower() in l.lower() for l in labels) and module.lower() not in spec_module.lower():
+            return False
+    return True
+
+# ── Subcommands ───────────────────────────────────────────────────────────────
+
+def cmd_list(args):
+    since = label = typ = module = None
+    i = 0
+    while i < len(args):
+        if args[i] == "--since"  and i + 1 < len(args): since  = args[i+1]; i += 2
+        elif args[i] == "--label" and i + 1 < len(args): label  = args[i+1]; i += 2
+        elif args[i] == "--type"  and i + 1 < len(args): typ    = args[i+1]; i += 2
+        elif args[i] == "--module" and i + 1 < len(args): module = args[i+1]; i += 2
+        else: i += 1
+
+    archives = load_all()
+    filtered = [r for r in archives if matches_filters(r, since, label, typ, module)]
+
+    if not filtered:
+        print(DIM("No archives match the given filters."))
+        return
+
+    # Sort by merged_at descending
+    filtered.sort(key=lambda r: r.get("merged_at") or r.get("started_at") or "", reverse=True)
+
+    print(BOLD(f"{'TASK-ID':<12} {'TYPE':<12} {'MERGED':<12} {'PR':<6} TITLE"))
+    print(DIM("─" * 80))
+    for r in filtered:
+        tid     = r.get("task_id", "")
+        typ_    = (r.get("type") or "")[:11]
+        merged  = (r.get("merged_at") or "")[:10]
+        pr      = r.get("pr") or {}
+        pr_num  = f"#{pr.get('number','')}" if pr.get("number") else ""
+        title   = (r.get("title") or "")[:48]
+        print(f"{CYAN(tid):<22} {DIM(typ_):<12} {GREEN(merged):<12} {YELL(pr_num):<14} {title}")
+
+
+def cmd_show(args):
+    if not args:
+        print("Usage: co-task show <TASK-ID>", file=sys.stderr)
+        sys.exit(1)
+    rec = load_one(args[0])
+    print(json.dumps(rec, indent=2, ensure_ascii=False))
+
+
+def cmd_summary(args):
+    if not args:
+        print("Usage: co-task summary <TASK-ID>", file=sys.stderr)
+        sys.exit(1)
+    r = load_one(args[0])
+
+    pr   = r.get("pr") or {}
+    sha  = r.get("merge_sha") or ""
+    sha7 = sha[:7] if sha else "—"
+
+    print()
+    print(BOLD(f"  {r.get('task_id','')}  —  {r.get('title','')}"))
+    print(DIM("  " + "─" * 76))
+    print(f"  Type:      {r.get('type','')}    Status: {r.get('status','')}    Bump: {r.get('semver_bump','')}")
+    print(f"  Branch:    {DIM(r.get('branch',''))}")
+    print(f"  Merge SHA: {CYAN(sha7)}    PR: {YELL(pr.get('url','—'))}")
+    print(f"  Started:   {(r.get('started_at','') or '')[:10]}    Merged: {GREEN((r.get('merged_at','') or '')[:10])}")
+    if r.get("files_changed") is not None:
+        print(f"  Changes:   {GREEN('+'+str(r.get('lines_added',0)))} {RED('-'+str(r.get('lines_removed',0)))} in {r.get('files_changed',0)} file(s)")
+    labels = r.get("labels", [])
+    if labels:
+        print(f"  Labels:    {' '.join(MAG(l) for l in labels)}")
+    if r.get("summary"):
+        print()
+        print(f"  {r['summary']}")
+    if r.get("changelog_entry"):
+        print()
+        print(DIM("  Changelog entry:"))
+        for line in r["changelog_entry"].strip().splitlines():
+            print(f"    {line}")
+    print()
+
+
+def cmd_diff(args):
+    if not args:
+        print("Usage: co-task diff <TASK-ID>", file=sys.stderr)
+        sys.exit(1)
+    r = load_one(args[0])
+    sha = r.get("merge_sha")
+    if not sha:
+        print(f"No merge_sha in archive for {args[0]}", file=sys.stderr)
+        sys.exit(1)
+    subprocess.run(["git", "show", sha, "--stat", "--no-color"], cwd=repo_root())
+
+
+def cmd_open(args):
+    if not args:
+        print("Usage: co-task open <TASK-ID>", file=sys.stderr)
+        sys.exit(1)
+    r = load_one(args[0])
+    pr = r.get("pr") or {}
+    url = pr.get("url")
+    if not url:
+        print(f"No PR URL in archive for {args[0]}", file=sys.stderr)
+        sys.exit(1)
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    subprocess.run([opener, url])
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
+
+COMMANDS = {
+    "list":    cmd_list,
+    "show":    cmd_show,
+    "summary": cmd_summary,
+    "diff":    cmd_diff,
+    "open":    cmd_open,
+}
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    sub = sys.argv[1]
+    rest = sys.argv[2:]
+
+    if sub not in COMMANDS:
+        print(f"Unknown subcommand: {sub}", file=sys.stderr)
+        print(f"Available: {', '.join(COMMANDS)}", file=sys.stderr)
+        sys.exit(1)
+
+    COMMANDS[sub](rest)
+
+if __name__ == "__main__":
+    main()

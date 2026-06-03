@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-337",
+  "title": "Remote sister-repo sync — universes pull content from remote git on prod",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-337.md",
+  "branch": "feat/CO-337-remote-sister-repo-sync-universes-pull-c",
+  "merge_sha": "0f7ab1b9152e4934b1ecd399a224ae963d4b00ec",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/140",
+    "number": 140
+  },
+  "started_at": "2026-06-03T00:00:00Z",
+  "merged_at": "2026-06-03T14:15:13Z",
+  "files_changed": 15,
+  "lines_added": 654,
+  "lines_removed": 17,
+  "labels": [
+    "type:feat",
+    "module:storage",
+    "module:sync"
+  ],
+  "changelog_entry": null,
+  "summary": "As A platform operator wanting sister-repo content (mbya lexicon, topologia adapters, comunicacao sources, ArteLonga refs, etc.) to land on the prod CO instance, not just localhost",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-300",
+  "title": "CO-284-K — `co::testkit::TestServer` (spawn real co serve instances for integration tests)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-300.md",
+  "branch": "feat/CO-300-co-284-k-co-testkit-testserver-spawn-rea",
+  "merge_sha": "deccb5cc3af37e639a2e066a176468102aabaaaa",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/104",
+    "number": 104
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-27T19:09:00Z",
+  "files_changed": 4,
+  "lines_added": 519,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:testkit",
+    "module:arch"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

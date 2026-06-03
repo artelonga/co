@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-280",
+  "title": "Universe vs sub-universe vs deployable-unit — visual + nav clarification across SPA",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-280.md",
+  "branch": "feat/CO-280-sidebar-three-sections",
+  "merge_sha": "c644d33ff596c27ddd42ee13605b71864ccd820e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/96",
+    "number": 96
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-24T21:38:12Z",
+  "files_changed": 10,
+  "lines_added": 334,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:spa",
+    "module:ui",
+    "module:nav",
+    "module:ia"
+  ],
+  "changelog_entry": null,
+  "summary": "A visitor or operator landing on co.artelonga.com.br for the first time (or the 100th)",
+  "co_auto_version": "0.1.0"
+}

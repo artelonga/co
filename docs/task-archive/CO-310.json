@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-310",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-310-local-seed-co-fallback",
+  "merge_sha": "f9970d31fd190013c477dff3e2add22658f049ff",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/113",
+    "number": 113
+  },
+  "started_at": null,
+  "merged_at": "2026-05-28T21:54:07Z",
+  "files_changed": 3,
+  "lines_added": 80,
+  "lines_removed": 32,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

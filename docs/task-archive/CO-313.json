@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-313",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-313-global-theme",
+  "merge_sha": "da8c601c0d4a6cee4a1027606dbde6b1321bec07",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/115",
+    "number": 115
+  },
+  "started_at": null,
+  "merged_at": "2026-05-28T23:15:11Z",
+  "files_changed": 2,
+  "lines_added": 25,
+  "lines_removed": 13,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-290",
+  "title": "CO-284-A — Storage trait abstraction + SQLite impl",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-290.md",
+  "branch": "feat/CO-290-co-284-a-storage-trait-abstraction-sqlit",
+  "merge_sha": "e52384f1ecc7fd1d2667fde337d76c89cc61fff0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/98",
+    "number": 98
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-26T01:08:16Z",
+  "files_changed": 42,
+  "lines_added": 522,
+  "lines_removed": 391,
+  "labels": [
+    "type:refactor",
+    "module:arch",
+    "module:storage"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

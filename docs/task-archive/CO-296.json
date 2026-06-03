@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-296",
+  "title": "CO-284-G — Auth provider trait (extract JWT flow, prepare for OAuth/SSO)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-296.md",
+  "branch": "feat/CO-296-co-284-g-auth-provider-trait-extract-jwt",
+  "merge_sha": "b772ae5c5f78748d6937ddbc210743349871f137",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/103",
+    "number": 103
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-27T19:10:44Z",
+  "files_changed": 10,
+  "lines_added": 420,
+  "lines_removed": 55,
+  "labels": [
+    "type:refactor",
+    "module:arch",
+    "module:auth"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

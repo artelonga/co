@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-294",
+  "title": "CO-284-E — Blob store trait (standardize on top of CO-263's R2 adapter)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-294.md",
+  "branch": "feat/CO-294-co-284-e-blob-store-trait-standardize-on",
+  "merge_sha": "5fbdf315ed851956c11defcb5483c2caf2870be2",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/107",
+    "number": 107
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-28T16:14:58Z",
+  "files_changed": 9,
+  "lines_added": 497,
+  "lines_removed": 24,
+  "labels": [
+    "type:refactor",
+    "module:arch",
+    "module:storage"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

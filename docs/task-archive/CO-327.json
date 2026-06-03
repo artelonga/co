@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-327",
+  "title": "macOS desktop notifications for CO events",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-327.md",
+  "branch": "feat/CO-327-macos-desktop-notifications-for-co-event",
+  "merge_sha": "7ae55620361f8914a78e70bd452e574e094f65c7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/129",
+    "number": 129
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T17:15:32Z",
+  "files_changed": 6,
+  "lines_added": 176,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:notifications",
+    "module:co-cli"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri running `co serve` on his Mac",
+  "co_auto_version": "0.1.0"
+}

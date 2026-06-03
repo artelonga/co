@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-275",
+  "title": "Agent session events — capture tokens/tools/skills/duration per co-auto run; surface on kanban cards",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-275.md",
+  "branch": "feat/CO-275-agent-session-events-capture-tokens-tool",
+  "merge_sha": "090b17accb30228be940cf486ba5a0e23230a27b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/93",
+    "number": 93
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-23T13:04:39Z",
+  "files_changed": 15,
+  "lines_added": 1118,
+  "lines_removed": 12,
+  "labels": [
+    "type:feat",
+    "module:observability",
+    "module:co-auto",
+    "module:events"
+  ],
+  "changelog_entry": null,
+  "summary": "The operator (and contributors) of CO",
+  "co_auto_version": "0.1.0"
+}

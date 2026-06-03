@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-331",
+  "title": "Tools as git repos — npm-like install/version/conflict + jj-compatible",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-331.md",
+  "branch": "feat/CO-331-tools-as-git-repos-npm-like-install-vers",
+  "merge_sha": "53e639467773dd59ca17579975a912ae7f3d35ef",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/133",
+    "number": 133
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T19:32:12Z",
+  "files_changed": 9,
+  "lines_added": 1114,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:tools",
+    "module:arch"
+  ],
+  "changelog_entry": null,
+  "summary": "As A CO user wanting to add an open-source tool (like Claude Code, a custom agent, a co-compatible plugin) to my CO setup",
+  "co_auto_version": "0.1.0"
+}
