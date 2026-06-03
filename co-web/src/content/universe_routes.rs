@@ -1256,16 +1256,20 @@ pub async fn get_universe_theme_css(
         .into_response()
 }
 
-/// CO-330: typed request for `PATCH /api/v1/universes/:slug/source`.
+/// CO-330 + CO-337: typed request for `PATCH /api/v1/universes/:slug/source`.
 /// All fields are optional — only provided ones are updated.
 #[derive(Debug, Deserialize)]
 pub struct PatchUniverseSourceRequest {
     pub local_repo_path: Option<String>,
     pub content_subdirs: Option<Vec<String>>,
     pub anon_published_only: Option<bool>,
+    /// CO-337: remote git URL for prod sync (e.g. "https://github.com/artelonga/comunicacao").
+    pub remote_url: Option<String>,
+    /// CO-337: branch, tag, or SHA to track (default: "main").
+    pub remote_ref: Option<String>,
 }
 
-/// CO-330: response for `PATCH /api/v1/universes/:slug/source`.
+/// CO-330 + CO-337: response for `PATCH /api/v1/universes/:slug/source`.
 #[derive(Debug, Serialize)]
 pub struct PatchUniverseSourceResponse {
     pub key: String,
@@ -1274,6 +1278,10 @@ pub struct PatchUniverseSourceResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_subdirs: Option<Vec<String>>,
     pub anon_published_only: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_ref: Option<String>,
 }
 
 /// PATCH /api/v1/universes/:slug/source — update runtime repo binding (owner only).
@@ -1313,36 +1321,41 @@ pub async fn patch_universe_source(
                 body.local_repo_path.as_deref(),
                 subdirs_json.as_deref(),
                 body.anon_published_only,
+                body.remote_url.as_deref(),
+                body.remote_ref.as_deref(),
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
 
-    let (updated_anon_published_only, local_repo_path, content_subdirs) = {
+    let (updated_anon_published_only, local_repo_path, content_subdirs, remote_url, remote_ref) = {
         let storage = lock_storage(&state);
         let anon_flag = storage
             .get_universe(&slug)
             .map(|u| u.anon_published_only)
             .unwrap_or(false);
-        let (path, subdirs) = storage
+        let (path, subdirs, rurl, rref) = storage
             .conn()
             .query_row(
-                "SELECT local_repo_path, content_subdirs FROM universes WHERE key = ?1",
+                "SELECT local_repo_path, content_subdirs, remote_url, remote_ref \
+                 FROM universes WHERE key = ?1",
                 rusqlite::params![slug],
                 |row| {
                     Ok((
                         row.get::<_, Option<String>>(0)?,
                         row.get::<_, Option<String>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                        row.get::<_, Option<String>>(3)?,
                     ))
                 },
             )
-            .map(|(p, s)| {
+            .map(|(p, s, ru, rr)| {
                 let subdirs = s
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
-                (p, subdirs)
+                (p, subdirs, ru, rr)
             })
-            .unwrap_or((None, None));
-        (anon_flag, path, subdirs)
+            .unwrap_or((None, None, None, None));
+        (anon_flag, path, subdirs, rurl, rref)
     };
 
     Ok(Json(PatchUniverseSourceResponse {
@@ -1350,6 +1363,8 @@ pub async fn patch_universe_source(
         local_repo_path,
         content_subdirs,
         anon_published_only: updated_anon_published_only,
+        remote_url,
+        remote_ref,
     }))
 }
 

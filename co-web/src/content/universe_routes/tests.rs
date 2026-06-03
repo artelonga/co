@@ -1077,6 +1077,8 @@ fn test_co330_migration_columns_and_source_update() {
             Some("~/projects/test"),
             Some(r#"["docs","content"]"#),
             Some(true),
+            None,
+            None,
         )
         .expect("update_universe_source must succeed");
 

@@ -297,6 +297,8 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // into their matching universes for localhost dev. Skips per-universe when
     // already seeded (>5 entries). No-op on prod where the dir doesn't exist.
     seed_orchestrator::run_sister_repo_seeds(&config);
+    // CO-337: clone/pull remote sister repos for prod (local_repo_path wins when set + exists).
+    seed_orchestrator::run_remote_sister_repo_seeds(&config);
 
     // CO-44 + e2e: UAT startup runs when CO_ENV=uat OR CO_ENV=test.
     // Test env seeds yuri@uat.local so playwright fixtures can authenticate
@@ -670,6 +672,8 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         worker_executor.spawn_worker(crate::workers::DeploymentSnapshotWorker::new(state.clone()));
         // CO-334: parse sister-repo CHANGELOG.md files every 5 minutes.
         worker_executor.spawn_worker(crate::workers::ReleaseNotesWorker::new(state.clone()));
+        // CO-337: clone/pull remote sister repos and reseed every 15 min.
+        worker_executor.spawn_worker(crate::workers::RemoteSisterRepoWorker::new(config.clone()));
     }
 
     // CO-334: run the first release-notes refresh at boot so the feed is populated

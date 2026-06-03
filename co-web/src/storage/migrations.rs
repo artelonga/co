@@ -2169,5 +2169,36 @@ impl Storage {
         ] {
             let _ = self.conn.execute(sql, []);
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 56 {
+            // CO-337: remote sister-repo sync — three additive nullable columns on universes.
+            for sql in &[
+                "ALTER TABLE universes ADD COLUMN remote_url TEXT",
+                "ALTER TABLE universes ADD COLUMN remote_ref TEXT",
+                "ALTER TABLE universes ADD COLUMN remote_last_sync TEXT",
+            ] {
+                let _ = self.conn.execute(sql, []);
+            }
+            self.conn
+                .execute_batch("INSERT OR IGNORE INTO schema_version (version) VALUES (56);")
+                .expect("migration v56: schema_version");
+        }
+        // CO-337 drift-safe guard.
+        for sql in &[
+            "ALTER TABLE universes ADD COLUMN remote_url TEXT",
+            "ALTER TABLE universes ADD COLUMN remote_ref TEXT",
+            "ALTER TABLE universes ADD COLUMN remote_last_sync TEXT",
+        ] {
+            let _ = self.conn.execute(sql, []);
+        }
     }
 }

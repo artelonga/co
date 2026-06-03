@@ -256,6 +256,115 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
     }
 }
 
+/// CO-337: clone/pull remote sister repos and seed their content.
+///
+/// Reads `remote_url` + `remote_ref` from each universe row and syncs a
+/// shallow clone at `<data-dir>/remote-repos/<key>/`. Falls back gracefully
+/// when git is unavailable or the remote is unreachable.
+///
+/// **Resolution order** (local wins when both are set):
+/// 1. If `local_repo_path` is set AND the path exists → skip (CO-330 handles it)
+/// 2. If `remote_url` is set → clone/pull to `remote-repos/<key>/`
+///
+/// Runs at `co serve` boot and every 15 min via [`crate::workers::RemoteSisterRepoWorker`].
+pub fn run_remote_sister_repo_seeds(config: &WebConfig) {
+    let mut storage = Storage::new(&config.data_dir);
+    let remote_repos_dir = std::path::PathBuf::from(&config.data_dir).join("remote-repos");
+
+    struct RemoteRow {
+        key: String,
+        remote_url: String,
+        remote_ref: Option<String>,
+        content_subdirs: Option<String>,
+        local_repo_path: Option<String>,
+    }
+
+    // Query universes that have a remote_url configured.
+    let rows: Vec<RemoteRow> = {
+        let conn = storage.conn();
+        let mut stmt = match conn.prepare(
+            "SELECT key, remote_url, remote_ref, content_subdirs, local_repo_path \
+             FROM universes \
+             WHERE remote_url IS NOT NULL AND COALESCE(hidden, 0) = 0",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("run_remote_sister_repo_seeds: prepare failed: {e}");
+                return;
+            }
+        };
+        match stmt.query_map([], |row| {
+            Ok(RemoteRow {
+                key: row.get(0)?,
+                remote_url: row.get(1)?,
+                remote_ref: row.get(2)?,
+                content_subdirs: row.get(3)?,
+                local_repo_path: row.get(4)?,
+            })
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(_) => vec![],
+        }
+    };
+
+    for row in &rows {
+        let (universe_key, remote_url, remote_ref, subdirs_json, local_repo_path) = (
+            &row.key,
+            &row.remote_url,
+            &row.remote_ref,
+            &row.content_subdirs,
+            &row.local_repo_path,
+        );
+        // Resolution order: local wins when set + accessible.
+        if let Some(local) = local_repo_path {
+            let local_path = if let Some(rel) = local.strip_prefix("~/") {
+                dirs::home_dir()
+                    .map(|h| h.join(rel))
+                    .unwrap_or_else(|| std::path::PathBuf::from(local))
+            } else {
+                std::path::PathBuf::from(local)
+            };
+            if local_path.exists() {
+                tracing::debug!(
+                    "CO-337: {universe_key} — local_repo_path exists at {}, skipping remote",
+                    local_path.display()
+                );
+                continue;
+            }
+        }
+
+        let ref_name = remote_ref.as_deref().unwrap_or("main");
+        let dest = remote_repos_dir.join(universe_key);
+
+        if let Err(e) = crate::vcs::sync_repo(remote_url, ref_name, &dest) {
+            tracing::warn!("CO-337: failed to sync remote repo for {universe_key}: {e}");
+            continue;
+        }
+
+        let subdirs: Vec<String> = subdirs_json
+            .as_deref()
+            .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+            .filter(|v: &Vec<String>| !v.is_empty())
+            .unwrap_or_else(|| vec!["docs".into(), "content".into()]);
+        let subdirs_refs: Vec<&str> = subdirs.iter().map(|s| s.as_str()).collect();
+
+        storage.seed_universe_from_local_repo(universe_key, &dest, &subdirs_refs, 0);
+
+        let work_dir = dest.join("work");
+        if work_dir.exists() {
+            storage.seed_universe_work_tasks_from_local(universe_key, &work_dir, 0);
+        }
+
+        // Stamp the successful sync time.
+        let now = chrono::Utc::now().to_rfc3339();
+        let _ = storage.conn().execute(
+            "UPDATE universes SET remote_last_sync = ?1 WHERE key = ?2",
+            rusqlite::params![now, universe_key],
+        );
+        tracing::info!("CO-337: synced remote repo for {universe_key} from {remote_url}");
+    }
+}
+
 /// CO-142 Phase E: refresh data/co/ from bundled /app/seed-co/ on every boot.
 /// The seed dir is injected at Docker build time (COPY work/co/ /app/seed-co/).
 /// This keeps the dev board in sync with repo state without writing back.

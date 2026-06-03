@@ -134,13 +134,15 @@ impl Storage {
         Some(universe)
     }
 
-    /// CO-330: update runtime universe→repo binding fields (owner-only, all fields optional).
+    /// CO-330 + CO-337: update runtime universe→repo binding fields (owner-only, all fields optional).
     pub fn update_universe_source(
         &self,
         key: &str,
         local_repo_path: Option<&str>,
         content_subdirs: Option<&str>,
         anon_published_only: Option<bool>,
+        remote_url: Option<&str>,
+        remote_ref: Option<&str>,
     ) -> rusqlite::Result<()> {
         if let Some(path) = local_repo_path {
             self.conn.execute(
@@ -159,6 +161,18 @@ impl Storage {
             self.conn.execute(
                 "UPDATE universes SET anon_published_only = ?1 WHERE key = ?2",
                 rusqlite::params![v, key],
+            )?;
+        }
+        if let Some(url) = remote_url {
+            self.conn.execute(
+                "UPDATE universes SET remote_url = ?1 WHERE key = ?2",
+                rusqlite::params![url, key],
+            )?;
+        }
+        if let Some(r) = remote_ref {
+            self.conn.execute(
+                "UPDATE universes SET remote_ref = ?1 WHERE key = ?2",
+                rusqlite::params![r, key],
             )?;
         }
         Ok(())

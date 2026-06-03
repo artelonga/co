@@ -114,6 +114,7 @@ pub use platform::rate_limit;
 pub use platform::telemetry;
 pub use platform::theme_engine;
 pub use platform::universe_pool;
+pub use platform::vcs;
 pub use platform::wae;
 pub use platform::worker_supervisor;
 pub use platform::workers;
