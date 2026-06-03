@@ -2,6 +2,7 @@
 // ES module entry point. Imports all feature modules and wires them together.
 
 import { state, canEditCurrentUniverse } from './modules/state.js';
+import { renderBreadcrumbs } from './modules/breadcrumbs.js';
 import { api, apiFetch, injectApiCallbacks } from './modules/api.js';
 import { esc, filteredTasks, loadSubtreeState, addDays, todayDate } from './modules/helpers.js';
 import { STATUSES, ZOOM_DAYS, rebuildI18nConstants } from './modules/constants.js';
@@ -531,6 +532,7 @@ function renderContent() {
 function render() {
     renderSidebar();
     renderHeader();
+    renderBreadcrumbs();
     renderMiniCalendar();
     renderContent();
 }
