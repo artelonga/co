@@ -272,13 +272,11 @@ pub async fn start_server(config: WebConfig) {
 }
 
 async fn start_server_inner(config: WebConfig, bind_host: &str) {
-    // Initialize tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "co_web=info,tower_http=info".parse().unwrap()),
-        )
-        .init();
+    // Initialise tracing — guard must be held until the server exits so that
+    // any pending OTLP spans are flushed before the process terminates.
+    let _telemetry = crate::infra::telemetry::init_subscriber(
+        crate::infra::telemetry::TelemetryConfig::from_env(),
+    );
 
     let storage = Storage::new(&config.data_dir);
 
