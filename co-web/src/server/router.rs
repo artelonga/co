@@ -298,6 +298,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let leads_public_api = crate::lead_routes::public_router();
     let leads_admin_api = crate::lead_routes::admin_router();
 
+    // CO-211: OpenAPI spec + Swagger UI — no auth, no body limit override needed.
+    let openapi_api = crate::openapi_routes::router();
+
     let mut router =
         Router::new()
             .merge(ws_route)
@@ -305,6 +308,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(chat_ws_route)
             .merge(analytics_ws_route)
             .merge(co_routes)
+            .nest("/api", openapi_api)
             .nest("/api", board_public)
             .nest("/api", board_protected)
             .nest("/api", auth_api)
