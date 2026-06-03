@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-298",
+  "title": "CO-284-I — `co serve --staging` mode (latency + fault injection decorators)",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-298.md",
+  "branch": "revert/CO-298-staging-decorators",
+  "merge_sha": "07a9b57d0f0257312901b8be80b8404d8f344b11",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/112",
+    "number": 112
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-28T19:17:25Z",
+  "files_changed": 52,
+  "lines_added": 45,
+  "lines_removed": 1245,
+  "labels": [
+    "type:feat",
+    "module:staging",
+    "module:arch"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

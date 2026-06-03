@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-304",
+  "title": "E2e selector + timing quality pass — eliminate Carregando/timeout brittleness",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-304.md",
+  "branch": "feat/CO-304-e2e-selector-timing-quality-pass-elimina",
+  "merge_sha": "9ab80549a0ef82d148d088bb4ddf50a8ddf03657",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/101",
+    "number": 101
+  },
+  "started_at": "2026-05-26T00:00:00Z",
+  "merged_at": "2026-05-27T09:31:05Z",
+  "files_changed": 18,
+  "lines_added": 332,
+  "lines_removed": 73,
+  "labels": [
+    "type:test",
+    "module:ci",
+    "module:devex"
+  ],
+  "changelog_entry": null,
+  "summary": "Anyone whose PR's CI fails on inherited e2e brittleness instead of their actual change",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-305",
+  "title": "E2e residual failures sweep — 9 specific bugs surfaced by CO-304",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-305.md",
+  "branch": "feat/CO-305-e2e-residual-failures-sweep-9-specific-b",
+  "merge_sha": "59ea9225311702f5f22d04c1154c25b30c3a3ef4",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/102",
+    "number": 102
+  },
+  "started_at": "2026-05-27T00:00:00Z",
+  "merged_at": "2026-05-27T11:43:13Z",
+  "files_changed": 19,
+  "lines_added": 239,
+  "lines_removed": 83,
+  "labels": [
+    "type:fix",
+    "module:e2e",
+    "module:routing",
+    "module:auth",
+    "module:seed"
+  ],
+  "changelog_entry": null,
+  "summary": "⚠ Reopened 2026-05-27 — first iteration succeeded partially, 5 failures remain in CI",
+  "co_auto_version": "0.1.0"
+}

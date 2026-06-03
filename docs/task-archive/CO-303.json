@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-303",
+  "title": "Local-fidelity auth — inline magic-code display + admin password fallback in SPA login modal",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-303.md",
+  "branch": "feat/CO-303-local-fidelity-auth-inline-magic-code-di",
+  "merge_sha": "1f8591ccdeff2159a7d73333b4fe9da8b057f232",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/100",
+    "number": 100
+  },
+  "started_at": "2026-05-26T00:00:00Z",
+  "merged_at": "2026-05-26T23:09:30Z",
+  "files_changed": 13,
+  "lines_added": 590,
+  "lines_removed": 8,
+  "labels": [
+    "type:feat",
+    "module:auth",
+    "module:devex",
+    "module:spa"
+  ],
+  "changelog_entry": null,
+  "summary": "Any developer testing the platform on localhost + any user running the SPA in any environment",
+  "co_auto_version": "0.1.0"
+}

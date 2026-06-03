@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-316",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-316-release-drop-niche-platforms",
+  "merge_sha": "223aed0a2b254ccb6b7586cc8a99f2d01d123470",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/118",
+    "number": 118
+  },
+  "started_at": null,
+  "merged_at": "2026-05-29T12:32:52Z",
+  "files_changed": 2,
+  "lines_added": 21,
+  "lines_removed": 5,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

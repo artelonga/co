@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-311",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-311-remove-platforms-section",
+  "merge_sha": "f53c7d6a4d0d803ecd7632e02a448d310fbfa965",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/114",
+    "number": 114
+  },
+  "started_at": null,
+  "merged_at": "2026-05-28T22:41:57Z",
+  "files_changed": 7,
+  "lines_added": 22,
+  "lines_removed": 66,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

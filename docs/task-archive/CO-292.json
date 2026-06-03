@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-292",
+  "title": "CO-284-C — Worker executor trait (formalize CO-223 with enqueue/cancel)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-292.md",
+  "branch": "feat/CO-292-co-284-c-worker-executor-trait-formalize",
+  "merge_sha": "2693bd3c2b307fc595f83282a5aedbd15133f723",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/106",
+    "number": 106
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-28T16:13:43Z",
+  "files_changed": 39,
+  "lines_added": 472,
+  "lines_removed": 57,
+  "labels": [
+    "type:refactor",
+    "module:arch",
+    "module:workers"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

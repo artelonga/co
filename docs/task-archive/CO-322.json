@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-322",
+  "title": "co launch — bootstrap a universe from the current repo (Fly-style)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-322.md",
+  "branch": "feat/CO-322-co-launch-bootstrap-a-universe-from-the-",
+  "merge_sha": "8491a0dadcbffd9a13f598dc2abcc74dfc9d3f31",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/124",
+    "number": 124
+  },
+  "started_at": "2026-05-30T00:00:00Z",
+  "merged_at": "2026-05-30T18:16:19Z",
+  "files_changed": 7,
+  "lines_added": 295,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:co-cli",
+    "module:localhost"
+  ],
+  "changelog_entry": null,
+  "summary": "A developer who wants to spin up a new universe from a local repo without manually configuring storage, projects, or seed paths",
+  "co_auto_version": "0.1.0"
+}

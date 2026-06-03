@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-321",
+  "title": "E2e — localhost trial flow (subscribe / unsubscribe / sister repos / themes)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-321.md",
+  "branch": "feat/CO-321-e2e-localhost-trial-flow-subscribe-unsub",
+  "merge_sha": "f99427de36e88a036a8a88b3377743f6837380fe",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/123",
+    "number": 123
+  },
+  "started_at": "2026-05-30T00:00:00Z",
+  "merged_at": "2026-05-30T16:41:01Z",
+  "files_changed": 4,
+  "lines_added": 402,
+  "lines_removed": 2,
+  "labels": [
+    "type:test",
+    "module:e2e",
+    "module:localhost"
+  ],
+  "changelog_entry": null,
+  "summary": "A developer about to demo or use `co serve` locally",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-329",
+  "title": "/analytics non-indexed real-time telemetry + background-process visibility",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-329.md",
+  "branch": "feat/CO-329-analytics-non-indexed-real-time-telemetr",
+  "merge_sha": "1109fe034b25a1899cf8c8e8e0279a0147ee953d",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/131",
+    "number": 131
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T15:53:47Z",
+  "files_changed": 10,
+  "lines_added": 984,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:observability",
+    "module:platform"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri running CO and wanting to see what's happening in real-time",
+  "co_auto_version": "0.1.0"
+}

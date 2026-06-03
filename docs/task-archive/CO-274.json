@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-274",
+  "title": "co-auto context budget — cut from ~150k chars to ~30k via skills + per-universe CLAUDE.md",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-274.md",
+  "branch": "feat/CO-274-co-auto-context-budget-cut-from-150k-cha",
+  "merge_sha": "7b3eb144db10c2e57a9d8daf6ed5853522e50668",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/91",
+    "number": 91
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-23T12:39:17Z",
+  "files_changed": 9,
+  "lines_added": 600,
+  "lines_removed": 81,
+  "labels": [
+    "type:refactor",
+    "module:co-auto",
+    "module:devex"
+  ],
+  "changelog_entry": null,
+  "summary": "A developer kicking co-auto runs (and the user paying for tokens)",
+  "co_auto_version": "0.1.0"
+}

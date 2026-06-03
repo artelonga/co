@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-336",
+  "title": "Feedback → PR/commit traceable (open-source issue-tracker semantics)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-336.md",
+  "branch": "feat/CO-336-feedback-pr-commit-traceable-open-source",
+  "merge_sha": "208f620eef0f37f6cc52a389355c6300e9d03ecf",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/137",
+    "number": 137
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T22:16:28Z",
+  "files_changed": 7,
+  "lines_added": 955,
+  "lines_removed": 58,
+  "labels": [
+    "type:feat",
+    "module:feedback",
+    "module:traceability"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri receiving feedback on an entry (yuri.artelonga.com.br, artelonga.com.br, sister sites via Yggdrasil's Fale Conosco)",
+  "co_auto_version": "0.1.0"
+}

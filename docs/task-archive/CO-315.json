@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-315",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "fix/CO-315-defer-embedding-bootscan",
+  "merge_sha": "f67abbe42d3c1eabaf9830b9bc127d3513c651fa",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/117",
+    "number": 117
+  },
+  "started_at": null,
+  "merged_at": "2026-05-29T11:22:21Z",
+  "files_changed": 2,
+  "lines_added": 31,
+  "lines_removed": 1,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

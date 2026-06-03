@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-282",
+  "title": "Localhost distribution — `co serve` + browser auto-launch + Tauri shell roadmap",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-282.md",
+  "branch": "feat/CO-282-localhost-distribution-co-serve-browser-",
+  "merge_sha": "b2b1ed4a51825f4f14de3dca383c7d6790d9d10b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/97",
+    "number": 97
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-27T13:03:42Z",
+  "files_changed": 12,
+  "lines_added": 448,
+  "lines_removed": 127,
+  "labels": [
+    "type:feat",
+    "module:distribution",
+    "module:cli",
+    "module:ui",
+    "module:desktop"
+  ],
+  "changelog_entry": null,
+  "summary": "Any developer/operator who wants to run CO locally (offline-first, no Fly account required), and the operator looking to distribute CO as a downloadable tool",
+  "co_auto_version": "0.1.0"
+}

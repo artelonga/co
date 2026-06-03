@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-279",
+  "title": "Every universe must seed a default project — fix private-universe + template-seed regression",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-279.md",
+  "branch": "fix/issue-279-template-seed-defaults",
+  "merge_sha": "9e02c7e13c4ca42bfda83f935559a9100a39cfb9",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/95",
+    "number": 95
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-24T21:07:49Z",
+  "files_changed": 4,
+  "lines_added": 292,
+  "lines_removed": 16,
+  "labels": [
+    "type:fix",
+    "module:seed",
+    "module:storage",
+    "module:universe"
+  ],
+  "changelog_entry": null,
+  "summary": "Any logged-in user with a private universe (e.g. yuri) — and the operator running CI",
+  "co_auto_version": "0.1.0"
+}

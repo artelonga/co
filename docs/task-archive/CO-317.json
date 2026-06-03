@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-317",
+  "title": null,
+  "type": "user-story",
+  "status": null,
+  "semver_bump": null,
+  "spec_path": null,
+  "branch": "feat/CO-317-local-repos-as-universes",
+  "merge_sha": "d09db9199d54fab03e8e55cb8f2b674324989ae8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/119",
+    "number": 119
+  },
+  "started_at": null,
+  "merged_at": "2026-05-29T20:19:57Z",
+  "files_changed": 4,
+  "lines_added": 224,
+  "lines_removed": 0,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": null,
+  "co_auto_version": "0.1.0"
+}

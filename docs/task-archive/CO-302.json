@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-302",
+  "title": "Test pyramid restructure — parallelize e2e, cut redundancy, add component layer, run locally",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-302.md",
+  "branch": "feat/CO-302-test-pyramid-restructure-parallelize-e2e",
+  "merge_sha": "2382a41f14b1457dde1298db88432fbd74766d49",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/99",
+    "number": 99
+  },
+  "started_at": "2026-05-26T00:00:00Z",
+  "merged_at": "2026-05-26T19:54:18Z",
+  "files_changed": 72,
+  "lines_added": 4574,
+  "lines_removed": 3871,
+  "labels": [
+    "type:refactor",
+    "module:testing",
+    "module:ci",
+    "module:devex"
+  ],
+  "changelog_entry": null,
+  "summary": "Anyone running CI (every commit author) and anyone wanting to verify changes locally before pushing",
+  "co_auto_version": "0.1.0"
+}

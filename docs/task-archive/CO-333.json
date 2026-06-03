@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-333",
+  "title": "Feedback system — Yggdrasil-compatible, per-universe + per-entry locus",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-333.md",
+  "branch": "feat/CO-333-feedback-system-yggdrasil-compatible-per",
+  "merge_sha": "cc643aef459541312226f827d89d6bdb3752a0ae",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/135",
+    "number": 135
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T21:00:14Z",
+  "files_changed": 11,
+  "lines_added": 1526,
+  "lines_removed": 3,
+  "labels": [
+    "type:feat",
+    "module:feedback",
+    "module:platform"
+  ],
+  "changelog_entry": null,
+  "summary": "As A visitor to any universe (yuri.artelonga.com.br, artelonga.com.br, etc.) wanting to leave feedback on a specific entry, AND Yuri/owner wanting to review feedback **in locus** — at the entry where ",
+  "co_auto_version": "0.1.0"
+}

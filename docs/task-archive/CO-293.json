@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-293",
+  "title": "CO-284-D — Cache trait + in-process LRU default impl",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-293.md",
+  "branch": "feat/CO-293-co-284-d-cache-trait-in-process-lru-defa",
+  "merge_sha": "74356dd10210d50bf18769a3dfff188dc2b6579a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/108",
+    "number": 108
+  },
+  "started_at": "2026-05-24T00:00:00Z",
+  "merged_at": "2026-05-28T16:38:59Z",
+  "files_changed": 5,
+  "lines_added": 316,
+  "lines_removed": 60,
+  "labels": [
+    "type:refactor",
+    "module:arch",
+    "module:cache"
+  ],
+  "changelog_entry": null,
+  "summary": "What this slice does",
+  "co_auto_version": "0.1.0"
+}

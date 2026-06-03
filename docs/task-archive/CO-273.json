@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-273",
+  "title": "Centralized deployment dashboard — machines + sizes + statuses + versions across all units",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-273.md",
+  "branch": "feat/CO-273-centralized-deployment-dashboard-machine",
+  "merge_sha": "a39433e939df65759567b58b803a67f7b1a9e214",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/90",
+    "number": 90
+  },
+  "started_at": "2026-05-23T00:00:00Z",
+  "merged_at": "2026-05-23T12:28:45Z",
+  "files_changed": 14,
+  "lines_added": 936,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:admin",
+    "module:deploy",
+    "module:observability"
+  ],
+  "changelog_entry": null,
+  "summary": "An operator (yuri) or curious visitor wanting one-glance view of every deployable unit's runtime state",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-328",
+  "title": "Local LLM (macOS) + Claude Code hook integration",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-328.md",
+  "branch": "feat/CO-328-local-llm-macos-claude-code-hook-integra",
+  "merge_sha": "b2ba05ece03cb0958e7f3ca04fb953b2ab5871bc",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/132",
+    "number": 132
+  },
+  "started_at": "2026-05-31T00:00:00Z",
+  "merged_at": "2026-06-01T18:59:59Z",
+  "files_changed": 10,
+  "lines_added": 860,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:ai",
+    "module:co-cli"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri wanting AI assistance on his content without sending it to external APIs",
+  "co_auto_version": "0.1.0"
+}

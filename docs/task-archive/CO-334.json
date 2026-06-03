@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-334",
+  "title": "Cross-repo changelog aggregation — sister-repo releases interleaved into CO's changelog view",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-334.md",
+  "branch": "feat/CO-334-cross-repo-changelog-aggregation-sister-",
+  "merge_sha": "fc845a01ff8a3f25f473cd6ecca304de66807fbc",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/136",
+    "number": 136
+  },
+  "started_at": "2026-06-01T00:00:00Z",
+  "merged_at": "2026-06-01T21:24:47Z",
+  "files_changed": 13,
+  "lines_added": 1026,
+  "lines_removed": 70,
+  "labels": [
+    "type:feat",
+    "module:changelog",
+    "module:aggregation"
+  ],
+  "changelog_entry": null,
+  "summary": "As Yuri (and visitors) wanting one place to see what's happening across the whole platform — CO releases, sister-repo releases (ArteLonga, Quilombo, Yggdrasil, RFQ), all surfaced together",
+  "co_auto_version": "0.1.0"
+}
