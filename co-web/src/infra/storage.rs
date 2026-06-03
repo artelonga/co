@@ -106,6 +106,7 @@ impl Storage for SqliteStorage {
         self.inner.lock().get_blob(hash)
     }
 
+    #[tracing::instrument(skip(self), fields(db.system = "sqlite", db.table = "entries"))]
     fn get_entry(&self, universe_key: &str, path: &str) -> anyhow::Result<Option<EntryRow>> {
         let uc = self.uc(universe_key);
         let guard = uc
@@ -114,6 +115,7 @@ impl Storage for SqliteStorage {
         crate::entry_index::EntryIndex::new(&guard).get(universe_key, path)
     }
 
+    #[tracing::instrument(skip(self, filter), fields(db.system = "sqlite", db.table = "entries"))]
     fn list_entries(
         &self,
         universe_key: &str,
@@ -133,6 +135,7 @@ impl Storage for SqliteStorage {
         )
     }
 
+    #[tracing::instrument(skip(self), fields(db.system = "sqlite", db.table = "entries"))]
     fn search_entries(&self, universe_key: &str, query: &str) -> anyhow::Result<Vec<EntryRow>> {
         let uc = self.uc(universe_key);
         let guard = uc
