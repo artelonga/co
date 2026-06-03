@@ -34,6 +34,7 @@ pub use content::iceberg;
 pub use content::models;
 pub use content::obsidian_tasks;
 pub use content::op_log_routes;
+pub use content::openapi_routes;
 pub use content::proposal_routes;
 pub use content::query_dsl;
 pub use content::query_routes;

@@ -10,6 +10,7 @@ pub mod iceberg;
 pub mod models;
 pub mod obsidian_tasks;
 pub mod op_log_routes;
+pub mod openapi_routes;
 pub mod proposal_routes;
 pub mod query_dsl;
 pub mod query_routes;
