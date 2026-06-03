@@ -96,7 +96,7 @@ while IFS= read -r line; do
     continue
   fi
 
-  # Rule 3: no uncommitted changes
+  # Rule 3: no uncommitted changes (staged or unstaged)
   if [[ -d "$wt_path" ]]; then
     dirty=$(git -C "$wt_path" status --porcelain 2>/dev/null || true)
     if [[ -n "$dirty" ]]; then
@@ -105,10 +105,15 @@ while IFS= read -r line; do
       continue
     fi
 
-    # Rule 4: no unpushed commits ahead of main
-    unpushed=$(git -C "$wt_path" log "origin/main..HEAD" --oneline 2>/dev/null | head -1 || true)
-    if [[ -n "$unpushed" ]]; then
-      echo "    ↳ keep: has unpushed commits" >&2
+    # Rule 4: no commits that haven't been shipped to a remote branch.
+    # We check the remote tracking branch (origin/<branch>), not origin/main —
+    # squash-merges land on main as a single new commit, so the original branch
+    # commits will never appear on main. A worktree is safe to prune if its
+    # branch has been pushed (origin/<branch> exists) and the PR is merged.
+    local_sha=$(git -C "$wt_path" rev-parse HEAD 2>/dev/null || true)
+    remote_sha=$(git -C "$wt_path" rev-parse "origin/${wt_branch}" 2>/dev/null || true)
+    if [[ -n "$local_sha" && -n "$remote_sha" && "$local_sha" != "$remote_sha" ]]; then
+      echo "    ↳ keep: local branch differs from origin/${wt_branch} (commits not pushed)" >&2
       skip_count=$((skip_count + 1))
       continue
     fi
