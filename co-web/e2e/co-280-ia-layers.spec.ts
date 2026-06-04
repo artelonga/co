@@ -179,10 +179,12 @@ test.describe("CO-280: IA layers — sidebar, breadcrumbs, tools", () => {
     await expect(projectItem).toBeVisible({ timeout: 10_000 });
     await projectItem.click();
 
-    // Board content should appear
-    await page.waitForSelector(".kanban-column, .universe-home", {
-      timeout: 10_000,
-    });
+    // Default project view since CO-304 is `.conteudo-view`; older views
+    // (.kanban-column, .universe-home) may also be reached depending on state.
+    await page.waitForSelector(
+      "#content.conteudo-view, .kanban-column, .universe-home",
+      { timeout: 10_000 },
+    );
 
     const bc = page.locator("#breadcrumbs");
     await expect(bc).not.toHaveClass(/hidden/);
@@ -256,9 +258,10 @@ test.describe("CO-280: IA layers — sidebar, breadcrumbs, tools", () => {
     await expect(projectItem).toBeVisible({ timeout: 10_000 });
     await projectItem.click();
 
-    // Kanban or universe-home must render (not crash)
-    await page.waitForSelector(".kanban-column, .universe-home", {
-      timeout: 10_000,
-    });
+    // Project view must render (not crash). Default since CO-304 is conteudo.
+    await page.waitForSelector(
+      "#content.conteudo-view, .kanban-column, .universe-home",
+      { timeout: 10_000 },
+    );
   });
 });
