@@ -119,6 +119,20 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 
 ---
 
+## graph-views — `/api/v1/graph-views/*` (graph_view_routes.rs)
+
+CO-345: publishable saved graph views (universe + type filter + depth + root + layout seed).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/graph-views` | anon | List public graph views |
+| POST | `/api/v1/graph-views` | authed | Create a saved graph view |
+| GET | `/api/v1/graph-views/{slug}` | anon-if-public, authed-if-private | Fetch a saved view |
+| PATCH | `/api/v1/graph-views/{slug}` | authed (owner) | Update visibility/filters |
+| DELETE | `/api/v1/graph-views/{slug}` | authed (owner) | Delete |
+
+---
+
 ## entries — `/api/v1/universes/{slug}/...` (entry_routes.rs, all under owner/visibility gates)
 
 | Method | Path | Auth | Purpose |
