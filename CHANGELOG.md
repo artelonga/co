@@ -5,6 +5,296 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.40.0] — 2026-06-05 — substrate stable + OSS integrations
+
+## CO-211 — Universe Content API v1 spec + Swagger UI
+
+Added a formal OpenAPI 3.1 specification for the Universe Content API and two
+new endpoints that serve it:
+
+- `docs/api/openapi.yaml` — hand-written OpenAPI 3.1 spec covering all public
+  universe, entry, vault, and auth endpoints (Universe, Entry, Vault, Auth tags).
+- `GET /api/openapi.json` — machine-readable spec as JSON; clients and
+  openapi-generator can consume this to generate stubs.
+- `GET /api/docs` — Swagger UI rendered from the spec; developers can explore
+  and test the API interactively.
+
+The spec is embedded in the binary at compile time (`include_str!`) so no
+runtime file I/O is required and the binary stays self-contained.
+
+### Why
+
+CO shipped a working REST API with an implicit contract: some endpoints were
+documented in `docs/analytics-api.md`, most were only discoverable via grep in
+`co-web/src/`. No machine-readable spec meant clients couldn't generate stubs
+and breaking changes were only caught by manual testing.
+
+For the "any client renders any universe" vision (CO-212 Svelte viewer,
+CO-213 Obsidian plugin, future mobile app) the contract must be the source of
+truth, not the Rust handler code.
+
+### Versioning policy (locked in spec)
+
+- `v1` is locked — no breaking changes
+- Additive changes (new optional fields, new endpoints) do not require a version bump
+- `v2` will use `/api/v2/...` parallel to v1; v1 stays supported ≥ 12 months after v2 launches
+
+## CO-279 — Every universe must seed a default project — fix private-universe + template-seed regression
+
+Restored two invariants that were broken by a short-lived CO-254 rename (CO → TUTORIAL, 2026-05-04):
+
+1. **Template project key reverted to `CO`**: `seed_template_universe` now writes `projects/CO/_project.md` with 9 onboarding tasks. The comment in `seed.rs` records the history so the key is never changed again without updating tests and prod data.
+
+2. **Write-protection returns 403 (not 500)**: `guard_template` in `legacy.rs` correctly returns `AppError::Forbidden` before reaching any mutation path, so POST/PUT to template project tasks return 403.
+
+3. **`seed_default_project_if_missing`**: new idempotent helper that ensures any universe always has at least one project. Called from `seed_admin_content_universes` for all admin-owned universes and from `backfill_default_projects` at boot for any existing universe that slipped through without one.
+
+4. **`migrate_template_project_rename`**: cleanup pass that drops stale `projects/TUTORIAL/*` rows from any database that booted under the broken CO-254 code, then lets `seed_template_universe` re-seed the canonical `CO` project.
+
+5. **Private-universe creation already seeds a project**: `Storage::create_universe` (universe.rs) creates a `{KEY[:4]P}` project on first creation, so Yuri's private universe (and any other user's) never lands on the "no project found" dead-end.
+
+### Why
+
+CI on `main` was red since 2026-05-20 — 4 `template_tests.rs` failures blocked v2.29.0..v2.30.0 from shipping. The operator's private universe also showed the empty dead-end on every login.
+
+## CO-280 — Universe vs sub-universe vs deployable-unit — visual + nav clarification across SPA
+
+Added a breadcrumbs navigation trail to the SPA that makes the platform › universe › sub-universe › project hierarchy visually explicit. The breadcrumb bar (`#breadcrumbs`) renders above the main header whenever a named universe is active, hides on the template root, and collapses on viewports narrower than 480px.
+
+The sidebar Tools section (scaffolded in this branch) separates dev/operator affordances (Deployments, Changelog) from end-user project navigation — fulfilling the IA layer-3 requirement. The `co_dev_ship` button referenced in user reports was confirmed absent from the rendered sidebar.
+
+A Playwright spec (`e2e/co-280-ia-layers.spec.ts`) covers all three IA layers and includes a regression test for board navigation.
+
+### Why
+
+Users reported that 5 "sub-universes" in the sidebar appeared indistinguishable from projects within the current universe, and the `co_dev_ship` button felt out of place. Breadcrumbs give a clear `CO › Universe › Sub-universe › Project` trail without the confusion caused by the now-removed hardcoded Platforms sidebar section (CO-311). The Tools section provides a dedicated, visually muted home for operator affordances, fixing the mixed-IA symptom the user reported.
+
+## CO-291 — CO-284-B — Telemetry trait + OTLP exporter (feature-flagged)
+
+Added `co-web/src/infra/telemetry.rs` — a new module that wires a `tracing`
+subscriber to emit spans to stderr (default) or to any OTLP-compatible collector
+(Jaeger, Honeycomb, Grafana Cloud) when `CO_TELEMETRY_OTLP_ENDPOINT` is set.
+
+Changes:
+
+- **`infra/telemetry.rs`** — `TelemetryConfig` enum (Stderr | Otlp), `init_subscriber()`,
+  `TelemetryGuard` (flushes OTLP on drop), and `db_span()` helper for wrapping
+  SQLite calls with child spans.
+- **`server/mod.rs`** — replaced inline `tracing_subscriber::fmt().init()` with
+  `init_subscriber(TelemetryConfig::from_env())`.
+- **`infra/storage.rs`** — added `#[tracing::instrument]` to `get_entry`,
+  `list_entries`, and `search_entries` on `SqliteStorage`, producing `db.query`
+  child spans under each HTTP request span.
+- **`docs/observability.md`** — quickstart for running a local Jaeger and
+  pointing co-web at it.
+- **`co-web/Cargo.toml`** — added `opentelemetry`, `opentelemetry_sdk`,
+  `opentelemetry-otlp`, and `tracing-opentelemetry` dependencies.
+
+### Why
+
+CO-284 requires observability infrastructure so spans from HTTP requests and DB
+queries can be exported to a collector for latency analysis and debugging.  The
+env-var gate means zero runtime cost when OTLP is not configured, preserving
+the existing stderr-only behavior for local development.
+
+## CO-301 — Task archive — per-task worktree compression + queryable change-log link
+
+Adds a **review → archive → prune** lifecycle for co-auto worktrees that eliminates
+accumulated disk bloat while preserving full queryable history of every merged task.
+
+### What changed
+
+- `scripts/archive-task.sh <TASK-ID>` — writes `docs/task-archive/<TASK-ID>.json`
+  (spec frontmatter + PR metadata + merge SHA + changelog entry). Idempotent.
+- `scripts/prune-worktrees.sh [--apply]` — audits all git worktrees, prunes merged
+  + archived ones with no dirty state. Dry-run by default.
+- `scripts/co-task` — Python query tool: `list`, `show`, `summary`, `diff`, `open`
+  subcommands with `--since`, `--label`, `--type`, `--module` filters.
+- `scripts/backfill-task-archives.sh [--limit N] [--commit]` — retroactively
+  archives the last N merged PRs; creates a single `chore(archive): backfill` commit.
+- `scripts/safe-merge-pr.sh` — after every successful squash-merge: pulls main,
+  runs `archive-task.sh`, commits + pushes the archive, runs `prune-worktrees.sh --apply`.
+- `docs/task-archive/` — new git-tracked directory for all archive JSON files.
+- `scripts/README.md` — documents all scripts in one place.
+
+### Why
+
+330 GB across 57 stale worktrees as of CO-301. After each PR merged, the working tree
+is redundant — the commits are already on main. This makes the worktree disposable while
+preserving a queryable metadata bundle (task ↔ merge SHA ↔ PR ↔ changelog) forever in git.
+
+## CO-339 — Feedback validation — reject empty bodies + probe paths at the API
+
+Added server-side validation to `POST /api/v1/feedback` and
+`POST /api/v1/feedback/{universe}/{*entry_path}` that gates every submission
+through three checks before it reaches the database:
+
+1. **Probe path blocklist** — paths starting with `/_` or matching a set of
+   known scanner paths (`/probe`, `/smoke`, `/selftest`, `/telemetry-check`,
+   `/analytics-smoke`, `/healthcheck`) are rejected with
+   `400 {"error": "probe_path_blocked"}`.
+2. **Body length** — trimmed `message` shorter than 5 characters is rejected
+   with `400 {"error": "body_too_short"}`.  Supports both `message` and `body`
+   as JSON field names (Yggdrasil compat alias).
+3. **Rate limit** — 3 submissions per IP per hour (down from 10).  Excess
+   requests return `429 {"error": "rate_limited", "retry_after_s": <n>}`.
+
+A one-shot SQL migration (v57) back-fills all existing `open` rows with
+empty or short bodies (the 16 probe entries on prod) to `status = 'wont-fix'`
+with an explanatory `owner_response` note, so the operator's notification
+inbox shows only real feedback going forward.
+
+### Why
+
+The feedback table on prod accumulated 16 probe/scanner entries with empty
+bodies and paths like `/_smoke`, `/_proof`, `/probe`, `/telemetry-check` —
+all from CI smoke runners and scanners hitting the open endpoint introduced
+by CO-333. These blocked the signal in `/api/v1/me/notifications`.
+
+## CO-340 — Analytics rollups: per-universe ingest + filterable summary + historical↔surface bridge
+
+Adds the **central warehouse half** of the multi-tenant analytics framework
+(spec: `artelonga/ArteLonga#docs/analytics-framework.md`). Two capabilities:
+
+1. **Per-universe rollup ingest** — `POST /api/v1/analytics/public/rollups`
+   accepts a consented, PII-free `DailyRollup` (`{universe, day, metrics, dims}`)
+   from any producer (a universe-owned surface, a partner, another co universe,
+   or an external SDK). Upserted idempotently into a new `analytics_rollups`
+   table (PK `(universe_key, day)`, migration **v58**). Auth: bearer
+   `CO_ROLLUP_TOKEN` (ingest disabled with `503` when the env is unset).
+
+2. **Filterable, universe-scoped summary** — `GET /api/v1/analytics/public/summary`
+   gains `?universe=<id>` (default `artelonga`). This lets the **general
+   artelonga dashboard surface any universe's stats**, not just the network
+   aggregate. The universe id is sanitized to a safe handle before SQL use.
+
+### The historical ↔ surface bridge
+
+When a universe was a path on the apex (`artelonga.com.br/yuri/`) its telemetry
+lives in `telemetry_events` as `path LIKE '/yuri/%'` (with
+`universe_key='artelonga'`); after promotion to a CNAME surface
+(`yuri.artelonga.com.br`) its data arrives as rollups. The summary unifies both:
+
+- **event match** = `universe_key = X OR path LIKE '/X/%'` → captures the
+  historical `/yuri` traffic already in co;
+- **rollups overlay** the new data, **partitioned at the cutover** (the first
+  rollup day): events only count *before* it, rollups *from* it — so there is
+  no double-count across the migration boundary. One continuous timeline.
+
+If a universe has no rollups yet, the summary is purely event-based (so
+`?universe=yuri` returns the historical `/yuri` stats immediately, before the
+surface starts pushing).
+
+### Notes / scope
+
+- Headline scalars (views, visitors, returning, sessions) and the timeseries
+  merge across the bridge; dimensional breakdowns (geo/top-pages) stay
+  event-based for now — merging rollup `dims` is a follow-up.
+- Backward compatible: `?universe` defaults to `artelonga`; the existing
+  hardcoded behavior is preserved (the path-bridge is a no-op for the apex).
+- 7 new tests (bridge, rollup overlay, cutover no-double-count, idempotent
+  upsert, sanitize, day validation); all 26 analytics tests green; fmt + clippy
+  clean.
+
+### Why
+
+Two parallel analytics systems existed — the apex (co-backed) and the
+universe-owned surfaces — with **no integration**: a partner's stats split
+across two stores at the path→CNAME upgrade, and the general artelonga couldn't
+see a universe's surface data. This is the central seam that unifies them.
+
+## CO-346 — Fix SPA empty-board mystery — co universe shows no content despite 1227 entries on prod
+
+**Root cause (two compounding bugs):**
+
+1. `seed_co_universe_tasks` returned early when the source directory (`/app/seed-co/`) was absent, before it had a chance to upsert the `projects/CO/_project.md` entry into the universe DB. Both `seed_admin_content_universes` (`if key != "co"`) and `backfill_default_projects` (`AND key NOT IN (..., 'co')`) explicitly skip the `co` universe, trusting this seed to create the project. On installs where the source dir is missing, `co` ends up with zero projects. `bootAppForUniverse` finds no projects, never calls `selectProject`, and the kanban renders empty — even when the API reports 1 000+ entries.
+
+2. `list_dev_tasks` only searched entries at the `work/` path prefix. The boot-time seed (CO-262) stores task entries at `public/CO-*.md` to allow anonymous access via the entries API. This path-prefix mismatch meant `GET /api/v1/universes/co/dev-tasks` returned an empty array even on installs where the seed had run correctly.
+
+**Fixes:**
+
+- **`seed.rs`**: moved the CO project upsert block and `project_universe_index` INSERT before the `source_dir.exists()` guard, so the project row is always created regardless of whether task files are available.
+- **`entry_routes.rs`** (`list_dev_tasks`): added a second `query_by_path_prefix` call for the `public/` prefix and merged results with the existing `work/` query. Type filtering (`user-story` / `task` / `epic`) acts as the semantic gate.
+- **New unit test** (`test_seed_co_universe_tasks_creates_project_without_source_dir`): asserts that the CO project exists even when called with a non-existent source dir.
+- **New Playwright E2E spec** (`co-346-co-board.spec.ts`): covers anonymous visitor to `/co` (board loads, project visible), anonymous API access, and logged-in user stays on `/co` without auto-bounce.
+
+### Why
+The `co` universe is the only system universe with a custom project seed path separate from the generic default-project machinery. When that custom seed path is unavailable (first deploy before Docker bundle is in place, or a broken `resolve_seed_co_dir`), the safeguards designed for every other universe are explicitly bypassed — leaving `co` in a permanently empty-board state.
+
+## CO-347 — Surface missing content universes on prod — yuri / retro-umarizal / yoruba / neuro
+
+Added four new universe rows to `seed_admin_content_universes`: yuri, retro-umarizal, yoruba, and neuro.
+Each row is seeded with `remote_url`, `remote_ref='main'`, and appropriate `content_subdirs` so the
+CO-337 15-minute sync task can pull their content automatically on first boot and every subsequent cycle.
+
+The backfill UPDATE uses `WHERE remote_url IS NULL` as an idempotency guard — operator-set remote URLs
+are never overwritten on re-deploy.
+
+- `yuri`: clones `artelonga/artelonga`, walks `yuri/` subdir, `anon_published_only=1` (personal vault).
+- `retro-umarizal`: standalone `artelonga/retro-umarizal` repo, no subdir restriction.
+- `yoruba`: clones `artelonga/comunicacao`, walks `yoruba/` subdir, `parent_key=comunicacao`.
+- `neuro`: clones `artelonga/artelonga`, walks `neuro/` subdir, `parent_key=artelonga`.
+
+### Why
+
+The four universes existed locally but had no universe rows on prod, so they were invisible in the
+sidebar. No Docker rebuild is needed per content update — CO-337's remote sync handles ongoing refresh.
+
+## CO-348 — Mbya promote to first-class + merge yoruba term sources
+
+- `~/projects/mbya/_universe.yaml` created (CO-141 schema shape, adapted for mbya).
+- `seed_orchestrator.rs`: `remote_url='https://github.com/artelonga/mbya'` + `remote_ref='main'` set for the `mbya` universe row on boot (idempotent, WHERE remote_url IS NULL).
+- `~/projects/comunicacao/mbya/` removed (git rm -r); description in `comunicacao/_universe.yaml` updated to reflect the migration.
+- Yoruba merge: 7 of 8 topologia terms were identical to comunicacao; only `ogunte.md` diverged (field name `label` → `source` to match CO-141 schema). Merged into comunicacao/yoruba/terms/ogunte.md.
+- `~/projects/topologia/yoruba/terms/*.md` deleted (8 files). `_universe.yaml` + `index.md` retained as shape exemplar, with comment pointing to comunicacao canonical location.
+
+### Why
+
+Eliminates three drifting copies of the same lexicon (mbya standalone, comunicacao/mbya embedded, topologia/guarani-mbya exemplar) and two drifting copies of yoruba terms. After CO-347 deploys, prod has one canonical row per lexicon — mbya syncing from its own repo, yoruba syncing from comunicacao/yoruba subfolder.
+
+### Follow-up needed
+
+`~/projects/mbya/content/lexicon/` uses `type: lexeme` with fields `classe / familia / fonte / glosa_pt / ipa / lema` — diverges from the CO-141 `type: term` shape (`word / pronunciation / concept / parts / seed_status`). A schema normalization task is needed before the mbya universe can be fully ingested by CO's entry loader.
+
+## CO-349 — Yggdrasil RPG sub-universe scaffolding — 48+ folders, schemas later
+
+Adds `content/` directory to the yggdrasil repo with 24 sub-universe folders (6 categories × parent + 3 language variants) and 60 stub markdown entries.
+
+Categories: NPC (15 stubs), Monster (15 stubs), Location (10 stubs), Item (10 stubs), Faction (5 stubs), Encounter (5 stubs). Each category has shandara, tagmar, and godot language sub-universes.
+
+Also adds `scripts/scaffold-content.sh` — idempotent; skips existing files on re-run.
+
+### Why
+
+Provides stable folder addresses for each RPG content category × language slot before schemas are finalised, enabling CO-337 sync to surface them as sub-universes in the CO sidebar and making per-category schema tasks parallelisable.
+
+## CO-362 — Markdown render — rewrite http:// asset URLs to https://
+
+`co-web/static/shared/markdown.js` now rewrites `http://` to `https://` for
+`<img src="...">` URLs in rendered markdown, eliminating mixed-content browser
+warnings from historical content (npm badges, screenshots, etc.). Anchor
+`href` attributes are left unchanged. Any `<script src="http://...">` tags
+that survive into the rendered HTML are replaced with a comment.
+
+### Why
+
+The `/artelonga` universe (and others with legacy README content) was logging
+8+ mixed-content warnings per page load — mostly old img.shields.io badges
+and f.cl.ly screenshots that use bare `http://` URLs. Browsers auto-upgrade
+these today but still log a warning each time, eroding visitor trust.
+
+## CO-364 — Add open-source reference universes (odysseus + claude-code)
+
+Two upstream OSS repos surfaced as read-only CO universes via CO-337 remote sync:
+- `odysseus` ← github.com/pewdiepie-archdaemon/odysseus (branch `dev`) — self-hosted AI workspace
+- `claude-code` ← github.com/anthropics/claude-code (branch `main`) — Anthropic's agentic CLI
+
+`content_subdirs` limits to `docs/`, `README.md`, `CHANGELOG.md` so the sync stays lean.
+
+### Why
+User wants to study these projects' architecture and changelog alongside CO's own content for integration planning. Mirrors CO-347's pattern — just two more seed rows.
+
+
 ## [2.39.0] — 2026-06-03 — remote sister-repo sync (CO-337) + feedback widget wiring
 
 ## CO-333 — wire the visitor-facing feedback widget into the SPA
