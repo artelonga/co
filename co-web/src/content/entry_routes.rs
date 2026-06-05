@@ -1563,13 +1563,20 @@ pub async fn list_dev_tasks(
 
     let index = crate::entry_index::EntryIndex::new(&uc_guard);
     let limit = q.limit.unwrap_or(500).min(5_000);
-    let work_entries = index
+    // CO-346: search both `work/` (vault-pushed files) and `public/` (boot-time
+    // seed via CO-262) so the kanban board is never empty regardless of which
+    // path convention was used to populate the universe.
+    let mut all_entries = index
         .query_by_path_prefix(&slug, "work/", Some(limit))
         .map_err(|e| AppError::Internal(e.to_string()))?;
+    let public_entries = index
+        .query_by_path_prefix(&slug, "public/", Some(limit))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    all_entries.extend(public_entries);
 
     const DEV_TASK_TYPES: &[&str] = &["user-story", "task", "epic"];
 
-    let tasks: Vec<DevTask> = work_entries
+    let tasks: Vec<DevTask> = all_entries
         .into_iter()
         .filter(|e| DEV_TASK_TYPES.contains(&e.entry_type.as_str()))
         .filter_map(|e| {
