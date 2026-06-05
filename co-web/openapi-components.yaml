@@ -1,0 +1,666 @@
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: JWT session cookie (set via /api/v1/auth/verify or password-login)
+    apiToken:
+      type: http
+      scheme: bearer
+      description: Long-lived API token (created via POST /api/v1/auth/token)
+    bearerJWT:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT token via Authorization header (legacy; prefer sessionCookie)
+    githubPAT:
+      type: http
+      scheme: bearer
+      description: GitHub Personal Access Token (gestão administrativa)
+    sharedSecret:
+      type: apiKey
+      in: header
+      name: X-Shared-Secret
+      description: Shared secret for server-to-server endpoints (e.g. log drains)
+
+  schemas:
+    # --- Erros ---
+    Error:
+      type: object
+      required: [error, message]
+      properties:
+        error:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: "Recurso não encontrado"
+
+    # --- Projetos / Tarefas ---
+    Task:
+      type: object
+      required: [id, key, project_key, title, status, priority, labels, created_at, updated_at, description, archived]
+      properties:
+        id:
+          type: integer
+          example: 1
+        key:
+          type: string
+          example: DS-1
+        project_key:
+          type: string
+          example: DS
+        title:
+          type: string
+          example: Define visual identity
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        due_date:
+          type: string
+          format: date
+          nullable: true
+          example: "2026-04-30"
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        description:
+          type: string
+        archived:
+          type: boolean
+          default: false
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+          example: "yuri@artelonga.com.br"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CreateTask:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+          default: ""
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+          default: todo
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+          default: medium
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+
+    UpdateTask:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [todo, in_progress, in_review, done]
+        priority:
+          type: string
+          enum: [low, medium, high, critical]
+        due_date:
+          type: string
+          format: date
+          nullable: true
+        parent:
+          type: integer
+          nullable: true
+        labels:
+          type: array
+          items:
+            type: string
+        archived:
+          type: boolean
+        assignee:
+          type: string
+          nullable: true
+          description: Name or email of the person assigned to this task
+
+    # --- Saúde ---
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        version:
+          type: string
+          example: "0.22.1"
+
+    # --- Auth ---
+    LoginUsuario:
+      type: object
+      required: [usuario, senha]
+      properties:
+        usuario:
+          type: string
+          example: yuri
+        senha:
+          type: string
+          format: password
+
+    CriarUsuario:
+      type: object
+      required: [usuario, nome, senha]
+      properties:
+        usuario:
+          type: string
+          minLength: 3
+          maxLength: 30
+          pattern: "^[a-z0-9_]+$"
+          example: carlos
+        nome:
+          type: string
+          minLength: 2
+          example: Carlos Silva
+        senha:
+          type: string
+          format: password
+          minLength: 8
+
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        usuario:
+          $ref: "#/components/schemas/UsuarioResumo"
+
+    UsuarioResumo:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        usuario:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+          enum: [admin, editor, membro]
+
+    # --- Usuário ---
+    Usuario:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        usuario:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+          enum: [admin, editor, membro]
+        bio:
+          type: string
+          nullable: true
+        foto_url:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+        atualizado_em:
+          type: string
+          format: date-time
+
+    Membro:
+      type: object
+      properties:
+        id:
+          type: string
+        usuario:
+          type: string
+        nome:
+          type: string
+        bio:
+          type: string
+          nullable: true
+        foto_url:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    AtualizarPerfil:
+      type: object
+      properties:
+        nome:
+          type: string
+        bio:
+          type: string
+        foto_url:
+          type: string
+
+    # --- Evento ---
+    Evento:
+      type: object
+      properties:
+        id:
+          type: integer
+        titulo:
+          type: string
+        data:
+          type: string
+          format: date
+        hora:
+          type: string
+          example: "14:00"
+        local:
+          type: string
+        descricao_md:
+          type: string
+        criado_por:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarEvento:
+      type: object
+      required: [titulo, data, hora, local]
+      properties:
+        titulo:
+          type: string
+        data:
+          type: string
+          format: date
+        hora:
+          type: string
+        local:
+          type: string
+        descricao_md:
+          type: string
+
+    AtualizarEvento:
+      type: object
+      properties:
+        titulo:
+          type: string
+        data:
+          type: string
+        hora:
+          type: string
+        local:
+          type: string
+        descricao_md:
+          type: string
+
+    # --- Missão ---
+    Missao:
+      type: object
+      properties:
+        id:
+          type: integer
+        titulo:
+          type: string
+        descricao:
+          type: string
+        objetivo:
+          type: string
+        status:
+          type: string
+          enum: [aberta, em_andamento, concluida, cancelada]
+        criado_por:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+        atualizado_em:
+          type: string
+          format: date-time
+        participantes:
+          type: integer
+          description: Contagem de participantes aprovados
+
+    CriarMissao:
+      type: object
+      required: [titulo]
+      properties:
+        titulo:
+          type: string
+        descricao:
+          type: string
+        objetivo:
+          type: string
+
+    Participacao:
+      type: object
+      properties:
+        id:
+          type: integer
+        missao_id:
+          type: integer
+        usuario_id:
+          type: string
+        status:
+          type: string
+          enum: [pendente, aprovado, recusado]
+        criado_em:
+          type: string
+          format: date-time
+
+    AtualizarParticipacao:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pendente, aprovado, recusado]
+
+    # --- Comentário ---
+    Comentario:
+      type: object
+      properties:
+        id:
+          type: integer
+        publicacao_slug:
+          type: string
+          nullable: true
+        evento_id:
+          type: integer
+          nullable: true
+        autor_id:
+          type: string
+          nullable: true
+        nome_exibicao:
+          type: string
+          nullable: true
+        conteudo:
+          type: string
+        anonimo:
+          type: boolean
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarComentario:
+      type: object
+      required: [conteudo]
+      properties:
+        publicacao_slug:
+          type: string
+        evento_id:
+          type: integer
+        nome_exibicao:
+          type: string
+        conteudo:
+          type: string
+          maxLength: 2000
+        anonimo:
+          type: boolean
+          default: true
+
+    # --- Mensagem ---
+    Mensagem:
+      type: object
+      properties:
+        id:
+          type: integer
+        remetente_id:
+          type: string
+          nullable: true
+        destinatario_id:
+          type: string
+          nullable: true
+        missao_id:
+          type: integer
+          nullable: true
+        assunto:
+          type: string
+        conteudo:
+          type: string
+        nome_remetente:
+          type: string
+          nullable: true
+        email_remetente:
+          type: string
+          nullable: true
+        lida:
+          type: boolean
+        criado_em:
+          type: string
+          format: date-time
+
+    CriarMensagem:
+      type: object
+      required: [conteudo]
+      properties:
+        destinatario_id:
+          type: string
+        missao_id:
+          type: integer
+        assunto:
+          type: string
+        conteudo:
+          type: string
+          maxLength: 5000
+        nome_remetente:
+          type: string
+        email_remetente:
+          type: string
+
+    # --- Atividade ---
+    Atividade:
+      type: object
+      properties:
+        id:
+          type: integer
+        acao:
+          type: string
+        entidade:
+          type: string
+        entidade_id:
+          type: string
+          nullable: true
+        usuario_id:
+          type: string
+          nullable: true
+        conteudo:
+          type: string
+          nullable: true
+        criado_em:
+          type: string
+          format: date-time
+
+    # --- Gestão ---
+    PublicarRequest:
+      type: object
+      required: [caminho, conteudo]
+      properties:
+        caminho:
+          type: string
+          description: "Caminho relativo no universo (ex: relatos/meu-post.md)"
+          example: relatos/nova-horta.md
+        conteudo:
+          type: string
+          description: Conteúdo completo do arquivo markdown com frontmatter YAML
+
+    PublicarResponse:
+      type: object
+      properties:
+        caminho:
+          type: string
+        tipo:
+          type: string
+        id:
+          type: string
+
+    ValidarResponse:
+      type: object
+      properties:
+        valido:
+          type: boolean
+        erros:
+          type: array
+          items:
+            type: string
+        avisos:
+          type: array
+          items:
+            type: string
+
+    CriarConteudo:
+      type: object
+      required: [id, titulo]
+      properties:
+        id:
+          type: string
+          pattern: "^[a-zA-Z0-9._-]+$"
+          example: nova-horta
+        titulo:
+          type: string
+          example: Nova Horta Comunitária
+        descricao:
+          type: string
+        data:
+          type: string
+          format: date
+        tags:
+          type: array
+          items:
+            type: string
+        conteudo:
+          type: string
+          description: Corpo em markdown (abaixo do frontmatter)
+        hora:
+          type: string
+          description: Apenas para eventos (HH:MM)
+        local:
+          type: string
+          description: Apenas para eventos
+        nome:
+          type: string
+          description: Apenas para membros
+        papel:
+          type: string
+          description: Apenas para membros
+          enum: [admin, editor, membro]
+        status:
+          type: string
+          description: Apenas para quadro
+        prioridade:
+          type: string
+          description: Apenas para quadro
+        objetivo:
+          type: string
+          description: Apenas para quadro
+        publicado:
+          type: boolean
+          description: Apenas para relatos
+
+    AtualizarConteudo:
+      type: object
+      properties:
+        titulo:
+          type: string
+        descricao:
+          type: string
+        data:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        conteudo:
+          type: string
+        hora:
+          type: string
+        local:
+          type: string
+        nome:
+          type: string
+        papel:
+          type: string
+        status:
+          type: string
+        prioridade:
+          type: string
+        objetivo:
+          type: string
+        publicado:
+          type: boolean
+
+    ConteudoResumo:
+      type: object
+      properties:
+        id:
+          type: string
+        tipo:
+          type: string
+        titulo:
+          type: string
+        caminho:
+          type: string
+
+    # --- Iceberg ---
+    Manifest:
+      type: object
+      properties:
+        format_version:
+          type: integer
+        snapshot_id:
+          type: string
+          nullable: true
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ManifestEntry"
+
+    ManifestEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        schema_id:
+          type: integer
+        partition:
+          type: object
+          additionalProperties: true
+        stats:
+          type: object
+          additionalProperties: true
+

@@ -2,48 +2,18 @@ openapi: 3.1.0
 info:
   title: CO Web API
   description: |
-    API unificada do CO — plataforma de gestão de conteúdo baseada em grafos.
+    API da plataforma CO — gestão de conteúdo em grafo.
 
-    ## Distribuição
+    Gerado automaticamente a partir de docs/architecture/api-catalog.md.
+    Para adicionar ou remover endpoints, atualize o catálogo e rode
+    `npm run openapi:gen` em co-web/.
 
-    A API é dividida em duas camadas:
+    ## Como adicionar uma rota
 
-    ### Open Source (MIT) — Plataforma CO
-    Endpoints genéricos que funcionam para qualquer universo de conteúdo.
-    Código em `github.com/institutional-pointset/co`.
-
-    - `Plataforma` — Saúde, board de projetos, experimentos A/B
-    - `Autenticação` — JWT via email+código
-    - `Jogos` — Framework de jogos com plugins
-    - `Gestão` — CRUD de conteúdo via GitHub PAT (genérico)
-
-    ### Proprietary — Quilombo Araucária
-    Endpoints específicos da comunidade Quilombo Araucária.
-    Código nos módulos `quilombo_*`, conteúdo em repos privados.
-
-    - `Comunidade` — Auth por usuario+senha, perfil, missões, mensagens
-    - `Conteúdo` — Relatos, eventos, membros (leitura pública)
-    - `Admin` — Gestão de eventos, atividades (papel admin)
-
-    ## Autenticação
-
-    Três níveis de acesso:
-
-    - **Público** — sem autenticação
-    - **JWT** — `Authorization: Bearer {jwt}` (obtido via login)
-    - **GitHub** — `Authorization: Bearer ghp_xxxx` (PAT do GitHub)
-
-    ### Obtendo um JWT
-    ```bash
-    curl -X POST /api/v1/quilombo/auth/login \
-      -d '{"usuario":"yuri","senha":"********"}'
-    ```
-
-    ### Usando GitHub PAT
-    ```bash
-    curl -H "Authorization: Bearer ghp_xxxx" /api/v1/gestao/relatos
-    ```
-  version: 0.22.1
+    1. Implemente o handler e registre-o no arquivo `*_routes.rs` adequado.
+    2. Adicione uma linha na tabela correspondente em `docs/architecture/api-catalog.md`.
+    3. Rode `cd co-web && npm run openapi:gen` para regenerar este arquivo.
+  version: "2.40.0"
   contact:
     name: Arte Longa
     email: yuri@artelonga.com.br
@@ -51,81 +21,3872 @@ info:
     name: MIT
 
 servers:
+  - url: https://co-artelonga.fly.dev
+    description: Production
   - url: http://localhost:8742
-    description: Desenvolvimento local
-  - url: https://quilomboaraucaria.org
-    description: Produção (Fly.io)
+    description: Local
 
 tags:
-  # =============================================
-  # OPEN SOURCE (MIT) — Plataforma CO
-  # =============================================
+  - name: "auth"
+    description: "auth endpoints"
+  - name: "universes"
+    description: "universes endpoints"
+  - name: "graph-views"
+    description: "graph-views endpoints"
+  - name: "entries"
+    description: "entries endpoints"
+  - name: "vault"
+    description: "vault endpoints"
+  - name: "chat"
+    description: "chat endpoints"
+  - name: "dm"
+    description: "dm endpoints"
+  - name: "notifications"
+    description: "notifications endpoints"
+  - name: "interactions"
+    description: "interactions endpoints"
+  - name: "assets"
+    description: "assets endpoints"
+  - name: "references"
+    description: "references endpoints"
+  - name: "admin"
+    description: "admin endpoints"
+  - name: "gestao"
+    description: "gestao endpoints"
+  - name: "storage"
+    description: "storage endpoints"
+  - name: "invitations"
+    description: "invitations endpoints"
+  - name: "leads"
+    description: "leads endpoints"
+  - name: "openapi"
+    description: "openapi endpoints"
+  - name: "agent-sessions"
+    description: "agent-sessions endpoints"
+  - name: "ai"
+    description: "ai endpoints"
+  - name: "chat-llm"
+    description: "chat-llm endpoints"
+  - name: "changelog"
+    description: "changelog endpoints"
+  - name: "feedback"
+    description: "feedback endpoints"
+  - name: "analytics + telemetry"
+    description: "analytics + telemetry endpoints"
+  - name: "quilombo"
+    description: "quilombo endpoints"
+  - name: "board"
+    description: "board endpoints"
+  - name: "experiment"
+    description: "experiment endpoints"
+  - name: "game"
+    description: "game endpoints"
+  - name: "Health"
+    description: "Health endpoints"
 
-  # --- Público ---
-  - name: "CO: Saúde"
-    description: "[OSS] Verificação de status do servidor"
-  - name: "CO: Projetos"
-    description: "[OSS] Board de projetos e tarefas (co-web)"
-  - name: "CO: Experimentos"
-    description: "[OSS] Framework de experimentação A/B"
-  - name: "CO: Auth Email"
-    description: "[OSS] Autenticação via email + código de verificação"
-
-  # --- Jogos ---
-  - name: "CO: Jogos Públicos"
-    description: "[OSS] Leaderboards, perfis de jogadores, plugins"
-  - name: "CO: Jogos Protegidos"
-    description: "[OSS] Perfil, carteira e estatísticas (JWT)"
-
-  # --- Gestão (GitHub) ---
-  - name: "CO: Gestão - Publicação"
-    description: "[OSS] Validar e publicar conteúdo markdown (GitHub PAT)"
-  - name: "CO: Gestão - Relatos"
-    description: "[OSS] CRUD genérico de relatos (GitHub PAT)"
-  - name: "CO: Gestão - Eventos"
-    description: "[OSS] CRUD genérico de eventos (GitHub PAT)"
-  - name: "CO: Gestão - Membros"
-    description: "[OSS] CRUD genérico de membros (GitHub PAT)"
-  - name: "CO: Gestão - Quadro"
-    description: "[OSS] CRUD genérico de quadro/missões (GitHub PAT)"
-  - name: "CO: Gestão - Manifesto"
-    description: "[OSS] Manifesto Iceberg do universo (GitHub PAT)"
-
-  # =============================================
-  # PROPRIETARY — Quilombo Araucária
-  # =============================================
-
-  # --- Público ---
-  - name: "Quilombo: Conteúdo"
-    description: "[Proprietário] Leitura pública de relatos, eventos, membros"
-  - name: "Quilombo: Comentários"
-    description: "[Proprietário] Comentários em relatos e eventos (anônimo permitido)"
-  - name: "Quilombo: Contato"
-    description: "[Proprietário] Formulário de contato"
-
-  # --- JWT ---
-  - name: "Quilombo: Auth"
-    description: "[Proprietário] Login e cadastro por usuario+senha"
-  - name: "Quilombo: Perfil"
-    description: "[Proprietário] Gerenciamento de perfil do membro"
-  - name: "Quilombo: Missões"
-    description: "[Proprietário] Participação em missões comunitárias"
-  - name: "Quilombo: Mensagens"
-    description: "[Proprietário] Mensagens privadas entre membros"
-  - name: "Quilombo: Admin"
-    description: "[Proprietário] Painel admin (papel admin, JWT)"
+paths:
+  /.well-known/jwks.json:
+    get:
+      tags: ["auth"]
+      summary: "JWKS (ES256 public key)"
+      responses:
+        "200":
+          description: OK
+  /.well-known/openid-configuration:
+    get:
+      tags: ["auth"]
+      summary: "OIDC discovery"
+      responses:
+        "200":
+          description: OK
+  /api/docs:
+    get:
+      tags: ["openapi"]
+      summary: "Interactive API explorer"
+      responses:
+        "200":
+          description: OK
+  /api/experiment/feedback:
+    post:
+      tags: ["experiment"]
+      summary: "Record feedback"
+      responses:
+        "200":
+          description: OK
+  /api/experiment/summary:
+    get:
+      tags: ["experiment"]
+      summary: "Variant summary"
+      responses:
+        "200":
+          description: OK
+  /api/experiment/variant:
+    get:
+      tags: ["experiment"]
+      summary: "Get current variant"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["experiment"]
+      summary: "Switch variant"
+      responses:
+        "200":
+          description: OK
+  /api/health:
+    get:
+      tags: ["Health"]
+      summary: "Liveness"
+      responses:
+        "200":
+          description: OK
+  /api/health/deep:
+    get:
+      tags: ["Health"]
+      summary: "Includes storage check"
+      responses:
+        "200":
+          description: OK
+  /api/openapi.json:
+    get:
+      tags: ["openapi"]
+      summary: "OpenAPI 3.1 JSON spec"
+      responses:
+        "200":
+          description: OK
+  /api/projects:
+    post:
+      tags: ["board"]
+      summary: "Create project"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}:
+    get:
+      tags: ["board"]
+      summary: "Project info"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["board"]
+      summary: "Delete project"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/activity:
+    get:
+      tags: ["board"]
+      summary: "Activity feed"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/dashboard:
+    get:
+      tags: ["board"]
+      summary: "Dashboard"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/tasks:
+    get:
+      tags: ["board"]
+      summary: "List tasks"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["board"]
+      summary: "Create task"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/tasks/bulk-delete:
+    post:
+      tags: ["board"]
+      summary: "Bulk delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/tasks/bulk-update:
+    post:
+      tags: ["board"]
+      summary: "Bulk update"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/tasks/{id}:
+    get:
+      tags: ["board"]
+      summary: "Get single task"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["board"]
+      summary: "Update/delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["board"]
+      summary: "Update/delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/projects/{key}/tasks/{id}/comments:
+    get:
+      tags: ["board"]
+      summary: "List comments"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["board"]
+      summary: "Create comment"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/ab/flags:
+    get:
+      tags: ["admin"]
+      summary: "List flags"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["admin"]
+      summary: "CO-121 — A/B flag CRUD"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/ab/flags/{key}:
+    put:
+      tags: ["admin"]
+      summary: "Toggle flag"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/changelog/reindex:
+    post:
+      tags: ["admin"]
+      summary: "Re-index changelog from git"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/co-dev:
+    get:
+      tags: ["admin"]
+      summary: "CO-43 dev board info"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/co-dev/entries:
+    get:
+      tags: ["admin"]
+      summary: "Dev board entries"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/co-dev/entries/tags:
+    get:
+      tags: ["admin"]
+      summary: "Dev board tags"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/co-dev/entries/{*path}:
+    get:
+      tags: ["admin"]
+      summary: "Get dev board entry by path"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["admin"]
+      summary: "Update dev board entry"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/dashboard:
+    get:
+      tags: ["admin"]
+      summary: "Cross-system dashboard"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/deployments:
+    get:
+      tags: ["admin"]
+      summary: "Deployment history"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/deployments/refresh:
+    post:
+      tags: ["admin"]
+      summary: "Refresh deployment data"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/leads:
+    get:
+      tags: ["admin"]
+      summary: "CO-183 leads queue"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/leads/{id}:
+    patch:
+      tags: ["admin"]
+      summary: "Update lead"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/storage:
+    get:
+      tags: ["storage"]
+      summary: "Cluster-wide storage breakdown"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/telemetry/crud-summary:
+    get:
+      tags: ["admin"]
+      summary: "CRUD events summary"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/telemetry/export:
+    get:
+      tags: ["admin"]
+      summary: "CSV export"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/telemetry/summary:
+    get:
+      tags: ["admin"]
+      summary: "Telemetry summary (CO-46)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/users/origin-breakdown:
+    get:
+      tags: ["admin"]
+      summary: "User signup origin breakdown"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/workers/status:
+    get:
+      tags: ["admin"]
+      summary: "Worker/job status"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/agent/sessions:
+    get:
+      tags: ["agent-sessions"]
+      summary: "List agent sessions (public kanban)"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["agent-sessions"]
+      summary: "Record new agent session"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/agent/sessions/latest:
+    get:
+      tags: ["agent-sessions"]
+      summary: "Latest session summary"
+      responses:
+        "200":
+          description: OK
+  /api/v1/ai/query:
+    post:
+      tags: ["ai"]
+      summary: "AI completion query"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/ai/status:
+    get:
+      tags: ["ai"]
+      summary: "AI provider status"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/analytics/public/popularity:
+    get:
+      tags: ["analytics + telemetry"]
+      summary: "CO-180 popularity"
+      responses:
+        "200":
+          description: OK
+  /api/v1/analytics/public/recent:
+    get:
+      tags: ["analytics + telemetry"]
+      summary: "Recent activity"
+      responses:
+        "200":
+          description: OK
+  /api/v1/analytics/public/rollups:
+    post:
+      tags: ["analytics + telemetry"]
+      summary: "Ingest per-universe rollup (CO-340)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/analytics/public/summary:
+    get:
+      tags: ["analytics + telemetry"]
+      summary: "CO-179 public summary"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/change-password:
+    post:
+      tags: ["auth"]
+      summary: "Change password (authed)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/forgot-password:
+    post:
+      tags: ["auth"]
+      summary: "CO-165 — initiate reset"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/forgot-password/verify:
+    post:
+      tags: ["auth"]
+      summary: "Verify reset token"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/google/callback:
+    get:
+      tags: ["auth"]
+      summary: "Google OAuth callback"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/google/start:
+    get:
+      tags: ["auth"]
+      summary: "Begin Google OAuth (oauth_google.rs)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/google/status:
+    get:
+      tags: ["auth"]
+      summary: "Whether Google OAuth is configured"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/legacy-login:
+    post:
+      tags: ["game"]
+      summary: "Legacy game login"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/login:
+    post:
+      tags: ["auth"]
+      summary: "Request email magic-code (CO-188)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/login-options:
+    get:
+      tags: ["auth"]
+      summary: "CO-303 — login methods available"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/logout:
+    post:
+      tags: ["auth"]
+      summary: "Clear session cookie"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/me:
+    get:
+      tags: ["auth"]
+      summary: "Current user + tier"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/onboard-with-email:
+    post:
+      tags: ["auth"]
+      summary: "CO-190 — passwordless onboarding"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/onboard-with-email/verify:
+    post:
+      tags: ["auth"]
+      summary: "CO-190 — verify code"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/password-login:
+    post:
+      tags: ["auth"]
+      summary: "CO-85 — username+password (any env)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/recovery/channels:
+    get:
+      tags: ["auth"]
+      summary: "List recovery channels"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["auth"]
+      summary: "Add recovery channel"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/recovery/channels/verify:
+    post:
+      tags: ["auth"]
+      summary: "Verify channel code"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/recovery/channels/{id}:
+    delete:
+      tags: ["auth"]
+      summary: "Remove recovery channel"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/register:
+    post:
+      tags: ["game"]
+      summary: "Register game player"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/reset-password:
+    post:
+      tags: ["auth"]
+      summary: "CO-165 — complete reset"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/signup:
+    post:
+      tags: ["auth"]
+      summary: "CO-175 — usuario + password (+ optional email), rate-limited 100/day"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/stats:
+    get:
+      tags: ["auth"]
+      summary: "Per-user storage stats"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/token:
+    post:
+      tags: ["auth"]
+      summary: "CO-35 — create long-lived API token"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/tokens:
+    get:
+      tags: ["auth"]
+      summary: "List API tokens"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/tokens/{id}:
+    delete:
+      tags: ["auth"]
+      summary: "Revoke API token"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/uat-login:
+    post:
+      tags: ["auth"]
+      summary: "CO-44 — `yuri/uat` on UAT, 404 in prod"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/verify:
+    post:
+      tags: ["auth"]
+      summary: "Exchange code → session cookie"
+      responses:
+        "200":
+          description: OK
+  /api/v1/blobs:
+    post:
+      tags: ["assets"]
+      summary: "CAS write"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/blobs/{hash}:
+    get:
+      tags: ["assets"]
+      summary: "CAS read (CO-163 BaseBackend shim)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    head:
+      tags: ["assets"]
+      summary: "CAS exists check"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: hash
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/cache/stats:
+    get:
+      tags: ["storage"]
+      summary: "LRU cache stats (CO-79)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/changelog:
+    get:
+      tags: ["changelog"]
+      summary: "Changelog entries"
+      responses:
+        "200":
+          description: OK
+  /api/v1/changelog/feed:
+    get:
+      tags: ["changelog"]
+      summary: "Changelog Atom/RSS feed"
+      responses:
+        "200":
+          description: OK
+  /api/v1/changelog/repos:
+    get:
+      tags: ["changelog"]
+      summary: "Repositories in changelog"
+      responses:
+        "200":
+          description: OK
+  /api/v1/chat/{slug}:
+    post:
+      tags: ["chat-llm"]
+      summary: "LLM chat on a universe"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/deployments/status:
+    get:
+      tags: ["chat-llm"]
+      summary: "Latest deployment status"
+      responses:
+        "200":
+          description: OK
+  /api/v1/dms/with/{user_id}:
+    post:
+      tags: ["dm"]
+      summary: "Open or get DM room"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/dms/{room_id}/mute:
+    post:
+      tags: ["dm"]
+      summary: "Toggle mute"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: room_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/dms/{room_id}/read:
+    post:
+      tags: ["dm"]
+      summary: "Mark read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: room_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback:
+    post:
+      tags: ["feedback"]
+      summary: "Submit feedback (universe-wide)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/all/public:
+    get:
+      tags: ["feedback"]
+      summary: "Public feedback aggregated across universes"
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/{key}:
+    get:
+      tags: ["feedback"]
+      summary: "List feedback for universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["feedback"]
+      summary: "Update feedback status"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/{universe_key}/entry/{*entry_path}:
+    get:
+      tags: ["feedback"]
+      summary: "Feedback for a specific entry"
+      parameters:
+        - name: universe_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/{universe_key}/item/{id}:
+    get:
+      tags: ["feedback"]
+      summary: "Single feedback item"
+      parameters:
+        - name: universe_key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/{universe_key}/public:
+    get:
+      tags: ["feedback"]
+      summary: "Public feedback mural for universe"
+      parameters:
+        - name: universe_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/feedback/{universe_key}/{*entry_path}:
+    post:
+      tags: ["feedback"]
+      summary: "Submit feedback for entry"
+      parameters:
+        - name: universe_key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/games/leaderboard/global:
+    get:
+      tags: ["game"]
+      summary: "Global leaderboard"
+      responses:
+        "200":
+          description: OK
+  /api/v1/games/recent:
+    get:
+      tags: ["game"]
+      summary: "Recent game activity"
+      responses:
+        "200":
+          description: OK
+  /api/v1/games/{game_name}/leaderboard:
+    get:
+      tags: ["game"]
+      summary: "Game leaderboard"
+      parameters:
+        - name: game_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/games/{game_name}/result:
+    post:
+      tags: ["game"]
+      summary: "Record game result"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: game_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/games/{game_name}/stats:
+    get:
+      tags: ["game"]
+      summary: "My game stats"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: game_name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/eventos:
+    get:
+      tags: ["gestao"]
+      summary: "List all eventos"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["gestao"]
+      summary: "Create evento"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/eventos/{id}:
+    put:
+      tags: ["gestao"]
+      summary: "Update evento"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["gestao"]
+      summary: "Delete evento"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/manifesto:
+    get:
+      tags: ["gestao"]
+      summary: "Universe Iceberg manifest"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/manifesto/reconstruir:
+    post:
+      tags: ["gestao"]
+      summary: "Rebuild manifest from source"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/membros:
+    get:
+      tags: ["gestao"]
+      summary: "List all membros"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["gestao"]
+      summary: "Create membro"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/membros/{id}:
+    put:
+      tags: ["gestao"]
+      summary: "Update membro"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["gestao"]
+      summary: "Delete membro"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/oauth/clients:
+    get:
+      tags: ["auth"]
+      summary: "List clients"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["auth"]
+      summary: "Register OAuth client"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/publicar:
+    post:
+      tags: ["gestao"]
+      summary: "Publish markdown file to universe"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/quadro:
+    get:
+      tags: ["gestao"]
+      summary: "List board items"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["gestao"]
+      summary: "Create board item"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/quadro/{id}:
+    put:
+      tags: ["gestao"]
+      summary: "Update board item"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["gestao"]
+      summary: "Delete board item"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/relatos:
+    get:
+      tags: ["gestao"]
+      summary: "List all relatos"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["gestao"]
+      summary: "Create relato"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/relatos/{id}:
+    put:
+      tags: ["gestao"]
+      summary: "Update relato"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["gestao"]
+      summary: "Delete relato"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/schema-status:
+    get:
+      tags: ["gestao"]
+      summary: "CO-361 — current schema version + app version"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/validar:
+    post:
+      tags: ["gestao"]
+      summary: "Validate markdown frontmatter"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/webhooks:
+    get:
+      tags: ["gestao"]
+      summary: "List webhooks"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["gestao"]
+      summary: "CO-168 register outbound webhook"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/webhooks/{id}:
+    put:
+      tags: ["gestao"]
+      summary: "Update"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["gestao"]
+      summary: "Delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/webhooks/{id}/deliveries:
+    get:
+      tags: ["gestao"]
+      summary: "Delivery log"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/graph-views:
+    get:
+      tags: ["graph-views"]
+      summary: "List public graph views"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["graph-views"]
+      summary: "Create a saved graph view"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/graph-views/{slug}:
+    get:
+      tags: ["graph-views"]
+      summary: "Fetch a saved view"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["graph-views"]
+      summary: "Update visibility/filters"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["graph-views"]
+      summary: "Delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/health:
+    get:
+      tags: ["game"]
+      summary: "Game service health"
+      responses:
+        "200":
+          description: OK
+  /api/v1/interactions:
+    get:
+      tags: ["interactions"]
+      summary: "Discover registered interactions"
+      responses:
+        "200":
+          description: OK
+  /api/v1/interactions/openapi.json:
+    get:
+      tags: ["interactions"]
+      summary: "**OpenAPI 3.1 generated from `e2e/interactions/registry.yaml`**"
+      responses:
+        "200":
+          description: OK
+  /api/v1/interactions/{id}:
+    get:
+      tags: ["interactions"]
+      summary: "Inspect one"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["interactions"]
+      summary: "Execution not yet wired"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/invitations/{token}:
+    get:
+      tags: ["invitations"]
+      summary: "Preview invitation before accepting"
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/invitations/{token}/accept:
+    post:
+      tags: ["invitations"]
+      summary: "Accept invite, join universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/leads:
+    post:
+      tags: ["leads"]
+      summary: "Submit interest (public)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/dm-policy:
+    put:
+      tags: ["dm"]
+      summary: "Who can DM me"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/dms:
+    get:
+      tags: ["dm"]
+      summary: "DM inbox"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/inbound-proposals:
+    get:
+      tags: ["entries"]
+      summary: "Inbox of inbound proposals across owned universes"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/invitations:
+    get:
+      tags: ["invitations"]
+      summary: "My pending invitations"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/invitations/accept:
+    post:
+      tags: ["invitations"]
+      summary: "Accept invite via me/ (token in body)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/notification-preferences:
+    get:
+      tags: ["notifications"]
+      summary: "Get prefs"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["notifications"]
+      summary: "Update prefs"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/notifications:
+    get:
+      tags: ["notifications"]
+      summary: "List notifications"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/notifications/read-all:
+    post:
+      tags: ["notifications"]
+      summary: "Mark all read"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/notifications/{id}/read:
+    post:
+      tags: ["notifications"]
+      summary: "Mark single read"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/push-subscriptions:
+    get:
+      tags: ["notifications"]
+      summary: "List subscriptions"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["notifications"]
+      summary: "Subscribe to push"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/push-subscriptions/{id}:
+    delete:
+      tags: ["notifications"]
+      summary: "Unsubscribe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/storage:
+    get:
+      tags: ["storage"]
+      summary: "Per-user storage (CO-128)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/universes:
+    get:
+      tags: ["universes"]
+      summary: "Bucketed: owned/member/subscribed (CO-191)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/notifications/vapid-public-key:
+    get:
+      tags: ["notifications"]
+      summary: "CO-201 — VAPID public key"
+      responses:
+        "200":
+          description: OK
+  /api/v1/players/{username}:
+    get:
+      tags: ["game"]
+      summary: "Player public profile"
+      parameters:
+        - name: username
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/plugins:
+    get:
+      tags: ["game"]
+      summary: "List plugins"
+      responses:
+        "200":
+          description: OK
+  /api/v1/plugins/{name}/info:
+    get:
+      tags: ["game"]
+      summary: "Plugin manifest info"
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/profile:
+    get:
+      tags: ["game"]
+      summary: "My game profile"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/admin/atividades:
+    get:
+      tags: ["quilombo"]
+      summary: "Activity log"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/admin/resumo:
+    get:
+      tags: ["quilombo"]
+      summary: "Admin summary"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/admin/telemetria:
+    get:
+      tags: ["quilombo"]
+      summary: "Telemetria quilombo"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/admin/usuarios:
+    get:
+      tags: ["quilombo"]
+      summary: "List users"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/admin/usuarios/{id}:
+    put:
+      tags: ["quilombo"]
+      summary: "Update user"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/alterar-pagina-na-web/approve/{run_id}:
+    post:
+      tags: ["quilombo"]
+      summary: "Approve run"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: run_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/alterar-pagina-na-web/preview:
+    post:
+      tags: ["quilombo"]
+      summary: "Preview change"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/alterar-pagina-na-web/revert:
+    post:
+      tags: ["quilombo"]
+      summary: "Revert run"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/alterar-pagina-na-web/runs:
+    get:
+      tags: ["quilombo"]
+      summary: "List web-edit runs"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/auth/cadastro:
+    post:
+      tags: ["quilombo"]
+      summary: "Quilombo registration"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/auth/link-co-account:
+    post:
+      tags: ["quilombo"]
+      summary: "Link to CO account"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/auth/login:
+    post:
+      tags: ["quilombo"]
+      summary: "Quilombo login (user+password)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/comentarios:
+    get:
+      tags: ["quilombo"]
+      summary: "List comments"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["quilombo"]
+      summary: "Post comment (anonymous allowed)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/contato:
+    post:
+      tags: ["quilombo"]
+      summary: "Contact form"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos:
+    get:
+      tags: ["quilombo"]
+      summary: "List eventos"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos/criar:
+    post:
+      tags: ["quilombo"]
+      summary: "Create evento (admin)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos/slug/{slug}:
+    get:
+      tags: ["quilombo"]
+      summary: "Get evento by slug"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos/{id}:
+    get:
+      tags: ["quilombo"]
+      summary: "Get evento by ID"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos/{id}/editar:
+    put:
+      tags: ["quilombo"]
+      summary: "Update evento (admin)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/eventos/{id}/excluir:
+    post:
+      tags: ["quilombo"]
+      summary: "Delete evento (admin)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/fotos/{filename}:
+    get:
+      tags: ["quilombo"]
+      summary: "Serve photo file"
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/membros:
+    get:
+      tags: ["quilombo"]
+      summary: "List membros"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/membros/{usuario}:
+    get:
+      tags: ["quilombo"]
+      summary: "Member public profile"
+      parameters:
+        - name: usuario
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/mensagens:
+    get:
+      tags: ["quilombo"]
+      summary: "My messages"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["quilombo"]
+      summary: "Send message"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/missoes:
+    get:
+      tags: ["quilombo"]
+      summary: "List missoes"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/missoes/criar:
+    post:
+      tags: ["quilombo"]
+      summary: "Create missao (admin)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/missoes/{id}:
+    get:
+      tags: ["quilombo"]
+      summary: "Get missao with participants"
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/missoes/{id}/participacoes/{uid}:
+    put:
+      tags: ["quilombo"]
+      summary: "Approve/reject participation"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: uid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/missoes/{id}/participar:
+    post:
+      tags: ["quilombo"]
+      summary: "Join missao"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/paginas/{slug}:
+    get:
+      tags: ["quilombo"]
+      summary: "Get static page"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/perfil:
+    get:
+      tags: ["quilombo"]
+      summary: "My quilombo profile"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["quilombo"]
+      summary: "Update profile"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/publicacoes:
+    get:
+      tags: ["quilombo"]
+      summary: "List published relatos"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/publicacoes/{slug}:
+    get:
+      tags: ["quilombo"]
+      summary: "Get relato by slug"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/tags:
+    get:
+      tags: ["quilombo"]
+      summary: "All tags"
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/tags/{tag}:
+    get:
+      tags: ["quilombo"]
+      summary: "Relatos by tag"
+      parameters:
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/quilombo/upload/{filename}:
+    get:
+      tags: ["quilombo"]
+      summary: "Serve upload file"
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/search:
+    get:
+      tags: ["entries"]
+      summary: "CO-164 cross-universe semantic search"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/event:
+    post:
+      tags: ["analytics + telemetry"]
+      summary: "Single event"
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/events:
+    post:
+      tags: ["analytics + telemetry"]
+      summary: "Batch (Plausible-style)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/themes/available:
+    get:
+      tags: ["universes"]
+      summary: "List available themes per tier"
+      responses:
+        "200":
+          description: OK
+  /api/v1/themes/{preset}:
+    get:
+      tags: ["universes"]
+      summary: "Compiled CSS for a specific theme preset"
+      parameters:
+        - name: preset
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/uat/changes:
+    get:
+      tags: ["admin"]
+      summary: "CO-45 UAT change list"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/uat/export-patch:
+    post:
+      tags: ["admin"]
+      summary: "Export changes as patch"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes:
+    get:
+      tags: ["universes"]
+      summary: "List universes (public + caller's owned/member)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["universes"]
+      summary: "Create universe"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/apply-template-all:
+    post:
+      tags: ["universes"]
+      summary: "Apply template across all universes"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/available:
+    get:
+      tags: ["universes"]
+      summary: "Check universe slug availability"
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/public:
+    get:
+      tags: ["universes"]
+      summary: "Public universe directory"
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/quilomboaraucaria/stats:
+    get:
+      tags: ["universes"]
+      summary: "Special-cased stats (CO-41)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/search:
+    get:
+      tags: ["universes"]
+      summary: "Search public universes"
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/members:
+    post:
+      tags: ["universes"]
+      summary: "Add member"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/members/{user_id}:
+    delete:
+      tags: ["universes"]
+      summary: "Remove member"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}:
+    get:
+      tags: ["universes"]
+      summary: "Universe info"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["universes"]
+      summary: "Update name/visibility"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["universes"]
+      summary: "Delete universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/apply-template:
+    post:
+      tags: ["universes"]
+      summary: "Apply template universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/assets:
+    get:
+      tags: ["assets"]
+      summary: "List assets in universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["assets"]
+      summary: "Upload asset (drag-and-drop)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/assets/tags:
+    get:
+      tags: ["assets"]
+      summary: "Tag counts"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/assets/{sha256}:
+    get:
+      tags: ["assets"]
+      summary: "Asset metadata"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["assets"]
+      summary: "Delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/assets/{sha256}/tags:
+    post:
+      tags: ["assets"]
+      summary: "Add tags"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/assets/{sha256}/tags/{tag}:
+    delete:
+      tags: ["assets"]
+      summary: "Remove tag"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: sha256
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: tag
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/blob/{*path}:
+    get:
+      tags: ["assets"]
+      summary: "Serve raw blob (PDF viewer fallback)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/branches:
+    post:
+      tags: ["entries"]
+      summary: "Phase 2 — named pointer to state"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/branches/{name}:
+    put:
+      tags: ["entries"]
+      summary: "Advance branch"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/chat/rooms:
+    get:
+      tags: ["chat"]
+      summary: "List rooms in universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["chat"]
+      summary: "Create room (member-only)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/chat/rooms/{room_slug}/members:
+    get:
+      tags: ["chat"]
+      summary: "Room member list"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: room_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/chat/rooms/{room_slug}/messages:
+    get:
+      tags: ["chat"]
+      summary: "Paginated history"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: room_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["chat"]
+      summary: "Post message"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: room_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/chat/rooms/{room_slug}/messages/{msg_id}:
+    patch:
+      tags: ["chat"]
+      summary: "Edit own message"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: room_slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: msg_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["chat"]
+      summary: "Delete own message"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: room_slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: msg_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/cherry-pick:
+    post:
+      tags: ["entries"]
+      summary: "Cherry-pick operation"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/citations:
+    get:
+      tags: ["entries"]
+      summary: "Inbound references"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/citations/orphan-wikilinks:
+    get:
+      tags: ["entries"]
+      summary: "Wikilinks with no target entry"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/claim:
+    post:
+      tags: ["universes"]
+      summary: "Claim anon clone after login"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/clone:
+    post:
+      tags: ["universes"]
+      summary: "Auto-clone template (anonymous flow)"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/config:
+    get:
+      tags: ["universes"]
+      summary: "Universe config"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["universes"]
+      summary: "Update config"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/dev-tasks:
+    get:
+      tags: ["entries"]
+      summary: "CO-272 dev board tasks for dogfooding"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/diff:
+    get:
+      tags: ["entries"]
+      summary: "Diff between op-log positions"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/duplicate:
+    post:
+      tags: ["universes"]
+      summary: "Duplicate as new universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries:
+    get:
+      tags: ["entries"]
+      summary: "List entries (filter by type)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["entries"]
+      summary: "Create entry"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/history:
+    get:
+      tags: ["entries"]
+      summary: "Entry change history"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/popular:
+    get:
+      tags: ["entries"]
+      summary: "Popular entries by view count"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/similar:
+    get:
+      tags: ["entries"]
+      summary: "CO-164 — semantic similar"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/tags:
+    get:
+      tags: ["entries"]
+      summary: "Tag counts"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/tree:
+    get:
+      tags: ["entries"]
+      summary: "Hierarchical tree"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/entries/{*path}:
+    get:
+      tags: ["entries"]
+      summary: "Get entry by path"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["entries"]
+      summary: "Update entry"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["entries"]
+      summary: "Delete entry"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/graph:
+    get:
+      tags: ["entries"]
+      summary: "CO-335 — entry relation graph (nodes + edges)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/invitations:
+    get:
+      tags: ["universes"]
+      summary: "List universe invitations"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["universes"]
+      summary: "Create invitation (CO-188)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/jobs/doc-gen:
+    post:
+      tags: ["universes"]
+      summary: "Submit doc-generation job"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/jobs/doc-gen/last-error:
+    get:
+      tags: ["universes"]
+      summary: "Last doc-gen job error"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/manifest:
+    get:
+      tags: ["entries"]
+      summary: "Universe manifest (all entries)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/members:
+    get:
+      tags: ["universes"]
+      summary: "List members"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/merges:
+    post:
+      tags: ["entries"]
+      summary: "Merge proposal"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/op-diff:
+    get:
+      tags: ["entries"]
+      summary: "Per-op diff view"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/oplog:
+    get:
+      tags: ["entries"]
+      summary: "Full op-log with payloads"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/ops:
+    get:
+      tags: ["entries"]
+      summary: "List operations in op-log"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/projects:
+    get:
+      tags: ["universes"]
+      summary: "List projects in universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/promote:
+    post:
+      tags: ["entries"]
+      summary: "Promote branch tip"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/proposals:
+    post:
+      tags: ["entries"]
+      summary: "Phase 3 — state-snapshot proposal"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/proposals/decide:
+    post:
+      tags: ["entries"]
+      summary: "Merge/reject inline proposal"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/proposals/inline:
+    post:
+      tags: ["entries"]
+      summary: "Lightweight inline proposal (non-owner)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/query:
+    get:
+      tags: ["entries"]
+      summary: "Query DSL (CO-74)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["entries"]
+      summary: "CO-244 SQL query (read-only, auth required)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/reindex:
+    post:
+      tags: ["universes"]
+      summary: "Rebuild search index"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/relations/inbound:
+    get:
+      tags: ["entries"]
+      summary: "CO-153 inbound typed FKs"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/relations/outbound:
+    get:
+      tags: ["entries"]
+      summary: "CO-153 outbound typed FKs"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/replay:
+    get:
+      tags: ["entries"]
+      summary: "Replay op-log to a point"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/revert:
+    post:
+      tags: ["entries"]
+      summary: "Revert to prior state"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/source:
+    patch:
+      tags: ["universes"]
+      summary: "Patch universe source config"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/states:
+    post:
+      tags: ["entries"]
+      summary: "CO-native versioning Phase 1 — snapshot"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/states/diff:
+    get:
+      tags: ["entries"]
+      summary: "Diff between two states"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/storage:
+    get:
+      tags: ["storage"]
+      summary: "Per-universe breakdown"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/subscribe:
+    post:
+      tags: ["universes"]
+      summary: "Subscribe to universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["universes"]
+      summary: "Unsubscribe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/subscribe/pin:
+    put:
+      tags: ["universes"]
+      summary: "Pin subscription"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["universes"]
+      summary: "Unpin subscription"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/subscribers:
+    get:
+      tags: ["universes"]
+      summary: "List subscribers"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/subscription:
+    get:
+      tags: ["universes"]
+      summary: "My subscription state"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/theme.css:
+    get:
+      tags: ["universes"]
+      summary: "Compiled theme CSS"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/:
+    get:
+      tags: ["vault"]
+      summary: "List notes/files"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/clip:
+    post:
+      tags: ["vault"]
+      summary: "Web clipper ingest"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/search:
+    post:
+      tags: ["vault"]
+      summary: "Full-text search"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/tags:
+    get:
+      tags: ["vault"]
+      summary: "Tag counts"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/tree:
+    get:
+      tags: ["vault"]
+      summary: "File tree"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/vault/{*path}:
+    get:
+      tags: ["vault"]
+      summary: "File CRUD (Obsidian REST shape; PATCH for partial updates)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["vault"]
+      summary: "Create file at path"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["vault"]
+      summary: "File CRUD (Obsidian REST shape; PATCH for partial updates)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["vault"]
+      summary: "File CRUD (Obsidian REST shape; PATCH for partial updates)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["vault"]
+      summary: "File CRUD (Obsidian REST shape; PATCH for partial updates)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{u}/references:
+    get:
+      tags: ["references"]
+      summary: "List reference cards"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["references"]
+      summary: "Create reference card"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{u}/references/broken-cards:
+    get:
+      tags: ["references"]
+      summary: "Cards with missing blob/file"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{u}/references/orphan-blobs:
+    get:
+      tags: ["references"]
+      summary: "Blobs with no reference card"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{u}/references/works:
+    get:
+      tags: ["references"]
+      summary: "List works"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{u}/references/{*path}:
+    get:
+      tags: ["references"]
+      summary: "Get reference card"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["references"]
+      summary: "Update reference card"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["references"]
+      summary: "Delete reference card"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: u
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/users/{user_id}/block:
+    post:
+      tags: ["dm"]
+      summary: "Block user"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["dm"]
+      summary: "Unblock"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/wallet:
+    get:
+      tags: ["game"]
+      summary: "My wallet"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /auth/co-handover:
+    get:
+      tags: ["auth"]
+      summary: "CO-206 — issue handover token, server-side redirect"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /gestao:
+    get:
+      tags: ["gestao"]
+      summary: "CO-361 — gestao SPA shell page"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /oauth/authorize:
+    get:
+      tags: ["auth"]
+      summary: "OAuth2 authorization code flow"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /oauth/token:
+    post:
+      tags: ["auth"]
+      summary: "Token exchange"
+      responses:
+        "200":
+          description: OK
+  /oauth/userinfo:
+    get:
+      tags: ["auth"]
+      summary: "OIDC userinfo"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /v1/log-drains/vercel/{universe_id}:
+    post:
+      tags: ["admin"]
+      summary: "CO-124 Vercel log drain receiver"
+      security:
+        - sharedSecret: []
+      parameters:
+        - name: universe_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
 
 components:
   securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: session
+      description: JWT session cookie (set via /api/v1/auth/verify or password-login)
+    apiToken:
+      type: http
+      scheme: bearer
+      description: Long-lived API token (created via POST /api/v1/auth/token)
     bearerJWT:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: Token JWT obtido via login (comunidade ou email)
+      description: JWT token via Authorization header (legacy; prefer sessionCookie)
     githubPAT:
       type: http
       scheme: bearer
       description: GitHub Personal Access Token (gestão administrativa)
+    sharedSecret:
+      type: apiKey
+      in: header
+      name: X-Shared-Secret
+      description: Shared secret for server-to-server endpoints (e.g. log drains)
 
   schemas:
     # --- Erros ---
@@ -767,1038 +4528,3 @@ components:
           type: object
           additionalProperties: true
 
-# ============================================================
-# PATHS — organizados por nível de acesso
-# ============================================================
-
-paths:
-
-  # ========================================
-  # PÚBLICO — Sem autenticação
-  # ========================================
-
-  /api/health:
-    get:
-      tags: ["CO: Saúde"]
-      summary: Verificar status do servidor
-      operationId: healthCheck
-      responses:
-        "200":
-          description: Servidor operacional
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-
-  /api/v1/health:
-    get:
-      tags: ["CO: Saúde"]
-      summary: Verificar saúde do serviço de jogos
-      operationId: gameHealthCheck
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/HealthResponse"
-
-  # --- Conteúdo Público (Quilombo) ---
-
-  /api/v1/quilombo/publicacoes:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar relatos publicados
-      operationId: listarRelatos
-      responses:
-        "200":
-          description: Lista de relatos (posts) publicados, ordenados por data
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-
-  /api/v1/quilombo/publicacoes/{slug}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Obter relato por slug
-      operationId: obterRelato
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Conteúdo completo do relato com frontmatter e corpo
-          content:
-            application/json:
-              schema:
-                type: object
-        "404":
-          description: Relato não encontrado
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-
-  /api/v1/quilombo/paginas/{slug}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Obter página estática
-      operationId: obterPagina
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Página com frontmatter e corpo markdown
-          content:
-            application/json:
-              schema:
-                type: object
-        "404":
-          description: Página não encontrada
-
-  /api/v1/quilombo/eventos:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar eventos da comunidade
-      operationId: listarEventos
-      responses:
-        "200":
-          description: Lista de eventos ordenados por data
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Evento"
-
-  /api/v1/quilombo/eventos/{id}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Obter detalhes do evento
-      operationId: obterEvento
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Evento"
-        "404":
-          description: Evento não encontrado
-
-  /api/v1/quilombo/missoes:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar missões da comunidade
-      operationId: listarMissoes
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Missao"
-
-  /api/v1/quilombo/missoes/{id}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Obter missão com lista de participantes
-      operationId: obterMissao
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Missão com campo extra "participacoes"
-          content:
-            application/json:
-              schema:
-                type: object
-
-  /api/v1/quilombo/membros:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar membros da comunidade
-      operationId: listarMembros
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Membro"
-
-  /api/v1/quilombo/membros/{usuario}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Obter perfil público do membro
-      operationId: obterMembro
-      parameters:
-        - name: usuario
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Membro"
-        "404":
-          description: Membro não encontrado
-
-  /api/v1/quilombo/tags:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar todas as tags
-      operationId: listarTags
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: string
-
-  /api/v1/quilombo/tags/{tag}:
-    get:
-      tags: ["Quilombo: Conteúdo"]
-      summary: Listar relatos com tag específica
-      operationId: relatosPorTag
-      parameters:
-        - name: tag
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  type: object
-
-  # --- Comentários (público) ---
-
-  /api/v1/quilombo/comentarios:
-    get:
-      tags: ["Quilombo: Comentários"]
-      summary: Listar comentários
-      operationId: listarComentarios
-      parameters:
-        - name: relato
-          in: query
-          schema:
-            type: string
-          description: Filtrar por slug do relato
-        - name: evento
-          in: query
-          schema:
-            type: integer
-          description: Filtrar por ID do evento
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Comentario"
-    post:
-      tags: ["Quilombo: Comentários"]
-      summary: Criar comentário (anônimo permitido)
-      operationId: criarComentario
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarComentario"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Comentario"
-        "400":
-          description: Conteúdo inválido (vazio ou >2000 caracteres)
-
-  /api/v1/quilombo/contato:
-    post:
-      tags: ["Quilombo: Contato"]
-      summary: Enviar mensagem de contato (anônimo)
-      operationId: enviarContato
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarMensagem"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Mensagem"
-
-  # ========================================
-  # JWT — Autenticação necessária
-  # ========================================
-
-  # --- Auth ---
-
-  /api/v1/quilombo/auth/login:
-    post:
-      tags: ["Quilombo: Auth"]
-      summary: Login com usuário e senha
-      operationId: loginQuilombo
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/LoginUsuario"
-      responses:
-        "200":
-          description: JWT token + dados do usuário
-          headers:
-            Set-Cookie:
-              description: "session={jwt}; HttpOnly; SameSite=Strict"
-              schema:
-                type: string
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LoginResponse"
-        "401":
-          description: Credenciais inválidas
-        "429":
-          description: Muitas tentativas (rate limited)
-
-  /api/v1/quilombo/auth/cadastro:
-    post:
-      tags: ["Quilombo: Auth"]
-      summary: Registrar novo membro
-      operationId: cadastroQuilombo
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarUsuario"
-      responses:
-        "201":
-          description: Conta criada + JWT
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LoginResponse"
-        "400":
-          description: Dados inválidos
-        "409":
-          description: Usuário já existe
-
-  /api/v1/auth/login:
-    post:
-      tags: ["CO: Auth Email"]
-      summary: Solicitar código de verificação por email
-      operationId: loginEmail
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email]
-              properties:
-                email:
-                  type: string
-                  format: email
-      responses:
-        "200":
-          description: Código enviado (se email cadastrado)
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  message:
-                    type: string
-
-  /api/v1/auth/verify:
-    post:
-      tags: ["CO: Auth Email"]
-      summary: Verificar código e obter JWT
-      operationId: verificarCodigo
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [email, code]
-              properties:
-                email:
-                  type: string
-                code:
-                  type: string
-                  minLength: 6
-                  maxLength: 6
-      responses:
-        "200":
-          description: JWT emitido
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  user_id:
-                    type: string
-                  email:
-                    type: string
-                  display_name:
-                    type: string
-                  expires_at:
-                    type: string
-                    format: date-time
-
-  # --- Perfil (JWT) ---
-
-  /api/v1/quilombo/perfil:
-    get:
-      tags: ["Quilombo: Perfil"]
-      summary: Obter meu perfil
-      operationId: obterPerfil
-      security:
-        - bearerJWT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Usuario"
-        "401":
-          description: Não autenticado
-    put:
-      tags: ["Quilombo: Perfil"]
-      summary: Atualizar meu perfil
-      operationId: atualizarPerfil
-      security:
-        - bearerJWT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarPerfil"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Usuario"
-
-  # --- Missões (JWT) ---
-
-  /api/v1/quilombo/missoes/criar:
-    post:
-      tags: ["Quilombo: Missões"]
-      summary: Criar nova missão
-      operationId: criarMissao
-      security:
-        - bearerJWT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarMissao"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Missao"
-        "403":
-          description: Sem permissão
-
-  /api/v1/quilombo/missoes/{id}/participar:
-    post:
-      tags: ["Quilombo: Missões"]
-      summary: Participar de uma missão
-      operationId: participarMissao
-      security:
-        - bearerJWT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Participacao"
-        "404":
-          description: Missão não encontrada
-        "409":
-          description: Já participa desta missão
-
-  /api/v1/quilombo/missoes/{id}/participacoes/{uid}:
-    put:
-      tags: ["Quilombo: Missões"]
-      summary: Aprovar ou rejeitar participação
-      description: Apenas o criador da missão ou admin pode alterar
-      operationId: atualizarParticipacao
-      security:
-        - bearerJWT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-        - name: uid
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarParticipacao"
-      responses:
-        "200":
-          description: Status atualizado
-        "403":
-          description: Sem permissão
-
-  # --- Eventos (JWT admin) ---
-
-  /api/v1/quilombo/eventos/criar:
-    post:
-      tags: ["Quilombo: Admin"]
-      summary: Criar evento (admin)
-      operationId: criarEventoAdmin
-      security:
-        - bearerJWT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarEvento"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Evento"
-        "403":
-          description: Apenas admin
-
-  /api/v1/quilombo/eventos/{id}/editar:
-    put:
-      tags: ["Quilombo: Admin"]
-      summary: Atualizar evento (admin)
-      operationId: atualizarEventoAdmin
-      security:
-        - bearerJWT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarEvento"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Evento"
-
-  /api/v1/quilombo/eventos/{id}/excluir:
-    post:
-      tags: ["Quilombo: Admin"]
-      summary: Excluir evento (admin)
-      operationId: excluirEventoAdmin
-      security:
-        - bearerJWT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "204":
-          description: Evento excluído
-
-  # --- Mensagens (JWT) ---
-
-  /api/v1/quilombo/mensagens:
-    get:
-      tags: ["Quilombo: Mensagens"]
-      summary: Listar minhas mensagens
-      operationId: listarMensagens
-      security:
-        - bearerJWT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Mensagem"
-    post:
-      tags: ["Quilombo: Mensagens"]
-      summary: Enviar mensagem
-      operationId: enviarMensagem
-      security:
-        - bearerJWT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarMensagem"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Mensagem"
-
-  # --- Admin (JWT admin) ---
-
-  /api/v1/quilombo/admin/atividades:
-    get:
-      tags: ["Quilombo: Admin"]
-      summary: Listar log de atividades (admin)
-      operationId: listarAtividades
-      security:
-        - bearerJWT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/Atividade"
-        "403":
-          description: Apenas admin
-
-  # ========================================
-  # GITHUB — Gestão administrativa
-  # ========================================
-
-  /api/v1/gestao/validar:
-    post:
-      tags: ["CO: Gestão - Publicação"]
-      summary: Validar frontmatter YAML de conteúdo markdown
-      operationId: validarConteudo
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PublicarRequest"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ValidarResponse"
-
-  /api/v1/gestao/publicar:
-    post:
-      tags: ["CO: Gestão - Publicação"]
-      summary: Publicar arquivo markdown no universo
-      operationId: publicarConteudo
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PublicarRequest"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PublicarResponse"
-        "400":
-          description: Validação falhou
-
-  /api/v1/gestao/relatos:
-    get:
-      tags: ["CO: Gestão - Relatos"]
-      summary: Listar todos os relatos
-      operationId: gestaoListarRelatos
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConteudoResumo"
-    post:
-      tags: ["CO: Gestão - Relatos"]
-      summary: Criar relato
-      operationId: gestaoCriarRelato
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarConteudo"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-        "409":
-          description: Relato com este ID já existe
-
-  /api/v1/gestao/relatos/{id}:
-    put:
-      tags: ["CO: Gestão - Relatos"]
-      summary: Atualizar relato
-      operationId: gestaoAtualizarRelato
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarConteudo"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-        "404":
-          description: Relato não encontrado
-    delete:
-      tags: ["CO: Gestão - Relatos"]
-      summary: Excluir relato
-      operationId: gestaoExcluirRelato
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Relato excluído
-
-  /api/v1/gestao/eventos:
-    get:
-      tags: ["CO: Gestão - Eventos"]
-      summary: Listar todos os eventos
-      operationId: gestaoListarEventos
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConteudoResumo"
-    post:
-      tags: ["CO: Gestão - Eventos"]
-      summary: Criar evento
-      operationId: gestaoCriarEvento
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarConteudo"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-
-  /api/v1/gestao/eventos/{id}:
-    put:
-      tags: ["CO: Gestão - Eventos"]
-      summary: Atualizar evento
-      operationId: gestaoAtualizarEvento
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarConteudo"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-    delete:
-      tags: ["CO: Gestão - Eventos"]
-      summary: Excluir evento
-      operationId: gestaoExcluirEvento
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Evento excluído
-
-  /api/v1/gestao/membros:
-    get:
-      tags: ["CO: Gestão - Membros"]
-      summary: Listar todos os membros
-      operationId: gestaoListarMembros
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConteudoResumo"
-    post:
-      tags: ["CO: Gestão - Membros"]
-      summary: Criar membro
-      operationId: gestaoCriarMembro
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarConteudo"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-
-  /api/v1/gestao/membros/{id}:
-    put:
-      tags: ["CO: Gestão - Membros"]
-      summary: Atualizar membro
-      operationId: gestaoAtualizarMembro
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarConteudo"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-    delete:
-      tags: ["CO: Gestão - Membros"]
-      summary: Excluir membro
-      operationId: gestaoExcluirMembro
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Membro excluído
-
-  /api/v1/gestao/quadro:
-    get:
-      tags: ["CO: Gestão - Quadro"]
-      summary: Listar missões do quadro
-      operationId: gestaoListarQuadro
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/ConteudoResumo"
-    post:
-      tags: ["CO: Gestão - Quadro"]
-      summary: Criar missão no quadro
-      operationId: gestaoCriarMissao
-      security:
-        - githubPAT: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CriarConteudo"
-      responses:
-        "201":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-
-  /api/v1/gestao/quadro/{id}:
-    put:
-      tags: ["CO: Gestão - Quadro"]
-      summary: Atualizar missão
-      operationId: gestaoAtualizarMissao
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AtualizarConteudo"
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ConteudoResumo"
-    delete:
-      tags: ["CO: Gestão - Quadro"]
-      summary: Excluir missão
-      operationId: gestaoExcluirMissao
-      security:
-        - githubPAT: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "204":
-          description: Missão excluída
-
-  /api/v1/gestao/manifesto:
-    get:
-      tags: ["CO: Gestão - Manifesto"]
-      summary: Obter manifesto Iceberg atual
-      description: Retorna o índice de todos os arquivos do universo com partições e estatísticas
-      operationId: obterManifesto
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Manifest"
-
-  /api/v1/gestao/manifesto/reconstruir:
-    post:
-      tags: ["CO: Gestão - Manifesto"]
-      summary: Reconstruir manifesto a partir do filesystem
-      operationId: reconstruirManifesto
-      security:
-        - githubPAT: []
-      responses:
-        "200":
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Manifest"

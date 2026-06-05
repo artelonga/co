@@ -1,0 +1,21 @@
+name: OpenAPI drift check
+
+on:
+  pull_request:
+    paths:
+      - 'co-web/src/**/*_routes.rs'
+      - 'docs/architecture/api-catalog.md'
+      - 'co-web/openapi.yaml'
+      - 'co-web/openapi-components.yaml'
+      - 'co-web/scripts/generate-openapi.ts'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: cd co-web && npm install --no-audit --no-fund
+      - run: cd co-web && npm run openapi:check
