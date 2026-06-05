@@ -868,6 +868,21 @@ impl Storage {
                 "public-subscribable",
                 Some("artelonga"),
             ),
+            // CO-364: external OSS projects surfaced as study/integration universes.
+            (
+                "odysseus",
+                "Odysseus",
+                "Self-hosted AI workspace — open-source reference (pewdiepie-archdaemon/odysseus)",
+                "public-subscribable",
+                None,
+            ),
+            (
+                "claude-code",
+                "Claude Code",
+                "Anthropic's agentic coding CLI — upstream changelog + docs",
+                "public-subscribable",
+                None,
+            ),
         ] {
             // 1.54.0: INSERT OR IGNORE only — no boot-reconcile UPDATE. The
             // pre-1.54 reconcile stomped user-set name/description/visibility
@@ -933,6 +948,21 @@ impl Storage {
                 "https://github.com/artelonga/artelonga",
                 "main",
                 Some("[\"neuro\"]"),
+                false,
+            ),
+            // CO-364: OSS reference universes — read-only mirrors for study/integration.
+            (
+                "odysseus",
+                "https://github.com/pewdiepie-archdaemon/odysseus",
+                "dev",
+                Some("[\"docs\",\"README.md\",\"CHANGELOG.md\"]"),
+                false,
+            ),
+            (
+                "claude-code",
+                "https://github.com/anthropics/claude-code",
+                "main",
+                Some("[\"docs\",\"README.md\",\"CHANGELOG.md\"]"),
                 false,
             ),
         ] {
