@@ -1362,6 +1362,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/gestao/schema-status:
+    get:
+      tags: ["gestao"]
+      summary: "CO-361 — current schema version + app version"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/gestao/validar:
     post:
       tags: ["gestao"]
@@ -3798,6 +3807,15 @@ paths:
     get:
       tags: ["auth"]
       summary: "CO-206 — issue handover token, server-side redirect"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /gestao:
+    get:
+      tags: ["gestao"]
+      summary: "CO-361 — gestao SPA shell page"
       security:
         - sessionCookie: []
       responses:

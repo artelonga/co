@@ -343,6 +343,8 @@ Content management via GitHub PAT. Routes under `/api/v1/gestao/` gated by `GEST
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
+| GET | `/api/v1/gestao/schema-status` | admin (gh) | CO-361 — current schema version + app version |
+| GET | `/gestao` | admin (gh) | CO-361 — gestao SPA shell page |
 | POST | `/api/v1/gestao/webhooks` | admin (gh) | CO-168 register outbound webhook |
 | GET | `/api/v1/gestao/webhooks` | admin (gh) | List webhooks |
 | PUT | `/api/v1/gestao/webhooks/{id}` | admin (gh) | Update |
