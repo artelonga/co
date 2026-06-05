@@ -78,6 +78,7 @@ pub fn run_startup_seeds(config: &WebConfig) {
         UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/mbya', content_subdirs='["docs","content"]' WHERE key='mbya' AND local_repo_path IS NULL;
+        UPDATE universes SET remote_url='https://github.com/artelonga/mbya', remote_ref='main' WHERE key='mbya' AND remote_url IS NULL;
         UPDATE universes SET local_repo_path='~/projects/topologia', content_subdirs='["docs","content"]' WHERE key='topologia' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/yuri', content_subdirs='[""]', anon_published_only=1 WHERE key='yuri' AND local_repo_path IS NULL;
         "#,
