@@ -596,6 +596,15 @@ pub struct MeResponse {
     /// CO-198: DM privacy policy (everyone | shared-universe | nobody).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dm_policy: Option<String>,
+    /// CO-370: linked lead id (NULL if user has no lead record).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_id: Option<i64>,
+    /// CO-370: status of the linked lead (new | triaged | in_progress | closed).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_status: Option<String>,
+    /// CO-370: acquisition channel that created the lead (lead_form | signup | invitation | manual).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lead_source: Option<String>,
 }
 
 /// CO-173: per-universe metadata bag for the authenticated user.

@@ -2319,6 +2319,70 @@ impl Storage {
                 )
                 .expect("migration v60: atividades + schema_versoes");
         }
+
+        if current_version < 61 {
+            // CO-370: lead-user join — leads side.
+            // Adds user_id (FK → users.id) and source so every lead knows
+            // which acquisition channel created it and which user it belongs to.
+            use crate::storage::schema::ensure_column;
+            ensure_column(&self.conn, "leads", "user_id", "TEXT")
+                .expect("CO-370 v61: leads.user_id");
+            ensure_column(&self.conn, "leads", "source", "TEXT DEFAULT 'lead_form'")
+                .expect("CO-370 v61: leads.source");
+            self.conn
+                .execute_batch(
+                    "CREATE INDEX IF NOT EXISTS idx_leads_email    ON leads(email);
+                     CREATE INDEX IF NOT EXISTS idx_leads_user_id  ON leads(user_id);",
+                )
+                .expect("CO-370 v61: leads indexes");
+            crate::record_migration!(
+                self.conn,
+                61,
+                "CO-370: leads.user_id + leads.source + indexes"
+            );
+        }
+
+        if current_version < 62 {
+            // CO-370: lead-user join — users side.
+            // Adds lead_id (FK → leads.id), status, and activated_at to users.
+            // Backfills both FKs by matching existing records on lowercased email.
+            use crate::storage::schema::ensure_column;
+            ensure_column(&self.conn, "users", "lead_id", "INTEGER")
+                .expect("CO-370 v62: users.lead_id");
+            ensure_column(&self.conn, "users", "status", "TEXT DEFAULT 'active'")
+                .expect("CO-370 v62: users.status");
+            ensure_column(&self.conn, "users", "activated_at", "TEXT")
+                .expect("CO-370 v62: users.activated_at");
+            self.conn
+                .execute_batch("CREATE INDEX IF NOT EXISTS idx_users_lead_id ON users(lead_id);")
+                .expect("CO-370 v62: users.lead_id index");
+            // Backfill: match existing leads → users by email (first lead wins per user).
+            self.conn
+                .execute_batch(
+                    "UPDATE leads
+                       SET user_id = (
+                         SELECT id FROM users
+                         WHERE lower(users.email) = lower(leads.email)
+                         LIMIT 1
+                       )
+                     WHERE leads.email IS NOT NULL AND leads.user_id IS NULL;
+
+                     UPDATE users
+                       SET lead_id = (
+                         SELECT id FROM leads
+                         WHERE lower(leads.email) = lower(users.email)
+                         ORDER BY leads.id ASC
+                         LIMIT 1
+                       )
+                     WHERE users.email IS NOT NULL AND users.lead_id IS NULL;",
+                )
+                .expect("CO-370 v62: backfill email join");
+            crate::record_migration!(
+                self.conn,
+                62,
+                "CO-370: users.lead_id + users.status + users.activated_at + backfill"
+            );
+        }
     }
 }
 

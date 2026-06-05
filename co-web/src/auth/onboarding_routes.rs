@@ -356,9 +356,19 @@ async fn onboard_verify_handler(
     let user = match oc.intent.as_str() {
         "login" => {
             let storage = lock_storage(&state);
-            storage
+            let u = storage
                 .get_user_by_email(&email_normalized)
-                .ok_or_else(|| AppError::Internal("User not found for login intent".into()))?
+                .ok_or_else(|| AppError::Internal("User not found for login intent".into()))?;
+
+            // CO-370: activate pre-registered shell users on first verified login.
+            let now_str = Utc::now().to_rfc3339();
+            let _ = storage.conn().execute(
+                "UPDATE users SET status = 'active', activated_at = ?1 \
+                 WHERE id = ?2 AND status = 'pre-registered'",
+                rusqlite::params![now_str, u.id],
+            );
+
+            u
         }
         _ => {
             // "create" — or any unexpected intent is treated as create.
@@ -399,8 +409,9 @@ async fn onboard_verify_handler(
                     .conn()
                     .execute(
                         "INSERT INTO users \
-                         (id, usuario, email, display_name, tier, created_at, origin) \
-                         VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5)",
+                         (id, usuario, email, display_name, tier, created_at, origin, \
+                          status, activated_at) \
+                         VALUES (?1, ?2, ?3, ?2, 'player', ?4, ?5, 'active', ?4)",
                         rusqlite::params![id, usuario, email_normalized, now_str, oc.origin],
                     )
                     .map_err(|e| AppError::Internal(format!("INSERT users: {e}")))?;
@@ -433,6 +444,78 @@ async fn onboard_verify_handler(
                 &state,
                 crate::telemetry::CrudEvent {
                     kind: "auth.signup",
+                    universe: String::new(),
+                    list: Some("onboard-email".to_string()),
+                    key: Some(id.clone()),
+                    actor: Some(id.clone()),
+                    session_id: None,
+                    extra: None,
+                },
+            );
+
+            // CO-370: upsert a signup-sourced lead for this email.
+            // Skip if a lead already exists for this email (idempotent).
+            {
+                let now_str = Utc::now().to_rfc3339();
+                let storage = lock_storage(&state);
+                let lead_id: Option<i64> = storage
+                    .conn()
+                    .query_row(
+                        "SELECT id FROM leads WHERE lower(email) = lower(?1) LIMIT 1",
+                        rusqlite::params![email_normalized],
+                        |r| r.get(0),
+                    )
+                    .ok();
+
+                let lead_id = if let Some(lid) = lead_id {
+                    // Link the new user to the pre-existing lead.
+                    let _ = storage.conn().execute(
+                        "UPDATE leads SET user_id = ?1 WHERE id = ?2 AND user_id IS NULL",
+                        rusqlite::params![id, lid],
+                    );
+                    let _ = storage.conn().execute(
+                        "UPDATE users SET lead_id = ?1 WHERE id = ?2 AND lead_id IS NULL",
+                        rusqlite::params![lid, id],
+                    );
+                    lid
+                } else {
+                    // Create a new signup-sourced lead linked to the new user.
+                    let res = storage.conn().execute(
+                        "INSERT OR IGNORE INTO leads \
+                         (created_at, updated_at, email, mensagem, status, priority, \
+                          source, user_id) \
+                         VALUES (?1, ?1, ?2, '', 'new', 'normal', 'signup', ?3)",
+                        rusqlite::params![now_str, email_normalized, id],
+                    );
+                    let new_lid = res
+                        .ok()
+                        .filter(|&n| n > 0)
+                        .map(|_| storage.conn().last_insert_rowid());
+                    if let Some(new_lid) = new_lid {
+                        let _ = storage.conn().execute(
+                            "UPDATE users SET lead_id = ?1 WHERE id = ?2 AND lead_id IS NULL",
+                            rusqlite::params![new_lid, id],
+                        );
+                        new_lid
+                    } else {
+                        0
+                    }
+                };
+
+                // Auto-advance signup-sourced leads from new → in_progress.
+                if lead_id > 0 {
+                    let _ = storage.conn().execute(
+                        "UPDATE leads SET status = 'in_progress', updated_at = ?1 \
+                         WHERE id = ?2 AND source = 'signup' AND status = 'new'",
+                        rusqlite::params![now_str, lead_id],
+                    );
+                }
+            }
+
+            crate::telemetry::emit_crud_event(
+                &state,
+                crate::telemetry::CrudEvent {
+                    kind: "signup.captured",
                     universe: String::new(),
                     list: Some("onboard-email".to_string()),
                     key: Some(id.clone()),

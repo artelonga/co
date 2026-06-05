@@ -345,6 +345,25 @@ pub(super) async fn me_handler(
                 |row| row.get(0),
             )
             .ok();
+        // CO-370: include lead identity for funnel attribution.
+        let (lead_id, lead_status, lead_source) = storage
+            .conn()
+            .query_row(
+                "SELECT l.id, l.status, l.source \
+                 FROM leads l \
+                 INNER JOIN users u ON u.lead_id = l.id \
+                 WHERE u.id = ?1 \
+                 LIMIT 1",
+                rusqlite::params![user.id],
+                |r| {
+                    Ok((
+                        r.get::<_, Option<i64>>(0)?,
+                        r.get::<_, Option<String>>(1)?,
+                        r.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap_or((None, None, None));
         return Ok(Json(MeResponse {
             user_id: user.id,
             email: user.email,
@@ -352,6 +371,9 @@ pub(super) async fn me_handler(
             tier: user.tier,
             universes,
             dm_policy,
+            lead_id,
+            lead_status,
+            lead_source,
         }));
     }
 
@@ -371,6 +393,9 @@ pub(super) async fn me_handler(
             tier: u.papel.to_string(),
             universes,
             dm_policy: None,
+            lead_id: None,
+            lead_status: None,
+            lead_source: None,
         }));
     }
 
