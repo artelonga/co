@@ -2275,5 +2275,85 @@ impl Storage {
                 )
                 .expect("migration v59: graph_views");
         }
+
+        if current_version < 60 {
+            // CO-361: atividades audit log + schema_versoes migration history.
+            // `atividades` records every meaningful mutation with a before/after diff
+            // (sensitive keys redacted), typed acao/tipo enums, hashed IP, and the
+            // app version that generated the event.
+            // `schema_versoes` records each migration step with the app version that
+            // applied it. Existing versions 1..59 are backfilled from schema_version
+            // with descricao='(backfilled)' and versao_app='unknown'.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS atividades (
+                       id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                       acao        TEXT NOT NULL CHECK (acao IN ('criar','ler','atualizar','excluir','login','logout')),
+                       entidade    TEXT NOT NULL,
+                       entidade_id TEXT,
+                       conteudo    TEXT,
+                       tipo        TEXT NOT NULL CHECK (tipo IN ('sucesso','erro','navegacao','sistema')),
+                       user_id     TEXT,
+                       ip_hash     TEXT,
+                       user_agent  TEXT,
+                       versao_app  TEXT,
+                       criado_em   TEXT NOT NULL DEFAULT (datetime('now'))
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_atividades_criado ON atividades(criado_em DESC);
+                     CREATE INDEX IF NOT EXISTS idx_atividades_user   ON atividades(user_id, criado_em DESC);
+                     CREATE INDEX IF NOT EXISTS idx_atividades_acao   ON atividades(acao, entidade, criado_em DESC);
+
+                     CREATE TABLE IF NOT EXISTS schema_versoes (
+                       versao      INTEGER PRIMARY KEY,
+                       descricao   TEXT NOT NULL,
+                       versao_app  TEXT NOT NULL,
+                       applied_at  TEXT NOT NULL DEFAULT (datetime('now'))
+                     );
+
+                     INSERT OR IGNORE INTO schema_versoes (versao, descricao, versao_app)
+                       SELECT version, '(backfilled)', 'unknown' FROM schema_version;
+
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (60);
+                     INSERT OR IGNORE INTO schema_versoes (versao, descricao, versao_app)
+                       VALUES (60, 'atividades audit log + schema_versoes', 'unknown');",
+                )
+                .expect("migration v60: atividades + schema_versoes");
+        }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Helper macro for future migrations (v60+)
+// ---------------------------------------------------------------------------
+
+/// Record a migration step in both `schema_version` and `schema_versoes`.
+///
+/// Usage (inside the `Migrations` impl block):
+/// ```ignore
+/// record_migration!(self, 60, "short description of what this migration does");
+/// ```
+///
+/// Going forward, every new migration MUST use this macro instead of a bare
+/// `INSERT INTO schema_version` so that `schema_versoes` stays in sync.
+#[macro_export]
+macro_rules! record_migration {
+    ($conn:expr, $version:expr, $desc:expr) => {
+        $conn
+            .execute(
+                "INSERT OR IGNORE INTO schema_version (version) VALUES (?1)",
+                rusqlite::params![$version],
+            )
+            .unwrap_or_else(|e| {
+                panic!("record_migration v{}: schema_version insert: {e}", $version)
+            });
+        $conn
+            .execute(
+                "INSERT OR IGNORE INTO schema_versoes (versao, descricao, versao_app) \
+                 VALUES (?1, ?2, ?3)",
+                rusqlite::params![$version, $desc, env!("CARGO_PKG_VERSION")],
+            )
+            .unwrap_or_else(|e| {
+                panic!("record_migration v{}: schema_versoes insert: {e}", $version)
+            });
+    };
 }

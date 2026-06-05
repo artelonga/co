@@ -1,5 +1,6 @@
 pub mod ab;
 pub mod ab_routes;
+pub mod atividade;
 pub mod baseline;
 pub mod cache;
 pub mod config;
