@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-347",
+  "title": "Surface missing content universes on prod — yuri / retro-umarizal / yoruba / neuro",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-347.md",
+  "branch": "feat/CO-347-surface-missing-content-universes-on-pro",
+  "merge_sha": "25023af5c88fb825bbc45d2b39dd5e6077311a16",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/146",
+    "number": 146
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T14:01:26Z",
+  "files_changed": 3,
+  "lines_added": 244,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:storage",
+    "module:sync"
+  ],
+  "changelog_entry": "## CO-347 — Surface missing content universes on prod — yuri / retro-umarizal / yoruba / neuro\n\nAdded four new universe rows to `seed_admin_content_universes`: yuri, retro-umarizal, yoruba, and neuro.\nEach row is seeded with `remote_url`, `remote_ref='main'`, and appropriate `content_subdirs` so the\nCO-337 15-minute sync task can pull their content automatically on first boot and every subsequent cycle.\n\nThe backfill UPDATE uses `WHERE remote_url IS NULL` as an idempotency guard — operator-set remote URLs\nare never overwritten on re-deploy.\n\n- `yuri`: clones `artelonga/artelonga`, walks `yuri/` subdir, `anon_published_only=1` (personal vault).\n- `retro-umarizal`: standalone `artelonga/retro-umarizal` repo, no subdir restriction.\n- `yoruba`: clones `artelonga/comunicacao`, walks `yoruba/` subdir, `parent_key=comunicacao`.\n- `neuro`: clones `artelonga/artelonga`, walks `neuro/` subdir, `parent_key=artelonga`.\n\n### Why\n\nThe four universes existed locally but had no universe rows on prod, so they were invisible in the\nsidebar. No Docker rebuild is needed per content update — CO-337's remote sync handles ongoing refresh.",
+  "summary": "The platform operator (yuri) who has four content universes ready to publish — yuri, retro-umarizal, yoruba, neuro — none of which appear in prod CO today.",
+  "co_auto_version": "0.1.0"
+}
