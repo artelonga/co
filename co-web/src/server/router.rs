@@ -230,6 +230,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(crate::changelog_routes::serve_changelog_page),
         )
         .route("/admin", get(crate::admin_routes::serve_admin_page))
+        // CO-361: gestao SPA — GitHub PAT auth is handled client-side
+        .route("/gestao", get(crate::gestao_routes::serve_gestao_page))
         .route(
             "/admin/deployments",
             get(crate::deployment_dashboard::serve_deployments_page),

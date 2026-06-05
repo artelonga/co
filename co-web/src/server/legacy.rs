@@ -160,13 +160,45 @@ pub(super) async fn create_task(
             .create_task(&key, body)
             .map_err(|e| AppError::Internal(e.to_string()))?;
         storage.increment_universe_content_count(&ukey);
+        let task_id = task.id.to_string();
+        drop(storage);
+        crate::atividade::log_atividade(
+            state.clone(),
+            crate::atividade::Atividade {
+                acao: crate::atividade::Acao::Criar,
+                entidade: "task".into(),
+                entidade_id: Some(task_id),
+                before: None,
+                after: Some(serde_json::json!({"project": key})),
+                tipo: crate::atividade::Tipo::Sucesso,
+                user_id: None,
+                ip: None,
+                user_agent: None,
+            },
+        );
         return Ok((StatusCode::CREATED, Json(task)));
     }
 
-    storage
+    let task = storage
         .create_task(&key, body)
-        .map(|t| (StatusCode::CREATED, Json(t)))
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let task_id = task.id.to_string();
+    drop(storage);
+    crate::atividade::log_atividade(
+        state,
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Criar,
+            entidade: "task".into(),
+            entidade_id: Some(task_id),
+            before: None,
+            after: Some(serde_json::json!({"project": key})),
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: None,
+            ip: None,
+            user_agent: None,
+        },
+    );
+    Ok((StatusCode::CREATED, Json(task)))
 }
 
 pub(super) async fn update_task(
@@ -186,10 +218,25 @@ pub(super) async fn update_task(
     }
 
     let mut storage = lock_storage(&state);
-    storage
+    let task = storage
         .update_task(&key, id, body)
-        .map(Json)
-        .map_err(|e| AppError::Internal(e.to_string()))
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    drop(storage);
+    crate::atividade::log_atividade(
+        state,
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Atualizar,
+            entidade: "task".into(),
+            entidade_id: Some(id.to_string()),
+            before: None,
+            after: Some(serde_json::json!({"project": key})),
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: None,
+            ip: None,
+            user_agent: None,
+        },
+    );
+    Ok(Json(task))
 }
 
 pub(super) async fn delete_task(
@@ -212,6 +259,22 @@ pub(super) async fn delete_task(
     if let Some(ref ukey) = universe_key {
         storage.decrement_universe_content_count(ukey, 1 + comment_count);
     }
+    drop(storage);
+
+    crate::atividade::log_atividade(
+        state,
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Excluir,
+            entidade: "task".into(),
+            entidade_id: Some(id.to_string()),
+            before: Some(serde_json::json!({"project": key})),
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: None,
+            ip: None,
+            user_agent: None,
+        },
+    );
 
     Ok(StatusCode::NO_CONTENT)
 }
