@@ -1333,13 +1333,11 @@ impl Storage {
     /// Idempotent: runs on every boot via `run_co142_refresh`. Purely additive —
     /// user-created entries in the `co` universe are never deleted.
     pub fn seed_co_universe_tasks(&mut self, source_dir: &std::path::Path) {
-        if !source_dir.exists() {
-            tracing::warn!(
-                "seed_co_universe_tasks: source dir {} does not exist — skipped",
-                source_dir.display()
-            );
-            return;
-        }
+        // CO-346: guard on universe row BEFORE source-dir check so the CO project
+        // upsert below always runs even when task files are not yet available.
+        // Without this, a fresh install where /app/seed-co/ is absent leaves `co`
+        // with zero projects — `bootAppForUniverse` never calls `selectProject`
+        // and the kanban renders empty despite 1000+ entries from `co push`.
         if self.get_universe("co").is_none() {
             tracing::warn!("seed_co_universe_tasks: 'co' universe row missing — skipped");
             return;
@@ -1347,11 +1345,9 @@ impl Storage {
 
         let universe_root = self.universe_root("co");
         let now_str = Utc::now().to_rfc3339();
-        let mut upserted = 0usize;
-        let mut skipped = 0usize;
 
-        // CO-261: ensure the CO Development Board project entry exists so the
-        // kanban sidebar shows the project. Upsert is safe on every boot.
+        // CO-261 / CO-346: always upsert the CO Development Board project entry
+        // so the kanban has a project to show even when source_dir is absent.
         {
             let proj_path = "projects/CO/_project.md";
             let proj_fm = json!({
@@ -1384,6 +1380,18 @@ impl Storage {
              VALUES ('CO', 'co')",
             [],
         );
+
+        if !source_dir.exists() {
+            tracing::warn!(
+                "seed_co_universe_tasks: source dir {} does not exist — \
+                 CO project seeded, task files skipped",
+                source_dir.display()
+            );
+            return;
+        }
+
+        let mut upserted = 0usize;
+        let mut skipped = 0usize;
 
         // Recursively walk source_dir. Entry paths are relative to the source dir.
         fn walk(
@@ -1755,6 +1763,29 @@ mod tests {
                 .any(|t| t.title.to_lowercase().contains("docs")),
             "CLAUDE.md must not be seeded as a task"
         );
+    }
+
+    /// CO-346: project must exist even when source dir is absent so the kanban
+    /// board never renders empty.
+    #[test]
+    fn test_seed_co_universe_tasks_creates_project_without_source_dir() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let missing_dir = tempfile::tempdir().unwrap();
+        let missing_path = missing_dir.path().join("nonexistent");
+
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+        // Source dir does not exist — project should still be created.
+        storage.seed_co_universe_tasks(&missing_path);
+
+        let project = storage.get_project("CO");
+        assert!(
+            project.is_some(),
+            "CO project must exist even when source dir is absent"
+        );
+        // No task files → zero tasks, but that is expected.
+        let tasks = storage.list_tasks("CO");
+        assert_eq!(tasks.len(), 0, "no task files → zero tasks");
     }
 
     #[test]
