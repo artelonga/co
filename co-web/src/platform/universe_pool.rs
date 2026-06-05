@@ -72,6 +72,7 @@ CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL);
 
 -- CO-74: typed FK relationship graph — one row per directed edge
 -- CO-153: to_universe added for cross-universe refs (NULL = same universe)
+-- CO-363: link_text stores optional alias label from [[target|label]] wikilinks
 CREATE TABLE IF NOT EXISTS entry_relations (
     universe_key  TEXT NOT NULL,
     from_path     TEXT NOT NULL,
@@ -81,6 +82,7 @@ CREATE TABLE IF NOT EXISTS entry_relations (
     to_universe   TEXT,
     valid_from    TEXT,
     valid_until   TEXT,
+    link_text     TEXT,
     PRIMARY KEY (universe_key, from_path, to_path, relation_type)
 );
 CREATE INDEX IF NOT EXISTS idx_er_from
@@ -546,6 +548,32 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         )
         .expect("universe schema_version v15");
     }
+    if v < 16 {
+        // CO-363: link_text column on entry_relations — stores optional alias label
+        // from [[target|label]] wikilinks. Nullable; NULL means no alias was written.
+        // New universes already have the column from UNIVERSE_SCHEMA; existing ones
+        // get it here.
+        ensure_universe_column(conn, "entry_relations", "link_text", "TEXT");
+        // Backfill body wikilinks for all existing entries. This is a one-time
+        // ~60s run for ~11,500-entry universes. Uses INSERT OR REPLACE scoped to
+        // wikilink relation_types so frontmatter FK rows are not touched.
+        if let Err(e) = crate::content::relation_index::backfill_body_wikilinks(conn, universe_key)
+        {
+            tracing::warn!(
+                universe = %universe_key,
+                error = %e,
+                "CO-363: body wikilink backfill failed (non-fatal)"
+            );
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (16)",
+            [],
+        )
+        .expect("universe schema_version v16");
+    }
+    // CO-363 unconditional drift guard — ensures link_text exists even if v16
+    // was partially applied on an older instance.
+    ensure_universe_column(conn, "entry_relations", "link_text", "TEXT");
 
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet

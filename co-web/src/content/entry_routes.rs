@@ -779,20 +779,17 @@ pub async fn create_entry(
         index
             .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-74: extract and store typed FK relations from manifest-declared ref/ref_list fields
-        let rc = if let Some(ref m) = manifest_arc {
-            crate::relation_index::sync_entry_relations(
-                &uc_guard,
-                &slug,
-                &body.path,
-                &entry.entry_type,
-                &body.frontmatter,
-                m,
-            )
-            .unwrap_or(0)
-        } else {
-            0
-        };
+        // CO-74/CO-363: extract typed FK + body wikilink relations
+        let rc = crate::relation_index::sync_entry_relations(
+            &uc_guard,
+            &slug,
+            &body.path,
+            &entry.entry_type,
+            &body.frontmatter,
+            &body.body,
+            manifest_arc.as_deref(),
+        )
+        .unwrap_or(0);
         // CO-156: sync references_meta shadow table for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,
@@ -984,19 +981,16 @@ pub async fn update_entry(
         index
             .upsert_dates(&slug, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-74: re-sync typed FK relations
-        let _ = if let Some(ref m) = manifest_arc {
-            crate::relation_index::sync_entry_relations(
-                &uc_guard,
-                &slug,
-                &path,
-                &entry.entry_type,
-                &new_fm,
-                m,
-            )
-        } else {
-            Ok(0)
-        };
+        // CO-74/CO-363: re-sync typed FK + body wikilink relations
+        let _ = crate::relation_index::sync_entry_relations(
+            &uc_guard,
+            &slug,
+            &path,
+            &entry.entry_type,
+            &new_fm,
+            &new_body,
+            manifest_arc.as_deref(),
+        );
         // CO-156: sync references_meta for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,

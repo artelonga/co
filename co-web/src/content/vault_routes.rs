@@ -722,17 +722,16 @@ pub(crate) fn write_vault_entry(
         index
             .upsert_dates(universe_key, &entry, manifest_arc.as_deref())
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        // CO-74: extract and store typed FK relations
-        if let Some(ref m) = manifest_arc {
-            let _ = crate::relation_index::sync_entry_relations(
-                &uc_guard,
-                universe_key,
-                path,
-                &entry.entry_type,
-                &frontmatter,
-                m,
-            );
-        }
+        // CO-74/CO-363: extract typed FK + body wikilink relations
+        let _ = crate::relation_index::sync_entry_relations(
+            &uc_guard,
+            universe_key,
+            path,
+            &entry.entry_type,
+            &frontmatter,
+            body,
+            manifest_arc.as_deref(),
+        );
         // CO-156: sync references_meta for reference cards
         crate::reference_routes::maybe_sync_reference_meta(
             &uc_guard,
