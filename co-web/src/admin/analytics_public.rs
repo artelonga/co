@@ -14,14 +14,40 @@ use std::time::{Duration, Instant};
 use axum::{
     Json, Router,
     extract::{Query, State},
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::server::AppState;
+
+/// Sanitiza um universe id pra um handle seguro ([a-z0-9-], ≤64). Vazio → "artelonga".
+/// Usado pra interpolar com segurança em SQL (sem injection).
+fn sanitize_universe(s: &str) -> String {
+    let c: String = s
+        .chars()
+        .filter(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || *ch == '-')
+        .take(64)
+        .collect();
+    if c.is_empty() {
+        UNIVERSE_KEY.to_string()
+    } else {
+        c
+    }
+}
+
+fn valid_day(s: &str) -> bool {
+    s.len() == 10
+        && s.as_bytes().iter().enumerate().all(|(i, b)| {
+            if i == 4 || i == 7 {
+                *b == b'-'
+            } else {
+                b.is_ascii_digit()
+            }
+        })
+}
 
 const UNIVERSE_KEY: &str = "artelonga";
 const CACHE_TTL: Duration = Duration::from_secs(300);
@@ -96,10 +122,11 @@ struct RecentCacheEntry {
     fetched_at: Instant,
 }
 
-static SUMMARY_CACHE: OnceLock<Mutex<HashMap<u32, SummaryCacheEntry>>> = OnceLock::new();
+// keyed by (universe, days)
+static SUMMARY_CACHE: OnceLock<Mutex<HashMap<(String, u32), SummaryCacheEntry>>> = OnceLock::new();
 static RECENT_CACHE: OnceLock<Mutex<HashMap<u32, RecentCacheEntry>>> = OnceLock::new();
 
-fn summary_cache() -> &'static Mutex<HashMap<u32, SummaryCacheEntry>> {
+fn summary_cache() -> &'static Mutex<HashMap<(String, u32), SummaryCacheEntry>> {
     SUMMARY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -114,6 +141,9 @@ fn recent_cache() -> &'static Mutex<HashMap<u32, RecentCacheEntry>> {
 #[derive(Debug, Deserialize)]
 pub struct SummaryParams {
     pub days: Option<u32>,
+    /// Universe a consultar. Default "artelonga" (rede). Ex. "yuri" → mostra a
+    /// universe yuri através da artelonga geral, com a PONTE histórico↔surface.
+    pub universe: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -125,37 +155,104 @@ pub struct RecentParams {
 // Aggregate query helpers
 // ---------------------------------------------------------------------------
 
+/// Métricas escalares de um rollup diário (DailyRollup.metrics no schema do artelonga).
+#[derive(Debug, Deserialize, Default, Clone)]
+pub struct RollupMetrics {
+    #[serde(default)]
+    pub pageviews: i64,
+    #[serde(default)]
+    pub visitors: i64,
+    #[serde(default)]
+    pub returning: i64,
+    #[serde(default)]
+    pub sessions: i64,
+    #[serde(default)]
+    pub bounced: i64,
+    #[serde(default)]
+    pub dwell_ms_sum: i64,
+    #[serde(default)]
+    pub conversions: i64,
+}
+
+/// Rollups consentidos (sem PII) pushados por producers, dentro da janela.
+/// Vazio se a tabela não existir (ex. DBs de teste antigos) — degrada pra eventos.
+pub fn query_rollups(conn: &Connection, universe: &str, days: u32) -> Vec<(String, RollupMetrics)> {
+    conn.prepare(&format!(
+        "SELECT day, metrics FROM analytics_rollups \
+         WHERE universe_key = ?1 AND day >= date('now', '-{days} days') \
+         ORDER BY day ASC"
+    ))
+    .ok()
+    .and_then(|mut stmt| {
+        stmt.query_map(params![universe], |r| {
+            let day: String = r.get(0)?;
+            let metrics_json: String = r.get(1)?;
+            Ok((day, metrics_json))
+        })
+        .ok()
+        .map(|rows| {
+            rows.filter_map(|r| r.ok())
+                .map(|(day, mj)| {
+                    (
+                        day,
+                        serde_json::from_str::<RollupMetrics>(&mj).unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+    })
+    .unwrap_or_default()
+}
+
+/// Default-universe wrapper (rede artelonga). Mantém o contrato existente.
 pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
-    let views: i64 = conn
+    query_universe_summary(conn, UNIVERSE_KEY, days)
+}
+
+/// Summary de UMA universe, com a PONTE histórico↔surface:
+///   match de eventos = `universe_key = X OR path LIKE '/X/%'`
+///     → captura o histórico de `/yuri/*` servido pelo apex (universe_key='artelonga').
+///   rollups (pushados pela surface) sobrepõem o NOVO dado, particionado no CUTOVER
+///     (primeiro dia com rollup) → eventos só contam ANTES, rollups DEPOIS: sem dupla
+///     contagem na fronteira da migração path→CNAME. Uma série contínua.
+pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> PublicSummary {
+    let u = sanitize_universe(universe);
+    // ponte: universe_key direto OU path histórico `/u/*`
+    let m = format!("(universe_key = '{u}' OR path LIKE '/{u}/%')");
+
+    let rollups = query_rollups(conn, &u, days);
+    let cutover: Option<String> = rollups.iter().map(|(d, _)| d.clone()).min();
+    // quando há rollups, eventos só contam ANTES do cutover (evita dupla contagem)
+    let event_bound = match &cutover {
+        Some(c) => format!(" AND date(timestamp) < '{c}'"),
+        None => String::new(),
+    };
+    let win = format!("AND timestamp >= datetime('now', '-{days} days'){event_bound}");
+
+    let mut views: i64 = conn
         .query_row(
             &format!(
                 "SELECT COUNT(*) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND event_type = 'pageview' \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND event_type = 'pageview' {win}"
             ),
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
 
-    let events_total: i64 = conn
+    let mut events_total: i64 = conn
         .query_row(
-            &format!(
-                "SELECT COUNT(*) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' \
-                 AND timestamp >= datetime('now', '-{days} days')"
-            ),
+            &format!("SELECT COUNT(*) FROM telemetry_events WHERE {m} {win}"),
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
 
-    let visitors: i64 = conn
+    let mut visitors: i64 = conn
         .query_row(
             &format!(
                 "SELECT COUNT(DISTINCT visitor_token) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND visitor_token IS NOT NULL \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND visitor_token IS NOT NULL {win}"
             ),
             [],
             |r| r.get(0),
@@ -163,13 +260,12 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         .unwrap_or(0);
 
     // Returning: visitors seen on >= 2 distinct days within the window
-    let returning: i64 = conn
+    let mut returning: i64 = conn
         .query_row(
             &format!(
                 "SELECT COUNT(*) FROM (\
                    SELECT visitor_token FROM telemetry_events \
-                   WHERE universe_key = '{UNIVERSE_KEY}' AND visitor_token IS NOT NULL \
-                   AND timestamp >= datetime('now', '-{days} days') \
+                   WHERE {m} AND visitor_token IS NOT NULL {win} \
                    GROUP BY visitor_token \
                    HAVING COUNT(DISTINCT date(timestamp)) >= 2\
                  )"
@@ -179,26 +275,24 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         )
         .unwrap_or(0);
 
-    let sessions: i64 = conn
+    let mut sessions: i64 = conn
         .query_row(
             &format!(
                 "SELECT COUNT(DISTINCT session_id) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND session_id IS NOT NULL \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND session_id IS NOT NULL {win}"
             ),
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
 
-    // Average page duration as a proxy for session engagement
+    // Average page duration as a proxy for session engagement (event-based)
     let session_avg_ms: i64 = conn
         .query_row(
             &format!(
                 "SELECT COALESCE(CAST(AVG(duration_ms) AS INTEGER), 0) \
                  FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND duration_ms > 0 \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND duration_ms > 0 {win}"
             ),
             [],
             |r| r.get(0),
@@ -210,8 +304,7 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         .query_row(
             &format!(
                 "SELECT COUNT(DISTINCT country) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND country IS NOT NULL \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND country IS NOT NULL {win}"
             ),
             [],
             |r| r.get(0),
@@ -222,20 +315,18 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         .query_row(
             &format!(
                 "SELECT COUNT(DISTINCT city) FROM telemetry_events \
-                 WHERE universe_key = '{UNIVERSE_KEY}' AND city IS NOT NULL \
-                 AND timestamp >= datetime('now', '-{days} days')"
+                 WHERE {m} AND city IS NOT NULL {win}"
             ),
             [],
             |r| r.get(0),
         )
         .unwrap_or(0);
 
-    let timeseries: Vec<TimeseriesBucket> = conn
+    let mut timeseries: Vec<TimeseriesBucket> = conn
         .prepare(&format!(
             "SELECT date(timestamp) AS bucket, COUNT(*) AS cnt \
              FROM telemetry_events \
-             WHERE universe_key = '{UNIVERSE_KEY}' \
-             AND timestamp >= datetime('now', '-{days} days') \
+             WHERE {m} {win} \
              GROUP BY bucket ORDER BY bucket ASC"
         ))
         .ok()
@@ -255,9 +346,7 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         .prepare(&format!(
             "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
              FROM telemetry_events \
-             WHERE universe_key = '{UNIVERSE_KEY}' AND event_type = 'pageview' \
-             AND path IS NOT NULL \
-             AND timestamp >= datetime('now', '-{days} days') \
+             WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL {win} \
              GROUP BY path ORDER BY views DESC LIMIT 20"
         ))
         .ok()
@@ -281,9 +370,7 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
                     COUNT(DISTINCT visitor_token) AS visitors, \
                     COUNT(DISTINCT session_id) AS sessions \
              FROM telemetry_events \
-             WHERE universe_key = '{UNIVERSE_KEY}' \
-             AND country IS NOT NULL AND city IS NOT NULL \
-             AND timestamp >= datetime('now', '-{days} days') \
+             WHERE {m} AND country IS NOT NULL AND city IS NOT NULL {win} \
              GROUP BY country, city ORDER BY visitors DESC LIMIT 50"
         ))
         .ok()
@@ -301,6 +388,22 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         })
         .unwrap_or_default();
 
+    // ── overlay dos rollups (porção pós-cutover): soma escalares + estende a série ──
+    if !rollups.is_empty() {
+        views += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
+        events_total += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
+        visitors += rollups.iter().map(|(_, x)| x.visitors).sum::<i64>();
+        returning += rollups.iter().map(|(_, x)| x.returning).sum::<i64>();
+        sessions += rollups.iter().map(|(_, x)| x.sessions).sum::<i64>();
+        for (day, x) in &rollups {
+            timeseries.push(TimeseriesBucket {
+                bucket: day.clone(),
+                count: x.pageviews,
+            });
+        }
+        timeseries.sort_by(|a, b| a.bucket.cmp(&b.bucket));
+    }
+
     PublicSummary {
         as_of: chrono::Utc::now().to_rfc3339(),
         window_days: days,
@@ -316,6 +419,102 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
         top_pages,
         geo,
     }
+}
+
+// ---------------------------------------------------------------------------
+// Rollup ingest (producer push) — DailyRollup do schema do artelonga
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct DailyRollupIn {
+    pub universe: String,
+    pub day: String,
+    #[serde(default)]
+    pub metrics: serde_json::Value,
+    #[serde(default)]
+    pub dims: serde_json::Value,
+}
+
+/// Upsert idempotente keyed by (universe, day).
+pub fn upsert_rollup(
+    conn: &Connection,
+    universe: &str,
+    day: &str,
+    metrics: &str,
+    dims: &str,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO analytics_rollups (universe_key, day, metrics, dims, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5) \
+         ON CONFLICT(universe_key, day) DO UPDATE SET \
+           metrics = excluded.metrics, dims = excluded.dims, updated_at = excluded.updated_at",
+        params![
+            universe,
+            day,
+            metrics,
+            dims,
+            chrono::Utc::now().to_rfc3339()
+        ],
+    )?;
+    Ok(())
+}
+
+/// POST /api/v1/analytics/public/rollups — recebe um DailyRollup consentido (sem PII)
+/// de um producer (surface universe-owned, parceiro, universe co, SDK). Auth: bearer
+/// token `CO_ROLLUP_TOKEN` (se a env não estiver setada, o ingest fica desabilitado).
+pub async fn rollups_ingest_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<DailyRollupIn>,
+) -> Response {
+    let Ok(expected) = std::env::var("CO_ROLLUP_TOKEN") else {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({"error": "rollup ingest disabled"})),
+        )
+            .into_response();
+    };
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if auth != format!("Bearer {expected}") {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({"error": "unauthorized"})),
+        )
+            .into_response();
+    }
+    if !valid_day(&body.day) {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "day must be YYYY-MM-DD"})),
+        )
+            .into_response();
+    }
+    let u = sanitize_universe(&body.universe);
+    let metrics = serde_json::to_string(&body.metrics).unwrap_or_else(|_| "{}".to_string());
+    let dims = serde_json::to_string(&body.dims).unwrap_or_else(|_| "{}".to_string());
+    {
+        let storage = state.core.storage.lock();
+        if upsert_rollup(storage.conn(), &u, &body.day, &metrics, &dims).is_err() {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({"error": "db error"})),
+            )
+                .into_response();
+        }
+    }
+    // invalida o cache de summary (qualquer universe/days)
+    summary_cache()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    (
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({"ok": true, "universe": u, "day": body.day})),
+    )
+        .into_response()
 }
 
 pub fn query_public_recent(conn: &Connection, limit: u32) -> PublicRecent {
@@ -372,10 +571,12 @@ pub async fn summary_handler(
             .into_response());
     }
     let days = raw.min(365);
+    let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
+    let key = (universe.clone(), days);
 
     {
         let cache = summary_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(entry) = cache.get(&days)
+        if let Some(entry) = cache.get(&key)
             && entry.fetched_at.elapsed() < CACHE_TTL
         {
             return Ok(Json(entry.data.clone()));
@@ -384,13 +585,13 @@ pub async fn summary_handler(
 
     let data = {
         let storage = state.core.storage.lock();
-        query_public_summary(storage.conn(), days)
+        query_universe_summary(storage.conn(), &universe, days)
     };
 
     {
         let mut cache = summary_cache().lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(
-            days,
+            key,
             SummaryCacheEntry {
                 data: data.clone(),
                 fetched_at: Instant::now(),
@@ -640,6 +841,7 @@ pub fn router() -> Router<AppState> {
         .route("/summary", get(summary_handler))
         .route("/recent", get(recent_handler))
         .route("/popularity", get(popularity_handler))
+        .route("/rollups", post(rollups_ingest_handler))
 }
 // Tests
 // ---------------------------------------------------------------------------
@@ -844,6 +1046,104 @@ mod tests {
             !json.contains("properties"),
             "raw properties must not appear"
         );
+    }
+
+    // --- universe bridge + rollups (CO-340) ---
+
+    fn create_rollups_table(conn: &Connection) {
+        conn.execute_batch(
+            "CREATE TABLE analytics_rollups (
+                universe_key TEXT NOT NULL, day TEXT NOT NULL,
+                metrics TEXT NOT NULL, dims TEXT NOT NULL DEFAULT '{}',
+                updated_at TEXT NOT NULL, PRIMARY KEY (universe_key, day));",
+        )
+        .unwrap();
+    }
+    fn today() -> String {
+        chrono::Utc::now().format("%Y-%m-%d").to_string()
+    }
+
+    #[test]
+    fn test_universe_bridge_matches_historical_path() {
+        // historical /yuri served by apex: universe_key='artelonga', path '/yuri/...'
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/yuri/resume", 0);
+        insert_pageview(&conn, "artelonga", "v3", "s3", "/", 0); // not yuri
+        let s = query_universe_summary(&conn, "yuri", 7);
+        assert_eq!(s.views, 2, "yuri bridges historical /yuri/* paths");
+        let s_art = query_universe_summary(&conn, "artelonga", 7);
+        assert_eq!(s_art.views, 3, "artelonga still counts all");
+    }
+
+    #[test]
+    fn test_universe_matches_direct_universe_key() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "yuri", "v1", "s1", "/", 0); // new surface: universe_key='yuri'
+        let s = query_universe_summary(&conn, "yuri", 7);
+        assert_eq!(s.views, 1);
+    }
+
+    #[test]
+    fn test_rollup_overlay_extends_timeseries_and_totals() {
+        let conn = create_test_db();
+        create_rollups_table(&conn);
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", -5); // historical (pre-cutover)
+        upsert_rollup(
+            &conn,
+            "yuri",
+            &today(),
+            r#"{"pageviews":10,"visitors":4,"sessions":6}"#,
+            "{}",
+        )
+        .unwrap();
+        let s = query_universe_summary(&conn, "yuri", 30);
+        assert_eq!(s.views, 11, "1 historical event + 10 rollup pageviews");
+        assert!(s.visitors >= 4, "rollup visitors added");
+        assert!(s.timeseries.len() >= 2, "historical day + rollup day");
+        assert!(
+            s.timeseries.iter().any(|b| b.count == 10),
+            "rollup day count present in series"
+        );
+    }
+
+    #[test]
+    fn test_rollup_cutover_excludes_same_day_events() {
+        // events on/after the cutover (first rollup day) are NOT double-counted
+        let conn = create_test_db();
+        create_rollups_table(&conn);
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", 0); // TODAY (= cutover)
+        upsert_rollup(&conn, "yuri", &today(), r#"{"pageviews":10}"#, "{}").unwrap();
+        let s = query_universe_summary(&conn, "yuri", 30);
+        assert_eq!(
+            s.views, 10,
+            "same-day event excluded; rollup wins; no double count"
+        );
+    }
+
+    #[test]
+    fn test_upsert_rollup_idempotent_latest_wins() {
+        let conn = create_test_db();
+        create_rollups_table(&conn);
+        upsert_rollup(&conn, "yuri", "2026-06-01", r#"{"pageviews":5}"#, "{}").unwrap();
+        upsert_rollup(&conn, "yuri", "2026-06-01", r#"{"pageviews":8}"#, "{}").unwrap();
+        let r = query_rollups(&conn, "yuri", 3650);
+        assert_eq!(r.len(), 1, "one row per (universe, day)");
+        assert_eq!(r[0].1.pageviews, 8, "latest upsert wins");
+    }
+
+    #[test]
+    fn test_sanitize_universe_strips_unsafe() {
+        assert_eq!(sanitize_universe("yuri"), "yuri");
+        assert_eq!(sanitize_universe("yu ri'; DROP"), "yuri");
+        assert_eq!(sanitize_universe(""), "artelonga");
+    }
+
+    #[test]
+    fn test_valid_day_format() {
+        assert!(valid_day("2026-06-05"));
+        assert!(!valid_day("2026-6-5"));
+        assert!(!valid_day("not-a-date"));
     }
 
     // --- HTTP integration tests ---
