@@ -66,6 +66,7 @@ pub use social::ws;
 pub use admin::admin_routes;
 pub use admin::analytics_public;
 pub use admin::analytics_routes;
+pub use admin::backup_routes;
 pub use admin::changelog_parser;
 pub use admin::changelog_routes;
 pub use admin::deployment_dashboard;
@@ -123,6 +124,9 @@ pub use platform::worker_supervisor;
 pub use platform::workers;
 
 // universes — quilombo (quilomboaraucaria.org backend)
+// storage — backup backend trait + implementations
+pub use storage::backup;
+
 pub use universes::quilombo::processos;
 pub use universes::quilombo::quilombo_models;
 pub use universes::quilombo::quilombo_permissoes;

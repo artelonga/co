@@ -409,6 +409,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/ab", ab_admin)
             .nest("/api/v1/cache", cache_api)
             .nest("/api/v1/admin", admin_dashboard_api)
+            .nest("/api/v1/admin", crate::backup_routes::router())
             .nest("/api/v1/admin", crate::deployment_dashboard::router())
             .nest("/api/v1/admin", crate::storage_dashboard::router())
             .nest("/api/v1/me", crate::storage_dashboard::me_router())

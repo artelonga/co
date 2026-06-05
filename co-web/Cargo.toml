@@ -73,6 +73,10 @@ path = "src/bin/split_db.rs"
 [features]
 default = []
 blob-r2 = ["co/deploy-r2"]
+backup-s3 = []
+backup-r2 = []
+backup-fly = []
+backup-gcs = []
 
 [dev-dependencies]
 tempfile = { workspace = true }
