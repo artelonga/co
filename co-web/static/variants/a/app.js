@@ -148,7 +148,7 @@ function readUniverseSlugFromUrl() {
     // window.__CO_SUBDOMAIN_UNIVERSE__ is injected by the server when the
     // request arrives via a *.artelonga.com.br subdomain.
     if (window.__CO_SUBDOMAIN_UNIVERSE__) return window.__CO_SUBDOMAIN_UNIVERSE__;
-    const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications'];
+    const RESERVED = ['', 'admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications', 'graph-views'];
     if (window.location.pathname.match(/^\/yggdrasil\/[a-z0-9-]+/)) return 'yggdrasil';
     const m = window.location.pathname.match(/^\/([a-z0-9-]+)(\/|$)/);
     if (m && !RESERVED.includes(m[1])) return m[1];

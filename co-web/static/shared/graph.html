@@ -51,6 +51,45 @@
   }
   #controls button:hover { border-color: var(--accent); }
 
+  /* CO-345: Universe chip strip */
+  #universe-strip {
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+    min-height: 38px;
+  }
+  #universe-strip .strip-label { font-size: .75rem; color: var(--muted); margin-right: 4px; }
+  .universe-chip {
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: .75rem;
+    cursor: pointer;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    transition: all .15s;
+    user-select: none;
+  }
+  .universe-chip.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a1a1a;
+    font-weight: 600;
+  }
+  .universe-chip:hover { border-color: var(--accent); }
+
+  /* CO-345: Depth slider */
+  #depth-wrap {
+    display: flex; align-items: center; gap: 6px;
+    margin-left: 8px;
+  }
+  #depth-wrap label { font-size: .75rem; color: var(--muted); }
+  #depth-slider { width: 70px; accent-color: var(--accent); cursor: pointer; }
+  #depth-val { font-size: .75rem; color: var(--text); min-width: 12px; }
+
   #canvas-wrap {
     flex: 1;
     position: relative;
@@ -119,6 +158,50 @@
     color: var(--text);
   }
   #fit-btn:hover { border-color: var(--accent); }
+
+  /* CO-345: Save view modal */
+  #save-modal-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #save-modal-backdrop.show { display: flex; }
+  #save-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    width: 320px;
+    max-width: 90vw;
+  }
+  #save-modal h3 { font-size: 1rem; margin-bottom: 16px; }
+  #save-modal label { font-size: .8rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  #save-modal input, #save-modal select {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px 10px; font-size: .85rem; margin-bottom: 14px;
+  }
+  #save-modal input:focus, #save-modal select:focus { outline: none; border-color: var(--accent); }
+  #save-modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px; }
+  #save-modal button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 14px; font-size: .8rem; cursor: pointer;
+  }
+  #save-modal button.primary { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+  #save-modal button:hover { border-color: var(--accent); }
+
+  /* CO-345: Toast */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 16px; font-size: .82rem;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 200;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
 </style>
 </head>
 <body>
@@ -130,9 +213,20 @@
     <span id="node-count"></span>
     <div id="controls">
       <select id="type-filter"><option value="">Todos os tipos</option></select>
+      <!-- CO-345: depth slider -->
+      <div id="depth-wrap">
+        <label for="depth-slider">Profundidade</label>
+        <input type="range" id="depth-slider" min="1" max="6" value="3">
+        <span id="depth-val">3</span>
+      </div>
+      <button id="save-view-btn">⊕ Salvar vista</button>
       <button id="reload-btn">↺ Recarregar</button>
     </div>
   </header>
+  <!-- CO-345: Universe chip strip -->
+  <div id="universe-strip">
+    <span class="strip-label">Universos:</span>
+  </div>
   <div id="canvas-wrap">
     <div id="tooltip"><div class="tt-title"></div><div class="tt-type"></div></div>
     <div id="panel">
@@ -146,37 +240,135 @@
   </div>
 </div>
 
+<!-- CO-345: Save view modal -->
+<div id="save-modal-backdrop">
+  <div id="save-modal">
+    <h3>Salvar vista de grafo</h3>
+    <label for="view-name">Nome</label>
+    <input type="text" id="view-name" placeholder="Ex: Yoruba × Mbya divinities">
+    <label for="view-visibility">Visibilidade</label>
+    <select id="view-visibility">
+      <option value="private">Privado</option>
+      <option value="unlisted">Não listado (com link)</option>
+      <option value="public">Público</option>
+    </select>
+    <div class="modal-actions">
+      <button id="modal-cancel">Cancelar</button>
+      <button class="primary" id="modal-save">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
 <script src="/lib/co-graph.js"></script>
 <script>
 (function () {
   'use strict';
 
-  // Resolve universe slug from URL: /<slug>/graph → slug
+  // ── URL detection ─────────────────────────────────────────────────────────
+  // Handles both /{slug}/graph and /graph-views/{view-slug}.
   var pathParts = window.location.pathname.replace(/^\//, '').split('/');
-  var slug = pathParts[0] || '';
-  if (!slug) { document.getElementById('status').textContent = 'URL inválida — slug não encontrado'; return; }
+  var mode = 'universe'; // 'universe' | 'saved-view'
+  var slug = ''; // universe slug (universe mode) or view slug (saved-view mode)
+
+  if (pathParts[0] === 'graph-views' && pathParts[1]) {
+    mode = 'saved-view';
+    slug = pathParts[1];
+  } else {
+    slug = pathParts[0] || '';
+  }
+
+  if (!slug) { document.getElementById('status').textContent = 'URL inválida'; return; }
 
   document.getElementById('universe-name').textContent = slug;
   document.title = slug + ' — Grafo — CO';
 
-  var wrap      = document.getElementById('canvas-wrap');
-  var tooltip   = document.getElementById('tooltip');
-  var panel     = document.getElementById('panel');
-  var status    = document.getElementById('status');
-  var fitBtn    = document.getElementById('fit-btn');
-  var reloadBtn = document.getElementById('reload-btn');
+  var wrap       = document.getElementById('canvas-wrap');
+  var tooltip    = document.getElementById('tooltip');
+  var panel      = document.getElementById('panel');
+  var status     = document.getElementById('status');
+  var fitBtn     = document.getElementById('fit-btn');
+  var reloadBtn  = document.getElementById('reload-btn');
   var typeFilter = document.getElementById('type-filter');
-  var handle    = null;
-  var rawData   = { nodes: [], edges: [] };
+  var depthSlider = document.getElementById('depth-slider');
+  var depthVal   = document.getElementById('depth-val');
+  var saveBtn    = document.getElementById('save-view-btn');
+  var strip      = document.getElementById('universe-strip');
+  var handle     = null;
+  var rawData    = { nodes: [], edges: [] };
   var selectedId = null;
+
+  // ── Active universes ──────────────────────────────────────────────────────
+  // Set of universe slugs currently selected in the chip strip.
+  var activeUniverses = new Set();
 
   // Node colors by type
   var TYPE_COLORS = {
     task: '#7fa7d6', nota: '#8fcf9b', song: '#d2a0e0', poem: '#e0a96d',
-    person: '#d6a07f', place: '#7fc4d6', event: '#c0c070', default: '#8090a0',
+    term: '#e8c06d', concept: '#b8d4a8', person: '#d6a07f', place: '#7fc4d6',
+    event: '#c0c070', default: '#8090a0',
   };
   function colorFor(type) { return TYPE_COLORS[type] || TYPE_COLORS.default; }
 
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  var toastTimer = null;
+  function showToast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 3500);
+  }
+
+  // ── Universe chip strip ───────────────────────────────────────────────────
+  function buildChipStrip(allUniverses) {
+    // Preserve the label, remove old chips.
+    var label = strip.querySelector('.strip-label');
+    strip.innerHTML = '';
+    strip.appendChild(label);
+
+    var depthWrap = document.createElement('div');
+    depthWrap.id = 'depth-chip-wrap';
+    depthWrap.style.cssText = 'display:flex;align-items:center;gap:6px;margin-left:auto;';
+
+    allUniverses.forEach(function (u) {
+      var chip = document.createElement('span');
+      chip.className = 'universe-chip' + (activeUniverses.has(u) ? ' active' : '');
+      chip.textContent = u;
+      chip.title = u;
+      chip.addEventListener('click', function () {
+        if (activeUniverses.has(u)) {
+          // Don't allow deselecting the last universe.
+          if (activeUniverses.size <= 1) return;
+          activeUniverses.delete(u);
+          chip.classList.remove('active');
+        } else {
+          activeUniverses.add(u);
+          chip.classList.add('active');
+        }
+        loadGraph();
+      });
+      strip.appendChild(chip);
+    });
+  }
+
+  function loadPublicUniverses() {
+    fetch('/api/v1/universes?visibility=public-subscribable', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : []; })
+      .then(function (list) {
+        var slugs = (list || []).map(function (u) { return u.slug || u.key || u; }).filter(Boolean);
+        // Ensure the current universe is always present.
+        if (slug && !slugs.includes(slug)) slugs.unshift(slug);
+        buildChipStrip(slugs);
+      })
+      .catch(function () {
+        // Fallback: just show current universe.
+        buildChipStrip([slug]);
+      });
+  }
+
+  // ── Graph data ────────────────────────────────────────────────────────────
   function buildGraphData(includeType) {
     var filtered = rawData.nodes.filter(function (n) {
       return !includeType || n.type === includeType;
@@ -193,7 +385,7 @@
           color: colorFor(n.type),
           size: 8,
           selected: n.id === selectedId,
-          x: n._x, y: n._y, // preserve positions across filter changes
+          x: n._x, y: n._y,
         };
       }),
       edges: edges,
@@ -231,9 +423,25 @@
     if (handle) handle.update(buildGraphData(typeFilter.value));
   });
 
+  // ── Load graph ────────────────────────────────────────────────────────────
+  function buildGraphUrl() {
+    var universeList = Array.from(activeUniverses);
+    var primaryUniverse = universeList[0] || slug;
+    var depth = depthSlider.value;
+    var params = [];
+    if (universeList.length > 1) {
+      params.push('universes=' + encodeURIComponent(universeList.join(',')));
+    }
+    if (depth !== '3') {
+      params.push('max_depth=' + encodeURIComponent(depth));
+    }
+    var qs = params.length ? '?' + params.join('&') : '';
+    return '/api/v1/universes/' + encodeURIComponent(primaryUniverse) + '/graph' + qs;
+  }
+
   function loadGraph() {
     status.textContent = 'carregando…';
-    var url = '/api/v1/universes/' + encodeURIComponent(slug) + '/graph';
+    var url = buildGraphUrl();
     fetch(url, { credentials: 'include' })
       .then(function (r) {
         if (!r.ok) throw new Error(r.status + ' ' + r.statusText);
@@ -242,7 +450,6 @@
       .then(function (data) {
         rawData = data;
 
-        // Populate type filter dropdown
         var types = Array.from(new Set(data.nodes.map(function (n) { return n.type; }))).sort();
         typeFilter.innerHTML = '<option value="">Todos os tipos (' + data.nodes.length + ')</option>';
         types.forEach(function (t) {
@@ -262,13 +469,11 @@
             data: gd,
             layout: 'force',
             onNodeClick: function (node, sx, sy) {
-              // Find raw node for frontmatter
               var raw = rawData.nodes.find(function (n) { return n.id === node.id; });
               if (raw) showPanel(raw);
             },
             onNodeHover: function (node) {
               if (node) {
-                // Get screen position via handle
                 var raw = rawData.nodes.find(function (n) { return n.id === node.id; });
                 var pos = handle.worldToScreen(node.x || 0, node.y || 0);
                 showTooltip(raw || node, pos[0], pos[1]);
@@ -284,8 +489,107 @@
       });
   }
 
+  // ── Saved view boot ───────────────────────────────────────────────────────
+  function bootFromSavedView(viewSlug) {
+    status.textContent = 'carregando vista…';
+    fetch('/api/v1/graph-views/' + encodeURIComponent(viewSlug), { credentials: 'include' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Vista não encontrada (' + r.status + ')');
+        return r.json();
+      })
+      .then(function (view) {
+        document.getElementById('universe-name').textContent = view.name;
+        document.title = view.name + ' — Grafo — CO';
+
+        // Hydrate active universes.
+        var universes = JSON.parse(view.universe_filter || '[]');
+        if (universes.length) {
+          activeUniverses = new Set(universes);
+        }
+
+        // Hydrate depth.
+        if (view.depth) {
+          depthSlider.value = view.depth;
+          depthVal.textContent = view.depth;
+        }
+
+        loadPublicUniverses();
+        loadGraph();
+      })
+      .catch(function (err) {
+        status.textContent = 'Erro ao carregar vista: ' + err.message;
+      });
+  }
+
+  // ── CO-345: Save view modal ───────────────────────────────────────────────
+  var backdrop = document.getElementById('save-modal-backdrop');
+  saveBtn.addEventListener('click', function () {
+    backdrop.classList.add('show');
+    document.getElementById('view-name').focus();
+  });
+  document.getElementById('modal-cancel').addEventListener('click', function () {
+    backdrop.classList.remove('show');
+  });
+  backdrop.addEventListener('click', function (e) {
+    if (e.target === backdrop) backdrop.classList.remove('show');
+  });
+
+  document.getElementById('modal-save').addEventListener('click', function () {
+    var name = document.getElementById('view-name').value.trim();
+    if (!name) {
+      document.getElementById('view-name').focus();
+      return;
+    }
+    var visibility = document.getElementById('view-visibility').value;
+    var universes  = Array.from(activeUniverses);
+    var depth      = parseInt(depthSlider.value, 10) || 3;
+
+    var saveBtn2 = document.getElementById('modal-save');
+    saveBtn2.disabled = true;
+    saveBtn2.textContent = '…';
+
+    fetch('/api/v1/me/graph-views', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: name,
+        universe_filter: universes,
+        depth: depth,
+        visibility: visibility,
+      }),
+    })
+      .then(function (r) {
+        if (!r.ok) return r.json().then(function (b) { throw new Error(b.error || r.status); });
+        return r.json();
+      })
+      .then(function (view) {
+        backdrop.classList.remove('show');
+        var url = window.location.origin + '/graph-views/' + encodeURIComponent(view.slug);
+        showToast('Vista salva — ' + url);
+        // Copy URL to clipboard if available.
+        if (navigator.clipboard) navigator.clipboard.writeText(url).catch(function () {});
+        document.getElementById('view-name').value = '';
+      })
+      .catch(function (err) {
+        showToast('Erro: ' + err.message);
+      })
+      .finally(function () {
+        saveBtn2.disabled = false;
+        saveBtn2.textContent = 'Salvar';
+      });
+  });
+
+  // ── Event listeners ───────────────────────────────────────────────────────
   typeFilter.addEventListener('change', function () {
     if (handle) handle.update(buildGraphData(typeFilter.value));
+  });
+
+  depthSlider.addEventListener('input', function () {
+    depthVal.textContent = depthSlider.value;
+  });
+  depthSlider.addEventListener('change', function () {
+    loadGraph();
   });
 
   fitBtn.addEventListener('click', function () {
@@ -294,7 +598,14 @@
 
   reloadBtn.addEventListener('click', loadGraph);
 
-  loadGraph();
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  if (mode === 'saved-view') {
+    bootFromSavedView(slug);
+  } else {
+    activeUniverses.add(slug);
+    loadPublicUniverses();
+    loadGraph();
+  }
 })();
 </script>
 </body>

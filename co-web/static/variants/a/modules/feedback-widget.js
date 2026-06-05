@@ -19,7 +19,7 @@ const CoFeedbackWidget = (() => {
     function detectUniverse() {
         if (window.__CO_SUBDOMAIN_UNIVERSE__) return window.__CO_SUBDOMAIN_UNIVERSE__;
         const m = window.location.pathname.match(/^\/([a-z0-9-]+)/);
-        const RESERVED = ['admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications'];
+        const RESERVED = ['admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'notifications', 'graph-views'];
         if (m && !RESERVED.includes(m[1])) return m[1];
         return 'template';
     }

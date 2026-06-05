@@ -2250,5 +2250,30 @@ impl Storage {
                 )
                 .expect("migration v58: analytics_rollups");
         }
+
+        if current_version < 59 {
+            // CO-345: graph_views — publishable saved graph views.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS graph_views (
+                        slug             TEXT PRIMARY KEY,
+                        owner_id         TEXT NOT NULL,
+                        name             TEXT NOT NULL,
+                        universe_filter  TEXT NOT NULL,
+                        type_filter      TEXT,
+                        relation_filter  TEXT,
+                        depth            INTEGER,
+                        root             TEXT,
+                        layout_seed      INTEGER,
+                        visibility       TEXT NOT NULL DEFAULT 'private',
+                        created_at       TEXT NOT NULL,
+                        updated_at       TEXT NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_graph_views_owner
+                        ON graph_views(owner_id);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (59);",
+                )
+                .expect("migration v59: graph_views");
+        }
     }
 }
