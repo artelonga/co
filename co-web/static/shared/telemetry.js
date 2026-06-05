@@ -72,7 +72,7 @@
     };
 
     // universe slug from /{slug}/...
-    const RESERVED = ['admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'api'];
+    const RESERVED = ['admin', 'settings', 'yggdrasil', 'static', 'health', '_app', 'api', 'graph-views'];
     const m = location.pathname.match(/^\/([^/]+)/);
     if (m && !RESERVED.includes(m[1])) body.universe_key = m[1];
 
