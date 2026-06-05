@@ -334,6 +334,8 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 | GET | `/api/v1/uat/changes` | admin | CO-45 UAT change list |
 | POST | `/api/v1/uat/export-patch` | admin | Export changes as patch |
 | POST | `/v1/log-drains/vercel/{universe_id}` | shared-secret | CO-124 Vercel log drain receiver |
+| POST | `/api/v1/admin/backup/snapshot` | admin | CO-365 — force snapshot via active backup backend |
+| GET | `/api/v1/admin/backup/snapshots` | admin | CO-365 — list snapshots from backup backend |
 
 ---
 
