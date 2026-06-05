@@ -357,6 +357,7 @@ pub struct SwitchVariant {
 pub struct HealthResponse {
     pub status: String,
     pub version: String,
+    pub env: String,
 }
 
 #[derive(Debug, Serialize)]

@@ -76,6 +76,7 @@ async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
+        env: std::env::var("CO_ENV").unwrap_or_else(|_| "production".into()),
     })
 }
 
@@ -309,6 +310,8 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     };
 
     seed_orchestrator::run_admin_seeding(&config);
+    // CO-379: seed stable fixture universes on staging (no-op on prod/uat).
+    seed_orchestrator::seed_staging_fixtures(&config);
     seed_orchestrator::backfill_chat_push(&config);
 
     // One-shot SQL seed file: place `seed.sql` in data_dir, it runs once on startup then is deleted.
@@ -672,6 +675,11 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         worker_executor.spawn_worker(crate::workers::ReleaseNotesWorker::new(state.clone()));
         // CO-337: clone/pull remote sister repos and reseed every 15 min.
         worker_executor.spawn_worker(crate::workers::RemoteSisterRepoWorker::new(config.clone()));
+        // CO-379: weekly u-test-* retention sweep — staging only.
+        if config.is_staging() {
+            worker_executor
+                .spawn_worker(crate::workers::StagingTestSweepWorker::new(config.clone()));
+        }
     }
 
     // CO-334: run the first release-notes refresh at boot so the feed is populated

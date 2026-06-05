@@ -74,6 +74,11 @@ impl WebConfig {
         self.co_env == "uat"
     }
 
+    /// Returns true when running in staging mode (`CO_ENV=staging`).
+    pub fn is_staging(&self) -> bool {
+        self.co_env == "staging"
+    }
+
     /// Returns true when UAT-login (`POST /api/v1/auth/uat-login`) should be
     /// reachable. CO-309: returns true for every non-prod environment
     /// (`uat`, `test`, `dev`, `local`, or unset) — same set as
@@ -134,6 +139,17 @@ mod tests {
             assert!(
                 !config_with_env(env).is_local_or_test(),
                 "expected is_local_or_test() == false for CO_ENV={env:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_staging_returns_true_only_for_staging() {
+        assert!(config_with_env("staging").is_staging());
+        for env in &["prod", "uat", "test", "dev", "local", ""] {
+            assert!(
+                !config_with_env(env).is_staging(),
+                "expected is_staging() == false for CO_ENV={env:?}"
             );
         }
     }

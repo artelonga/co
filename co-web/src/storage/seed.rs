@@ -975,6 +975,177 @@ impl Storage {
         }
     }
 
+    /// CO-379: seed stable fixture universes for the staging environment.
+    ///
+    /// These universes are read-only baselines — never mutated by Playwright
+    /// test runs. Idempotent: `INSERT OR IGNORE` skips already-present rows.
+    ///
+    /// Fixture set:
+    /// - `recursion-a` / `recursion-ab` / `recursion-abc` — nested-universe fixture
+    /// - `funnel-fixture` — pre-seeded mixed leads + users for funnel report tests
+    /// - `mbya-staging` / `yoruba-staging` — workspace template fixtures
+    pub fn seed_staging_fixture_universes(&mut self) {
+        let now = Utc::now().to_rfc3339();
+
+        // (key, name, description, visibility, parent_key)
+        let fixtures: &[(&str, &str, &str, &str, Option<&str>)] = &[
+            (
+                "recursion-a",
+                "Recursion A",
+                "Staging fixture: top-level universe for recursion tests",
+                "public",
+                None,
+            ),
+            (
+                "recursion-ab",
+                "Recursion A/B",
+                "Staging fixture: sub-universe of recursion-a",
+                "public",
+                Some("recursion-a"),
+            ),
+            (
+                "recursion-abc",
+                "Recursion A/B/C",
+                "Staging fixture: sub-sub-universe of recursion-ab",
+                "public",
+                Some("recursion-ab"),
+            ),
+            (
+                "funnel-fixture",
+                "Funnel Fixture",
+                "Staging fixture: pre-seeded leads + users for funnel report tests",
+                "private",
+                None,
+            ),
+            (
+                "mbya-staging",
+                "Mbya Staging",
+                "Staging fixture: workspace template fixture (mbya lexicon)",
+                "public",
+                None,
+            ),
+            (
+                "yoruba-staging",
+                "Yoruba Staging",
+                "Staging fixture: workspace template fixture (yoruba lexicon)",
+                "public",
+                None,
+            ),
+        ];
+
+        for &(key, name, desc, vis, parent) in fixtures {
+            let _ = self.conn.execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, visibility) \
+                 VALUES (?1, ?2, ?3, 'system', ?4, ?5)",
+                rusqlite::params![key, name, desc, now, vis],
+            );
+            if let Some(p) = parent {
+                let _ = self.conn.execute(
+                    "UPDATE universes SET parent_key = ?2 \
+                     WHERE key = ?1 AND parent_key IS NULL",
+                    rusqlite::params![key, p],
+                );
+            }
+        }
+
+        tracing::info!(
+            "CO-379: staging fixture universes seeded: recursion-a, recursion-ab, \
+             recursion-abc, funnel-fixture, mbya-staging, yoruba-staging"
+        );
+    }
+
+    /// CO-379: delete `u-test-*` universe rows (and their directories) that are
+    /// older than `max_age_days`, retaining the most recent `keep_count` rows for
+    /// forensic inspection. Returns the number of universes deleted.
+    pub fn sweep_test_namespaces(&mut self, max_age_days: i64, keep_count: usize) -> usize {
+        let cutoff = (chrono::Utc::now()
+            - chrono::Duration::try_days(max_age_days).unwrap_or(chrono::Duration::zero()))
+        .to_rfc3339();
+
+        // IDs of the most-recent `keep_count` u-test-* universes — these are preserved.
+        let keep_keys: Vec<String> = {
+            let mut stmt = match self.conn.prepare(
+                "SELECT key FROM universes WHERE key LIKE 'u-test-%' \
+                 ORDER BY created_at DESC LIMIT ?1",
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("CO-379: sweep_test_namespaces prepare (keep): {e}");
+                    return 0;
+                }
+            };
+            match stmt.query_map(rusqlite::params![keep_count as i64], |r| r.get(0)) {
+                Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                Err(_) => vec![],
+            }
+        };
+
+        // Collect universe keys and dirs to delete (older than cutoff, not in keep set).
+        let to_delete: Vec<(String, std::path::PathBuf)> = {
+            let mut stmt = match self.conn.prepare(
+                "SELECT key FROM universes \
+                 WHERE key LIKE 'u-test-%' AND created_at < ?1",
+            ) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("CO-379: sweep_test_namespaces prepare (sweep): {e}");
+                    return 0;
+                }
+            };
+            let keys: Vec<String> =
+                match stmt.query_map(rusqlite::params![cutoff], |r| r.get::<_, String>(0)) {
+                    Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                    Err(_) => vec![],
+                };
+            keys.into_iter()
+                .filter(|k| !keep_keys.contains(k))
+                .map(|k| {
+                    let dir = self.universe_root(&k);
+                    (k, dir)
+                })
+                .collect()
+        };
+
+        let mut deleted = 0;
+        for (key, dir) in &to_delete {
+            // Cascade: delete child rows in all tables with universe_key before
+            // deleting the parent row (mirrors delete_universe in universe_routes.rs).
+            let tables: Vec<String> = {
+                let conn = &self.conn;
+                match conn.prepare(
+                    "SELECT m.name FROM sqlite_master m \
+                     JOIN pragma_table_info(m.name) p \
+                     WHERE m.type = 'table' AND m.name != 'universes' \
+                       AND m.name NOT LIKE 'sqlite_%' AND p.name = 'universe_key'",
+                ) {
+                    Ok(mut s) => match s.query_map([], |r| r.get::<_, String>(0)) {
+                        Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+                        Err(_) => vec![],
+                    },
+                    Err(_) => vec![],
+                }
+            };
+            for table in &tables {
+                let sql = format!("DELETE FROM \"{table}\" WHERE universe_key = ?1");
+                let _ = self.conn.execute(&sql, rusqlite::params![key]);
+            }
+            if let Err(e) = self.conn.execute(
+                "DELETE FROM universes WHERE key = ?1",
+                rusqlite::params![key],
+            ) {
+                tracing::warn!("CO-379: sweep_test_namespaces delete row {key}: {e}");
+                continue;
+            }
+            if dir.exists() {
+                let _ = std::fs::remove_dir_all(dir);
+            }
+            deleted += 1;
+        }
+
+        deleted
+    }
+
     /// CO-279: ensure a universe has at least one project entry so the kanban
     /// board never lands on the "no project found" empty state.
     ///
@@ -2085,5 +2256,153 @@ mod tests {
             url, "https://github.com/custom/repo",
             "operator-set remote_url must not be overwritten on re-seed"
         );
+    }
+
+    // CO-379: staging fixture universe seeding
+    #[test]
+    fn test_seed_staging_fixture_universes_creates_all_fixtures() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_staging_fixture_universes();
+
+        for key in [
+            "recursion-a",
+            "recursion-ab",
+            "recursion-abc",
+            "funnel-fixture",
+            "mbya-staging",
+            "yoruba-staging",
+        ] {
+            let u = storage.get_universe(key);
+            assert!(
+                u.is_some(),
+                "fixture universe '{key}' must exist after seed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_seed_staging_fixture_universes_parent_keys() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_staging_fixture_universes();
+
+        let ab: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT parent_key FROM universes WHERE key = 'recursion-ab'",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        assert_eq!(
+            ab.as_deref(),
+            Some("recursion-a"),
+            "recursion-ab.parent_key"
+        );
+
+        let abc: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT parent_key FROM universes WHERE key = 'recursion-abc'",
+                [],
+                |r| r.get(0),
+            )
+            .ok()
+            .flatten();
+        assert_eq!(
+            abc.as_deref(),
+            Some("recursion-ab"),
+            "recursion-abc.parent_key"
+        );
+    }
+
+    #[test]
+    fn test_seed_staging_fixture_universes_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_staging_fixture_universes();
+        storage.seed_staging_fixture_universes(); // second run
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM universes WHERE key LIKE 'recursion-%' OR key IN ('funnel-fixture','mbya-staging','yoruba-staging')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 6, "idempotent: exactly 6 fixture rows");
+    }
+
+    // CO-379: test namespace sweep
+    #[test]
+    fn test_sweep_test_namespaces_deletes_old_universes() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        let old_date = "2020-01-01T00:00:00+00:00";
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes (key, name, owner_id, created_at, visibility) \
+                 VALUES ('u-test-old-abc123', 'Old Test', 'system', ?1, 'private')",
+                rusqlite::params![old_date],
+            )
+            .unwrap();
+
+        // keep_count=0 → delete all eligible (no forensic floor).
+        let n = storage.sweep_test_namespaces(7, 0);
+        assert_eq!(n, 1, "one old universe should be swept");
+
+        let u = storage.get_universe("u-test-old-abc123");
+        assert!(u.is_none(), "swept universe must be gone");
+    }
+
+    #[test]
+    fn test_sweep_test_namespaces_keeps_recent_universes() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        let recent_date = chrono::Utc::now().to_rfc3339();
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes (key, name, owner_id, created_at, visibility) \
+                 VALUES ('u-test-new-abc123', 'New Test', 'system', ?1, 'private')",
+                rusqlite::params![recent_date],
+            )
+            .unwrap();
+
+        // Recent universe is newer than 7-day cutoff — must not be swept.
+        let n = storage.sweep_test_namespaces(7, 0);
+        assert_eq!(n, 0, "recent universe must not be swept");
+
+        let u = storage.get_universe("u-test-new-abc123");
+        assert!(u.is_some(), "recent universe must still exist");
+    }
+
+    #[test]
+    fn test_sweep_test_namespaces_respects_keep_count() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        let old_date = "2020-01-01T00:00:00+00:00";
+        // Insert 3 old u-test-* universes.
+        for i in 0..3 {
+            storage
+                .conn()
+                .execute(
+                    "INSERT INTO universes (key, name, owner_id, created_at, visibility) \
+                     VALUES (?1, 'Test', 'system', ?2, 'private')",
+                    rusqlite::params![format!("u-test-keep-{i}"), old_date],
+                )
+                .unwrap();
+        }
+
+        // keep_count=2 → 3 old − 2 kept = 1 deleted.
+        let n = storage.sweep_test_namespaces(7, 2);
+        assert_eq!(n, 1, "keep_count=2 should leave 2 and delete 1");
     }
 }
