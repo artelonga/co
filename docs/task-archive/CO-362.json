@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-362",
+  "title": "Markdown render — rewrite http:// asset URLs to https:// to eliminate mixed-content warnings",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-362.md",
+  "branch": "feat/CO-362-markdown-render-rewrite-http-asset-urls-",
+  "merge_sha": "4a4c33b3c61fc019b3b535da86c52a9a42298b2f",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/150",
+    "number": 150
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T15:18:12Z",
+  "files_changed": 4,
+  "lines_added": 88,
+  "lines_removed": 6,
+  "labels": [
+    "type:fix",
+    "module:render",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-362 — Markdown render — rewrite http:// asset URLs to https://\n\n`co-web/static/shared/markdown.js` now rewrites `http://` to `https://` for\n`<img src=\"...\">` URLs in rendered markdown, eliminating mixed-content browser\nwarnings from historical content (npm badges, screenshots, etc.). Anchor\n`href` attributes are left unchanged. Any `<script src=\"http://...\">` tags\nthat survive into the rendered HTML are replaced with a comment.\n\n### Why\n\nThe `/artelonga` universe (and others with legacy README content) was logging\n8+ mixed-content warnings per page load — mostly old img.shields.io badges\nand f.cl.ly screenshots that use bare `http://` URLs. Browsers auto-upgrade\nthese today but still log a warning each time, eroding visitor trust.",
+  "summary": "As A visitor browsing /artelonga or any universe with historical markdown content",
+  "co_auto_version": "0.1.0"
+}
