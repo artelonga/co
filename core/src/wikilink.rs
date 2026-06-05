@@ -26,15 +26,39 @@ pub fn resolve_ref_value(s: &str) -> &str {
 ///
 /// Returns resolved paths (without `[[`/`]]` wrappers and without alias part).
 pub fn extract_wikilinks(text: &str) -> Vec<String> {
+    extract_wikilinks_with_labels(text)
+        .into_iter()
+        .map(|(target, _label)| target)
+        .collect()
+}
+
+/// Extract all wikilinks from a free-text string, preserving the alias label.
+///
+/// Returns `(target_path, optional_label)` pairs. The target is stripped of `[[`/`]]`
+/// wrappers; the label is the part after `|` (if present), trimmed.
+pub fn extract_wikilinks_with_labels(text: &str) -> Vec<(String, Option<String>)> {
     let mut results = Vec::new();
     let mut rest = text;
     while let Some(start) = rest.find("[[") {
         rest = &rest[start + 2..];
         if let Some(end) = rest.find("]]") {
             let inner = &rest[..end];
-            let target = inner.split('|').next().unwrap_or(inner).trim();
+            let (raw_target, label) = if let Some(pipe) = inner.find('|') {
+                let label = inner[pipe + 1..].trim();
+                (
+                    &inner[..pipe],
+                    if label.is_empty() {
+                        None
+                    } else {
+                        Some(label.to_string())
+                    },
+                )
+            } else {
+                (inner, None)
+            };
+            let target = raw_target.trim();
             if !target.is_empty() {
-                results.push(target.to_string());
+                results.push((target.to_string(), label));
             }
             rest = &rest[end + 2..];
         } else {
@@ -110,5 +134,28 @@ mod tests {
     fn test_extract_multiple_wikilinks() {
         let links = extract_wikilinks("[[a]] mid [[b|alias]] end [[c]]");
         assert_eq!(links, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn test_extract_wikilinks_with_labels_basic() {
+        let links = extract_wikilinks_with_labels("See [[foo]] and [[bar|Bar Label]].");
+        assert_eq!(links.len(), 2);
+        assert_eq!(links[0], ("foo".to_string(), None));
+        assert_eq!(links[1], ("bar".to_string(), Some("Bar Label".to_string())));
+    }
+
+    #[test]
+    fn test_extract_wikilinks_with_labels_empty_label_treated_as_none() {
+        let links = extract_wikilinks_with_labels("[[path|]]");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0], ("path".to_string(), None));
+    }
+
+    #[test]
+    fn test_extract_wikilinks_with_labels_unicode_label() {
+        let links = extract_wikilinks_with_labels("[[concepts::mother.md|mãe]]");
+        assert_eq!(links.len(), 1);
+        assert_eq!(links[0].0, "concepts::mother.md");
+        assert_eq!(links[0].1, Some("mãe".to_string()));
     }
 }
