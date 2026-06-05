@@ -2227,5 +2227,28 @@ impl Storage {
                 )
                 .expect("migration v57: probe cleanup");
         }
+
+        if current_version < 58 {
+            // CO-340: analytics rollups — agregado diário CONSENTIDO, sem PII, por
+            // universe. É o que producers (surfaces universe-owned, parceiros, universes
+            // co) pusham; o summary central faz a ponte (universe + path histórico).
+            // metrics/dims = JSON (DailyRollup, ver openapi do artelonga). PK (universe, day)
+            // → upsert idempotente.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS analytics_rollups (
+                        universe_key TEXT NOT NULL,
+                        day          TEXT NOT NULL,
+                        metrics      TEXT NOT NULL,
+                        dims         TEXT NOT NULL DEFAULT '{}',
+                        updated_at   TEXT NOT NULL,
+                        PRIMARY KEY (universe_key, day)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_rollups_universe_day
+                        ON analytics_rollups(universe_key, day);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (58);",
+                )
+                .expect("migration v58: analytics_rollups");
+        }
     }
 }
