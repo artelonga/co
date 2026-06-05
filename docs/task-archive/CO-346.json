@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-346",
+  "title": "Fix SPA empty-board mystery — co universe shows no content despite 1227 entries on prod",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-346.md",
+  "branch": "feat/CO-346-fix-spa-empty-board-mystery-co-universe-",
+  "merge_sha": "ee1b9d614f67d5e9efcb58600ef076754fde3f0e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/148",
+    "number": 148
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T14:52:58Z",
+  "files_changed": 5,
+  "lines_added": 129,
+  "lines_removed": 14,
+  "labels": [
+    "type:fix",
+    "module:co-web",
+    "module:spa"
+  ],
+  "changelog_entry": "## CO-346 — Fix SPA empty-board mystery — co universe shows no content despite 1227 entries on prod\n\n**Root cause (two compounding bugs):**\n\n1. `seed_co_universe_tasks` returned early when the source directory (`/app/seed-co/`) was absent, before it had a chance to upsert the `projects/CO/_project.md` entry into the universe DB. Both `seed_admin_content_universes` (`if key != \"co\"`) and `backfill_default_projects` (`AND key NOT IN (..., 'co')`) explicitly skip the `co` universe, trusting this seed to create the project. On installs where the source dir is missing, `co` ends up with zero projects. `bootAppForUniverse` finds no projects, never calls `selectProject`, and the kanban renders empty — even when the API reports 1 000+ entries.\n\n2. `list_dev_tasks` only searched entries at the `work/` path prefix. The boot-time seed (CO-262) stores task entries at `public/CO-*.md` to allow anonymous access via the entries API. This path-prefix mismatch meant `GET /api/v1/universes/co/dev-tasks` returned an empty array even on installs where the seed had run correctly.\n\n**Fixes:**\n\n- **`seed.rs`**: moved the CO project upsert block and `project_universe_index` INSERT before the `source_dir.exists()` guard, so the project row is always created regardless of whether task files are available.\n- **`entry_routes.rs`** (`list_dev_tasks`): added a second `query_by_path_prefix` call for the `public/` prefix and merged results with the existing `work/` query. Type filtering (`user-story` / `task` / `epic`) acts as the semantic gate.\n- **New unit test** (`test_seed_co_universe_tasks_creates_project_without_source_dir`): asserts that the CO project exists even when called with a non-existent source dir.\n- **New Playwright E2E spec** (`co-346-co-board.spec.ts`): covers anonymous visitor to `/co` (board loads, project visible), anonymous API access, and logged-in user stays on `/co` without auto-bounce.\n\n### Why\nThe `co` universe is the only system universe with a custom project seed path separate from the generic default-project machinery. When that custom seed path is unavailable (first deploy before Docker bundle is in place, or a broken `resolve_seed_co_dir`), the safeguards designed for every other universe are explicitly bypassed — leaving `co` in a permanently empty-board state.",
+  "summary": "A visitor to https://co-artelonga.fly.dev/co (anonymous or logged-in)",
+  "co_auto_version": "0.1.0"
+}
