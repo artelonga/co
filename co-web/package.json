@@ -1,13 +1,15 @@
 {
-  "name": "co-web-e2e",
+  "name": "co-web",
   "version": "0.0.0",
   "private": true,
-  "description": "E2E tests for co-web using Playwright",
+  "description": "E2E tests and tooling for co-web",
   "scripts": {
     "test": "npx playwright test --pass-with-no-tests",
     "test:headed": "npx playwright test --headed",
     "test:ui": "npx playwright test --ui",
-    "test:components": "vitest run"
+    "test:components": "vitest run",
+    "openapi:gen": "node --import tsx scripts/generate-openapi.ts",
+    "openapi:check": "node --import tsx scripts/generate-openapi.ts --check"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",
@@ -15,6 +17,7 @@
     "@testing-library/dom": "^10.4.0",
     "@testing-library/user-event": "^14.5.2",
     "happy-dom": "^15.11.7",
+    "tsx": "^4",
     "vitest": "^3.2.0"
   }
 }
