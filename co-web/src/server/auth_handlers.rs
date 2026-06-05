@@ -293,6 +293,22 @@ pub(super) async fn verify_handler(
         },
     );
 
+    // CO-361: audit log
+    crate::atividade::log_atividade(
+        state.clone(),
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Login,
+            entidade: "user".into(),
+            entidade_id: Some(user_id.clone()),
+            before: None,
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: Some(user_id.clone()),
+            ip: None,
+            user_agent: None,
+        },
+    );
+
     let response_body = VerifyResponse {
         user_id,
         email,
@@ -421,6 +437,7 @@ pub(super) async fn user_stats_handler(
 pub(super) async fn logout_handler(State(state): State<AppState>, headers: HeaderMap) -> Response {
     // CO-156: emit auth.logout telemetry (best-effort, before cookie is cleared)
     let session_id = crate::telemetry::extract_session_id(&headers);
+    let actor = crate::auth::resolve_user_id(&state, &headers);
     crate::telemetry::emit_crud_event(
         &state,
         crate::telemetry::CrudEvent {
@@ -428,9 +445,25 @@ pub(super) async fn logout_handler(State(state): State<AppState>, headers: Heade
             universe: String::new(),
             list: None,
             key: None,
-            actor: crate::auth::resolve_user_id(&state, &headers),
+            actor: actor.clone(),
             session_id,
             extra: None,
+        },
+    );
+
+    // CO-361: audit log
+    crate::atividade::log_atividade(
+        state.clone(),
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Logout,
+            entidade: "user".into(),
+            entidade_id: actor.clone(),
+            before: None,
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: actor,
+            ip: None,
+            user_agent: None,
         },
     );
 
@@ -548,6 +581,22 @@ pub(super) async fn password_login_handler(
             actor: Some(user.id.clone()),
             session_id: None,
             extra: None,
+        },
+    );
+
+    // CO-361: audit log (password field never in the diff — body is not captured)
+    crate::atividade::log_atividade(
+        state.clone(),
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Login,
+            entidade: "user".into(),
+            entidade_id: Some(user.id.clone()),
+            before: None,
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: Some(user.id.clone()),
+            ip: None,
+            user_agent: None,
         },
     );
 

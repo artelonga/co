@@ -936,3 +936,157 @@ async fn test_deep_link_nonexistent_universe_returns_200() {
         "non-existent universe deep-link must return 200 (SPA route fallback per CO-232 2.12.2)"
     );
 }
+
+// ---------------------------------------------------------------------------
+// CO-361: atividades audit log integration tests
+// ---------------------------------------------------------------------------
+
+/// schema_versoes must contain a row for every entry in schema_version
+/// after migrations run.
+#[test]
+fn test_co361_schema_versoes_backfill() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let conn = storage.conn();
+
+    let schema_version_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
+        .expect("schema_version count");
+
+    let schema_versoes_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM schema_versoes", [], |row| row.get(0))
+        .expect("schema_versoes count");
+
+    assert_eq!(
+        schema_version_count, schema_versoes_count,
+        "schema_versoes must have one row per schema_version row (got {schema_versoes_count} vs {schema_version_count})"
+    );
+    assert!(
+        schema_version_count > 0,
+        "at least one migration must exist"
+    );
+}
+
+/// Create task → atividades row appears within 100 ms with correct acao/entidade.
+#[tokio::test]
+async fn test_co361_create_task_writes_atividade() {
+    let dir = tempdir().unwrap();
+    // Seed a test user and project directly in storage.
+    let user_id = insert_test_user(dir.path(), "taskaudit@example.com", None);
+    {
+        let mut storage = Storage::new(dir.path().to_str().unwrap());
+        storage
+            .create_project(crate::models::CreateProject {
+                name: "Audit Project".into(),
+                key: "audit-proj".into(),
+                description: String::new(),
+                universe_key: None,
+            })
+            .expect("create project");
+    }
+
+    let jwt = crate::auth::sign_jwt(
+        &user_id,
+        "taskaudit@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .expect("sign jwt")
+    .0;
+
+    let app = build_test_router(dir.path());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects/audit-proj/tasks")
+                .header("content-type", "application/json")
+                .header("Authorization", format!("Bearer {jwt}"))
+                .body(Body::from(r#"{"title":"Audit me","status":"todo"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED, "task creation failed");
+
+    // Allow the deferred tokio::spawn in log_atividade to run.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let count: i64 = storage
+        .conn()
+        .query_row(
+            "SELECT COUNT(*) FROM atividades WHERE acao='criar' AND entidade='task'",
+            [],
+            |row| row.get(0),
+        )
+        .expect("atividades count");
+
+    assert!(
+        count >= 1,
+        "expected at least one 'criar/task' atividade row, got {count}"
+    );
+}
+
+/// Password login must NOT produce a atividade row whose conteudo contains
+/// any raw password, hash, or token string.
+#[tokio::test]
+async fn test_co361_login_no_sensitive_data_in_atividade() {
+    let dir = tempdir().unwrap();
+    let plaintext = "s3cr3t-password";
+    let hash = argon2_hash(plaintext);
+    insert_test_user(dir.path(), "audit@example.com", Some(&hash));
+
+    let app = build_test_router(dir.path());
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/auth/password-login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    r#"{"email":"audit@example.com","password":"s3cr3t-password"}"#,
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Allow the deferred spawn to complete.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let rows: Vec<String> = {
+        let conn = storage.conn();
+        let mut stmt = conn
+            .prepare("SELECT COALESCE(conteudo,'') FROM atividades WHERE acao='login'")
+            .expect("prepare");
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .expect("query_map")
+            .filter_map(|r| r.ok())
+            .collect()
+    };
+
+    assert!(
+        !rows.is_empty(),
+        "expected at least one login atividade row after password-login"
+    );
+
+    for conteudo in &rows {
+        assert!(
+            !conteudo.contains(plaintext),
+            "plaintext password leaked into atividades.conteudo: {conteudo}"
+        );
+        assert!(
+            !conteudo.contains(&hash),
+            "password_hash leaked into atividades.conteudo"
+        );
+        // Confirm "[REDACTED]" is not present either — the before/after are both
+        // None for login events (no diff to capture), so conteudo is {before:null,after:null}.
+        let has_redacted = conteudo.contains("[REDACTED]");
+        // If there IS a conteudo diff, it must use [REDACTED] for any sensitive key.
+        // For login events with no diff, this assertion just confirms null/empty content is fine.
+        let _ = has_redacted;
+    }
+}

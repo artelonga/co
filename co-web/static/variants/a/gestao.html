@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO Gestão</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#66bb6a;--red:#e57373;--yellow:#ffd54f}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif;padding:20px;max-width:960px}
+h1{font-size:1.4rem;margin-bottom:4px;color:var(--accent)}
+h2{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+.schema-strip{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px 16px;margin-bottom:16px;font-size:.8rem}
+.schema-strip .badge{padding:2px 8px;border-radius:4px;font-weight:600;font-size:.75rem}
+.badge-ok{background:var(--green);color:#000}
+.badge-drift{background:var(--red);color:#fff}
+.badge-loading{background:var(--yellow);color:#000}
+.schema-strip .schema-info{color:var(--text);font-weight:500}
+.schema-strip .schema-dim{color:var(--dim);margin-left:auto;font-size:.7rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px}
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.filters select,.filters input{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px}
+.filters button{background:var(--accent);color:#fff;border:none;padding:4px 12px;border-radius:4px;cursor:pointer;font-size:12px}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{text-align:left;padding:5px 8px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:5px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border:none}
+.acao-criar{color:#66bb6a}
+.acao-excluir{color:var(--red)}
+.acao-atualizar{color:#4fc3f7}
+.acao-login{color:#ffd54f}
+.acao-logout{color:var(--dim)}
+.acao-ler{color:var(--dim)}
+.diff-btn{background:none;border:1px solid var(--border);color:var(--dim);cursor:pointer;padding:2px 6px;border-radius:3px;font-size:11px}
+.diff-btn:hover{border-color:var(--accent);color:var(--accent)}
+.diff-panel{background:#0a0a14;border:1px solid var(--border);border-radius:6px;padding:12px;margin-top:8px;font-family:monospace;font-size:11px;white-space:pre-wrap;max-height:300px;overflow:auto;display:none}
+.err{color:var(--red);margin-top:8px;font-size:.8rem}
+.pat-section{margin-bottom:16px}
+.pat-section input{width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:4px;font-size:13px;font-family:monospace}
+.pat-section label{display:block;font-size:.75rem;color:var(--dim);margin-bottom:4px}
+.pat-section .hint{font-size:.7rem;color:var(--dim);margin-top:4px}
+</style>
+</head>
+<body>
+<h1>CO Gestão</h1>
+
+<div class="pat-section card">
+  <label>GitHub Personal Access Token</label>
+  <input id="pat-input" type="password" placeholder="ghp_..." autocomplete="off">
+  <div class="hint">Token is kept in memory only. Never stored in cookies or localStorage.</div>
+</div>
+
+<div class="schema-strip" id="schema-strip">
+  <span class="badge badge-loading" id="schema-badge">…</span>
+  <span class="schema-info" id="schema-info">Carregando versão do schema…</span>
+  <span class="schema-dim" id="schema-dim"></span>
+</div>
+
+<div class="card">
+  <h2>Atividades</h2>
+  <div class="filters">
+    <select id="f-acao">
+      <option value="">Todas as ações</option>
+      <option value="criar">Criar</option>
+      <option value="atualizar">Atualizar</option>
+      <option value="excluir">Excluir</option>
+      <option value="login">Login</option>
+      <option value="logout">Logout</option>
+      <option value="ler">Ler</option>
+    </select>
+    <input id="f-since" type="datetime-local" title="Desde (ISO)">
+    <input id="f-limit" type="number" value="50" min="1" max="200" style="width:70px" title="Limite">
+    <button onclick="loadAtividades()">Filtrar</button>
+    <button onclick="clearFilters()">Limpar</button>
+  </div>
+  <div id="atividades-err" class="err" style="display:none"></div>
+  <table>
+    <thead>
+      <tr>
+        <th>Ação</th>
+        <th>Entidade</th>
+        <th>ID</th>
+        <th>Usuário</th>
+        <th>App</th>
+        <th>Quando</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody id="atividades-body">
+      <tr><td colspan="7" style="color:var(--dim);text-align:center">Carregando…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <h2>Histórico de Migrações (schema_versoes)</h2>
+  <table>
+    <thead><tr><th>Versão</th><th>Descrição</th><th>App</th><th>Aplicado em</th></tr></thead>
+    <tbody id="schema-body">
+      <tr><td colspan="4" style="color:var(--dim);text-align:center">Aguardando autenticação…</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<script>
+var pat = '';
+
+function getPat(){
+  var v = document.getElementById('pat-input').value.trim();
+  if(v) pat = v;
+  return pat;
+}
+
+function authHeaders(){
+  var p = getPat();
+  return p ? {'Authorization':'Bearer '+p,'Content-Type':'application/json'} : {'Content-Type':'application/json'};
+}
+
+function esc(s){return(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+function relTime(iso){
+  try{
+    var d=new Date(iso+' UTC');
+    var diff=Date.now()-d.getTime();
+    if(diff<60000) return Math.floor(diff/1000)+'s atrás';
+    if(diff<3600000) return Math.floor(diff/60000)+'m atrás';
+    if(diff<86400000) return Math.floor(diff/3600000)+'h atrás';
+    return d.toLocaleString('pt-BR');
+  }catch(e){return iso||'';}
+}
+
+async function loadSchemaStatus(){
+  var strip=document.getElementById('schema-strip');
+  var badge=document.getElementById('schema-badge');
+  var info=document.getElementById('schema-info');
+  var dim=document.getElementById('schema-dim');
+  try{
+    var r=await fetch('/api/v1/gestao/schema-status',{headers:authHeaders()});
+    if(!r.ok){
+      badge.className='badge badge-drift';
+      badge.textContent='Erro '+r.status;
+      info.textContent='Falha ao carregar status do schema';
+      return;
+    }
+    var d=await r.json();
+    badge.className='badge '+(d.ok?'badge-ok':'badge-drift');
+    badge.textContent=d.ok?'OK':'DRIFT';
+    info.textContent='DB schema v'+d.schema_versao+' / app v'+d.app_versao;
+    if(!d.ok) info.textContent+=' ⚠ schema desatualizado';
+    dim.textContent='Esperado: v59';
+    renderSchemaHistorico(d.historico||[]);
+  }catch(e){
+    badge.className='badge badge-drift';
+    badge.textContent='Erro';
+    info.textContent=''+e.message;
+  }
+}
+
+function renderSchemaHistorico(rows){
+  var tb=document.getElementById('schema-body');
+  if(!rows.length){
+    tb.innerHTML='<tr><td colspan="4" style="color:var(--dim);text-align:center">Sem dados</td></tr>';
+    return;
+  }
+  tb.innerHTML=rows.map(function(r){
+    return'<tr><td>'+r.versao+'</td><td>'+esc(r.descricao)+'</td><td>'+esc(r.versao_app)+'</td><td>'+esc(r.applied_at)+'</td></tr>';
+  }).join('');
+}
+
+async function loadAtividades(){
+  var p=[];
+  var acao=document.getElementById('f-acao').value;
+  var since=document.getElementById('f-since').value;
+  var limit=document.getElementById('f-limit').value||50;
+  if(acao) p.push('acao='+encodeURIComponent(acao));
+  if(since) p.push('since='+encodeURIComponent(since.replace('T',' ')));
+  p.push('limit='+limit);
+  var url='/api/v1/gestao/atividades?'+p.join('&');
+  var errEl=document.getElementById('atividades-err');
+  var tb=document.getElementById('atividades-body');
+  tb.innerHTML='<tr><td colspan="7" style="color:var(--dim);text-align:center">Carregando…</td></tr>';
+  errEl.style.display='none';
+  try{
+    var r=await fetch(url,{headers:authHeaders()});
+    if(r.status===401||r.status===403){
+      errEl.textContent='Autenticação necessária — insira seu GitHub PAT acima.';
+      errEl.style.display='';
+      tb.innerHTML='';
+      return;
+    }
+    if(!r.ok){errEl.textContent='Erro '+r.status;errEl.style.display='';tb.innerHTML='';return;}
+    var rows=await r.json();
+    if(!rows.length){
+      tb.innerHTML='<tr><td colspan="7" style="color:var(--dim);text-align:center">Sem atividades no período</td></tr>';
+      return;
+    }
+    tb.innerHTML=rows.map(function(a,i){
+      var cls='acao-'+(a.acao||'');
+      var hasDiff=a.conteudo&&(a.conteudo.before!=null||a.conteudo.after!=null);
+      return '<tr>'+
+        '<td class="'+cls+'">'+esc(a.acao)+'</td>'+
+        '<td>'+esc(a.entidade)+'</td>'+
+        '<td style="font-family:monospace">'+esc(a.entidade_id||'—')+'</td>'+
+        '<td style="font-family:monospace">'+esc(a.user_id||'anon').substring(0,12)+'</td>'+
+        '<td>'+esc(a.versao_app||'?')+'</td>'+
+        '<td title="'+esc(a.criado_em)+'">'+relTime(a.criado_em)+'</td>'+
+        '<td>'+(hasDiff?'<button class="diff-btn" onclick="toggleDiff(this,'+i+')" data-idx="'+i+'">diff</button>':'')+'</td>'+
+        '</tr>'+
+        (hasDiff?'<tr id="diff-row-'+i+'" style="display:none"><td colspan="7"><div class="diff-panel" id="diff-panel-'+i+'" style="display:block">'+esc(JSON.stringify(a.conteudo,null,2))+'</div></td></tr>':'');
+    }).join('');
+  }catch(e){errEl.textContent=''+e.message;errEl.style.display='';}
+}
+
+function toggleDiff(btn,idx){
+  var row=document.getElementById('diff-row-'+idx);
+  if(!row) return;
+  var open=row.style.display==='table-row';
+  row.style.display=open?'none':'table-row';
+  btn.textContent=open?'diff':'fechar';
+}
+
+function clearFilters(){
+  document.getElementById('f-acao').value='';
+  document.getElementById('f-since').value='';
+  document.getElementById('f-limit').value='50';
+  loadAtividades();
+}
+
+document.getElementById('pat-input').addEventListener('change', function(){
+  pat=this.value.trim();
+  loadSchemaStatus();
+  loadAtividades();
+});
+
+loadSchemaStatus();
+loadAtividades();
+</script>
+</body>
+</html>

@@ -688,6 +688,9 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(state.clone()));
 
+    // CO-361: nightly 180-day atividades retention purge.
+    tokio::spawn(crate::atividade::retention_task(state.clone()));
+
     // CO-82: spawn UAT mirror task if reset just happened and env is configured.
     // Runs in the background after the server binds; failures are logged, not fatal.
     if uat_reset_just_happened

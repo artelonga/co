@@ -94,6 +94,7 @@ pub use integrations::webhook_worker;
 // platform context
 pub use platform::ab;
 pub use platform::ab_routes;
+pub use platform::atividade;
 pub use platform::baseline;
 pub use platform::cache;
 pub use platform::config;

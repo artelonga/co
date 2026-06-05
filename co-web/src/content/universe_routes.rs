@@ -276,6 +276,22 @@ pub async fn create_universe(
 
     let mut storage = lock_storage(&state);
     let universe = storage.create_universe(body, &user_id.0)?;
+    let ukey = universe.key.clone();
+    drop(storage);
+    crate::atividade::log_atividade(
+        state,
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Criar,
+            entidade: "universe".into(),
+            entidade_id: Some(ukey),
+            before: None,
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: Some(user_id.0),
+            ip: None,
+            user_agent: None,
+        },
+    );
     Ok((StatusCode::CREATED, Json(universe)))
 }
 
@@ -548,6 +564,22 @@ pub async fn delete_universe(
         .cache
         .query
         .invalidate_prefix(&format!("{slug}:"));
+
+    // CO-361: audit log
+    crate::atividade::log_atividade(
+        state.clone(),
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Excluir,
+            entidade: "universe".into(),
+            entidade_id: Some(slug.clone()),
+            before: None,
+            after: None,
+            tipo: crate::atividade::Tipo::Sucesso,
+            user_id: None,
+            ip: None,
+            user_agent: None,
+        },
+    );
 
     Ok((
         axum::http::StatusCode::OK,
