@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-339",
+  "title": "Feedback validation — reject empty bodies + probe paths at the API",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-339.md",
+  "branch": "feat/CO-339-feedback-validation-reject-empty-bodies-",
+  "merge_sha": "58cb534baa8957dd8e135fae30cb051c131a9c84",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/151",
+    "number": 151
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T15:22:45Z",
+  "files_changed": 4,
+  "lines_added": 404,
+  "lines_removed": 26,
+  "labels": [
+    "type:fix",
+    "module:feedback",
+    "module:api"
+  ],
+  "changelog_entry": "## CO-339 — Feedback validation — reject empty bodies + probe paths at the API\n\nAdded server-side validation to `POST /api/v1/feedback` and\n`POST /api/v1/feedback/{universe}/{*entry_path}` that gates every submission\nthrough three checks before it reaches the database:\n\n1. **Probe path blocklist** — paths starting with `/_` or matching a set of\n   known scanner paths (`/probe`, `/smoke`, `/selftest`, `/telemetry-check`,\n   `/analytics-smoke`, `/healthcheck`) are rejected with\n   `400 {\"error\": \"probe_path_blocked\"}`.\n2. **Body length** — trimmed `message` shorter than 5 characters is rejected\n   with `400 {\"error\": \"body_too_short\"}`.  Supports both `message` and `body`\n   as JSON field names (Yggdrasil compat alias).\n3. **Rate limit** — 3 submissions per IP per hour (down from 10).  Excess\n   requests return `429 {\"error\": \"rate_limited\", \"retry_after_s\": <n>}`.\n\nA one-shot SQL migration (v57) back-fills all existing `open` rows with\nempty or short bodies (the 16 probe entries on prod) to `status = 'wont-fix'`\nwith an explanatory `owner_response` note, so the operator's notification\ninbox shows only real feedback going forward.\n\n### Why\n\nThe feedback table on prod accumulated 16 probe/scanner entries with empty\nbodies and paths like `/_smoke`, `/_proof`, `/probe`, `/telemetry-check` —\nall from CI smoke runners and scanners hitting the open endpoint introduced\nby CO-333. These blocked the signal in `/api/v1/me/notifications`.",
+  "summary": "As The platform operator who reads /api/v1/me/notifications",
+  "co_auto_version": "0.1.0"
+}
