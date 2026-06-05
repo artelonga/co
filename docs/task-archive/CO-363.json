@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-363",
+  "title": "Cross-universe wikilink resolver — `[[key::path]]` populates entry_relations.to_universe",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-363.md",
+  "branch": "feat/CO-363-cross-universe-wikilink-resolver-key-pat",
+  "merge_sha": "ba7b1a4cfde7dcd227c3f0408aa6afa53d253e84",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/156",
+    "number": 156
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T19:46:06Z",
+  "files_changed": 7,
+  "lines_added": 521,
+  "lines_removed": 133,
+  "labels": [
+    "type:feat",
+    "module:graph",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-363 — Cross-universe wikilink resolver — `[[key::path]]` populates entry_relations.to_universe\n\nThe relation extractor now handles all four body wikilink forms and frontmatter\n`key::path` syntax, writing rows to `entry_relations` with `to_universe` populated:\n\n- `[[mbya::terms/jaxy-jatere]]` → `to_universe=\"mbya\"`, `to_entry=\"terms/jaxy-jatere\"`\n- `[[concepts::mother.md|mãe]]` → `to_universe=\"concepts\"`, `link_text=\"mãe\"`\n- `[[terms/local]]` (plain) → `to_universe=NULL` (same universe)\n- `[[../sibling/x]]` → `relation_type=\"wikilink_relative_deprecated\"` + deprecation log\n- Frontmatter `concept: yoruba::terms/ogunte` → `to_universe=\"yoruba\"`\n\nNew `link_text TEXT` column added to `entry_relations` (universe_pool v16). A\none-time startup backfill re-indexes body wikilinks for all existing entries.\n\n### Why\n\nCO-345's graph view needs real cross-universe edges to render. This spec populates\n`to_universe` for inline body wikilinks so the graph has the data it needs.",
+  "summary": "As A content author writing markdown in CO",
+  "co_auto_version": "0.1.0"
+}
