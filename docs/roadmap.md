@@ -1,6 +1,6 @@
-# CO Roadmap — Brain as a Service
+# CO Roadmap — Wave-based, v3.0 mobile public release in Wave 4
 
-This roadmap is framed by the BaaS thesis (see [`ArteLonga/docs/brain-as-a-service.md`](https://github.com/artelonga/ArteLonga/blob/main/docs/brain-as-a-service.md)).
+Framed by the BaaS thesis (see [`ArteLonga/docs/brain-as-a-service.md`](https://github.com/artelonga/ArteLonga/blob/main/docs/brain-as-a-service.md)).
 
 A **brain** = human + their hardware + their notes/tasks/calendar + their content, delivered as a sovereign, renderable surface that scales horizontally at zero marginal SaaS cost.
 
@@ -8,95 +8,144 @@ A **brain** = human + their hardware + their notes/tasks/calendar + their conten
 
 ## Current state (2026-06-05)
 
-- **Version**: v2.40.0 — substrate stable + OSS integrations
+- **Version**: v2.40.0 → v2.41.0 (Wave 3 in flight: CO-368 + CO-370 pending)
 - **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
-- **Content universes on prod**: co, artelonga, comunicacao, mbya, rfq, yggdrasil, template, plus yuri/retro-umarizal/yoruba/neuro/odysseus/claude-code surfaced via remote sync
-- **Open work items**: ~95 (after backfill: 13 critical, 41 high)
+- **Staging** (post-CO-373): `https://staging.co.artelonga.com.br`
+- **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-372 cron-driven from Wave 4
+- **Open work items**: ~90 (after closing CO-94/146/162/277/143)
+- **Per-wave DoD**: `docs/release-checklist.md`
 
-## Phased releases to v3.0 public launch
+## Wave-aligned releases
 
-### ✅ v2.40 — Brain substrate stable + open brain references (shipped 2026-06-05)
-Universal substrate ready; first OSS brain references (odysseus, claude-code) ingested.
+Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-end.
 
-### 🟡 v2.41 — Brain interlink map (this week)
-The axons between thoughts — cross-universe wikilinks resolve, graph view aggregates across brains.
-- **CO-345** cross-universe graph view + publishable saved views (🟢 just merged)
-- **CO-363** wikilink resolver (`[[key::path]]` → entry_relations.to_universe)
-- **CO-350** Catalog → OpenAPI codegen + CI drift check
-- **CO-361** atividades audit log + schema_versoes admin surface
+| Wave | Tag | Theme | PR count |
+|---|---|---|---|
+| ⏪ done | v2.39.0 | Foundation (CO-211/280/291/301/337/338) | 6 |
+| ⏪ done | **v2.40.0** | Substrate stable + OSS integrations | 10 |
+| 🟡 active | **v2.41.0** | Brain interlink + scrum + retro sim | 7 |
+| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | All substrate + Sala + mobile + staging + edge protection + privacy | **17** |
+| ⚪ planned | v3.1.0 | Monetization + KB + funnel + sprint calendar | 4 |
+| ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web) | 4 |
+| ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
+| ⚪ planned | v3.4.0 | Scale (job queue, cache, rate tiers, load tests) | 6 |
+| ⚪ planned | v3.5.0 | Universe types (manifest plugins, git-backed) | 4 |
+| ⚪ planned | v3.6.0 | Native shells (Capacitor) + advanced | 3 |
 
-### 🟡 v2.42 — Brain interaction surface (Sala) (week 2-3)
-How a brain works — multi-user spatial canvas anchored to a content universe. Yggdrasil's `comunicacao` sala absorbed into CO as the **workspace** primitive.
-- **CO-352** workspace primitive (`entry_type: workspace` + per-user state)
-- **CO-355** workspace template registry (`_workspace.yaml` per universe)
-- **CO-354** suggest/review pipeline (with login CTA)
-- **CO-365** storage backend trait (replaces CO-143 AWS lock-in)
-- Yggdrasil `/universos/comunicacao` 301-redirects to CO
+## Wave 4 — v3.0 (the big public release push)
 
-### 🟡 v2.43 — Multi-brain collab + brain dashboard (week 4)
-Realtime presence; single dashboard for the operator.
-- **CO-353** WebSocket lobby + realtime presence (cursors, live placement)
-- **CO-360** unified `/gestao/resumo` dashboard (collapses 6 admin routes)
-- Yggdrasil game content migrated into CO `yggdrasil` universe
+**Theme**: Brain on any device, public.
 
-### 🔵 v3.0 — First brain on any device, public (week 5-6)
-Public launch — anyone can register, browse template, fork a universe, install as PWA on phone.
-- **CO-356** touch DnD on board (mobile compat)
-- **CO-357** PWA shell (manifest, SW, install prompt, offline cache)
-- **CO-358** mobile IA pass (drawer sidebar, breadcrumb collapse, board reflow)
-- **CO-359** mobile E2E CI matrix (Pixel 7 / iPhone 14 / iPad Pro)
-- **CO-278-B** public API rate limits + abuse protection
-- Press launch, blog post, open invite
+17 PRs batched for CI sanity. Each batch fires when prior batch's PRs merge.
 
-### 🟣 v3.1 — Monetization + universal KB
-First-product moment — brain owners can pay; any content syncs to KB.
-- **CO-366** conversion/payment wiring (Hostinger first; Pix + Stripe stubs)
-- **CO-367** universal content → KB sync (generalizes CO-340 rollup pattern)
-
-### Future (v3.2+)
-- Sync + offline protocol v1 (CO-61, CO-62, CO-128)
-- Security: encrypted assets (CO-145), `.co` format (CO-86), filesystem-as-web (CO-110)
-- Scale: load test scaffolding (CO-101), per-tier rate limits (CO-80), embedding sidecar (CO-286)
-- Native shells: Capacitor iOS/Android (CO-344)
-- Universe types: manifest plugin system (CO-63, CO-70, CO-89, CO-93)
-
-## The BaaS invariants
-
-These four properties must hold across every release:
-
-1. **3 separated layers** — brain content / brain surface (form) / CO platform (identity · warehouse · payment · sync)
-2. **Sovereign edge** — the brain owner controls their hardware + their data; CO is consented async
-3. **No third-party lock-in** — every external integration is behind a trait (storage, payment, sync target)
-4. **Cache-first delivery** — local write renders immediately; sync is eventually consistent; ingest break ≠ unavailable
-
-## Critical open items not yet in a wave
-
-| ID | Why | Disposition |
+### Batch A — substrate gates (4 PRs, fire first)
+| PR | Spec | What it ships |
 |---|---|---|
-| CO-145 encrypted assets | Sovereignty signal; post-v3.0 | v3.2 |
-| CO-86 `.co` file format | Transport-optimized; post-v3.0 | v3.2 |
-| CO-87 composable protocol stack | Architecture; post-v3.0 | v3.2 |
-| CO-76 scalability infra | Pre-empts thousand-brain scale | v3.2 |
-| CO-278-A token tiers + billing | Builds on CO-366; post-v3.1 | v3.2 |
+| **CO-373** | Staging Fly app + DNS + per-test universe isolation | `staging.co.artelonga.com.br` live |
+| **CO-365** | Storage backend trait | LocalFsBackend default; S3/R2/Fly/GCS stubs |
+| **CO-278-B** | Rate limits + abuse heuristics | 60/min anon; X-RateLimit-* headers |
+| **CO-360** | Unified `/gestao/resumo` | One Svelte page, 4 tabs |
+
+### Batch B — Sala + identity (5 PRs)
+| PR | Spec | What it ships |
+|---|---|---|
+| **CO-352** | Workspace primitive | `entry_type: workspace` + per-user state |
+| **CO-354** | Suggest/review pipeline | draft → reviewed → published lifecycle |
+| **CO-355** | Workspace template registry | `_workspace.yaml` per universe |
+| **CO-377** | Cross-env identity (Phase 1) | yuri creds work on prod + staging |
+| **CO-378** | Analytics privacy (noindex respect) | Private paths redacted in `/gestao/resumo` |
+
+### Batch C — Realtime + mobile foundation (4 PRs)
+| PR | Spec | What it ships |
+|---|---|---|
+| **CO-353** | WebSocket lobby + presence | Cursors broadcast < 300ms |
+| **CO-356** | Touch DnD on board | Pointer-events replaces HTML5 DnD |
+| **CO-357** | PWA shell | Manifest, SW, install, offline cache |
+| **CO-358** | Mobile IA pass | Drawer, breadcrumb collapse, board reflow |
+
+### Batch D — Validation + tagging (4 PRs)
+| PR | Spec | What it ships |
+|---|---|---|
+| **CO-374** | Playwright E2E suite for staging | 6 scenario files + acceptance generator |
+| **CO-375** | API contract enforcement | Probe drift gates prod release |
+| **CO-376** | Pre-prod migration validation | Snapshot+migrate+smoke per migration PR |
+| **CO-359** | Mobile E2E CI matrix | Pixel 7 / iPhone 14 / iPad Pro projects |
+
+**v3.0 release ships** when Batch D closes + `docs/release-checklist.md` Wave 4 section all green + retrospective passes.
+
+## All open todo/in_progress work mapped
+
+| ID | Title | Wave |
+|---|---|---|
+| CO-368 | Scrum entry types | v2.41 (in flight) |
+| CO-370 | Lead funnel + unified capture | v2.41 (in flight) |
+| CO-352, 353, 354, 355, 356, 357, 358, 359, 360 | Workspace + mobile + admin | **v3.0 Wave 4** |
+| CO-365, 373, 374, 375, 376, 377, 378, 278-B | Storage + staging + privacy + rate limits | **v3.0 Wave 4** |
+| CO-366, 367, 371, 372 | Monetization + KB + funnel + calendar | v3.1 Wave 5 |
+| CO-145 | Encrypted assets | v3.2 Wave 6 |
+| CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web | v3.2 Wave 6 |
+| CO-61, 62, 128, 58 | Sync protocol + adapter + conflict UI + PWA offline | v3.3 Wave 7 |
+| CO-76, 78, 79, 80, 101, 285, 286 | Scale infra + job queue + cache + rate tiers + load + Fly cost | v3.4 Wave 8 |
+| CO-63, 70, 89, 93 | Universe types + manifest plugins + git-backed | v3.5 Wave 9 |
+| CO-344, 211 v2, 264 | Native shells + advanced | v3.6 Wave 10 |
+| CO-227, 228, 170, 144, 283, 284, 298 | Ongoing refactors (no wave) | Continuous |
+| CO-94, 143, 146, 162, 277 | Already resolved (status flipped today) | — |
+
+## The BaaS invariants (must hold across every wave)
+
+1. **3 separated layers** — brain content / brain surface / CO platform
+2. **Sovereign edge** — brain owner controls hardware + data; CO is consented async
+3. **No third-party lock-in** — every external integration behind a trait
+4. **Cache-first delivery** — local write renders immediately; sync eventual; ingest break ≠ unavailable
+
+## The bi-weekly release cadence (cron-driven from Wave 4)
+
+```
+Monday-Wednesday: PR work
+Wednesday 23:59 BRT: PR cutoff for current sprint
+Thursday 06:00 BRT: main HEAD → staging auto-deploy
+Thursday 06:00-12:00 BRT: Playwright full suite vs staging
+Thursday 12:00 BRT: green = release candidate; red = abort
+Thursday 12:00-14:30 BRT: human review window
+Thursday 15:00 BRT: prod deploy via release-commit.sh + git tag
+Thursday 15:05 BRT: retrospective begins
+```
+
+CO-372 calendar surfaces the cadence; CO-376 gates with migration validation; CO-374 gates with E2E suite.
+
+## Cost addendum
+
+- Current prod: ~$3-8/mo (shared-cpu-1x, 512 MB, 3 GB volume)
+- Add staging (Wave 4): +$3/mo
+- Total post-Wave 4: ~$6-11/mo
+- Growth tier (50 universes): ~$8/mo prod + $3/mo staging
+- Yggdrasil-scale (200 universes): ~$25-30/mo prod + $3/mo staging
 
 ## Conventions
 
-- **Branch**: `feat|fix|refactor/CO-<n>-<short-desc>` (no `issue-` prefix)
-- **Commits**: conventional, `Co-Authored-By: Claude <noreply@anthropic.com>`
-- **Spec format**: `work/co/CO-<n>.md` with YAML frontmatter (id, title, status, priority, labels, module, dates, related)
-- **Forbidden in agent PRs**: `Cargo.toml`, `co-cli/Cargo.toml`, `CHANGELOG.md` — owned by `scripts/release-commit.sh`
-- **Changelog entries**: write to `CHANGELOG-PENDING/CO-<n>.md`; release script consolidates
-- **Merge**: `scripts/safe-merge-pr.sh artelonga/co <pr>` (never bare `gh pr merge --delete-branch`)
+- Branch: `feat|fix|refactor/CO-<n>-<short-desc>` (no `issue-` prefix)
+- Commits: conventional, `Co-Authored-By: Claude <noreply@anthropic.com>`
+- Spec format: `work/co/CO-<n>.md` with YAML frontmatter
+- Forbidden in agent PRs: `Cargo.toml`, `co-cli/Cargo.toml`, `CHANGELOG.md` (release-commit owns)
+- Changelog entries: `CHANGELOG-PENDING/CO-<n>.md`
+- Merge: `scripts/safe-merge-pr.sh artelonga/co <pr>` (never bare `gh pr merge --delete-branch`)
 
 ## Reference repos
 
-| Repo | Role |
-|---|---|
-| `artelonga/co` | the platform (this repo) |
-| `artelonga/ArteLonga` | the BaaS thesis + reference surfaces (`docs/brain-as-a-service.md`) |
-| `artelonga/yggdrasil` | game runtime; content moving to CO |
-| `artelonga/comunicacao` | mbya + yoruba lexicon source; surfaced as CO universes |
-| `artelonga/topologia` | concept plane source; surfaced as CO universe |
-| `artelonga/rfq-gateway` | RFQ trade log; surfaced as CO universe |
-| `pewdiepie-archdaemon/odysseus` | open-source AI workspace reference (read-only) |
-| `anthropics/claude-code` | Anthropic agentic CLI reference (read-only) |
+| Repo | Role | Surfaced as universe? |
+|---|---|---|
+| `artelonga/co` | the platform (this repo) | `co` |
+| `artelonga/ArteLonga` | BaaS thesis + reference surfaces (`docs/brain-as-a-service.md` · `scrum/scrum.md`) | `artelonga` + child universes `yuri`, `neuro` |
+| `artelonga/quilomboaraucaria` | **canonical reference architecture** (analytics, telemetry, atividades, schema_versoes, OpenAPI codegen — patterns CO adopts) | `quilomboaraucaria` |
+| `artelonga/yggdrasil` | game runtime + sala (workspace absorbed into CO Wave 4) | `yggdrasil` |
+| `artelonga/comunicacao` | mbya + yoruba lexicon source | `comunicacao` (parent of `mbya`, `yoruba`) |
+| `artelonga/topologia` | concept plane source (CO-141) | `topologia` (parent of language family) |
+| `artelonga/mbya` | Arandu — standalone Mbyá Guarani lexicon (Rust + Dioxus + SQLite) | `mbya` (promoted to first-class via CO-348) |
+| `artelonga/retro-umarizal` | neighborhood memory site | `retro-umarizal` (CO-347) |
+| `artelonga/rfq-gateway` | RFQ trade log | `rfq` |
+| `pewdiepie-archdaemon/odysseus` | open-source AI workspace reference (read-only) | `odysseus` (CO-364) |
+| `anthropics/claude-code` | Anthropic agentic CLI reference (read-only) | `claude-code` (CO-364) |
+
+## Pre-flight gate (every release)
+
+See `docs/release-checklist.md` for the full per-wave checklist.
