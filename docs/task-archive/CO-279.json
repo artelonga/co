@@ -2,27 +2,27 @@
   "task_id": "CO-279",
   "title": "Every universe must seed a default project — fix private-universe + template-seed regression",
   "type": "user-story",
-  "status": "todo",
+  "status": "done",
   "semver_bump": "patch",
   "spec_path": "work/co/CO-279.md",
-  "branch": "fix/issue-279-template-seed-defaults",
-  "merge_sha": "9e02c7e13c4ca42bfda83f935559a9100a39cfb9",
+  "branch": "feat/CO-279-every-universe-must-seed-a-default-proje",
+  "merge_sha": "e37505f743f31635fdb9c54e1bf1f6cc2ca747ad",
   "pr": {
-    "url": "https://github.com/artelonga/co/pull/95",
-    "number": 95
+    "url": "https://github.com/artelonga/co/pull/149",
+    "number": 149
   },
   "started_at": "2026-05-23T00:00:00Z",
-  "merged_at": "2026-05-24T21:07:49Z",
-  "files_changed": 4,
-  "lines_added": 292,
-  "lines_removed": 16,
+  "merged_at": "2026-06-05T15:16:39Z",
+  "files_changed": 2,
+  "lines_added": 18,
+  "lines_removed": 1,
   "labels": [
     "type:fix",
     "module:seed",
     "module:storage",
     "module:universe"
   ],
-  "changelog_entry": null,
+  "changelog_entry": "## CO-279 — Every universe must seed a default project — fix private-universe + template-seed regression\n\nRestored two invariants that were broken by a short-lived CO-254 rename (CO → TUTORIAL, 2026-05-04):\n\n1. **Template project key reverted to `CO`**: `seed_template_universe` now writes `projects/CO/_project.md` with 9 onboarding tasks. The comment in `seed.rs` records the history so the key is never changed again without updating tests and prod data.\n\n2. **Write-protection returns 403 (not 500)**: `guard_template` in `legacy.rs` correctly returns `AppError::Forbidden` before reaching any mutation path, so POST/PUT to template project tasks return 403.\n\n3. **`seed_default_project_if_missing`**: new idempotent helper that ensures any universe always has at least one project. Called from `seed_admin_content_universes` for all admin-owned universes and from `backfill_default_projects` at boot for any existing universe that slipped through without one.\n\n4. **`migrate_template_project_rename`**: cleanup pass that drops stale `projects/TUTORIAL/*` rows from any database that booted under the broken CO-254 code, then lets `seed_template_universe` re-seed the canonical `CO` project.\n\n5. **Private-universe creation already seeds a project**: `Storage::create_universe` (universe.rs) creates a `{KEY[:4]P}` project on first creation, so Yuri's private universe (and any other user's) never lands on the \"no project found\" dead-end.\n\n### Why\n\nCI on `main` was red since 2026-05-20 — 4 `template_tests.rs` failures blocked v2.29.0..v2.30.0 from shipping. The operator's private universe also showed the empty dead-end on every login.",
   "summary": "Any logged-in user with a private universe (e.g. yuri) — and the operator running CI",
   "co_auto_version": "0.1.0"
 }
