@@ -2200,5 +2200,32 @@ impl Storage {
         ] {
             let _ = self.conn.execute(sql, []);
         }
+
+        let current_version: i64 = self
+            .conn
+            .query_row(
+                "SELECT COALESCE(MAX(version), 0) FROM schema_version",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if current_version < 57 {
+            // CO-339: backfill probe/scanner entries — mark existing open rows with
+            // empty or short bodies (< 5 chars) as wont-fix so they don't surface
+            // in the operator's notification inbox. Idempotent on fresh DBs (0 rows
+            // affected). The `owner_response` column (added in v55) holds the reason.
+            self.conn
+                .execute_batch(
+                    "UPDATE feedback
+                        SET status = 'wont-fix',
+                            owner_response = 'auto-resolved: probe traffic (CO-339)'
+                      WHERE status = 'open'
+                        AND (message IS NULL OR TRIM(message) = '' OR LENGTH(TRIM(message)) < 5)
+                        AND created_at < (strftime('%s','now') - 60);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (57);",
+                )
+                .expect("migration v57: probe cleanup");
+        }
     }
 }

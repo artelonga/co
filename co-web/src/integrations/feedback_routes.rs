@@ -17,7 +17,7 @@ use axum::{
     Router,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
-    response::IntoResponse,
+    response::{IntoResponse, Response},
     routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
@@ -62,19 +62,25 @@ pub fn router() -> Router<AppState> {
 static FEEDBACK_RATE: OnceLock<parking_lot::Mutex<HashMap<String, VecDeque<Instant>>>> =
     OnceLock::new();
 
-fn check_rate(ip: &str) -> bool {
+fn check_rate(ip: &str) -> Result<(), u64> {
     let store = FEEDBACK_RATE.get_or_init(|| parking_lot::Mutex::new(HashMap::new()));
     let mut store = store.lock();
+    let now = Instant::now();
     let window = store.entry(ip.to_string()).or_default();
-    let cutoff = Instant::now() - Duration::from_secs(3600);
+    let cutoff = now - Duration::from_secs(3600);
     while window.front().is_some_and(|t| *t < cutoff) {
         window.pop_front();
     }
-    if window.len() >= 10 {
-        return false;
+    if window.len() >= 3 {
+        let oldest = *window.front().unwrap();
+        let retry_after = (oldest + Duration::from_secs(3600))
+            .saturating_duration_since(now)
+            .as_secs()
+            .max(1);
+        return Err(retry_after);
     }
-    window.push_back(Instant::now());
-    true
+    window.push_back(now);
+    Ok(())
 }
 
 fn client_ip(headers: &HeaderMap) -> String {
@@ -86,6 +92,22 @@ fn client_ip(headers: &HeaderMap) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// Returns true for known probe/smoke/scanner paths.
+/// Normalises by stripping a leading '/' so both URL-path and body entry_path work.
+fn is_probe_path(path: &str) -> bool {
+    let p = path.trim_start_matches('/');
+    p.starts_with('_')
+        || matches!(
+            p,
+            "probe" | "smoke" | "selftest" | "telemetry-check" | "analytics-smoke" | "healthcheck"
+        )
+}
+
+/// Build a minimal `{"error": "<code>"}` response.
+fn feedback_err(error: &'static str, status: StatusCode) -> Response {
+    (status, axum::Json(serde_json::json!({ "error": error }))).into_response()
+}
+
 // ---------------------------------------------------------------------------
 // Request / response types
 // ---------------------------------------------------------------------------
@@ -95,6 +117,7 @@ pub struct SubmitFeedbackBody {
     /// Yggdrasil compat: universe key in body (for POST /feedback without URL params).
     pub universe: Option<String>,
     pub kind: String,
+    #[serde(alias = "body")]
     pub message: String,
     pub name: Option<String>,
     pub email: Option<String>,
@@ -390,12 +413,28 @@ pub async fn submit_universe_wide(
     State(state): State<AppState>,
     headers: HeaderMap,
     axum::Json(body): axum::Json<SubmitFeedbackBody>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response, AppError> {
+    // 1. Probe path check — before body-length so scanners don't get a different hint.
+    if let Some(ref ep) = body.entry_path
+        && is_probe_path(ep)
+    {
+        return Ok(feedback_err("probe_path_blocked", StatusCode::BAD_REQUEST));
+    }
+    // 2. Body length check.
+    if body.message.trim().len() < 5 {
+        return Ok(feedback_err("body_too_short", StatusCode::BAD_REQUEST));
+    }
+    // 3. Rate limit: 3 submissions per IP per hour.
     let ip = client_ip(&headers);
-    if !check_rate(&ip) {
-        return Err(AppError::TooManyRequests(
-            "Rate limit: 10 feedback submissions per hour".into(),
-        ));
+    if let Err(retry_after) = check_rate(&ip) {
+        return Ok((
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(serde_json::json!({
+                "error": "rate_limited",
+                "retry_after_s": retry_after,
+            })),
+        )
+            .into_response());
     }
 
     let universe_key = body
@@ -403,9 +442,6 @@ pub async fn submit_universe_wide(
         .as_deref()
         .ok_or_else(|| AppError::BadRequest("'universe' field required".into()))?;
     validate_kind(&body.kind)?;
-    if body.message.trim().is_empty() {
-        return Err(AppError::BadRequest("message cannot be empty".into()));
-    }
 
     // Verify universe exists
     universe_owner(&state, universe_key)?;
@@ -436,7 +472,7 @@ pub async fn submit_universe_wide(
     );
     notify_owner(&state, universe_key, entry_path, &id);
 
-    Ok((StatusCode::CREATED, axum::Json(FeedbackCreated { id })))
+    Ok((StatusCode::CREATED, axum::Json(FeedbackCreated { id })).into_response())
 }
 
 /// POST /api/v1/feedback/{universe}/{*entry_path} — per-entry locus.
@@ -445,18 +481,29 @@ pub async fn submit_per_entry(
     Path((universe_key, entry_path)): Path<(String, String)>,
     headers: HeaderMap,
     axum::Json(body): axum::Json<SubmitFeedbackBody>,
-) -> Result<impl IntoResponse, AppError> {
+) -> Result<Response, AppError> {
+    // 1. Probe path check (entry_path from URL, no leading slash).
+    if is_probe_path(&entry_path) {
+        return Ok(feedback_err("probe_path_blocked", StatusCode::BAD_REQUEST));
+    }
+    // 2. Body length check.
+    if body.message.trim().len() < 5 {
+        return Ok(feedback_err("body_too_short", StatusCode::BAD_REQUEST));
+    }
+    // 3. Rate limit: 3 submissions per IP per hour.
     let ip = client_ip(&headers);
-    if !check_rate(&ip) {
-        return Err(AppError::TooManyRequests(
-            "Rate limit: 10 feedback submissions per hour".into(),
-        ));
+    if let Err(retry_after) = check_rate(&ip) {
+        return Ok((
+            StatusCode::TOO_MANY_REQUESTS,
+            axum::Json(serde_json::json!({
+                "error": "rate_limited",
+                "retry_after_s": retry_after,
+            })),
+        )
+            .into_response());
     }
 
     validate_kind(&body.kind)?;
-    if body.message.trim().is_empty() {
-        return Err(AppError::BadRequest("message cannot be empty".into()));
-    }
 
     // Verify universe exists
     universe_owner(&state, &universe_key)?;
@@ -486,7 +533,7 @@ pub async fn submit_per_entry(
     );
     notify_owner(&state, &universe_key, Some(&entry_path), &id);
 
-    Ok((StatusCode::CREATED, axum::Json(FeedbackCreated { id })))
+    Ok((StatusCode::CREATED, axum::Json(FeedbackCreated { id })).into_response())
 }
 
 /// GET /api/v1/feedback/{universe} — list feedback for the universe.
@@ -1476,5 +1523,282 @@ mod tests {
         // anon should see only public_visible=1 item
         assert_eq!(json["total"], 1);
         assert_eq!(json["items"][0]["id"], "id13a");
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-339: body validation + probe-path blocklist + rate limit
+    // -----------------------------------------------------------------------
+
+    // 14. Empty body returns 400 body_too_short
+    #[tokio::test]
+    async fn test_body_too_short_400() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/feedback")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-for", "10.0.1.1")
+                    .body(Body::from(r#"{"kind":"feedback","body":""}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["error"], "body_too_short");
+    }
+
+    // 15. Probe path returns 400 probe_path_blocked (even if body < 5 chars)
+    #[tokio::test]
+    async fn test_probe_path_blocked_400() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/feedback")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-for", "10.0.1.2")
+                    .body(Body::from(
+                        r#"{"kind":"feedback","body":"ok","entry_path":"/_probe"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["error"], "probe_path_blocked");
+    }
+
+    // 16. Various probe paths are blocked
+    #[tokio::test]
+    async fn test_probe_path_variants_blocked() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+
+        for (i, probe_path) in [
+            "/_smoke",
+            "/_selftest",
+            "/probe",
+            "/smoke",
+            "/selftest",
+            "/telemetry-check",
+            "/analytics-smoke",
+            "/healthcheck",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let app = build_test_router(dir.path());
+            let body = serde_json::json!({
+                "kind": "feedback",
+                "body": "hello world this is a long enough message",
+                "entry_path": probe_path,
+            });
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/feedback")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", format!("10.0.1.{}", 20 + i))
+                        .body(Body::from(body.to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(
+                resp.status(),
+                StatusCode::BAD_REQUEST,
+                "probe path '{probe_path}' should be blocked"
+            );
+            let json = body_json(resp.into_body()).await;
+            assert_eq!(json["error"], "probe_path_blocked");
+        }
+    }
+
+    // 17. Valid submission with /yuri entry_path succeeds with 201
+    #[tokio::test]
+    async fn test_valid_feedback_201() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb17@example.com");
+        insert_universe(dir.path(), "fb_uni17", &owner_id);
+
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/feedback")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-for", "10.0.1.50")
+                    .body(Body::from(
+                        r#"{"kind":"feedback","body":"Found a bug in mbya terms","universe":"fb_uni17","entry_path":"/yuri"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let json = body_json(resp.into_body()).await;
+        assert!(json["id"].is_string());
+    }
+
+    // 18. 4th submission from same IP within 1 hour returns 429
+    #[tokio::test]
+    async fn test_rate_limit_429() {
+        isolate_env();
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_fb18@example.com");
+        insert_universe(dir.path(), "fb_uni18", &owner_id);
+
+        // 3 submissions succeed
+        for i in 0..3u8 {
+            let app = build_test_router(dir.path());
+            let resp = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/api/v1/feedback")
+                        .header("content-type", "application/json")
+                        .header("x-forwarded-for", "10.0.1.99")
+                        .body(Body::from(format!(
+                            r#"{{"kind":"feedback","body":"Valid message number {}","universe":"fb_uni18"}}"#,
+                            i
+                        )))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                resp.status(),
+                StatusCode::CREATED,
+                "submission {i} should succeed"
+            );
+        }
+
+        // 4th submission is rate-limited
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/feedback")
+                    .header("content-type", "application/json")
+                    .header("x-forwarded-for", "10.0.1.99")
+                    .body(Body::from(
+                        r#"{"kind":"feedback","body":"This should be blocked","universe":"fb_uni18"}"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::TOO_MANY_REQUESTS);
+        let json = body_json(resp.into_body()).await;
+        assert_eq!(json["error"], "rate_limited");
+        assert!(json["retry_after_s"].as_u64().unwrap_or(0) > 0);
+    }
+
+    // 19. Probe-cleanup migration SQL marks short/empty rows wont-fix
+    #[tokio::test]
+    async fn test_probe_cleanup_migration_sql() {
+        let dir = tempdir().unwrap();
+        let owner_id = insert_user(dir.path(), "owner_probe_mig@example.com");
+        insert_universe(dir.path(), "probe_mig_uni", &owner_id);
+
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        let two_min_ago = chrono::Utc::now().timestamp() - 120;
+
+        // Insert an empty-body probe row
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO feedback \
+                 (id, universe_key, entry_path, kind, message, anonymous, created_at, status) \
+                 VALUES ('pmig1', 'probe_mig_uni', '/_smoke', 'feedback', '', 1, ?1, 'open')",
+                rusqlite::params![two_min_ago],
+            )
+            .unwrap();
+
+        // Insert a short-body probe row ('ok' = 2 chars < 5)
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO feedback \
+                 (id, universe_key, entry_path, kind, message, anonymous, created_at, status) \
+                 VALUES ('pmig2', 'probe_mig_uni', '/probe', 'feedback', 'ok', 1, ?1, 'open')",
+                rusqlite::params![two_min_ago],
+            )
+            .unwrap();
+
+        // Insert a valid row that should NOT be touched
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO feedback \
+                 (id, universe_key, kind, message, anonymous, created_at, status) \
+                 VALUES ('pmig3', 'probe_mig_uni', 'feedback', 'valid feedback message', 1, ?1, 'open')",
+                rusqlite::params![two_min_ago],
+            )
+            .unwrap();
+
+        // Run the cleanup SQL (same as v57 migration)
+        storage
+            .conn()
+            .execute(
+                "UPDATE feedback \
+                    SET status = 'wont-fix', \
+                        owner_response = 'auto-resolved: probe traffic (CO-339)' \
+                  WHERE status = 'open' \
+                    AND (message IS NULL OR TRIM(message) = '' OR LENGTH(TRIM(message)) < 5) \
+                    AND created_at < (strftime('%s','now') - 60)",
+                [],
+            )
+            .unwrap();
+
+        let status1: String = storage
+            .conn()
+            .query_row("SELECT status FROM feedback WHERE id = 'pmig1'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            status1, "wont-fix",
+            "empty-body probe row should be wont-fix"
+        );
+
+        let status2: String = storage
+            .conn()
+            .query_row("SELECT status FROM feedback WHERE id = 'pmig2'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            status2, "wont-fix",
+            "short-body probe row should be wont-fix"
+        );
+
+        let status3: String = storage
+            .conn()
+            .query_row("SELECT status FROM feedback WHERE id = 'pmig3'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(status3, "open", "valid feedback row must not be touched");
     }
 }
