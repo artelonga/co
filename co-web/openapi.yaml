@@ -481,12 +481,32 @@ paths:
   /api/v1/admin/leads:
     get:
       tags: ["admin"]
-      summary: "CO-183 leads queue"
+      summary: "CO-183 leads queue (CO-370: extended with user_id, user_status, verified_at)"
       security:
         - sessionCookie: []
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total:
+                    type: integer
+                  leads:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        created_at: { type: string, format: date-time }
+                        updated_at: { type: string, format: date-time }
+                        email: { type: string, nullable: true }
+                        status: { type: string, enum: [new, triaged, in_progress, closed] }
+                        user_id: { type: string, nullable: true, description: "CO-370: linked user id" }
+                        user_status: { type: string, nullable: true, enum: [active, pre-registered], description: "CO-370: user activation state" }
+                        verified_at: { type: string, format: date-time, nullable: true, description: "CO-370: when the user completed email verification" }
   /api/v1/admin/leads/{id}:
     patch:
       tags: ["admin"]
@@ -701,26 +721,38 @@ paths:
   /api/v1/auth/me:
     get:
       tags: ["auth"]
-      summary: "Current user + tier"
+      summary: "Current user + tier (CO-370: extended with lead_id, lead_status, lead_source)"
       security:
         - sessionCookie: []
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user_id: { type: string }
+                  email: { type: string }
+                  display_name: { type: string }
+                  tier: { type: string }
+                  lead_id: { type: integer, nullable: true, description: "CO-370: linked lead id" }
+                  lead_status: { type: string, nullable: true, enum: [new, triaged, in_progress, closed], description: "CO-370: current lead funnel stage" }
+                  lead_source: { type: string, nullable: true, enum: [lead_form, signup, invitation, manual], description: "CO-370: acquisition channel" }
   /api/v1/auth/onboard-with-email:
     post:
       tags: ["auth"]
       summary: "CO-190 — passwordless onboarding"
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Code sent
   /api/v1/auth/onboard-with-email/verify:
     post:
       tags: ["auth"]
-      summary: "CO-190 — verify code"
+      summary: "CO-190 — verify code (CO-370: creates signup lead + auto-advances to in_progress)"
       responses:
         "200":
-          description: OK
+          description: Session issued; signup-sourced leads auto-advance to in_progress
   /api/v1/auth/password-login:
     post:
       tags: ["auth"]
@@ -1578,10 +1610,30 @@ paths:
   /api/v1/leads:
     post:
       tags: ["leads"]
-      summary: "Submit interest (public)"
+      summary: "Submit interest (public) — CO-370: also creates/links a user shell"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mensagem]
+              properties:
+                mensagem: { type: string, maxLength: 4000 }
+                nome: { type: string }
+                email: { type: string, format: email, description: "CO-370: used as join key to find/create user shell" }
+                telefone: { type: string }
+                servico_titulo: { type: string }
+                parceiro_handle: { type: string }
       responses:
-        "200":
-          description: OK
+        "201":
+          description: Lead created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: integer, description: "Lead id" }
   /api/v1/me/dm-policy:
     put:
       tags: ["dm"]

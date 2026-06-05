@@ -47,6 +47,15 @@ pub struct LeadRow {
     pub notes: Option<String>,
     pub closed_reason: Option<String>,
     pub promoted_to_al: Option<i64>,
+    /// CO-370: linked user id (NULL if no user was matched/created yet).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_id: Option<String>,
+    /// CO-370: status of the linked user ('active' | 'pre-registered').
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_status: Option<String>,
+    /// CO-370: when the linked user completed email verification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verified_at: Option<String>,
 }
 
 /// Typed response for `POST /api/v1/leads`.
@@ -151,6 +160,109 @@ fn check_admin_gate(headers: &HeaderMap) -> Option<Response> {
         );
     }
     None
+}
+
+// ---------------------------------------------------------------------------
+// CO-370: Lead-user linking
+// ---------------------------------------------------------------------------
+
+/// After a lead is inserted, find or create a user shell for `email` and
+/// stitch the bidirectional FK (leads.user_id ↔ users.lead_id).
+///
+/// Spawned on a background task so it never adds latency to the caller.
+fn link_lead_to_user(state: &crate::server::AppState, lead_id: i64, email: &str) {
+    let state = state.clone();
+    let email = email.to_string();
+    tokio::spawn(async move {
+        let linked_user_id = {
+            let storage = state.core.storage.lock();
+
+            // Look for an existing user with this email.
+            let existing_user_id: Option<String> = storage
+                .conn()
+                .query_row(
+                    "SELECT id FROM users WHERE lower(email) = lower(?1) LIMIT 1",
+                    rusqlite::params![email],
+                    |r| r.get(0),
+                )
+                .ok();
+
+            if let Some(uid) = existing_user_id {
+                uid
+            } else {
+                // Create a pre-registered shell user so the lead has a user record.
+                let shell_id = format!("usr_{}", nanoid::nanoid!(10));
+                let now_str = chrono::Utc::now().to_rfc3339();
+                let display = email.split('@').next().unwrap_or("anon").to_string();
+                let inserted = storage
+                    .conn()
+                    .execute(
+                        "INSERT OR IGNORE INTO users \
+                         (id, email, display_name, tier, created_at, status) \
+                         VALUES (?1, ?2, ?3, 'player', ?4, 'pre-registered')",
+                        rusqlite::params![shell_id, email, display, now_str],
+                    )
+                    .unwrap_or(0);
+                if inserted > 0 {
+                    shell_id
+                } else {
+                    // Race: another request inserted the user between our SELECT and INSERT.
+                    storage
+                        .conn()
+                        .query_row(
+                            "SELECT id FROM users WHERE lower(email) = lower(?1) LIMIT 1",
+                            rusqlite::params![email],
+                            |r| r.get::<_, String>(0),
+                        )
+                        .unwrap_or_default()
+                }
+            }
+        };
+
+        if linked_user_id.is_empty() {
+            tracing::warn!("link_lead_to_user: could not resolve user for lead {lead_id}");
+            return;
+        }
+
+        // Stitch the bidirectional FKs.
+        {
+            let storage = state.core.storage.lock();
+            let _ = storage.conn().execute(
+                "UPDATE leads SET user_id = ?1 WHERE id = ?2 AND user_id IS NULL",
+                rusqlite::params![linked_user_id, lead_id],
+            );
+            let _ = storage.conn().execute(
+                "UPDATE users SET lead_id = ?1 WHERE id = ?2 AND lead_id IS NULL",
+                rusqlite::params![lead_id, linked_user_id],
+            );
+        }
+
+        // Telemetry: lead.captured + lead.user_linked
+        crate::telemetry::emit_crud_event(
+            &state,
+            crate::telemetry::CrudEvent {
+                kind: "lead.captured",
+                universe: String::new(),
+                list: Some("leads".to_string()),
+                key: Some(lead_id.to_string()),
+                actor: None,
+                session_id: None,
+                extra: None,
+            },
+        );
+        crate::telemetry::emit_crud_event(
+            &state,
+            crate::telemetry::CrudEvent {
+                kind: "lead.user_linked",
+                universe: String::new(),
+                list: Some("leads".to_string()),
+                key: Some(lead_id.to_string()),
+                actor: None,
+                session_id: None,
+                extra: Some(serde_json::json!({"user_id": linked_user_id})),
+            },
+        );
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +466,11 @@ pub async fn submit_lead(
     );
     tokio::spawn(send_lead_notification(id, nome, servico_titulo, lead_body));
 
+    // 9. CO-370: user linking — find or create a user shell for the email.
+    if let Some(ref email_str) = email {
+        link_lead_to_user(&state, id, email_str);
+    }
+
     (StatusCode::CREATED, Json(CreateLeadResponse { id })).into_response()
 }
 
@@ -401,13 +518,18 @@ pub async fn list_leads(
         .and_then(|mut stmt| stmt.query_row(rusqlite::params_from_iter(binds.iter()), |r| r.get(0)))
         .unwrap_or(0);
 
-    // Data query
+    // Data query — LEFT JOIN users for CO-370 user_id / user_status / verified_at.
     binds.push(limit.to_string());
     let data_sql = format!(
-        "SELECT id, created_at, updated_at, nome, email, telefone, mensagem,
-                servico_titulo, parceiro_handle, status, priority, assignee_handle,
-                notes, closed_reason, promoted_to_al
-         FROM leads {where_clause} ORDER BY created_at DESC LIMIT ?"
+        "SELECT l.id, l.created_at, l.updated_at, l.nome, l.email, l.telefone, l.mensagem,
+                l.servico_titulo, l.parceiro_handle, l.status, l.priority, l.assignee_handle,
+                l.notes, l.closed_reason, l.promoted_to_al,
+                l.user_id,
+                u.status  AS user_status,
+                CASE WHEN u.status = 'active' THEN u.activated_at ELSE NULL END AS verified_at
+         FROM leads l
+         LEFT JOIN users u ON u.id = l.user_id
+         {where_clause} ORDER BY l.created_at DESC LIMIT ?"
     );
 
     let leads: Vec<LeadRow> = storage
@@ -431,6 +553,9 @@ pub async fn list_leads(
                     notes: r.get(12)?,
                     closed_reason: r.get(13)?,
                     promoted_to_al: r.get(14)?,
+                    user_id: r.get(15)?,
+                    user_status: r.get(16)?,
+                    verified_at: r.get(17)?,
                 })
             })
             .map(|rows| rows.filter_map(|r| r.ok()).collect())
