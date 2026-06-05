@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-369",
+  "title": "Retrospective sprint simulation — reconstruct CO's history as bi-weekly sprints",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-369.md",
+  "branch": "feat/CO-369-retrospective-sprint-simulation-reconstr",
+  "merge_sha": "fe947ca27d748449ea11bbc67f6ff6705c8f2010",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/158",
+    "number": 158
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T20:08:05Z",
+  "files_changed": 21,
+  "lines_added": 4862,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:scrum",
+    "module:docs"
+  ],
+  "changelog_entry": "## CO-369 — Retrospective sprint simulation — reconstruct CO's history as bi-weekly sprints\n\nAdded `co-web/scripts/scrum/retro-simulate.ts`, a one-shot Node/tsx script that walks\n`git log --first-parent main`, `git for-each-ref refs/tags`, and `work/co/CO-*.md` spec files\nto reconstruct CO's delivery history as 14-day bi-weekly sprints anchored at 2026-06-11.\n\nGenerates 13 retrospective sprint files (`docs/scrum/sprints/sprint-minus-N.md` + `sprint-0.md`),\na velocity chart (`retro-velocity.md`), a narrative overview (`retro-simulation.md`), and an\nanomalies report (`retro-anomalies.md`). `--forward` flag generates the next 4 sprint templates.\nA machine-readable `_index.json` serves CO-372's sprint calendar renderer.\n\n### Why\n\nThe sprint simulation gives CO an honest historical record of \"what shipped per sprint\" without\nrequiring retroactive scrum discipline. It provides sprint -12 → -1 velocity data, release cadence\nevidence, and DoD completion visibility from day one — grounding ArteLonga's scrum framework\nempirically.",
+  "summary": "As A platform operator wanting to see CO's actual history as if it had been scrum-managed all along",
+  "co_auto_version": "0.1.0"
+}
