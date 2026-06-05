@@ -139,7 +139,7 @@
    */
   function _postProcessAssets(html) {
     if (!html || typeof html !== 'string') return html;
-    return html
+    return _rewriteHttpAssets(html
       // <img src="sha256:abc…"> → asset URL + lazy load
       .replace(/<img\b([^>]*?)\bsrc=(["'])sha256:([a-f0-9]{64})\2([^>]*)>/gi,
         (_m, before, q, sha, after) => {
@@ -163,7 +163,27 @@
           const hasPreload = /\bpreload=/.test(before + after);
           const preload = hasPreload ? '' : ' preload="none"';
           return `<video${before} src=${q}${url}${q}${after}${preload}>`;
-        });
+        }));
+  }
+
+  /**
+   * CO-362: Rewrite http:// src URLs in <img> tags to https:// and block
+   * <script src="http://..."> elements to eliminate mixed-content warnings.
+   * Applied to all rendered HTML regardless of render path.
+   */
+  function _rewriteHttpAssets(html) {
+    if (!html || typeof html !== 'string') return html;
+    return html
+      // <img src="http://…"> → https://
+      .replace(
+        /<img\b([^>]*?)\bsrc=(["'])http:\/\//gi,
+        (_, attrs, q) => `<img${attrs} src=${q}https://`
+      )
+      // <script src="http://…"> → blocked comment (with or without closing tag)
+      .replace(
+        /<script\b[^>]*\bsrc=(["'])http:\/\/([^"']+)\1[^>]*>(?:[\s\S]*?<\/script>)?/gi,
+        (_, _q, url) => `<!-- co: http script blocked (${url.slice(0, 80)}) -->`
+      );
   }
 
   function _escHtml(s) {
@@ -185,9 +205,11 @@
       // sha256: image → asset API URL with lazy load + async decode
       .replace(/!\[([^\]]*)\]\(sha256:([a-f0-9]{64})\)/g, (_, alt, sha) =>
         `<img src="${_assetUrl(sha)}" alt="${alt}" loading="lazy" decoding="async" class="md-img">`)
-      // plain image (non-sha256) with lazy load + async decode
-      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) =>
-        `<img src="${src}" alt="${alt}" loading="lazy" decoding="async" class="md-img">`)
+      // plain image (non-sha256) with lazy load + async decode; rewrite http:// → https://
+      .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (_, alt, src) => {
+        const safeSrc = src.startsWith('http://') ? 'https://' + src.slice(7) : src;
+        return `<img src="${safeSrc}" alt="${alt}" loading="lazy" decoding="async" class="md-img">`;
+      })
       .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
       .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
       .replace(/\*(.+?)\*/g, '<em>$1</em>')
