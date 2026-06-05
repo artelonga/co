@@ -15,14 +15,18 @@ import { test, expect } from "./fixtures";
 import { navigateTo, loginAsAdmin } from "./helpers";
 
 test.describe("CO-346: /co board visibility", () => {
-  test("anonymous visitor to /co sees the kanban board with at least one project", async ({
+  test("anonymous visitor to /co sees content rendered with at least one project", async ({
     page,
   }) => {
     // Default `page` has no session cookie — truly anonymous.
     await navigateTo(page, "/co");
 
-    // Kanban columns are injected once bootAppForUniverse selects a project.
-    await page.waitForSelector(".kanban-column", { timeout: 10_000 });
+    // Default view since CO-304 is conteudo, not kanban. Accept any of the
+    // three project-view containers — what matters is that content rendered.
+    await page.waitForSelector(
+      "#content.conteudo-view, .kanban-column, .universe-home",
+      { timeout: 10_000 },
+    );
 
     // The CO project (or any project) must appear in the sidebar project list.
     const projectItems = page.locator("#project-list .sidebar-item-key");
@@ -47,7 +51,10 @@ test.describe("CO-346: /co board visibility", () => {
 
     // URL must not have been rewritten to the user's own universe.
     expect(page.url()).toContain("/co");
-    // Board must render (not stuck loading or redirected away).
-    await page.waitForSelector(".kanban-column", { timeout: 10_000 });
+    // Project view must render (default is conteudo since CO-304).
+    await page.waitForSelector(
+      "#content.conteudo-view, .kanban-column, .universe-home",
+      { timeout: 10_000 },
+    );
   });
 });
