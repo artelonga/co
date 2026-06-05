@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-361",
+  "title": "Atividades audit log + schema_versoes admin surface",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-361.md",
+  "branch": "feat/CO-361-atividades-audit-log-schema-versoes-admi",
+  "merge_sha": "9c4f09779e8febe8af1e4e04b95d5a3a6012ecb4",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/154",
+    "number": 154
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T17:48:06Z",
+  "files_changed": 14,
+  "lines_added": 1072,
+  "lines_removed": 10,
+  "labels": [
+    "type:feat",
+    "module:co-web",
+    "module:storage",
+    "module:admin"
+  ],
+  "changelog_entry": "## CO-361 — Atividades audit log + schema_versoes admin surface\n\nAdds a typed `atividades` audit log and a `schema_versoes` migration history\ntable, both surfaced in the `/gestao` admin SPA.\n\n### What changed\n\n- **Migration v59** creates the `atividades` table (3 indexes, CHECK constraints\n  on `acao`/`tipo`), the `schema_versoes` table, and backfills\n  `schema_versoes` from the existing `schema_version` rows with\n  `descricao='(backfilled)'`.\n- **`platform::atividade`** — new module with `log_atividade()` (deferred write\n  via `tokio::spawn`), `redact()` (strips SENSITIVE_KEYS at any JSON depth),\n  and `sha256_short()` (16-char SHA-256 prefix for IP hashing).\n- **Call sites wired**: task create/update/delete (`server::legacy`), universe\n  create/delete (`content::universe_routes`), login via magic-link and\n  password (`server::auth_handlers`), and logout.\n- **`GET /api/v1/gestao/atividades`** — paginated feed filterable by `acao` and\n  `since`; GitHub admin auth required.\n- **`GET /api/v1/gestao/schema-status`** — returns current schema version, app\n  version, drift indicator, and last 20 migration history rows.\n- **`/gestao` SPA** — new `gestao.html` served at `/gestao`; shows the\n  \"DB schema vN / app vX.Y.Z\" header strip with drift badge and an\n  atividades feed with per-row diff panel.\n- **180-day retention**: `atividade::retention_task` spawned at boot, deletes\n  rows older than 180 days nightly.\n- **`record_migration!` macro** defined in `migrations.rs` for future v60+\n  migrations to keep `schema_version` and `schema_versoes` in sync.\n\n### Why\n\nOperators were unable to answer \"who deleted that entry?\" without digging\nthrough Fly.io logs. After every deploy there was no in-DB record of which\nmigration version the running container had applied. This closes both gaps\nwithout adding latency to any request (all writes are deferred).",
+  "summary": "a CO operator wanting to know what happened, when, and which migration version is live",
+  "co_auto_version": "0.1.0"
+}
