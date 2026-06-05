@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-350",
+  "title": "Catalog → OpenAPI codegen + CI drift check",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-350.md",
+  "branch": "feat/CO-350-catalog-openapi-codegen-ci-drift-check",
+  "merge_sha": "2b7c78dbeb0a37c8351ae05b67643b6ee3f929f8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/155",
+    "number": 155
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T18:43:46Z",
+  "files_changed": 9,
+  "lines_added": 6260,
+  "lines_removed": 1511,
+  "labels": [
+    "type:feat",
+    "module:api",
+    "module:ci"
+  ],
+  "changelog_entry": "## CO-350 — Catalog → OpenAPI codegen + CI drift check\n\nAdded a TypeScript generator (`co-web/scripts/generate-openapi.ts`) that parses\n`docs/architecture/api-catalog.md` and emits `co-web/openapi.yaml`.\nTwo new npm scripts: `openapi:gen` regenerates the YAML from the catalog;\n`openapi:check` exits 1 with a readable diff when catalog, code, and YAML diverge.\nA GitHub Actions workflow (`openapi-check.yml`) runs `openapi:check` on PRs that\ntouch `*_routes.rs`, `api-catalog.md`, `openapi.yaml`, or the generator script.\n\nThe bootstrap commit aligns the catalog (316 entries) with every registered axum\nroute and regenerates `co-web/openapi.yaml` so `--check` passes immediately after\nmerge. Component schemas are extracted into `co-web/openapi-components.yaml` and\nconcatenated at gen time.\n\n### Why\n\nBoth `api-catalog.md` (human-readable) and `openapi.yaml` (machine-readable) existed\nwith zero enforcement that they described the same surface. Adding a route no longer\nrequires a separate \"update docs\" step — the catalog row is the documentation, and\nCI rejects PRs that skip it.",
+  "summary": "A maintainer who has to keep CO's API documentation honest — today both /Users/artelonga/projects/co/docs/architecture/api-catalog.md (357 lines) and /Users/artelonga/projects/co/co-web/openapi.yaml (",
+  "co_auto_version": "0.1.0"
+}
