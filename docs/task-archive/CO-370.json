@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-370",
+  "title": "Lead funnel docs + unified capture — signup = lead (email join key)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-370.md",
+  "branch": "feat/CO-370-lead-funnel-docs-unified-capture-signup-",
+  "merge_sha": "64550e6db5185cd90418b7ea80added7877260c8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/157",
+    "number": 157
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T22:16:52Z",
+  "files_changed": 8,
+  "lines_added": 459,
+  "lines_removed": 10,
+  "labels": [
+    "type:feat",
+    "module:auth",
+    "module:leads",
+    "module:funnel",
+    "module:docs"
+  ],
+  "changelog_entry": "## CO-370 — Lead funnel docs + unified capture — signup = lead (email join key)\n\nDocuments the 8-step acquisition funnel and stitches the lead capture and\npasswordless signup paths at the email join key, so every signup creates a\nlead record and every lead form submission creates a user shell.\n\n### Changes\n\n- `docs/lead-acquisition.md` — 8-step funnel diagram, per-step table, gap\n  analysis, KPIs, and cross-references to CO-371/CO-366.\n- Migration v61 adds `leads.user_id` (FK → users) and `leads.source`\n  (`lead_form | signup | invitation | manual`) with indexes.\n- Migration v62 adds `users.lead_id` (FK → leads), `users.status`\n  (`active | pre-registered | suspended`), and `users.activated_at`;\n  backfills both FKs by matching existing rows on lowercased email.\n- `POST /api/v1/leads` now finds or creates a user shell (status\n  `pre-registered`) when an email is provided, links bidirectional FKs,\n  and emits `lead.captured` + `lead.user_linked` telemetry.\n- `POST /api/v1/auth/onboard-with-email/verify` (create path) now upserts\n  a signup-sourced lead, links the new user, auto-advances the lead to\n  `in_progress`, and emits `signup.captured` telemetry.\n- `GET /api/v1/auth/me` response extended with `lead_id`, `lead_status`,\n  `lead_source`.\n- `GET /api/v1/admin/leads` response extended with `user_id`, `user_status`,\n  `verified_at`.\n- OpenAPI documents all extended request/response shapes.\n\n### Why\n\nLead form submitters were invisible to admin triage because the leads table\nand users table had no cross-link. A signed-up user had no lead record, so\nacquisition → convert attribution was unjoinable without manual SQL.\nCO-371 (funnel report) requires this unified identity to compute per-step\ndrop-off metrics.",
+  "summary": "As The platform operator running an end-to-end conversion funnel from discover → onboard",
+  "co_auto_version": "0.1.0"
+}
