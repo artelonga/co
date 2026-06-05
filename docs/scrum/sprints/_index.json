@@ -1,0 +1,1870 @@
+[
+  {
+    "number": -12,
+    "start": "2025-12-12",
+    "end": "2025-12-25",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -11,
+    "start": "2025-12-26",
+    "end": "2026-01-08",
+    "release_tags": [
+      "v0.1.0"
+    ],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -10,
+    "start": "2026-01-09",
+    "end": "2026-01-22",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -9,
+    "start": "2026-01-23",
+    "end": "2026-02-05",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -8,
+    "start": "2026-02-06",
+    "end": "2026-02-19",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -7,
+    "start": "2026-02-20",
+    "end": "2026-03-05",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -6,
+    "start": "2026-03-06",
+    "end": "2026-03-19",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -5,
+    "start": "2026-03-20",
+    "end": "2026-04-02",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": -4,
+    "start": "2026-04-03",
+    "end": "2026-04-16",
+    "release_tags": [],
+    "pbi_count": 2,
+    "pbis": [
+      {
+        "id": "CO-50",
+        "title": "Universe-as-repo — each universe backed by a Git repo, built at runtime from main",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-13",
+        "release_tag": null
+      },
+      {
+        "id": "CO-49",
+        "title": "User access model spec — deterministic API for anonymous, logged-in, and subscribed users",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-13",
+        "release_tag": null
+      }
+    ]
+  },
+  {
+    "number": -3,
+    "start": "2026-04-17",
+    "end": "2026-04-30",
+    "release_tags": [],
+    "pbi_count": 21,
+    "pbis": [
+      {
+        "id": "CO-61",
+        "title": "Sync Protocol v1 — op log + content-addressed blobs + 3-way merge + recursive resolution",
+        "status": "done",
+        "merged_pr": 12,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-72",
+        "title": "Doc-generator hooks — scaladoc, sphinx, mkdocs, redoc, rustdoc, jsdoc",
+        "status": "done",
+        "merged_pr": 11,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-71",
+        "title": "Per-universe schema validator + generic JSON entry storage",
+        "status": "done",
+        "merged_pr": 10,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-70",
+        "title": "Manifest format spec — _universe.yaml at universe root",
+        "status": "done",
+        "merged_pr": 9,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-140",
+        "title": "co-dev universe row — seed on startup so it appears in Yuri's sidebar",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-64",
+        "title": "Post-GitHub cleanup — remove dead git_sync.rs, formalize ARCHITECTURE.md",
+        "status": "done",
+        "merged_pr": 8,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-119",
+        "title": "Restore-drill script + quarterly cadence + result log",
+        "status": "done",
+        "merged_pr": 7,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-117",
+        "title": "Cloudflare CDN in front of co.artelonga.com.br (cache rules + auth-cookie passthrough)",
+        "status": "done",
+        "merged_pr": 6,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-138",
+        "title": "Wave 2 Playwright e2e coverage — sidebar trio, mermaid svg, onboarding banner",
+        "status": "done",
+        "merged_pr": 5,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-137",
+        "title": "Investigate why migration v22 didn't apply on prod + harden ALTER ADD COLUMN against partial-application",
+        "status": "done",
+        "merged_pr": 4,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-103",
+        "title": "Per-deploy regression smoke test — scripts/smoke-{prod,uat}.sh",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-30",
+        "release_tag": null
+      },
+      {
+        "id": "CO-94",
+        "title": "Obsidian-like vault viewer — folder tree + markdown panel for raw imported content",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-29",
+        "release_tag": null
+      },
+      {
+        "id": "CO-93",
+        "title": "Universe types + sync + deployment — unified architecture (public-static / private-static / private-dynamic)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-28",
+        "release_tag": null
+      },
+      {
+        "id": "CO-92",
+        "title": "Unified timeline view — events from any universe with linear+log scrolling",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-28",
+        "release_tag": null
+      },
+      {
+        "id": "CO-82",
+        "title": "UAT mirrors prod content on reset — HTTP pull of yuri's universes",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-27",
+        "release_tag": null
+      },
+      {
+        "id": "CO-90",
+        "title": "Drop global admin tier — every user owns their universes; tier is billing-only",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-27",
+        "release_tag": null
+      },
+      {
+        "id": "CO-85",
+        "title": "Password-login on prod — replace email-code friction with Argon2id auth",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-27",
+        "release_tag": null
+      },
+      {
+        "id": "CO-83",
+        "title": "Mermaid.js diagram rendering — C4, ER, flowcharts, sequence, state, class",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-27",
+        "release_tag": null
+      },
+      {
+        "id": "CO-84",
+        "title": "Extract co auto into dev/co-auto crate — trait-based composable pipeline",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-26",
+        "release_tag": null
+      },
+      {
+        "id": "CO-66",
+        "title": "API hygiene — 500→409 on duplicate key, fix seed description override, no-auto-stop UAT",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-26",
+        "release_tag": null
+      },
+      {
+        "id": "CO-65",
+        "title": "Visibility on PUT — let owners flip universe visibility via API",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-04-26",
+        "release_tag": null
+      }
+    ]
+  },
+  {
+    "number": -2,
+    "start": "2026-05-01",
+    "end": "2026-05-14",
+    "release_tags": [
+      "v1.0.0",
+      "v2.2.0",
+      "v2.3.0",
+      "v2.4.0",
+      "v2.5.0",
+      "v2.6.0"
+    ],
+    "pbi_count": 71,
+    "pbis": [
+      {
+        "id": "CO-209",
+        "title": "Conversas — unified chat surface with first-time welcome + member-visible privacy disclosure",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-208",
+        "title": "Playwright e2e suite maintenance — unwind 12 days of API drift + rate-limit collisions",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-180",
+        "title": "Popularity endpoint pra ranking de serviços no home da artelonga",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-179",
+        "title": "Public analytics endpoints — /summary e /recent pra dashboard de artelonga",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-178",
+        "title": "Geo enrichment server-side (country + city) em telemetry_events",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-177",
+        "title": "Aceitar events de artelonga.com.br via CORS + populate universe_key",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-13",
+        "release_tag": "v2.6.0"
+      },
+      {
+        "id": "CO-206",
+        "title": "Yggdrasil verifies CO JWKS — centralized SSO across all universes",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-184",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-205",
+        "title": "Artelonga signup backend — CORS + origin tracking for artelonga.com.br registrations",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-203",
+        "title": "Switch Mutex<Storage> from std::sync to parking_lot — eliminate poison-on-panic cascade",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-204",
+        "title": "Chat message origin telemetry — track which universe context each message was sent from",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-191",
+        "title": "Unified GET /api/v1/me/universes shape — owned, member, invited, subscribed, discoverable",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-12",
+        "release_tag": "v2.4.0"
+      },
+      {
+        "id": "CO-199",
+        "title": "Notification engine + preferences + 4 event types (Phase 5 slice 1)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-202",
+        "title": "In-app notification center — 🔔 bell + dropdown + settings page (Phase 5 slice 4)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-201",
+        "title": "Web push notifications — browser Push API + service worker (Phase 5 slice 3)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-200",
+        "title": "Email digest delivery — daily/hourly/instant per user prefs (Phase 5 slice 2)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-198",
+        "title": "Private DMs — 1:1 chat with inbox, unread counts, privacy controls (Phase 4 slice 5)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-196",
+        "title": "Chat moderation — edit/delete own, admin delete any (Phase 4 slice 4)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-194",
+        "title": "Chat WebSocket — live messages + presence (Phase 4 slice 2)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-197",
+        "title": "co-auto: fast-forward main after successful task so next ticket branches from current state",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-11",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-193",
+        "title": "Chat schema + REST endpoints (Phase 4 first slice)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-187",
+        "title": "Drop legacy HS256 handover helper from co-web (CO-186 cleanup)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-192",
+        "title": "Sidebar consumes unified /me/universes shape — invited badge, discoverable section",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-183",
+        "title": "POST /api/v1/leads + admin queue (substituir mailto do contato artelonga)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-190",
+        "title": "Passwordless onboarding via email — magic-code sign-in or signup",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-189",
+        "title": "Invitation UI — settings panel for inviters + public accept page (Phase 3 second slice)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-188",
+        "title": "Universe invitations — schema + REST endpoints (Phase 3 first slice)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-10",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-172",
+        "title": "Quilombo signups become CO accounts — central auth + redirected password reset",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-09",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-171",
+        "title": "Modularize the 6k+ line monoliths — storage.rs, app.js, recovery_routes.rs into composable components",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-09",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-165",
+        "title": "Forgot password / change password with verified recovery channels (email · WhatsApp · SMS), encrypted at rest",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-169",
+        "title": "Direct notification provider adapters: Resend email + Evolution API WhatsApp",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-168",
+        "title": "Outbound webhook system + notification queue — n8n/Zapier integration point",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-167",
+        "title": "Email collection for quilombo users — bridge to CO unified auth",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-164",
+        "title": "Vector index for entries — semantic search inside CO",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-163",
+        "title": "Mempalace BaseBackend Python shim using /api/v1/blobs",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-166",
+        "title": "Single sign-on across universe deployments — co.artelonga.com.br as central auth backend",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-08",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-161",
+        "title": "Visibility gate consolidation — single tower middleware on /api/v1/universes/{slug}/* (replaces 13 per-handler calls)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-04",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-152",
+        "title": "topologia-co-adapter — load CO universes into topologia-core::Term/Concept",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-160",
+        "title": "Inline PDF renderer in the SPA — read references without downloading",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-159",
+        "title": "INMET moon-phase importer — populate time/moon-phases/<year>/ from portal.inmet.gov.br",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-158",
+        "title": "Reference versioning — work_id + editions[] + primary/secondary source chain",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-157",
+        "title": "PDF metadata extraction tool — auto-populate reference cards from source PDFs",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-156",
+        "title": "Universal envelope: binary content cards (PDF/image/video metadata) + uniform CRUD telemetry",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-155",
+        "title": "topologia-mbya-adapter — Arandu lexicon as a LanguagePlane via mbya_lexicon.db",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-154",
+        "title": "References as a first-class content type — citations table + searchable excerpts",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-153",
+        "title": "Cross-universe entry_relations — `to_universe` column + `co://` URI resolver",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-151",
+        "title": "Real-time delta sync — protobuf SyncDelta over WebSocket with zstd",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-03",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-147",
+        "title": "Indexable asset metadata layer — list/filter, tags, mime, frontmatter (Phase 2 of CO-145)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-150",
+        "title": "SPA lazy-load integration — img/video, asset browser, frontmatter excerpts (Phase 5 of CO-145)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-146",
+        "title": "Binary asset upload + sha256 content-addressable storage (Phase 1 of CO-145)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-144",
+        "title": "Per-user dados/ panel inside personal universe + deterministic-chain process model (Co/processos/)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-100",
+        "title": "Documentation pass — ARCHITECTURE / OPERATIONS / ONBOARDING reflecting 1.21.x reality",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-143",
+        "title": "Deploy the backup-cron Fly app — daily snapshots are NOT running on prod",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-142",
+        "title": "Public-universe routing audit + co-dev/co-experience deprecation + content-count reconciliation",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-02",
+        "release_tag": "v2.2.0"
+      },
+      {
+        "id": "CO-105",
+        "title": "Admin telemetry dashboard — /api/v1/admin/dashboard + /admin static page",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-121",
+        "title": "A/B primitives on OLTP (feature_flags, ab_assignments, ab_exposures)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-123",
+        "title": "ClickHouse single-node on Fly + Iceberg-table-function ready",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-141",
+        "title": "Meaning-topology dictionary — concept + language universes (mbyá / portuguese / yoruba)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-124",
+        "title": "Co-agent variants for CF Workers tail + Vercel Log Drains",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-97",
+        "title": "Unify telemetria visitor token (visitante_id) with marketing al_vid",
+        "status": "done",
+        "merged_pr": 23,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-120",
+        "title": "Co-agent adapter trait + Fly sidecar reference impl",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-122",
+        "title": "Quota/tier model spec (no enforcement yet)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-118",
+        "title": "Workers Analytics Engine ingest from co-web for exposure + telemetry events",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-109",
+        "title": "Mbya Guarani stress-test universe — lexicon PDF → markdown corpus + universe seed",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-108",
+        "title": "Universe archive format + backup-to-external-HD — co-compatible, storage-optimized snapshots of all source repos",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-80",
+        "title": "Per-tier rate limiting + quota — token bucket per user/tier/operation",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-79",
+        "title": "Caching layer — manifest, theme.css, hot queries + CDN strategy",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-77",
+        "title": "Per-universe SQLite + global metadata DB + LiteFS read replicas",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-69",
+        "title": "PWA offline — IndexedDB cache + Background Sync (INFRA-4)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-101",
+        "title": "Load test scaffolding — k6 scenarios + baseline against UAT",
+        "status": "done",
+        "merged_pr": 18,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      },
+      {
+        "id": "CO-104",
+        "title": "Backup automation — daily snapshot of SQLite + universes/ to S3, with tested restore",
+        "status": "done",
+        "merged_pr": 13,
+        "merged_at": "2026-05-01",
+        "release_tag": "v1.0.0"
+      }
+    ]
+  },
+  {
+    "number": -1,
+    "start": "2026-05-15",
+    "end": "2026-05-28",
+    "release_tags": [
+      "v2.11.2",
+      "v2.11.3",
+      "v2.11.4",
+      "v2.12.1",
+      "v2.12.2",
+      "v2.12.3",
+      "v2.12.6",
+      "v2.13.0",
+      "v2.13.1",
+      "v2.13.2",
+      "v2.13.3",
+      "v2.13.4",
+      "v2.13.5",
+      "v2.13.6",
+      "v2.14.0",
+      "v2.15.0",
+      "v2.16.0",
+      "v2.16.1",
+      "v2.17.0",
+      "v2.18.0",
+      "v2.19.0",
+      "v2.20.0",
+      "v2.21.0",
+      "v2.22.0",
+      "v2.23.0",
+      "v2.24.0",
+      "v2.24.1",
+      "v2.25.0",
+      "v2.26.0",
+      "v2.27.0",
+      "v2.28.0",
+      "v2.29.0",
+      "v2.30.2",
+      "v2.31.0",
+      "v2.31.1"
+    ],
+    "pbi_count": 76,
+    "pbis": [
+      {
+        "id": "CO-314",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 116,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-313",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 115,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-311",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 114,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-310",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 113,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-298",
+        "title": "CO-284-I — `co serve --staging` mode (latency + fault injection decorators)",
+        "status": "done",
+        "merged_pr": 112,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-307",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 110,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-293",
+        "title": "CO-284-D — Cache trait + in-process LRU default impl",
+        "status": "done",
+        "merged_pr": 108,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-294",
+        "title": "CO-284-E — Blob store trait (standardize on top of CO-263's R2 adapter)",
+        "status": "done",
+        "merged_pr": 107,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-292",
+        "title": "CO-284-C — Worker executor trait (formalize CO-223 with enqueue/cancel)",
+        "status": "done",
+        "merged_pr": 106,
+        "merged_at": "2026-05-28",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-296",
+        "title": "CO-284-G — Auth provider trait (extract JWT flow, prepare for OAuth/SSO)",
+        "status": "done",
+        "merged_pr": 103,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-300",
+        "title": "CO-284-K — `co::testkit::TestServer` (spawn real co serve instances for integration tests)",
+        "status": "done",
+        "merged_pr": 104,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-306",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 105,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-282",
+        "title": "Localhost distribution — `co serve` + browser auto-launch + Tauri shell roadmap",
+        "status": "done",
+        "merged_pr": 97,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-305",
+        "title": "E2e residual failures sweep — 9 specific bugs surfaced by CO-304",
+        "status": "done",
+        "merged_pr": 102,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-304",
+        "title": "E2e selector + timing quality pass — eliminate Carregando/timeout brittleness",
+        "status": "done",
+        "merged_pr": 101,
+        "merged_at": "2026-05-27",
+        "release_tag": "v2.31.1"
+      },
+      {
+        "id": "CO-303",
+        "title": "Local-fidelity auth — inline magic-code display + admin password fallback in SPA login modal",
+        "status": "done",
+        "merged_pr": 100,
+        "merged_at": "2026-05-26",
+        "release_tag": "v2.31.0"
+      },
+      {
+        "id": "CO-302",
+        "title": "Test pyramid restructure — parallelize e2e, cut redundancy, add component layer, run locally",
+        "status": "done",
+        "merged_pr": 99,
+        "merged_at": "2026-05-26",
+        "release_tag": "v2.31.0"
+      },
+      {
+        "id": "CO-290",
+        "title": "CO-284-A — Storage trait abstraction + SQLite impl",
+        "status": "done",
+        "merged_pr": 98,
+        "merged_at": "2026-05-25",
+        "release_tag": "v2.31.0"
+      },
+      {
+        "id": "CO-281",
+        "title": "Fly cost audit — rightsize per app, enable auto-suspend, extract embedding sidecar",
+        "status": "done",
+        "merged_pr": 94,
+        "merged_at": "2026-05-24",
+        "release_tag": "v2.30.2"
+      },
+      {
+        "id": "CO-277",
+        "title": "Recursive subspace addressing — sub-universe task resolution in co-auto",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-275",
+        "title": "Agent session events — capture tokens/tools/skills/duration per co-auto run; surface on kanban cards",
+        "status": "done",
+        "merged_pr": 93,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-276",
+        "title": "co-auto CLI simplification — positional task arg, smarter defaults, drop redundant flags",
+        "status": "done",
+        "merged_pr": 92,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-274",
+        "title": "co-auto context budget — cut from ~150k chars to ~30k via skills + per-universe CLAUDE.md",
+        "status": "done",
+        "merged_pr": 91,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-273",
+        "title": "Centralized deployment dashboard — machines + sizes + statuses + versions across all units",
+        "status": "done",
+        "merged_pr": 90,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-272",
+        "title": "Kanban view shows entries-as-tasks, not just legacy projects — close the dogfooding gap",
+        "status": "done",
+        "merged_pr": 89,
+        "merged_at": "2026-05-23",
+        "release_tag": "v2.29.0"
+      },
+      {
+        "id": "CO-270",
+        "title": "Items list final fix — audit middleware chain; identify silent-empty wrapper for anonymous",
+        "status": "done",
+        "merged_pr": 88,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-271",
+        "title": "Verify CO-269 deploy + complete LICENSE seed (still 404 in prod)",
+        "status": "done",
+        "merged_pr": 87,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-268",
+        "title": "List items filter — items SELECT is stricter than COUNT for anonymous (post-CO-266)",
+        "status": "done",
+        "merged_pr": 86,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-269",
+        "title": "Seed LICENSE.md into /co universe (currently 404 at /co/license)",
+        "status": "done",
+        "merged_pr": 85,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-267",
+        "title": "CO-261 phase B — cross-repo sync (yggdrasil/rfq/qb/artelonga work folders → CO universes)",
+        "status": "done",
+        "merged_pr": 84,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-266",
+        "title": "List endpoint visibility — total counts correctly but items array empty for anonymous",
+        "status": "done",
+        "merged_pr": 83,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-264",
+        "title": "Universe = recursive folder tree — per-universe CHANGELOG, index.md, README.md at every level; folder-prefix filtering",
+        "status": "done",
+        "merged_pr": 82,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-265",
+        "title": "Extract universe-specific modules out of co-web/src/ — separate co (platform) from universes (extensions)",
+        "status": "done",
+        "merged_pr": 81,
+        "merged_at": "2026-05-22",
+        "release_tag": "v2.25.0"
+      },
+      {
+        "id": "CO-224",
+        "title": "Promote routes into context folders (auth/, content/, social/, admin/)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-263",
+        "title": "Feature-gate R2 deployer adapter to avoid AWS SDK bloat in default build",
+        "status": "done",
+        "merged_pr": 79,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-262",
+        "title": "Fix CO-261 entries visibility — seed walker inserts rows but /entries API returns 0",
+        "status": "done",
+        "merged_pr": 78,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-260",
+        "title": "Cross-version changelog viewer — range queries + group-by-type + sort-by-PR-size",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-261",
+        "title": "Sync repo work/*.md → CO universe entries (live dev board for /co, /yggdrasil, /rfq, etc.)",
+        "status": "done",
+        "merged_pr": 76,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-134",
+        "title": "Deployer adapter trait + first impl (static-on-R2)",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-243",
+        "title": "VS Code (and LSP) integration — open universe as remote workspace",
+        "status": "done",
+        "merged_pr": 75,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-259",
+        "title": "Split sidebar.js + state.js + api.js into smaller files for parallel task independence",
+        "status": "done",
+        "merged_pr": 74,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-245",
+        "title": "Inline code editor for plaintext file types (CodeMirror)",
+        "status": "done",
+        "merged_pr": 72,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-244",
+        "title": "Python / R REPL interoperability — DuckDB attach + in-browser REPL",
+        "status": "done",
+        "merged_pr": 71,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-133",
+        "title": "deploy.yaml schema + universe-level manifest validation",
+        "status": "done",
+        "merged_pr": 70,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-242",
+        "title": "Unified file listing — surface all file types in universe entries (PDF, image, video, code)",
+        "status": "done",
+        "merged_pr": 69,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-236",
+        "title": "co auth — CLI commands for centralized password reset + API token lifecycle",
+        "status": "done",
+        "merged_pr": 68,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-129",
+        "title": "Jujutsu-shaped changelog renderer (op-log → commit DAG)",
+        "status": "done",
+        "merged_pr": 67,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-225",
+        "title": "Document AppState composition pattern + add a MODULES.md",
+        "status": "done",
+        "merged_pr": 66,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-258",
+        "title": "co-auto agent prompts — forbid CHANGELOG.md + Cargo.toml mutations (release commits own them)",
+        "status": "done",
+        "merged_pr": 65,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-257",
+        "title": "ship-task.sh + gh wrapper — never --delete-branch when mergeable is UNKNOWN",
+        "status": "done",
+        "merged_pr": 64,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-253",
+        "title": "Unsubscribed universe = read-only + Subscribe/Login-to-Subscribe prompt on CRUD",
+        "status": "done",
+        "merged_pr": 62,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-254",
+        "title": "Rename tutorial project + tasks to remove the CO/CO collision (template vs co dev)",
+        "status": "done",
+        "merged_pr": 61,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-255",
+        "title": "Splitter resize — mirror behavior when detail pane is on the right (obsidian-mode)",
+        "status": "done",
+        "merged_pr": 60,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-252",
+        "title": "Surface 'co' dev sub-universe on the anonymous sidebar + landing",
+        "status": "done",
+        "merged_pr": 58,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-250",
+        "title": "Playwright static-asset MIME + bootstrap smoke (would have caught 2.13.3/4 cascade)",
+        "status": "done",
+        "merged_pr": 57,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-251",
+        "title": "Template wiki rewrite — index.md as a hyperlinked landing + 'Ver mais' popular list",
+        "status": "done",
+        "merged_pr": 56,
+        "merged_at": "2026-05-21",
+        "release_tag": "v2.13.1"
+      },
+      {
+        "id": "CO-241",
+        "title": "Add true content-volume metrics (lines, words, chars) — fix 'lines = files' confusion",
+        "status": "done",
+        "merged_pr": 55,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-239",
+        "title": "Fix host stats — wire nix::sys::statvfs for data_dir_total / data_dir_available",
+        "status": "done",
+        "merged_pr": 54,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-238",
+        "title": "Sidebar UX — clarify owned/member/role/sub-universe semantics",
+        "status": "done",
+        "merged_pr": 53,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-240",
+        "title": "Fix per-universe data_db_bytes — currently 0 for every universe",
+        "status": "done",
+        "merged_pr": 51,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-232",
+        "title": "Cross-universe deep-link returns universe home instead of 404",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-237",
+        "title": "Hash API tokens at rest (currently stored in plain text)",
+        "status": "done",
+        "merged_pr": 50,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-226",
+        "title": "Add OpenAPI coverage for auth + admin + chat to the interactions registry",
+        "status": "done",
+        "merged_pr": 48,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-233",
+        "title": "Sync pipeline — latest changes not appearing on prod web",
+        "status": "done",
+        "merged_pr": 47,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-221",
+        "title": "Slim AppStateInner (18 fields) via segregated sub-states",
+        "status": "done",
+        "merged_pr": 45,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-219",
+        "title": "Promote chat_routes.rs (2063 LoC) into chat/ module folder",
+        "status": "done",
+        "merged_pr": 44,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-223",
+        "title": "Define shared Worker trait + lifecycle (embedding + notification + push workers)",
+        "status": "done",
+        "merged_pr": 43,
+        "merged_at": "2026-05-20",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-222",
+        "title": "Unify auth gating into a single typed extractor",
+        "status": "done",
+        "merged_pr": 42,
+        "merged_at": "2026-05-19",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-220",
+        "title": "Replace cross-feature direct calls with in-process event bus",
+        "status": "done",
+        "merged_pr": 40,
+        "merged_at": "2026-05-19",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-217",
+        "title": "Top-20 serde_json::Value handler payloads → typed Deserialize structs",
+        "status": "done",
+        "merged_pr": 39,
+        "merged_at": "2026-05-19",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-249",
+        "title": "Gari ops universe — multi-platform cleanup with transparency + CO integration",
+        "status": "done",
+        "merged_pr": 38,
+        "merged_at": "2026-05-19",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-95",
+        "title": "Universe branching — materialized dev branches with deterministic copy + parallel deploys",
+        "status": "done",
+        "merged_pr": 37,
+        "merged_at": "2026-05-19",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-215",
+        "title": "Split server.rs into server/{router, state, validation, uat_boot, seed_orchestrator}.rs",
+        "status": "done",
+        "merged_pr": 32,
+        "merged_at": "2026-05-18",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-248",
+        "title": "co-auto --auto-pr — push branch + open PR after each successful task",
+        "status": "done",
+        "merged_pr": 33,
+        "merged_at": "2026-05-18",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-247",
+        "title": "Fizzy compatibility for CO quadro — import / export / shared schema",
+        "status": "done",
+        "merged_pr": 31,
+        "merged_at": "2026-05-18",
+        "release_tag": "v2.11.2"
+      },
+      {
+        "id": "CO-234",
+        "title": "Chat shows 'Entre para participar' for logged-in users (HttpOnly cookie + JS detection mismatch)",
+        "status": "done",
+        "merged_pr": 28,
+        "merged_at": "2026-05-18",
+        "release_tag": "v2.11.2"
+      }
+    ]
+  },
+  {
+    "number": 0,
+    "start": "2026-05-29",
+    "end": "2026-06-11",
+    "release_tags": [
+      "v2.32.0",
+      "v2.33.0",
+      "v2.34.0",
+      "v2.35.0",
+      "v2.36.0",
+      "v2.37.0",
+      "v2.38.0",
+      "v2.39.0",
+      "v2.40.0"
+    ],
+    "pbi_count": 39,
+    "pbis": [
+      {
+        "id": "CO-363",
+        "title": "Cross-universe wikilink resolver — `[[key::path]]` populates entry_relations.to_universe",
+        "status": "done",
+        "merged_pr": 156,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-350",
+        "title": "Catalog → OpenAPI codegen + CI drift check",
+        "status": "done",
+        "merged_pr": 155,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-361",
+        "title": "Atividades audit log + schema_versoes admin surface",
+        "status": "done",
+        "merged_pr": 154,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-345",
+        "title": "Cross-universe graph view + publishable saved views",
+        "status": "done",
+        "merged_pr": 153,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-364",
+        "title": "Add open-source reference universes — odysseus + claude-code",
+        "status": "done",
+        "merged_pr": null,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-340",
+        "title": "Per-universe analytics rollups + filterable summary + historical-path bridge",
+        "status": "done",
+        "merged_pr": 152,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-339",
+        "title": "Feedback validation — reject empty bodies + probe paths at the API",
+        "status": "done",
+        "merged_pr": 151,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-362",
+        "title": "Markdown render — rewrite http:// asset URLs to https:// to eliminate mixed-content warnings",
+        "status": "done",
+        "merged_pr": 150,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-279",
+        "title": "Every universe must seed a default project — fix private-universe + template-seed regression",
+        "status": "done",
+        "merged_pr": 149,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-346",
+        "title": "Fix SPA empty-board mystery — co universe shows no content despite 1227 entries on prod",
+        "status": "done",
+        "merged_pr": 148,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-347",
+        "title": "Surface missing content universes on prod — yuri / retro-umarizal / yoruba / neuro",
+        "status": "done",
+        "merged_pr": 146,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-348",
+        "title": "Mbya promote to first-class + merge yoruba term sources",
+        "status": "done",
+        "merged_pr": 147,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-349",
+        "title": "Yggdrasil RPG sub-universe scaffolding — 48+ folders, schemas later",
+        "status": "done",
+        "merged_pr": 145,
+        "merged_at": "2026-06-05",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-280",
+        "title": "Universe vs sub-universe vs deployable-unit — visual + nav clarification across SPA",
+        "status": "done",
+        "merged_pr": 142,
+        "merged_at": "2026-06-04",
+        "release_tag": "v2.40.0"
+      },
+      {
+        "id": "CO-211",
+        "title": "Universe Content API contract — formal v1 spec with OpenAPI so any client renders any universe",
+        "status": "done",
+        "merged_pr": 144,
+        "merged_at": "2026-06-03",
+        "release_tag": "v2.39.0"
+      },
+      {
+        "id": "CO-291",
+        "title": "CO-284-B — Telemetry trait + OTLP exporter (feature-flagged)",
+        "status": "done",
+        "merged_pr": 143,
+        "merged_at": "2026-06-03",
+        "release_tag": "v2.39.0"
+      },
+      {
+        "id": "CO-301",
+        "title": "Task archive — per-task worktree compression + queryable change-log link",
+        "status": "done",
+        "merged_pr": 141,
+        "merged_at": "2026-06-03",
+        "release_tag": "v2.39.0"
+      },
+      {
+        "id": "CO-337",
+        "title": "Remote sister-repo sync — universes pull content from remote git on prod",
+        "status": "done",
+        "merged_pr": 140,
+        "merged_at": "2026-06-03",
+        "release_tag": "v2.39.0"
+      },
+      {
+        "id": "CO-333",
+        "title": "Feedback system — Yggdrasil-compatible, per-universe + per-entry locus",
+        "status": "done",
+        "merged_pr": 139,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-336",
+        "title": "Feedback → PR/commit traceable (open-source issue-tracker semantics)",
+        "status": "done",
+        "merged_pr": 137,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-335",
+        "title": "Centralized graph rendering — one primitive, content in CO, UI customization deferred",
+        "status": "done",
+        "merged_pr": 138,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-334",
+        "title": "Cross-repo changelog aggregation — sister-repo releases interleaved into CO's changelog view",
+        "status": "done",
+        "merged_pr": 136,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-332",
+        "title": "External assistant — non-Claude LLM with deterministic tool routing for yuri.artelonga.com.br",
+        "status": "done",
+        "merged_pr": 134,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-331",
+        "title": "Tools as git repos — npm-like install/version/conflict + jj-compatible",
+        "status": "done",
+        "merged_pr": 133,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-328",
+        "title": "Local LLM (macOS) + Claude Code hook integration",
+        "status": "done",
+        "merged_pr": 132,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-327",
+        "title": "macOS desktop notifications for CO events",
+        "status": "done",
+        "merged_pr": 129,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-329",
+        "title": "/analytics non-indexed real-time telemetry + background-process visibility",
+        "status": "done",
+        "merged_pr": 131,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-325",
+        "title": "Reference type system + recursive composition + notas abstraction",
+        "status": "done",
+        "merged_pr": 130,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-323",
+        "title": "yuri.artelonga.com.br — subdomain routing to a single-universe view",
+        "status": "done",
+        "merged_pr": 128,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-326",
+        "title": "Direct messaging — send to yuri@artelonga.com.br (email + in-app)",
+        "status": "done",
+        "merged_pr": 127,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-330",
+        "title": "Runtime universe→repo bindings + anon published-only filter (deploy-free)",
+        "status": "done",
+        "merged_pr": 126,
+        "merged_at": "2026-06-01",
+        "release_tag": "v2.35.0"
+      },
+      {
+        "id": "CO-322",
+        "title": "co launch — bootstrap a universe from the current repo (Fly-style)",
+        "status": "done",
+        "merged_pr": 124,
+        "merged_at": "2026-05-30",
+        "release_tag": "v2.33.0"
+      },
+      {
+        "id": "CO-321",
+        "title": "E2e — localhost trial flow (subscribe / unsubscribe / sister repos / themes)",
+        "status": "done",
+        "merged_pr": 123,
+        "merged_at": "2026-05-30",
+        "release_tag": "v2.33.0"
+      },
+      {
+        "id": "CO-320",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 122,
+        "merged_at": "2026-05-30",
+        "release_tag": "v2.33.0"
+      },
+      {
+        "id": "CO-319",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 121,
+        "merged_at": "2026-05-30",
+        "release_tag": "v2.33.0"
+      },
+      {
+        "id": "CO-318",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 120,
+        "merged_at": "2026-05-29",
+        "release_tag": "v2.32.0"
+      },
+      {
+        "id": "CO-317",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 119,
+        "merged_at": "2026-05-29",
+        "release_tag": "v2.32.0"
+      },
+      {
+        "id": "CO-316",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 118,
+        "merged_at": "2026-05-29",
+        "release_tag": "v2.32.0"
+      },
+      {
+        "id": "CO-315",
+        "title": "(spec not found)",
+        "status": "done",
+        "merged_pr": 117,
+        "merged_at": "2026-05-29",
+        "release_tag": "v2.32.0"
+      }
+    ]
+  },
+  {
+    "number": 1,
+    "start": "2026-06-12",
+    "end": "2026-06-25",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": 2,
+    "start": "2026-06-26",
+    "end": "2026-07-09",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": 3,
+    "start": "2026-07-10",
+    "end": "2026-07-23",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  },
+  {
+    "number": 4,
+    "start": "2026-07-24",
+    "end": "2026-08-06",
+    "release_tags": [],
+    "pbi_count": 0,
+    "pbis": []
+  }
+]
