@@ -1,7 +1,7 @@
 # CO — Release Checklist (Wave-Based)
 
 **Versão:** vivo, atualizado por release  
-**URLs:** <https://co-artelonga.fly.dev> (prod) · <https://staging.co.artelonga.com.br> (staging, post-CO-373)  
+**URLs:** <https://co-artelonga.fly.dev> (prod) · <https://staging.co.artelonga.com.br> (staging, post-CO-379)  
 **Cadência:** bi-semanal, quinta-feira 15:00 BRT (corte de PR quarta 23:59 BRT)
 
 Este documento é o gate de cada release. Cada wave consolida múltiplos PRs em UMA tag git semver. A checklist roda antes do `scripts/release-commit.sh`.
@@ -33,7 +33,7 @@ Critérios de pronto (DoD por entregável):
 
 #### Substrate gates
 
-- [ ] **CO-373** Staging Fly app responde 200 em `staging.co.artelonga.com.br/api/health`
+- [ ] **CO-379** Staging Fly app responde 200 em `staging.co.artelonga.com.br/api/health`
 - [ ] **CO-365** Backup backend trait + LocalFsBackend gravam snapshot diário em `/data/backups/`
 - [ ] **CO-278-B** `X-RateLimit-Limit` + `X-RateLimit-Remaining` presentes em todas as respostas `/api/v1/*`
 - [ ] **CO-360** `/gestao/resumo` renderiza 4 abas (Resumo / Conteúdo / Usuários / Atividades) a partir de um único endpoint

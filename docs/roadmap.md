@@ -10,7 +10,7 @@ A **brain** = human + their hardware + their notes/tasks/calendar + their conten
 
 - **Version**: v2.40.0 → v2.41.0 (Wave 3 in flight: CO-368 + CO-370 pending)
 - **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
-- **Staging** (post-CO-373): `https://staging.co.artelonga.com.br`
+- **Staging** (post-CO-379): `https://staging.co.artelonga.com.br`
 - **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-372 cron-driven from Wave 4
 - **Open work items**: ~90 (after closing CO-94/146/162/277/143)
 - **Per-wave DoD**: `docs/release-checklist.md`
@@ -41,7 +41,7 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 ### Batch A — substrate gates (4 PRs, fire first)
 | PR | Spec | What it ships |
 |---|---|---|
-| **CO-373** | Staging Fly app + DNS + per-test universe isolation | `staging.co.artelonga.com.br` live |
+| **CO-379** | Staging Fly app + DNS + per-test universe isolation | `staging.co.artelonga.com.br` live |
 | **CO-365** | Storage backend trait | LocalFsBackend default; S3/R2/Fly/GCS stubs |
 | **CO-278-B** | Rate limits + abuse heuristics | 60/min anon; X-RateLimit-* headers |
 | **CO-360** | Unified `/gestao/resumo` | One Svelte page, 4 tabs |
@@ -80,7 +80,7 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | CO-368 | Scrum entry types | v2.41 (in flight) |
 | CO-370 | Lead funnel + unified capture | v2.41 (in flight) |
 | CO-352, 353, 354, 355, 356, 357, 358, 359, 360 | Workspace + mobile + admin | **v3.0 Wave 4** |
-| CO-365, 373, 374, 375, 376, 377, 378, 278-B | Storage + staging + privacy + rate limits | **v3.0 Wave 4** |
+| CO-365, 374, 375, 376, 377, 378, 379, 278-B | Storage + staging + privacy + rate limits | **v3.0 Wave 4** |
 | CO-366, 367, 371, 372 | Monetization + KB + funnel + calendar | v3.1 Wave 5 |
 | CO-145 | Encrypted assets | v3.2 Wave 6 |
 | CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web | v3.2 Wave 6 |
