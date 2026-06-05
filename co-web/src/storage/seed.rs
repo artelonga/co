@@ -839,6 +839,35 @@ impl Storage {
                 "public-subscribable",
                 None,
             ),
+            // CO-347: four content universes surfaced on prod via remote sync.
+            (
+                "yuri",
+                "Yuri",
+                "Caderno pessoal — yuri.artelonga.com.br",
+                "public-subscribable",
+                None,
+            ),
+            (
+                "retro-umarizal",
+                "Retro Umarizal",
+                "Memória do bairro — retro-umarizal.artelonga.com.br",
+                "public-subscribable",
+                None,
+            ),
+            (
+                "yoruba",
+                "Yorùbá",
+                "Léxico Yorùbá — termos, divindades, conceitos",
+                "public-subscribable",
+                Some("comunicacao"),
+            ),
+            (
+                "neuro",
+                "Neuro",
+                "Cartografia neuro — laudo, recursos",
+                "public-subscribable",
+                Some("artelonga"),
+            ),
         ] {
             // 1.54.0: INSERT OR IGNORE only — no boot-reconcile UPDATE. The
             // pre-1.54 reconcile stomped user-set name/description/visibility
@@ -873,6 +902,47 @@ impl Storage {
              WHERE key = 'rfq' AND visibility = 'private'",
             [],
         );
+
+        // CO-347: backfill remote sync config for the four new content universes.
+        // WHERE remote_url IS NULL is the idempotency guard — once an operator
+        // sets a custom remote_url the boot UPDATE never overwrites it.
+        for (key, url, gitref, subdirs, anon_only) in [
+            (
+                "yuri",
+                "https://github.com/artelonga/artelonga",
+                "main",
+                Some("[\"yuri\"]"),
+                true,
+            ),
+            (
+                "retro-umarizal",
+                "https://github.com/artelonga/retro-umarizal",
+                "main",
+                None,
+                false,
+            ),
+            (
+                "yoruba",
+                "https://github.com/artelonga/comunicacao",
+                "main",
+                Some("[\"yoruba\"]"),
+                false,
+            ),
+            (
+                "neuro",
+                "https://github.com/artelonga/artelonga",
+                "main",
+                Some("[\"neuro\"]"),
+                false,
+            ),
+        ] {
+            let _ = self.conn.execute(
+                "UPDATE universes \
+                 SET remote_url = ?2, remote_ref = ?3, content_subdirs = ?4, anon_published_only = ?5 \
+                 WHERE key = ?1 AND remote_url IS NULL",
+                rusqlite::params![key, url, gitref, subdirs, anon_only as i64],
+            );
+        }
     }
 
     /// CO-279: ensure a universe has at least one project entry so the kanban
@@ -1799,5 +1869,160 @@ mod tests {
         );
         let license = license.unwrap();
         assert_eq!(license.entry_type, "page");
+    }
+
+    // CO-347: four content universes seeded with remote sync config.
+    #[test]
+    fn test_seed_admin_content_universes_co347_rows_exist() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+
+        for key in ["yuri", "retro-umarizal", "yoruba", "neuro"] {
+            let u = storage.get_universe(key);
+            assert!(u.is_some(), "universe '{key}' must exist after seed");
+            let u = u.unwrap();
+            assert_eq!(u.visibility, "public-subscribable", "{key}.visibility");
+        }
+    }
+
+    #[test]
+    fn test_seed_admin_content_universes_co347_parent_keys() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+
+        let yoruba = storage.get_universe("yoruba").unwrap();
+        assert_eq!(
+            yoruba.parent_key.as_deref(),
+            Some("comunicacao"),
+            "yoruba.parent_key must be 'comunicacao'"
+        );
+
+        let neuro = storage.get_universe("neuro").unwrap();
+        assert_eq!(
+            neuro.parent_key.as_deref(),
+            Some("artelonga"),
+            "neuro.parent_key must be 'artelonga'"
+        );
+    }
+
+    #[test]
+    fn test_seed_admin_content_universes_co347_remote_sync_fields() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+
+        struct RemoteRow {
+            remote_url: Option<String>,
+            remote_ref: Option<String>,
+            content_subdirs: Option<String>,
+            anon_published_only: i64,
+        }
+
+        let conn = storage.conn();
+        let fetch = |key: &str| -> RemoteRow {
+            conn.query_row(
+                "SELECT remote_url, remote_ref, content_subdirs, anon_published_only \
+                 FROM universes WHERE key = ?1",
+                rusqlite::params![key],
+                |row| {
+                    Ok(RemoteRow {
+                        remote_url: row.get(0)?,
+                        remote_ref: row.get(1)?,
+                        content_subdirs: row.get(2)?,
+                        anon_published_only: row.get(3)?,
+                    })
+                },
+            )
+            .expect("universe row must exist")
+        };
+
+        let yuri = fetch("yuri");
+        assert_eq!(
+            yuri.remote_url.as_deref(),
+            Some("https://github.com/artelonga/artelonga"),
+            "yuri.remote_url"
+        );
+        assert_eq!(yuri.remote_ref.as_deref(), Some("main"), "yuri.remote_ref");
+        assert_eq!(
+            yuri.content_subdirs.as_deref(),
+            Some("[\"yuri\"]"),
+            "yuri.content_subdirs"
+        );
+        assert_eq!(
+            yuri.anon_published_only, 1,
+            "yuri.anon_published_only must be 1"
+        );
+
+        let retro = fetch("retro-umarizal");
+        assert_eq!(
+            retro.remote_url.as_deref(),
+            Some("https://github.com/artelonga/retro-umarizal"),
+            "retro-umarizal.remote_url"
+        );
+        assert_eq!(retro.remote_ref.as_deref(), Some("main"));
+        assert_eq!(
+            retro.anon_published_only, 0,
+            "retro-umarizal.anon_published_only must be 0"
+        );
+
+        let yoruba = fetch("yoruba");
+        assert_eq!(
+            yoruba.remote_url.as_deref(),
+            Some("https://github.com/artelonga/comunicacao"),
+            "yoruba.remote_url"
+        );
+        assert_eq!(
+            yoruba.content_subdirs.as_deref(),
+            Some("[\"yoruba\"]"),
+            "yoruba.content_subdirs"
+        );
+        assert_eq!(yoruba.anon_published_only, 0);
+
+        let neuro = fetch("neuro");
+        assert_eq!(
+            neuro.remote_url.as_deref(),
+            Some("https://github.com/artelonga/artelonga"),
+            "neuro.remote_url"
+        );
+        assert_eq!(
+            neuro.content_subdirs.as_deref(),
+            Some("[\"neuro\"]"),
+            "neuro.content_subdirs"
+        );
+        assert_eq!(neuro.anon_published_only, 0);
+    }
+
+    #[test]
+    fn test_seed_admin_content_universes_co347_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+
+        // Simulate operator setting a custom remote_url for yuri.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET remote_url = 'https://github.com/custom/repo' WHERE key = 'yuri'",
+                [],
+            )
+            .unwrap();
+
+        // Second boot — must not overwrite operator-set remote_url.
+        storage.seed_admin_content_universes();
+
+        let url: String = storage
+            .conn()
+            .query_row(
+                "SELECT remote_url FROM universes WHERE key = 'yuri'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            url, "https://github.com/custom/repo",
+            "operator-set remote_url must not be overwritten on re-seed"
+        );
     }
 }
