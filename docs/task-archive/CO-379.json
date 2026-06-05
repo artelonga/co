@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-379",
+  "title": "Staging environment — Fly app + DNS + secrets + nightly reset (foundation for Wave 4 v3.0 — CO-379)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-379.md",
+  "branch": "feat/CO-379-staging-environment-fly-app-dns-secrets-",
+  "merge_sha": "49c3710536b5a62bdcdf21326ace42b552caeae7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/160",
+    "number": 160
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-05T22:50:41Z",
+  "files_changed": 12,
+  "lines_added": 590,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:infra",
+    "module:ops",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-379 — Staging environment — Fly app + DNS + secrets + nightly reset (foundation for Wave 4 v3.0)\n\nAdded a dedicated staging environment (`co-artelonga-staging`) as an automated validation gate for Wave 4 PRs (16 PRs with heavy schema + UI changes).\n\nChanges:\n- `fly.staging.toml` — new Fly.io app config (`co-artelonga-staging`, `gru`, 256 MB shared, `CO_ENV=staging`)\n- `.github/workflows/staging-deploy.yml` — auto-deploys main to staging on every push\n- `/api/health` response now includes `env` field (`\"staging\"` | `\"production\"` | …) read from `CO_ENV`\n- `WebConfig::is_staging()` — identifies the staging environment for conditional seeding and worker registration\n- Staging fixture universes seeded on every deploy (idempotent): `recursion-a`, `recursion-ab`, `recursion-abc`, `funnel-fixture`, `mbya-staging`, `yoruba-staging`\n- `StagingTestSweepWorker` — hourly worker that deletes `u-test-*` universes older than 7 days every Sunday 03:00 BRT (registered only when `CO_ENV=staging`), keeping the most recent 100 for forensic inspection\n- `storage::snapshot` module — SQLite online backup/restore API via `rusqlite::Backup` (CO-376 pre-prod migration validation will use this)\n\n### Why\nWave 4 (v3.0 mobile public release) lands 16 PRs with schema migrations and UI rework. Running the full Playwright suite against a real Fly instance catches drift that unit tests cannot — shared staging JWT secret means cross-env token verification is also tested. Per design: reverses the prior \"no UAT\" decision only for automated validation; manual UAT remains off the table.",
+  "summary": "As The operator preparing v3.0 mobile public release",
+  "co_auto_version": "0.1.0"
+}
