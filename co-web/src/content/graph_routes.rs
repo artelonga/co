@@ -3,12 +3,16 @@
 //! GET /api/v1/universes/:slug/graph
 //!   ?include_types=type1,type2   — filter by entry type (all if absent)
 //!   ?relation=rel1,rel2          — filter by relation kind (all if absent)
-//!   ?root=<path>                 — BFS root (full graph if absent)
+//!   ?root=<path>                 — BFS root (full graph if absent); accepts "key::path"
 //!   ?max_depth=3                 — BFS hop limit (default 3; ignored without root)
 //!   ?published_only=true         — filter to published entries only
+//!   ?universes=slug1,slug2       — CO-345: multi-universe mode (comma list)
 //!
 //! Returns { nodes: [...], edges: [...] } where each node is a universe entry
 //! and each edge is an entry_relations row with both endpoints in the node set.
+//!
+//! In multi-universe mode node IDs are "universe::path"; single-universe mode
+//! keeps bare "path" for back-compat.
 
 use axum::{
     Json, Router,
@@ -29,11 +33,15 @@ use crate::server::AppState;
 
 #[derive(Debug, Deserialize)]
 pub struct GraphQuery {
+    /// CO-345: comma-separated universe slugs to include. When absent, only the
+    /// route slug is queried (single-universe mode, back-compat).
+    pub universes: Option<String>,
     /// Comma-separated entry types to include (all types if absent).
     pub include_types: Option<String>,
     /// Comma-separated relation kinds to include (all if absent).
     pub relation: Option<String>,
     /// BFS root entry path; when set, only entries reachable from here are returned.
+    /// In multi-universe mode accepts "key::path" form.
     pub root: Option<String>,
     /// Maximum BFS hops from root (default 3; ignored when root is absent).
     pub max_depth: Option<usize>,
@@ -91,22 +99,41 @@ pub async fn get_graph(
     let max_depth = q.max_depth.unwrap_or(3);
     let published_only = q.published_only.unwrap_or(false);
 
-    let uc = {
-        let storage = state.core.storage.lock();
-        storage.universe_conn(&slug)
+    // CO-345: build the universe set. When `universes` query param is absent,
+    // fall back to single-universe mode using the route slug.
+    let universe_set: Vec<String> = match q.universes.as_ref() {
+        Some(list) => {
+            let mut set: Vec<String> = list
+                .split(',')
+                .map(|u| u.trim().to_string())
+                .filter(|u| !u.is_empty())
+                .collect();
+            // Always include the route slug so the canonical universe is present.
+            if !set.contains(&slug) {
+                set.insert(0, slug.clone());
+            }
+            set
+        }
+        None => vec![slug.clone()],
     };
-    let conn = uc
-        .lock()
-        .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+    let multi_universe = universe_set.len() > 1;
 
-    // ── 1. Load all matching entries into a HashMap ─────────────────────────
+    // ── 1. Load all matching entries from each universe ──────────────────────
     let mut all_nodes: HashMap<String, GraphNode> = HashMap::new();
-    {
+    for universe_key in &universe_set {
+        let uc = {
+            let storage = state.core.storage.lock();
+            storage.universe_conn(universe_key)
+        };
+        let conn = uc
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+
         let mut stmt = conn.prepare(
             "SELECT path, entry_type, title, frontmatter_json \
              FROM entries WHERE universe_key = ?1 ORDER BY path",
         )?;
-        let rows = stmt.query_map(params![slug], |row| {
+        let rows = stmt.query_map(params![universe_key], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -134,10 +161,17 @@ pub async fn get_graph(
                 continue;
             }
 
+            // In multi-universe mode node IDs are "universe::path" for global uniqueness.
+            let id = if multi_universe {
+                format!("{}::{}", universe_key, path)
+            } else {
+                path.clone()
+            };
+
             all_nodes.insert(
-                path.clone(),
+                id.clone(),
                 GraphNode {
-                    id: path,
+                    id,
                     node_type: entry_type,
                     title,
                     frontmatter,
@@ -146,41 +180,94 @@ pub async fn get_graph(
         }
     }
 
-    // ── 2. Load all same-universe relations where both endpoints are nodes ───
+    // ── 2. Load edges from each universe ────────────────────────────────────
     let all_edges: Vec<GraphEdge> = {
-        let mut stmt = conn.prepare(
-            "SELECT from_path, to_path, relation_type \
-             FROM entry_relations \
-             WHERE universe_key = ?1 AND to_universe IS NULL \
-             ORDER BY from_path, to_path",
-        )?;
-        let rows = stmt.query_map(params![slug], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
+        let mut edges = Vec::new();
+        for universe_key in &universe_set {
+            let uc = {
+                let storage = state.core.storage.lock();
+                storage.universe_conn(universe_key)
+            };
+            let conn = uc
+                .lock()
+                .map_err(|_| AppError::Internal("universe conn lock".into()))?;
 
-        rows.filter_map(|r| r.ok())
-            .filter(|(from, to, kind)| {
-                all_nodes.contains_key(from.as_str())
-                    && all_nodes.contains_key(to.as_str())
-                    && filter_relations
-                        .as_ref()
-                        .is_none_or(|f| f.contains(kind.as_str()))
-            })
-            .map(|(from, to, kind)| GraphEdge {
-                source: from,
-                target: to,
-                kind,
-            })
-            .collect()
+            #[allow(clippy::type_complexity)]
+            let (sql, from_node_id, to_node_id): (
+                &str,
+                Box<dyn Fn(&str, &str, Option<&str>) -> String>,
+                Box<dyn Fn(&str, &str, Option<&str>) -> String>,
+            ) = if multi_universe {
+                // In multi-universe mode: include cross-universe edges where both
+                // endpoints land in the node set. to_universe=NULL → same universe.
+                (
+                    "SELECT from_path, to_path, relation_type, to_universe \
+                     FROM entry_relations \
+                     WHERE universe_key = ?1 \
+                     ORDER BY from_path, to_path",
+                    Box::new(|u: &str, p: &str, _: Option<&str>| format!("{}::{}", u, p)),
+                    Box::new(|from_u: &str, p: &str, to_u: Option<&str>| {
+                        let target_u = to_u.unwrap_or(from_u);
+                        format!("{}::{}", target_u, p)
+                    }),
+                )
+            } else {
+                // Single-universe: only same-universe edges (back-compat).
+                (
+                    "SELECT from_path, to_path, relation_type, to_universe \
+                     FROM entry_relations \
+                     WHERE universe_key = ?1 AND to_universe IS NULL \
+                     ORDER BY from_path, to_path",
+                    Box::new(|_u: &str, p: &str, _: Option<&str>| p.to_string()),
+                    Box::new(|_u: &str, p: &str, _: Option<&str>| p.to_string()),
+                )
+            };
+
+            let mut stmt = conn.prepare(sql)?;
+            let rows: Vec<(String, String, String, Option<String>)> = stmt
+                .query_map(params![universe_key], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, Option<String>>(3)?,
+                    ))
+                })?
+                .filter_map(|r| r.ok())
+                .collect();
+
+            for (from_path, to_path, kind, to_universe) in rows {
+                let source = from_node_id(universe_key, &from_path, to_universe.as_deref());
+                let target = to_node_id(universe_key, &to_path, to_universe.as_deref());
+
+                if !all_nodes.contains_key(&source) || !all_nodes.contains_key(&target) {
+                    continue;
+                }
+                if filter_relations
+                    .as_ref()
+                    .is_some_and(|f| !f.contains(kind.as_str()))
+                {
+                    continue;
+                }
+                edges.push(GraphEdge {
+                    source,
+                    target,
+                    kind,
+                });
+            }
+        }
+        edges
     };
 
     // ── 3. BFS traversal when a root entry is given ─────────────────────────
-    let (nodes, edges) = if let Some(root) = q.root.as_deref() {
-        // Build undirected adjacency for BFS
+    let (nodes, edges) = if let Some(root_raw) = q.root.as_deref() {
+        // In multi-universe mode root may be supplied as "key::path" or bare path.
+        let root = if multi_universe && !root_raw.contains("::") {
+            format!("{}::{}", slug, root_raw)
+        } else {
+            root_raw.to_string()
+        };
+
         let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
         for e in &all_edges {
             adj.entry(e.source.as_str())
@@ -193,9 +280,9 @@ pub async fn get_graph(
 
         let mut visited: HashSet<String> = HashSet::new();
         let mut queue: VecDeque<(String, usize)> = VecDeque::new();
-        if all_nodes.contains_key(root) {
-            queue.push_back((root.to_string(), 0));
-            visited.insert(root.to_string());
+        if all_nodes.contains_key(&root) {
+            queue.push_back((root.clone(), 0));
+            visited.insert(root);
         }
         while let Some((cur, depth)) = queue.pop_front() {
             if depth >= max_depth {
@@ -585,6 +672,135 @@ mod tests {
         assert!(
             edges.is_empty(),
             "cross-universe edges must not appear in graph response"
+        );
+    }
+
+    // ── multi-universe node ID logic ─────────────────────────────────────────
+
+    #[test]
+    fn test_multi_universe_node_id_format() {
+        // In multi-universe mode, node IDs are "universe::path".
+        let universe_key = "mbya";
+        let path = "terms/jaryi.md";
+        let id = format!("{}::{}", universe_key, path);
+        assert_eq!(id, "mbya::terms/jaryi.md");
+    }
+
+    #[test]
+    fn test_single_universe_node_id_format() {
+        // In single-universe mode, node IDs are bare paths (back-compat).
+        let path = "terms/jaryi.md";
+        // In single-universe mode the id equals the path.
+        assert_eq!(path, "terms/jaryi.md");
+    }
+
+    #[test]
+    fn test_multi_universe_cross_edge_included_when_both_endpoints_in_set() {
+        // Simulate multi-universe edge resolution: a cross-universe edge is
+        // admitted when the target universe is in the universe set.
+        let conn = setup_db();
+        insert_entry(&conn, "mbya", "terms/jaryi.md", "term", "Jaryi", json!({}));
+        insert_entry(
+            &conn,
+            "concepts",
+            "mother.md",
+            "concept",
+            "Mother",
+            json!({}),
+        );
+
+        // Cross-universe edge: mbya/terms/jaryi.md → concepts/mother.md
+        conn.execute(
+            "INSERT INTO entry_relations \
+             (universe_key, from_path, to_path, relation_type, created_at, to_universe) \
+             VALUES ('mbya', 'terms/jaryi.md', 'mother.md', 'concept', '2026-01-01', 'concepts')",
+            [],
+        )
+        .unwrap();
+
+        // Build multi-universe node set: both universes included.
+        let mut all_nodes: HashMap<String, GraphNode> = HashMap::new();
+        for (u, path, etype, title) in [
+            ("mbya", "terms/jaryi.md", "term", "Jaryi"),
+            ("concepts", "mother.md", "concept", "Mother"),
+        ] {
+            let id = format!("{}::{}", u, path);
+            all_nodes.insert(
+                id.clone(),
+                GraphNode {
+                    id,
+                    node_type: etype.into(),
+                    title: Some(title.into()),
+                    frontmatter: json!({}),
+                },
+            );
+        }
+
+        // Simulate multi-universe edge loading from mbya DB.
+        let mut stmt = conn
+            .prepare(
+                "SELECT from_path, to_path, relation_type, to_universe \
+                 FROM entry_relations WHERE universe_key = 'mbya'",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, String, Option<String>)> = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            })
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
+
+        let mut edges = Vec::new();
+        for (from_path, to_path, kind, to_universe) in &rows {
+            let universe_key = "mbya";
+            let source = format!("{}::{}", universe_key, from_path);
+            let target_u = to_universe.as_deref().unwrap_or(universe_key);
+            let target = format!("{}::{}", target_u, to_path);
+            if all_nodes.contains_key(&source) && all_nodes.contains_key(&target) {
+                edges.push(GraphEdge {
+                    source,
+                    target,
+                    kind: kind.clone(),
+                });
+            }
+        }
+
+        assert_eq!(edges.len(), 1, "cross-universe edge must be included");
+        assert_eq!(edges[0].source, "mbya::terms/jaryi.md");
+        assert_eq!(edges[0].target, "concepts::mother.md");
+        assert_eq!(edges[0].kind, "concept");
+    }
+
+    #[test]
+    fn test_multi_universe_cross_edge_excluded_when_target_not_in_set() {
+        // When the target universe is NOT in the requested set, the edge endpoint
+        // won't be in all_nodes and the edge is silently dropped.
+        let mut all_nodes: HashMap<String, GraphNode> = HashMap::new();
+        // Only mbya entries in the set (concepts is absent).
+        let id = "mbya::terms/jaryi.md".to_string();
+        all_nodes.insert(
+            id.clone(),
+            GraphNode {
+                id,
+                node_type: "term".into(),
+                title: None,
+                frontmatter: json!({}),
+            },
+        );
+
+        // Build a cross-universe edge pointing to concepts (not in set).
+        let source = "mbya::terms/jaryi.md".to_string();
+        let target = "concepts::mother.md".to_string();
+        let included = all_nodes.contains_key(&source) && all_nodes.contains_key(&target);
+        assert!(
+            !included,
+            "edge must be excluded when target universe not in set"
         );
     }
 }

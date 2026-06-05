@@ -248,6 +248,37 @@ pub fn extract_relations(
     relations
 }
 
+/// CO-345: Extract cross-universe wikilinks from a markdown body.
+///
+/// Scans body text for `[[key::path]]` (and `[[key::path|alias]]`) patterns and
+/// emits `("wikilink", path, Some(key))` triples. Plain `[[path]]` links without
+/// a `::` separator are ignored here — they are same-universe refs and the
+/// manifest already handles typed FK fields.
+///
+/// This supplements `extract_relations` (which only covers frontmatter fields
+/// declared in the manifest) for inline body wikilinks.
+pub fn extract_body_cross_universe_wikilinks(body: &str) -> Vec<(String, String, Option<String>)> {
+    use co::wikilink::extract_wikilinks;
+
+    extract_wikilinks(body)
+        .into_iter()
+        .filter_map(|target| {
+            // Only "key::path" form emits a cross-universe relation.
+            let (key, path) = target.split_once("::")?;
+            let key = key.trim();
+            let path = path.trim();
+            if key.is_empty() || path.is_empty() {
+                return None;
+            }
+            Some((
+                "wikilink".to_string(),
+                path.to_string(),
+                Some(key.to_string()),
+            ))
+        })
+        .collect()
+}
+
 /// Sync relations for a single entry: extract from frontmatter, replace in DB.
 ///
 /// Called from entry write paths (create, update) and from vault writes.
@@ -785,6 +816,52 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].to_path, "mother.md");
         assert_eq!(rows[0].to_universe, Some("concepts".to_string()));
+    }
+
+    // ---- extract_body_cross_universe_wikilinks (CO-345) ----
+
+    #[test]
+    fn test_body_wikilinks_cross_universe_extracted() {
+        let body = "See [[yoruba::iya]] and also [[mbya::terms/jaryi.md|Jaryi]].";
+        let rels = extract_body_cross_universe_wikilinks(body);
+        assert_eq!(rels.len(), 2);
+        assert!(rels.contains(&(
+            "wikilink".to_string(),
+            "iya".to_string(),
+            Some("yoruba".to_string())
+        )));
+        assert!(rels.contains(&(
+            "wikilink".to_string(),
+            "terms/jaryi.md".to_string(),
+            Some("mbya".to_string())
+        )));
+    }
+
+    #[test]
+    fn test_body_wikilinks_plain_same_universe_ignored() {
+        // [[plain]] without :: must not produce a cross-universe relation.
+        let body = "See [[terms/jaryi.md]] and [[concepts/mother.md|Mother]].";
+        let rels = extract_body_cross_universe_wikilinks(body);
+        assert!(
+            rels.is_empty(),
+            "same-universe plain wikilinks must not produce cross-universe entries"
+        );
+    }
+
+    #[test]
+    fn test_body_wikilinks_empty_body() {
+        let rels = extract_body_cross_universe_wikilinks("");
+        assert!(rels.is_empty());
+    }
+
+    #[test]
+    fn test_body_wikilinks_mixed_same_and_cross() {
+        let body = "Links: [[local.md]] [[key::remote.md]] [[other::path/to/doc.md|Title]].";
+        let rels = extract_body_cross_universe_wikilinks(body);
+        assert_eq!(rels.len(), 2);
+        let universes: Vec<Option<String>> = rels.iter().map(|r| r.2.clone()).collect();
+        assert!(universes.contains(&Some("key".to_string())));
+        assert!(universes.contains(&Some("other".to_string())));
     }
 
     #[test]

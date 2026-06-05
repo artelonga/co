@@ -2252,12 +2252,37 @@ impl Storage {
         }
 
         if current_version < 59 {
+            // CO-345: graph_views — publishable saved graph views.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS graph_views (
+                        slug             TEXT PRIMARY KEY,
+                        owner_id         TEXT NOT NULL,
+                        name             TEXT NOT NULL,
+                        universe_filter  TEXT NOT NULL,
+                        type_filter      TEXT,
+                        relation_filter  TEXT,
+                        depth            INTEGER,
+                        root             TEXT,
+                        layout_seed      INTEGER,
+                        visibility       TEXT NOT NULL DEFAULT 'private',
+                        created_at       TEXT NOT NULL,
+                        updated_at       TEXT NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_graph_views_owner
+                        ON graph_views(owner_id);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (59);",
+                )
+                .expect("migration v59: graph_views");
+        }
+
+        if current_version < 60 {
             // CO-361: atividades audit log + schema_versoes migration history.
             // `atividades` records every meaningful mutation with a before/after diff
             // (sensitive keys redacted), typed acao/tipo enums, hashed IP, and the
             // app version that generated the event.
             // `schema_versoes` records each migration step with the app version that
-            // applied it. Existing versions 1..58 are backfilled from schema_version
+            // applied it. Existing versions 1..59 are backfilled from schema_version
             // with descricao='(backfilled)' and versao_app='unknown'.
             self.conn
                 .execute_batch(
@@ -2288,11 +2313,11 @@ impl Storage {
                      INSERT OR IGNORE INTO schema_versoes (versao, descricao, versao_app)
                        SELECT version, '(backfilled)', 'unknown' FROM schema_version;
 
-                     INSERT OR IGNORE INTO schema_version (version) VALUES (59);
+                     INSERT OR IGNORE INTO schema_version (version) VALUES (60);
                      INSERT OR IGNORE INTO schema_versoes (versao, descricao, versao_app)
-                       VALUES (59, 'atividades audit log + schema_versoes', 'unknown');",
+                       VALUES (60, 'atividades audit log + schema_versoes', 'unknown');",
                 )
-                .expect("migration v59: atividades + schema_versoes");
+                .expect("migration v60: atividades + schema_versoes");
         }
     }
 }

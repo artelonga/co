@@ -171,6 +171,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let reference_api = crate::reference_routes::reference_router();
     // CO-335: graph endpoint
     let graph_api = crate::graph_routes::router();
+    // CO-345: graph views (publishable saved views)
+    let graph_view_me_api = crate::graph_view_routes::me_router().layer(
+        axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+    );
+    let graph_view_public_api = crate::graph_view_routes::public_router();
 
     // CO-161: single visibility + writer gate. Every route nested here inherits
     // the access-control check — no per-handler boilerplate needed.
@@ -290,6 +295,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/{slug}/", get(serve_co_index))
         // CO-335: universe graph viewer — must be before the {*subpath} wildcard.
         .route("/{slug}/graph", get(serve_graph_page))
+        // CO-345: saved graph view viewer — must be before the {*subpath} wildcard.
+        .route("/graph-views/{slug}", get(serve_graph_page))
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));
@@ -382,6 +389,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // enforces its own auth + path constraints.
             .nest("/api/v1/universes", crate::proposal_routes::inline_router())
             .nest("/api/v1/me", crate::proposal_routes::inbox_router())
+            // CO-345: graph views — my views (auth-gated) + public/unlisted access
+            .nest("/api/v1/me", graph_view_me_api)
+            .nest("/api/v1", graph_view_public_api)
             // 1.75.0: blob CAS API — accepts JWT or long-lived API token.
             .nest(
                 "/api/v1",
