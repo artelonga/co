@@ -31,6 +31,8 @@ tags:
     description: "auth endpoints"
   - name: "universes"
     description: "universes endpoints"
+  - name: "graph-views"
+    description: "graph-views endpoints"
   - name: "entries"
     description: "entries endpoints"
   - name: "vault"
@@ -1423,6 +1425,64 @@ paths:
         - sessionCookie: []
       parameters:
         - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/graph-views:
+    get:
+      tags: ["graph-views"]
+      summary: "List public graph views"
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["graph-views"]
+      summary: "Create a saved graph view"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/graph-views/{slug}:
+    get:
+      tags: ["graph-views"]
+      summary: "Fetch a saved view"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["graph-views"]
+      summary: "Update visibility/filters"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    delete:
+      tags: ["graph-views"]
+      summary: "Delete"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
           in: path
           required: true
           schema:
