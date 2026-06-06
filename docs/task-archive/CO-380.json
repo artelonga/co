@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-380",
+  "title": "Universal event bus — EDA spine for all observability (atividades + analytics + billing + sala presence)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-380.md",
+  "branch": "feat/CO-380-universal-event-bus-eda-spine-for-all-ob",
+  "merge_sha": "7f23101c684d411c65214eee31326fa07a892dfd",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/161",
+    "number": 161
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-06T18:25:12Z",
+  "files_changed": 31,
+  "lines_added": 1483,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:eda",
+    "module:platform",
+    "module:websocket"
+  ],
+  "changelog_entry": "## CO-380 — Universal event bus — EDA spine for all observability (atividades + analytics + billing + sala presence)\n\nIntroduced a universal EDA (Event-Driven Architecture) bus as the single spine for all\nstate-changing observability across the platform. Every route that mutates state now\npublishes a typed `Event` to the bus; subscribers consume and act asynchronously.\n\n### What changed\n\n- **`co-web/src/eda/`** — new module:\n  - `event.rs`: `Event` envelope with ULID-based IDs + `Visibility` enum (Public / UniverseMembers / UniverseOwner / UserOnly / System)\n  - `bus.rs`: `EdaBus` trait + `Filter` (prefix-matched event_type, universe_key, user_id, min_visibility) + `Subscription`\n  - `tokio_bus.rs`: `TokioBroadcastBus` — default in-process impl (4 096-slot broadcast; < 50ms p99)\n  - `redis_bus.rs` / `nats_bus.rs`: feature-gated stubs (`eda-redis`, `eda-nats`)\n  - `events_ws.rs`: `GET /api/v1/events` WebSocket route — server-enforced federation rules (anon → Public only)\n  - `subscribers/`: 6 concrete subscribers (AtividadesPersistor, AnalyticsAggregator, BillingPersistor, SalaBroadcaster, KbIndexer, LiveTimeline)\n\n- **Migration v63** (`event_log` table + indexes on `created_at`, `universe_key`, `event_type`)\n\n- **30-day retention task** for `event_log` (nightly, mirrors atividades retention pattern)\n\n- **6 producers wired**:\n  - `atividade::log_atividade` — publishes `atividade.*` (System visibility)\n  - `telemetry_middleware` — publishes `analytics.visit` (Public)\n  - `entry_routes` — publishes `entry.created / updated / deleted` (UniverseMembers)\n  - `vault_routes::write_vault_entry` — publishes `vault.write` (UniverseOwner)\n  - `sync_ws::apply_deltas_to_storage` — publishes `sync.remote_pull` (UniverseOwner)\n  - `auth_handlers::signup_handler` — publishes `billing.account_created` stub (UserOnly)\n\n- **OpenAPI** updated with `/api/v1/events` WebSocket route and `Events` tag\n\n- **Cargo features** added: `eda-redis`, `eda-nats`, `eda-persistence`\n\n- **CO-353 workspace presence** reimplemented as `SalaBroadcaster` subscriber (ready for CO-381 WebSocket fanout)\n\n- **CO-361 atividades log** still works — `log_atividade()` continues its direct SQL write; bus publish is additive\n\n- **CO-340 analytics rollups** still work via existing REST ingest path; `AnalyticsAggregator` is the future in-process hook\n\n### Why\n\nThe 6+ fragmented event paths (atividades sync write, analytics batch, billing sync, sala presence,\nsync polling, KB push) were creating tight coupling and making real-time observability impossible.\nA single bus + subscriber model consolidates all observability into one pattern, makes CO-381\n(live timeline) trivial, and enables the Yggdrasil notes integration (CO-383) to plug in as\nanother producer without touching existing code.",
+  "summary": "As The platform operator (and visitor / member / owner) wanting real-time observability across CRUD, analytics, billing, sync, and presence — all flowing through one spine",
+  "co_auto_version": "0.1.0"
+}
