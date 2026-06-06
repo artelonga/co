@@ -2383,6 +2383,37 @@ impl Storage {
                 "CO-370: users.lead_id + users.status + users.activated_at + backfill"
             );
         }
+
+        if current_version < 63 {
+            // CO-380: universal EDA event_log — append-only replay store.
+            // Every event published to the EdaBus is also persisted here for
+            // 30-day retention + replay. `AtividadesPersistor` subscriber writes
+            // each row; the retention task prunes rows older than 30 days nightly.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS event_log (
+                       id           TEXT PRIMARY KEY,
+                       event_type   TEXT NOT NULL,
+                       universe_key TEXT,
+                       user_id      TEXT,
+                       payload_json TEXT NOT NULL DEFAULT '{}',
+                       visibility   TEXT NOT NULL DEFAULT 'Public',
+                       created_at   TEXT NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_event_log_created
+                       ON event_log(created_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_event_log_universe
+                       ON event_log(universe_key, created_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_event_log_type
+                       ON event_log(event_type, created_at DESC);",
+                )
+                .expect("CO-380 v63: event_log table + indexes");
+            crate::record_migration!(
+                self.conn,
+                63,
+                "CO-380: event_log table + created/universe/type indexes"
+            );
+        }
     }
 }
 

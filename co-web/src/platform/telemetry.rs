@@ -613,12 +613,32 @@ pub async fn telemetry_middleware(
         city,
     };
 
+    // CO-380: capture fields before ev moves into the spawn closure.
+    let eda_universe_key = ev.universe_key.clone();
+    let eda_user_id = ev.user_id.clone();
+    let eda_path = ev.path.clone();
+    let eda_event_name = ev.event_name.clone();
+    let eda_duration_ms = ev.duration_ms;
+
     // OLTP write (primary store — CO-46)
     let state_clone = state.clone();
     tokio::spawn(async move {
         let storage = state_clone.core.storage.lock();
         insert_event(storage.conn(), &ev);
     });
+
+    // CO-380: publish analytics.visit to EDA bus.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "analytics.visit",
+        eda_universe_key,
+        eda_user_id,
+        serde_json::json!({
+            "path": eda_path,
+            "event_name": eda_event_name,
+            "duration_ms": eda_duration_ms,
+        }),
+        crate::eda::Visibility::Public,
+    ));
 
     // CO-118: parallel WAE write (fire-and-forget, no-op when not configured)
     Arc::clone(&state.integrations.wae).emit(crate::wae::TelemetryEvent {

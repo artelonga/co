@@ -219,6 +219,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     );
     // CO-329: Analytics real-time stream — auth done inside handler.
     let analytics_ws_route = crate::analytics_routes::router();
+    // CO-380: Universal EDA event stream — auth/visibility enforced in handler.
+    let eda_events_ws_route = Router::new()
+        .route(
+            "/api/v1/events",
+            get(crate::eda::events_ws::events_ws_handler),
+        )
+        .with_state(state.clone());
 
     // All literal routes are registered before `/{slug}` so axum's matcher
     // prefers them over the param capture.
@@ -316,6 +323,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(sync_ws_route)
             .merge(chat_ws_route)
             .merge(analytics_ws_route)
+            .merge(eda_events_ws_route)
             .merge(co_routes)
             .nest("/api", openapi_api)
             .nest("/api", board_public)

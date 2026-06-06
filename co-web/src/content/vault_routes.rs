@@ -779,6 +779,15 @@ pub(crate) fn write_vault_entry(
         }
     }
 
+    // CO-380: publish vault.write to EDA bus for observability.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "vault.write",
+        Some(universe_key.to_string()),
+        None,
+        serde_json::json!({ "path": path, "entry_type": entry.entry_type }),
+        crate::eda::Visibility::UniverseOwner,
+    ));
+
     Ok(crate::entry_index::EntryRow {
         path: path.to_string(),
         universe_key: universe_key.to_string(),

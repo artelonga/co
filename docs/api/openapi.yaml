@@ -68,6 +68,12 @@ tags:
       Authenticated; supports JWT or long-lived API token.
   - name: Auth
     description: Authentication and session management
+  - name: Events
+    description: |
+      Universal EDA event stream (CO-380).
+      Real-time events over WebSocket — filtered by scope and visibility.
+      Anonymous clients receive Public events only; authenticated clients
+      receive Universe-scoped events up to their membership level.
 
 components:
   securitySchemes:
@@ -1320,3 +1326,55 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "500":
           $ref: "#/components/responses/InternalServerError"
+
+  /api/v1/events:
+    get:
+      tags: [Events]
+      summary: Real-time EDA event stream (WebSocket)
+      operationId: eventsWebSocket
+      description: |
+        Opens a WebSocket connection that streams JSON-serialized `Event`
+        objects in real time as state-changing routes publish to the EDA bus.
+
+        **Upgrade:** `GET /api/v1/events` with `Connection: Upgrade, Upgrade: websocket` headers.
+
+        **Scope parameter:** `?scope=<universe_key>` limits the stream to a
+        single universe. Use `scope=global` (default) for platform-wide public events.
+
+        **Visibility federation (server-enforced):**
+        | Client type | Receives |
+        |---|---|
+        | Anonymous (no token) | `Public` events only |
+        | Authenticated member | `Public` + `UniverseMembers` for their universe |
+        | Universe owner | All of the above + `UniverseOwner` |
+        | System admin | All including `System` |
+
+        `UserOnly` events are never forwarded to the WebSocket stream.
+
+        **Authentication:** optional JWT via `?token=<jwt>` query param or
+        session cookie. Without a valid token the connection is anonymous.
+
+        **Frame format:** each frame is a JSON text message with the shape of
+        the `Event` schema below. Binary frames are not used.
+
+        **Latency:** < 50ms p99 (in-process tokio broadcast; CO-380 guarantee).
+
+        **CO-381** will add the full `/api/v1/events?scope=<universe>` timeline
+        consumer used by the SPA live timeline view.
+      parameters:
+        - name: scope
+          in: query
+          description: Universe key to scope the stream, or "global" for platform-wide public events.
+          schema:
+            type: string
+            default: global
+        - name: token
+          in: query
+          description: Optional JWT token (alternative to session cookie).
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket connection established
+        "400":
+          $ref: "#/components/responses/BadRequest"

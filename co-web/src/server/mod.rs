@@ -695,6 +695,24 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         });
     }
 
+    // CO-380: spawn EDA subscribers (Phase 2 — runtime is live).
+    {
+        let bus = Arc::clone(&state.core.eda_bus);
+        crate::eda::subscribers::atividades::spawn(
+            Arc::clone(&bus),
+            Arc::clone(&state.core.storage),
+        );
+        crate::eda::subscribers::analytics::spawn(Arc::clone(&bus));
+        crate::eda::subscribers::billing::spawn(Arc::clone(&bus));
+        crate::eda::subscribers::sala::spawn(Arc::clone(&bus));
+        crate::eda::subscribers::kb::spawn(Arc::clone(&bus));
+        // Phase 2: start the LiveTimeline forward task (channel was created in from_storage_full).
+        crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
+    }
+
+    // CO-380: nightly 30-day event_log retention purge.
+    tokio::spawn(crate::eda::event_log_retention_task(state.clone()));
+
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(state.clone()));
 

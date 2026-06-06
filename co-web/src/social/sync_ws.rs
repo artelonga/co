@@ -464,6 +464,15 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
         }
     }
 
+    // CO-380: publish sync.remote_pull to EDA bus for observability.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "sync.remote_pull",
+        Some(universe_key.to_string()),
+        None,
+        serde_json::json!({ "deltas": batch.deltas.len() }),
+        crate::eda::Visibility::UniverseOwner,
+    ));
+
     // Reconcile content_count once per batch — the per-universe upsert/delete
     // doesn't touch the cached counter on `meta.universes`. Without this,
     // sync-driven writes drift the counter (observed: `co` 513 cached vs 500

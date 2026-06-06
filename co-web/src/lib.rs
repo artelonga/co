@@ -2,6 +2,7 @@
 pub mod admin;
 pub mod auth;
 pub mod content;
+pub mod eda;
 pub mod infra;
 pub mod integrations;
 pub mod platform;
