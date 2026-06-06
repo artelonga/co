@@ -5,6 +5,245 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.41.0] — 2026-06-06 — Brain interlink + EDA spine + staging foundation
+
+## CO-345 — Cross-universe graph view + publishable saved views
+
+`GraphQuery` now accepts `?universes=key1,key2` to load nodes and edges across multiple universes in a single graph render. When multi-universe mode is active, node IDs become `universe::path`; single-universe mode keeps bare `path` for back-compat.
+
+A new `graph_views` table (migration v59) and five CRUD endpoints (`POST /api/v1/me/graph-views`, `GET /api/v1/me/graph-views`, `GET /api/v1/graph-views/{slug}`, `PATCH /api/v1/graph-views/{slug}`, `DELETE /api/v1/graph-views/{slug}`) let authenticated users save, share, and manage named graph views with `public | unlisted | private` visibility.
+
+The graph canvas (`/shared/graph.html`) gains a universe chip strip (fetched from `GET /api/v1/universes?visibility=public-subscribable`), a depth slider (1–6), and a "Save view" modal that posts the current state and returns a shareable `/graph-views/{slug}` URL. Opening `/graph-views/{slug}` hydrates chips, depth, and root from the saved view before loading the graph.
+
+`extract_body_cross_universe_wikilinks` in `relation_index.rs` now emits `to_universe` for `[[key::path]]` wikilinks found in markdown bodies, enabling cross-universe edges to be indexed correctly.
+
+### Why
+Allows graph views that span multiple content universes (e.g. yoruba + mbya) to be created, shared, and bookmarked without per-session configuration.
+
+## CO-350 — Catalog → OpenAPI codegen + CI drift check
+
+Added a TypeScript generator (`co-web/scripts/generate-openapi.ts`) that parses
+`docs/architecture/api-catalog.md` and emits `co-web/openapi.yaml`.
+Two new npm scripts: `openapi:gen` regenerates the YAML from the catalog;
+`openapi:check` exits 1 with a readable diff when catalog, code, and YAML diverge.
+A GitHub Actions workflow (`openapi-check.yml`) runs `openapi:check` on PRs that
+touch `*_routes.rs`, `api-catalog.md`, `openapi.yaml`, or the generator script.
+
+The bootstrap commit aligns the catalog (316 entries) with every registered axum
+route and regenerates `co-web/openapi.yaml` so `--check` passes immediately after
+merge. Component schemas are extracted into `co-web/openapi-components.yaml` and
+concatenated at gen time.
+
+### Why
+
+Both `api-catalog.md` (human-readable) and `openapi.yaml` (machine-readable) existed
+with zero enforcement that they described the same surface. Adding a route no longer
+requires a separate "update docs" step — the catalog row is the documentation, and
+CI rejects PRs that skip it.
+
+## CO-361 — Atividades audit log + schema_versoes admin surface
+
+Adds a typed `atividades` audit log and a `schema_versoes` migration history
+table, both surfaced in the `/gestao` admin SPA.
+
+### What changed
+
+- **Migration v59** creates the `atividades` table (3 indexes, CHECK constraints
+  on `acao`/`tipo`), the `schema_versoes` table, and backfills
+  `schema_versoes` from the existing `schema_version` rows with
+  `descricao='(backfilled)'`.
+- **`platform::atividade`** — new module with `log_atividade()` (deferred write
+  via `tokio::spawn`), `redact()` (strips SENSITIVE_KEYS at any JSON depth),
+  and `sha256_short()` (16-char SHA-256 prefix for IP hashing).
+- **Call sites wired**: task create/update/delete (`server::legacy`), universe
+  create/delete (`content::universe_routes`), login via magic-link and
+  password (`server::auth_handlers`), and logout.
+- **`GET /api/v1/gestao/atividades`** — paginated feed filterable by `acao` and
+  `since`; GitHub admin auth required.
+- **`GET /api/v1/gestao/schema-status`** — returns current schema version, app
+  version, drift indicator, and last 20 migration history rows.
+- **`/gestao` SPA** — new `gestao.html` served at `/gestao`; shows the
+  "DB schema vN / app vX.Y.Z" header strip with drift badge and an
+  atividades feed with per-row diff panel.
+- **180-day retention**: `atividade::retention_task` spawned at boot, deletes
+  rows older than 180 days nightly.
+- **`record_migration!` macro** defined in `migrations.rs` for future v60+
+  migrations to keep `schema_version` and `schema_versoes` in sync.
+
+### Why
+
+Operators were unable to answer "who deleted that entry?" without digging
+through Fly.io logs. After every deploy there was no in-DB record of which
+migration version the running container had applied. This closes both gaps
+without adding latency to any request (all writes are deferred).
+
+## CO-363 — Cross-universe wikilink resolver — `[[key::path]]` populates entry_relations.to_universe
+
+The relation extractor now handles all four body wikilink forms and frontmatter
+`key::path` syntax, writing rows to `entry_relations` with `to_universe` populated:
+
+- `[[mbya::terms/jaxy-jatere]]` → `to_universe="mbya"`, `to_entry="terms/jaxy-jatere"`
+- `[[concepts::mother.md|mãe]]` → `to_universe="concepts"`, `link_text="mãe"`
+- `[[terms/local]]` (plain) → `to_universe=NULL` (same universe)
+- `[[../sibling/x]]` → `relation_type="wikilink_relative_deprecated"` + deprecation log
+- Frontmatter `concept: yoruba::terms/ogunte` → `to_universe="yoruba"`
+
+New `link_text TEXT` column added to `entry_relations` (universe_pool v16). A
+one-time startup backfill re-indexes body wikilinks for all existing entries.
+
+### Why
+
+CO-345's graph view needs real cross-universe edges to render. This spec populates
+`to_universe` for inline body wikilinks so the graph has the data it needs.
+
+## CO-365 — Long-term storage backend trait — pluggable backup scaffold (local default, S3/R2/GCS as stubs)
+
+Introduced a `BackupBackend` trait with a full `LocalFsBackend` implementation
+(default, no feature flag) and compile-tested stubs for S3, R2, Fly volume
+snapshots, and GCS (each gated behind `backup-s3 / backup-r2 / backup-fly /
+backup-gcs` cargo features). The backend choice is now a config flip
+(`CO_BACKUP_BACKEND` env var), not a code change.
+
+Changes:
+- `co-web/src/storage/backup/` — `BackupBackend` trait, `Snapshot`, `SnapshotId`,
+  `SnapshotMeta` types, `LocalFsBackend` (full), four cloud stubs, `backend_from_env`
+  factory, and `build_snapshot` tarball builder.
+- `co-web/src/platform/workers.rs` — `BackupWorker` (runs every
+  `CO_BACKUP_INTERVAL_HOURS`, default 24 h; short-circuits when
+  `CO_BACKUP_BACKEND=disabled`).
+- `co-web/src/admin/backup_routes.rs` — `POST /api/v1/admin/backup/snapshot`
+  (admin-only, triggers snapshot in background) and
+  `GET /api/v1/admin/backup/snapshots` (admin-only, list stored snapshots).
+- Snapshot success/failure events routed to atividades audit log.
+- Retention prunes snapshots older than `CO_BACKUP_RETENTION_DAYS` (default 30) on
+  every worker tick.
+- Snapshot manifest includes the active backend name for restore-tool disambiguation.
+- `docs/backup-format.md` documents the archive layout, manifest schema, and admin API.
+- `scripts/backup-prod-local.sh` preserved as a CLI fallback.
+
+### Why
+
+Prepares CO for v3.0 public launch with backup running at startup — satisfies the
+BaaS sovereignty guarantee ("no third-party lock-in") by decoupling the backup
+target from the codebase. CO-143 (which required choosing AWS upfront) is no longer
+a v3.0 blocker.
+
+## CO-369 — Retrospective sprint simulation — reconstruct CO's history as bi-weekly sprints
+
+Added `co-web/scripts/scrum/retro-simulate.ts`, a one-shot Node/tsx script that walks
+`git log --first-parent main`, `git for-each-ref refs/tags`, and `work/co/CO-*.md` spec files
+to reconstruct CO's delivery history as 14-day bi-weekly sprints anchored at 2026-06-11.
+
+Generates 13 retrospective sprint files (`docs/scrum/sprints/sprint-minus-N.md` + `sprint-0.md`),
+a velocity chart (`retro-velocity.md`), a narrative overview (`retro-simulation.md`), and an
+anomalies report (`retro-anomalies.md`). `--forward` flag generates the next 4 sprint templates.
+A machine-readable `_index.json` serves CO-372's sprint calendar renderer.
+
+### Why
+
+The sprint simulation gives CO an honest historical record of "what shipped per sprint" without
+requiring retroactive scrum discipline. It provides sprint -12 → -1 velocity data, release cadence
+evidence, and DoD completion visibility from day one — grounding ArteLonga's scrum framework
+empirically.
+
+## CO-370 — Lead funnel docs + unified capture — signup = lead (email join key)
+
+Documents the 8-step acquisition funnel and stitches the lead capture and
+passwordless signup paths at the email join key, so every signup creates a
+lead record and every lead form submission creates a user shell.
+
+### Changes
+
+- `docs/lead-acquisition.md` — 8-step funnel diagram, per-step table, gap
+  analysis, KPIs, and cross-references to CO-371/CO-366.
+- Migration v61 adds `leads.user_id` (FK → users) and `leads.source`
+  (`lead_form | signup | invitation | manual`) with indexes.
+- Migration v62 adds `users.lead_id` (FK → leads), `users.status`
+  (`active | pre-registered | suspended`), and `users.activated_at`;
+  backfills both FKs by matching existing rows on lowercased email.
+- `POST /api/v1/leads` now finds or creates a user shell (status
+  `pre-registered`) when an email is provided, links bidirectional FKs,
+  and emits `lead.captured` + `lead.user_linked` telemetry.
+- `POST /api/v1/auth/onboard-with-email/verify` (create path) now upserts
+  a signup-sourced lead, links the new user, auto-advances the lead to
+  `in_progress`, and emits `signup.captured` telemetry.
+- `GET /api/v1/auth/me` response extended with `lead_id`, `lead_status`,
+  `lead_source`.
+- `GET /api/v1/admin/leads` response extended with `user_id`, `user_status`,
+  `verified_at`.
+- OpenAPI documents all extended request/response shapes.
+
+### Why
+
+Lead form submitters were invisible to admin triage because the leads table
+and users table had no cross-link. A signed-up user had no lead record, so
+acquisition → convert attribution was unjoinable without manual SQL.
+CO-371 (funnel report) requires this unified identity to compute per-step
+drop-off metrics.
+
+## CO-379 — Staging environment — Fly app + DNS + secrets + nightly reset (foundation for Wave 4 v3.0)
+
+Added a dedicated staging environment (`co-artelonga-staging`) as an automated validation gate for Wave 4 PRs (16 PRs with heavy schema + UI changes).
+
+Changes:
+- `fly.staging.toml` — new Fly.io app config (`co-artelonga-staging`, `gru`, 256 MB shared, `CO_ENV=staging`)
+- `.github/workflows/staging-deploy.yml` — auto-deploys main to staging on every push
+- `/api/health` response now includes `env` field (`"staging"` | `"production"` | …) read from `CO_ENV`
+- `WebConfig::is_staging()` — identifies the staging environment for conditional seeding and worker registration
+- Staging fixture universes seeded on every deploy (idempotent): `recursion-a`, `recursion-ab`, `recursion-abc`, `funnel-fixture`, `mbya-staging`, `yoruba-staging`
+- `StagingTestSweepWorker` — hourly worker that deletes `u-test-*` universes older than 7 days every Sunday 03:00 BRT (registered only when `CO_ENV=staging`), keeping the most recent 100 for forensic inspection
+- `storage::snapshot` module — SQLite online backup/restore API via `rusqlite::Backup` (CO-376 pre-prod migration validation will use this)
+
+### Why
+Wave 4 (v3.0 mobile public release) lands 16 PRs with schema migrations and UI rework. Running the full Playwright suite against a real Fly instance catches drift that unit tests cannot — shared staging JWT secret means cross-env token verification is also tested. Per design: reverses the prior "no UAT" decision only for automated validation; manual UAT remains off the table.
+
+## CO-380 — Universal event bus — EDA spine for all observability (atividades + analytics + billing + sala presence)
+
+Introduced a universal EDA (Event-Driven Architecture) bus as the single spine for all
+state-changing observability across the platform. Every route that mutates state now
+publishes a typed `Event` to the bus; subscribers consume and act asynchronously.
+
+### What changed
+
+- **`co-web/src/eda/`** — new module:
+  - `event.rs`: `Event` envelope with ULID-based IDs + `Visibility` enum (Public / UniverseMembers / UniverseOwner / UserOnly / System)
+  - `bus.rs`: `EdaBus` trait + `Filter` (prefix-matched event_type, universe_key, user_id, min_visibility) + `Subscription`
+  - `tokio_bus.rs`: `TokioBroadcastBus` — default in-process impl (4 096-slot broadcast; < 50ms p99)
+  - `redis_bus.rs` / `nats_bus.rs`: feature-gated stubs (`eda-redis`, `eda-nats`)
+  - `events_ws.rs`: `GET /api/v1/events` WebSocket route — server-enforced federation rules (anon → Public only)
+  - `subscribers/`: 6 concrete subscribers (AtividadesPersistor, AnalyticsAggregator, BillingPersistor, SalaBroadcaster, KbIndexer, LiveTimeline)
+
+- **Migration v63** (`event_log` table + indexes on `created_at`, `universe_key`, `event_type`)
+
+- **30-day retention task** for `event_log` (nightly, mirrors atividades retention pattern)
+
+- **6 producers wired**:
+  - `atividade::log_atividade` — publishes `atividade.*` (System visibility)
+  - `telemetry_middleware` — publishes `analytics.visit` (Public)
+  - `entry_routes` — publishes `entry.created / updated / deleted` (UniverseMembers)
+  - `vault_routes::write_vault_entry` — publishes `vault.write` (UniverseOwner)
+  - `sync_ws::apply_deltas_to_storage` — publishes `sync.remote_pull` (UniverseOwner)
+  - `auth_handlers::signup_handler` — publishes `billing.account_created` stub (UserOnly)
+
+- **OpenAPI** updated with `/api/v1/events` WebSocket route and `Events` tag
+
+- **Cargo features** added: `eda-redis`, `eda-nats`, `eda-persistence`
+
+- **CO-353 workspace presence** reimplemented as `SalaBroadcaster` subscriber (ready for CO-381 WebSocket fanout)
+
+- **CO-361 atividades log** still works — `log_atividade()` continues its direct SQL write; bus publish is additive
+
+- **CO-340 analytics rollups** still work via existing REST ingest path; `AnalyticsAggregator` is the future in-process hook
+
+### Why
+
+The 6+ fragmented event paths (atividades sync write, analytics batch, billing sync, sala presence,
+sync polling, KB push) were creating tight coupling and making real-time observability impossible.
+A single bus + subscriber model consolidates all observability into one pattern, makes CO-381
+(live timeline) trivial, and enables the Yggdrasil notes integration (CO-383) to plug in as
+another producer without touching existing code.
+
+
 ## [2.40.0] — 2026-06-05 — substrate stable + OSS integrations
 
 ## CO-211 — Universe Content API v1 spec + Swagger UI
