@@ -815,6 +815,15 @@ pub async fn create_entry(
             body_hash: entry.body_hash.clone(),
         });
 
+    // CO-380: also publish to EDA bus for universal observability.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "entry.created",
+        Some(slug.clone()),
+        crate::auth::resolve_user_id(&state, &headers),
+        serde_json::json!({ "path": body.path, "entry_type": entry.entry_type }),
+        crate::eda::Visibility::UniverseMembers,
+    ));
+
     // CO-79: invalidate query cache entries for this universe after a write.
     state
         .index
@@ -1014,6 +1023,15 @@ pub async fn update_entry(
             body_hash: entry.body_hash.clone(),
         });
 
+    // CO-380: also publish to EDA bus.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "entry.updated",
+        Some(slug.clone()),
+        None,
+        serde_json::json!({ "path": path, "entry_type": entry.entry_type }),
+        crate::eda::Visibility::UniverseMembers,
+    ));
+
     // CO-79: invalidate query cache entries for this universe after a write.
     state
         .index
@@ -1156,6 +1174,14 @@ pub async fn delete_entry(
             universe_key: slug.clone(),
             path: path.clone(),
         });
+    // CO-380: also publish to EDA bus.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "entry.deleted",
+        Some(slug.clone()),
+        None,
+        serde_json::json!({ "path": path }),
+        crate::eda::Visibility::UniverseMembers,
+    ));
     let mut storage = lock_storage(&state);
     storage.decrement_universe_content_count(&slug, 1);
 

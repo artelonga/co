@@ -807,6 +807,15 @@ pub(super) async fn signup_handler(
         },
     );
 
+    // CO-380: billing stub — account creation triggers a billing.account_created event.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "billing.account_created",
+        None,
+        Some(user.id.clone()),
+        serde_json::json!({ "tier": user.tier }),
+        crate::eda::Visibility::UserOnly,
+    ));
+
     Ok((
         StatusCode::OK,
         [(header::SET_COOKIE, cookie)],

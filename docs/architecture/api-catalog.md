@@ -466,6 +466,16 @@ CO-260 cross-version changelog viewer.
 
 ---
 
+## events — `/api/v1/events` (event_bus / live_routes.rs)
+
+CO-380 universal event bus + CO-381 live timeline WebSocket fanout.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/events` | authed (cookie or token) | WebSocket — subscribe to scoped event stream; filter via `?scope=mine|universe:<key>|public|admin` |
+
+---
+
 ## feedback — `/api/v1/feedback/*` (feedback_routes.rs)
 
 CO-333 feedback system. Submissions are public; management is owner-only.

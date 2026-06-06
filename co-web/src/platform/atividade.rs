@@ -13,6 +13,7 @@ use rusqlite::params;
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+use crate::eda::event::{Event, Visibility};
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -138,12 +139,32 @@ pub fn sha256_short(input: &str) -> String {
 ///
 /// Never blocks the caller. Uses `try_lock()` to avoid holding `Mutex<Storage>`
 /// across an await point; warns and skips if contended at that instant.
+///
+/// CO-380: also publishes to the EDA bus so all subscribers receive the event.
 pub fn log_atividade(state: AppState, atividade: Atividade) {
     tokio::spawn(async move {
         let conteudo = redact(json!({"before": atividade.before, "after": atividade.after}));
         let conteudo_str = conteudo.to_string();
         let ip_hash = atividade.ip.as_deref().map(sha256_short);
         let versao = env!("CARGO_PKG_VERSION");
+
+        // CO-380: publish to EDA bus BEFORE the SQL write so the event
+        // is in-flight even if the write is briefly contended.
+        let event_type = format!("atividade.{}", atividade.acao.as_str());
+        let payload = json!({
+            "entidade": atividade.entidade,
+            "entidade_id": atividade.entidade_id,
+            "tipo": atividade.tipo.as_str(),
+            "conteudo": conteudo,
+            "versao_app": versao,
+        });
+        state.core.eda_bus.publish(Event::new(
+            event_type,
+            None,
+            atividade.user_id.clone(),
+            payload,
+            Visibility::System,
+        ));
 
         let Some(storage) = state.core.storage.try_lock() else {
             tracing::warn!("log_atividade: storage lock contended — audit event dropped");

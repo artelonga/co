@@ -77,6 +77,10 @@ backup-s3 = []
 backup-r2 = []
 backup-fly = []
 backup-gcs = []
+# CO-380: EDA backend alternatives (stubs — fill when scale demands)
+eda-redis = []
+eda-nats = []
+eda-persistence = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

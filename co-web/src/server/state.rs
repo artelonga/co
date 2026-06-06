@@ -24,6 +24,10 @@ pub struct CoreState {
     pub blob_backend: Arc<crate::infra::blob::BlobBackend>,
     /// CO-328: AI router — dispatches queries to Ollama or Claude Code.
     pub ai_router: Arc<crate::infra::ai::AiRouter>,
+    /// CO-380: universal EDA bus — every state-changing route publishes here.
+    pub eda_bus: Arc<dyn crate::eda::EdaBus>,
+    /// CO-380: LiveTimeline fan-out channel — drives the `/api/v1/events` WebSocket.
+    pub timeline_tx: crate::eda::subscribers::timeline::TimelineSender,
 }
 
 impl CoreState {
@@ -80,6 +84,10 @@ impl CoreState {
             crate::infra::auth::LocalJwtProvider::new(Arc::clone(&secrets)),
         );
         let ai_router = Arc::new(crate::infra::ai::AiRouter::from_env());
+        let eda_bus: Arc<dyn crate::eda::EdaBus> = crate::eda::build_bus();
+        // Phase 1: create the timeline channel without spawning (safe in non-async contexts).
+        // Phase 2 (start) is called from start_server_inner after the runtime is up.
+        let timeline_tx = crate::eda::subscribers::timeline::new_channel();
         Self {
             storage,
             storage_trait,
@@ -90,6 +98,8 @@ impl CoreState {
             auth_provider,
             blob_backend: Arc::new(blob_backend),
             ai_router,
+            eda_bus,
+            timeline_tx,
         }
     }
 }

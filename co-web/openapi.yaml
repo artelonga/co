@@ -69,6 +69,8 @@ tags:
     description: "chat-llm endpoints"
   - name: "changelog"
     description: "changelog endpoints"
+  - name: "events"
+    description: "events endpoints"
   - name: "feedback"
     description: "feedback endpoints"
   - name: "analytics + telemetry"
@@ -992,6 +994,15 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/events:
+    get:
+      tags: ["events"]
+      summary: "WebSocket — subscribe to scoped event stream; filter via `?scope=mine"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK
