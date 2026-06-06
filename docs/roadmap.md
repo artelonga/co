@@ -1,10 +1,12 @@
 # CO Roadmap — Wave-based, v3.0 mobile public release in Wave 4
 
-Framed by the BaaS thesis (see [`ArteLonga/docs/brain-as-a-service.md`](https://github.com/artelonga/ArteLonga/blob/main/docs/brain-as-a-service.md)).
+Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/docs/intelligence-as-a-service.html`](https://artelonga.com.br/docs/intelligence-as-a-service.html), renamed from BaaS 2026-06-06).
 
-A **brain** = human + their hardware + their notes/tasks/calendar + their content, delivered as a sovereign, renderable surface that scales horizontally at zero marginal SaaS cost.
+**The bounded intelligence** — everything a schema or API contract can capture (deterministic, functional, verifiable) — **is the service**. **The brain** (biological, human) is deliberately excluded from the deterministic machinery and left free to roam toward creativity and free expression. The service liberates the brain; it doesn't commodify it.
 
-**`yuri`** is the reference brain. **`artelonga`** is the business. **CO** is the platform — identity · warehouse · payment · sync.
+**co é livre** (free software). **ñandé** (inclusive "we-with-you"), not **oré** (exclusive). The audience is part of "we" — never the object of "we own".
+
+**`yuri`** is the reference brain. **`artelonga`** is the business. **CO** is the bounded service — identity · warehouse · payment · sync · event bus.
 
 ## Current state (2026-06-05)
 
@@ -24,7 +26,7 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⏪ done | v2.39.0 | Foundation (CO-211/280/291/301/337/338) | 6 |
 | ⏪ done | **v2.40.0** | Substrate stable + OSS integrations | 10 |
 | 🟡 active | **v2.41.0** | Brain interlink + scrum + retro sim | 7 |
-| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | EDA spine + Sala + mobile + staging + edge protection + privacy + scrum CI + Yggdrasil read | **20** |
+| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | EDA spine (federated) + Sala + mobile + staging + edge protection + privacy + scrum CI + Yggdrasil read | **21** |
 | ⚪ planned | v3.1.0 | Monetization + KB + funnel + sprint calendar | 4 |
 | ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web) | 4 |
 | ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
@@ -36,13 +38,13 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 
 **Theme**: Brain on any device, observable in real time, public.
 
-**20 PRs** organized into **7 changelog themes** (CHANGELOG entries group by theme, not per-PR). Batched A/B/C/D for CI sanity. Each batch fires when prior batch's PRs merge.
+**21 PRs** organized into **7 changelog themes** (CHANGELOG entries group by theme, not per-PR). Batched A/B/C/D for CI sanity. Each batch fires when prior batch's PRs merge.
 
 ### Changelog themes (v3.0)
 
 | Theme | PRs | What ships |
 |---|---|---|
-| **1. Event-driven spine** | CO-380, CO-381 | Universal event bus + live timeline at `/agora` (pt-BR) / `/live` (en) |
+| **1. Event-driven spine** | CO-380, CO-381, CO-384 | Universal event bus + live timeline at `/agora` (pt-BR) / `/live` (en) + federated bridge (CO ↔ Yggdrasil ↔ devices, no polling) |
 | **2. Edge protection + privacy** | CO-278-B, CO-378 | Rate limits, abuse heuristics, noindex respect, robots.txt, sitemap.xml |
 | **3. Substrate hardening** | CO-365, CO-360 | Pluggable backup backend (local default); unified /gestao/resumo dashboard |
 | **4. Workspace primitive (Sala)** | CO-352, CO-354, CO-355 | Spatial canvas + suggest/review + template registry; absorbs Yggdrasil sala |
@@ -69,13 +71,14 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | **CO-378** | Analytics privacy (noindex respect) | 2 | Private paths redacted in `/gestao/resumo` |
 | **CO-381** | Live timeline `/agora` + `/live` | 1 | WebSocket-fed real-time observability |
 
-### Batch C — mobile + Yggdrasil read (5 PRs)
+### Batch C — mobile + Yggdrasil event-driven read (5 PRs)
 | PR | Spec | Theme | What it ships |
 |---|---|---|---|
 | **CO-356** | Touch DnD on board | 5 | Pointer-events replaces HTML5 DnD |
 | **CO-357** | PWA shell | 5 | Manifest, SW, install, offline cache |
 | **CO-358** | Mobile IA pass | 5 | Drawer, breadcrumb collapse, board reflow |
-| **CO-383** | Yggdrasil notes read-only ingest | 7 | Yggdrasil's notes appear in CO's vault read-only |
+| **CO-384** | Federated event bus bridge | 1 | Cross-deployment WS pub/sub (CO ↔ Yggdrasil ↔ devices). **No polling.** |
+| **CO-383** | Yggdrasil notes event-driven ingest | 7 | CO subscribes to Yggdrasil's bus; notes flow in real-time via CO-384 |
 
 (Note: CO-353 WebSocket lobby is **superseded by CO-380** — workspace presence becomes one consumer of the universal bus.)
 
