@@ -398,6 +398,24 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/admin/backup/snapshot:
+    post:
+      tags: ["admin"]
+      summary: "CO-365 — force snapshot via active backup backend"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/backup/snapshots:
+    get:
+      tags: ["admin"]
+      summary: "CO-365 — list snapshots from backup backend"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/admin/changelog/reindex:
     post:
       tags: ["admin"]

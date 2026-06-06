@@ -139,6 +139,7 @@ impl Storage {
 
 pub mod agent_sessions;
 pub(crate) mod api_tokens;
+pub mod backup;
 pub(crate) mod changelog;
 pub(crate) mod chat;
 pub(crate) mod clone_ops;

@@ -675,6 +675,8 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         worker_executor.spawn_worker(crate::workers::ReleaseNotesWorker::new(state.clone()));
         // CO-337: clone/pull remote sister repos and reseed every 15 min.
         worker_executor.spawn_worker(crate::workers::RemoteSisterRepoWorker::new(config.clone()));
+        // CO-365: backup snapshot worker — disabled when CO_BACKUP_BACKEND=disabled.
+        worker_executor.spawn_worker(crate::workers::BackupWorker::new(state.clone()));
         // CO-379: weekly u-test-* retention sweep — staging only.
         if config.is_staging() {
             worker_executor

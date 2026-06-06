@@ -269,7 +269,47 @@ impl Worker for ReleaseNotesWorker {
 }
 
 // ---------------------------------------------------------------------------
-// 8. RemoteSisterRepoWorker
+// 8. BackupWorker
+//    Runs every CO_BACKUP_INTERVAL_HOURS (default 24h). Creates a snapshot
+//    tarball, calls backend.put(), then prunes old snapshots (CO-365).
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct BackupWorker {
+    state: AppState,
+    interval: std::time::Duration,
+}
+
+impl BackupWorker {
+    pub fn new(state: AppState) -> Self {
+        let interval_hours = std::env::var("CO_BACKUP_INTERVAL_HOURS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(24);
+        Self {
+            state,
+            interval: std::time::Duration::from_secs(interval_hours * 3600),
+        }
+    }
+}
+
+#[async_trait]
+impl Worker for BackupWorker {
+    fn name(&self) -> &'static str {
+        "backup"
+    }
+
+    fn interval(&self) -> std::time::Duration {
+        self.interval
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        crate::storage::backup::worker::run_backup_tick(&self.state).await
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 9. RemoteSisterRepoWorker
 //    Clones/pulls remote sister repos and reseeds their content (CO-337).
 //    Default interval: 15 min. Override with CO_REMOTE_SYNC_INTERVAL_SECS.
 // ---------------------------------------------------------------------------
