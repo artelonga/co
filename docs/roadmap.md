@@ -27,7 +27,7 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⏪ done | **v2.40.0** | Substrate stable + OSS integrations | 10 |
 | 🟡 active | **v2.41.0** | Brain interlink + scrum + retro sim | 7 |
 | 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | EDA spine (federated) + Sala + mobile + staging + edge protection + privacy + scrum CI + Yggdrasil read | **21** |
-| ⚪ planned | v3.1.0 | Monetization + KB + funnel + sprint calendar | 4 |
+| ⚪ planned | v3.1.0 | Monetization + KB + funnel + calendar + time-rendering + UPSERT conflict tree | 6 |
 | ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web) | 4 |
 | ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
 | ⚪ planned | v3.4.0 | Scale (job queue, cache, rate tiers, load tests) | 6 |
