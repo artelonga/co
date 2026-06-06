@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-365",
+  "title": "Long-term storage backend trait — pluggable backup scaffold (local default, S3/R2/GCS as stubs)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-365.md",
+  "branch": "feat/CO-365-long-term-storage-backend-trait-pluggabl",
+  "merge_sha": "378e8fb07bf780f7ff06db123625d1656d6a6ad3",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/159",
+    "number": 159
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-06T11:13:54Z",
+  "files_changed": 20,
+  "lines_added": 1370,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:storage",
+    "module:ops",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-365 — Long-term storage backend trait — pluggable backup scaffold (local default, S3/R2/GCS as stubs)\n\nIntroduced a `BackupBackend` trait with a full `LocalFsBackend` implementation\n(default, no feature flag) and compile-tested stubs for S3, R2, Fly volume\nsnapshots, and GCS (each gated behind `backup-s3 / backup-r2 / backup-fly /\nbackup-gcs` cargo features). The backend choice is now a config flip\n(`CO_BACKUP_BACKEND` env var), not a code change.\n\nChanges:\n- `co-web/src/storage/backup/` — `BackupBackend` trait, `Snapshot`, `SnapshotId`,\n  `SnapshotMeta` types, `LocalFsBackend` (full), four cloud stubs, `backend_from_env`\n  factory, and `build_snapshot` tarball builder.\n- `co-web/src/platform/workers.rs` — `BackupWorker` (runs every\n  `CO_BACKUP_INTERVAL_HOURS`, default 24 h; short-circuits when\n  `CO_BACKUP_BACKEND=disabled`).\n- `co-web/src/admin/backup_routes.rs` — `POST /api/v1/admin/backup/snapshot`\n  (admin-only, triggers snapshot in background) and\n  `GET /api/v1/admin/backup/snapshots` (admin-only, list stored snapshots).\n- Snapshot success/failure events routed to atividades audit log.\n- Retention prunes snapshots older than `CO_BACKUP_RETENTION_DAYS` (default 30) on\n  every worker tick.\n- Snapshot manifest includes the active backend name for restore-tool disambiguation.\n- `docs/backup-format.md` documents the archive layout, manifest schema, and admin API.\n- `scripts/backup-prod-local.sh` preserved as a CLI fallback.\n\n### Why\n\nPrepares CO for v3.0 public launch with backup running at startup — satisfies the\nBaaS sovereignty guarantee (\"no third-party lock-in\") by decoupling the backup\ntarget from the codebase. CO-143 (which required choosing AWS upfront) is no longer\na v3.0 blocker.",
+  "summary": "As The platform operator opening CO to the public — wanting data durability without committing to a specific cloud provider yet",
+  "co_auto_version": "0.1.0"
+}
