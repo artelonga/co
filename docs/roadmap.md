@@ -24,7 +24,7 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⏪ done | v2.39.0 | Foundation (CO-211/280/291/301/337/338) | 6 |
 | ⏪ done | **v2.40.0** | Substrate stable + OSS integrations | 10 |
 | 🟡 active | **v2.41.0** | Brain interlink + scrum + retro sim | 7 |
-| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | All substrate + Sala + mobile + staging + edge protection + privacy | **17** |
+| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | EDA spine + Sala + mobile + staging + edge protection + privacy + scrum CI + Yggdrasil read | **20** |
 | ⚪ planned | v3.1.0 | Monetization + KB + funnel + sprint calendar | 4 |
 | ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web) | 4 |
 | ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
@@ -34,44 +34,61 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 
 ## Wave 4 — v3.0 (the big public release push)
 
-**Theme**: Brain on any device, public.
+**Theme**: Brain on any device, observable in real time, public.
 
-17 PRs batched for CI sanity. Each batch fires when prior batch's PRs merge.
+**20 PRs** organized into **7 changelog themes** (CHANGELOG entries group by theme, not per-PR). Batched A/B/C/D for CI sanity. Each batch fires when prior batch's PRs merge.
 
-### Batch A — substrate gates (4 PRs, fire first)
-| PR | Spec | What it ships |
+### Changelog themes (v3.0)
+
+| Theme | PRs | What ships |
 |---|---|---|
-| **CO-379** | Staging Fly app + DNS + per-test universe isolation | `staging.co.artelonga.com.br` live |
-| **CO-365** | Storage backend trait | LocalFsBackend default; S3/R2/Fly/GCS stubs |
-| **CO-278-B** | Rate limits + abuse heuristics | 60/min anon; X-RateLimit-* headers |
-| **CO-360** | Unified `/gestao/resumo` | One Svelte page, 4 tabs |
+| **1. Event-driven spine** | CO-380, CO-381 | Universal event bus + live timeline at `/agora` (pt-BR) / `/live` (en) |
+| **2. Edge protection + privacy** | CO-278-B, CO-378 | Rate limits, abuse heuristics, noindex respect, robots.txt, sitemap.xml |
+| **3. Substrate hardening** | CO-365, CO-360 | Pluggable backup backend (local default); unified /gestao/resumo dashboard |
+| **4. Workspace primitive (Sala)** | CO-352, CO-354, CO-355 | Spatial canvas + suggest/review + template registry; absorbs Yggdrasil sala |
+| **5. Mobile shell** | CO-356, CO-357, CO-358 | Touch DnD + PWA install + mobile IA reflow |
+| **6. Staging + verification** | CO-379, CO-374, CO-375, CO-376, CO-377, CO-359 | Staging Fly app, Playwright suite, contract enforcement, migration validation, cross-env identity, mobile CI matrix |
+| **7. Scrum CI/CD + Yggdrasil read** | CO-382, CO-383 | DoD-verifiable CI per task; read-only ingest of Yggdrasil notes |
 
-### Batch B — Sala + identity (5 PRs)
-| PR | Spec | What it ships |
-|---|---|---|
-| **CO-352** | Workspace primitive | `entry_type: workspace` + per-user state |
-| **CO-354** | Suggest/review pipeline | draft → reviewed → published lifecycle |
-| **CO-355** | Workspace template registry | `_workspace.yaml` per universe |
-| **CO-377** | Cross-env identity (Phase 1) | yuri creds work on prod + staging |
-| **CO-378** | Analytics privacy (noindex respect) | Private paths redacted in `/gestao/resumo` |
+### Batch A — substrate + edge gates (5 PRs, fire first)
+| PR | Spec | Theme | What it ships |
+|---|---|---|---|
+| **CO-379** | Staging Fly app + DNS | 6 | `staging.co.artelonga.com.br` live |
+| **CO-365** | Storage backend trait | 3 | LocalFsBackend default; S3/R2/Fly/GCS stubs |
+| **CO-278-B** | Rate limits + abuse heuristics | 2 | 60/min anon; X-RateLimit-* headers |
+| **CO-360** | Unified `/gestao/resumo` | 3 | One Svelte page, 4 tabs |
+| **CO-380** | Universal event bus (EDA spine) | 1 | tokio broadcast + event_log + 6 subscribers |
 
-### Batch C — Realtime + mobile foundation (4 PRs)
-| PR | Spec | What it ships |
-|---|---|---|
-| **CO-353** | WebSocket lobby + presence | Cursors broadcast < 300ms |
-| **CO-356** | Touch DnD on board | Pointer-events replaces HTML5 DnD |
-| **CO-357** | PWA shell | Manifest, SW, install, offline cache |
-| **CO-358** | Mobile IA pass | Drawer, breadcrumb collapse, board reflow |
+### Batch B — Sala + identity + privacy (6 PRs)
+| PR | Spec | Theme | What it ships |
+|---|---|---|---|
+| **CO-352** | Workspace primitive | 4 | `entry_type: workspace` + per-user state |
+| **CO-354** | Suggest/review pipeline | 4 | draft → reviewed → published lifecycle |
+| **CO-355** | Workspace template registry | 4 | `_workspace.yaml` per universe |
+| **CO-377** | Cross-env identity (Phase 1) | 6 | yuri creds work on prod + staging |
+| **CO-378** | Analytics privacy (noindex respect) | 2 | Private paths redacted in `/gestao/resumo` |
+| **CO-381** | Live timeline `/agora` + `/live` | 1 | WebSocket-fed real-time observability |
 
-### Batch D — Validation + tagging (4 PRs)
-| PR | Spec | What it ships |
-|---|---|---|
-| **CO-374** | Playwright E2E suite for staging | 6 scenario files + acceptance generator |
-| **CO-375** | API contract enforcement | Probe drift gates prod release |
-| **CO-376** | Pre-prod migration validation | Snapshot+migrate+smoke per migration PR |
-| **CO-359** | Mobile E2E CI matrix | Pixel 7 / iPhone 14 / iPad Pro projects |
+### Batch C — mobile + Yggdrasil read (5 PRs)
+| PR | Spec | Theme | What it ships |
+|---|---|---|---|
+| **CO-356** | Touch DnD on board | 5 | Pointer-events replaces HTML5 DnD |
+| **CO-357** | PWA shell | 5 | Manifest, SW, install, offline cache |
+| **CO-358** | Mobile IA pass | 5 | Drawer, breadcrumb collapse, board reflow |
+| **CO-383** | Yggdrasil notes read-only ingest | 7 | Yggdrasil's notes appear in CO's vault read-only |
 
-**v3.0 release ships** when Batch D closes + `docs/release-checklist.md` Wave 4 section all green + retrospective passes.
+(Note: CO-353 WebSocket lobby is **superseded by CO-380** — workspace presence becomes one consumer of the universal bus.)
+
+### Batch D — Validation + DoD CI + tagging (4 PRs)
+| PR | Spec | Theme | What it ships |
+|---|---|---|---|
+| **CO-374** | Playwright E2E suite for staging | 6 | 6 scenario files + acceptance generator |
+| **CO-375** | API contract enforcement | 6 | Probe drift gates prod release |
+| **CO-376** | Pre-prod migration validation | 6 | Snapshot+migrate+smoke per migration PR |
+| **CO-359** | Mobile E2E CI matrix | 6 | Pixel 7 / iPhone 14 / iPad Pro projects |
+| **CO-382** | Scrum-aligned CI/CD with DoD verification | 7 | Per-PR DoD gate, sprint review automation, release-gate.yml |
+
+**v3.0 release ships** when Batch D closes + every PR has green DoD verification (CO-382) + `docs/release-checklist.md` Wave 4 section all green + retrospective passes.
 
 ## All open todo/in_progress work mapped
 
