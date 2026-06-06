@@ -157,6 +157,7 @@ pub(crate) mod recompute;
 pub(crate) mod release_notes;
 pub(crate) mod schema;
 pub(crate) mod seed;
+pub mod snapshot;
 pub(crate) mod subscriptions;
 pub(crate) mod tasks;
 pub mod tool;

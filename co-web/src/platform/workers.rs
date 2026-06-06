@@ -348,3 +348,63 @@ impl Worker for RemoteSisterRepoWorker {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// 9. StagingTestSweepWorker
+//    CO-379: weekly Sunday 03:00 BRT sweep of u-test-* universes older than
+//    7 days. Ticks hourly; skips if the schedule doesn't match or the sweep
+//    already ran today. Only registered when CO_ENV=staging.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct StagingTestSweepWorker {
+    config: crate::config::WebConfig,
+    last_sweep_date: Option<chrono::NaiveDate>,
+}
+
+impl StagingTestSweepWorker {
+    pub fn new(config: crate::config::WebConfig) -> Self {
+        Self {
+            config,
+            last_sweep_date: None,
+        }
+    }
+}
+
+#[async_trait]
+impl Worker for StagingTestSweepWorker {
+    fn name(&self) -> &'static str {
+        "staging_test_sweep"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(3600) // check every hour
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        use chrono::{Datelike, Timelike, Utc, Weekday};
+
+        let now = Utc::now();
+        let today = now.date_naive();
+
+        // Sunday 06:00 UTC = 03:00 BRT (UTC-3). Skip if it's not the window.
+        if now.weekday() != Weekday::Sun || now.hour() != 6 {
+            return Ok(());
+        }
+
+        // Only sweep once per calendar day even if the worker restarts.
+        if self.last_sweep_date == Some(today) {
+            return Ok(());
+        }
+
+        let mut storage = crate::storage::Storage::new(&self.config.data_dir);
+        let n = storage.sweep_test_namespaces(7, 100);
+        tracing::info!(
+            "CO-379: staging test namespace sweep: deleted {} u-test-* universe(s)",
+            n
+        );
+
+        self.last_sweep_date = Some(today);
+        Ok(())
+    }
+}

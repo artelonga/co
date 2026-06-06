@@ -395,6 +395,17 @@ pub fn run_co142_refresh(config: &WebConfig) {
     }
 }
 
+/// CO-379: seed stable fixture universes for the staging environment.
+///
+/// Only runs when `CO_ENV=staging`. Idempotent — safe to call on every boot.
+pub fn seed_staging_fixtures(config: &WebConfig) {
+    if !config.is_staging() {
+        return;
+    }
+    let mut storage = Storage::new(&config.data_dir);
+    storage.seed_staging_fixture_universes();
+}
+
 /// CO-85: seed admin user from env (idempotent, runs in any env).
 /// CO-90 (preview): also ensure the seeded admin is a member of every
 /// existing system universe so the SPA shows them post-login.
