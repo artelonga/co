@@ -346,6 +346,7 @@ Content management via GitHub PAT. Routes under `/api/v1/gestao/` gated by `GEST
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/gestao/schema-status` | admin (gh) | CO-361 — current schema version + app version |
+| GET | `/api/v1/gestao/analytics/resumo` | admin (gh) | CO-378 — analytics resumo with private-path visibility |
 | GET | `/gestao` | admin (gh) | CO-361 — gestao SPA shell page |
 | POST | `/api/v1/gestao/webhooks` | admin (gh) | CO-168 register outbound webhook |
 | GET | `/api/v1/gestao/webhooks` | admin (gh) | List webhooks |
@@ -515,6 +516,7 @@ CO-333 feedback system. Submissions are public; management is owner-only.
 | GET | `/api/v1/analytics/public/recent` | anon | Recent activity |
 | GET | `/api/v1/analytics/public/popularity` | anon | CO-180 popularity |
 | POST | `/api/v1/analytics/public/rollups` | authed | Ingest per-universe rollup (CO-340) |
+| GET | `/api/v1/analytics/public/funnel` | anon | CO-378 — conversion funnel report with private-path redaction |
 
 ---
 
