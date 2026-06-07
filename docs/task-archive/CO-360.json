@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-360",
+  "title": "Unified /gestao/resumo dashboard — collapse 6 admin routes into one SPA + endpoint",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-360.md",
+  "branch": "feat/CO-360-unified-gestao-resumo-dashboard-collapse",
+  "merge_sha": "6848d942db34a1be084d555b98045bb626b709c0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/165",
+    "number": 165
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-07T11:35:18Z",
+  "files_changed": 13,
+  "lines_added": 1205,
+  "lines_removed": 596,
+  "labels": [
+    "type:refactor",
+    "module:co-web",
+    "module:admin"
+  ],
+  "changelog_entry": "## CO-360 — Unified /gestao/resumo dashboard — collapse 6 admin routes into one SPA + endpoint\n\nReplaced the fragmented admin surface (6 separate handlers with mismatched auth and HTML) with a single `/gestao` SPA backed by three batched endpoints:\n\n- `GET /api/v1/gestao/resumo` — one round-trip for KPIs (users, universes, entries, sessions_24h, disk), top pages, visits-by-hour, visits-by-dow, referrers, broken links, recent activity, schema version, and app version.\n- `GET /api/v1/gestao/universes` — universe list with entry counts and last-activity timestamp.\n- `GET /api/v1/gestao/atividades?limit=…&since=…&acao=…` — paginated audit log feed (session-cookie / JWT admin auth, replacing the GitHub-PAT-only endpoint for dashboard use).\n\nThe SPA (`/gestao`) renders four tabs — Resumo, Conteúdo, Usuários, Atividades — with 30-second client-side cache per tab so repeated switching does not re-fetch.\n\n### Deprecation timeline for old admin URLs\n\nThe following URLs now show a top banner \"Movido para /gestao. Este painel será removido em v2.41.\":\n\n- `/analytics` (real-time event stream dashboard)\n- `/admin/deployments` (Fly machine status dashboard)\n- `/storage` (per-universe disk dashboard)\n\nThese handlers remain reachable for **one release** after CO-360 ships. They will be deleted in v2.41.\n\n### Deleted\n\n- `co-web/src/admin/uat_mirror.rs` — obsolete per `feedback_no_uat` (CO-360 carries out the planned deletion). The UAT mirror spawn in `server/mod.rs` was removed alongside it.\n\n### Why\n\nOpening 4-6 separate admin tabs to assemble a complete operational picture added friction and meant every UI redesign required touching 6 handlers. The new SPA provides one cohesive surface with a single round-trip. Auth is now consistently cookie/JWT-based (same as the main app), removing the GitHub PAT requirement for the dashboard view.",
+  "summary": "a CO operator (Yuri, today; admins generally)",
+  "co_auto_version": "0.1.0"
+}
