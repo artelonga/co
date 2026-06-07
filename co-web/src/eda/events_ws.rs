@@ -19,6 +19,7 @@ use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use serde::Deserialize;
 use tokio::sync::broadcast;
@@ -53,9 +54,7 @@ fn default_scope() -> String {
 enum ClientLevel {
     Anonymous,
     Member,
-    #[allow(dead_code)] // CO-381 will wire owner/admin checks
     Owner,
-    #[allow(dead_code)]
     Admin,
 }
 
@@ -85,31 +84,67 @@ impl ClientLevel {
 // ---------------------------------------------------------------------------
 
 /// GET /api/v1/events — upgrade to WebSocket.
+///
+/// Auth is accepted via:
+///   - `?token=<jwt>` query param
+///   - `session` cookie (sent automatically by same-origin browser pages)
+///
+/// The scope drives both universe filtering and the ownership check for
+/// `Owner`-level elevation.
 pub async fn events_ws_handler(
     ws: WebSocketUpgrade,
     Query(params): Query<EventsQuery>,
     State(state): State<AppState>,
+    headers: HeaderMap,
 ) -> Response {
     let scope = params.scope.clone();
-    // Derive client visibility level from JWT (cookie or query token).
-    // For CO-380, we keep it simple: anon = Public, any valid token = Member.
-    // CO-381 will wire the full owner/admin check.
-    let client_level = derive_client_level(&state, &params);
+    let client_level = derive_client_level(&state, &params, &headers);
     let tx: TimelineSender = state.core.timeline_tx.clone();
 
     ws.on_upgrade(move |socket| handle_socket(socket, tx.subscribe(), scope, client_level))
 }
 
-fn derive_client_level(_state: &AppState, params: &EventsQuery) -> ClientLevel {
-    // Try to extract user id from the JWT token query param.
-    let maybe_token = params.token.as_deref();
-    if let Some(token) = maybe_token {
-        let secret = crate::auth::jwt_secret();
-        if crate::auth::decode_user_id(token, &secret).is_ok() {
-            return ClientLevel::Member;
+/// Derive the visibility level for this WebSocket connection.
+///
+/// Priority: `?token=` param → `session` cookie → anonymous.
+/// If the JWT is valid and `tier == "admin"` → Admin.
+/// If the JWT is valid and the user owns the scoped universe → Owner.
+/// If the JWT is valid (any tier) → Member.
+fn derive_client_level(state: &AppState, params: &EventsQuery, headers: &HeaderMap) -> ClientLevel {
+    let token = params
+        .token
+        .as_deref()
+        .map(|s| s.to_string())
+        .or_else(|| crate::auth::extract_session_cookie(headers));
+
+    let Some(token) = token else {
+        return ClientLevel::Anonymous;
+    };
+
+    let secret = crate::auth::jwt_secret();
+    let Ok(claims) = crate::auth::decode_claims(&token, &secret) else {
+        return ClientLevel::Anonymous;
+    };
+
+    if claims.tier == "admin" {
+        return ClientLevel::Admin;
+    }
+
+    let scope = &params.scope;
+    if scope != "global" {
+        let is_owner = state
+            .core
+            .storage
+            .lock()
+            .get_universe(scope)
+            .map(|u| u.owner_id == claims.sub)
+            .unwrap_or(false);
+        if is_owner {
+            return ClientLevel::Owner;
         }
     }
-    ClientLevel::Anonymous
+
+    ClientLevel::Member
 }
 
 async fn handle_socket(

@@ -276,6 +276,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             )),
         )
         .route("/invitations/{token}", get(serve_co_index))
+        // CO-381: live timeline — /agora (pt-BR) and /live (en) are public.
+        .route("/agora", get(crate::live_routes::serve_agora_page))
+        .route("/live", get(crate::live_routes::serve_live_page))
         // CO-170: friendly PT/EN aliases for the timeline composite view.
         .route(
             "/linhadotempo",
