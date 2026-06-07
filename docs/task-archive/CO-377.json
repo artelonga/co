@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-377",
+  "title": "Cross-env identity — shared admin + JWT (Phase 1); OIDC federation (Phase 2)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-377.md",
+  "branch": "feat/CO-377-cross-env-identity-shared-admin-jwt-phas",
+  "merge_sha": "7db7ff358db28e91d568961fd4629f5c6ab83a73",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/167",
+    "number": 167
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-07T11:47:15Z",
+  "files_changed": 7,
+  "lines_added": 292,
+  "lines_removed": 7,
+  "labels": [
+    "type:feat",
+    "module:auth",
+    "module:infra"
+  ],
+  "changelog_entry": "## CO-377 — Cross-env identity — shared admin + JWT (Phase 1); OIDC federation (Phase 2)\n\nPhase 1 establishes shared credentials between production and staging so that\n`yuri@artelonga.com.br` can log into staging with the same password as prod\nand tokens issued in one environment are accepted in the other.\n\nChanges:\n- `docs/cross-env-auth.md` — Phase 1 secrets sync runbook, risk model,\n  Phase 2 OIDC federation roadmap, rotation schedule\n- `docs/jwt-rotation.md` — step-by-step JWT_SECRET rotation runbook with\n  impact table, emergency procedure, and rotation log\n\nOperational steps (not tracked in git):\n- `JWT_SECRET`, `CO_SEED_ADMIN_PASSWORD_HASH`, `CO_SEED_ADMIN_EMAIL`,\n  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` synced from prod to staging\n  via `flyctl secrets set` following the runbook above\n- Google OAuth client updated: added\n  `https://staging.co.artelonga.com.br/api/v1/auth/google/callback`\n  as an authorized redirect URI\n\n### Why\nThe Playwright suite (CO-374) needs to use prod-issued tokens against staging.\nManual testing on staging should not require a separate account. Phase 2\n(OIDC federation via prod JWKS) is documented and deferred to post-v3.0 to\navoid the shared-secret risk long-term.",
+  "summary": "As The operator wanting one set of credentials to work across prod + staging",
+  "co_auto_version": "0.1.0"
+}
