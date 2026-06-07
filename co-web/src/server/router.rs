@@ -353,6 +353,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .layer(axum::middleware::from_fn(
                 crate::server::subdomain_routing::subdomain_routing_middleware,
             ))
+            // CO-360: unified dashboard endpoints (email admin auth) — registered
+            // BEFORE gestao_api so /atividades, /resumo, /universes are found first.
+            .nest("/api/v1/gestao", crate::resumo_routes::api_router())
             .nest("/api/v1/gestao", gestao_api)
             .nest("/api/v1/gestao", webhook_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.

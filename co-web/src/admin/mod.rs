@@ -10,6 +10,6 @@ pub mod gestao_routes;
 pub mod interactions;
 pub mod lead_routes;
 pub mod repl_routes;
+pub mod resumo_routes;
 pub mod storage_dashboard;
-pub mod uat_mirror;
 pub mod uat_routes;
