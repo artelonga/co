@@ -644,16 +644,45 @@ paths:
   /api/v1/analytics/public/rollups:
     post:
       tags: ["analytics + telemetry"]
-      summary: "Ingest per-universe rollup (CO-340)"
+      summary: "Ingest per-universe rollup (CO-340). CO-378: optional `private: true` marks rollup as private-path traffic."
       security:
         - sessionCookie: []
       responses:
-        "200":
-          description: OK
+        "202":
+          description: Accepted
+        "401":
+          description: Unauthorized (missing/invalid CO_ROLLUP_TOKEN)
   /api/v1/analytics/public/summary:
     get:
       tags: ["analytics + telemetry"]
-      summary: "CO-179 public summary"
+      summary: "CO-179 public summary — CO-378: private paths stripped from top_pages by default"
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+        - in: query
+          name: universe
+          schema: { type: string }
+        - in: query
+          name: include_private
+          description: "CO-378: include private paths (redacted hashes) in top_pages. Requires CO_ROLLUP_TOKEN bearer auth; silently ignored otherwise."
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: OK
+        "400":
+          description: "days=0"
+  /api/v1/analytics/public/funnel:
+    get:
+      tags: ["analytics + telemetry"]
+      summary: "CO-378: funnel report — total_views includes private paths, by_path excludes them"
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+        - in: query
+          name: universe
+          schema: { type: string }
       responses:
         "200":
           description: OK
@@ -1411,6 +1440,22 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/gestao/analytics/resumo:
+    get:
+      tags: ["gestao"]
+      summary: "CO-378 — analytics resumo with private-path visibility (admin only)"
+      description: "Returns top_pages including private paths (clustered as '(private)'). Logs analytics.private_path_viewed atividade on each call."
+      parameters:
+        - in: query
+          name: days
+          schema: { type: integer, default: 30, minimum: 1, maximum: 365 }
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+        "401":
+          description: Unauthorized — valid GitHub PAT required
   /api/v1/gestao/schema-status:
     get:
       tags: ["gestao"]
