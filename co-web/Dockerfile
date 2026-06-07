@@ -64,6 +64,9 @@ COPY co-agent/ co-agent/
 # CO-269: README.md and LICENSE are also needed so reseed_co_root_files can
 # seed them into the co universe at runtime (/app/ is the root_dir in Docker).
 COPY CHANGELOG.md README.md LICENSE ./
+# CO-211: openapi_routes.rs uses include_str!("../../../docs/api/openapi.yaml")
+# which resolves relative to the workspace root at compile time.
+COPY docs/api/ docs/api/
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
