@@ -4,7 +4,7 @@
 //! Content is written directly to the universe filesystem (markdown files).
 
 use axum::Router;
-use axum::extract::{Json, Path, Query, State};
+use axum::extract::{Json, Path, State};
 use axum::http::{StatusCode, header};
 use axum::middleware;
 use axum::response::IntoResponse;
@@ -172,8 +172,7 @@ pub fn router() -> Router<AppState> {
             "/manifesto/reconstruir",
             post(reconstruir_manifesto_handler),
         )
-        // CO-361: audit log feed + schema version status
-        .route("/atividades", get(atividades_handler))
+        // Note: /atividades is now provided by resumo_routes (email admin auth, CO-360)
         .route("/schema-status", get(schema_status_handler))
         // GitHub auth on all routes
         .layer(middleware::from_fn(github_auth::require_github_admin))
@@ -181,15 +180,32 @@ pub fn router() -> Router<AppState> {
 
 /// Serve the `/gestao` admin SPA page (no GitHub auth — auth is handled
 /// client-side when making API calls with the PAT).
-pub async fn serve_gestao_page() -> impl IntoResponse {
-    (
-        StatusCode::OK,
-        [
-            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-            (header::CACHE_CONTROL, "no-store"),
-        ],
-        GESTAO_PAGE_HTML,
-    )
+pub async fn serve_gestao_page(headers: axum::http::HeaderMap) -> axum::response::Response {
+    use crate::admin::admin_routes::{check_admin_email, extract_claims};
+
+    match extract_claims(&headers) {
+        Err(_) => axum::response::Redirect::to("/").into_response(),
+        Ok(claims) => {
+            if !check_admin_email(&claims.email) {
+                (
+                    StatusCode::FORBIDDEN,
+                    [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                    "<html><body><h1>403 Proibido</h1><p>Acesso restrito a administradores.</p></body></html>",
+                )
+                    .into_response()
+            } else {
+                (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+                        (header::CACHE_CONTROL, "no-store"),
+                    ],
+                    GESTAO_PAGE_HTML,
+                )
+                    .into_response()
+            }
+        }
+    }
 }
 
 const GESTAO_PAGE_HTML: &str = include_str!("../../static/variants/a/gestao.html");
@@ -820,79 +836,6 @@ async fn schema_check_handler(
         universes_columns,
         schema_versions,
     }))
-}
-
-// ---- CO-361: atividades audit log ----
-
-/// One row returned by the atividades feed.
-#[derive(Debug, Serialize)]
-pub struct AtividadeRow {
-    pub id: i64,
-    pub acao: String,
-    pub entidade: String,
-    pub entidade_id: Option<String>,
-    pub conteudo: Option<serde_json::Value>,
-    pub tipo: String,
-    pub user_id: Option<String>,
-    pub ip_hash: Option<String>,
-    pub user_agent: Option<String>,
-    pub versao_app: Option<String>,
-    pub criado_em: String,
-}
-
-/// GET /api/v1/gestao/atividades?limit=50&since=<iso>&acao=excluir
-///
-/// Paginated, filterable audit-log feed. Requires GitHub admin auth.
-async fn atividades_handler(
-    State(state): State<AppState>,
-    _admin: GitHubAdmin,
-    Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<Vec<AtividadeRow>>, AppError> {
-    let limit: i64 = params
-        .get("limit")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(50)
-        .clamp(1, 200);
-    let since = params.get("since").cloned();
-    let acao_filter = params.get("acao").cloned();
-
-    let storage = state.core.storage.lock();
-    let conn = storage.conn();
-
-    let sql = "SELECT id, acao, entidade, entidade_id, conteudo, tipo, \
-               user_id, ip_hash, user_agent, versao_app, criado_em \
-               FROM atividades \
-               WHERE (?1 IS NULL OR criado_em > ?1) \
-                 AND (?2 IS NULL OR acao = ?2) \
-               ORDER BY criado_em DESC \
-               LIMIT ?3";
-
-    let mut stmt = conn
-        .prepare(sql)
-        .map_err(|e| AppError::Internal(format!("atividades prepare: {e}")))?;
-
-    let rows: Vec<AtividadeRow> = stmt
-        .query_map(rusqlite::params![since, acao_filter, limit], |row| {
-            let conteudo_str: Option<String> = row.get(4)?;
-            Ok(AtividadeRow {
-                id: row.get(0)?,
-                acao: row.get(1)?,
-                entidade: row.get(2)?,
-                entidade_id: row.get(3)?,
-                conteudo: conteudo_str.and_then(|s| serde_json::from_str(&s).ok()),
-                tipo: row.get(5)?,
-                user_id: row.get(6)?,
-                ip_hash: row.get(7)?,
-                user_agent: row.get(8)?,
-                versao_app: row.get(9)?,
-                criado_em: row.get(10)?,
-            })
-        })
-        .map_err(|e| AppError::Internal(format!("atividades query: {e}")))?
-        .filter_map(|r| r.ok())
-        .collect();
-
-    Ok(Json(rows))
 }
 
 // ---- CO-361: schema version status ----

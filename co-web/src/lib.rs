@@ -76,8 +76,8 @@ pub use admin::gestao_routes;
 pub use admin::interactions;
 pub use admin::lead_routes;
 pub use admin::repl_routes;
+pub use admin::resumo_routes;
 pub use admin::storage_dashboard;
-pub use admin::uat_mirror;
 pub use admin::uat_routes;
 
 // integrations context

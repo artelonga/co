@@ -302,7 +302,7 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // CO-44 + e2e: UAT startup runs when CO_ENV=uat OR CO_ENV=test.
     // Test env seeds yuri@uat.local so playwright fixtures can authenticate
     // their apiContext via uat-login.
-    let uat_reset_just_happened = if config.allows_uat_login() {
+    let _uat_reset = if config.allows_uat_login() {
         tracing::info!("UAT/test mode enabled (CO_ENV={})", config.co_env);
         uat_boot::uat_startup(&config)
     } else {
@@ -718,30 +718,6 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
     // CO-361: nightly 180-day atividades retention purge.
     tokio::spawn(crate::atividade::retention_task(state.clone()));
-
-    // CO-82: spawn UAT mirror task if reset just happened and env is configured.
-    // Runs in the background after the server binds; failures are logged, not fatal.
-    if uat_reset_just_happened
-        && std::env::var("UAT_MIRROR_PROD").is_ok_and(|v| v == "true" || v == "1")
-    {
-        let prod_url = std::env::var("UAT_PROD_URL").unwrap_or_default();
-        let prod_token = std::env::var("UAT_PROD_TOKEN").unwrap_or_default();
-        let local_url = format!("http://localhost:{}", config.port);
-        if !prod_url.is_empty() && !prod_token.is_empty() {
-            tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-                if let Err(e) =
-                    crate::uat_mirror::mirror_prod_to_uat(&prod_url, &prod_token, &local_url).await
-                {
-                    tracing::error!("UAT mirror failed: {e:#}");
-                }
-            });
-        } else {
-            tracing::warn!(
-                "UAT_MIRROR_PROD set but UAT_PROD_URL or UAT_PROD_TOKEN missing — skipping mirror"
-            );
-        }
-    }
 
     // CO-118: emit a deploy event to WAE so the dataset is immediately queryable
     // after every startup — visible in WAE SQL within 60s per acceptance criteria.
