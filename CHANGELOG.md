@@ -5,6 +5,98 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.42.0] — 2026-06-08 — Unified gestão + cross-env identity + live timeline
+
+## CO-360 — Unified /gestao/resumo dashboard — collapse 6 admin routes into one SPA + endpoint
+
+Replaced the fragmented admin surface (6 separate handlers with mismatched auth and HTML) with a single `/gestao` SPA backed by three batched endpoints:
+
+- `GET /api/v1/gestao/resumo` — one round-trip for KPIs (users, universes, entries, sessions_24h, disk), top pages, visits-by-hour, visits-by-dow, referrers, broken links, recent activity, schema version, and app version.
+- `GET /api/v1/gestao/universes` — universe list with entry counts and last-activity timestamp.
+- `GET /api/v1/gestao/atividades?limit=…&since=…&acao=…` — paginated audit log feed (session-cookie / JWT admin auth, replacing the GitHub-PAT-only endpoint for dashboard use).
+
+The SPA (`/gestao`) renders four tabs — Resumo, Conteúdo, Usuários, Atividades — with 30-second client-side cache per tab so repeated switching does not re-fetch.
+
+### Deprecation timeline for old admin URLs
+
+The following URLs now show a top banner "Movido para /gestao. Este painel será removido em v2.41.":
+
+- `/analytics` (real-time event stream dashboard)
+- `/admin/deployments` (Fly machine status dashboard)
+- `/storage` (per-universe disk dashboard)
+
+These handlers remain reachable for **one release** after CO-360 ships. They will be deleted in v2.41.
+
+### Deleted
+
+- `co-web/src/admin/uat_mirror.rs` — obsolete per `feedback_no_uat` (CO-360 carries out the planned deletion). The UAT mirror spawn in `server/mod.rs` was removed alongside it.
+
+### Why
+
+Opening 4-6 separate admin tabs to assemble a complete operational picture added friction and meant every UI redesign required touching 6 handlers. The new SPA provides one cohesive surface with a single round-trip. Auth is now consistently cookie/JWT-based (same as the main app), removing the GitHub PAT requirement for the dashboard view.
+
+## CO-377 — Cross-env identity — shared admin + JWT (Phase 1); OIDC federation (Phase 2)
+
+Phase 1 establishes shared credentials between production and staging so that
+`yuri@artelonga.com.br` can log into staging with the same password as prod
+and tokens issued in one environment are accepted in the other.
+
+Changes:
+- `docs/cross-env-auth.md` — Phase 1 secrets sync runbook, risk model,
+  Phase 2 OIDC federation roadmap, rotation schedule
+- `docs/jwt-rotation.md` — step-by-step JWT_SECRET rotation runbook with
+  impact table, emergency procedure, and rotation log
+
+Operational steps (not tracked in git):
+- `JWT_SECRET`, `CO_SEED_ADMIN_PASSWORD_HASH`, `CO_SEED_ADMIN_EMAIL`,
+  `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` synced from prod to staging
+  via `flyctl secrets set` following the runbook above
+- Google OAuth client updated: added
+  `https://staging.co.artelonga.com.br/api/v1/auth/google/callback`
+  as an authorized redirect URI
+
+### Why
+The Playwright suite (CO-374) needs to use prod-issued tokens against staging.
+Manual testing on staging should not require a separate account. Phase 2
+(OIDC federation via prod JWKS) is documented and deferred to post-v3.0 to
+avoid the shared-secret risk long-term.
+
+## CO-381 — Live timeline — /agora (pt-BR) + /live (en) — real-time deployed-interface visualization
+
+Added `/agora` and `/live` — two language-routed entry points for the same live
+timeline SPA that streams EDA bus events to the browser via WebSocket.
+
+- **Routes**: `GET /agora` (pt-BR) and `GET /live` (en) serve `live.html` publicly
+  (no auth gate; anonymous visitors see public events only).
+- **WebSocket**: SPA connects to `/api/v1/events?scope=<scope>` — the existing
+  CO-380 endpoint now also accepts `session` cookie auth (same-origin browser
+  pages send cookies automatically).
+- **Visibility tiers** (wired in `events_ws.rs`): Anonymous → Public only;
+  Member → + UniverseMembers; Owner (detected via DB lookup) → + UniverseOwner;
+  Admin (`tier == "admin"` in JWT) → all including System.
+- **UI**: scope selector, filter chips (Content / Auth / Analytics / Billing /
+  System), stats strip (events/min, active universes, top types), pause/resume,
+  language toggle (redirects between the two routes).
+- **Event cards**: per-type icon + colour, human-readable summary, relative
+  timestamp, drill-in chevron.
+- **Drill-in panel**: full payload + context fields; becomes full-screen sheet
+  on mobile (≤ 640 px).
+- **Coalescing**: bursts of the same `event_type + universe_key` within 500 ms
+  collapse to "N entries updated".
+- **Throttle**: max 10 visible cards/sec; overflow shown as "+N more events".
+- **Reconnect**: exponential backoff (1 s → 2 → 4 → 8 → max 30 s).
+- **Battery-aware**: stream paused when the browser tab is hidden.
+- **Atividades**: every page load publishes `live.timeline_viewed` (System
+  visibility) to the EDA bus so the atividades log captures usage.
+- **OpenAPI**: updated `/api/v1/events` spec to reflect CO-381 SPA consumer,
+  `co.events.v1` sub-protocol, and cookie auth option.
+
+### Why
+Completes the "real-time visualization of effects on deployed interface"
+requirement (2026-06-06). The EDA bus (CO-380) was already emitting events;
+this task surfaces them to users in a browsable, filterable live feed.
+
+
 ## [2.41.0] — 2026-06-06 — Brain interlink + EDA spine + staging foundation
 
 ## CO-345 — Cross-universe graph view + publishable saved views
