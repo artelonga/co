@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-389",
+  "title": "Live-event layer over comunicacao universe — Yggdrasil lexicon salas as event source",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-389.md",
+  "branch": "feat/CO-389-live-event-layer-over-comunicacao-univer",
+  "merge_sha": "b0b102ac76f47b223047a3501d85d3bfe2a80201",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/169",
+    "number": 169
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-08T13:09:16Z",
+  "files_changed": 11,
+  "lines_added": 594,
+  "lines_removed": 4,
+  "labels": [
+    "type:feat",
+    "module:integrations",
+    "module:yggdrasil",
+    "module:comunicacao",
+    "module:eda"
+  ],
+  "changelog_entry": "## CO-389 — Live-event layer over comunicacao universe — Yggdrasil lexicon salas as event source\n\nSubscribes the CO EDA bus to Yggdrasil lexicon sala events, acting as a live overlay\non top of CO-337's 15-min sister-repo sync. Terms published in a sala appear in CO's\n`comunicacao` universe within 1s; sala activity events surface in `/agora` within 300ms.\n\n### What changed\n\n- **Migration v66** (meta.db marker) + **universe pool v17**: additive `source_marker TEXT`\n  column on the per-universe `entries` table.  Tracks which channel last wrote a row:\n  `'yggdrasil-live'` (live overlay), `'remote-git'` (CO-337 poll), or `NULL` (legacy).\n\n- **`co-web/src/eda/subscribers/comunicacao_live.rs`** (new): two subscribers —\n  - *Term subscriber*: listens for `entry.{created,updated,deleted}` on the `comunicacao`\n    universe (path must contain `_users/` — sala-published terms).  Hash-dedup skips\n    writes when CO-337 already has the same bytes.\n  - *Sala activity subscriber*: listens for `yggdrasil.sala.*` and re-publishes as\n    `sync.yggdrasil.sala.*` for `/agora` with no content mutation.\n\n- **`/agora` live.html**: five new event types in `EVT_META` and i18n labels\n  (`sync.comunicacao.term_landed`, `sync.comunicacao.event_dedup_skipped`,\n  `sync.yggdrasil.sala.published`, `sync.yggdrasil.sala.term_contributed`,\n  `sync.yggdrasil.sala.user_joined`).\n\n- **`/gestao/resumo`**: `comunicacao_overlay` field added with counts from `event_log`\n  for overlay-driven vs poll-driven upserts and dedup skips.\n\n- **OpenAPI** (`openapi.yaml`): documented the six `sync.*` event types on the\n  `/api/v1/events` WebSocket endpoint.\n\n### Why\n\nYggdrasil salas and CO's `comunicacao` universe feed the same lexicon.  CO-337's 15-min\npoll is the durable channel but creates a visible latency floor for sala UX.  This spec\nprovides the sub-1s live path without changing universe bindings or durability semantics.",
+  "summary": "As Yuri publishing a term in a Yggdrasil lexicon sala (Mbyá Guaraní × Iorubá) — wanting it visible in CO's `comunicacao` universe within seconds, not at the next 15-min sister-repo sync tick",
+  "co_auto_version": "0.1.0"
+}
