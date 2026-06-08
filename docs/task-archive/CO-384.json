@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-384",
+  "title": "Federated event bus bridge — cross-deployment WS pub/sub (CO ↔ Yggdrasil ↔ devices), no polling",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-384.md",
+  "branch": "feat/CO-384-federated-event-bus-bridge-cross-deploym",
+  "merge_sha": "ae971f4053ccd1c772bc79a35c58d05494bc976a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/168",
+    "number": 168
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-08T11:36:32Z",
+  "files_changed": 14,
+  "lines_added": 1479,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:eda",
+    "module:platform",
+    "module:federation",
+    "module:websocket"
+  ],
+  "changelog_entry": "## CO-384 — Federated event bus bridge — cross-deployment WS pub/sub (CO ↔ Yggdrasil ↔ devices)\n\nAdds a persistent bidirectional WebSocket bridge layer on top of CO-380's local `EdaBus`,\nenabling cross-deployment event federation with no polling.\n\n**New endpoint:** `GET /api/v1/events/bridge` — trusted peer deployments connect here\n(trust enforced by `CO_BRIDGE_TRUSTED_SOURCES`; unknown sources receive HTTP 403).\n\n**Protocol:** `co.eda.bridge.v1` sub-protocol. On connect, peers send a\n`ReplayRequest{last_received_id}` to drain missed events from `event_log` (idempotent,\nULID-keyed). Bidirectional `FederatedEvent` messages flow continuously after replay.\n\n**Privacy rules at bridge level:** only `Public` and `UniverseMembers` events are\nfederated. `UserOnly`, `UniverseOwner`, and `System` events remain local.\n\n**Loop guard:** `hop_count > 3` → event dropped silently.\n\n**Outbound client:** `BridgeManager` reads `CO_BRIDGE_OUTBOUND_TOKENS_JSON` at startup\nand spawns one task per destination. Reconnects with exponential backoff (1s→2s→4s→8s→16s→max 30s).\n\n**Migration v65:** `bridge_state` table tracks per-(source,target) connection state and\n`last_delivered_event_id` for replay on reconnect.\n\n**Telemetry:** `bridge.connected`, `bridge.disconnected`, `bridge.event_received`,\n`bridge.event_sent`, `bridge.replay_completed` — all `Public` visibility, visible in `/agora`.\n\n**Docs:** `docs/federated-eda.md` — full protocol, deployment, and trust setup guide.\nOpenAPI: `/api/v1/events/bridge` documented in `docs/api/openapi.yaml`.\n\n### Why\n\nEliminates polling for cross-deployment sync (CO-380 was in-process only). A note edited\nin Yggdrasil now arrives on CO's live timeline (`/agora`) within 300ms over LAN. CO-383\n(Yggdrasil ingest consumer) becomes a thin subscriber on top of this transport primitive.\nCO-385 (conflict resolution, v3.1) will consume the event stream surfaced here.",
+  "summary": "As Yuri running CO + Yggdrasil + multiple devices (laptop, mobile, friend's machine)",
+  "co_auto_version": "0.1.0"
+}
