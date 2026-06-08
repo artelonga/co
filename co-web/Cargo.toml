@@ -57,6 +57,8 @@ opentelemetry = { version = "0.26", features = ["trace"] }
 opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.26", features = ["tonic"] }
 tracing-opentelemetry = "0.27"
+# CO-384: outbound bridge WS client (connects CO to peer deployments).
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 
 [[bin]]
 name = "migrate_quilombo"

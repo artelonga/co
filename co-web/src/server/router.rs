@@ -226,6 +226,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             get(crate::eda::events_ws::events_ws_handler),
         )
         .with_state(state.clone());
+    // CO-384: Federated bridge — trust-list enforced in handler (CO_BRIDGE_TRUSTED_SOURCES).
+    let eda_bridge_ws_route = Router::new()
+        .route(
+            "/api/v1/events/bridge",
+            get(crate::eda::bridge::bridge_ws_handler),
+        )
+        .with_state(state.clone());
 
     // All literal routes are registered before `/{slug}` so axum's matcher
     // prefers them over the param capture.
@@ -327,6 +334,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(chat_ws_route)
             .merge(analytics_ws_route)
             .merge(eda_events_ws_route)
+            .merge(eda_bridge_ws_route)
             .merge(co_routes)
             .nest("/api", openapi_api)
             .nest("/api", board_public)

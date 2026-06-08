@@ -710,6 +710,13 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
     }
 
+    // CO-384: spawn outbound bridge clients (no-op when CO_BRIDGE_OUTBOUND_TOKENS_JSON not set).
+    crate::eda::bridge::BridgeManager::spawn(
+        Arc::clone(&state.core.eda_bus),
+        Arc::clone(&state.core.storage),
+        crate::eda::bridge::our_deployment_id(),
+    );
+
     // CO-380: nightly 30-day event_log retention purge.
     tokio::spawn(crate::eda::event_log_retention_task(state.clone()));
 

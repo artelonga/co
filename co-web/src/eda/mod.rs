@@ -32,6 +32,7 @@
 //! while let Some(ev) = sub.recv().await { /* … */ }
 //! ```
 
+pub mod bridge;
 pub mod bus;
 pub mod event;
 pub mod events_ws;
