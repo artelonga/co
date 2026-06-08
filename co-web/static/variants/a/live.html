@@ -116,7 +116,12 @@ var T = {
       'analytics.visit':'Visita','billing.paid':'Pagamento',
       'sync.remote_pull':'Sincronização','system.deploy':'Deploy','system.migration':'Migração',
       'workspace.cursor':'Cursor','kb.ingest':'Indexação','abuse.detected':'Abuso detectado',
-      'live.timeline_viewed':'Timeline acessada'
+      'live.timeline_viewed':'Timeline acessada',
+      'sync.comunicacao.term_landed':'Termo publicado (comunicação)',
+      'sync.comunicacao.event_dedup_skipped':'Termo deduplicado (comunicação)',
+      'sync.yggdrasil.sala.published':'Sala publicada',
+      'sync.yggdrasil.sala.term_contributed':'Termo contribuído',
+      'sync.yggdrasil.sala.user_joined':'Usuário entrou na sala'
     },
     fields:{id:'ID',type:'Tipo',universe:'Universo',user:'Usuário',visibility:'Visibilidade',time:'Horário',payload:'Payload'}
   },
@@ -136,7 +141,12 @@ var T = {
       'analytics.visit':'Visit','billing.paid':'Payment',
       'sync.remote_pull':'Sync pull','system.deploy':'Deploy','system.migration':'Migration',
       'workspace.cursor':'Cursor move','kb.ingest':'KB ingest','abuse.detected':'Abuse detected',
-      'live.timeline_viewed':'Timeline viewed'
+      'live.timeline_viewed':'Timeline viewed',
+      'sync.comunicacao.term_landed':'Term published (comunicacao)',
+      'sync.comunicacao.event_dedup_skipped':'Term deduped (comunicacao)',
+      'sync.yggdrasil.sala.published':'Sala published',
+      'sync.yggdrasil.sala.term_contributed':'Term contributed',
+      'sync.yggdrasil.sala.user_joined':'User joined sala'
     },
     fields:{id:'ID',type:'Type',universe:'Universe',user:'User',visibility:'Visibility',time:'Time',payload:'Payload'}
   }
@@ -162,7 +172,12 @@ var EVT_META = {
   'system.migration':{ icon:'🛠️', color:'var(--orange)',  cat:'system'   },
   'workspace.cursor':{ icon:'🖱️', color:'var(--light-blue)','cat':'system'},
   'kb.ingest'       :{ icon:'🧠', color:'var(--purple)',  cat:'system'   },
-  'abuse.detected'  :{ icon:'🚨', color:'var(--red)',     cat:'system'   }
+  'abuse.detected'  :{ icon:'🚨', color:'var(--red)',     cat:'system'   },
+  'sync.comunicacao.term_landed'          :{ icon:'📚', color:'var(--green)',  cat:'system' },
+  'sync.comunicacao.event_dedup_skipped'  :{ icon:'⏭️', color:'var(--dim)',    cat:'system' },
+  'sync.yggdrasil.sala.published'         :{ icon:'🎪', color:'var(--blue)',   cat:'system' },
+  'sync.yggdrasil.sala.term_contributed'  :{ icon:'✍️', color:'var(--yellow)', cat:'system' },
+  'sync.yggdrasil.sala.user_joined'       :{ icon:'👋', color:'var(--gray)',   cat:'system' }
 };
 function meta(type){
   var exact = EVT_META[type];

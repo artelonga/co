@@ -1015,6 +1015,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/events/bridge:
+    get:
+      tags: ["events"]
+      summary: "CO-384 — federated bridge: remote producers (Yggdrasil) dial in to publish events; CO is the hub"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/feedback:
     post:
       tags: ["feedback"]

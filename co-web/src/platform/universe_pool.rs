@@ -575,6 +575,20 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     // was partially applied on an older instance.
     ensure_universe_column(conn, "entry_relations", "link_text", "TEXT");
 
+    if v < 17 {
+        // CO-389: source_marker — diagnostic column tracking which channel last wrote
+        // this entry: 'yggdrasil-live' (live overlay), 'remote-git' (CO-337 poll),
+        // 'vault-write' (Vault API write), or NULL (legacy / untracked).
+        ensure_universe_column(conn, "entries", "source_marker", "TEXT");
+        conn.execute(
+            "INSERT OR IGNORE INTO schema_version (version) VALUES (17)",
+            [],
+        )
+        .expect("universe schema_version v17");
+    }
+    // CO-389 unconditional drift guard.
+    ensure_universe_column(conn, "entries", "source_marker", "TEXT");
+
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
     // computed", so we re-run the computation for all rows where body_chars = 0.

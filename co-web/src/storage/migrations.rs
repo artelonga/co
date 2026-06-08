@@ -2452,6 +2452,17 @@ impl Storage {
                 "CO-384: bridge_state table for federated WS event bus"
             );
         }
+
+        if current_version < 66 {
+            // CO-389: source_marker column added to per-universe entries tables
+            // (via universe_pool migration v17). No meta.db schema change needed;
+            // this marker records the migration version in schema_versoes.
+            crate::record_migration!(
+                self.conn,
+                66,
+                "CO-389: entries.source_marker via universe_pool v17 (yggdrasil-live overlay)"
+            );
+        }
     }
 }
 
