@@ -633,14 +633,23 @@ CO-38 yggdrasil — game plugins.
 
 ---
 
+## live timeline — `/agora` (pt-BR) + `/live` (en) (live_routes.rs / server/router.rs)
+
+CO-381: real-time deployed-interface visualization. SPA shell connecting to the CO-380 event bus WebSocket.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/agora` | anon | CO-381 — live timeline SPA (pt-BR) |
+| GET | `/live` | anon | CO-381 — live timeline SPA (en) — same SPA as /agora |
+
+---
+
 ## SPA + page routes (server.rs)
 
 | Path | Purpose |
 |---|---|
 | `/` `/{slug}` `/{slug}/{*subpath}` | SPA shell (serve_co_index) |
 | `/admin` | Admin page (server-side auth) |
-| `/agora` | CO-381 — live timeline (pt-BR) — real-time deployed-interface visualization |
-| `/live` | CO-381 — live timeline (en) — same SPA as /agora |
 | `/repl` | REPL shell over interactions API |
 | `/storage` | Storage dashboard page |
 | `/admin/leads.html` | Leads admin page |
