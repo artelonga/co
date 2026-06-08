@@ -83,6 +83,8 @@ tags:
     description: "experiment endpoints"
   - name: "game"
     description: "game endpoints"
+  - name: "live timeline"
+    description: "live timeline endpoints"
   - name: "Health"
     description: "Health endpoints"
 
@@ -98,6 +100,13 @@ paths:
     get:
       tags: ["auth"]
       summary: "OIDC discovery"
+      responses:
+        "200":
+          description: OK
+  /agora:
+    get:
+      tags: ["live timeline"]
+      summary: "CO-381 — live timeline SPA (pt-BR)"
       responses:
         "200":
           description: OK
@@ -3847,6 +3856,13 @@ paths:
       summary: "CO-361 — gestao SPA shell page"
       security:
         - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /live:
+    get:
+      tags: ["live timeline"]
+      summary: "CO-381 — live timeline SPA (en) — same SPA as /agora"
       responses:
         "200":
           description: OK

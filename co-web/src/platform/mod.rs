@@ -16,6 +16,7 @@ pub mod experiment;
 pub mod geo;
 pub mod index_manager;
 pub mod job_queue;
+pub mod live_routes;
 pub mod observability;
 pub mod plugin_loader;
 pub mod pretty_urls;

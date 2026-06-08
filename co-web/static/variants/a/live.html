@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agora — CO</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--dim:#778;--accent:#7c6fcd;
+  --green:#66bb6a;--blue:#4fc3f7;--red:#e57373;--yellow:#ffa726;--orange:#ff7043;
+  --gold:#ffd54f;--purple:#ce93d8;--dark-blue:#5c6bc0;--light-blue:#81d4fa;--gray:#90a4ae}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif;display:flex;flex-direction:column}
+/* Header */
+.header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.header h1{font-size:1rem;color:var(--accent);margin-right:4px;white-space:nowrap}
+.status-dot{width:8px;height:8px;border-radius:50%;background:var(--dim);display:inline-block;margin-right:4px;flex-shrink:0}
+.status-dot.ok{background:var(--green)}
+.status-dot.err{background:var(--red)}
+.status-dot.warn{background:var(--yellow)}
+#status-text{font-size:.7rem;color:var(--dim)}
+.spacer{flex:1}
+select,button{background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:4px 8px;font-size:.75rem;cursor:pointer}
+select:hover,button:hover{border-color:var(--accent)}
+button.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* Stats strip */
+.stats{display:flex;gap:16px;padding:8px 14px;border-bottom:1px solid var(--border);font-size:.7rem;color:var(--dim);flex-shrink:0;overflow-x:auto}
+.stat-item b{color:var(--text)}
+/* Filter chips */
+.filters{display:flex;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;flex-wrap:nowrap}
+.chip{padding:2px 10px;border-radius:12px;border:1px solid var(--border);font-size:.7rem;cursor:pointer;white-space:nowrap;background:transparent;color:var(--dim)}
+.chip:hover{border-color:var(--accent);color:var(--text)}
+.chip.active{background:var(--card);border-color:var(--accent);color:var(--accent)}
+/* Main layout */
+.main{display:flex;flex:1;overflow:hidden;min-height:0}
+/* Timeline */
+.timeline{flex:1;overflow-y:auto;padding:10px 14px;min-width:0}
+.overflow-badge{text-align:center;padding:6px;font-size:.7rem;color:var(--dim);background:var(--card);border-radius:4px;margin-bottom:6px;border:1px solid var(--border)}
+.empty{padding:40px 0;text-align:center;color:var(--dim);font-size:.85rem}
+/* Event card */
+.card{display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);margin-bottom:6px;cursor:pointer;min-height:44px;transition:border-color .1s}
+.card:hover{border-color:var(--accent)}
+.card.selected{border-color:var(--accent);background:rgba(124,111,205,.08)}
+.card-icon{font-size:1.1rem;line-height:1;flex-shrink:0;margin-top:1px}
+.card-body{flex:1;min-width:0}
+.card-type{font-size:.65rem;text-transform:uppercase;letter-spacing:.06em;color:var(--dim);margin-bottom:2px}
+.card-summary{font-size:.82rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card-meta{font-size:.65rem;color:var(--dim);margin-top:2px}
+.card-chevron{color:var(--dim);font-size:.8rem;flex-shrink:0;align-self:center}
+/* Drill-in panel */
+.drill{width:320px;border-left:1px solid var(--border);overflow-y:auto;padding:14px;flex-shrink:0;display:none}
+.drill.open{display:block}
+.drill h2{font-size:.9rem;color:var(--accent);margin-bottom:10px}
+.drill-close{float:right;background:none;border:none;color:var(--dim);cursor:pointer;font-size:1.1rem;padding:0;line-height:1}
+.drill pre{background:var(--card);border:1px solid var(--border);border-radius:4px;padding:10px;font-size:.7rem;overflow:auto;max-height:300px;white-space:pre-wrap;word-break:break-all}
+.drill-field{margin-bottom:8px;font-size:.78rem}
+.drill-field .lbl{color:var(--dim);font-size:.65rem;text-transform:uppercase;letter-spacing:.05em;display:block;margin-bottom:2px}
+/* Mobile: drill-in full-screen */
+@media(max-width:640px){
+  .drill.open{position:fixed;inset:0;z-index:100;width:100%;border:none;background:var(--bg)}
+  .drill-close{font-size:1.4rem}
+  .card{min-height:52px}
+}
+</style>
+</head>
+<body>
+<div class="header">
+  <span class="status-dot" id="dot"></span>
+  <h1 id="page-title">Agora</h1>
+  <span id="status-text">Conectando…</span>
+  <div class="spacer"></div>
+  <select id="scope-sel" title="Escopo">
+    <option value="global">Global</option>
+  </select>
+  <button id="pause-btn">Pausar</button>
+  <button id="lang-btn">English</button>
+</div>
+<div class="stats" id="stats-strip">
+  <span class="stat-item">Eventos/min: <b id="st-rate">—</b></span>
+  <span class="stat-item">Total: <b id="st-total">0</b></span>
+  <span class="stat-item">Universos ativos: <b id="st-universes">—</b></span>
+  <span class="stat-item">Tipos principais: <b id="st-types">—</b></span>
+</div>
+<div class="filters" id="filter-chips"></div>
+<div class="main">
+  <div class="timeline" id="timeline"><div class="empty" id="empty-msg">Aguardando eventos…</div></div>
+  <div class="drill" id="drill">
+    <button class="drill-close" id="drill-close" title="Fechar">✕</button>
+    <h2 id="drill-title">Detalhes</h2>
+    <div id="drill-content"></div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+// ---------------------------------------------------------------------------
+// i18n
+// ---------------------------------------------------------------------------
+var lang = location.pathname === '/agora' ? 'pt' : 'en';
+var T = {
+  pt:{
+    title:'Agora',langBtn:'English',pause:'Pausar',resume:'Retomar',
+    scope:'Escopo',global:'Global',
+    connecting:'Conectando…',connected:'Conectado — recebendo eventos',
+    disconnected:'Desconectado — reconectando',reconnecting:'Reconectando em {s}s…',
+    waiting:'Aguardando eventos…',
+    overflow:'+{n} mais eventos',
+    drillTitle:'Detalhes',drillClose:'Fechar',
+    chips:{ all:'Todos', crud:'Conteúdo', auth:'Autenticação', analytics:'Analytics', billing:'Cobrança', system:'Sistema' },
+    statsRate:'Eventos/min',statsTotal:'Total',statsUniverses:'Universos ativos',statsTypes:'Tipos principais',
+    evtLabels:{
+      'entry.created':'Entrada criada','entry.updated':'Entrada atualizada','entry.deleted':'Entrada excluída',
+      'auth.login':'Login','auth.logout':'Logout',
+      'analytics.visit':'Visita','billing.paid':'Pagamento',
+      'sync.remote_pull':'Sincronização','system.deploy':'Deploy','system.migration':'Migração',
+      'workspace.cursor':'Cursor','kb.ingest':'Indexação','abuse.detected':'Abuso detectado',
+      'live.timeline_viewed':'Timeline acessada'
+    },
+    fields:{id:'ID',type:'Tipo',universe:'Universo',user:'Usuário',visibility:'Visibilidade',time:'Horário',payload:'Payload'}
+  },
+  en:{
+    title:'Live',langBtn:'Português',pause:'Pause',resume:'Resume',
+    scope:'Scope',global:'Global',
+    connecting:'Connecting…',connected:'Connected — receiving events live',
+    disconnected:'Disconnected — reconnecting',reconnecting:'Reconnecting in {s}s…',
+    waiting:'Waiting for events…',
+    overflow:'+{n} more events',
+    drillTitle:'Details',drillClose:'Close',
+    chips:{ all:'All', crud:'Content', auth:'Auth', analytics:'Analytics', billing:'Billing', system:'System' },
+    statsRate:'Events/min',statsTotal:'Total',statsUniverses:'Active universes',statsTypes:'Top types',
+    evtLabels:{
+      'entry.created':'Entry created','entry.updated':'Entry updated','entry.deleted':'Entry deleted',
+      'auth.login':'Login','auth.logout':'Logout',
+      'analytics.visit':'Visit','billing.paid':'Payment',
+      'sync.remote_pull':'Sync pull','system.deploy':'Deploy','system.migration':'Migration',
+      'workspace.cursor':'Cursor move','kb.ingest':'KB ingest','abuse.detected':'Abuse detected',
+      'live.timeline_viewed':'Timeline viewed'
+    },
+    fields:{id:'ID',type:'Type',universe:'Universe',user:'User',visibility:'Visibility',time:'Time',payload:'Payload'}
+  }
+};
+function t(k){ return T[lang][k] || k; }
+function tf(k,vars){ var s=t(k); for(var v in vars) s=s.replace('{'+v+'}',vars[v]); return s; }
+function tl(type){ return (T[lang].evtLabels||{})[type] || type; }
+function tf2(k,vars){ var s=(T[lang].fields||{})[k]||k; for(var v in vars) s=s.replace('{'+v+'}',vars[v]); return s; }
+
+// ---------------------------------------------------------------------------
+// Event type metadata
+// ---------------------------------------------------------------------------
+var EVT_META = {
+  'entry.created'   :{ icon:'📝', color:'var(--green)',   cat:'crud'     },
+  'entry.updated'   :{ icon:'✏️', color:'var(--yellow)',  cat:'crud'     },
+  'entry.deleted'   :{ icon:'🗑️', color:'var(--red)',     cat:'crud'     },
+  'auth.login'      :{ icon:'🔓', color:'var(--blue)',    cat:'auth'     },
+  'auth.logout'     :{ icon:'🔒', color:'var(--blue)',    cat:'auth'     },
+  'analytics.visit' :{ icon:'👁️', color:'var(--gray)',    cat:'analytics'},
+  'billing.paid'    :{ icon:'💰', color:'var(--gold)',    cat:'billing'  },
+  'sync.remote_pull':{ icon:'🔄', color:'var(--purple)',  cat:'system'   },
+  'system.deploy'   :{ icon:'🚀', color:'var(--dark-blue)','cat':'system' },
+  'system.migration':{ icon:'🛠️', color:'var(--orange)',  cat:'system'   },
+  'workspace.cursor':{ icon:'🖱️', color:'var(--light-blue)','cat':'system'},
+  'kb.ingest'       :{ icon:'🧠', color:'var(--purple)',  cat:'system'   },
+  'abuse.detected'  :{ icon:'🚨', color:'var(--red)',     cat:'system'   }
+};
+function meta(type){
+  var exact = EVT_META[type];
+  if(exact) return exact;
+  var prefix = type.split('.')[0];
+  var defaults = { crud:{icon:'📄',color:'var(--green)'},auth:{icon:'👤',color:'var(--blue)'},
+    analytics:{icon:'📊',color:'var(--gray)'},billing:{icon:'💳',color:'var(--gold)'},
+    system:{icon:'⚙️',color:'var(--dim)'},live:{icon:'⚡',color:'var(--accent)'} };
+  return defaults[prefix] || {icon:'●',color:'var(--dim)',cat:'system'};
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+var events = [];       // rendered events (newest first)
+var paused = false;
+var pauseQueue = [];   // events received while paused
+var selectedId = null;
+var activeFilter = 'all';
+var allEventsFeed = {};// id → event (dedup)
+var totalSeen = 0;
+var activeUniverses = {};
+var typeCount = {};
+var minuteWindow = []; // timestamps for events/min
+
+// Coalescing
+var coalescePending = {}; // key → {ev, count, timer}
+
+// Throttle: max 10 visible adds per second
+var throttleCount = 0;
+var throttleOverflow = 0;
+var throttleTimer = null;
+
+// Reconnect
+var ws, reconnectDelay = 1000;
+
+// ---------------------------------------------------------------------------
+// DOM refs
+// ---------------------------------------------------------------------------
+var tlEl = document.getElementById('timeline');
+var drillEl = document.getElementById('drill');
+var drillTitle = document.getElementById('drill-title');
+var drillContent = document.getElementById('drill-content');
+var dot = document.getElementById('dot');
+var statusText = document.getElementById('status-text');
+var pauseBtn = document.getElementById('pause-btn');
+var langBtn = document.getElementById('lang-btn');
+var scopeSel = document.getElementById('scope-sel');
+
+// ---------------------------------------------------------------------------
+// Init i18n in DOM
+// ---------------------------------------------------------------------------
+document.getElementById('page-title').textContent = t('title');
+document.title = t('title') + ' — CO';
+pauseBtn.textContent = t('pause');
+langBtn.textContent = t('langBtn');
+document.getElementById('st-rate').previousSibling && void 0;
+updateStatsLabels();
+renderFilterChips();
+
+function updateStatsLabels(){
+  var s=document.getElementById('stats-strip');
+  s.children[0].innerHTML = t('statsRate')+': <b id="st-rate">—</b>';
+  s.children[1].innerHTML = t('statsTotal')+': <b id="st-total">0</b>';
+  s.children[2].innerHTML = t('statsUniverses')+': <b id="st-universes">—</b>';
+  s.children[3].innerHTML = t('statsTypes')+': <b id="st-types">—</b>';
+}
+
+function renderFilterChips(){
+  var cats = ['all','crud','auth','analytics','billing','system'];
+  document.getElementById('filter-chips').innerHTML = cats.map(function(c){
+    return '<button class="chip'+(c===activeFilter?' active':'')+'" data-cat="'+c+'">'+t('chips')[c]+'</button>';
+  }).join('');
+  document.getElementById('filter-chips').onclick = function(e){
+    var btn = e.target.closest('.chip');
+    if(!btn) return;
+    activeFilter = btn.dataset.cat;
+    renderFilterChips();
+    rerender();
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function relTime(dt){
+  var d = new Date(dt);
+  var ago = Math.floor((Date.now() - d.getTime()) / 1000);
+  if(ago < 5)   return 'agora';
+  if(ago < 60)  return ago+'s';
+  if(ago < 3600)return Math.floor(ago/60)+'m';
+  return Math.floor(ago/3600)+'h';
+}
+
+function buildWsUrl(){
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  var scope = scopeSel.value || 'global';
+  var url = proto + '//' + location.host + '/api/v1/events?scope=' + encodeURIComponent(scope);
+  return url;
+}
+
+function getFilterCat(evType){
+  var m = meta(evType);
+  return m.cat || 'system';
+}
+
+function passesFilter(evType){
+  if(activeFilter === 'all') return true;
+  return getFilterCat(evType) === activeFilter;
+}
+
+// ---------------------------------------------------------------------------
+// Coalescing: collapse bursts within 500ms
+// ---------------------------------------------------------------------------
+function onEventRaw(ev){
+  totalSeen++;
+  minuteWindow.push(Date.now());
+
+  // Track universe + type stats
+  if(ev.universe_key) activeUniverses[ev.universe_key] = Date.now();
+  typeCount[ev.event_type] = (typeCount[ev.event_type]||0) + 1;
+  updateStats();
+
+  if(!passesFilter(ev.event_type)) return;
+
+  if(paused){ pauseQueue.push(ev); return; }
+
+  var key = ev.event_type + ':' + (ev.universe_key || '');
+  if(coalescePending[key]){
+    coalescePending[key].count++;
+    coalescePending[key].latest = ev;
+    return;
+  }
+  var timer = setTimeout(function(){ flushCoalesce(key); }, 500);
+  coalescePending[key] = { ev: ev, count: 1, latest: ev, timer: timer };
+}
+
+function flushCoalesce(key){
+  var p = coalescePending[key];
+  if(!p) return;
+  delete coalescePending[key];
+  throttledAdd(p.latest, p.count);
+}
+
+function flushAllCoalesce(){
+  Object.keys(coalescePending).forEach(function(k){
+    clearTimeout(coalescePending[k].timer);
+    flushCoalesce(k);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Throttle: max 10 events/sec visible
+// ---------------------------------------------------------------------------
+function throttledAdd(ev, count){
+  if(!throttleTimer){
+    throttleCount = 0;
+    throttleOverflow = 0;
+    throttleTimer = setTimeout(function(){
+      if(throttleOverflow > 0) showOverflowBadge(throttleOverflow);
+      throttleTimer = null;
+    }, 1000);
+  }
+  if(throttleCount >= 10){
+    throttleOverflow += count;
+    return;
+  }
+  throttleCount++;
+  addCard(ev, count);
+}
+
+function showOverflowBadge(n){
+  var badge = document.createElement('div');
+  badge.className = 'overflow-badge';
+  badge.textContent = tf('overflow', {n: n});
+  var first = tlEl.firstChild;
+  if(first && first.id === 'empty-msg'){
+    tlEl.insertBefore(badge, first);
+  } else {
+    tlEl.insertBefore(badge, tlEl.firstChild);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render card
+// ---------------------------------------------------------------------------
+function addCard(ev, count){
+  var empty = document.getElementById('empty-msg');
+  if(empty) empty.remove();
+
+  var m = meta(ev.event_type);
+  var summary = count > 1
+    ? count + ' ' + tl(ev.event_type)
+    : tl(ev.event_type) + (ev.universe_key ? ' · ' + ev.universe_key : '');
+
+  var div = document.createElement('div');
+  div.className = 'card';
+  div.dataset.eid = ev.id;
+  div.innerHTML =
+    '<span class="card-icon" style="color:'+m.color+'">'+m.icon+'</span>'+
+    '<div class="card-body">'+
+      '<div class="card-type">'+esc(ev.event_type)+'</div>'+
+      '<div class="card-summary">'+esc(summary)+'</div>'+
+      '<div class="card-meta">'+relTime(ev.created_at)+(ev.user_id?' · '+esc(ev.user_id):'')+'</div>'+
+    '</div>'+
+    '<span class="card-chevron">›</span>';
+
+  div.onclick = function(){ openDrill(ev, div); };
+  tlEl.insertBefore(div, tlEl.firstChild);
+
+  // Store for drill-in
+  allEventsFeed[ev.id] = ev;
+
+  // Trim to last 200 rendered cards
+  var cards = tlEl.querySelectorAll('.card');
+  if(cards.length > 200) cards[cards.length-1].remove();
+}
+
+// ---------------------------------------------------------------------------
+// Drill-in panel
+// ---------------------------------------------------------------------------
+function openDrill(ev, cardEl){
+  // Deselect previous
+  tlEl.querySelectorAll('.card.selected').forEach(function(c){ c.classList.remove('selected'); });
+  if(selectedId === ev.id && drillEl.classList.contains('open')){
+    closeDrill(); return;
+  }
+  selectedId = ev.id;
+  if(cardEl) cardEl.classList.add('selected');
+
+  drillTitle.textContent = t('drillTitle') + ' — ' + tl(ev.event_type);
+  var m = meta(ev.event_type);
+  drillContent.innerHTML =
+    '<div class="drill-field"><span class="lbl">'+tf2('id')+'</span>'+esc(ev.id)+'</div>'+
+    '<div class="drill-field"><span class="lbl">'+tf2('type')+'</span><span style="color:'+m.color+'">'+m.icon+' '+esc(ev.event_type)+'</span></div>'+
+    (ev.universe_key ? '<div class="drill-field"><span class="lbl">'+tf2('universe')+'</span>'+esc(ev.universe_key)+'</div>' : '')+
+    (ev.user_id ? '<div class="drill-field"><span class="lbl">'+tf2('user')+'</span>'+esc(ev.user_id)+'</div>' : '')+
+    '<div class="drill-field"><span class="lbl">'+tf2('visibility')+'</span>'+esc(ev.visibility)+'</div>'+
+    '<div class="drill-field"><span class="lbl">'+tf2('time')+'</span>'+new Date(ev.created_at).toLocaleString()+'</div>'+
+    '<div class="drill-field"><span class="lbl">'+tf2('payload')+'</span><pre>'+esc(JSON.stringify(ev.payload,null,2))+'</pre></div>';
+
+  drillEl.classList.add('open');
+}
+
+function closeDrill(){
+  selectedId = null;
+  drillEl.classList.remove('open');
+  tlEl.querySelectorAll('.card.selected').forEach(function(c){ c.classList.remove('selected'); });
+}
+
+document.getElementById('drill-close').onclick = closeDrill;
+
+// ---------------------------------------------------------------------------
+// Stats
+// ---------------------------------------------------------------------------
+function updateStats(){
+  var now = Date.now();
+  minuteWindow = minuteWindow.filter(function(t){ return now - t < 60000; });
+  document.getElementById('st-rate') && (document.getElementById('st-rate').textContent = minuteWindow.length);
+  document.getElementById('st-total') && (document.getElementById('st-total').textContent = totalSeen);
+
+  // Active universes (seen in last 5 minutes)
+  var activeCount = Object.keys(activeUniverses).filter(function(k){ return now - activeUniverses[k] < 300000; }).length;
+  document.getElementById('st-universes') && (document.getElementById('st-universes').textContent = activeCount || '—');
+
+  // Top 3 types
+  var sorted = Object.keys(typeCount).sort(function(a,b){ return typeCount[b]-typeCount[a]; }).slice(0,3);
+  document.getElementById('st-types') && (document.getElementById('st-types').textContent = sorted.join(', ') || '—');
+}
+
+// ---------------------------------------------------------------------------
+// Full rerender on filter change
+// ---------------------------------------------------------------------------
+function rerender(){
+  var cardEls = Array.from(tlEl.querySelectorAll('.card'));
+  cardEls.forEach(function(c){
+    var ev = allEventsFeed[c.dataset.eid];
+    if(ev) c.style.display = passesFilter(ev.event_type) ? '' : 'none';
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pause / resume
+// ---------------------------------------------------------------------------
+pauseBtn.onclick = function(){
+  paused = !paused;
+  pauseBtn.textContent = paused ? t('resume') : t('pause');
+  pauseBtn.classList.toggle('active', paused);
+  if(!paused){
+    var queued = pauseQueue.splice(0);
+    queued.forEach(function(ev){ onEventRaw(ev); });
+  }
+};
+
+// Pause when tab is hidden (battery-aware)
+document.addEventListener('visibilitychange', function(){
+  if(document.hidden && !paused){ paused = true; pauseBtn.textContent = t('resume'); pauseBtn.classList.add('active'); }
+  else if(!document.hidden && paused && pauseQueue.length === 0){ paused = false; pauseBtn.textContent = t('pause'); pauseBtn.classList.remove('active'); }
+});
+
+// ---------------------------------------------------------------------------
+// Language toggle
+// ---------------------------------------------------------------------------
+langBtn.onclick = function(){
+  location.href = lang === 'pt' ? '/live' : '/agora';
+};
+
+// ---------------------------------------------------------------------------
+// Scope selector
+// ---------------------------------------------------------------------------
+scopeSel.onchange = function(){
+  if(ws) ws.close();
+  events = [];
+  allEventsFeed = {};
+  totalSeen = 0;
+  activeUniverses = {};
+  typeCount = {};
+  minuteWindow = [];
+  tlEl.innerHTML = '<div class="empty" id="empty-msg">'+t('waiting')+'</div>';
+  closeDrill();
+  reconnectDelay = 1000;
+  connect();
+};
+
+// ---------------------------------------------------------------------------
+// WebSocket
+// ---------------------------------------------------------------------------
+function setStatus(text, state){
+  statusText.textContent = text;
+  dot.className = 'status-dot' + (state === 'ok' ? ' ok' : state === 'err' ? ' err' : state === 'warn' ? ' warn' : '');
+}
+
+function connect(){
+  var url = buildWsUrl();
+  ws = new WebSocket(url, ['co.events.v1']);
+
+  ws.onopen = function(){
+    reconnectDelay = 1000;
+    setStatus(t('connected'), 'ok');
+  };
+
+  ws.onmessage = function(e){
+    try{ onEventRaw(JSON.parse(e.data)); }catch(ex){}
+  };
+
+  ws.onclose = function(e){
+    flushAllCoalesce();
+    var secs = Math.round(reconnectDelay / 1000);
+    setStatus(tf('reconnecting', {s: secs}), 'warn');
+    var delay = reconnectDelay;
+    reconnectDelay = Math.min(reconnectDelay * 2, 30000);
+    setTimeout(connect, delay);
+  };
+
+  ws.onerror = function(){
+    setStatus(t('disconnected'), 'err');
+  };
+}
+
+connect();
+
+// Relative-time refresh every 30s
+setInterval(function(){
+  tlEl.querySelectorAll('.card').forEach(function(c){
+    var ev = allEventsFeed[c.dataset.eid];
+    if(ev){
+      var meta2 = c.querySelector('.card-meta');
+      if(meta2){
+        var parts = meta2.textContent.split(' · ');
+        parts[0] = relTime(ev.created_at);
+        meta2.textContent = parts.join(' · ');
+      }
+    }
+  });
+}, 30000);
+
+})();
+</script>
+</body>
+</html>

@@ -1359,22 +1359,28 @@ paths:
 
         **Latency:** < 50ms p99 (in-process tokio broadcast; CO-380 guarantee).
 
-        **CO-381** will add the full `/api/v1/events?scope=<universe>` timeline
-        consumer used by the SPA live timeline view.
+        **SPA consumer:** `/agora` (pt-BR) and `/live` (en) connect to this
+        endpoint and render a live scrolling timeline (CO-381).
+
+        **Sub-protocol:** `co.events.v1` (Sec-WebSocket-Protocol header).
       parameters:
         - name: scope
           in: query
-          description: Universe key to scope the stream, or "global" for platform-wide public events.
+          description: >
+            Universe key to scope the stream, or `"global"` (default) for
+            platform-wide public events.
           schema:
             type: string
             default: global
         - name: token
           in: query
-          description: Optional JWT token (alternative to session cookie).
+          description: >
+            Optional JWT token (alternative to `session` cookie). Omit to
+            connect anonymously (Public events only).
           schema:
             type: string
       responses:
         "101":
-          description: WebSocket connection established
+          description: WebSocket connection established (Sec-WebSocket-Protocol co.events.v1)
         "400":
           $ref: "#/components/responses/BadRequest"
