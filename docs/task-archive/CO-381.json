@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-381",
+  "title": "Live timeline — /agora (pt-BR) + /live (en) — real-time deployed-interface visualization",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-381.md",
+  "branch": "feat/CO-381-live-timeline-agora-pt-br-live-en-real-t",
+  "merge_sha": "8c4560737cc663c320aa9b5714f8dcdf55757164",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/162",
+    "number": 162
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-08T10:33:05Z",
+  "files_changed": 12,
+  "lines_added": 865,
+  "lines_removed": 25,
+  "labels": [
+    "type:feat",
+    "module:live",
+    "module:spa",
+    "module:websocket"
+  ],
+  "changelog_entry": "## CO-381 — Live timeline — /agora (pt-BR) + /live (en) — real-time deployed-interface visualization\n\nAdded `/agora` and `/live` — two language-routed entry points for the same live\ntimeline SPA that streams EDA bus events to the browser via WebSocket.\n\n- **Routes**: `GET /agora` (pt-BR) and `GET /live` (en) serve `live.html` publicly\n  (no auth gate; anonymous visitors see public events only).\n- **WebSocket**: SPA connects to `/api/v1/events?scope=<scope>` — the existing\n  CO-380 endpoint now also accepts `session` cookie auth (same-origin browser\n  pages send cookies automatically).\n- **Visibility tiers** (wired in `events_ws.rs`): Anonymous → Public only;\n  Member → + UniverseMembers; Owner (detected via DB lookup) → + UniverseOwner;\n  Admin (`tier == \"admin\"` in JWT) → all including System.\n- **UI**: scope selector, filter chips (Content / Auth / Analytics / Billing /\n  System), stats strip (events/min, active universes, top types), pause/resume,\n  language toggle (redirects between the two routes).\n- **Event cards**: per-type icon + colour, human-readable summary, relative\n  timestamp, drill-in chevron.\n- **Drill-in panel**: full payload + context fields; becomes full-screen sheet\n  on mobile (≤ 640 px).\n- **Coalescing**: bursts of the same `event_type + universe_key` within 500 ms\n  collapse to \"N entries updated\".\n- **Throttle**: max 10 visible cards/sec; overflow shown as \"+N more events\".\n- **Reconnect**: exponential backoff (1 s → 2 → 4 → 8 → max 30 s).\n- **Battery-aware**: stream paused when the browser tab is hidden.\n- **Atividades**: every page load publishes `live.timeline_viewed` (System\n  visibility) to the EDA bus so the atividades log captures usage.\n- **OpenAPI**: updated `/api/v1/events` spec to reflect CO-381 SPA consumer,\n  `co.events.v1` sub-protocol, and cookie auth option.\n\n### Why\nCompletes the \"real-time visualization of effects on deployed interface\"\nrequirement (2026-06-06). The EDA bus (CO-380) was already emitting events;\nthis task surfaces them to users in a browsable, filterable live feed.",
+  "summary": "As A platform member, owner, or operator wanting to see what's happening RIGHT NOW",
+  "co_auto_version": "0.1.0"
+}
