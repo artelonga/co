@@ -9,6 +9,7 @@ pub mod platform;
 pub mod server;
 pub mod social;
 pub mod storage;
+pub mod sync;
 
 // Universe-specific extensions
 pub mod universes;
