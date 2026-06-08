@@ -1010,19 +1010,15 @@ paths:
     get:
       tags: ["events"]
       summary: "WebSocket — subscribe to scoped event stream; filter via `?scope=mine"
-      description: |
-        Real-time EDA event stream over WebSocket.
-
-        **CO-389 sync.* event types** (comunicacao universe live overlay):
-
-        | event_type | visibility | description |
-        |---|---|---|
-        | `sync.comunicacao.term_landed` | UniverseMembers | Yggdrasil sala term upserted into comunicacao universe |
-        | `sync.comunicacao.term_landed_via_repo` | UniverseMembers | CO-337 poll confirmed a term (hash match after overlay) |
-        | `sync.comunicacao.event_dedup_skipped` | System | Overlay dedup: incoming hash matched existing row |
-        | `sync.yggdrasil.sala.published` | Public | Yggdrasil sala published activity |
-        | `sync.yggdrasil.sala.term_contributed` | Public | Term contributed to a sala |
-        | `sync.yggdrasil.sala.user_joined` | Public | User joined a sala (anon-friendly) |
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/events/bridge:
+    get:
+      tags: ["events"]
+      summary: "CO-384 — federated bridge: remote producers (Yggdrasil) dial in to publish events; CO is the hub"
       security:
         - sessionCookie: []
       responses:

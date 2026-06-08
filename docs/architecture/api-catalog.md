@@ -473,6 +473,7 @@ CO-380 universal event bus + CO-381 live timeline WebSocket fanout.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/events` | authed (cookie or token) | WebSocket — subscribe to scoped event stream; filter via `?scope=mine|universe:<key>|public|admin` |
+| GET | `/api/v1/events/bridge` | bridge-jwt | CO-384 — federated bridge: remote producers (Yggdrasil) dial in to publish events; CO is the hub |
 
 ---
 
