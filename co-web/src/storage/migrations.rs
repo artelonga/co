@@ -2414,6 +2414,44 @@ impl Storage {
                 "CO-380: event_log table + created/universe/type indexes"
             );
         }
+
+        if current_version < 64 {
+            // CO-383: reserved — spec-only change (instance-qualified note path),
+            // no database schema mutation needed.
+            crate::record_migration!(
+                self.conn,
+                64,
+                "CO-383: reserved (spec fix, no schema change)"
+            );
+        }
+
+        if current_version < 65 {
+            // CO-384: bridge_state — tracks per-(source,target) WS bridge state for
+            // federated event bus. Stores last ACK'd event ULID for replay on reconnect.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS bridge_state (
+                       id                      TEXT PRIMARY KEY,
+                       source_deployment       TEXT NOT NULL,
+                       target_deployment       TEXT NOT NULL,
+                       last_delivered_event_id TEXT,
+                       last_connected_at       TEXT,
+                       last_disconnected_at    TEXT,
+                       state                   TEXT NOT NULL
+                         CHECK (state IN ('connected','disconnected','degraded'))
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_bridge_state_source
+                       ON bridge_state(source_deployment);
+                     CREATE INDEX IF NOT EXISTS idx_bridge_state_target
+                       ON bridge_state(target_deployment);",
+                )
+                .expect("CO-384 v65: bridge_state table + indexes");
+            crate::record_migration!(
+                self.conn,
+                65,
+                "CO-384: bridge_state table for federated WS event bus"
+            );
+        }
     }
 }
 

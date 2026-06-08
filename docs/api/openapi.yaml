@@ -1384,3 +1384,76 @@ paths:
           description: WebSocket connection established (Sec-WebSocket-Protocol co.events.v1)
         "400":
           $ref: "#/components/responses/BadRequest"
+
+  /api/v1/events/bridge:
+    get:
+      tags: [Events]
+      summary: Federated EDA bridge (deployment-to-deployment WebSocket)
+      operationId: bridgeWebSocket
+      description: |
+        Persistent bidirectional WebSocket connection between CO deployments.
+        Used to federate the local EDA bus across deployments (CO ↔ Yggdrasil,
+        CO ↔ devices). Only trusted sources (listed in `CO_BRIDGE_TRUSTED_SOURCES`)
+        are accepted; all others receive HTTP 403.
+
+        **Sub-protocol:** `co.eda.bridge.v1` (Sec-WebSocket-Protocol header).
+
+        **Protocol flow:**
+        1. Remote connects with `?source=<host>&token=<jwt>`.
+        2. Server validates trust list — 403 if unknown source.
+        3. Remote sends `ReplayRequest{last_received_id}` to request missed events.
+        4. Server replays events from `event_log` since that ULID.
+        5. Bidirectional `Event` messages flow continuously.
+
+        **Privacy rules (server-enforced):**
+        | Visibility | Federated? |
+        |---|---|
+        | `Public` | Yes |
+        | `UniverseMembers` | Yes |
+        | `UniverseOwner` | No |
+        | `UserOnly` | No |
+        | `System` | No |
+
+        **Loop guard:** events with `hop_count > 3` are silently dropped.
+
+        **Heartbeat:** server sends a WebSocket Ping frame every 30 seconds
+        (configurable via `CO_BRIDGE_HEARTBEAT_S`). Client should respond with Pong.
+
+        **Reconnect:** connecting side uses exponential backoff
+        (1 s → 2 s → 4 s → 8 s → 16 s → max 30 s).
+
+        **Telemetry:** `bridge.connected`, `bridge.disconnected`, `bridge.event_received`,
+        `bridge.event_sent`, and `bridge.replay_completed` events are published to
+        the local bus with `Public` visibility (visible in `/agora`).
+
+        **Configuration:**
+        ```bash
+        # Accept inbound connections from Yggdrasil
+        flyctl secrets set CO_BRIDGE_TRUSTED_SOURCES="yggdrasil.artelonga.com.br" -a co-artelonga
+
+        # Initiate outbound connection to Yggdrasil
+        flyctl secrets set CO_BRIDGE_OUTBOUND_TOKENS_JSON='{"yggdrasil.artelonga.com.br":"<jwt>"}' -a co-artelonga
+        ```
+      parameters:
+        - name: source
+          in: query
+          required: true
+          description: >
+            Identifier of the connecting deployment (e.g. "yggdrasil.artelonga.com.br").
+            Must be listed in `CO_BRIDGE_TRUSTED_SOURCES`.
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: true
+          description: >
+            JWT token issued by the connecting deployment. Used for authentication.
+          schema:
+            type: string
+      responses:
+        "101":
+          description: WebSocket bridge established (Sec-WebSocket-Protocol co.eda.bridge.v1)
+        "401":
+          description: Missing or empty token
+        "403":
+          description: Source deployment not in trust list (CO_BRIDGE_TRUSTED_SOURCES)
