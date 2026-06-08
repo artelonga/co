@@ -2463,6 +2463,38 @@ impl Storage {
                 "CO-389: entries.source_marker via universe_pool v17 (yggdrasil-live overlay)"
             );
         }
+
+        if current_version < 67 {
+            // CO-385: sync_conflicts — stores detected cross-device conflicts and
+            // their resolution state. Indexed for fast unresolved-conflict queries.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS sync_conflicts (
+                       id                   TEXT PRIMARY KEY,
+                       universe_key         TEXT NOT NULL,
+                       path                 TEXT NOT NULL,
+                       local_body_hash      TEXT NOT NULL,
+                       remote_body_hash     TEXT NOT NULL,
+                       common_ancestor_hash TEXT,
+                       kind                 TEXT NOT NULL,
+                       detected_at          TEXT NOT NULL,
+                       resolved_at          TEXT,
+                       resolution_action    TEXT,
+                       resolved_by          TEXT,
+                       FOREIGN KEY (universe_key) REFERENCES universes(key)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_sync_conflicts_unresolved
+                       ON sync_conflicts(detected_at) WHERE resolved_at IS NULL;
+                     CREATE INDEX IF NOT EXISTS idx_sync_conflicts_universe
+                       ON sync_conflicts(universe_key, detected_at DESC);",
+                )
+                .expect("CO-385 v67: sync_conflicts table + indexes");
+            crate::record_migration!(
+                self.conn,
+                67,
+                "CO-385: sync_conflicts table for Mac-style cross-device conflict resolution"
+            );
+        }
     }
 }
 

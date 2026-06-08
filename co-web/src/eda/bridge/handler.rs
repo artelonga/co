@@ -22,6 +22,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use chrono::Utc;
 use parking_lot::Mutex;
+use rusqlite::OptionalExtension;
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 
@@ -299,6 +300,16 @@ async fn handle_inbound_text(
             federated.hop_count += 1;
             federated.bridge_received_at = Utc::now();
 
+            // CO-385: Hash-skip optimization — entry events with matching body_hash
+            // never enter the conflict pipeline. Differing hashes create a conflict
+            // record and publish `sync.conflict_detected` for the live timeline.
+            if matches!(
+                federated.event.event_type.as_str(),
+                "entry.created" | "entry.updated"
+            ) {
+                check_entry_conflict(&federated.event, source, storage, bus);
+            }
+
             // Republish on local bus — local subscribers see it like any other event.
             bus.publish(federated.event.clone());
 
@@ -311,6 +322,116 @@ async fn handle_inbound_text(
             ));
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// CO-385: bridge-layer conflict detection
+// ---------------------------------------------------------------------------
+
+/// Hash-skip + conflict creation for federated `entry.*` events.
+///
+/// If the remote `body_hash` matches what we have locally → hash-skip (no conflict).
+/// If it differs → persist a conflict record and publish `sync.conflict_detected`.
+fn check_entry_conflict(
+    ev: &Event,
+    source: &str,
+    storage: &Arc<Mutex<Storage>>,
+    bus: &Arc<dyn EdaBus>,
+) {
+    let payload = &ev.payload;
+
+    let (universe_key, path, remote_hash) = match (
+        ev.universe_key.as_deref(),
+        payload.get("path").and_then(|v| v.as_str()),
+        payload.get("body_hash").and_then(|v| v.as_str()),
+    ) {
+        (Some(u), Some(p), Some(h)) => (u, p, h),
+        _ => return, // missing fields → skip silently
+    };
+
+    // Read local body_hash for this (universe_key, path).
+    let local_hash: Option<String> = {
+        let st = storage.lock();
+        let uc = st.universe_conn(universe_key);
+        let conn = uc.lock().unwrap();
+        conn.query_row(
+            "SELECT body_hash FROM entries WHERE universe_key = ?1 AND path = ?2",
+            rusqlite::params![universe_key, path],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()
+        .ok()
+        .flatten()
+    };
+
+    let local_hash_str = match local_hash {
+        Some(ref h) => h.clone(),
+        None => {
+            // Entry doesn't exist locally → RemoteOnlyNew, not a conflict by default.
+            return;
+        }
+    };
+
+    // Hash-skip: same hash → no conflict needed.
+    if local_hash_str == remote_hash {
+        debug!(
+            universe = %universe_key, path = %path,
+            "EDA bridge: hash-skip — no conflict (hashes match)"
+        );
+        return;
+    }
+
+    // Hashes differ → create conflict record.
+    use crate::sync::conflict_detector::{Conflict, ConflictKind, EntryRevision};
+    use crate::sync::routes::persist_conflict;
+
+    let conflict = Conflict::new(
+        universe_key,
+        path,
+        EntryRevision {
+            path: path.into(),
+            body_hash: local_hash_str.clone(),
+            body: None,
+            updated_at: None,
+            source: "local".into(),
+        },
+        EntryRevision {
+            path: path.into(),
+            body_hash: remote_hash.into(),
+            body: None,
+            updated_at: None,
+            source: source.into(),
+        },
+        None,
+        ConflictKind::BothModified,
+    );
+
+    {
+        let st = storage.lock();
+        if let Err(e) = persist_conflict(st.conn(), &conflict) {
+            warn!(
+                universe = %universe_key, path = %path,
+                "EDA bridge: persist_conflict failed: {e}"
+            );
+            return;
+        }
+    }
+
+    bus.publish(Event::new(
+        "sync.conflict_detected",
+        Some(universe_key.into()),
+        None,
+        serde_json::json!({
+            "conflict_id": &conflict.id,
+            "path": path,
+            "kind": "both_modified",
+            "local_body_hash": local_hash_str,
+            "remote_body_hash": remote_hash,
+            "source": source,
+            "resolve_url": format!("/sync/conflicts?universe={universe_key}"),
+        }),
+        Visibility::UniverseOwner,
+    ));
 }
 
 // ---------------------------------------------------------------------------

@@ -549,6 +549,48 @@ components:
           type: string
           format: date-time
 
+    SyncConflict:
+      type: object
+      required: [id, universe_key, path, local_body_hash, remote_body_hash, kind, detected_at, suggested_action]
+      properties:
+        id:
+          type: string
+          description: ULID
+        universe_key:
+          type: string
+        path:
+          type: string
+          description: Entry path within the universe.
+        local_body_hash:
+          type: string
+          description: SHA-256 of the local body at detection time.
+        remote_body_hash:
+          type: string
+          description: SHA-256 of the remote body at detection time.
+        kind:
+          type: string
+          enum:
+            - both_modified
+            - local_only_new
+            - remote_only_new
+            - local_deleted_remote_modified
+            - local_modified_remote_deleted
+        detected_at:
+          type: string
+          format: date-time
+        resolved_at:
+          type: string
+          format: date-time
+          nullable: true
+        resolution_action:
+          type: string
+          nullable: true
+        suggested_action:
+          type: string
+          description: >
+            Suggested default action for this universe. `replace` for yggdrasil
+            (remote-authoritative); `update` for user-owned universes.
+
 # =============================================================================
 # Paths
 # =============================================================================
@@ -1457,3 +1499,139 @@ paths:
           description: Missing or empty token
         "403":
           description: Source deployment not in trust list (CO_BRIDGE_TRUSTED_SOURCES)
+
+  /api/v1/me/sync/conflicts:
+    get:
+      summary: List unresolved sync conflicts
+      description: |
+        CO-385: Lists all unresolved cross-device sync conflicts for the
+        authenticated user. Conflicts arise when the same entry is modified on
+        multiple devices while offline; the bridge layer (CO-384) detects them
+        via body_hash comparison.
+
+        The response includes a `suggested_action` per conflict: for `yggdrasil`
+        universes the suggestion is `replace` (remote wins); for all other
+        universes the suggestion is `update` (3-way merge).
+
+        Each conflict row contains the `local_body_hash` and `remote_body_hash`
+        so the UI can display a diff before the user chooses an action.
+      operationId: listSyncConflicts
+      security:
+        - BearerAuth: []
+        - SessionAuth: []
+      parameters:
+        - name: universe
+          in: query
+          required: false
+          description: Narrow results to a specific universe key.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of unresolved conflicts
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [conflicts, total]
+                properties:
+                  conflicts:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SyncConflict'
+                  total:
+                    type: integer
+        "401":
+          description: Not authenticated
+
+  /api/v1/sync/conflicts/{id}/resolve:
+    post:
+      summary: Resolve a sync conflict
+      description: |
+        CO-385: Applies one of the seven CRUD action-tree operations to the
+        conflict identified by `{id}`. The action is applied atomically:
+        the entry is written, the conflict is marked resolved, and a
+        `sync.conflict_resolved` event is published to the CO-380 bus.
+
+        When `apply_to_all_matching` is `true`, the same action is propagated
+        to all remaining unresolved conflicts of the same `kind` in the same
+        universe (bulk-apply). A `sync.conflict_resolved_bulk` event is
+        published with the count.
+
+        **Action semantics**:
+        | action | CRUD | Effect |
+        |--------|------|--------|
+        | `keep_both` | C | Local renamed with `_1` suffix; remote written at original path |
+        | `ignore` | — | No-op; marks conflict resolved without modifying entries |
+        | `replace` | U | Overwrites local with remote (remote wins) |
+        | `update` | U | 3-way merge; adds conflict markers if non-resolvable |
+        | `upsert` | C+U | Merge existing diffs + insert new remote items |
+        | `accept_delete` | D | Mirrors remote delete; hard-deletes local entry |
+        | `keep_local` | — | Keeps local entry as-is; discards remote change |
+
+        **CO-383 integration**: for the `yggdrasil` universe, the suggested
+        default is `replace` (Yggdrasil is the authoritative source).
+      operationId: resolveSyncConflict
+      security:
+        - BearerAuth: []
+        - SessionAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: Conflict ULID from the `sync_conflicts` table.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum:
+                    - keep_both
+                    - ignore
+                    - replace
+                    - update
+                    - upsert
+                    - accept_delete
+                    - keep_local
+                apply_to_all_matching:
+                  type: boolean
+                  default: false
+                  description: >
+                    When true, apply this action to all remaining unresolved
+                    conflicts of the same `kind` in the same universe.
+      responses:
+        "200":
+          description: Conflict resolved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conflict_id:
+                    type: string
+                  action:
+                    type: string
+                  path:
+                    type: string
+                    description: Final path of the entry after resolution.
+                  event_type:
+                    type: string
+                    description: EDA event type published (sync.conflict_resolved).
+                  bulk_resolved:
+                    type: integer
+                    description: >
+                      Number of additional conflicts resolved (0 when
+                      apply_to_all_matching is false).
+        "400":
+          description: Unknown action value
+        "401":
+          description: Not authenticated
+        "404":
+          description: Conflict not found or already resolved

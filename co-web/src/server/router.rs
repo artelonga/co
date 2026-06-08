@@ -208,6 +208,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let dev_board_api = crate::dev_board::router();
     let cache_api = Router::new().route("/stats", get(cache_stats_handler));
 
+    // CO-385: conflict resolution REST API (auth enforced inside router).
+    let sync_conflict_api = crate::sync::router(state.clone());
+
     // CRDT WebSocket — no body limit, auth done inside the handler.
     let ws_route = Router::new().route("/ws/doc/{slug}/{doc_id}", get(crate::ws::ws_handler));
     let sync_ws_route =
@@ -344,6 +347,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api", game_public)
             .nest("/api", game_protected)
             .nest("/api/v1/quilombo", quilombo_api)
+            // CO-385: conflict resolution endpoints (auth enforced in sub-router).
+            .nest("/api/v1", sync_conflict_api)
             .layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 crate::telemetry::telemetry_middleware,
