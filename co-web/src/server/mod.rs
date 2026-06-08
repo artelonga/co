@@ -706,6 +706,11 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         crate::eda::subscribers::billing::spawn(Arc::clone(&bus));
         crate::eda::subscribers::sala::spawn(Arc::clone(&bus));
         crate::eda::subscribers::kb::spawn(Arc::clone(&bus));
+        // CO-389: live overlay for Yggdrasil lexicon sala events → comunicacao universe.
+        crate::eda::subscribers::comunicacao_live::spawn(
+            Arc::clone(&bus),
+            Arc::clone(&state.core.storage),
+        );
         // Phase 2: start the LiveTimeline forward task (channel was created in from_storage_full).
         crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
     }

@@ -73,6 +73,14 @@ pub struct RecentAtividade {
     pub at: String,
 }
 
+/// CO-389: diagnostic counts for comunicacao universe overlay vs poll-driven upserts.
+#[derive(Debug, Serialize)]
+pub struct ComunicacaoOverlayStats {
+    pub term_landed_overlay: i64,
+    pub term_landed_via_repo: i64,
+    pub dedup_skipped: i64,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ResumoResponse {
     pub totals: ResumoTotals,
@@ -84,6 +92,8 @@ pub struct ResumoResponse {
     pub recent_activity: Vec<RecentAtividade>,
     pub schema_versao: i64,
     pub app_versao: &'static str,
+    /// CO-389: diagnostic — counts from event_log for comunicacao overlay vs repo sync.
+    pub comunicacao_overlay: ComunicacaoOverlayStats,
 }
 
 #[derive(Debug, Serialize)]
@@ -301,6 +311,9 @@ fn query_resumo_from_db(
         )
         .unwrap_or(0);
 
+    // CO-389: count overlay-driven vs poll-driven comunicacao upserts from event_log.
+    let comunicacao_overlay = query_comunicacao_overlay_stats(conn);
+
     ResumoResponse {
         totals: ResumoTotals {
             users,
@@ -318,6 +331,26 @@ fn query_resumo_from_db(
         recent_activity,
         schema_versao,
         app_versao: env!("CARGO_PKG_VERSION"),
+        comunicacao_overlay,
+    }
+}
+
+/// CO-389: count comunicacao overlay events from the event_log table.
+///
+/// Returns zero counts gracefully if the table does not yet exist or is empty.
+fn query_comunicacao_overlay_stats(conn: &Connection) -> ComunicacaoOverlayStats {
+    let count_by_type = |event_type: &str| -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM event_log WHERE event_type = ?1",
+            rusqlite::params![event_type],
+            |r| r.get(0),
+        )
+        .unwrap_or(0)
+    };
+    ComunicacaoOverlayStats {
+        term_landed_overlay: count_by_type("sync.comunicacao.term_landed"),
+        term_landed_via_repo: count_by_type("sync.comunicacao.term_landed_via_repo"),
+        dedup_skipped: count_by_type("sync.comunicacao.event_dedup_skipped"),
     }
 }
 
