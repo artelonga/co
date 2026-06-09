@@ -477,6 +477,17 @@ CO-380 universal event bus + CO-381 live timeline WebSocket fanout.
 
 ---
 
+## sync — `/api/v1/sync/*` + `/api/v1/me/sync/*` (sync/routes.rs)
+
+CO-385 CRUD action tree — Mac-style UPSERT conflict resolution for cross-device sync.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/me/sync/conflicts` | authed | List the caller's outstanding sync conflicts (returns `SyncConflict[]`) |
+| POST | `/api/v1/sync/conflicts/{id}/resolve` | authed | Resolve a conflict; body `{action, apply_to_all_matching?}` — actions: `keep_both`, `ignore`, `replace`, `update`, `upsert`, `accept_delete`, `keep_local` |
+
+---
+
 ## feedback — `/api/v1/feedback/*` (feedback_routes.rs)
 
 CO-333 feedback system. Submissions are public; management is owner-only.
