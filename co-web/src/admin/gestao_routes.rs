@@ -4,7 +4,7 @@
 //! Content is written directly to the universe filesystem (markdown files).
 
 use axum::Router;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::middleware;
 use axum::response::IntoResponse;
