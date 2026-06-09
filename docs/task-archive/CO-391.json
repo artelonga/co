@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-391",
+  "title": "Real-axum WebSocket bridge handshake integration test — backstop for the YG-119 mock blind spot",
+  "type": "user-story",
+  "status": "in_progress",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-391.md",
+  "branch": "test/CO-391-bridge-handshake-integration",
+  "merge_sha": "451fd46547bb392d35d7b928bf3d79ad1ee671b7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/172",
+    "number": 172
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-09T17:15:46Z",
+  "files_changed": 3,
+  "lines_added": 422,
+  "lines_removed": 0,
+  "labels": [
+    "type:test",
+    "module:eda",
+    "module:bridge"
+  ],
+  "changelog_entry": "## CO-391 — Real-axum WebSocket bridge handshake integration test\n\nAdds the missing integration-test layer between the `is_trusted_in` unit tests and\nfull E2E for the CO-384 federated bridge. Boots the real axum router on an ephemeral\n`127.0.0.1` port and dials `/api/v1/events/bridge` with a real `tokio_tungstenite`\nclient speaking `co.eda.bridge.v1`.\n\nCoverage:\n\n- **Happy path** — trusted source + non-empty token + subprotocol → `101`, subprotocol\n  echo, and `bridge.connected` observed on the local bus (the handler publishes it to\n  the bus, not down the socket — the CO-391 draft's \"first frame\" assumption was wrong).\n- **403** — untrusted source rejected.\n- **401** — empty token rejected.\n- **400** — GET without `Connection: Upgrade` rejected by axum's `WebSocketUpgrade`\n  extractor (tested via `oneshot`, since a real WS client always sends the header).\n\nThe 400 case is the exact failure observed locally on 2026-06-09 during pre-flight for\nthe v3.0 federation cut (HTTP 400 \"Connection header did not include 'upgrade'\"), which\nYG-119's lenient tokio-tungstenite mock had masked. If a YG-122-class regression were\nreintroduced on the CO side, these tests fail loudly at PR time.\n\nNo behavior change — test-only. Reuses the existing `127.0.0.1:0` + `axum::serve` +\n`connect_async` harness pattern already used by `social/sync_ws.rs` and\n`admin/analytics_routes.rs`; no new deps (tokio-tungstenite already a dev-dep).\n\n### Why\n\nCO unit tests covered only the trust-list predicate — no `WebSocketUpgrade`, no real\nsocket. The handshake contract was enforced from neither end until YG-122 + this test\nlanded. This is the unit/integration layer; CO-374 (Playwright staging) remains the\nseparate prod-shape backstop.",
+  "summary": "As A CO maintainer preparing the v3.0 federation cut",
+  "co_auto_version": "0.1.0"
+}
