@@ -86,6 +86,9 @@ impl Storage {
             visibility: "private".into(),
             parent_key: None,
             anon_published_only: false,
+            source_kind: None,
+            source_url: None,
+            source_last_event_at: None,
         })
     }
 
@@ -118,6 +121,9 @@ impl Storage {
                         visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                         parent_key: None,
                         anon_published_only: row.get::<_, i64>(10).unwrap_or(0) != 0,
+                        source_kind: None,
+                        source_url: None,
+                        source_last_event_at: None,
                     })
                 },
             )
@@ -131,7 +137,33 @@ impl Storage {
             )
             .ok()
             .flatten();
+        // CO-383: source attribution fields (v68 columns, may be NULL on pre-migration rows).
+        if let Ok((sk, su, sla)) = self.conn.query_row(
+            "SELECT source_kind, source_url, source_last_event_at FROM universes WHERE key = ?1",
+            params![key],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
+        ) {
+            universe.source_kind = sk;
+            universe.source_url = su;
+            universe.source_last_event_at = sla;
+        }
         Some(universe)
+    }
+
+    /// CO-383: stamp the last-received event timestamp for an event-bus universe.
+    pub fn touch_universe_last_event_at(&self, key: &str, ts: &str) {
+        if let Err(e) = self.conn.execute(
+            "UPDATE universes SET source_last_event_at = ?1 WHERE key = ?2",
+            params![ts, key],
+        ) {
+            tracing::warn!(universe_key = %key, error = %e, "touch_universe_last_event_at failed");
+        }
     }
 
     /// CO-330 + CO-337: update runtime universe→repo binding fields (owner-only, all fields optional).
@@ -222,6 +254,9 @@ impl Storage {
                     visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                     parent_key: None,
                     anon_published_only: false,
+                    source_kind: None,
+                    source_url: None,
+                    source_last_event_at: None,
                 })
             })
             .expect("Failed to list universes for user")
@@ -392,6 +427,9 @@ impl Storage {
                 visibility: row.get::<_, String>(9).unwrap_or_else(|_| "private".into()),
                 parent_key: None,
                 anon_published_only: false,
+                source_kind: None,
+                source_url: None,
+                source_last_event_at: None,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))

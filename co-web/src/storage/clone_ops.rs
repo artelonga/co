@@ -965,6 +965,9 @@ impl Storage {
             visibility: "private".into(),
             parent_key: None,
             anon_published_only: false,
+            source_kind: None,
+            source_url: None,
+            source_last_event_at: None,
         })
     }
 
@@ -1201,6 +1204,9 @@ impl Storage {
             visibility: "private".into(),
             parent_key: None,
             anon_published_only: false,
+            source_kind: None,
+            source_url: None,
+            source_last_event_at: None,
         })
     }
 }

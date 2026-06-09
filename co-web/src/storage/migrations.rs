@@ -2495,6 +2495,32 @@ impl Storage {
                 "CO-385: sync_conflicts table for Mac-style cross-device conflict resolution"
             );
         }
+
+        if current_version < 68 {
+            // CO-383: source attribution columns for event-bus-backed universes.
+            // (Originally reserved in v64 as a no-op; v65–67 were claimed by CO-384/CO-389/CO-385.)
+            ensure_column(&self.conn, "universes", "source_kind", "TEXT")
+                .expect("CO-383 v68: universes.source_kind");
+            ensure_column(&self.conn, "universes", "source_url", "TEXT")
+                .expect("CO-383 v68: universes.source_url");
+            ensure_column(&self.conn, "universes", "source_last_event_at", "TEXT")
+                .expect("CO-383 v68: universes.source_last_event_at");
+            // Backfill the yggdrasil universe as an event-bus subscriber.
+            if let Err(e) = self.conn.execute(
+                "UPDATE universes \
+                 SET source_kind = 'event-bus', \
+                     source_url  = 'wss://yggdrasil.artelonga.com.br/api/v1/events' \
+                 WHERE key = 'yggdrasil'",
+                [],
+            ) {
+                tracing::warn!("CO-383 v68: yggdrasil backfill skipped: {e}");
+            }
+            crate::record_migration!(
+                self.conn,
+                68,
+                "CO-383: source attribution columns + yggdrasil event-bus binding"
+            );
+        }
     }
 }
 

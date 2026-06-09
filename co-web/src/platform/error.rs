@@ -28,6 +28,11 @@ pub enum AppError {
         limit: i64,
         tier: String,
     },
+    /// CO-383: write rejected on a read-only event-bus-backed universe — returns 405.
+    ReadOnlyUniverse {
+        source_kind: String,
+        source_url: Option<String>,
+    },
 }
 
 impl std::fmt::Display for AppError {
@@ -51,6 +56,9 @@ impl std::fmt::Display for AppError {
             }
             AppError::StorageQuotaExceeded { used, limit, tier } => {
                 write!(f, "Storage quota exceeded ({tier}): {used}/{limit}")
+            }
+            AppError::ReadOnlyUniverse { source_kind, .. } => {
+                write!(f, "Read-only universe ({source_kind}): edits not accepted")
             }
         }
     }
@@ -115,6 +123,21 @@ impl IntoResponse for AppError {
             return resp;
         }
 
+        if let AppError::ReadOnlyUniverse {
+            source_kind,
+            source_url,
+        } = self
+        {
+            let body = json!({
+                "error": "read_only_universe",
+                "source_kind": source_kind,
+                "source_url": source_url,
+                "message": "Este universo é somente-leitura: edite na origem.",
+                "message_en": "This universe is read-only: sourced via event bus. Edit at the source."
+            });
+            return (StatusCode::METHOD_NOT_ALLOWED, axum::Json(body)).into_response();
+        }
+
         let (status, error, message) = match self {
             AppError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg),
             AppError::Conflict(msg) => (StatusCode::CONFLICT, "conflict", msg),
@@ -136,7 +159,8 @@ impl IntoResponse for AppError {
             }
             AppError::UsageLimitExceeded { .. }
             | AppError::RateLimited { .. }
-            | AppError::StorageQuotaExceeded { .. } => unreachable!(),
+            | AppError::StorageQuotaExceeded { .. }
+            | AppError::ReadOnlyUniverse { .. } => unreachable!(),
         };
 
         let message_pt = translate_error_pt(error);

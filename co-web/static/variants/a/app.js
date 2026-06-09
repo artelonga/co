@@ -141,6 +141,34 @@ function hideTemplateBanner() {
     if (b) b.classList.add('hidden');
     const a = document.getElementById('app');
     if (a) a.classList.remove('is-template');
+    hideSourceBusBanner();
+}
+
+// CO-383: Read-only banner for event-bus-backed universes (e.g. yggdrasil notes).
+function showSourceBusBanner(info) {
+    const b = document.getElementById('source-bus-banner');
+    if (!b) return;
+    if (info && info.source_kind === 'event-bus') {
+        const msg = document.getElementById('source-bus-msg');
+        if (msg) msg.textContent = window.t ? window.t('universe.source_bus_readonly') : 'Somente-leitura — publicado via Yggdrasil';
+        const link = document.getElementById('source-bus-link');
+        if (link && info.source_url) {
+            // Convert wss:// bus URL to an https:// editor URL for the link.
+            const editorUrl = info.source_url.replace(/^wss?:\/\/([^/]+).*/, 'https://$1');
+            link.href = editorUrl;
+            link.style.display = '';
+        } else if (link) {
+            link.style.display = 'none';
+        }
+        b.style.display = 'flex';
+    } else {
+        b.style.display = 'none';
+    }
+}
+
+function hideSourceBusBanner() {
+    const b = document.getElementById('source-bus-banner');
+    if (b) b.style.display = 'none';
 }
 
 function readUniverseSlugFromUrl() {
@@ -611,7 +639,7 @@ async function initFooter() {
 function wireModules() {
     injectApiCallbacks(showLoginModal, showUsageLimitModal, showToast);
     injectSwitchView(switchView);
-    injectBootCallbacks({ showLoading, hideLoading, render, selectProject, removeManifestViewTabs, injectManifestViewTabs, switchView });
+    injectBootCallbacks({ showLoading, hideLoading, render, selectProject, removeManifestViewTabs, injectManifestViewTabs, switchView, onUniverseInfoLoaded: showSourceBusBanner });
     injectSidebarCallbacks({
         bootAppForUniverse: async (slug) => {
             destroyConversas();
