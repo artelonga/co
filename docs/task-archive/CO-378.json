@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-378",
+  "title": "Privacy: respect noindex/nofollow in analytics rollups + funnel reports — strip private paths",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-378.md",
+  "branch": "feat/CO-378-privacy-respect-noindex-nofollow-in-anal",
+  "merge_sha": "7867729228240d3dbd915c5a108b4e7e2b64a269",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/166",
+    "number": 166
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-09T23:34:40Z",
+  "files_changed": 7,
+  "lines_added": 743,
+  "lines_removed": 67,
+  "labels": [
+    "type:fix",
+    "module:analytics",
+    "module:privacy",
+    "module:security"
+  ],
+  "changelog_entry": "## CO-378 — Privacy: respect noindex/nofollow in analytics rollups + funnel reports — strip private paths\n\nAdded path-level privacy redaction to the analytics pipeline so private event pages\n(noindex/nofollow or matching `/_drafts/`, `/_proposals/`, `/_smoke/`, etc.) are no\nlonger exposed in admin dashboards or the public summary endpoint.\n\n### Changes\n\n- **Migration v69**: adds `path_private INTEGER DEFAULT 0` to `analytics_rollups`.\n  Future rollup producers can send `private: true` to mark a universe/day as private.\n\n- **Rollup ingest** (`POST /api/v1/analytics/public/rollups`): accepts optional\n  `private: bool` field (backward-compatible; defaults to false). Sets `path_private=1`\n  on the upserted row.\n\n- **Public summary** (`GET /api/v1/analytics/public/summary`): default response strips\n  private paths from `top_pages` and aggregates them as a single `{path: \"(private)\"}` entry.\n  Scalar aggregates (views, visitors, sessions, geo) remain unfiltered.\n  `?include_private=true` with a valid `CO_ROLLUP_TOKEN` bearer returns deterministic\n  redacted hashes (`<private-path-{hash16}>`) and logs an `analytics.private_path_viewed`\n  atividade event.\n\n- **Funnel report** (`GET /api/v1/analytics/public/funnel`): new endpoint. Private paths\n  contribute to `total_views` and `total_private_views` but are excluded from `by_path`.\n\n- **Gestão analytics resumo** (`GET /api/v1/gestao/analytics/resumo`): new admin-only\n  endpoint. Returns analytics summary with private paths clustered as a single\n  `(private)` entry showing total views and page count. Logs\n  `analytics.private_path_viewed` atividade on each call. (Mounted under\n  `/analytics/` because `/api/v1/gestao/resumo` is the CO-360 dashboard endpoint.)\n\n- **OpenAPI**: documents `?include_private` flag on summary, new funnel endpoint,\n  new gestao/analytics/resumo endpoint.\n\nNote: the \"Resumo Analytics\" card originally added to the old `/gestao` page was\ndropped in rebase — CO-360 replaced that page with the four-tab SPA. Surfacing the\nprivate-cluster view in the SPA is follow-up work under CO-360's surface.\n\n### Why\n\n`/2026-05-29/` slide-deck for \"1º Encontro · Neuro Notebook Brasil\" is `noindex,nofollow`\nbut the platform's own admin surface was revealing: (a) that the URL exists, (b) traffic\ncount, (c) forensic details like JS error counts and visitor origin. The page's meta\nintent (`noindex,nofollow`) was violated by the platform's own analytics dashboard.\n\nBaaS sovereignty principle: the brain owner controls what's visible — not just to search\nengines but to platform operators.",
+  "summary": "As Yuri running events with noindex slide-decks that shouldn't reveal their existence",
+  "co_auto_version": "0.1.0"
+}
