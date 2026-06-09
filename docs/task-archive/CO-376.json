@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-376",
+  "title": "Pre-prod migration validation — run new migrations on staging snapshot before prod apply",
+  "type": "user-story",
+  "status": "in_progress",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-376.md",
+  "branch": "feat/CO-376-migration-validation-mvp",
+  "merge_sha": "6825eee325c806026cf4915d2d2281f99ea089e0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/173",
+    "number": 173
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-09T17:16:31Z",
+  "files_changed": 5,
+  "lines_added": 423,
+  "lines_removed": 10,
+  "labels": [
+    "type:feat",
+    "module:infra",
+    "module:storage",
+    "module:test"
+  ],
+  "changelog_entry": "## CO-376 — Pre-prod migration validation (MVP) — `migrate_check` against a staging snapshot\n\nAdds a Rust validator that applies the current binary's migrations against a **copy** of a\nstaging snapshot and runs read-only smoke assertions — catching the 1.22.4 class of\nincident (unguarded freshly-migrated-column read) before prod, without touching any live DB.\n\n- **New bin `co-web/src/bin/migrate_check.rs`** — `migrate_check <extracted-snapshot-dir>`:\n  records a pre-migration baseline, runs meta migrations via `Storage::new` (+ entry-split),\n  opens each universe to run pool migrations, then asserts the wave's tables/columns are\n  selectable (`bridge_state` v65, `sync_conflicts` v67, `universes.source_*` v68,\n  `entries.source_marker` pool v17), the `yuri` admin user survived, stable counts are\n  unchanged, and the conserved entry total (meta + all universes) drifts ≤ ±5%. Exit 0 iff\n  all pass, 1 on any failure, 2 on bad invocation.\n- **`docs/migration-checklist.md`** — the CI-sandbox flow: obtain a staging snapshot\n  (admin backup endpoint or nightly artifact), extract, run `migrate_check`, interpret.\n\nExecution is **CI-sandbox** — operates on an extracted copy, never on staging's live DB\n(resolves the spec's self-contradiction between its SSH-based Flow text and its \"no live\ndata touched\" acceptance).\n\n### Why\n\nThe federation wave (v65–v68 + pool v17) applies to live data for the first time at the\nv3.0 cut. `migrate_check` is the go/no-go gate for that.\n\n### Deferred (CO-376 follow-up)\n\nAuto-gating GitHub Action on migration-touching PRs; `GET /api/v1/admin/migrations/snapshots`;\ncustom `migrations/<vN>.smoke.sql`; 24h retention automation.",
+  "summary": "As The platform operator avoiding data-loss from bad migrations",
+  "co_auto_version": "0.1.0"
+}
