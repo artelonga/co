@@ -317,6 +317,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/{slug}/graph", get(serve_graph_page))
         // CO-345: saved graph view viewer — must be before the {*subpath} wildcard.
         .route("/graph-views/{slug}", get(serve_graph_page))
+        // CO-352: sala (workspace canvas) routes — literal paths before wildcard.
+        .route("/u/{universe}/sala", get(serve_sala_page))
+        .route("/u/{universe}/sala/{workspace_slug}", get(serve_sala_page))
+        .route("/sala/{share_token}", get(serve_sala_page))
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));
@@ -416,6 +420,18 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // enforces its own auth + path constraints.
             .nest("/api/v1/universes", crate::proposal_routes::inline_router())
             .nest("/api/v1/me", crate::proposal_routes::inbox_router())
+            // CO-352: workspace state — personal per-user, outside writer gate.
+            .nest(
+                "/api/v1/universes",
+                crate::workspace_routes::public_router(),
+            )
+            .nest(
+                "/api/v1/universes",
+                crate::workspace_routes::authed_router().layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+                ),
+            )
+            .nest("/api/v1", crate::workspace_routes::share_router())
             // CO-345: graph views — my views (auth-gated) + public/unlisted access
             .nest("/api/v1/me", graph_view_me_api)
             .nest("/api/v1", graph_view_public_api)

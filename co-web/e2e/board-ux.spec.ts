@@ -17,7 +17,7 @@ test.describe("Empty states", () => {
 });
 
 test.describe("View tabs", () => {
-  test("all 6 view tabs are visible after selecting a project", async ({
+  test("all view tabs are visible after selecting a project", async ({
     page,
     seedProject,
   }) => {
@@ -25,8 +25,8 @@ test.describe("View tabs", () => {
     await selectProject(page, seedProject.key);
     await waitForBoard(page);
     const tabs = page.locator("#view-tabs .view-tab");
-    // 7 tabs: conteudo, kanban, table, calendar, timeline, dashboard, changelog
-    await expect(tabs).toHaveCount(7);
+    // 8 tabs: conteudo, kanban, table, calendar, timeline, dashboard, changelog, workspace (CO-352)
+    await expect(tabs).toHaveCount(8);
   });
 });
 

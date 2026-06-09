@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sala — CO</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0d0d12;
+    --surface: #1a1a24;
+    --border: #2a2a38;
+    --text: #e8e3d3;
+    --muted: #8c8674;
+    --accent: #d4af37;
+    --danger: #ef4444;
+    --co-graph-node-default: #5a7a9a;
+    --co-graph-edge-color: rgba(180,190,220,0.18);
+    --co-graph-label-color: #c8d0dc;
+    --co-graph-sublabel-color: #8c8674;
+    --co-graph-hover-ring: #d4af37;
+    --co-graph-selected-ring: #d4af37;
+    --co-graph-grid-color: rgba(200,210,255,0.05);
+  }
+
+  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  /* Header */
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 48px;
+  }
+  header a { color: var(--muted); text-decoration: none; font-size: .85rem; }
+  header a:hover { color: var(--text); }
+  #sala-name { font-weight: 600; font-size: .95rem; }
+  #sala-status { font-size: .75rem; color: var(--muted); margin-left: 4px; }
+
+  /* Toolbar */
+  #toolbar {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .toolbar-btn {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 12px; font-size: .8rem; cursor: pointer;
+    transition: border-color .15s;
+    user-select: none;
+  }
+  .toolbar-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .toolbar-btn.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+  .toolbar-btn:disabled { opacity: .45; cursor: not-allowed; }
+  .toolbar-btn.readonly { opacity: .45; }
+  .toolbar-sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
+  #toolbar-save-status { font-size: .72rem; color: var(--muted); margin-left: auto; }
+
+  /* Canvas */
+  #canvas-wrap {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+
+  /* Status */
+  #status {
+    position: absolute;
+    bottom: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: .75rem;
+    color: var(--muted);
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+  }
+
+  /* Tooltip */
+  #tooltip {
+    position: absolute;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: .8rem;
+    max-width: 240px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+    z-index: 10;
+  }
+  #tooltip.show { opacity: 1; }
+  #tooltip .tt-title { font-weight: 600; margin-bottom: 3px; }
+  #tooltip .tt-type  { color: var(--muted); font-size: .75rem; }
+
+  /* Node panel */
+  #node-panel {
+    position: absolute;
+    right: 16px; top: 16px;
+    width: 260px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    font-size: .85rem;
+    display: none;
+    z-index: 20;
+  }
+  #node-panel.show { display: block; }
+  #node-panel .p-close { float: right; cursor: pointer; color: var(--muted); font-size: 1.1rem; line-height: 1; }
+  #node-panel .p-close:hover { color: var(--text); }
+  #node-panel .p-title { font-weight: 600; font-size: .95rem; margin-bottom: 4px; padding-right: 20px; }
+  #node-panel .p-type  { color: var(--muted); font-size: .75rem; margin-bottom: 10px; }
+  #node-panel .p-path  { font-size: .72rem; color: var(--muted); word-break: break-all; }
+
+  /* Login CTA modal */
+  #login-cta-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  #login-cta-backdrop.show { display: flex; }
+  #login-cta-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px;
+    width: 340px;
+    max-width: 90vw;
+    text-align: center;
+  }
+  #login-cta-modal h3 { font-size: 1.05rem; margin-bottom: 8px; }
+  #login-cta-modal p { font-size: .85rem; color: var(--muted); margin-bottom: 20px; line-height: 1.5; }
+  #login-cta-modal .cta-actions { display: flex; gap: 8px; justify-content: center; }
+  #login-cta-modal button {
+    background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 18px; font-size: .85rem; cursor: pointer;
+  }
+  #login-cta-modal button.primary { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+  #login-cta-modal button:hover { border-color: var(--accent); }
+
+  /* Entry picker modal */
+  #entry-picker-backdrop {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    z-index: 200;
+    align-items: center; justify-content: center;
+  }
+  #entry-picker-backdrop.show { display: flex; }
+  #entry-picker-modal {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    width: 420px;
+    max-width: 90vw;
+    max-height: 70vh;
+    display: flex; flex-direction: column;
+  }
+  #entry-picker-modal h3 { font-size: 1rem; margin-bottom: 12px; }
+  #entry-search {
+    width: 100%; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 12px; font-size: .85rem;
+    margin-bottom: 10px;
+  }
+  #entry-search:focus { outline: none; border-color: var(--accent); }
+  #entry-list { overflow-y: auto; flex: 1; }
+  .entry-item {
+    padding: 8px 10px; border-radius: 6px; cursor: pointer;
+    font-size: .85rem; border: 1px solid transparent;
+  }
+  .entry-item:hover { background: rgba(255,255,255,.05); border-color: var(--border); }
+  .entry-item .ei-title { font-weight: 500; }
+  .entry-item .ei-meta { font-size: .72rem; color: var(--muted); margin-top: 2px; }
+  #picker-cancel-btn {
+    margin-top: 12px; width: 100%;
+    background: var(--bg); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 7px; font-size: .82rem; cursor: pointer;
+  }
+  #picker-cancel-btn:hover { border-color: var(--accent); color: var(--text); }
+
+  /* Toast */
+  #toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 16px; font-size: .82rem;
+    opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 300;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+
+  /* Read-only banner */
+  #readonly-banner {
+    display: none;
+    background: rgba(212,175,55,.12);
+    border-bottom: 1px solid rgba(212,175,55,.3);
+    padding: 6px 16px;
+    font-size: .78rem;
+    color: var(--accent);
+    flex-shrink: 0;
+    text-align: center;
+  }
+  #readonly-banner.show { display: block; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <a href="/">CO</a>
+    <span style="color:var(--border)">›</span>
+    <a id="universe-link" href="/">…</a>
+    <span style="color:var(--border)">›</span>
+    <span id="sala-name">Sala</span>
+    <span id="sala-status"></span>
+  </header>
+
+  <div id="readonly-banner">Vista somente-leitura — entre para editar / Read-only view — log in to edit</div>
+
+  <div id="toolbar">
+    <button class="toolbar-btn" id="btn-add" title="Adicionar entrada / Add entry">＋ Adicionar</button>
+    <button class="toolbar-btn" id="btn-link" title="Ligar nós / Link nodes">⟵ Ligar</button>
+    <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" id="btn-compor" title="Compor nova entrada / Compose entry">✎ Compor</button>
+    <button class="toolbar-btn" id="btn-sugerir" title="Sugerir / Suggest (anon allowed)">💬 Sugerir</button>
+    <button class="toolbar-btn" id="btn-publish" title="Publicar rascunho / Publish draft">↑ Publicar</button>
+    <div class="toolbar-sep"></div>
+    <button class="toolbar-btn" id="btn-review" title="Modo estudo / Study mode">▶ Revisar</button>
+    <button class="toolbar-btn" id="btn-fit" title="Enquadrar tudo / Zoom to fit">⊞ Enquadrar</button>
+    <button class="toolbar-btn" id="btn-salas" title="Minhas salas / My workspaces">⊟ Salas</button>
+    <span id="toolbar-save-status"></span>
+  </div>
+
+  <div id="canvas-wrap">
+    <div id="tooltip"><div class="tt-title"></div><div class="tt-type"></div></div>
+    <div id="node-panel">
+      <span class="p-close" id="panel-close">×</span>
+      <div class="p-title" id="panel-title"></div>
+      <div class="p-type"  id="panel-type"></div>
+      <div class="p-path"  id="panel-path"></div>
+    </div>
+    <div id="status">carregando…</div>
+  </div>
+</div>
+
+<!-- Login CTA modal -->
+<div id="login-cta-backdrop">
+  <div id="login-cta-modal">
+    <h3>Entre para continuar</h3>
+    <p>Você precisa estar autenticado para realizar esta ação na Sala. Entre ou crie uma conta — é gratuito.</p>
+    <div class="cta-actions">
+      <button id="cta-cancel">Agora não</button>
+      <button class="primary" id="cta-login">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Entry picker modal -->
+<div id="entry-picker-backdrop">
+  <div id="entry-picker-modal">
+    <h3>Adicionar entrada ao canvas</h3>
+    <input type="search" id="entry-search" placeholder="Filtrar entradas…">
+    <div id="entry-list"></div>
+    <button id="picker-cancel-btn">Cancelar</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/lib/co-graph.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── URL detection ─────────────────────────────────────────────────────────
+  // Supports:
+  //   /u/{universe}/sala                — default workspace
+  //   /u/{universe}/sala/{slug}         — named workspace
+  //   /sala/{share_token}               — shared workspace (read-only)
+  var pathParts = window.location.pathname.replace(/^\//, '').split('/');
+  var mode = 'universe';   // 'universe' | 'named' | 'share-token'
+  var universeKey = '';
+  var workspaceSlug = 'default';
+  var shareToken = '';
+  var isReadOnly = false;
+
+  if (pathParts[0] === 'sala' && pathParts[1]) {
+    mode = 'share-token';
+    shareToken = pathParts[1];
+    isReadOnly = true;
+  } else if (pathParts[0] === 'u' && pathParts[1]) {
+    universeKey = pathParts[1];
+    if (pathParts[3]) {
+      mode = 'named';
+      workspaceSlug = pathParts[3];
+    }
+  }
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  var universeLink  = document.getElementById('universe-link');
+  var salaName      = document.getElementById('sala-name');
+  var salaStatus    = document.getElementById('sala-status');
+  var statusEl      = document.getElementById('status');
+  var tooltip       = document.getElementById('tooltip');
+  var nodePanel     = document.getElementById('node-panel');
+  var saveStatusEl  = document.getElementById('toolbar-save-status');
+  var readonlyBanner = document.getElementById('readonly-banner');
+
+  var btnAdd     = document.getElementById('btn-add');
+  var btnLink    = document.getElementById('btn-link');
+  var btnCompor  = document.getElementById('btn-compor');
+  var btnSugerir = document.getElementById('btn-sugerir');
+  var btnPublish = document.getElementById('btn-publish');
+  var btnReview  = document.getElementById('btn-review');
+  var btnFit     = document.getElementById('btn-fit');
+  var btnSalas   = document.getElementById('btn-salas');
+
+  // ── App state ─────────────────────────────────────────────────────────────
+  var graphHandle = null;
+  var layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
+  var allEntries = [];        // fetched entry list for picker
+  var saveDebounce = null;
+  var linkMode = false;       // true when btn-link is active
+  var linkFrom = null;        // node selected as link source
+  var isLoggedIn = false;
+
+  // ── Toast ─────────────────────────────────────────────────────────────────
+  var toastTimer = null;
+  function showToast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove('show'); }, 3500);
+  }
+
+  // ── Auth check ────────────────────────────────────────────────────────────
+  function checkAuth(cb) {
+    fetch('/api/v1/auth/me', { credentials: 'include' })
+      .then(function (r) {
+        isLoggedIn = r.ok;
+        cb(r.ok);
+      })
+      .catch(function () { isLoggedIn = false; cb(false); });
+  }
+
+  // ── Login CTA ─────────────────────────────────────────────────────────────
+  function requireLogin(action) {
+    if (isLoggedIn) { action(); return; }
+    var backdrop = document.getElementById('login-cta-backdrop');
+    backdrop.classList.add('show');
+    document.getElementById('cta-cancel').onclick = function () {
+      backdrop.classList.remove('show');
+    };
+    document.getElementById('cta-login').onclick = function () {
+      backdrop.classList.remove('show');
+      var returnTo = encodeURIComponent(window.location.href);
+      window.location.href = '/?login=1&return_to=' + returnTo;
+    };
+  }
+
+  // ── Graph render ──────────────────────────────────────────────────────────
+  function buildGraphData() {
+    var byPath = {};
+    layout.nodes.forEach(function (n) { byPath[n.entry_path] = n; });
+    var nodes = layout.nodes.map(function (n) {
+      return {
+        id: n.entry_path,
+        label: n.label || n.entry_path.split('/').pop().replace(/\.md$/i, ''),
+        color: n.color || null,
+        size: 9,
+        x: n.x || 0,
+        y: n.y || 0,
+        fixed: true,
+      };
+    });
+    var edges = layout.edges.map(function (e) {
+      return { source: e.from, target: e.to, kind: e.type || '', directed: true };
+    });
+    return { nodes: nodes, edges: edges };
+  }
+
+  function renderGraph() {
+    var wrap = document.getElementById('canvas-wrap');
+    var data = buildGraphData();
+    if (graphHandle) {
+      graphHandle.update(data);
+    } else {
+      graphHandle = co_graph.render(wrap, {
+        data: data,
+        layout: 'manual',
+        grid: { size: 60 },
+        onNodeClick: onNodeClick,
+        onNodeHover: onNodeHover,
+        onNodeMoveEnd: onNodeMoveEnd,
+      });
+    }
+    var view = layout.view || {};
+    statusEl.textContent = data.nodes.length + ' nós · ' + data.edges.length + ' arestas';
+  }
+
+  function onNodeClick(node, sx, sy) {
+    if (linkMode && linkFrom) {
+      if (node.id !== linkFrom.id) {
+        addEdge(linkFrom.id, node.id, 'relates_to');
+        exitLinkMode();
+      }
+      return;
+    }
+    if (linkMode) {
+      linkFrom = node;
+      salaStatus.textContent = '↩ Clique no nó de destino…';
+      return;
+    }
+    showNodePanel(node);
+  }
+
+  function onNodeHover(node) {
+    if (node) {
+      tooltip.querySelector('.tt-title').textContent = node.label || node.id;
+      tooltip.querySelector('.tt-type').textContent = node.id;
+      var pos = graphHandle.worldToScreen(node.x || 0, node.y || 0);
+      tooltip.style.left = (pos[0] + 12) + 'px';
+      tooltip.style.top  = (pos[1] - 40) + 'px';
+      tooltip.classList.add('show');
+    } else {
+      tooltip.classList.remove('show');
+    }
+  }
+
+  function onNodeMoveEnd(node) {
+    var n = layout.nodes.find(function (n) { return n.entry_path === node.id; });
+    if (n) { n.x = node.x; n.y = node.y; }
+    scheduleSave();
+  }
+
+  function showNodePanel(node) {
+    document.getElementById('panel-title').textContent = node.label || node.id;
+    document.getElementById('panel-type').textContent = '';
+    document.getElementById('panel-path').textContent = node.id;
+    nodePanel.classList.add('show');
+  }
+
+  document.getElementById('panel-close').addEventListener('click', function () {
+    nodePanel.classList.remove('show');
+  });
+
+  // ── State persistence ─────────────────────────────────────────────────────
+  function scheduleSave() {
+    if (isReadOnly || !isLoggedIn) return;
+    saveStatusEl.textContent = '…';
+    if (saveDebounce) clearTimeout(saveDebounce);
+    saveDebounce = setTimeout(saveState, 500);
+  }
+
+  function saveState() {
+    if (isReadOnly || !isLoggedIn) return;
+    var body = JSON.stringify({ layout_json: JSON.stringify(layout), is_public: false });
+    fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: body,
+    })
+      .then(function (r) {
+        saveStatusEl.textContent = r.ok ? '✓ salvo' : '⚠ erro ao salvar';
+        if (r.ok) setTimeout(function () { saveStatusEl.textContent = ''; }, 2000);
+      })
+      .catch(function () { saveStatusEl.textContent = '⚠ sem conexão'; });
+  }
+
+  // ── Load state ────────────────────────────────────────────────────────────
+  function loadState() {
+    if (mode === 'share-token') {
+      return loadByShareToken(shareToken);
+    }
+    fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+      credentials: 'include',
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        try {
+          layout = data.layout_json ? JSON.parse(data.layout_json) : { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
+        } catch (_) {
+          layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
+        }
+        renderGraph();
+      })
+      .catch(function (err) {
+        statusEl.textContent = 'Erro ao carregar: ' + err.message;
+      });
+  }
+
+  function loadByShareToken(token) {
+    fetch('/api/v1/workspace-states/' + encodeURIComponent(token), { credentials: 'include' })
+      .then(function (r) {
+        if (!r.ok) throw new Error('Token inválido (' + r.status + ')');
+        return r.json();
+      })
+      .then(function (data) {
+        universeKey = data.universe_key || universeKey;
+        workspaceSlug = data.workspace_slug || workspaceSlug;
+        salaName.textContent = 'Sala — ' + universeKey;
+        document.title = 'Sala — ' + universeKey + ' — CO';
+        universeLink.href = '/' + universeKey;
+        universeLink.textContent = universeKey;
+        try {
+          layout = JSON.parse(data.layout_json);
+        } catch (_) {
+          layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
+        }
+        renderGraph();
+      })
+      .catch(function (err) {
+        statusEl.textContent = 'Erro ao carregar: ' + err.message;
+      });
+  }
+
+  // ── Add entry to canvas ───────────────────────────────────────────────────
+  function openEntryPicker() {
+    var backdrop = document.getElementById('entry-picker-backdrop');
+    var list = document.getElementById('entry-list');
+    var search = document.getElementById('entry-search');
+    backdrop.classList.add('show');
+    search.value = '';
+    search.focus();
+
+    function renderList(filter) {
+      var items = allEntries.filter(function (e) {
+        if (!filter) return true;
+        var f = filter.toLowerCase();
+        return (e.path || '').toLowerCase().includes(f) || (e.title || '').toLowerCase().includes(f);
+      }).slice(0, 50);
+      list.innerHTML = items.length
+        ? items.map(function (e) {
+            return '<div class="entry-item" data-path="' + esc(e.path) + '">' +
+              '<div class="ei-title">' + esc(e.title || e.path) + '</div>' +
+              '<div class="ei-meta">' + esc(e.path) + ' · ' + esc(e.entry_type || '') + '</div>' +
+              '</div>';
+          }).join('')
+        : '<div style="padding:12px;color:var(--muted);font-size:.82rem">Nenhuma entrada encontrada</div>';
+      list.querySelectorAll('.entry-item').forEach(function (el) {
+        el.addEventListener('click', function () {
+          addEntryToCanvas(el.dataset.path);
+          backdrop.classList.remove('show');
+        });
+      });
+    }
+
+    if (!allEntries.length) {
+      fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/entries?limit=200', { credentials: 'include' })
+        .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
+        .then(function (data) {
+          allEntries = data.entries || data || [];
+          renderList('');
+        })
+        .catch(function () { list.innerHTML = '<div style="padding:12px;color:var(--muted)">Erro ao carregar entradas</div>'; });
+    } else {
+      renderList('');
+    }
+
+    search.addEventListener('input', function () { renderList(search.value); });
+  }
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function addEntryToCanvas(path) {
+    var exists = layout.nodes.some(function (n) { return n.entry_path === path; });
+    if (exists) { showToast('Já está no canvas'); return; }
+    var entry = allEntries.find(function (e) { return e.path === path; });
+    layout.nodes.push({
+      entry_path: path,
+      label: entry ? (entry.title || path.split('/').pop().replace(/\.md$/i, '')) : path,
+      x: (Math.random() - 0.5) * 400,
+      y: (Math.random() - 0.5) * 300,
+    });
+    renderGraph();
+    scheduleSave();
+  }
+
+  // ── Add edge ──────────────────────────────────────────────────────────────
+  function addEdge(fromPath, toPath, edgeType) {
+    layout.edges.push({ from: fromPath, to: toPath, type: edgeType });
+    renderGraph();
+    scheduleSave();
+  }
+
+  function enterLinkMode() {
+    linkMode = true;
+    linkFrom = null;
+    btnLink.classList.add('active');
+    salaStatus.textContent = 'Clique no nó de origem…';
+  }
+
+  function exitLinkMode() {
+    linkMode = false;
+    linkFrom = null;
+    btnLink.classList.remove('active');
+    salaStatus.textContent = '';
+  }
+
+  // ── Toolbar wiring ────────────────────────────────────────────────────────
+  btnAdd.addEventListener('click', function () {
+    requireLogin(openEntryPicker);
+  });
+
+  btnLink.addEventListener('click', function () {
+    requireLogin(function () {
+      if (linkMode) { exitLinkMode(); } else { enterLinkMode(); }
+    });
+  });
+
+  btnCompor.addEventListener('click', function () {
+    requireLogin(function () {
+      showToast('Composição de entradas — em breve (CO-355)');
+    });
+  });
+
+  btnSugerir.addEventListener('click', function () {
+    showToast('Sugestão enviada para revisão — em breve (CO-354)');
+  });
+
+  btnPublish.addEventListener('click', function () {
+    requireLogin(function () {
+      showToast('Publicação de rascunho — em breve');
+    });
+  });
+
+  btnReview.addEventListener('click', function () {
+    showToast('Modo revisão — em breve');
+  });
+
+  btnFit.addEventListener('click', function () {
+    if (graphHandle) graphHandle.fit(true);
+  });
+
+  btnSalas.addEventListener('click', function () {
+    requireLogin(function () {
+      showToast('Lista de salas — em breve');
+    });
+  });
+
+  document.getElementById('picker-cancel-btn').addEventListener('click', function () {
+    document.getElementById('entry-picker-backdrop').classList.remove('show');
+  });
+
+  document.getElementById('entry-picker-backdrop').addEventListener('click', function (e) {
+    if (e.target === this) this.classList.remove('show');
+  });
+
+  // ── Read-only mode ────────────────────────────────────────────────────────
+  // hardDisable: share-token views have no login path, so buttons are truly
+  // disabled. Anonymous views keep buttons clickable — a disabled button never
+  // fires its click handler, which would make the login CTA unreachable.
+  function applyReadOnly(hardDisable) {
+    isReadOnly = true;
+    readonlyBanner.classList.add('show');
+    [btnAdd, btnLink, btnCompor, btnPublish].forEach(function (b) {
+      if (hardDisable) {
+        b.disabled = true;
+      } else {
+        b.classList.add('readonly');
+      }
+    });
+  }
+
+  // ── Boot ──────────────────────────────────────────────────────────────────
+  function boot() {
+    if (mode === 'share-token') {
+      applyReadOnly(true);
+      salaName.textContent = 'Sala compartilhada';
+      document.title = 'Sala compartilhada — CO';
+      statusEl.textContent = 'carregando…';
+      loadState();
+      return;
+    }
+
+    if (!universeKey) {
+      statusEl.textContent = 'URL inválida — esperado /u/{universo}/sala';
+      return;
+    }
+
+    salaName.textContent = 'Sala · ' + (workspaceSlug === 'default' ? universeKey : workspaceSlug);
+    document.title = 'Sala — ' + universeKey + ' — CO';
+    universeLink.href = '/' + universeKey;
+    universeLink.textContent = universeKey;
+
+    checkAuth(function (loggedIn) {
+      if (!loggedIn) {
+        applyReadOnly();
+      }
+      loadState();
+    });
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

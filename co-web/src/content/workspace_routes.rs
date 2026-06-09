@@ -1,0 +1,500 @@
+//! CO-352: Workspace ("Sala") state persistence.
+//!
+//! GET  /api/v1/universes/{key}/workspaces/{slug}/state
+//!      — returns the caller's saved layout, or an empty canvas if none exists
+//! PUT  /api/v1/universes/{key}/workspaces/{slug}/state
+//!      — upsert layout (auth required)
+//! POST /api/v1/universes/{key}/workspaces/{slug}/state/share
+//!      — generate a share token for the caller's state (auth required)
+//! GET  /api/v1/workspace-states/{token}
+//!      — resolve a share token → state (public, no auth)
+
+use axum::{
+    Json, Router,
+    extract::{Path, State},
+    http::{HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
+    routing::{get, post, put},
+};
+use chrono::Utc;
+use rusqlite::params;
+use serde::{Deserialize, Serialize};
+
+use crate::auth::extractors::AuthedUser;
+use crate::error::AppError;
+use crate::server::AppState;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceState {
+    pub id: String,
+    pub universe_key: String,
+    pub workspace_slug: String,
+    pub user_id: String,
+    pub layout_json: String,
+    pub is_public: bool,
+    pub share_token: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpsertStateBody {
+    /// Serialised layout: {nodes:[{entry_path,x,y}],edges:[{from,to,type}],view:{tx,ty,scale}}
+    pub layout_json: String,
+    #[serde(default)]
+    pub is_public: bool,
+}
+
+fn err_json(status: StatusCode, msg: &str) -> Response {
+    (status, Json(serde_json::json!({ "error": msg }))).into_response()
+}
+
+fn empty_layout_json() -> String {
+    r#"{"nodes":[],"edges":[],"view":{"tx":0,"ty":0,"scale":1}}"#.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// Handlers
+// ---------------------------------------------------------------------------
+
+/// GET /api/v1/universes/{key}/workspaces/{slug}/state
+///
+/// Returns the caller's saved workspace state. If the caller is not
+/// authenticated (or has no saved state for this workspace) returns an
+/// empty-canvas placeholder so the frontend can start fresh without a 404.
+async fn get_workspace_state(
+    State(state): State<AppState>,
+    Path((universe_key, workspace_slug)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let caller_id = extract_optional_user_id(&headers);
+
+    let Some(user_id) = caller_id else {
+        return Ok(Json(empty_state(&universe_key, &workspace_slug)).into_response());
+    };
+
+    let storage = state.core.storage.lock();
+    let result = storage.conn().query_row(
+        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                is_public, share_token, created_at, updated_at \
+         FROM workspace_states \
+         WHERE universe_key = ?1 AND workspace_slug = ?2 AND user_id = ?3",
+        params![universe_key, workspace_slug, user_id],
+        row_to_state,
+    );
+
+    match result {
+        Ok(ws) => Ok(Json(ws).into_response()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Ok(Json(empty_state(&universe_key, &workspace_slug)).into_response())
+        }
+        Err(e) => Err(AppError::from(e)),
+    }
+}
+
+/// GET /api/v1/universes/{key}/workspaces/{slug}/state/public
+///
+/// Returns the most-recently-updated public state for this workspace
+/// (the one with is_public=1). Read-only, no auth required.
+async fn get_public_workspace_state(
+    State(state): State<AppState>,
+    Path((universe_key, workspace_slug)): Path<(String, String)>,
+) -> Result<Response, AppError> {
+    let storage = state.core.storage.lock();
+    let result = storage.conn().query_row(
+        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                is_public, share_token, created_at, updated_at \
+         FROM workspace_states \
+         WHERE universe_key = ?1 AND workspace_slug = ?2 AND is_public = 1 \
+         ORDER BY updated_at DESC LIMIT 1",
+        params![universe_key, workspace_slug],
+        row_to_state,
+    );
+
+    match result {
+        Ok(ws) => Ok(Json(ws).into_response()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(err_json(
+            StatusCode::NOT_FOUND,
+            "no public workspace state found",
+        )),
+        Err(e) => Err(AppError::from(e)),
+    }
+}
+
+/// PUT /api/v1/universes/{key}/workspaces/{slug}/state
+///
+/// Upsert the caller's workspace layout. The UNIQUE constraint on
+/// (universe_key, workspace_slug, user_id) ensures one state per
+/// user per workspace.
+async fn upsert_workspace_state(
+    State(state): State<AppState>,
+    Path((universe_key, workspace_slug)): Path<(String, String)>,
+    user: AuthedUser,
+    Json(body): Json<UpsertStateBody>,
+) -> Result<Response, AppError> {
+    if serde_json::from_str::<serde_json::Value>(&body.layout_json).is_err() {
+        return Ok(err_json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "layout_json must be valid JSON",
+        ));
+    }
+
+    let now = Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+    let is_public_int: i64 = if body.is_public { 1 } else { 0 };
+
+    {
+        let storage = state.core.storage.lock();
+        storage.conn().execute(
+            "INSERT INTO workspace_states \
+             (id, universe_key, workspace_slug, user_id, layout_json, is_public, \
+              created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) \
+             ON CONFLICT (universe_key, workspace_slug, user_id) DO UPDATE SET \
+               layout_json = excluded.layout_json, \
+               is_public   = excluded.is_public, \
+               updated_at  = excluded.updated_at",
+            params![
+                id,
+                universe_key,
+                workspace_slug,
+                user.user_id,
+                body.layout_json,
+                is_public_int,
+                now,
+            ],
+        )?;
+    }
+
+    let ws = fetch_state_by_user(&state, &universe_key, &workspace_slug, &user.user_id)?
+        .ok_or_else(|| AppError::Internal("workspace state missing after upsert".into()))?;
+    Ok((StatusCode::OK, Json(ws)).into_response())
+}
+
+/// POST /api/v1/universes/{key}/workspaces/{slug}/state/share
+///
+/// Generates a random share token for the caller's existing workspace state.
+/// The caller must have previously PUT their state. Returns the token so
+/// the client can build a shareable URL: `/sala/{token}`.
+async fn share_workspace_state(
+    State(state): State<AppState>,
+    Path((universe_key, workspace_slug)): Path<(String, String)>,
+    user: AuthedUser,
+) -> Result<Response, AppError> {
+    let token = uuid::Uuid::new_v4().as_simple().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let rows = {
+        let storage = state.core.storage.lock();
+        storage.conn().execute(
+            "UPDATE workspace_states \
+             SET share_token = ?1, updated_at = ?2 \
+             WHERE universe_key = ?3 AND workspace_slug = ?4 AND user_id = ?5",
+            params![token, now, universe_key, workspace_slug, user.user_id],
+        )?
+    };
+
+    if rows == 0 {
+        return Ok(err_json(
+            StatusCode::NOT_FOUND,
+            "workspace state not found — PUT your layout first",
+        ));
+    }
+
+    Ok(Json(serde_json::json!({ "share_token": token })).into_response())
+}
+
+/// GET /api/v1/workspace-states/{token}
+///
+/// Resolve a share token to a workspace state. Public — no auth required.
+async fn get_by_share_token(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> Result<Response, AppError> {
+    let storage = state.core.storage.lock();
+    let result = storage.conn().query_row(
+        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                is_public, share_token, created_at, updated_at \
+         FROM workspace_states WHERE share_token = ?1",
+        params![token],
+        row_to_state,
+    );
+
+    match result {
+        Ok(ws) => Ok(Json(ws).into_response()),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            Ok(err_json(StatusCode::NOT_FOUND, "share token not found"))
+        }
+        Err(e) => Err(AppError::from(e)),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn extract_optional_user_id(headers: &HeaderMap) -> Option<String> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.to_string())
+        .or_else(|| crate::auth::extract_session_cookie(headers))?;
+    let secret = crate::auth::jwt_secret();
+    crate::auth::decode_user_id(&token, &secret).ok()
+}
+
+fn fetch_state_by_user(
+    state: &AppState,
+    universe_key: &str,
+    workspace_slug: &str,
+    user_id: &str,
+) -> Result<Option<WorkspaceState>, AppError> {
+    let storage = state.core.storage.lock();
+    let result = storage.conn().query_row(
+        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                is_public, share_token, created_at, updated_at \
+         FROM workspace_states \
+         WHERE universe_key = ?1 AND workspace_slug = ?2 AND user_id = ?3",
+        params![universe_key, workspace_slug, user_id],
+        row_to_state,
+    );
+    match result {
+        Ok(ws) => Ok(Some(ws)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppError::from(e)),
+    }
+}
+
+fn row_to_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceState> {
+    Ok(WorkspaceState {
+        id: row.get(0)?,
+        universe_key: row.get(1)?,
+        workspace_slug: row.get(2)?,
+        user_id: row.get(3)?,
+        layout_json: row.get(4)?,
+        is_public: row.get::<_, i64>(5)? != 0,
+        share_token: row.get(6)?,
+        created_at: row.get(7)?,
+        updated_at: row.get(8)?,
+    })
+}
+
+fn empty_state(universe_key: &str, workspace_slug: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": null,
+        "universe_key": universe_key,
+        "workspace_slug": workspace_slug,
+        "user_id": null,
+        "layout_json": empty_layout_json(),
+        "is_public": false,
+        "share_token": null,
+        "created_at": null,
+        "updated_at": null,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Routers
+// ---------------------------------------------------------------------------
+
+/// Routes mounted at `/api/v1/universes` — no auth middleware applied.
+/// GET handlers extract the caller's identity themselves.
+pub fn public_router() -> Router<AppState> {
+    Router::new()
+        .route("/{key}/workspaces/{slug}/state", get(get_workspace_state))
+        .route(
+            "/{key}/workspaces/{slug}/state/public",
+            get(get_public_workspace_state),
+        )
+}
+
+/// Routes mounted at `/api/v1/universes` — `require_auth` applied at the call site.
+pub fn authed_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/{key}/workspaces/{slug}/state",
+            put(upsert_workspace_state),
+        )
+        .route(
+            "/{key}/workspaces/{slug}/state/share",
+            post(share_workspace_state),
+        )
+}
+
+/// Routes mounted at `/api/v1` — share-token resolution, public.
+pub fn share_router() -> Router<AppState> {
+    Router::new().route("/workspace-states/{token}", get(get_by_share_token))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    fn setup_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE workspace_states (
+               id            TEXT PRIMARY KEY,
+               universe_key  TEXT NOT NULL,
+               workspace_slug TEXT NOT NULL,
+               user_id       TEXT NOT NULL,
+               layout_json   TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[],\"view\":{\"tx\":0,\"ty\":0,\"scale\":1}}',
+               is_public     INTEGER NOT NULL DEFAULT 0,
+               share_token   TEXT,
+               created_at    TEXT NOT NULL,
+               updated_at    TEXT NOT NULL,
+               UNIQUE (universe_key, workspace_slug, user_id)
+             );
+             CREATE INDEX IF NOT EXISTS idx_workspace_states_user
+               ON workspace_states (user_id);
+             CREATE INDEX IF NOT EXISTS idx_workspace_states_token
+               ON workspace_states (share_token) WHERE share_token IS NOT NULL;",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn insert_state(
+        conn: &Connection,
+        id: &str,
+        universe_key: &str,
+        workspace_slug: &str,
+        user_id: &str,
+        is_public: i64,
+        share_token: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO workspace_states \
+             (id, universe_key, workspace_slug, user_id, layout_json, is_public, \
+              share_token, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, '{\"nodes\":[]}', ?5, ?6, '2026-01-01', '2026-01-01')",
+            params![
+                id,
+                universe_key,
+                workspace_slug,
+                user_id,
+                is_public,
+                share_token
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn test_row_to_state_maps_correctly() {
+        let conn = setup_db();
+        insert_state(&conn, "id-1", "mbya", "default", "user-1", 0, None);
+
+        let ws: WorkspaceState = conn
+            .query_row(
+                "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                        is_public, share_token, created_at, updated_at \
+                 FROM workspace_states WHERE id = 'id-1'",
+                [],
+                row_to_state,
+            )
+            .unwrap();
+
+        assert_eq!(ws.universe_key, "mbya");
+        assert_eq!(ws.workspace_slug, "default");
+        assert_eq!(ws.user_id, "user-1");
+        assert!(!ws.is_public);
+        assert!(ws.share_token.is_none());
+    }
+
+    #[test]
+    fn test_public_state_query() {
+        let conn = setup_db();
+        insert_state(&conn, "id-1", "mbya", "default", "user-1", 0, None);
+        insert_state(&conn, "id-2", "mbya", "default", "user-2", 1, None);
+
+        let ws: WorkspaceState = conn
+            .query_row(
+                "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                        is_public, share_token, created_at, updated_at \
+                 FROM workspace_states \
+                 WHERE universe_key = 'mbya' AND workspace_slug = 'default' AND is_public = 1 \
+                 ORDER BY updated_at DESC LIMIT 1",
+                [],
+                row_to_state,
+            )
+            .unwrap();
+
+        assert_eq!(ws.user_id, "user-2");
+        assert!(ws.is_public);
+    }
+
+    #[test]
+    fn test_share_token_lookup() {
+        let conn = setup_db();
+        insert_state(
+            &conn,
+            "id-1",
+            "mbya",
+            "default",
+            "user-1",
+            0,
+            Some("abc123"),
+        );
+
+        let ws: WorkspaceState = conn
+            .query_row(
+                "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
+                        is_public, share_token, created_at, updated_at \
+                 FROM workspace_states WHERE share_token = 'abc123'",
+                [],
+                row_to_state,
+            )
+            .unwrap();
+
+        assert_eq!(ws.id, "id-1");
+        assert_eq!(ws.share_token.as_deref(), Some("abc123"));
+    }
+
+    #[test]
+    fn test_upsert_conflict_updates_layout() {
+        let conn = setup_db();
+        insert_state(&conn, "id-1", "mbya", "default", "user-1", 0, None);
+
+        conn.execute(
+            "INSERT INTO workspace_states \
+             (id, universe_key, workspace_slug, user_id, layout_json, is_public, created_at, updated_at) \
+             VALUES ('id-2', 'mbya', 'default', 'user-1', '{\"nodes\":[{\"id\":\"x\"}]}', 0, '2026-01-02', '2026-01-02') \
+             ON CONFLICT (universe_key, workspace_slug, user_id) DO UPDATE SET \
+               layout_json = excluded.layout_json, \
+               updated_at  = excluded.updated_at",
+            [],
+        )
+        .unwrap();
+
+        let layout: String = conn
+            .query_row(
+                "SELECT layout_json FROM workspace_states \
+                 WHERE universe_key = 'mbya' AND workspace_slug = 'default' AND user_id = 'user-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        assert!(layout.contains("\"x\""));
+    }
+
+    #[test]
+    fn test_empty_layout_json_is_valid_json() {
+        let s = empty_layout_json();
+        let v: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert!(v["nodes"].is_array());
+        assert!(v["edges"].is_array());
+        assert!(v["view"].is_object());
+    }
+}

@@ -33,6 +33,8 @@ tags:
     description: "universes endpoints"
   - name: "graph-views"
     description: "graph-views endpoints"
+  - name: "workspace"
+    description: "workspace endpoints"
   - name: "entries"
     description: "entries endpoints"
   - name: "vault"
@@ -2420,6 +2422,83 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{key}/workspaces/{slug}/state:
+    get:
+      tags: ["workspace"]
+      summary: "Get current user's workspace state for this sala"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["workspace"]
+      summary: "Persist workspace state (positions, custom edges)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/workspaces/{slug}/state/public:
+    get:
+      tags: ["workspace"]
+      summary: "Get public/shared workspace state"
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/workspaces/{slug}/state/share:
+    post:
+      tags: ["workspace"]
+      summary: "Publish workspace state as shareable"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}:
     get:
       tags: ["universes"]
@@ -3892,6 +3971,19 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/workspace-states/{token}:
+    get:
+      tags: ["workspace"]
+      summary: "Fetch a shared workspace state by token"
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /auth/co-handover:
     get:
       tags: ["auth"]
@@ -3939,6 +4031,37 @@ paths:
       summary: "OIDC userinfo"
       security:
         - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /u/{universe}/sala:
+    get:
+      tags: ["workspace"]
+      summary: "Sala SPA shell (default workspace for universe)"
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /u/{universe}/sala/{workspace_slug}:
+    get:
+      tags: ["workspace"]
+      summary: "Sala SPA shell (specific workspace)"
+      parameters:
+        - name: universe
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: workspace_slug
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: OK

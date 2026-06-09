@@ -26,6 +26,7 @@ import {
 } from './modules/views/timeline.js';
 import { renderDashboard, injectDashboardCallbacks } from './modules/views/dashboard.js';
 import { renderChangelog, injectChangelogCallbacks } from './modules/views/changelog.js';
+import { renderWorkspace, injectWorkspaceCallbacks } from './modules/views/workspace.js';
 import {
     renderConteudo, openZoomModal, injectConteudoCallbacks, injectOpenContentEditor,
 } from './modules/views/conteudo.js';
@@ -555,6 +556,7 @@ function renderContent() {
     else if (state.view === 'timeline') renderTimeline();
     else if (state.view === 'dashboard') renderDashboard();
     else if (state.view === 'changelog') renderChangelog();
+    else if (state.view === 'workspace') renderWorkspace(state.currentUniverse, state.currentProject?.key);
 }
 
 function render() {
@@ -657,6 +659,7 @@ function wireModules() {
     injectTimelineCallbacks({ openTaskModal, refreshTasks, renderContent });
     injectDashboardCallbacks({ openTaskModal });
     injectChangelogCallbacks({ showToast, showLoginModal });
+    injectWorkspaceCallbacks({ showLoginModal, showToast, isLoggedIn: () => !!state.currentUser });
     injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });
