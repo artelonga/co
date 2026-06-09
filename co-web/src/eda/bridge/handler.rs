@@ -534,6 +534,23 @@ fn load_events_since(storage: &Arc<Mutex<Storage>>, since_id: Option<&str>) -> V
 mod tests {
     use super::*;
 
+    use axum::body::Body;
+    use axum::http::Request;
+    use std::sync::Arc;
+    use tokio::net::TcpListener;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::http::Request as WsRequest;
+    use tower::ServiceExt;
+
+    use crate::auth::AuthStore;
+    use crate::config::WebConfig;
+    use crate::experiment::ExperimentStore;
+    use crate::server::{
+        AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
+        build_router,
+    };
+    use crate::storage::Storage;
+
     #[test]
     fn trust_list_empty_rejects_all() {
         assert!(!is_trusted_in(&[], "any.com"));
@@ -555,5 +572,232 @@ mod tests {
         let trusted = vec!["co.artelonga.com.br".to_string()];
         assert!(!is_trusted_in(&trusted, "co.artelonga.com.br.evil.example"));
         assert!(!is_trusted_in(&trusted, "evil.co.artelonga.com.br"));
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-391: real-axum WebSocket handshake integration tests.
+    //
+    // The `is_trusted_in` unit tests above cover the trust-list predicate only —
+    // no `WebSocketUpgrade`, no real socket. These tests boot the real axum router
+    // with the bridge route mounted and dial it with a real WS client speaking
+    // `co.eda.bridge.v1`, locking down the handshake contract from the CO side so a
+    // YG-122-class regression (axum rejecting a connect a lenient mock accepted)
+    // fails loudly at PR time instead of at first prod dial.
+    // -----------------------------------------------------------------------
+
+    /// Host written into `CO_BRIDGE_TRUSTED_SOURCES` by every test below. All
+    /// tests write the SAME value so concurrent env writes are harmless (mirrors
+    /// the shared-`JWT_SECRET` pattern in `social/sync_ws.rs`).
+    const TRUSTED_PEER: &str = "co-bridge-test-peer.local";
+
+    fn set_bridge_env() {
+        // Safety: tests share one process; we always write the same values.
+        unsafe {
+            std::env::set_var("JWT_SECRET", "test-jwt-secret");
+            std::env::set_var("CO_BRIDGE_TRUSTED_SOURCES", TRUSTED_PEER);
+        }
+    }
+
+    fn test_config(dir: &std::path::Path) -> WebConfig {
+        WebConfig {
+            port: 0,
+            data_dir: dir.to_string_lossy().into(),
+            static_dir: "co-web/static".into(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: "plugins".into(),
+            game_db_path: None,
+            universo_dir: dir.join("universes").to_string_lossy().into(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "test".into(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        }
+    }
+
+    fn make_test_state(dir: &std::path::Path) -> AppState {
+        set_bridge_env();
+        let storage = Storage::new(dir);
+        let experiment = ExperimentStore::new(dir);
+        let auth_store = AuthStore::new(dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_storage =
+            Arc::new(game_core::storage::Storage::open(&dir.join("game_test.db")).unwrap());
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
+        AppState::new(AppStateInner {
+            core: Arc::new(CoreState::from_storage(
+                storage,
+                test_config(dir),
+                auth_store,
+            )),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: std::sync::Mutex::new(std::collections::HashMap::new()),
+                chat_presence: std::sync::Mutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx,
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: std::sync::Mutex::new(experiment),
+                worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
+            }),
+        })
+    }
+
+    /// Boot the real router on an ephemeral port; return `(port, bus)`. The bus is
+    /// the *same* instance the server uses, so the test can observe events the
+    /// handler publishes locally (e.g. `bridge.connected`).
+    async fn spawn_bridge_server() -> (u16, Arc<dyn EdaBus>) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let state = make_test_state(tmp.path());
+        let bus = Arc::clone(&state.core.eda_bus);
+        let app = build_router(state, None);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::mem::forget(tmp); // keep the data dir alive for the server's lifetime
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        (port, bus)
+    }
+
+    /// Build the WS upgrade request a Yggdrasil peer sends. `connect_async` always
+    /// emits the upgrade headers — the missing-`Upgrade` case is tested separately
+    /// via a plain HTTP GET, which a WS client cannot produce.
+    fn ws_request(
+        port: u16,
+        source: &str,
+        token: &str,
+        subprotocol: Option<&str>,
+    ) -> WsRequest<()> {
+        let url =
+            format!("ws://127.0.0.1:{port}/api/v1/events/bridge?source={source}&token={token}");
+        let mut b = WsRequest::builder()
+            .uri(&url)
+            .header("Host", format!("127.0.0.1:{port}"))
+            .header("Sec-WebSocket-Version", "13")
+            .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+            .header("Connection", "Upgrade")
+            .header("Upgrade", "websocket");
+        if let Some(sp) = subprotocol {
+            b = b.header("Sec-WebSocket-Protocol", sp);
+        }
+        b.body(()).unwrap()
+    }
+
+    /// Happy path YG-119's lenient mock falsely passed: trusted source + non-empty
+    /// token + subprotocol → 101, subprotocol echo, and `bridge.connected` on the bus.
+    #[tokio::test]
+    async fn bridge_handshake_accepts_trusted_source() {
+        let (port, bus) = spawn_bridge_server().await;
+        // Subscribe BEFORE connecting so we don't miss the connect telemetry.
+        let mut sub = bus.subscribe(Filter::default());
+
+        let (mut ws, response) = connect_async(ws_request(
+            port,
+            TRUSTED_PEER,
+            "any-token",
+            Some("co.eda.bridge.v1"),
+        ))
+        .await
+        .expect("handshake must succeed");
+
+        assert_eq!(response.status().as_u16(), 101);
+        assert_eq!(
+            response
+                .headers()
+                .get("sec-websocket-protocol")
+                .and_then(|h| h.to_str().ok()),
+            Some("co.eda.bridge.v1"),
+            "server must echo the negotiated subprotocol",
+        );
+
+        // `bridge.connected` is published to the LOCAL bus, not echoed down the
+        // socket — assert it lands there.
+        let connected = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                match sub.recv().await {
+                    Some(ev) if ev.event_type == "bridge.connected" => break ev,
+                    Some(_) => continue,
+                    None => panic!("bus closed before bridge.connected"),
+                }
+            }
+        })
+        .await
+        .expect("bridge.connected must land on the local bus within 2s");
+
+        assert_eq!(connected.payload["source"], TRUSTED_PEER);
+        ws.close(None).await.ok();
+    }
+
+    /// Regression guard for the trust list.
+    #[tokio::test]
+    async fn bridge_handshake_rejects_untrusted_source() {
+        let (port, _bus) = spawn_bridge_server().await;
+        match connect_async(ws_request(
+            port,
+            "untrusted.example",
+            "any-token",
+            Some("co.eda.bridge.v1"),
+        ))
+        .await
+        {
+            Ok(_) => panic!("untrusted source must be rejected"),
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                assert_eq!(resp.status().as_u16(), 403);
+            }
+            Err(e) => panic!("expected HTTP 403, got error: {e:?}"),
+        }
+    }
+
+    /// Regression guard for the token-presence check.
+    #[tokio::test]
+    async fn bridge_handshake_rejects_empty_token() {
+        let (port, _bus) = spawn_bridge_server().await;
+        match connect_async(ws_request(port, TRUSTED_PEER, "", Some("co.eda.bridge.v1"))).await {
+            Ok(_) => panic!("empty token must be rejected"),
+            Err(tokio_tungstenite::tungstenite::Error::Http(resp)) => {
+                assert_eq!(resp.status().as_u16(), 401);
+            }
+            Err(e) => panic!("expected HTTP 401, got error: {e:?}"),
+        }
+    }
+
+    /// The exact failure that bit us on 2026-06-09: a GET without `Connection: Upgrade`
+    /// is rejected by axum's `WebSocketUpgrade` extractor with 400 before the handler
+    /// body runs. A real WS client always sends the header, so this case requires a
+    /// plain HTTP GET via `oneshot`.
+    #[tokio::test]
+    async fn bridge_handshake_rejects_missing_upgrade_header() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let app = build_router(make_test_state(tmp.path()), None);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!(
+                        "/api/v1/events/bridge?source={TRUSTED_PEER}&token=any-token"
+                    ))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 400);
     }
 }
