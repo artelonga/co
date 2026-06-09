@@ -4,7 +4,7 @@
 //! Content is written directly to the universe filesystem (markdown files).
 
 use axum::Router;
-use axum::extract::{Json, Path, State};
+use axum::extract::{Json, Path, Query, State};
 use axum::http::{StatusCode, header};
 use axum::middleware;
 use axum::response::IntoResponse;
@@ -174,6 +174,10 @@ pub fn router() -> Router<AppState> {
         )
         // Note: /atividades is now provided by resumo_routes (email admin auth, CO-360)
         .route("/schema-status", get(schema_status_handler))
+        // CO-378: analytics resumo (includes private paths).
+        // Mounted at /analytics/resumo — the bare /resumo at this prefix belongs
+        // to the CO-360 dashboard endpoint in resumo_routes.
+        .route("/analytics/resumo", get(resumo_handler))
         // GitHub auth on all routes
         .layer(middleware::from_fn(github_auth::require_github_admin))
 }
@@ -862,6 +866,99 @@ pub struct SchemaVersaoRow {
 
 /// The migration version this binary expects to find after startup.
 const EXPECTED_SCHEMA_VERSION: i64 = 59;
+
+// ---- CO-378: analytics resumo (admin view with private paths) ----
+
+#[derive(Debug, Serialize)]
+pub struct ResumoTopPage {
+    pub path: String,
+    pub views: i64,
+    pub visitors: i64,
+    pub private: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResumoResponse {
+    pub as_of: String,
+    pub window_days: u32,
+    pub views: i64,
+    pub visitors: i64,
+    pub top_pages: Vec<ResumoTopPage>,
+    pub private_total_views: i64,
+}
+
+/// GET /api/v1/gestao/analytics/resumo?days=N — analytics resumo with private-path visibility.
+///
+/// Requires GitHub admin auth. Calls query_universe_summary with include_private=true
+/// and logs an atividade for auditability.
+async fn resumo_handler(
+    State(state): State<AppState>,
+    _admin: GitHubAdmin,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<ResumoResponse>, AppError> {
+    let days: u32 = params
+        .get("days")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(30)
+        .clamp(1, 365);
+
+    let summary = {
+        let storage = state.core.storage.lock();
+        crate::admin::analytics_public::query_universe_summary(
+            storage.conn(),
+            "artelonga",
+            days,
+            true,
+        )
+    };
+
+    crate::atividade::log_atividade(
+        state,
+        crate::atividade::Atividade {
+            acao: crate::atividade::Acao::Ler,
+            entidade: "analytics".to_string(),
+            entidade_id: Some("private_path_viewed".to_string()),
+            before: None,
+            after: Some(serde_json::json!({
+                "event": "analytics.private_path_viewed",
+                "universe": "artelonga",
+                "days": days,
+                "via": "gestao/analytics/resumo",
+            })),
+            tipo: crate::atividade::Tipo::Sistema,
+            user_id: None,
+            ip: None,
+            user_agent: None,
+        },
+    );
+
+    let private_total_views: i64 = summary
+        .top_pages
+        .iter()
+        .filter(|p| p.private == Some(true))
+        .map(|p| p.views)
+        .sum();
+
+    let top_pages: Vec<ResumoTopPage> = summary
+        .top_pages
+        .into_iter()
+        .map(|p| ResumoTopPage {
+            path: p.path,
+            views: p.views,
+            visitors: p.visitors,
+            private: p.private.unwrap_or(false),
+        })
+        .collect();
+
+    Ok(Json(ResumoResponse {
+        as_of: summary.as_of,
+        window_days: days,
+        views: summary.views,
+        visitors: summary.visitors,
+        top_pages,
+        private_total_views,
+    }))
+}
 
 /// GET /api/v1/gestao/schema-status — schema version info for the header strip.
 async fn schema_status_handler(

@@ -627,6 +627,13 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/analytics/public/funnel:
+    get:
+      tags: ["analytics + telemetry"]
+      summary: "CO-378 — conversion funnel report with private-path redaction"
+      responses:
+        "200":
+          description: OK
   /api/v1/analytics/public/popularity:
     get:
       tags: ["analytics + telemetry"]
@@ -1180,6 +1187,15 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/analytics/resumo:
+    get:
+      tags: ["gestao"]
+      summary: "CO-378 — analytics resumo with private-path visibility"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK

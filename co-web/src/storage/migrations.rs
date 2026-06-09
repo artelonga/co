@@ -2521,6 +2521,23 @@ impl Storage {
                 "CO-383: source attribution columns + yggdrasil event-bus binding"
             );
         }
+
+        if current_version < 69 {
+            // CO-378: privacy — mark rollup rows that aggregate private-path traffic
+            // so the public summary can strip them from top_pages listings.
+            ensure_column(
+                &self.conn,
+                "analytics_rollups",
+                "path_private",
+                "INTEGER DEFAULT 0",
+            )
+            .expect("CO-378 v69: analytics_rollups.path_private");
+            crate::record_migration!(
+                self.conn,
+                69,
+                "CO-378: analytics_rollups.path_private — private rollup redaction"
+            );
+        }
     }
 }
 

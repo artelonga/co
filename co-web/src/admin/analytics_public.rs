@@ -2,6 +2,7 @@
 //!
 //! GET /api/v1/analytics/public/summary?days=N
 //! GET /api/v1/analytics/public/recent?limit=N
+//! GET /api/v1/analytics/public/funnel?days=N   (CO-378)
 //!
 //! Read-only, no auth. Hardcoded to universe_key = 'artelonga'.
 //! Strips all PII (visitor_token, ip_hash, raw properties).
@@ -20,6 +21,7 @@ use axum::{
 };
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::server::AppState;
 
@@ -53,6 +55,46 @@ const UNIVERSE_KEY: &str = "artelonga";
 const CACHE_TTL: Duration = Duration::from_secs(300);
 
 // ---------------------------------------------------------------------------
+// CO-378: privacy helpers
+// ---------------------------------------------------------------------------
+
+/// Returns true if the path matches a private/internal segment pattern.
+pub fn is_private_path(path: &str) -> bool {
+    const PATTERNS: &[&str] = &[
+        "/_drafts/",
+        "/_proposals/",
+        "/_smoke/",
+        "/_t/",
+        "/_proof/",
+        "/probe/",
+    ];
+    PATTERNS.iter().any(|p| path.contains(p))
+}
+
+/// Returns a deterministic opaque token for a private path. Used in admin-only views.
+pub fn redact_path(path: &str) -> String {
+    let hash = Sha256::digest(path.as_bytes());
+    let hex16: String = hash[..8].iter().map(|b| format!("{b:02x}")).collect();
+    format!("<private-path-{hex16}>")
+}
+
+/// SQL predicate selecting private-path events.
+const PRIVATE_PATH_EXPR: &str = "(path LIKE '%/_drafts/%' \
+    OR path LIKE '%/_proposals/%' \
+    OR path LIKE '%/_smoke/%' \
+    OR path LIKE '%/_t/%' \
+    OR path LIKE '%/_proof/%' \
+    OR path LIKE '%/probe/%')";
+
+/// SQL predicate selecting public-path events.
+const PUBLIC_PATH_EXPR: &str = "NOT (path LIKE '%/_drafts/%' \
+    OR path LIKE '%/_proposals/%' \
+    OR path LIKE '%/_smoke/%' \
+    OR path LIKE '%/_t/%' \
+    OR path LIKE '%/_proof/%' \
+    OR path LIKE '%/probe/%')";
+
+// ---------------------------------------------------------------------------
 // Response shapes (PII-free)
 // ---------------------------------------------------------------------------
 
@@ -67,6 +109,8 @@ pub struct TopPage {
     pub path: String,
     pub views: i64,
     pub visitors: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub private: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -109,6 +153,33 @@ pub struct PublicRecent {
 }
 
 // ---------------------------------------------------------------------------
+// CO-378: funnel types
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize, Clone)]
+pub struct FunnelEntry {
+    pub path: String,
+    pub views: i64,
+    pub visitors: i64,
+    pub pct: f64,
+}
+
+#[derive(Debug, Serialize, Clone)]
+pub struct FunnelResponse {
+    pub as_of: String,
+    pub window_days: u32,
+    pub total_views: i64,
+    pub total_private_views: i64,
+    pub by_path: Vec<FunnelEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FunnelParams {
+    pub days: Option<u32>,
+    pub universe: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
 // Per-params in-memory cache
 // ---------------------------------------------------------------------------
 
@@ -122,11 +193,13 @@ struct RecentCacheEntry {
     fetched_at: Instant,
 }
 
-// keyed by (universe, days)
-static SUMMARY_CACHE: OnceLock<Mutex<HashMap<(String, u32), SummaryCacheEntry>>> = OnceLock::new();
+type SummaryCacheMap = Mutex<HashMap<(String, u32, bool), SummaryCacheEntry>>;
+
+// keyed by (universe, days, include_private)
+static SUMMARY_CACHE: OnceLock<SummaryCacheMap> = OnceLock::new();
 static RECENT_CACHE: OnceLock<Mutex<HashMap<u32, RecentCacheEntry>>> = OnceLock::new();
 
-fn summary_cache() -> &'static Mutex<HashMap<(String, u32), SummaryCacheEntry>> {
+fn summary_cache() -> &'static SummaryCacheMap {
     SUMMARY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -141,9 +214,10 @@ fn recent_cache() -> &'static Mutex<HashMap<u32, RecentCacheEntry>> {
 #[derive(Debug, Deserialize)]
 pub struct SummaryParams {
     pub days: Option<u32>,
-    /// Universe a consultar. Default "artelonga" (rede). Ex. "yuri" → mostra a
-    /// universe yuri através da artelonga geral, com a PONTE histórico↔surface.
+    /// Universe a consultar. Default "artelonga" (rede).
     pub universe: Option<String>,
+    /// CO-378: include private paths in top_pages (redacted). Requires admin auth.
+    pub include_private: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -174,9 +248,42 @@ pub struct RollupMetrics {
     pub conversions: i64,
 }
 
-/// Rollups consentidos (sem PII) pushados por producers, dentro da janela.
-/// Vazio se a tabela não existir (ex. DBs de teste antigos) — degrada pra eventos.
+/// Rollups públicos (path_private=0) dentro da janela.
 pub fn query_rollups(conn: &Connection, universe: &str, days: u32) -> Vec<(String, RollupMetrics)> {
+    conn.prepare(&format!(
+        "SELECT day, metrics FROM analytics_rollups \
+         WHERE universe_key = ?1 AND day >= date('now', '-{days} days') \
+           AND (path_private = 0 OR path_private IS NULL) \
+         ORDER BY day ASC"
+    ))
+    .ok()
+    .and_then(|mut stmt| {
+        stmt.query_map(params![universe], |r| {
+            let day: String = r.get(0)?;
+            let metrics_json: String = r.get(1)?;
+            Ok((day, metrics_json))
+        })
+        .ok()
+        .map(|rows| {
+            rows.filter_map(|r| r.ok())
+                .map(|(day, mj)| {
+                    (
+                        day,
+                        serde_json::from_str::<RollupMetrics>(&mj).unwrap_or_default(),
+                    )
+                })
+                .collect()
+        })
+    })
+    .unwrap_or_default()
+}
+
+/// Todos os rollups dentro da janela, incluindo linhas marcadas como privadas.
+pub fn query_rollups_all(
+    conn: &Connection,
+    universe: &str,
+    days: u32,
+) -> Vec<(String, RollupMetrics)> {
     conn.prepare(&format!(
         "SELECT day, metrics FROM analytics_rollups \
          WHERE universe_key = ?1 AND day >= date('now', '-{days} days') \
@@ -206,7 +313,85 @@ pub fn query_rollups(conn: &Connection, universe: &str, days: u32) -> Vec<(Strin
 
 /// Default-universe wrapper (rede artelonga). Mantém o contrato existente.
 pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
-    query_universe_summary(conn, UNIVERSE_KEY, days)
+    query_universe_summary(conn, UNIVERSE_KEY, days, false)
+}
+
+/// Builds the top_pages list with privacy filtering.
+///
+/// Default (include_private=false): public paths only + a single `(private)` cluster entry.
+/// Admin (include_private=true): all paths; private paths shown as `<private-path-{hex}>`.
+fn build_top_pages(conn: &Connection, m: &str, win: &str, include_private: bool) -> Vec<TopPage> {
+    let mut pages: Vec<TopPage> = conn
+        .prepare(&format!(
+            "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
+             FROM telemetry_events \
+             WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL AND {PUBLIC_PATH_EXPR} {win} \
+             GROUP BY path ORDER BY views DESC LIMIT 20"
+        ))
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                Ok(TopPage {
+                    path: r.get(0)?,
+                    views: r.get(1)?,
+                    visitors: r.get(2)?,
+                    private: None,
+                })
+            })
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+
+    if include_private {
+        let private_pages: Vec<TopPage> = conn
+            .prepare(&format!(
+                "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
+                 FROM telemetry_events \
+                 WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL AND {PRIVATE_PATH_EXPR} {win} \
+                 GROUP BY path ORDER BY views DESC"
+            ))
+            .ok()
+            .and_then(|mut stmt| {
+                stmt.query_map([], |r| {
+                    let path: String = r.get(0)?;
+                    Ok(TopPage {
+                        path: redact_path(&path),
+                        views: r.get(1)?,
+                        visitors: r.get(2)?,
+                        private: Some(true),
+                    })
+                })
+                .ok()
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+            })
+            .unwrap_or_default();
+        pages.extend(private_pages);
+        pages.sort_by(|a, b| b.views.cmp(&a.views));
+        pages.truncate(20);
+    } else {
+        let (priv_views, priv_visitors): (i64, i64) = conn
+            .query_row(
+                &format!(
+                    "SELECT COUNT(*), COUNT(DISTINCT visitor_token) \
+                     FROM telemetry_events \
+                     WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL \
+                       AND {PRIVATE_PATH_EXPR} {win}"
+                ),
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap_or((0, 0));
+        if priv_views > 0 {
+            pages.push(TopPage {
+                path: "(private)".to_string(),
+                views: priv_views,
+                visitors: priv_visitors,
+                private: Some(true),
+            });
+        }
+    }
+    pages
 }
 
 /// Summary de UMA universe, com a PONTE histórico↔surface:
@@ -215,14 +400,21 @@ pub fn query_public_summary(conn: &Connection, days: u32) -> PublicSummary {
 ///   rollups (pushados pela surface) sobrepõem o NOVO dado, particionado no CUTOVER
 ///     (primeiro dia com rollup) → eventos só contam ANTES, rollups DEPOIS: sem dupla
 ///     contagem na fronteira da migração path→CNAME. Uma série contínua.
-pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> PublicSummary {
+pub fn query_universe_summary(
+    conn: &Connection,
+    universe: &str,
+    days: u32,
+    include_private: bool,
+) -> PublicSummary {
     let u = sanitize_universe(universe);
-    // ponte: universe_key direto OU path histórico `/u/*`
     let m = format!("(universe_key = '{u}' OR path LIKE '/{u}/%')");
 
-    let rollups = query_rollups(conn, &u, days);
+    let rollups = if include_private {
+        query_rollups_all(conn, &u, days)
+    } else {
+        query_rollups(conn, &u, days)
+    };
     let cutover: Option<String> = rollups.iter().map(|(d, _)| d.clone()).min();
-    // quando há rollups, eventos só contam ANTES do cutover (evita dupla contagem)
     let event_bound = match &cutover {
         Some(c) => format!(" AND date(timestamp) < '{c}'"),
         None => String::new(),
@@ -259,7 +451,6 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
         )
         .unwrap_or(0);
 
-    // Returning: visitors seen on >= 2 distinct days within the window
     let mut returning: i64 = conn
         .query_row(
             &format!(
@@ -286,7 +477,6 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
         )
         .unwrap_or(0);
 
-    // Average page duration as a proxy for session engagement (event-based)
     let session_avg_ms: i64 = conn
         .query_row(
             &format!(
@@ -299,7 +489,6 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
         )
         .unwrap_or(0);
 
-    // Geo counts — NULL when CO-178 (country/city columns) not yet applied
     let countries: i64 = conn
         .query_row(
             &format!(
@@ -342,28 +531,8 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
         })
         .unwrap_or_default();
 
-    let top_pages: Vec<TopPage> = conn
-        .prepare(&format!(
-            "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
-             FROM telemetry_events \
-             WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL {win} \
-             GROUP BY path ORDER BY views DESC LIMIT 20"
-        ))
-        .ok()
-        .and_then(|mut stmt| {
-            stmt.query_map([], |r| {
-                Ok(TopPage {
-                    path: r.get(0)?,
-                    views: r.get(1)?,
-                    visitors: r.get(2)?,
-                })
-            })
-            .ok()
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let top_pages = build_top_pages(conn, &m, &win, include_private);
 
-    // Geo aggregation — empty until CO-178 populates country/city columns
     let geo: Vec<GeoRow> = conn
         .prepare(&format!(
             "SELECT country, city, \
@@ -388,7 +557,6 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
         })
         .unwrap_or_default();
 
-    // ── overlay dos rollups (porção pós-cutover): soma escalares + estende a série ──
     if !rollups.is_empty() {
         views += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
         events_total += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
@@ -421,6 +589,74 @@ pub fn query_universe_summary(conn: &Connection, universe: &str, days: u32) -> P
     }
 }
 
+/// Funnel report: total views (including private) + per-path breakdown (public only).
+pub fn query_funnel(conn: &Connection, universe: &str, days: u32) -> FunnelResponse {
+    let u = sanitize_universe(universe);
+    let m = format!("(universe_key = '{u}' OR path LIKE '/{u}/%')");
+    let win = format!("AND timestamp >= datetime('now', '-{days} days')");
+
+    let total_views: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM telemetry_events \
+                 WHERE {m} AND event_type = 'pageview' {win}"
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let total_private_views: i64 = conn
+        .query_row(
+            &format!(
+                "SELECT COUNT(*) FROM telemetry_events \
+                 WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL \
+                   AND {PRIVATE_PATH_EXPR} {win}"
+            ),
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let by_path: Vec<FunnelEntry> = conn
+        .prepare(&format!(
+            "SELECT path, COUNT(*) AS views, COUNT(DISTINCT visitor_token) AS visitors \
+             FROM telemetry_events \
+             WHERE {m} AND event_type = 'pageview' AND path IS NOT NULL \
+               AND {PUBLIC_PATH_EXPR} {win} \
+             GROUP BY path ORDER BY views DESC LIMIT 20"
+        ))
+        .ok()
+        .and_then(|mut stmt| {
+            stmt.query_map([], |r| {
+                let views: i64 = r.get(1)?;
+                let visitors: i64 = r.get(2)?;
+                let pct = if total_views > 0 {
+                    100.0 * views as f64 / total_views as f64
+                } else {
+                    0.0
+                };
+                Ok(FunnelEntry {
+                    path: r.get(0)?,
+                    views,
+                    visitors,
+                    pct,
+                })
+            })
+            .ok()
+            .map(|rows| rows.filter_map(|r| r.ok()).collect())
+        })
+        .unwrap_or_default();
+
+    FunnelResponse {
+        as_of: chrono::Utc::now().to_rfc3339(),
+        window_days: days,
+        total_views,
+        total_private_views,
+        by_path,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Rollup ingest (producer push) — DailyRollup do schema do artelonga
 // ---------------------------------------------------------------------------
@@ -433,6 +669,9 @@ pub struct DailyRollupIn {
     pub metrics: serde_json::Value,
     #[serde(default)]
     pub dims: serde_json::Value,
+    /// CO-378: marks this rollup as covering private-path traffic (excluded from default summary).
+    #[serde(default)]
+    pub private: bool,
 }
 
 /// Upsert idempotente keyed by (universe, day).
@@ -442,21 +681,36 @@ pub fn upsert_rollup(
     day: &str,
     metrics: &str,
     dims: &str,
+    path_private: bool,
 ) -> rusqlite::Result<()> {
     conn.execute(
-        "INSERT INTO analytics_rollups (universe_key, day, metrics, dims, updated_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5) \
+        "INSERT INTO analytics_rollups (universe_key, day, metrics, dims, path_private, updated_at) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6) \
          ON CONFLICT(universe_key, day) DO UPDATE SET \
-           metrics = excluded.metrics, dims = excluded.dims, updated_at = excluded.updated_at",
+           metrics = excluded.metrics, dims = excluded.dims, \
+           path_private = excluded.path_private, updated_at = excluded.updated_at",
         params![
             universe,
             day,
             metrics,
             dims,
+            path_private as i64,
             chrono::Utc::now().to_rfc3339()
         ],
     )?;
     Ok(())
+}
+
+/// True when the request carries a valid CO_ROLLUP_TOKEN bearer.
+fn is_admin_authed(headers: &HeaderMap) -> bool {
+    let Ok(expected) = std::env::var("CO_ROLLUP_TOKEN") else {
+        return false;
+    };
+    let auth = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    auth == format!("Bearer {expected}")
 }
 
 /// POST /api/v1/analytics/public/rollups — recebe um DailyRollup consentido (sem PII)
@@ -497,7 +751,7 @@ pub async fn rollups_ingest_handler(
     let dims = serde_json::to_string(&body.dims).unwrap_or_else(|_| "{}".to_string());
     {
         let storage = state.core.storage.lock();
-        if upsert_rollup(storage.conn(), &u, &body.day, &metrics, &dims).is_err() {
+        if upsert_rollup(storage.conn(), &u, &body.day, &metrics, &dims, body.private).is_err() {
             return (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(serde_json::json!({"error": "db error"})),
@@ -505,7 +759,6 @@ pub async fn rollups_ingest_handler(
                 .into_response();
         }
     }
-    // invalida o cache de summary (qualquer universe/days)
     summary_cache()
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -518,7 +771,6 @@ pub async fn rollups_ingest_handler(
 }
 
 pub fn query_public_recent(conn: &Connection, limit: u32) -> PublicRecent {
-    // ts as milliseconds since epoch; country/city are NULL until CO-178
     let events: Vec<RecentEvent> = conn
         .prepare(&format!(
             "SELECT \
@@ -555,11 +807,13 @@ pub fn query_public_recent(conn: &Connection, limit: u32) -> PublicRecent {
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /api/v1/analytics/public/summary?days=N
+/// GET /api/v1/analytics/public/summary?days=N&include_private=true
 ///
 /// `days` clamped to [1, 365], default 30. Returns 400 for days=0.
+/// `include_private=true` requires CO_ROLLUP_TOKEN bearer auth; silently ignored otherwise.
 pub async fn summary_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<SummaryParams>,
 ) -> Result<Json<PublicSummary>, Response> {
     let raw = params.days.unwrap_or(30);
@@ -572,7 +826,30 @@ pub async fn summary_handler(
     }
     let days = raw.min(365);
     let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
-    let key = (universe.clone(), days);
+    let include_private = params.include_private.unwrap_or(false) && is_admin_authed(&headers);
+
+    if include_private {
+        crate::atividade::log_atividade(
+            state.clone(),
+            crate::atividade::Atividade {
+                acao: crate::atividade::Acao::Ler,
+                entidade: "analytics".to_string(),
+                entidade_id: Some("private_path_viewed".to_string()),
+                before: None,
+                after: Some(serde_json::json!({
+                    "event": "analytics.private_path_viewed",
+                    "universe": universe,
+                    "days": days,
+                })),
+                tipo: crate::atividade::Tipo::Sistema,
+                user_id: None,
+                ip: None,
+                user_agent: None,
+            },
+        );
+    }
+
+    let key = (universe.clone(), days, include_private);
 
     {
         let cache = summary_cache().lock().unwrap_or_else(|e| e.into_inner());
@@ -585,7 +862,7 @@ pub async fn summary_handler(
 
     let data = {
         let storage = state.core.storage.lock();
-        query_universe_summary(storage.conn(), &universe, days)
+        query_universe_summary(storage.conn(), &universe, days, include_private)
     };
 
     {
@@ -636,6 +913,20 @@ pub async fn recent_handler(
         );
     }
 
+    Json(data)
+}
+
+/// GET /api/v1/analytics/public/funnel?days=N
+pub async fn funnel_handler(
+    State(state): State<AppState>,
+    Query(params): Query<FunnelParams>,
+) -> Json<FunnelResponse> {
+    let days = params.days.unwrap_or(30).clamp(1, 365);
+    let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
+    let data = {
+        let storage = state.core.storage.lock();
+        query_funnel(storage.conn(), &universe, days)
+    };
     Json(data)
 }
 
@@ -842,6 +1133,7 @@ pub fn router() -> Router<AppState> {
         .route("/recent", get(recent_handler))
         .route("/popularity", get(popularity_handler))
         .route("/rollups", post(rollups_ingest_handler))
+        .route("/funnel", get(funnel_handler))
 }
 // Tests
 // ---------------------------------------------------------------------------
@@ -895,6 +1187,101 @@ mod tests {
         .unwrap();
     }
 
+    // --- CO-378: privacy helpers ---
+
+    #[test]
+    fn test_is_private_path_matches_drafts() {
+        assert!(is_private_path("/blog/_drafts/my-post"));
+        assert!(is_private_path("/content/_proposals/idea"));
+        assert!(is_private_path("/app/_smoke/test"));
+        assert!(is_private_path("/app/_t/token"));
+        assert!(is_private_path("/app/_proof/check"));
+        assert!(is_private_path("/probe/health"));
+    }
+
+    #[test]
+    fn test_is_private_path_public_paths_not_matched() {
+        assert!(!is_private_path("/about"));
+        assert!(!is_private_path("/blog/my-post"));
+        assert!(!is_private_path("/"));
+        assert!(!is_private_path("/public/page"));
+    }
+
+    #[test]
+    fn test_redact_path_deterministic() {
+        let a = redact_path("/_drafts/secret");
+        let b = redact_path("/_drafts/secret");
+        assert_eq!(a, b, "same path must produce same redacted token");
+        assert!(a.starts_with("<private-path-"), "must use expected prefix");
+        assert_eq!(a.len(), "<private-path-".len() + 16 + 1, "hex16 + '>'");
+    }
+
+    #[test]
+    fn test_redact_path_different_for_different_paths() {
+        let a = redact_path("/_drafts/foo");
+        let b = redact_path("/_drafts/bar");
+        assert_ne!(a, b, "different paths must produce different tokens");
+    }
+
+    #[test]
+    fn test_top_pages_filters_private_paths_by_default() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/public-page", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/_drafts/secret", 0);
+        let m = "(universe_key = 'artelonga' OR path LIKE '/artelonga/%')";
+        let win = "AND timestamp >= datetime('now', '-30 days')";
+        let pages = build_top_pages(&conn, m, win, false);
+        let public_paths: Vec<&str> = pages
+            .iter()
+            .filter(|p| p.private != Some(true))
+            .map(|p| p.path.as_str())
+            .collect();
+        assert!(
+            public_paths.contains(&"/public-page"),
+            "public path must appear"
+        );
+        assert!(
+            !public_paths.contains(&"/_drafts/secret"),
+            "raw private path must not appear"
+        );
+        // private traffic aggregated as single "(private)" entry
+        let private_cluster = pages
+            .iter()
+            .any(|p| p.path == "(private)" && p.private == Some(true));
+        assert!(private_cluster, "must have a (private) cluster entry");
+    }
+
+    #[test]
+    fn test_top_pages_include_private_shows_redacted_hashes() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/public-page", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/_drafts/secret", 0);
+        let m = "(universe_key = 'artelonga' OR path LIKE '/artelonga/%')";
+        let win = "AND timestamp >= datetime('now', '-30 days')";
+        let pages = build_top_pages(&conn, m, win, true);
+        let paths: Vec<&str> = pages.iter().map(|p| p.path.as_str()).collect();
+        assert!(paths.contains(&"/public-page"), "public path must appear");
+        // Raw private path must NOT appear; redacted hash must appear instead
+        assert!(
+            !paths.contains(&"/_drafts/secret"),
+            "raw private path must not appear even in admin mode"
+        );
+        let has_redacted = pages
+            .iter()
+            .any(|p| p.path.starts_with("<private-path-") && p.private == Some(true));
+        assert!(has_redacted, "redacted hash entry must appear for admin");
+    }
+
+    #[test]
+    fn test_aggregate_counts_unaffected_by_privacy() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/public", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/_drafts/secret", 0);
+        let s = query_public_summary(&conn, 30);
+        // Total views = 2 (both public and private paths are counted in aggregates)
+        assert_eq!(s.views, 2, "aggregate counts must include private paths");
+    }
+
     // --- summary shape ---
 
     #[test]
@@ -938,10 +1325,8 @@ mod tests {
     #[test]
     fn test_summary_returning_visitors() {
         let conn = create_test_db();
-        // visitor v1 on two different days → returning
         insert_pageview(&conn, "artelonga", "v1", "s1", "/", 0);
         insert_pageview(&conn, "artelonga", "v1", "s2", "/", -1);
-        // visitor v2 only once → not returning
         insert_pageview(&conn, "artelonga", "v2", "s3", "/", 0);
         let s = query_public_summary(&conn, 30);
         assert_eq!(s.returning, 1);
@@ -972,7 +1357,6 @@ mod tests {
     fn test_summary_geo_empty_without_co178_columns() {
         let conn = create_test_db();
         insert_pageview(&conn, "artelonga", "v1", "s1", "/", 0);
-        // No country/city columns → geo must be empty, no panic
         let s = query_public_summary(&conn, 7);
         assert!(
             s.geo.is_empty(),
@@ -1055,7 +1439,8 @@ mod tests {
             "CREATE TABLE analytics_rollups (
                 universe_key TEXT NOT NULL, day TEXT NOT NULL,
                 metrics TEXT NOT NULL, dims TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL, PRIMARY KEY (universe_key, day));",
+                updated_at TEXT NOT NULL, path_private INTEGER DEFAULT 0,
+                PRIMARY KEY (universe_key, day));",
         )
         .unwrap();
     }
@@ -1065,22 +1450,21 @@ mod tests {
 
     #[test]
     fn test_universe_bridge_matches_historical_path() {
-        // historical /yuri served by apex: universe_key='artelonga', path '/yuri/...'
         let conn = create_test_db();
         insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", 0);
         insert_pageview(&conn, "artelonga", "v2", "s2", "/yuri/resume", 0);
-        insert_pageview(&conn, "artelonga", "v3", "s3", "/", 0); // not yuri
-        let s = query_universe_summary(&conn, "yuri", 7);
+        insert_pageview(&conn, "artelonga", "v3", "s3", "/", 0);
+        let s = query_universe_summary(&conn, "yuri", 7, false);
         assert_eq!(s.views, 2, "yuri bridges historical /yuri/* paths");
-        let s_art = query_universe_summary(&conn, "artelonga", 7);
+        let s_art = query_universe_summary(&conn, "artelonga", 7, false);
         assert_eq!(s_art.views, 3, "artelonga still counts all");
     }
 
     #[test]
     fn test_universe_matches_direct_universe_key() {
         let conn = create_test_db();
-        insert_pageview(&conn, "yuri", "v1", "s1", "/", 0); // new surface: universe_key='yuri'
-        let s = query_universe_summary(&conn, "yuri", 7);
+        insert_pageview(&conn, "yuri", "v1", "s1", "/", 0);
+        let s = query_universe_summary(&conn, "yuri", 7, false);
         assert_eq!(s.views, 1);
     }
 
@@ -1088,16 +1472,17 @@ mod tests {
     fn test_rollup_overlay_extends_timeseries_and_totals() {
         let conn = create_test_db();
         create_rollups_table(&conn);
-        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", -5); // historical (pre-cutover)
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", -5);
         upsert_rollup(
             &conn,
             "yuri",
             &today(),
             r#"{"pageviews":10,"visitors":4,"sessions":6}"#,
             "{}",
+            false,
         )
         .unwrap();
-        let s = query_universe_summary(&conn, "yuri", 30);
+        let s = query_universe_summary(&conn, "yuri", 30, false);
         assert_eq!(s.views, 11, "1 historical event + 10 rollup pageviews");
         assert!(s.visitors >= 4, "rollup visitors added");
         assert!(s.timeseries.len() >= 2, "historical day + rollup day");
@@ -1109,12 +1494,11 @@ mod tests {
 
     #[test]
     fn test_rollup_cutover_excludes_same_day_events() {
-        // events on/after the cutover (first rollup day) are NOT double-counted
         let conn = create_test_db();
         create_rollups_table(&conn);
-        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", 0); // TODAY (= cutover)
-        upsert_rollup(&conn, "yuri", &today(), r#"{"pageviews":10}"#, "{}").unwrap();
-        let s = query_universe_summary(&conn, "yuri", 30);
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/yuri/", 0);
+        upsert_rollup(&conn, "yuri", &today(), r#"{"pageviews":10}"#, "{}", false).unwrap();
+        let s = query_universe_summary(&conn, "yuri", 30, false);
         assert_eq!(
             s.views, 10,
             "same-day event excluded; rollup wins; no double count"
@@ -1125,11 +1509,79 @@ mod tests {
     fn test_upsert_rollup_idempotent_latest_wins() {
         let conn = create_test_db();
         create_rollups_table(&conn);
-        upsert_rollup(&conn, "yuri", "2026-06-01", r#"{"pageviews":5}"#, "{}").unwrap();
-        upsert_rollup(&conn, "yuri", "2026-06-01", r#"{"pageviews":8}"#, "{}").unwrap();
+        upsert_rollup(
+            &conn,
+            "yuri",
+            "2026-06-01",
+            r#"{"pageviews":5}"#,
+            "{}",
+            false,
+        )
+        .unwrap();
+        upsert_rollup(
+            &conn,
+            "yuri",
+            "2026-06-01",
+            r#"{"pageviews":8}"#,
+            "{}",
+            false,
+        )
+        .unwrap();
         let r = query_rollups(&conn, "yuri", 3650);
         assert_eq!(r.len(), 1, "one row per (universe, day)");
         assert_eq!(r[0].1.pageviews, 8, "latest upsert wins");
+    }
+
+    #[test]
+    fn test_private_rollup_excluded_from_default_rollups() {
+        let conn = create_test_db();
+        create_rollups_table(&conn);
+        upsert_rollup(
+            &conn,
+            "yuri",
+            "2026-06-01",
+            r#"{"pageviews":5}"#,
+            "{}",
+            false,
+        )
+        .unwrap();
+        upsert_rollup(
+            &conn,
+            "yuri",
+            "2026-06-02",
+            r#"{"pageviews":3}"#,
+            "{}",
+            true,
+        )
+        .unwrap();
+        let public = query_rollups(&conn, "yuri", 3650);
+        assert_eq!(
+            public.len(),
+            1,
+            "private rollup excluded from query_rollups"
+        );
+        assert_eq!(public[0].1.pageviews, 5);
+        let all = query_rollups_all(&conn, "yuri", 3650);
+        assert_eq!(all.len(), 2, "query_rollups_all includes both");
+    }
+
+    #[test]
+    fn test_funnel_private_paths_in_total_not_by_path() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/public", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/_drafts/hidden", 0);
+        let f = query_funnel(&conn, "artelonga", 30);
+        assert_eq!(f.total_views, 2, "total includes private paths");
+        assert_eq!(f.total_private_views, 1, "private count is tracked");
+        let by_path_paths: Vec<&str> = f.by_path.iter().map(|e| e.path.as_str()).collect();
+        assert!(
+            !by_path_paths.contains(&"/_drafts/hidden"),
+            "private path must not appear in by_path"
+        );
+        assert!(
+            by_path_paths.contains(&"/public"),
+            "public path must appear in by_path"
+        );
     }
 
     #[test]
@@ -1299,6 +1751,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_include_private_without_auth_ignored() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/analytics/public/summary?include_private=true")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        // Without CO_ROLLUP_TOKEN, include_private=true must be silently ignored → 200 OK
+        assert_eq!(
+            resp.status(),
+            AxumStatus::OK,
+            "include_private without auth must return 200, not an error"
+        );
+    }
+
+    #[tokio::test]
     async fn test_recent_limit_200_returns_200() {
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
@@ -1319,6 +1793,30 @@ mod tests {
         let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
         assert!(json["events"].is_array());
         assert!(json["events"].as_array().unwrap().len() <= 200);
+    }
+
+    #[tokio::test]
+    async fn test_funnel_returns_200() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/analytics/public/funnel")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["total_views"].is_number());
+        assert!(json["total_private_views"].is_number());
+        assert!(json["by_path"].is_array());
     }
 
     #[tokio::test]
@@ -1369,7 +1867,6 @@ mod tests {
             )
             .await
             .unwrap();
-        // CORS preflight must not return 405
         assert_ne!(
             resp.status(),
             AxumStatus::METHOD_NOT_ALLOWED,
