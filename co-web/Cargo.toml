@@ -72,6 +72,10 @@ path = "src/bin/import_quilombo.rs"
 name = "split_db"
 path = "src/bin/split_db.rs"
 
+[[bin]]
+name = "migrate_check"
+path = "src/bin/migrate_check.rs"
+
 [features]
 default = []
 blob-r2 = ["co/deploy-r2"]
