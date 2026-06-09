@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-394",
+  "title": "Seed relation extraction — co launch populates entry_relations (graph edges)",
+  "type": "user-story",
+  "status": "in_progress",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-394.md",
+  "branch": "feat/CO-394-seed-relation-extraction",
+  "merge_sha": "3cb790d77a03b4684cf90df35823152b07781191",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/178",
+    "number": 178
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-09T19:11:30Z",
+  "files_changed": 3,
+  "lines_added": 169,
+  "lines_removed": 0,
+  "labels": [
+    "type:fix",
+    "module:web",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-394 — Seed relation extraction — `co launch` populates the knowledge graph\n\nCLI-seeded universes (`co launch` / `seed_universe_from_local_repo`) now extract\n`[[wikilink]]` relations during seeding, in parity with the server vault/entry write\npath. Previously the seed ingested entry bodies but left `entry_relations` empty, so the\nknowledge-graph view rendered nodes with **zero edges** for every locally-seeded universe\n(grcsamazonia, comunicacao, mbya, …).\n\n- After each entry upsert, `extract_body_wikilinks(&entry.body)` runs and\n  `RelationIndex::replace_all` stores the edges.\n- Same-universe targets are resolved relative to the linking entry's directory\n  (`resolve_entry_rel`), normalizing `.`/`..`, so the stored `to_path` matches stored\n  entry paths (which carry the content-subdir prefix) — otherwise edges dangle and the\n  graph builder drops them.\n\nVerified on grcsamazonia: `entry_relations` 0 → 20, graph 0 → 18 edges across 15/17 docs.\n\n### Why\n\nThe grafo / garden view is a core CO surface, but it was empty for every CLI-seeded\nuniverse because relation extraction lived only on the HTTP write path. This makes\n`co launch` produce a fully linked graph from the same markdown.",
+  "summary": "As Anyone running a universe locally via `co launch`",
+  "co_auto_version": "0.1.0"
+}
