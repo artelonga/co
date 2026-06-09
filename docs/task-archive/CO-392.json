@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-392",
+  "title": "co push — CLI → remote universe CRUD over the Vault API (the missing edge)",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-392.md",
+  "branch": "docs/CO-392-universe-crud",
+  "merge_sha": "a891dc8ddcb0303cd49a044de15635083a06c263",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/174",
+    "number": 174
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-09T17:17:05Z",
+  "files_changed": 2,
+  "lines_added": 200,
+  "lines_removed": 0,
+  "labels": [
+    "type:feat",
+    "module:cli",
+    "module:collab"
+  ],
+  "changelog_entry": null,
+  "summary": "As A universe author working locally with `co launch` / jujutsu",
+  "co_auto_version": "0.1.0"
+}
