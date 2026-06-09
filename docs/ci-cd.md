@@ -39,6 +39,11 @@ What runs, what breaks it, and how to catch each failure *before* it goes red.
    push back-to-back; the earlier run is superseded and shows as failure. Benign (no code
    gate failed). If the noise matters, add a `concurrency:` group to `ci.yml`.
 
+7. **Flaky server-readiness timeout** — `testserver_tests` spawn the real `co` binary and
+   poll `/api/health`; the 30 s deadline (`tests/testkit.rs wait_ready`) flaked under CI
+   load when cold-boot + migrations + seed ran long (e.g. `test_ts_vault_write_and_read`,
+   2026-06-09). **Fixed:** deadline raised to 90 s.
+
 ## Preflight — mirror the gates locally
 
 ```bash
