@@ -5,6 +5,296 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.43.0] — 2026-06-09 — federated event bus + sync + privacy
+
+## CO-376 — Pre-prod migration validation (MVP) — `migrate_check` against a staging snapshot
+
+Adds a Rust validator that applies the current binary's migrations against a **copy** of a
+staging snapshot and runs read-only smoke assertions — catching the 1.22.4 class of
+incident (unguarded freshly-migrated-column read) before prod, without touching any live DB.
+
+- **New bin `co-web/src/bin/migrate_check.rs`** — `migrate_check <extracted-snapshot-dir>`:
+  records a pre-migration baseline, runs meta migrations via `Storage::new` (+ entry-split),
+  opens each universe to run pool migrations, then asserts the wave's tables/columns are
+  selectable (`bridge_state` v65, `sync_conflicts` v67, `universes.source_*` v68,
+  `entries.source_marker` pool v17), the `yuri` admin user survived, stable counts are
+  unchanged, and the conserved entry total (meta + all universes) drifts ≤ ±5%. Exit 0 iff
+  all pass, 1 on any failure, 2 on bad invocation.
+- **`docs/migration-checklist.md`** — the CI-sandbox flow: obtain a staging snapshot
+  (admin backup endpoint or nightly artifact), extract, run `migrate_check`, interpret.
+
+Execution is **CI-sandbox** — operates on an extracted copy, never on staging's live DB
+(resolves the spec's self-contradiction between its SSH-based Flow text and its "no live
+data touched" acceptance).
+
+### Why
+
+The federation wave (v65–v68 + pool v17) applies to live data for the first time at the
+v3.0 cut. `migrate_check` is the go/no-go gate for that.
+
+### Deferred (CO-376 follow-up)
+
+Auto-gating GitHub Action on migration-touching PRs; `GET /api/v1/admin/migrations/snapshots`;
+custom `migrations/<vN>.smoke.sql`; 24h retention automation.
+
+## CO-378 — Privacy: respect noindex/nofollow in analytics rollups + funnel reports — strip private paths
+
+Added path-level privacy redaction to the analytics pipeline so private event pages
+(noindex/nofollow or matching `/_drafts/`, `/_proposals/`, `/_smoke/`, etc.) are no
+longer exposed in admin dashboards or the public summary endpoint.
+
+### Changes
+
+- **Migration v69**: adds `path_private INTEGER DEFAULT 0` to `analytics_rollups`.
+  Future rollup producers can send `private: true` to mark a universe/day as private.
+
+- **Rollup ingest** (`POST /api/v1/analytics/public/rollups`): accepts optional
+  `private: bool` field (backward-compatible; defaults to false). Sets `path_private=1`
+  on the upserted row.
+
+- **Public summary** (`GET /api/v1/analytics/public/summary`): default response strips
+  private paths from `top_pages` and aggregates them as a single `{path: "(private)"}` entry.
+  Scalar aggregates (views, visitors, sessions, geo) remain unfiltered.
+  `?include_private=true` with a valid `CO_ROLLUP_TOKEN` bearer returns deterministic
+  redacted hashes (`<private-path-{hash16}>`) and logs an `analytics.private_path_viewed`
+  atividade event.
+
+- **Funnel report** (`GET /api/v1/analytics/public/funnel`): new endpoint. Private paths
+  contribute to `total_views` and `total_private_views` but are excluded from `by_path`.
+
+- **Gestão analytics resumo** (`GET /api/v1/gestao/analytics/resumo`): new admin-only
+  endpoint. Returns analytics summary with private paths clustered as a single
+  `(private)` entry showing total views and page count. Logs
+  `analytics.private_path_viewed` atividade on each call. (Mounted under
+  `/analytics/` because `/api/v1/gestao/resumo` is the CO-360 dashboard endpoint.)
+
+- **OpenAPI**: documents `?include_private` flag on summary, new funnel endpoint,
+  new gestao/analytics/resumo endpoint.
+
+Note: the "Resumo Analytics" card originally added to the old `/gestao` page was
+dropped in rebase — CO-360 replaced that page with the four-tab SPA. Surfacing the
+private-cluster view in the SPA is follow-up work under CO-360's surface.
+
+### Why
+
+`/2026-05-29/` slide-deck for "1º Encontro · Neuro Notebook Brasil" is `noindex,nofollow`
+but the platform's own admin surface was revealing: (a) that the URL exists, (b) traffic
+count, (c) forensic details like JS error counts and visitor origin. The page's meta
+intent (`noindex,nofollow`) was violated by the platform's own analytics dashboard.
+
+BaaS sovereignty principle: the brain owner controls what's visible — not just to search
+engines but to platform operators.
+
+## CO-383 — Yggdrasil notes ingestion — event-driven subscription via federated bus (no polling)
+
+Yggdrasil notes now flow into CO's `yggdrasil` universe in real-time via the CO-384
+federated bus bridge — zero polling, sub-300ms latency.
+
+- Migration v68 adds `source_kind`, `source_url`, `source_last_event_at` columns to
+  `universes` and backfills the `yggdrasil` row as `source_kind = 'event-bus'`.
+- New EDA subscriber `yggdrasil_notes` listens for `entry.{created,updated,deleted}`
+  events on the `yggdrasil` universe key and upserts/soft-deletes entries at
+  `instances/<instance_id>/notes/<slug>.md` with `source_marker = 'yggdrasil-live'`.
+- Stamps `source_last_event_at` on the universe row after each ingested event.
+- Re-publishes `sync.yggdrasil.note_ingested` to CO's own bus so the live timeline
+  (/agora, CO-381) picks up each ingestion in real time.
+- Write attempts (POST/PUT/DELETE) on any `source_kind = 'event-bus'` universe return
+  HTTP 405 with a structured `read_only_universe` error body pointing to the source.
+- SPA shows a sticky "Somente-leitura — publicado via Yggdrasil" banner with an
+  "Editar na origem" link whenever a read-only event-bus universe is viewed.
+
+### Why
+
+The Yggdrasil-keeps-notes architecture decision (memory `project_yggdrasil_absorption`)
+requires CO to be a subscriber, not a writer. Polling was explicitly rejected
+(memory `feedback_no_polling`). The CO-384 federated WS bridge provides durable,
+replay-on-reconnect event delivery — CO hooks into it with a single subscriber task.
+
+## CO-384 — Federated event bus bridge — cross-deployment WS pub/sub (CO ↔ Yggdrasil ↔ devices)
+
+Adds a persistent bidirectional WebSocket bridge layer on top of CO-380's local `EdaBus`,
+enabling cross-deployment event federation with no polling.
+
+**New endpoint:** `GET /api/v1/events/bridge` — trusted peer deployments connect here
+(trust enforced by `CO_BRIDGE_TRUSTED_SOURCES`; unknown sources receive HTTP 403).
+
+**Protocol:** `co.eda.bridge.v1` sub-protocol. On connect, peers send a
+`ReplayRequest{last_received_id}` to drain missed events from `event_log` (idempotent,
+ULID-keyed). Bidirectional `FederatedEvent` messages flow continuously after replay.
+
+**Privacy rules at bridge level:** only `Public` and `UniverseMembers` events are
+federated. `UserOnly`, `UniverseOwner`, and `System` events remain local.
+
+**Loop guard:** `hop_count > 3` → event dropped silently.
+
+**Outbound client:** `BridgeManager` reads `CO_BRIDGE_OUTBOUND_TOKENS_JSON` at startup
+and spawns one task per destination. Reconnects with exponential backoff (1s→2s→4s→8s→16s→max 30s).
+
+**Migration v65:** `bridge_state` table tracks per-(source,target) connection state and
+`last_delivered_event_id` for replay on reconnect.
+
+**Telemetry:** `bridge.connected`, `bridge.disconnected`, `bridge.event_received`,
+`bridge.event_sent`, `bridge.replay_completed` — all `Public` visibility, visible in `/agora`.
+
+**Docs:** `docs/federated-eda.md` — full protocol, deployment, and trust setup guide.
+OpenAPI: `/api/v1/events/bridge` documented in `docs/api/openapi.yaml`.
+
+### Why
+
+Eliminates polling for cross-deployment sync (CO-380 was in-process only). A note edited
+in Yggdrasil now arrives on CO's live timeline (`/agora`) within 300ms over LAN. CO-383
+(Yggdrasil ingest consumer) becomes a thin subscriber on top of this transport primitive.
+CO-385 (conflict resolution, v3.1) will consume the event stream surfaced here.
+
+## CO-385 — CRUD action tree — Mac-style UPSERT conflict resolution for cross-device sync
+
+Implements the full conflict resolution layer for cross-device sync.
+
+### What changed
+
+- **5 ConflictKind variants** (`both_modified`, `local_only_new`, `remote_only_new`,
+  `local_deleted_remote_modified`, `local_modified_remote_deleted`) classified by
+  `detect_conflicts()` in `co-web/src/sync/conflict_detector.rs`.
+
+- **7 resolution actions** (`keep_both`, `ignore`, `replace`, `update`, `upsert`,
+  `accept_delete`, `keep_local`) implemented in `conflict_resolver.rs`. Each
+  action writes the entry change atomically, marks the conflict resolved in the
+  `sync_conflicts` table, and publishes a `sync.conflict_resolved` event.
+
+- **Hash-skip optimization**: same `body_hash` between local and remote skips the
+  conflict pipeline entirely, both in `detect_conflicts()` and in the CO-384
+  bridge handler.
+
+- **3-way text merge** for `update`/`upsert`: line-based merge with git-style
+  conflict markers (`<<<<<<< / ======= / >>>>>>>`) when both sides diverged.
+
+- **Bulk-apply**: `POST /api/v1/sync/conflicts/{id}/resolve` accepts
+  `apply_to_all_matching: true` to propagate a single action to all sibling
+  conflicts of the same `ConflictKind`.
+
+- **Migration v67**: `sync_conflicts` table + two indexes (unresolved, per-universe).
+
+- **REST API**:
+  - `GET  /api/v1/me/sync/conflicts?universe=<key>`
+  - `POST /api/v1/sync/conflicts/{id}/resolve`
+
+- **EDA events**: `sync.conflict_detected` (bridge), `sync.conflict_resolved`
+  (resolver), `sync.conflict_resolved_bulk` (bulk route).
+
+- **CO-383 integration**: yggdrasil universe defaults to `replace` (remote wins).
+
+- **CO-381 integration**: `wireLiveConflictCta()` shows "Resolver →" toast in
+  the live timeline on `sync.conflict_detected`.
+
+- **SPA UI** (`conflicts.js`): conflict panel with action buttons filtered by
+  `ConflictKind`, bulk-apply checkbox, live toast CTA.
+
+- **OpenAPI**: `GET /me/sync/conflicts` and `POST /sync/conflicts/{id}/resolve`
+  documented with full `SyncConflict` schema.
+
+- **Docs**: `docs/conflict-resolution.md` — action tree, merge behavior, API,
+  events, DB schema.
+
+### Why
+
+CO-385 is the core reliability primitive for Vault-based cross-device sync.
+Without explicit conflict resolution, concurrent writes from two devices silently
+overwrite each other. The Mac-style action tree gives users full control without
+requiring a manual `git merge`.
+
+## CO-389 — Live-event layer over comunicacao universe — Yggdrasil lexicon salas as event source
+
+Subscribes the CO EDA bus to Yggdrasil lexicon sala events, acting as a live overlay
+on top of CO-337's 15-min sister-repo sync. Terms published in a sala appear in CO's
+`comunicacao` universe within 1s; sala activity events surface in `/agora` within 300ms.
+
+### What changed
+
+- **Migration v66** (meta.db marker) + **universe pool v17**: additive `source_marker TEXT`
+  column on the per-universe `entries` table.  Tracks which channel last wrote a row:
+  `'yggdrasil-live'` (live overlay), `'remote-git'` (CO-337 poll), or `NULL` (legacy).
+
+- **`co-web/src/eda/subscribers/comunicacao_live.rs`** (new): two subscribers —
+  - *Term subscriber*: listens for `entry.{created,updated,deleted}` on the `comunicacao`
+    universe (path must contain `_users/` — sala-published terms).  Hash-dedup skips
+    writes when CO-337 already has the same bytes.
+  - *Sala activity subscriber*: listens for `yggdrasil.sala.*` and re-publishes as
+    `sync.yggdrasil.sala.*` for `/agora` with no content mutation.
+
+- **`/agora` live.html**: five new event types in `EVT_META` and i18n labels
+  (`sync.comunicacao.term_landed`, `sync.comunicacao.event_dedup_skipped`,
+  `sync.yggdrasil.sala.published`, `sync.yggdrasil.sala.term_contributed`,
+  `sync.yggdrasil.sala.user_joined`).
+
+- **`/gestao/resumo`**: `comunicacao_overlay` field added with counts from `event_log`
+  for overlay-driven vs poll-driven upserts and dedup skips.
+
+- **OpenAPI** (`openapi.yaml`): documented the six `sync.*` event types on the
+  `/api/v1/events` WebSocket endpoint.
+
+### Why
+
+Yggdrasil salas and CO's `comunicacao` universe feed the same lexicon.  CO-337's 15-min
+poll is the durable channel but creates a visible latency floor for sala UX.  This spec
+provides the sub-1s live path without changing universe bindings or durability semantics.
+
+## CO-391 — Real-axum WebSocket bridge handshake integration test
+
+Adds the missing integration-test layer between the `is_trusted_in` unit tests and
+full E2E for the CO-384 federated bridge. Boots the real axum router on an ephemeral
+`127.0.0.1` port and dials `/api/v1/events/bridge` with a real `tokio_tungstenite`
+client speaking `co.eda.bridge.v1`.
+
+Coverage:
+
+- **Happy path** — trusted source + non-empty token + subprotocol → `101`, subprotocol
+  echo, and `bridge.connected` observed on the local bus (the handler publishes it to
+  the bus, not down the socket — the CO-391 draft's "first frame" assumption was wrong).
+- **403** — untrusted source rejected.
+- **401** — empty token rejected.
+- **400** — GET without `Connection: Upgrade` rejected by axum's `WebSocketUpgrade`
+  extractor (tested via `oneshot`, since a real WS client always sends the header).
+
+The 400 case is the exact failure observed locally on 2026-06-09 during pre-flight for
+the v3.0 federation cut (HTTP 400 "Connection header did not include 'upgrade'"), which
+YG-119's lenient tokio-tungstenite mock had masked. If a YG-122-class regression were
+reintroduced on the CO side, these tests fail loudly at PR time.
+
+No behavior change — test-only. Reuses the existing `127.0.0.1:0` + `axum::serve` +
+`connect_async` harness pattern already used by `social/sync_ws.rs` and
+`admin/analytics_routes.rs`; no new deps (tokio-tungstenite already a dev-dep).
+
+### Why
+
+CO unit tests covered only the trust-list predicate — no `WebSocketUpgrade`, no real
+socket. The handshake contract was enforced from neither end until YG-122 + this test
+landed. This is the unit/integration layer; CO-374 (Playwright staging) remains the
+separate prod-shape backstop.
+
+## CO-394 — Seed relation extraction — `co launch` populates the knowledge graph
+
+CLI-seeded universes (`co launch` / `seed_universe_from_local_repo`) now extract
+`[[wikilink]]` relations during seeding, in parity with the server vault/entry write
+path. Previously the seed ingested entry bodies but left `entry_relations` empty, so the
+knowledge-graph view rendered nodes with **zero edges** for every locally-seeded universe
+(grcsamazonia, comunicacao, mbya, …).
+
+- After each entry upsert, `extract_body_wikilinks(&entry.body)` runs and
+  `RelationIndex::replace_all` stores the edges.
+- Same-universe targets are resolved relative to the linking entry's directory
+  (`resolve_entry_rel`), normalizing `.`/`..`, so the stored `to_path` matches stored
+  entry paths (which carry the content-subdir prefix) — otherwise edges dangle and the
+  graph builder drops them.
+
+Verified on grcsamazonia: `entry_relations` 0 → 20, graph 0 → 18 edges across 15/17 docs.
+
+### Why
+
+The grafo / garden view is a core CO surface, but it was empty for every CLI-seeded
+universe because relation extraction lived only on the HTTP write path. This makes
+`co launch` produce a fully linked graph from the same markdown.
+
+
 ## [2.42.0] — 2026-06-08 — Unified gestão + cross-env identity + live timeline
 
 ## CO-360 — Unified /gestao/resumo dashboard — collapse 6 admin routes into one SPA + endpoint
