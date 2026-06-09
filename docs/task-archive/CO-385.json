@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-385",
+  "title": "CRUD action tree — Mac-style UPSERT conflict resolution for cross-device sync",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-385.md",
+  "branch": "feat/CO-385-crud-action-tree-mac-style-upsert-confli",
+  "merge_sha": "8ae20167384aa7b834e92dd4f5eac0c4ff44244e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/170",
+    "number": 170
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-08T23:53:12Z",
+  "files_changed": 13,
+  "lines_added": 1958,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:sync",
+    "module:eda",
+    "module:conflict",
+    "module:spa"
+  ],
+  "changelog_entry": "## CO-385 — CRUD action tree — Mac-style UPSERT conflict resolution for cross-device sync\n\nImplements the full conflict resolution layer for cross-device sync.\n\n### What changed\n\n- **5 ConflictKind variants** (`both_modified`, `local_only_new`, `remote_only_new`,\n  `local_deleted_remote_modified`, `local_modified_remote_deleted`) classified by\n  `detect_conflicts()` in `co-web/src/sync/conflict_detector.rs`.\n\n- **7 resolution actions** (`keep_both`, `ignore`, `replace`, `update`, `upsert`,\n  `accept_delete`, `keep_local`) implemented in `conflict_resolver.rs`. Each\n  action writes the entry change atomically, marks the conflict resolved in the\n  `sync_conflicts` table, and publishes a `sync.conflict_resolved` event.\n\n- **Hash-skip optimization**: same `body_hash` between local and remote skips the\n  conflict pipeline entirely, both in `detect_conflicts()` and in the CO-384\n  bridge handler.\n\n- **3-way text merge** for `update`/`upsert`: line-based merge with git-style\n  conflict markers (`<<<<<<< / ======= / >>>>>>>`) when both sides diverged.\n\n- **Bulk-apply**: `POST /api/v1/sync/conflicts/{id}/resolve` accepts\n  `apply_to_all_matching: true` to propagate a single action to all sibling\n  conflicts of the same `ConflictKind`.\n\n- **Migration v67**: `sync_conflicts` table + two indexes (unresolved, per-universe).\n\n- **REST API**:\n  - `GET  /api/v1/me/sync/conflicts?universe=<key>`\n  - `POST /api/v1/sync/conflicts/{id}/resolve`\n\n- **EDA events**: `sync.conflict_detected` (bridge), `sync.conflict_resolved`\n  (resolver), `sync.conflict_resolved_bulk` (bulk route).\n\n- **CO-383 integration**: yggdrasil universe defaults to `replace` (remote wins).\n\n- **CO-381 integration**: `wireLiveConflictCta()` shows \"Resolver →\" toast in\n  the live timeline on `sync.conflict_detected`.\n\n- **SPA UI** (`conflicts.js`): conflict panel with action buttons filtered by\n  `ConflictKind`, bulk-apply checkbox, live toast CTA.\n\n- **OpenAPI**: `GET /me/sync/conflicts` and `POST /sync/conflicts/{id}/resolve`\n  documented with full `SyncConflict` schema.\n\n- **Docs**: `docs/conflict-resolution.md` — action tree, merge behavior, API,\n  events, DB schema.\n\n### Why\n\nCO-385 is the core reliability primitive for Vault-based cross-device sync.\nWithout explicit conflict resolution, concurrent writes from two devices silently\noverwrite each other. The Mac-style action tree gives users full control without\nrequiring a manual `git merge`.",
+  "summary": "As Yuri editing notes on the laptop offline AND on the phone offline; both reconnect later",
+  "co_auto_version": "0.1.0"
+}
