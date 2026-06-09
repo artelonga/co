@@ -7,9 +7,24 @@ on:
 jobs:
   staging-deploy:
     runs-on: ubuntu-latest
+    # Map the secret to a job-level env so step `if:` can test it. Without the
+    # FLY_API_TOKEN repo secret, flyctl errors "no access token available" and the
+    # job goes red on EVERY push to main. Guard the deploy so the job skips
+    # gracefully (green) when the token is absent, instead of failing perpetually.
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Skip notice (no Fly token)
+        if: ${{ env.FLY_API_TOKEN == '' }}
+        run: |
+          echo "::notice::FLY_API_TOKEN repo secret is not set — skipping staging deploy."
+          echo "To enable staging CD: gh secret set FLY_API_TOKEN --body \"\$(flyctl auth token)\""
+
       - uses: superfly/flyctl-actions/setup-flyctl@master
-      - run: flyctl deploy --config fly.staging.toml --remote-only
-        env:
-          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        if: ${{ env.FLY_API_TOKEN != '' }}
+
+      - name: Deploy to staging
+        if: ${{ env.FLY_API_TOKEN != '' }}
+        run: flyctl deploy --config fly.staging.toml --remote-only
