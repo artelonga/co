@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-383",
+  "title": "Yggdrasil notes ingestion — event-driven subscription via federated bus (no polling)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-383.md",
+  "branch": "feat/CO-383-yggdrasil-notes-ingestion-event-driven-s",
+  "merge_sha": "be80b9f901911fe2f3a5353b32c0fec628216af2",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/171",
+    "number": 171
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-09T04:01:56Z",
+  "files_changed": 18,
+  "lines_added": 614,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:integrations",
+    "module:yggdrasil",
+    "module:eda"
+  ],
+  "changelog_entry": "## CO-383 — Yggdrasil notes ingestion — event-driven subscription via federated bus (no polling)\n\nYggdrasil notes now flow into CO's `yggdrasil` universe in real-time via the CO-384\nfederated bus bridge — zero polling, sub-300ms latency.\n\n- Migration v68 adds `source_kind`, `source_url`, `source_last_event_at` columns to\n  `universes` and backfills the `yggdrasil` row as `source_kind = 'event-bus'`.\n- New EDA subscriber `yggdrasil_notes` listens for `entry.{created,updated,deleted}`\n  events on the `yggdrasil` universe key and upserts/soft-deletes entries at\n  `instances/<instance_id>/notes/<slug>.md` with `source_marker = 'yggdrasil-live'`.\n- Stamps `source_last_event_at` on the universe row after each ingested event.\n- Re-publishes `sync.yggdrasil.note_ingested` to CO's own bus so the live timeline\n  (/agora, CO-381) picks up each ingestion in real time.\n- Write attempts (POST/PUT/DELETE) on any `source_kind = 'event-bus'` universe return\n  HTTP 405 with a structured `read_only_universe` error body pointing to the source.\n- SPA shows a sticky \"Somente-leitura — publicado via Yggdrasil\" banner with an\n  \"Editar na origem\" link whenever a read-only event-bus universe is viewed.\n\n### Why\n\nThe Yggdrasil-keeps-notes architecture decision (memory `project_yggdrasil_absorption`)\nrequires CO to be a subscriber, not a writer. Polling was explicitly rejected\n(memory `feedback_no_polling`). The CO-384 federated WS bridge provides durable,\nreplay-on-reconnect event delivery — CO hooks into it with a single subscriber task.",
+  "summary": "As Yuri running both CO and Yggdrasil — wanting Yggdrasil's notes to flow into CO in real-time, edited locally, with no central polling",
+  "co_auto_version": "0.1.0"
+}
