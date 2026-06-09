@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-395",
+  "title": "construir — universe markdown → Quartz static public site (board stays the app)",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-395.md",
+  "branch": "docs/CO-395-universe-public-site",
+  "merge_sha": "fc92c8f9bd20dc82fbb09dc620ab3863d9d3e01f",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/177",
+    "number": 177
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-09T19:11:56Z",
+  "files_changed": 7,
+  "lines_added": 316,
+  "lines_removed": 5,
+  "labels": [
+    "type:feat",
+    "module:cli",
+    "module:web"
+  ],
+  "changelog_entry": null,
+  "summary": "As A universe owner who wants the content public as a site, not behind the CO board",
+  "co_auto_version": "0.1.0"
+}
