@@ -205,15 +205,20 @@ fn candidate_binary_path() -> PathBuf {
 }
 
 /// Poll `GET <base_url>/api/health` until it returns 2xx or the deadline expires.
+///
+/// 90 s deadline (was 30 s): the test spawns the real compiled `co` binary, which on
+/// a loaded CI runner cold-boots SQLite + runs migrations + seeds before /api/health
+/// turns green. 30 s flaked under CI load (e.g. `test_ts_vault_write_and_read`,
+/// 2026-06-09); 90 s is generous headroom without masking a genuine hang.
 async fn wait_ready(base_url: &str) {
     let client = reqwest::Client::new();
     let url = format!("{base_url}/api/health");
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(90);
 
     loop {
         assert!(
             Instant::now() < deadline,
-            "co server did not become ready within 30 s at {base_url}"
+            "co server did not become ready within 90 s at {base_url}"
         );
         if let Ok(resp) = client.get(&url).send().await {
             if resp.status().is_success() {
