@@ -398,6 +398,15 @@ pub struct Universe {
     /// in their frontmatter. Owner/authenticated callers see all entries.
     #[serde(default)]
     pub anon_published_only: bool,
+    /// CO-383: origin kind for event-bus-backed universes ('event-bus' | 'remote-git' | 'local-only').
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// CO-383: event bus URL (e.g. wss://yggdrasil.artelonga.com.br/api/v1/events).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
+    /// CO-383: ISO timestamp of the last event received from the upstream bus.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_last_event_at: Option<String>,
 }
 
 fn default_visibility() -> String {

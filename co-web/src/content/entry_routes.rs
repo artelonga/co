@@ -730,6 +730,14 @@ pub async fn create_entry(
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
 
+        // CO-383: reject writes on event-bus-backed universes (e.g. yggdrasil notes).
+        if universe.source_kind.as_deref() == Some("event-bus") {
+            return Err(AppError::ReadOnlyUniverse {
+                source_kind: universe.source_kind.unwrap_or_default(),
+                source_url: universe.source_url,
+            });
+        }
+
         // CO-80: quota check — anonymous usage gate or tier-based storage quota.
         if let Some((uid, tier)) = crate::rate_limit::extract_auth_identity(&headers) {
             crate::rate_limit::check_storage_quota(&storage, &uid, tier, &headers)?;
@@ -913,9 +921,16 @@ pub async fn update_entry(
 ) -> Result<Json<EntryRow>, AppError> {
     let universe_root = {
         let storage = lock_storage(&state);
-        storage
+        let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        // CO-383: reject writes on event-bus-backed universes.
+        if universe.source_kind.as_deref() == Some("event-bus") {
+            return Err(AppError::ReadOnlyUniverse {
+                source_kind: universe.source_kind.unwrap_or_default(),
+                source_url: universe.source_url,
+            });
+        }
         storage.universe_root(&slug)
     };
 
@@ -1116,9 +1131,16 @@ pub async fn delete_entry(
 ) -> Result<StatusCode, AppError> {
     let universe_root = {
         let storage = lock_storage(&state);
-        storage
+        let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        // CO-383: reject writes on event-bus-backed universes.
+        if universe.source_kind.as_deref() == Some("event-bus") {
+            return Err(AppError::ReadOnlyUniverse {
+                source_kind: universe.source_kind.unwrap_or_default(),
+                source_url: universe.source_url,
+            });
+        }
         storage.universe_root(&slug)
     };
 

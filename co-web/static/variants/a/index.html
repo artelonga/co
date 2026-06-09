@@ -643,6 +643,18 @@
         <a class="footer-github-link" href="https://github.com/artelonga/co" target="_blank" rel="noopener" data-i18n="action.github">GitHub</a>
     </footer>
 
+    <!-- CO-383: Read-only event-bus universe banner — shown for universes where
+         source_kind = 'event-bus' (e.g. yggdrasil notes). Hidden by default. -->
+    <div id="source-bus-banner" role="status" aria-live="polite"
+         style="display:none;position:sticky;top:0;z-index:200;
+                background:var(--card-bg,#f0f7ff);border-bottom:2px solid var(--co-accent,#6366f1);
+                padding:6px 16px;align-items:center;gap:10px;font-size:13px;line-height:1.4">
+        <span class="material-symbols-outlined" style="font-size:16px;color:var(--co-accent,#6366f1);flex-shrink:0" aria-hidden="true">inbox</span>
+        <span id="source-bus-msg" style="flex:1">Somente-leitura — publicado via Yggdrasil</span>
+        <a id="source-bus-link" href="#" target="_blank" rel="noopener"
+           class="btn btn-ghost" style="font-size:12px;padding:4px 12px;white-space:nowrap">Editar na origem</a>
+    </div>
+
     <!-- Cookie banner removed in 2.13.6 — Co only uses cookies estritamente
          necessários (sessão JWT + preferências de UI). LGPD Art. 7º, IX dispensa
          consentimento prévio para esses casos. Detalhes na /privacidade. -->

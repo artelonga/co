@@ -10,3 +10,4 @@ pub mod comunicacao_live;
 pub mod kb;
 pub mod sala;
 pub mod timeline;
+pub mod yggdrasil_notes;

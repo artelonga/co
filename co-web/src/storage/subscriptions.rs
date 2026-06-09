@@ -102,6 +102,9 @@ impl Storage {
                 // for the search UX); leave as None for resilience.
                 parent_key: None,
                 anon_published_only: false,
+                source_kind: None,
+                source_url: None,
+                source_last_event_at: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())

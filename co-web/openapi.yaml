@@ -71,6 +71,8 @@ tags:
     description: "changelog endpoints"
   - name: "events"
     description: "events endpoints"
+  - name: "sync"
+    description: "sync endpoints"
   - name: "feedback"
     description: "feedback endpoints"
   - name: "analytics + telemetry"
@@ -1765,6 +1767,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/me/sync/conflicts:
+    get:
+      tags: ["sync"]
+      summary: "List the caller's outstanding sync conflicts (returns `SyncConflict[]`)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/me/universes:
     get:
       tags: ["universes"]
@@ -2234,6 +2245,21 @@ paths:
       summary: "CO-164 cross-universe semantic search"
       security:
         - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/sync/conflicts/{id}/resolve:
+    post:
+      tags: ["sync"]
+      summary: "Resolve a conflict; body `{action, apply_to_all_matching?}` — actions: `keep_both`, `ignore`, `replace`, `update`, `upsert`, `accept_delete`, `keep_local`"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: OK

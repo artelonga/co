@@ -12,6 +12,9 @@ let _selectProject = async () => {};
 let _removeManifestViewTabs = () => {};
 let _injectManifestViewTabs = () => {};
 let _switchView = () => {};
+// CO-383: called after universe info is loaded so the caller can show/hide
+// read-only banners based on source_kind.
+let _onUniverseInfoLoaded = (_info) => {};
 
 export function injectBootCallbacks(callbacks) {
     _showLoading = callbacks.showLoading;
@@ -21,6 +24,7 @@ export function injectBootCallbacks(callbacks) {
     _removeManifestViewTabs = callbacks.removeManifestViewTabs;
     _injectManifestViewTabs = callbacks.injectManifestViewTabs;
     _switchView = callbacks.switchView;
+    if (callbacks.onUniverseInfoLoaded) _onUniverseInfoLoaded = callbacks.onUniverseInfoLoaded;
 }
 
 // Universe home — fallback when no project exists
@@ -161,6 +165,7 @@ export async function bootAppForUniverse(slug) {
         if (info) {
             state.universeInfo = info;
             renderUsageCount();
+            _onUniverseInfoLoaded(info);
         }
         if (config) {
             applyUniverseConfig(config);

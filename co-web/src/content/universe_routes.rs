@@ -235,6 +235,9 @@ pub async fn list_public_universes(
                     if s.is_empty() { None } else { Some(s) }
                 },
                 anon_published_only: false,
+                source_kind: None,
+                source_url: None,
+                source_last_event_at: None,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;
