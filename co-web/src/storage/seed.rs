@@ -1348,6 +1348,32 @@ impl Storage {
                 };
                 if upsert_entry_row(&conn, universe_key, &entry).is_ok() {
                     upserted += 1;
+                    // CO-394: extract [[wikilink]] relations during seed, in parity with
+                    // the vault/entry write path. Without this, CLI-seeded universes
+                    // (`co launch`) have entries but an empty `entry_relations` table, so
+                    // the knowledge-graph view renders nodes with zero edges.
+                    //
+                    // Same-universe targets are resolved relative to the linking entry's
+                    // directory so the stored `to_path` matches stored entry paths (which
+                    // carry the content-subdir prefix) — otherwise edges dangle and the
+                    // graph builder drops them.
+                    let relations: Vec<_> =
+                        crate::relation_index::extract_body_wikilinks(&entry.body)
+                            .into_iter()
+                            .map(|(rt, to_path, to_univ, label)| {
+                                let resolved = if to_univ.is_none() {
+                                    resolve_entry_rel(&entry_path, &to_path)
+                                } else {
+                                    to_path
+                                };
+                                (rt, resolved, to_univ, label)
+                            })
+                            .collect();
+                    let _ = crate::relation_index::RelationIndex::new(&conn).replace_all(
+                        universe_key,
+                        &entry_path,
+                        &relations,
+                    );
                 }
             }
         }
@@ -1778,6 +1804,34 @@ impl Storage {
 /// CO-317: recursively collect all `.md` files under `dir`. Skips common
 /// developer-tool directories (`.git`, `target`, `node_modules`, `.next`,
 /// `dist`, `build`) so we don't ingest 10k irrelevant readmes.
+/// Resolve a same-universe wikilink `target` relative to the linking entry's
+/// directory, normalizing `.`/`..`, so the resulting path matches stored entry
+/// paths (e.g. from `content/documentos-fundacao/_index.md`, target
+/// `01-capa.md` → `content/documentos-fundacao/01-capa.md`; `../index.md` →
+/// `content/index.md`). Used by the seed relation-extraction (CO-394).
+fn resolve_entry_rel(from_entry: &str, target: &str) -> String {
+    let base = std::path::Path::new(from_entry)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let joined = if base.is_empty() {
+        target.to_string()
+    } else {
+        format!("{base}/{target}")
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for comp in joined.split('/') {
+        match comp {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            c => parts.push(c),
+        }
+    }
+    parts.join("/")
+}
+
 pub(super) fn walk_md_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     fn is_skip_dir(name: &str) -> bool {
         matches!(
@@ -1894,6 +1948,30 @@ mod tests {
              priority: high\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-02-01T00:00:00Z\n\
              labels:\n  - type:feat\n---\n\nBody of CO-{n}.",
         )
+    }
+
+    #[test]
+    fn test_resolve_entry_rel_co394() {
+        // sibling target → joined onto the from-entry's directory
+        assert_eq!(
+            resolve_entry_rel("content/documentos-fundacao/_index.md", "01-capa.md"),
+            "content/documentos-fundacao/01-capa.md"
+        );
+        // subdir target from the universe root
+        assert_eq!(
+            resolve_entry_rel("content/index.md", "documentos-fundacao/_index.md"),
+            "content/documentos-fundacao/_index.md"
+        );
+        // parent traversal normalizes `..`
+        assert_eq!(
+            resolve_entry_rel("content/documentos-fundacao/_index.md", "../index.md"),
+            "content/index.md"
+        );
+        // `./` is a no-op
+        assert_eq!(
+            resolve_entry_rel("content/index.md", "./samba.md"),
+            "content/samba.md"
+        );
     }
 
     #[test]
