@@ -39,10 +39,16 @@ What runs, what breaks it, and how to catch each failure *before* it goes red.
    push back-to-back; the earlier run is superseded and shows as failure. Benign (no code
    gate failed). If the noise matters, add a `concurrency:` group to `ci.yml`.
 
-7. **Flaky server-readiness timeout** — `testserver_tests` spawn the real `co` binary and
-   poll `/api/health`; the 30 s deadline (`tests/testkit.rs wait_ready`) flaked under CI
-   load when cold-boot + migrations + seed ran long (e.g. `test_ts_vault_write_and_read`,
-   2026-06-09). **Fixed:** deadline raised to 90 s.
+7. **Flaky server-readiness timeout (Rust)** — `testserver_tests` spawn the real `co`
+   binary and poll `/api/health`; the 30 s deadline (`tests/testkit.rs wait_ready`) flaked
+   under CI load when cold-boot + migrations + seed ran long (e.g.
+   `test_ts_vault_write_and_read`, 2026-06-09). **Fixed:** deadline raised to 90 s.
+
+8. **Flaky Playwright timeout (e2e)** — heavy specs (e.g. `localhost-trial.spec.ts`
+   sister-repo seeding) exceed Playwright's default 30 s per-test under 4-worker runner
+   contention; all retries run under the same saturation so they fail together. A load
+   timeout, not a frontend regression. **Fixed:** `playwright.config.ts` per-test timeout
+   raised to 60 s in CI.
 
 ## Preflight — mirror the gates locally
 

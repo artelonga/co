@@ -8,6 +8,10 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 4 : undefined,
+  // 60s per-test in CI (default 30s): heavy specs (e.g. localhost-trial's
+  // sister-repo seeding) exceed 30s under 4-worker runner contention — a load
+  // timeout, not a frontend bug. 60s gives headroom while still failing genuine hangs.
+  timeout: process.env.CI ? 60_000 : 30_000,
   testIgnore: ["**/archived/**", "**/wave-2/**", "**/interactions/**"],
   reporter: "html",
   use: {
