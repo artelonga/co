@@ -14,7 +14,11 @@
     "scrum:retro:forward": "node --import tsx scripts/scrum/retro-simulate.ts --forward",
     "contract:probe": "node --import tsx scripts/contract/probe-staging.ts",
     "scrum:sprint-review": "node --import tsx scripts/scrum/sprint-review.ts",
-    "dod:verify": "node --import tsx scripts/dod/verify.ts"
+    "dod:verify": "node --import tsx scripts/dod/verify.ts",
+    "test:staging": "npx playwright test --config=e2e-staging/playwright.staging.config.ts",
+    "test:staging:headed": "npx playwright test --config=e2e-staging/playwright.staging.config.ts --headed",
+    "acceptance:gen": "node --import tsx scripts/scrum/acceptance-to-playwright.ts",
+    "acceptance:check": "node --import tsx scripts/scrum/acceptance-to-playwright.ts --check"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",
