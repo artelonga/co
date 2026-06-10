@@ -1478,6 +1478,12 @@ paths:
         '403': { description: "Admin required" }
       security:
         - bearerAuth: []
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has GitHub admin role."
+      x-postconditions:
+        - id: post.readonly
+          rule: "No state mutated; counts reflect security_findings table."
       x-safety: snapshot-restore
 
   /api/v1/gestao/security/scan:
