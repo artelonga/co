@@ -37,8 +37,10 @@ async function selectProjectOnMobile(page: Page, key: string): Promise<void> {
   await page.locator(`#project-list .sidebar-item-key:text-is("${key}")`).click();
   await tasksLoaded;
 
-  // Close sidebar overlay so view tabs are reachable.
-  await page.locator("#sidebar-overlay.visible").click();
+  // Close sidebar overlay so view tabs are reachable. The open sidebar
+  // covers the overlay's center point and intercepts a normal click, so
+  // dispatch the click event straight to the overlay element.
+  await page.locator("#sidebar-overlay.visible").dispatchEvent("click");
   await page.waitForFunction(
     () => !document.querySelector("#sidebar.open"),
     { timeout: 5_000 },
