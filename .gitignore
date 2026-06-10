@@ -54,3 +54,6 @@ GeoLite2-*.mmdb
 # CO-243: LSP rust build artifacts
 co-lsp/target/
 {,/}data-test-co305/
+
+# CO-375: contract probe report (generated artifact — not committed)
+contract-probe-report.json

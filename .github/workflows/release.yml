@@ -9,8 +9,38 @@ permissions:
   contents: write
 
 jobs:
+  # CO-375: run contract probe before any build artifacts are published.
+  # If staging is drifting from the declared contract, the release is blocked.
+  contract-check:
+    name: Contract probe (staging gate)
+    runs-on: ubuntu-latest
+    env:
+      STAGING_URL: https://co-artelonga-staging.fly.dev
+      CO_STAGING_ADMIN_TOKEN: ${{ secrets.CO_STAGING_ADMIN_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: co-web/package-lock.json
+      - name: Install dependencies
+        working-directory: co-web
+        run: npm ci --no-audit --no-fund
+      - name: Run contract probe
+        working-directory: co-web
+        run: npm run contract:probe
+      - name: Upload probe report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-contract-probe-report
+          path: contract-probe-report.json
+          retention-days: 90
+
   build:
     name: Build ${{ matrix.target }}
+    needs: contract-check
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
