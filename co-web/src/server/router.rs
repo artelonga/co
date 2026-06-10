@@ -212,6 +212,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     let contact_api = crate::contact_routes::contact_router();
 
+    // CO-398: delivery pipeline — GitHub inbound webhook + lead-time metrics.
+    let delivery_api = crate::delivery_routes::router();
+    let delivery_universe_api = crate::delivery_routes::universe_router();
+
     let log_drain_api = crate::log_drain_routes::router();
     let uat_api = crate::uat_routes::router(state.clone());
     let dev_board_api = crate::dev_board::router();
@@ -494,6 +498,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/analytics/public", analytics_public_api)
             .nest("/api/v1", leads_public_api)
             .nest("/api/v1/admin", leads_admin_api)
+            // CO-398: delivery pipeline webhook + metrics.
+            .nest("/api/v1", delivery_api)
+            .nest("/api/v1/universes", delivery_universe_api)
             .nest("/api/v1/processos", crate::processos::router())
             .nest("/oauth", oauth_api)
             .nest("/api/v1/gestao/oauth", gestao_oauth_api)

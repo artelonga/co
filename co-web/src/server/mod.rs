@@ -717,6 +717,11 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
             Arc::clone(&bus),
             Arc::clone(&state.core.storage),
         );
+        // CO-398: persist task status transitions + emit deploy.triggered on done.
+        crate::eda::subscribers::delivery_pipeline::spawn(
+            Arc::clone(&bus),
+            Arc::clone(&state.core.storage),
+        );
         // Phase 2: start the LiveTimeline forward task (channel was created in from_storage_full).
         crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
     }

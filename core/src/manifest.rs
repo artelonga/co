@@ -490,14 +490,23 @@ fn validate(manifest: &Manifest) -> Result<(), ManifestError> {
 ///
 /// Produces a board with a single `task` content type and
 /// `[todo, doing, done]` columns — identical to pre-manifest behaviour.
+/// Delivery pipeline status values (CO-398 — default for new project universes).
+pub const DELIVERY_PIPELINE_STATUSES: &[&str] =
+    &["todo", "started", "in_progress", "review", "done"];
+
 pub fn default_manifest(name: impl Into<String>) -> Manifest {
+    let statuses: Vec<String> = DELIVERY_PIPELINE_STATUSES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
     let mut schema = BTreeMap::new();
     schema.insert(
         "status".to_string(),
         FieldDef {
             field_type: FieldType::Enum,
             required: false,
-            values: vec!["todo".to_string(), "doing".to_string(), "done".to_string()],
+            values: statuses.clone(),
             semantic: None,
             target: None,
         },
@@ -512,6 +521,26 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
             target: None,
         },
     );
+    schema.insert(
+        "pr_url".to_string(),
+        FieldDef {
+            field_type: FieldType::String,
+            required: false,
+            values: vec![],
+            semantic: None,
+            target: None,
+        },
+    );
+    schema.insert(
+        "preview_url".to_string(),
+        FieldDef {
+            field_type: FieldType::String,
+            required: false,
+            values: vec![],
+            semantic: None,
+            target: None,
+        },
+    );
 
     Manifest {
         schema_version: 1,
@@ -520,9 +549,7 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
             name: "task".to_string(),
             schema,
             presentation: Presentation {
-                board: Some(BoardPresentation {
-                    columns: vec!["todo".to_string(), "doing".to_string(), "done".to_string()],
-                }),
+                board: Some(BoardPresentation { columns: statuses }),
                 list: None,
                 calendar: None,
             },
@@ -805,12 +832,20 @@ content_types:
         let ct = &m.content_types[0];
         assert_eq!(ct.name, "task");
         let board = ct.presentation.board.as_ref().expect("board should exist");
-        assert_eq!(board.columns, ["todo", "doing", "done"]);
+        assert_eq!(
+            board.columns,
+            ["todo", "started", "in_progress", "review", "done"]
+        );
         assert!(ct.schema.contains_key("title"));
         assert!(ct.schema.contains_key("status"));
+        assert!(ct.schema.contains_key("pr_url"));
+        assert!(ct.schema.contains_key("preview_url"));
         let status = &ct.schema["status"];
         assert_eq!(status.field_type, FieldType::Enum);
-        assert_eq!(status.values, ["todo", "doing", "done"]);
+        assert_eq!(
+            status.values,
+            ["todo", "started", "in_progress", "review", "done"]
+        );
     }
 
     #[test]
