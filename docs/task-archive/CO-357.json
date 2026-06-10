@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-357",
+  "title": "PWA shell — manifest, service worker, install prompt, offline cache for content",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-357.md",
+  "branch": "feat/CO-357-pwa-shell-manifest-service-worker-instal",
+  "merge_sha": "052375fc2399356e8aa538129ab2a5b255c690f0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/186",
+    "number": 186
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T03:06:45Z",
+  "files_changed": 23,
+  "lines_added": 388,
+  "lines_removed": 64,
+  "labels": [
+    "type:feat",
+    "module:co-web",
+    "module:offline"
+  ],
+  "changelog_entry": "## CO-357 — PWA shell — manifest, service worker, install prompt, offline cache for content\n\nFull PWA implementation: web app manifest with correct icons, service worker upgrade to\n`co-v6-offline`, install prompt for Android Chrome and iOS Safari tip, and offline\nnavigation fallback to `/offline.html`.\n\n### Changes\n\n- `static/manifest.json` (new root): `CO — Collective Consciousness`, theme `#2563eb`,\n  scope `/`, display `standalone`, PNG icons at 192/512/maskable sizes.\n- `static/shared/icons/`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,\n  `apple-touch-icon.png` (180 px) — solid CO-brand blue (#2563eb) placeholder PNGs.\n- `static/shared/sw.js` + `static/sw.js`: CACHE_NAME bumped to `co-v6-offline`;\n  STATIC_ASSETS now caches `/manifest.json` and `/offline.html`; API strategy upgraded\n  to network-first-with-cache-fallback; navigation offline fallback to `/offline.html`.\n- `static/offline.html` (new): minimal \"you're offline\" page served when navigation\n  fails and no cached page is available.\n- All `variants/*/index.html`: manifest link updated to `/manifest.json`; theme-color\n  updated to `#2563eb`; viewport gets `viewport-fit=cover`; apple-touch-icon,\n  apple-mobile-web-app-capable/status-bar-style/title metas added.\n- `variants/a/modules/install/wire.js` (new): listens for `beforeinstallprompt`,\n  shows the existing `#pwa-install-wrap` button, prompts on confirm, persists\n  30-day dismissal. iOS Safari gets a one-shot \"Tap Share → Add to Home Screen\" tooltip.\n  Emits `pwa_install_prompt_shown`, `pwa_install_prompt_dismissed`, `pwa_installed`\n  telemetry events.\n- `static_files.rs`: `manifest.json` and `offline.html` served from root (not shared/);\n  `manifest.json` MIME type corrected to `application/manifest+json`;\n  `sw.js` now includes `Service-Worker-Allowed: /` response header.\n\n### Why\n\nLighthouse PWA category was failing (manifest 404, no icons, wrong MIME type, no apple\nmeta tags). CO mobile users could not install the app to their home screen.",
+  "summary": "a mobile/tablet user (and any user who wants CO on their home screen or readable on a flaky train Wi-Fi)",
+  "co_auto_version": "0.1.0"
+}

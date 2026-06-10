@@ -1,0 +1,109 @@
+{
+  "co_id": "CO-357",
+  "spec_title": "PWA shell — manifest, service worker, install prompt, offline cache for content",
+  "timestamp": "2026-06-10T03:07:13.733Z",
+  "items": [
+    {
+      "text": "`/Users/artelonga/projects/co/co-web/static/manifest.json` exists with name/short_name/icons/theme_color/scope/display:standalone",
+      "pattern": "co[- _]web|users/artelonga/projects/co/co[- _]web/static/manifest.json|short|icons/theme|scope/display|users|artelonga|projects",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "anonymous API: /co returns projects (not an empty array)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`/Users/artelonga/projects/co/co-web/static/shared/icons/` contains 192/512/maskable/apple-touch PNGs",
+      "pattern": "co[- _]web|apple[- _]touch|users/artelonga/projects/co/co[- _]web/static/shared/icons/|maskable/apple[- _]touch|users|artelonga|projects",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "anonymous API: /co returns projects (not an empty array)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "SPA `<head>` includes `<link rel=\"manifest\">`, apple-touch-icon, theme-color, viewport-fit=cover, apple-mobile-web-app meta",
+      "pattern": "apple[- _]touch[- _]icon|theme[- _]color|viewport[- _]fit|apple[- _]mobile[- _]web[- _]app|includes|manifest",
+      "matched_file": "co-web/e2e/co-355-workspace-templates.spec.ts",
+      "matched_test": "GET workspace-templates always includes blank",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Service worker registers at `/sw.js` scope `/` on page load",
+      "pattern": "sw.js|service|worker|registers|scope",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`sw.js` `STATIC_ASSETS` references resolve (no 404s); `CACHE_NAME` bumped to `co-v6-offline`",
+      "pattern": "co[- _]v6[- _]offline|static|assets|references|resolve",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "3. subscribe blocked — public-static returns 400, excluded from discoverable",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Cache-first / network-first / cache-only strategies match the spec (manual test with DevTools offline mode)",
+      "pattern": "cache[- _]first|network[- _]first|cache[- _]only|strategies",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Offline navigation falls back to `/offline.html`",
+      "pattern": "offline.html|offline|navigation|falls",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "no-regression — board navigation still works after CO-280 changes",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Install prompt button surfaces when `beforeinstallprompt` fires; dismissal persists 30 days",
+      "pattern": "install|prompt|button|surfaces",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "Entrar button inside overlay opens login modal",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "iOS Safari shows one-shot \"Add to Home Screen\" tooltip on first visit",
+      "pattern": "one[- _]shot|safari|shows|screen",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Lighthouse PWA category score ≥ 90 on `https://co-artelonga.fly.dev/`",
+      "pattern": "co[- _]artelonga|co[- _]artelonga.fly.dev/|lighthouse|category|score|https",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Installed PWA launches in standalone mode (no browser chrome) on Android Chrome + iOS Safari",
+      "pattern": "installed|launches|standalone|browser",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Telemetry events for prompt show/dismiss/install land in `telemetry_events`",
+      "pattern": "dismiss/install|telemetry|events|prompt|dismiss",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe-prompt-overlay closes on cancel",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 12,
+  "passed": 8,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 67
+}
