@@ -116,6 +116,7 @@ pub use platform::experiment;
 pub use platform::geo;
 pub use platform::index_manager;
 pub use platform::job_queue;
+pub use platform::kb_routes;
 pub use platform::live_routes;
 pub use platform::observability;
 pub use platform::plugin_loader;

@@ -2567,6 +2567,63 @@ impl Storage {
                 "CO-352: workspace_states — per-user spatial canvas state"
             );
         }
+
+        if current_version < 71 {
+            // CO-367: universal KB sync warehouse.
+            // `entry_kb_index`  — history table keyed by (universe_key, entry_path, body_hash).
+            // `entry_kb_latest` — latest-version view per (universe_key, entry_path).
+            // `entry_kb_fts`    — FTS5 virtual table for full-text search over body_preview.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS entry_kb_index (
+                       universe_key     TEXT NOT NULL,
+                       entry_path       TEXT NOT NULL,
+                       body_hash        TEXT NOT NULL,
+                       entry_type       TEXT,
+                       frontmatter_json TEXT,
+                       body_preview     TEXT,
+                       size_bytes       INTEGER,
+                       updated_at       TEXT NOT NULL,
+                       indexed_at       TEXT NOT NULL,
+                       asset_refs       TEXT,
+                       PRIMARY KEY (universe_key, entry_path, body_hash)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_kb_universe_type
+                       ON entry_kb_index(universe_key, entry_type);
+                     CREATE INDEX IF NOT EXISTS idx_kb_updated
+                       ON entry_kb_index(updated_at);
+
+                     CREATE TABLE IF NOT EXISTS entry_kb_latest (
+                       universe_key     TEXT NOT NULL,
+                       entry_path       TEXT NOT NULL,
+                       body_hash        TEXT NOT NULL,
+                       entry_type       TEXT,
+                       frontmatter_json TEXT,
+                       body_preview     TEXT,
+                       size_bytes       INTEGER,
+                       updated_at       TEXT NOT NULL,
+                       indexed_at       TEXT NOT NULL,
+                       asset_refs       TEXT,
+                       PRIMARY KEY (universe_key, entry_path)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_kb_latest_indexed
+                       ON entry_kb_latest(indexed_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_kb_latest_type
+                       ON entry_kb_latest(universe_key, entry_type);
+
+                     CREATE VIRTUAL TABLE IF NOT EXISTS entry_kb_fts USING fts5(
+                       universe_key UNINDEXED,
+                       entry_path   UNINDEXED,
+                       body_preview
+                     );",
+                )
+                .expect("CO-367 v71: entry_kb_index + entry_kb_latest + entry_kb_fts");
+            crate::record_migration!(
+                self.conn,
+                71,
+                "CO-367: entry_kb_index + entry_kb_latest + entry_kb_fts (universal KB sync)"
+            );
+        }
     }
 }
 
