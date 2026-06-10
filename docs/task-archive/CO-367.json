@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-367",
+  "title": "Universal content → KB sync — generalize the rollup pattern to all entry types",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-367.md",
+  "branch": "feat/CO-367-universal-content-kb-sync-generalize-the",
+  "merge_sha": "56d5e619a07adb7abd85801338605ca0e8040ac2",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/192",
+    "number": 192
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T16:34:38Z",
+  "files_changed": 13,
+  "lines_added": 1768,
+  "lines_removed": 7,
+  "labels": [
+    "type:feat",
+    "module:kb",
+    "module:sync",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-367 — Universal content → KB sync — generalize the rollup pattern to all entry types\n\nIntroduces a universal KB ingest pipeline that makes every entry write (note,\narticle, poem, asset reference) visible to downstream consumers — search, agents,\nanalytics — without changing how users interact with CO.\n\n- **Migration v71** adds three new tables to `meta.db`:\n  - `entry_kb_index` — history table, PK `(universe_key, entry_path, body_hash)`\n  - `entry_kb_latest` — latest-version view per `(universe_key, entry_path)`\n  - `entry_kb_fts` — FTS5 virtual table for full-text search over `body_preview`\n- **POST /api/v1/kb/ingest** — idempotent upsert, auth via `CO_KB_TOKEN` bearer (503 if unset)\n- **GET /api/v1/kb/search?q=...** — FTS5 search; optional `universe_key` filter\n- **GET /api/v1/kb/recent?universe_key=...** — latest indexed entries per path\n- **Entry write wiring** — `create_entry` and `update_entry` fire `kb_routes::fire_kb_ingest`\n  via `tokio::spawn`; the write response never waits for KB sync\n- **Frontend retry queue** (`modules/kb-sync.js`) — queues `KbIngestEvent`s in IndexedDB\n  when the endpoint is unreachable and drains on reconnect (exponential backoff: 1m → 5m → 30m → 2h)\n- **Atividades** — `event_type = 'kb.ingested'` lands in the audit log per new ingest\n- **Asset refs** — `asset_refs` JSON array preserved in both history and latest tables\n- **OpenAPI** — three KB endpoints documented with request/response schemas\n\n### Why\n\nCO-340 shipped analytics rollups as a one-off pattern. This PR retroactively\ngeneralises that shape — local write → cache-first render → consented async sync →\ndownstream availability — so the BaaS §6 promise \"add anything → registered,\nsynced, delivered\" holds for all content types.",
+  "summary": "As A brain owner adding any content (note, article, poem, audio clip, screenshot) to their universe",
+  "co_auto_version": "0.1.0"
+}
