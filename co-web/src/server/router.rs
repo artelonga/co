@@ -416,6 +416,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                     crate::auth::require_auth,
                 )),
             )
+            // CO-355: workspace template registry — public read, optional auth on POST.
+            .nest(
+                "/api/v1/universes",
+                crate::workspace_template_routes::router(),
+            )
             // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
             // enforces its own auth + path constraints.
             .nest("/api/v1/universes", crate::proposal_routes::inline_router())

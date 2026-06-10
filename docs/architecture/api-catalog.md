@@ -147,6 +147,16 @@ CO-352: Sala primitive — spatial canvas anchored to a universe, with per-user 
 | GET | `/u/{universe}/sala` | anon | Sala SPA shell (default workspace for universe) |
 | GET | `/u/{universe}/sala/{workspace_slug}` | anon | Sala SPA shell (specific workspace) |
 
+## workspace-templates — `/api/v1/universes/{slug}/workspace-templates/*` (workspace_template_routes.rs)
+
+CO-355: per-universe `_workspace.yaml` template registry — seeds Sala layouts.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/universes/{slug}/workspace-templates` | visibility | List available workspace templates |
+| GET | `/api/v1/universes/{slug}/workspace-templates/{template_slug}` | visibility | Fetch a specific template |
+| POST | `/api/v1/universes/{slug}/workspaces/{workspace_slug}/from-template/{template_slug}` | authed | Seed a new workspace from a template |
+
 ---
 
 ## entries — `/api/v1/universes/{slug}/...` (entry_routes.rs, all under owner/visibility gates)

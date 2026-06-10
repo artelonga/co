@@ -2539,7 +2539,6 @@ impl Storage {
             );
         }
 
-        // v70: CO-352 (CO-355's sibling workspace_states block takes v71).
         if current_version < 70 {
             // CO-352: per-user spatial canvas state for sala (workspace canvas).
             self.conn

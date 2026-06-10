@@ -25,3 +25,4 @@ pub mod universe_routes;
 pub mod universo;
 pub mod vault_routes;
 pub mod workspace_routes;
+pub mod workspace_template_routes;

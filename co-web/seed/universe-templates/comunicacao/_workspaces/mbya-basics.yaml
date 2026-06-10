@@ -1,0 +1,69 @@
+name: "Mbya — Básico"
+description: "12 termos fundamentais do guarani mbya com relações de afinidade e deriva."
+default_layout:
+  nodes:
+    - entry_path: "termos/nhandereko.md"
+      x: 200
+      y: 150
+    - entry_path: "termos/ayvu-rapyta.md"
+      x: 400
+      y: 150
+    - entry_path: "termos/tekoa.md"
+      x: 600
+      y: 150
+    - entry_path: "termos/opy.md"
+      x: 100
+      y: 350
+    - entry_path: "termos/nhe-e.md"
+      x: 300
+      y: 350
+    - entry_path: "termos/yvy-mara-ey.md"
+      x: 500
+      y: 350
+    - entry_path: "termos/mborai.md"
+      x: 700
+      y: 350
+    - entry_path: "termos/jeguata.md"
+      x: 200
+      y: 550
+    - entry_path: "termos/petyngua.md"
+      x: 400
+      y: 550
+    - entry_path: "termos/potyro.md"
+      x: 600
+      y: 550
+    - entry_path: "termos/teko-axy.md"
+      x: 100
+      y: 750
+    - entry_path: "termos/aguyje.md"
+      x: 400
+      y: 750
+  edges:
+    - from: "termos/nhandereko.md"
+      to: "termos/ayvu-rapyta.md"
+      type: "afinidade"
+    - from: "termos/ayvu-rapyta.md"
+      to: "termos/tekoa.md"
+      type: "deriva"
+    - from: "termos/nhe-e.md"
+      to: "termos/ayvu-rapyta.md"
+      type: "afinidade"
+    - from: "termos/opy.md"
+      to: "termos/nhe-e.md"
+      type: "afinidade"
+    - from: "termos/yvy-mara-ey.md"
+      to: "termos/nhandereko.md"
+      type: "afinidade"
+    - from: "termos/aguyje.md"
+      to: "termos/teko-axy.md"
+      type: "oposto"
+study_mode:
+  algorithm: "spaced-repetition"
+  initial_interval_hours: 24
+  ease_factor: 2.5
+allowed_entry_types:
+  - term
+  - concept
+metadata:
+  difficulty: beginner
+  estimated_minutes: 20
