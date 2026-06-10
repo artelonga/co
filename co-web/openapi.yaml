@@ -93,6 +93,8 @@ tags:
     description: "game endpoints"
   - name: "live timeline"
     description: "live timeline endpoints"
+  - name: "suggest/review pages"
+    description: "suggest/review pages endpoints"
   - name: "Health"
     description: "Health endpoints"
   - name: "crawl"
@@ -2365,13 +2367,6 @@ paths:
       responses:
         "200":
           description: OK
-  /api/v1/universes/available:
-    get:
-      tags: ["universes"]
-      summary: "Check universe slug availability"
-      responses:
-        "200":
-          description: OK
   /api/v1/universes/public:
     get:
       tags: ["universes"]
@@ -3530,20 +3525,6 @@ paths:
       responses:
         "200":
           description: OK
-    get:
-      tags: ["suggest/review"]
-      summary: "Owner review queue page (shared/review.html)"
-      security:
-        - sessionCookie: []
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: OK
     patch:
       tags: ["suggest/review"]
       summary: "Edit a draft before approving"
@@ -3737,18 +3718,6 @@ paths:
         "200":
           description: OK
   /api/v1/universes/{slug}/suggest:
-    get:
-      tags: ["suggest/review"]
-      summary: "Public suggest form page (shared/suggest.html)"
-      parameters:
-        - name: slug
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: OK
     post:
       tags: ["suggest/review"]
       summary: "Submit a suggestion (anon-friendly, rate-limited) — creates a draft entry"
@@ -4253,6 +4222,34 @@ paths:
         - sharedSecret: []
       parameters:
         - name: universe_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /{slug}/review:
+    get:
+      tags: ["suggest/review pages"]
+      summary: "Owner review queue page (shared/review.html)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /{slug}/suggest:
+    get:
+      tags: ["suggest/review pages"]
+      summary: "Public suggest form page (shared/suggest.html)"
+      parameters:
+        - name: slug
           in: path
           required: true
           schema:

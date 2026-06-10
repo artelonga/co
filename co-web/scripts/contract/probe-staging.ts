@@ -94,6 +94,10 @@ interface Report {
 // Endpoints that issue tokens / start async flows / have destructive side effects.
 // Probing these would break staging data or trigger external services.
 const SKIP_ENDPOINT_KEYS = new Set([
+  // Config-dependent: handler 404s by design when VAPID_PUBLIC_KEY secret is
+  // absent (staging has no push credentials) — indistinguishable from a
+  // removed route from outside.
+  'GET /api/v1/notifications/vapid-public-key',
   // Token issuance — require fresh user interaction
   'POST /api/v1/auth/token',
   'POST /api/v1/auth/tokens',

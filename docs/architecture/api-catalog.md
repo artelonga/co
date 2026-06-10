@@ -84,7 +84,6 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | POST | `/api/v1/universes` | authed | Create universe |
 | GET | `/api/v1/universes/search` | anon | Search public universes |
 | GET | `/api/v1/universes/public` | anon | Public universe directory |
-| GET | `/api/v1/universes/available` | anon | Check universe slug availability |
 | GET | `/api/v1/universes/{slug}` | visibility | Universe info |
 | PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility |
 | DELETE | `/api/v1/universes/{slug}` | owner | Delete universe |
@@ -170,8 +169,6 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | PATCH | `/api/v1/universes/{slug}/review` | owner (in-handler) | Edit a draft before approving |
 | POST | `/api/v1/universes/{slug}/review/approve` | owner (in-handler) | Approve → review_status published |
 | POST | `/api/v1/universes/{slug}/review/reject` | owner (in-handler) | Reject → entry removed |
-| GET | `/{slug}/suggest` | anon | Public suggest form page (shared/suggest.html) |
-| GET | `/{slug}/review` | anon page, owner data | Owner review queue page (shared/review.html) |
 
 ---
 
@@ -713,6 +710,17 @@ CO-381: real-time deployed-interface visualization. SPA shell connecting to the 
 |---|---|---|---|
 | GET | `/agora` | anon | CO-381 — live timeline SPA (pt-BR) |
 | GET | `/live` | anon | CO-381 — live timeline SPA (en) — same SPA as /agora |
+
+---
+
+## suggest/review pages — top-level, served before the SPA wildcard
+
+CO-354 page shells (the API lives in the suggest/review section above).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/{slug}/suggest` | anon | Public suggest form page (shared/suggest.html) |
+| GET | `/{slug}/review` | anon page, owner data | Owner review queue page (shared/review.html) |
 
 ---
 
