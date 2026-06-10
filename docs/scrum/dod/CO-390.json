@@ -1,0 +1,69 @@
+{
+  "co_id": "CO-390",
+  "spec_title": "SPIKE — layered architecture (domain/dto/repository/service) proof-of-concept on entries module",
+  "timestamp": "2026-06-10T16:30:51.193Z",
+  "items": [
+    {
+      "text": "Spike completed within 24 person-hours (hard box)",
+      "pattern": "person[- _]hours|spike|completed|within",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "All 4 hypothesis items measured (pass/fail recorded)",
+      "pattern": "fail|hypothesis|items|measured|recorded",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sub-universe items are indented relative to their parent",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Wire compatibility verified — no HTTP response diff vs main",
+      "pattern": "compatibility|verified|response",
+      "matched_file": "co-web/e2e/archived/auth-crdt.spec.ts",
+      "matched_test": "cloned template universe has is_anonymous=true in the response",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "All existing tests green on the spike branch",
+      "pattern": "existing|tests|green|spike",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] Each item mapped to a test pattern; matching tests executed",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`docs/spikes/library-manager-decision.md` exists with clear recommendation",
+      "pattern": "library[- _]manager[- _]decision|spikes/library[- _]manager[- _]decision.md|spikes|exists|clear",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/logout clears the session cookie",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Spike branch pushed (not merged); commit message references CO-390",
+      "pattern": "co[- _]390|spike|branch|pushed|merged",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Decision recommendation referenced from CO-227 + CO-228 (epics this informs)",
+      "pattern": "co[- _]227|co[- _]228|decision|recommendation|referenced",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 7,
+  "passed": 3,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 43
+}
