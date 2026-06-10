@@ -1243,13 +1243,41 @@ fn create_task_branch(
         // Worktree mode: create isolated directory for this task
         let worktree_dir = workdir.join(".worktrees").join(&task.key);
 
-        // Check if worktree already exists
+        // Check if worktree already exists. A stale worktree silently bases the
+        // task on an old main (CO-354 ran on a v2.41-era base, 2026-06-10) —
+        // refresh it onto origin/main before reuse. Local changes are discarded:
+        // anything worth keeping was pushed by the previous run's ship step.
         if worktree_dir.exists() {
             println!(
-                "  {} Reusing existing worktree: {}",
+                "  {} Reusing existing worktree (refreshing onto origin/main): {}",
                 "◆".dimmed(),
                 worktree_dir.display()
             );
+            let fetch_ok = Command::new("git")
+                .args(["fetch", "origin", "main"])
+                .current_dir(&worktree_dir)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if fetch_ok {
+                let reset_ok = Command::new("git")
+                    .args(["reset", "--hard", "origin/main"])
+                    .current_dir(&worktree_dir)
+                    .status()
+                    .map(|s| s.success())
+                    .unwrap_or(false);
+                if !reset_ok {
+                    println!(
+                        "  {} worktree refresh failed — continuing on existing base",
+                        "⚠".yellow()
+                    );
+                }
+            } else {
+                println!(
+                    "  {} fetch origin/main failed — continuing on existing base",
+                    "⚠".yellow()
+                );
+            }
             return Ok((branch_name, worktree_dir));
         }
 
