@@ -462,8 +462,14 @@ function classifyDrift(
     return { drift: true, drift_type: 'server_error', detail: `HTTP ${actual} (server error)` };
   }
 
-  // 404 for a declared route = route has been removed
+  // 404 for a declared route = route has been removed — EXCEPT for routes
+  // with path params: we probe them with the literal placeholder (e.g.
+  // /paginas/{slug}), so the handler runs and correctly returns entity-404.
+  // Router-404 and entity-404 are indistinguishable from outside; accept it.
   if (actual === 404) {
+    if (endpointKey.includes('{')) {
+      return { drift: false };
+    }
     return { drift: true, drift_type: 'route_missing', detail: 'HTTP 404 — route not found (was it removed?)' };
   }
 
@@ -481,6 +487,12 @@ function classifyDrift(
   // 405 (method not allowed) = route exists but method wrong = drift
   if (actual === 405) {
     return { drift: true, drift_type: 'status_code', detail: `HTTP 405 — method not allowed (was method removed or changed?)` };
+  }
+
+  // GET probed without required query params: 400/422 proves the route
+  // exists and validated input — not drift.
+  if (method === 'GET' && (actual === 400 || actual === 422)) {
+    return { drift: false };
   }
 
   // GET should return 200 on success (anon or authed)
