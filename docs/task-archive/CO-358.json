@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-358",
+  "title": "Mobile IA pass — drawer sidebar, breadcrumb collapse, board → list reflow",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-358.md",
+  "branch": "feat/CO-358-mobile-ia-pass-drawer-sidebar-breadcrumb",
+  "merge_sha": "96249d2e893bcfaa7c076d0100789487298aeb5e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/187",
+    "number": 187
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T04:19:38Z",
+  "files_changed": 10,
+  "lines_added": 625,
+  "lines_removed": 31,
+  "labels": [
+    "type:feat",
+    "module:co-web",
+    "module:ui"
+  ],
+  "changelog_entry": "## CO-358 — Mobile IA pass — drawer sidebar, breadcrumb collapse, board → list reflow\n\nFull mobile responsive pass for the CO SPA: the app is now designed for small screens\nrather than being a desktop layout shrunken to 360 px.\n\n- **Sidebar drawer**: off-canvas at ≤640px with slide transition (`translateX`). Hamburger\n  button (fixed, 44×44 hit area) toggles it. Swipe from left edge (<20px) opens; swipe\n  right on open drawer closes. ESC closes. Focus trap active while open. Tap-outside closes.\n- **Breadcrumb collapse**: at ≤480px shows `← <title>` instead of full trail. Tapping the\n  title opens a popover with the full navigation trail; items are full-touch-target links.\n  Back arrow navigates to parent directly.\n- **Board single-column**: at ≤640px kanban columns stack vertically; a segmented control\n  at the top lets the user switch the active column. Selection persists via `localStorage`\n  (`co.board.mobileActiveColumn`).\n- **Tables → card view**: at ≤640px `<thead>` hidden, each `<tr>` rendered as a stacked\n  card using `display: block`. `data-label` attributes on `<td>` elements drive `::before`\n  pseudo-element labels. CSS-only transformation, no JS change needed.\n- **Modals full-screen**: at ≤640px `.modal` takes `100vw × 100dvh`, no border-radius,\n  with sticky `modal-header` containing a 44×44 close button.\n- **Touch targets**: all `button`, `.btn`, `.view-tab`, `.nav-item` etc. get\n  `min-height: 44px` at ≤640px. Inline badges use padding expansion.\n- **Header overflow menu**: at ≤640px a kebab button (⋮) replaces non-essential header\n  controls (search, lang toggle, universe info) with a dropdown menu.\n- **Breakpoint variables**: `--bp-mobile: 640px`, `--bp-tablet: 900px`,\n  `--touch-target: 44px` added to `:root`.\n- **iOS safe areas**: `env(safe-area-inset-top/bottom)` applied to header and\n  bottom-sheet elements.\n\n### Why\n\nMobile users bounced because the SPA was a desktop layout shrunken to 360 px: sidebar\nhad no drawer affordance, breadcrumbs wrapped across three lines, the kanban board\nhorizontal-scrolled inside a vertical-scroll page, tables overflowed, and modals floated\nat 320 px on a 360 px viewport. This pass makes CO usable on the device most people read on.",
+  "summary": "a phone or tablet user holding CO in one hand",
+  "co_auto_version": "0.1.0"
+}

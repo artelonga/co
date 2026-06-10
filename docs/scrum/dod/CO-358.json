@@ -1,0 +1,85 @@
+{
+  "co_id": "CO-358",
+  "spec_title": "Mobile IA pass — drawer sidebar, breadcrumb collapse, board → list reflow",
+  "timestamp": "2026-06-10T04:20:17.314Z",
+  "items": [
+    {
+      "text": "Sidebar drawers off-canvas at `≤640px`; hamburger toggles it; swipe-left-edge opens; tap-outside closes; ESC closes; focus trap works",
+      "pattern": "off[- _]canvas|swipe[- _]left[- _]edge|tap[- _]outside|sidebar|drawers|640px",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Breadcrumbs collapse to `← <title>` at `≤480px`; full trail behind tap",
+      "pattern": "breadcrumbs|collapse|title|480px",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "create project task, drag to In Progress, edit title, then delete",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Board renders single-column at `≤640px`; segmented control switches active column; selection persists",
+      "pattern": "single[- _]column|board|renders|640px",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Tables transform to card layout at `≤640px`",
+      "pattern": "tables|transform|layout|640px",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Modals full-screen at `≤640px` with sticky-header close button",
+      "pattern": "full[- _]screen|sticky[- _]header|modals|640px",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "All interactive elements ≥ 44×44 px hit area at `≤640px`",
+      "pattern": "interactive|elements|640px",
+      "matched_file": "co-web/e2e/i18n.spec.ts",
+      "matched_test": "data-i18n elements update after language toggle",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Header overflow menu at `≤640px` hides non-essential controls",
+      "pattern": "non[- _]essential|header|overflow|640px|hides",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "iOS safe-area padding applied to header + bottom-sheet",
+      "pattern": "safe[- _]area|bottom[- _]sheet|padding|applied|header",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Manual smoke on iPhone 14 Safari + Pixel 7 Chrome viewports (Playwright will lock this in via CO-359)",
+      "pattern": "co[- _]359|manual|smoke|iphone|safari",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 9,
+  "passed": 5,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 56
+}
