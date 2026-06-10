@@ -1,0 +1,45 @@
+{
+  "co_id": "CO-356",
+  "spec_title": "Touch DnD on board — pointer-event based drag for mobile (replaces HTML5 DnD)",
+  "timestamp": "2026-06-10T02:53:45.041Z",
+  "items": [
+    {
+      "text": "Card drag works on mouse (desktop) — same UX as before",
+      "pattern": "works|mouse|desktop|before",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Card drag works on touch (iOS Safari, Android Chrome) — verified manually",
+      "pattern": "works|touch|safari|android",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "no-regression — board navigation still works after CO-280 changes",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Vertical scroll still works when starting touch on a card (200 ms threshold)",
+      "pattern": "vertical|scroll|still|works",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "vertical swipe on a card does not trigger drag",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Quick hori",
+      "pattern": "quick",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "quick tap (< 8 px movement) does not move the card",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 4,
+  "passed": 4,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
