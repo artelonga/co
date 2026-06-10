@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-352",
+  "spec_title": "Workspace (\\",
+  "timestamp": "2026-06-10T01:37:00.553Z",
+  "items": [
+    {
+      "text": "Migration adds `workspace_states` table",
+      "pattern": "migration|workspace|states|table",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`workspace` entry type registered (renderable, lists in `entries?type=workspace`)",
+      "pattern": "workspace|entry|registered|renderable",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`/u/{universe}/sala` route renders the canvas with current user's saved layout (or empty if none)",
+      "pattern": "u/|sala|universe|route|renders|canvas",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Toolbar buttons render and dispatch correctly (CRUD ones gated by login modal for anon)",
+      "pattern": "toolbar|buttons|render|dispatch",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "PUT state debounces + persists; refresh restores layout",
+      "pattern": "state|debounces|persists|refresh",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Public workspace render (`is_public=1`) accessible without login (read-only)",
+      "pattern": "read[- _]only|public|workspace|render",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Share-token route resolves to the right workspace state",
+      "pattern": "share[- _]token|route|resolves|right",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "New view tab \"Sala\" / \"Workspace\" visible next to kanban/conteudo, i18n correct",
+      "pattern": "conteudo|workspace|visible|kanban",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "all view tabs are visible after selecting a project",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`https://co-artelonga.fly.dev/u/comunicacao/sala` loads with at least an empty canvas",
+      "pattern": "co[- _]artelonga|co[- _]artelonga.fly.dev/u/comunicacao/sala|https|comunicacao|loads",
+      "matched_file": "co-web/e2e/responsive.spec.ts",
+      "matched_test": "page loads without JS errors at 768px",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "E2E test: anon visits sala → clicks btn-add → login modal appears",
+      "pattern": "btn[- _]add|visits|clicks|login",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 10,
+  "passed": 10,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

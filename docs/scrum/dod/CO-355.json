@@ -1,0 +1,85 @@
+{
+  "co_id": "CO-355",
+  "spec_title": "Workspace template registry — _workspace.yaml per universe seeds Sala layouts",
+  "timestamp": "2026-06-10T01:37:00.650Z",
+  "items": [
+    {
+      "text": "Template loader parses `_workspace.yaml` + `_workspaces/*.yaml`",
+      "pattern": "template|loader|parses|workspace",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L1 — Breadcrumbs are hidden on the template root view",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Schema validation: unknown fields logged but tolerated; invalid YAML rejected with clear error",
+      "pattern": "schema|validation|unknown|fields",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /workspace-templates` lists templates for a universe",
+      "pattern": "workspace[- _]templates|lists|templates|universe",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`POST /from-template/{slug}` creates a new `workspace_states` row seeded with template's layout",
+      "pattern": "from[- _]template|from[- _]template/|creates|workspace|states",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Sala picker modal shows registry + \"Blank\" option",
+      "pattern": "picker|modal|shows|registry",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "Entrar button inside overlay opens login modal",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Missing referenced entries → warning logged, node dropped, render continues",
+      "pattern": "missing|referenced|entries|warning",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "?type=feat returns only feat entries",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Test fixture universe with 2 templates + 1 default → all 3 visible in API + UI",
+      "pattern": "fixture|universe|templates|default",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "versions are sorted newest-first by default",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`_workspaces/mbya-basics.yaml` checked into the comunicacao universe; loads on prod after sync",
+      "pattern": "mbya[- _]basics|mbya[- _]basics.yaml|workspaces|checked|comunicacao",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "E2E: create new Sala from \"mbya-basics\" → canvas opens with 12 nodes pre-placed",
+      "pattern": "mbya[- _]basics|pre[- _]placed|create|canvas|opens",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "Entrar button inside overlay opens login modal",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 9,
+  "passed": 8,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 89
+}

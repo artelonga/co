@@ -1,0 +1,45 @@
+{
+  "co_id": "CO-375",
+  "spec_title": "API contract enforcement against running staging — probe every endpoint, detect drift",
+  "timestamp": "2026-06-10T01:37:00.737Z",
+  "items": [
+    {
+      "text": "Probes every endpoint in `openapi.yaml`",
+      "pattern": "probes|every|endpoint|openapi",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Detects status code drift (declared 200, actual 500)",
+      "pattern": "detects|status|drift|declared",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Detects response shape drift (missing required field, extra field, wrong type)",
+      "pattern": "detects|response|shape|drift",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "login-options returns expected shape",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Skips token-issuance endpoints + ones with unparameteri",
+      "pattern": "token[- _]issuance|skips|endpoints|unparameteri",
+      "matched_file": "co-web/e2e/archived/auth-crdt.spec.ts",
+      "matched_test": "authenticated user can access protected write endpoints",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 4,
+  "passed": 4,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
