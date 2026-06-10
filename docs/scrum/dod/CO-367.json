@@ -1,0 +1,109 @@
+{
+  "co_id": "CO-367",
+  "spec_title": "Universal content → KB sync — generalize the rollup pattern to all entry types",
+  "timestamp": "2026-06-10T16:43:49.452Z",
+  "items": [
+    {
+      "text": "Migration v60 creates `entry_kb_index` table",
+      "pattern": "migration|creates|entry|index",
+      "matched_file": "co-web/e2e/co-355-workspace-templates.spec.ts",
+      "matched_test": "POST from-template/blank creates workspace state (anon)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`POST /api/v1/kb/ingest` idempotent upsert keyed by `(universe_key, entry_path, body_hash)`",
+      "pattern": "api/v1/kb/ingest|ingest|idempotent|upsert|keyed",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "6. sister repo seeding — pages + tasks ingested from CO_LOCAL_REPOS_DIR",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Auth via bearer `CO_KB_TOKEN` (env var); 503 if token unset",
+      "pattern": "bearer|token|unset",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "CO's own entry-write path fires a non-blocking ingest event",
+      "pattern": "entry[- _]write|non[- _]blocking|fires|ingest",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "6. sister repo seeding — pages + tasks ingested from CO_LOCAL_REPOS_DIR",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "FTS5 search via `GET /api/v1/kb/search?q=...&universe_key=...` returns matching entries",
+      "pattern": "api/v1/kb/search|search|universe|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /api/v1/kb/recent?universe_key=...` returns recently-indexed entries",
+      "pattern": "recently[- _]indexed|api/v1/kb/recent|recent|universe|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Asset refs preserved in the index",
+      "pattern": "asset|preserved|index",
+      "matched_file": "co-web/e2e/wave-2/co-245-code-editor.spec.ts",
+      "matched_test": "vault PUT of .py file returns asset.code entry type",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Retry queue (surface-side) buffers offline writes; drains on reconnect",
+      "pattern": "surface[- _]side|retry|queue|buffers",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`event_type = 'kb.ingested'` lands in atividades",
+      "pattern": "event|ingested|lands|atividades",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "6. sister repo seeding — pages + tasks ingested from CO_LOCAL_REPOS_DIR",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Conversion KPI updated: t_ingest → t_searchable per CO-360",
+      "pattern": "co[- _]360|conversion|updated|ingest|searchable",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "6. sister repo seeding — pages + tasks ingested from CO_LOCAL_REPOS_DIR",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "OpenAPI (CO-211) documents the 3 KB endpoints",
+      "pattern": "co[- _]211|openapi|documents|endpoints",
+      "matched_file": "co-web/e2e/archived/auth-crdt.spec.ts",
+      "matched_test": "authenticated user can access protected write endpoints",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Sync break test: take down KB endpoint, verify local writes still render (resilience guarantee)",
+      "pattern": "break|endpoint|verify|local",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "onboard-with-email returns dev_code in test env and verify succeeds",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 12,
+  "passed": 11,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 92
+}
