@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CO — Sem conexão</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #f9fafb; color: #111; }
+    .card { text-align: center; padding: 40px 32px; max-width: 400px; }
+    .icon { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 1.4rem; margin: 0 0 10px; }
+    p { color: #6b7280; line-height: 1.6; margin: 0 0 24px; }
+    a { display: inline-block; padding: 10px 24px; background: #2563eb; color: #fff; border-radius: 8px; text-decoration: none; font-weight: 500; }
+    a:hover { background: #1d4ed8; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">📡</div>
+    <h1>Você está offline</h1>
+    <p>Sem conexão com a internet. O conteúdo que você já visitou ainda está disponível no cache.</p>
+    <a href="/" onclick="window.location.reload(); return false;">Tentar novamente</a>
+  </div>
+</body>
+</html>

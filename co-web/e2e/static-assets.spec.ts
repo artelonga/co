@@ -33,7 +33,8 @@ const ASSETS: AssetEntry[] = [
   // PDF.js viewer bundle (served from /pdfjs/ prefix)
   { path: "/pdfjs/build/pdf.mjs",          expectedMime: "application/javascript" },
   // Root-level shortcuts (remapped server-side to shared/)
-  { path: "/manifest.json",                expectedMime: "application/json" },
+  // CO-357: PWA manifest uses the spec MIME type (W3C Web App Manifest)
+  { path: "/manifest.json",                expectedMime: "application/manifest+json" },
   { path: "/sw.js",                        expectedMime: "application/javascript" },
 ];
 
