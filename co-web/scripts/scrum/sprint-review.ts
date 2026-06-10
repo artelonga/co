@@ -98,7 +98,10 @@ function currentSprintNumber(): number {
   const anchor = new Date(ANCHOR_DATE + 'T12:00:00Z');
   const now = new Date(today + 'T12:00:00Z');
   const diffDays = Math.floor((now.getTime() - anchor.getTime()) / (1000 * 86400));
-  return Math.floor(diffDays / 14);
+  // ceil: a day inside the window ending at anchor+n*14 belongs to sprint n.
+  // floor() put pre-anchor days into "Sprint -1" with a stale window
+  // (launch-night bug, 2026-06-10).
+  return Math.ceil(diffDays / 14);
 }
 
 function sprintWindow(n: number): { start: string; end: string } {
