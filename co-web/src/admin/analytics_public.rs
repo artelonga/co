@@ -177,6 +177,11 @@ pub struct FunnelResponse {
 pub struct FunnelParams {
     pub days: Option<u32>,
     pub universe: Option<String>,
+    // CO-371: acquisition funnel params (admin-only when `window` is present)
+    pub window: Option<String>,
+    pub start: Option<String>,
+    pub end: Option<String>,
+    pub breakdown: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -916,18 +921,41 @@ pub async fn recent_handler(
     Json(data)
 }
 
-/// GET /api/v1/analytics/public/funnel?days=N
+/// GET /api/v1/analytics/public/funnel
+///
+/// Two modes:
+///   - `?days=N` (CO-378): public path-funnel, no auth required.
+///   - `?window=7d|30d|90d|custom` (CO-371): 8-step acquisition funnel, admin-only.
 pub async fn funnel_handler(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<FunnelParams>,
-) -> Json<FunnelResponse> {
-    let days = params.days.unwrap_or(30).clamp(1, 365);
-    let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
-    let data = {
-        let storage = state.core.storage.lock();
-        query_funnel(storage.conn(), &universe, days)
-    };
-    Json(data)
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if params.window.is_some() {
+        // CO-371: 8-step acquisition funnel — admin-only
+        let acq_params = crate::admin::funnel_routes::AcquisitionFunnelParams {
+            window: params.window,
+            start: params.start,
+            end: params.end,
+            breakdown: params.breakdown,
+        };
+        match crate::admin::funnel_routes::acquisition_funnel_handler(&state, &headers, &acq_params)
+            .await
+        {
+            Ok(json) => json.into_response(),
+            Err(err) => err,
+        }
+    } else {
+        // CO-378: public path-based funnel
+        let days = params.days.unwrap_or(30).clamp(1, 365);
+        let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
+        let data = {
+            let storage = state.core.storage.lock();
+            query_funnel(storage.conn(), &universe, days)
+        };
+        Json(data).into_response()
+    }
 }
 
 // ---------------------------------------------------------------------------

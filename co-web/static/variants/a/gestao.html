@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>CO — Gestão</title>
 <style>
-:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#66bb6a;--red:#e57373;--yellow:#ffd54f;--blue:#4fc3f7}
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#66bb6a;--red:#e57373;--yellow:#ffd54f;--blue:#4fc3f7;--orange:#ffb74d}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif}
 header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--card)}
@@ -50,6 +50,18 @@ td.mono{font-family:monospace;font-size:11px}
 .acao-atualizar{color:var(--blue)}
 .acao-login{color:var(--yellow)}
 .acao-logout,.acao-ler{color:var(--dim)}
+/* Funnel chart */
+.funnel-bars{display:flex;flex-direction:column;gap:6px;margin:12px 0}
+.funnel-row{display:flex;align-items:center;gap:8px;font-size:12px}
+.funnel-label{width:80px;text-align:right;color:var(--dim);font-size:11px;flex-shrink:0}
+.funnel-bar-wrap{flex:1;height:22px;background:var(--border);border-radius:3px;overflow:hidden;position:relative}
+.funnel-bar{height:100%;background:var(--accent);border-radius:3px;opacity:.8;transition:width .3s}
+.funnel-count{width:60px;text-align:right;font-variant-numeric:tabular-nums;font-family:monospace;font-size:11px}
+.funnel-drop{width:52px;text-align:right;color:var(--red);font-size:10px}
+.funnel-kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin:12px 0}
+.funnel-filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center}
+.funnel-filters select{background:var(--bg);border:1px solid var(--border);color:var(--text);padding:4px 8px;border-radius:4px;font-size:12px}
+.funnel-filters button{background:var(--accent);color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:12px}
 .referrers .ref-row{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:12px}
 .referrers .ref-bar-wrap{flex:1;height:8px;background:var(--border);border-radius:4px;overflow:hidden}
 .referrers .ref-bar{height:100%;background:var(--accent);border-radius:4px;opacity:.7}
@@ -72,6 +84,7 @@ a:hover{text-decoration:underline}
     <button class="tab-btn" onclick="switchTab('conteudo',this)">Conteúdo</button>
     <button class="tab-btn" onclick="switchTab('usuarios',this)">Usuários</button>
     <button class="tab-btn" onclick="switchTab('atividades',this)">Atividades</button>
+    <button class="tab-btn" onclick="switchTab('funil',this)">Funil</button>
   </div>
 
   <!-- Resumo -->
@@ -101,6 +114,30 @@ a:hover{text-decoration:underline}
     <div class="kpi-grid" id="user-kpi-grid"></div>
     <div class="section-title">Visitas por dia da semana</div>
     <div class="card"><div class="dow-bars" id="dow-bars"></div></div>
+  </div>
+
+  <!-- Funil (CO-371) -->
+  <div class="tab-panel" id="panel-funil">
+    <div class="funnel-filters">
+      <select id="funil-window">
+        <option value="7d">7 dias</option>
+        <option value="30d" selected>30 dias</option>
+        <option value="90d">90 dias</option>
+      </select>
+      <select id="funil-breakdown">
+        <option value="none">Sem breakdown</option>
+        <option value="source">Por fonte</option>
+        <option value="day">Por dia</option>
+        <option value="country">Por país</option>
+      </select>
+      <button onclick="fetchFunil()">Atualizar</button>
+    </div>
+    <div class="section-title">Funil de aquisição — 8 etapas</div>
+    <div class="card">
+      <div class="funnel-kpi-grid" id="funil-kpi-grid"></div>
+      <div class="funnel-bars" id="funil-bars"></div>
+    </div>
+    <div id="funil-breakdown-section"></div>
   </div>
 
   <!-- Atividades -->
@@ -152,6 +189,7 @@ function loadTab(name){
   else if(name==='conteudo'){ if(isFresh('conteudo')){ renderUniverses(cache['conteudo'].data); } else { fetchUniverses(); } }
   else if(name==='usuarios'){ if(isFresh('resumo')){ renderUsuarios(cache['resumo'].data); } else { fetchResumo().then(function(){ renderUsuarios(cache['resumo'].data); }); } }
   else if(name==='atividades'){ fetchAtividades(); }
+  else if(name==='funil'){ if(isFresh('funil')){ renderFunil(cache['funil'].data); } else { fetchFunil(); } }
 }
 
 function fetchResumo(){
@@ -267,6 +305,77 @@ function renderAtividades(rows){
   document.querySelector('#ativ-table tbody').innerHTML=rows.length
     ?rows.map(function(a){ return '<tr><td class="num">'+a.id+'</td><td class="acao-'+esc(a.acao)+'">'+esc(a.acao)+'</td><td>'+esc(a.entidade)+'</td><td class="mono">'+esc(a.entidade_id||'')+'</td><td>'+esc(a.tipo)+'</td><td class="mono">'+esc(a.user_id||'')+'</td><td class="mono">'+esc(a.ip_hash||'')+'</td><td class="mono" style="color:var(--dim)">'+fmtDate(a.criado_em)+'</td></tr>'; }).join('')
     :'<tr><td colspan="8" style="color:var(--dim);text-align:center">Sem atividades</td></tr>';
+}
+
+function fetchFunil(){
+  var window=document.getElementById('funil-window').value||'30d';
+  var breakdown=document.getElementById('funil-breakdown').value||'none';
+  var url='/api/v1/analytics/public/funnel?window='+encodeURIComponent(window)+'&breakdown='+encodeURIComponent(breakdown);
+  fetch(url,{credentials:'same-origin'}).then(function(r){
+    if(r.status===401){ window.location.href='/'; return null; }
+    if(r.status===403){ showErr('Acesso restrito a administradores.'); return null; }
+    if(!r.ok){ showErr('Erro '+r.status+' ao carregar funil.'); return null; }
+    return r.json();
+  }).then(function(data){
+    if(!data) return;
+    cache['funil']={ts:Date.now(),data:data};
+    renderFunil(data);
+  });
+}
+
+function renderFunil(d){
+  showErr('');
+  var steps=d.steps||[];
+  var maxCount=Math.max(1,Math.max.apply(null,steps.map(function(s){return s.count;})));
+  var LABELS=['Descobrir','Engajar','Intenção','Captura','Qualificar','Registrar','Converter','Onboard'];
+  document.getElementById('funil-bars').innerHTML=steps.map(function(s,i){
+    var pct=Math.max(2,Math.round((s.count/maxCount)*100));
+    var drop=s.drop_off_pct!=null?(-s.drop_off_pct.toFixed(1)+'%'):'';
+    return '<div class="funnel-row">'
+      +'<div class="funnel-label">'+esc(LABELS[i]||s.name)+'</div>'
+      +'<div class="funnel-bar-wrap"><div class="funnel-bar" style="width:'+pct+'%"></div></div>'
+      +'<div class="funnel-count">'+fmt(s.count)+'</div>'
+      +'<div class="funnel-drop">'+esc(drop)+'</div>'
+      +'</div>';
+  }).join('');
+
+  var kpis=d.kpis||{};
+  var pct=function(v){ return v!=null?(v*100).toFixed(1)+'%':'—'; };
+  document.getElementById('funil-kpi-grid').innerHTML=[
+    ['Intent rate',pct(kpis.intent_rate)],
+    ['Capture rate',pct(kpis.capture_rate)],
+    ['Verify rate',pct(kpis.verify_rate)],
+    ['Conversion',pct(kpis.conversion_rate)],
+    ['Janela',esc((d.window||{}).start||'')+'→'+esc((d.window||{}).end||'')],
+  ].map(function(k){ return '<div class="kpi"><div class="label">'+k[0]+'</div><div class="value" style="font-size:14px">'+k[1]+'</div></div>'; }).join('');
+
+  var section=document.getElementById('funil-breakdown-section');
+  section.innerHTML='';
+  if(d.by_source){
+    section.innerHTML='<div class="section-title">Por fonte</div><div class="card"><table id="funil-src-table"><thead><tr><th>Fonte</th><th>Descobrir</th><th>Engajar</th><th>Intenção</th></tr></thead><tbody>'
+      +Object.keys(d.by_source).sort(function(a,b){ var sa=d.by_source[a]; var sb=d.by_source[b]; return (sb[0]||{}).count-(sa[0]||{}).count; }).slice(0,15).map(function(src){
+        var steps=d.by_source[src]||[];
+        return '<tr><td class="mono">'+esc(src)+'</td>'
+          +[0,1,2].map(function(i){ return '<td class="num">'+fmt((steps[i]||{}).count||0)+'</td>'; }).join('')
+          +'</tr>';
+      }).join('')+'</tbody></table></div>';
+  } else if(d.by_day){
+    section.innerHTML='<div class="section-title">Por dia</div><div class="card" style="overflow-x:auto"><table id="funil-day-table"><thead><tr><th>Dia</th><th>Descobrir</th><th>Engajar</th><th>Intenção</th><th>Captura</th><th>Registrar</th></tr></thead><tbody>'
+      +(d.by_day||[]).map(function(row){
+        var steps=row.steps||[];
+        return '<tr><td class="mono">'+esc(row.day)+'</td>'
+          +[0,1,2,3,5].map(function(i){ return '<td class="num">'+fmt((steps[i]||{}).count||0)+'</td>'; }).join('')
+          +'</tr>';
+      }).join('')+'</tbody></table></div>';
+  } else if(d.by_country){
+    section.innerHTML='<div class="section-title">Por país</div><div class="card"><table id="funil-cty-table"><thead><tr><th>País</th><th>Descobrir</th><th>Engajar</th><th>Intenção</th></tr></thead><tbody>'
+      +(d.by_country||[]).map(function(row){
+        var steps=row.steps||[];
+        return '<tr><td class="mono">'+esc(row.country)+'</td>'
+          +[0,1,2].map(function(i){ return '<td class="num">'+fmt((steps[i]||{}).count||0)+'</td>'; }).join('')
+          +'</tr>';
+      }).join('')+'</tbody></table></div>';
+  }
 }
 
 fetchResumo();
