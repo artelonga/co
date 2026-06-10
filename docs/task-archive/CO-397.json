@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-397",
+  "title": "Public API rate limits + abuse protection — Phase 1 of CO-278 epic (formerly CO-278-B), blocks v3.0 public release",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-397.md",
+  "branch": "feat/CO-397-public-api-rate-limits-abuse-protection-",
+  "merge_sha": "71ec4adef46b2e562ca3ae3a42411b2dd591ea19",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/183",
+    "number": 183
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T02:10:08Z",
+  "files_changed": 12,
+  "lines_added": 682,
+  "lines_removed": 96,
+  "labels": [
+    "type:feat",
+    "module:api",
+    "module:platform",
+    "module:security"
+  ],
+  "changelog_entry": "## CO-397 — Public API rate limits + abuse protection (Phase 1 of CO-278 epic)\n\nAdded the minimum rate-limiting and abuse-protection layer needed to safely open the CO public API at v3.0.\n\n- **Token-bucket rate limits** for anonymous (60 GET/min) and authenticated (600 GET/min, 10×) traffic via in-memory middleware. Anonymous write budget: 5/min; authenticated: 60/min.\n- **X-RateLimit-Limit / Remaining / Reset headers** on every `/api/v1/*` response so clients can self-pace.\n- **X-Co-Server-Version** header on all responses for agent identification.\n- **User-Agent gate**: empty or single-character UA is rejected with 400 `missing_user_agent`.\n- **Abuse heuristics**: 30+ 404s or 10+ 401s within a 1-minute window → 15-minute temp ban. Bans are in-memory and clear on restart.\n- **Trusted-IP bypass**: set `CO_TRUSTED_IPS=CSV-of-CIDRs` to exempt monitoring IPs and CI runners.\n- **`GET /robots.txt`** and **`GET /sitemap.xml`**: crawl policy + auto-generated sitemap from public universes.\n- **Abuse events logged to `atividades`** (`entidade=api_abuse`, `tipo=sistema`) so they surface in the `/gestao/resumo` recent-activity feed.\n- **OpenAPI spec updated** with `components/responses/RateLimited` and 429 responses on entries, universes, and feedback endpoints.\n\n### Why\n\nThe public API was fully open with no IP-level rate limit beyond CO-339's feedback path. A single misconfigured crawler or LLM agent loop could exhaust the Fly machine before v3.0 launch. This is the minimum viable protection layer — per-tier billing semantics and persistent bans are deferred to CO-80 / CO-278-A (post-v3.0).",
+  "summary": "As The platform operator opening CO to the public web at v3.0",
+  "co_auto_version": "0.1.0"
+}
