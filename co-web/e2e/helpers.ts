@@ -36,8 +36,32 @@ export async function waitForTimeline(page: Page): Promise<void> {
   await page.waitForSelector(".timeline-wrapper", { state: "visible" });
 }
 
+/**
+ * Open the sidebar drawer on narrow mobile viewports (≤ 640 px).
+ * No-op on wider viewports or when the sidebar is already open.
+ * CO-359: required after CO-358's drawer sidebar landed for mobile.
+ */
+export async function openSidebarIfMobile(page: Page): Promise<void> {
+  const vp = page.viewportSize();
+  if (!vp || vp.width > 640) return;
+  const hamburger = page.locator("#hamburger-btn");
+  if ((await hamburger.count()) === 0) return;
+  const sidebar = page.locator("#sidebar");
+  const isOpen = await sidebar
+    .evaluate((el) => el.classList.contains("open"))
+    .catch(() => false);
+  if (!isOpen) {
+    await hamburger.click();
+    await page.waitForFunction(
+      () => document.getElementById("sidebar")?.classList.contains("open"),
+      { timeout: 3_000 },
+    );
+  }
+}
+
 /** Click a project in the sidebar and wait for the kanban board */
 export async function selectProject(page: Page, key: string): Promise<void> {
+  await openSidebarIfMobile(page);
   const link = page.locator(
     `#project-list .sidebar-item-key:text-is("${key}")`,
   );
@@ -52,6 +76,20 @@ export async function selectProject(page: Page, key: string): Promise<void> {
   );
   await link.click();
   await tasksLoaded;
+  // CO-359: on mobile the drawer stays open after selection and intercepts
+  // every later interaction — close it. The open sidebar covers the
+  // overlay's center, so dispatch the click straight to the overlay.
+  const vp = page.viewportSize();
+  if (vp && vp.width <= 640) {
+    const overlay = page.locator("#sidebar-overlay.visible");
+    if ((await overlay.count()) > 0) {
+      await overlay.dispatchEvent("click");
+      await page.waitForFunction(
+        () => !document.getElementById("sidebar")?.classList.contains("open"),
+        { timeout: 3_000 },
+      );
+    }
+  }
   // CO-304: render() fires renderConteudo() which is async (6 API calls). Those
   // calls complete and overwrite content.innerHTML AFTER we switch to kanban.
   // renderConteudo() now has a stale-view guard, but we also wait here for the

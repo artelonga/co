@@ -250,6 +250,8 @@ test.describe("CO-280: IA layers — sidebar, breadcrumbs, tools", () => {
     page,
     seedProject,
   }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) <= 640,
+      "single-column mobile board (CO-358) — cross-column visibility is a desktop assertion");
     await navigateTo(page, "/");
 
     const projectItem = page.locator(

@@ -40,8 +40,10 @@ test.describe("i18n: language toggle", () => {
     test.skip(count === 0, "lang toggle not found");
     await langBtn.click();
 
-    // After toggle, at least one data-i18n element should have changed content
-    const i18nEls = page.locator("[data-i18n]");
+    // After toggle, at least one data-i18n element should have changed content.
+    // CO-359: scope to :visible — on mobile the first [data-i18n] match lives
+    // inside the closed sidebar drawer.
+    const i18nEls = page.locator("[data-i18n]:visible");
     await expect(i18nEls.first()).toBeVisible({ timeout: 3_000 });
   });
 

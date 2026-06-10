@@ -12,11 +12,6 @@ import {
   createTask,
 } from "./helpers";
 
-test.beforeEach(async ({ page }) => {
-  const vp = page.viewportSize();
-  test.skip(!!(vp && vp.width <= 640), "Sidebar not available on mobile");
-});
-
 test.describe("Auth: unauthenticated writes rejected", () => {
   test("POST tasks without session returns 401", async ({
     request,  // unauthenticated plain context — no uat-login cookie
@@ -55,6 +50,8 @@ test.describe("Status progression", () => {
     apiContext,
     seedProject,
   }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) <= 640,
+      "single-column mobile board (CO-358) — cross-column visibility is a desktop assertion");
     const task = await createTask(apiContext, seedProject.key, { title: "Progress task" });
 
     await navigateTo(page, "/");

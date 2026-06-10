@@ -13,7 +13,7 @@ export default defineConfig({
   // timeout, not a frontend bug. 60s gives headroom while still failing genuine hangs.
   timeout: process.env.CI ? 60_000 : 30_000,
   testIgnore: ["**/archived/**", "**/wave-2/**", "**/interactions/**"],
-  reporter: "html",
+  reporter: [["html"], ["list"]],
   use: {
     baseURL,
     trace: "on-first-retry",
@@ -21,71 +21,21 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   globalTeardown: "./e2e/global-teardown.ts",
   projects: [
-    // Desktop viewports (1280×720)
     {
-      name: "chromium-desktop",
-      use: {
-        ...devices["Desktop Chrome"],
-        viewport: { width: 1280, height: 720 },
-      },
+      name: "desktop-chromium",
+      use: { ...devices["Desktop Chrome"] },
     },
     {
-      name: "firefox-desktop",
-      use: {
-        ...devices["Desktop Firefox"],
-        viewport: { width: 1280, height: 720 },
-      },
+      name: "pixel-7",
+      use: { ...devices["Pixel 7"] },
     },
     {
-      name: "webkit-desktop",
-      use: {
-        ...devices["Desktop Safari"],
-        viewport: { width: 1280, height: 720 },
-      },
-    },
-    // Tablet viewports (768×1024)
-    {
-      name: "chromium-tablet",
-      use: {
-        ...devices["Desktop Chrome"],
-        viewport: { width: 768, height: 1024 },
-      },
+      name: "iphone-14",
+      use: { ...devices["iPhone 14"] },
     },
     {
-      name: "firefox-tablet",
-      use: {
-        ...devices["Desktop Firefox"],
-        viewport: { width: 768, height: 1024 },
-      },
-    },
-    {
-      name: "webkit-tablet",
-      use: {
-        ...devices["Desktop Safari"],
-        viewport: { width: 768, height: 1024 },
-      },
-    },
-    // Mobile viewports (375×812)
-    {
-      name: "chromium-mobile",
-      use: {
-        ...devices["Desktop Chrome"],
-        viewport: { width: 375, height: 812 },
-      },
-    },
-    {
-      name: "firefox-mobile",
-      use: {
-        ...devices["Desktop Firefox"],
-        viewport: { width: 375, height: 812 },
-      },
-    },
-    {
-      name: "webkit-mobile",
-      use: {
-        ...devices["Desktop Safari"],
-        viewport: { width: 375, height: 812 },
-      },
+      name: "ipad-pro",
+      use: { ...devices["iPad Pro 11"] },
     },
   ],
 });

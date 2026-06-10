@@ -18,6 +18,7 @@
  */
 
 import { test, expect } from './fixtures';
+import { openSidebarIfMobile } from './helpers';
 import { spawn } from 'child_process';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
@@ -105,9 +106,6 @@ test.describe('CO-321: localhost trial flow', () => {
 
   // ── 1. Anonymous boot ───────────────────────────────────────────────────────
   test('1. anonymous boot — no Plataformas, no raw chip key, no Descobríveis section', async ({ page }) => {
-    const vp = page.viewportSize();
-    test.skip(!!(vp && vp.width <= 640), 'Sidebar not visible on mobile');
-
     // Fresh incognito-like visit: page has no session cookie by default.
     await page.goto('/', { waitUntil: 'networkidle' });
     const sidebar = page.locator('#project-list');
@@ -133,9 +131,6 @@ test.describe('CO-321: localhost trial flow', () => {
     page,
     apiContext,
   }) => {
-    const vp = page.viewportSize();
-    test.skip(!!(vp && vp.width <= 640), 'Sidebar not visible on mobile');
-
     // Idempotent cleanup: unsubscribe in case a previous test run left state.
     await apiContext.delete(`/api/v1/universes/${SUB_TARGET}/subscribe`);
 
@@ -148,6 +143,7 @@ test.describe('CO-321: localhost trial flow', () => {
       data: { email: 'yuri@uat.local', password: 'uat' },
     });
     await page.goto('/', { waitUntil: 'networkidle' });
+    await openSidebarIfMobile(page);
 
     // Universe row must appear somewhere in the sidebar.
     const row = page.locator(`.sidebar-universe-item[data-universe="${SUB_TARGET}"]`);
@@ -188,9 +184,6 @@ test.describe('CO-321: localhost trial flow', () => {
     page,
     apiContext,
   }) => {
-    const vp = page.viewportSize();
-    test.skip(!!(vp && vp.width <= 640), 'Sidebar not visible on mobile');
-
     // Setup: subscribe so the × button appears.
     await apiContext.post(`/api/v1/universes/${SUB_TARGET}/subscribe`);
 
@@ -198,6 +191,7 @@ test.describe('CO-321: localhost trial flow', () => {
       data: { email: 'yuri@uat.local', password: 'uat' },
     });
     await page.goto('/', { waitUntil: 'networkidle' });
+    await openSidebarIfMobile(page);
 
     const btn = page.locator(`.sidebar-unsubscribe-btn[data-key="${SUB_TARGET}"]`);
     await expect(btn).toBeVisible({ timeout: 8_000 });
@@ -214,9 +208,6 @@ test.describe('CO-321: localhost trial flow', () => {
 
   // ── 5. Theme persistence ────────────────────────────────────────────────────
   test('5. theme persistence — chosen theme survives universe navigation', async ({ page }) => {
-    const vp = page.viewportSize();
-    test.skip(!!(vp && vp.width <= 640), 'Sidebar not visible on mobile');
-
     await page.request.post('/api/v1/auth/uat-login', {
       data: { email: 'yuri@uat.local', password: 'uat' },
     });
@@ -350,12 +341,12 @@ test.describe('CO-321: localhost trial flow', () => {
     }
 
     // ── UI-level assertion: search prompt lists only valid candidates ─────────
-    const vp = page.viewportSize();
-    if ((me.discoverable ?? []).length > 0 && !(vp && vp.width <= 640)) {
+    if ((me.discoverable ?? []).length > 0) {
       await page.request.post('/api/v1/auth/uat-login', {
         data: { email: 'yuri@uat.local', password: 'uat' },
       });
       await page.goto('/', { waitUntil: 'networkidle' });
+      await openSidebarIfMobile(page);
 
       const searchBtn = page.locator('.sidebar-discover-search-btn');
       if ((await searchBtn.count()) > 0) {

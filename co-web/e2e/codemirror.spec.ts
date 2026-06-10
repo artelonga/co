@@ -6,11 +6,6 @@
 import { test, expect } from "./fixtures";
 import { navigateTo, selectProject, createTask } from "./helpers";
 
-test.beforeEach(async ({ page }) => {
-  const vp = page.viewportSize();
-  test.skip(!!(vp && vp.width <= 640), "Sidebar not available on mobile viewport");
-});
-
 test.describe("CodeMirror: init", () => {
   test("opening a task modal mounts .co-editor-wrap", async ({
     page,

@@ -87,8 +87,16 @@ async function holdAndDrag(page: Page, from: Locator, to: Locator): Promise<void
 }
 
 // ─── Desktop drag ─────────────────────────────────────────────────────────────
+// ─── Drag between columns ─────────────────────────────────────────────────────
 
 test.describe("Drag: move task card between kanban columns", () => {
+  // ≤640px shows a single column (CO-358) — cross-column drag at that width
+  // is covered by the dedicated "Mobile drag" suite below via segment buttons.
+  test.beforeEach(async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) <= 640,
+      "single-column mobile board — covered by the Mobile drag suite");
+  });
+
   test("drag from 'To Do' to 'In Progress' updates the task status via API", async ({
     page,
     apiContext,
@@ -277,6 +285,13 @@ for (const device of MOBILE_VIEWPORTS) {
 // ─── Full CRUD sequence ───────────────────────────────────────────────────────
 
 test.describe("Full CRUD: create → drag → edit → delete", () => {
+  // ≤640px shows a single column (CO-358) — cross-column drag at that width
+  // is covered by the dedicated "Mobile drag" suite below via segment buttons.
+  test.beforeEach(async ({ page }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) <= 640,
+      "single-column mobile board — covered by the Mobile drag suite");
+  });
+
   test("create project task, drag to In Progress, edit title, then delete", async ({
     page,
     apiContext,

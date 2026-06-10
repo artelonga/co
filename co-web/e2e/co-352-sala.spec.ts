@@ -13,6 +13,11 @@ import { test, expect } from "./fixtures";
 import { navigateTo } from "./helpers";
 
 test.describe("CO-352: Sala (workspace) primitive", () => {
+    // CO-352: sala canvas is a desktop-only surface; not adapted for mobile (CO-359).
+    test.beforeEach(async ({ page }) => {
+        const vp = page.viewportSize();
+        test.skip(!!(vp && vp.width <= 640), "Sala canvas is desktop-only (CO-352)");
+    });
     test("anonymous visitor to /u/template/sala sees the canvas page", async ({
         page,
     }) => {
