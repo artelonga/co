@@ -1,0 +1,94 @@
+name: Prod Release
+
+on:
+  # Manual dispatch — operator triggers on Thursday 12:00 BRT (15:00 UTC)
+  workflow_dispatch:
+    inputs:
+      skip_staging_check:
+        description: "Skip staging E2E gate (emergency only — requires justification)"
+        required: false
+        default: "false"
+        type: boolean
+      justification:
+        description: "Justification for skipping staging gate (required if skip_staging_check=true)"
+        required: false
+        default: ""
+
+jobs:
+  precondition-staging-e2e:
+    name: Precondition — Staging E2E must be green
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip notice (emergency override)
+        if: ${{ inputs.skip_staging_check == 'true' }}
+        run: |
+          echo "::warning::Staging E2E gate skipped. Justification: ${{ inputs.justification }}"
+          echo "This skip is logged for audit purposes."
+
+      - name: Check latest Staging E2E workflow run
+        if: ${{ inputs.skip_staging_check != 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Checking latest Staging E2E run on main..."
+          RUN=$(gh run list \
+            --repo "${{ github.repository }}" \
+            --workflow="staging-e2e.yml" \
+            --branch=main \
+            --limit=1 \
+            --json conclusion,status,databaseId \
+            --jq '.[0]')
+
+          if [ -z "$RUN" ] || [ "$RUN" = "null" ]; then
+            echo "::error::No Staging E2E run found on main. Run the staging suite first."
+            exit 1
+          fi
+
+          CONCLUSION=$(echo "$RUN" | jq -r '.conclusion // empty')
+          STATUS=$(echo "$RUN" | jq -r '.status // empty')
+          RUN_ID=$(echo "$RUN" | jq -r '.databaseId // empty')
+
+          echo "Latest Staging E2E run: status=$STATUS conclusion=$CONCLUSION id=$RUN_ID"
+
+          if [ "$CONCLUSION" != "success" ]; then
+            echo "::error::Latest Staging E2E run did not succeed (conclusion=$CONCLUSION)."
+            echo "::error::Fix the staging suite before deploying to prod."
+            echo "Run details: https://github.com/${{ github.repository }}/actions/runs/$RUN_ID"
+            exit 1
+          fi
+
+          echo "✅ Staging E2E is green (run #$RUN_ID)"
+
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: precondition-staging-e2e
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Check Fly token
+        if: ${{ env.FLY_API_TOKEN == '' }}
+        run: |
+          echo "::error::FLY_API_TOKEN secret is not set."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to production
+        run: flyctl deploy --config fly.toml --remote-only
+
+      - name: Post-deploy smoke check
+        run: |
+          echo "Running prod smoke check..."
+          for i in $(seq 1 12); do
+            if curl -sf "https://co.artelonga.com.br/api/health" | grep -q '"status":"ok"'; then
+              echo "✅ Production is healthy"
+              exit 0
+            fi
+            echo "Attempt $i/12: not ready, waiting 15s..."
+            sleep 15
+          done
+          echo "::error::Production health check failed after deploy"
+          exit 1

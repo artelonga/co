@@ -1,0 +1,114 @@
+name: Staging E2E
+
+on:
+  # Run automatically 5 minutes after a successful staging deploy
+  workflow_run:
+    workflows: ["Deploy to Staging"]
+    types: [completed]
+
+  # Manual trigger (Thursday release gate + ad-hoc runs)
+  workflow_dispatch:
+    inputs:
+      staging_url:
+        description: "Staging URL override (default: https://staging.co.artelonga.com.br)"
+        required: false
+        default: ""
+      reset_fixtures:
+        description: "Reset staging fixtures before running (STAGING_RESET=1)"
+        required: false
+        default: "false"
+        type: boolean
+
+jobs:
+  check-staging-deploy:
+    # Only run if triggered by a successful staging deploy (not on failure)
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - id: check
+        run: echo "should_run=true" >> "$GITHUB_OUTPUT"
+
+  staging-e2e:
+    name: Staging E2E (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    needs: check-staging-deploy
+    if: needs.check-staging-deploy.outputs.should_run == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        project: ["Pixel 7", "iPhone 14", "iPad Pro"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: co-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: co-web
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: co-web
+        run: npx playwright install --with-deps chromium
+
+      # 5-minute delay to allow the staging server to fully start
+      - name: Wait for staging to be healthy
+        env:
+          STAGING_URL: ${{ inputs.staging_url || 'https://staging.co.artelonga.com.br' }}
+        run: |
+          echo "Waiting for staging to be healthy..."
+          for i in $(seq 1 30); do
+            if curl -sf "$STAGING_URL/api/health" | grep -q '"status":"ok"'; then
+              echo "Staging is healthy"
+              break
+            fi
+            echo "Attempt $i/30: not ready yet, waiting 10s..."
+            sleep 10
+          done
+
+      - name: Run Staging E2E — ${{ matrix.project }}
+        working-directory: co-web
+        env:
+          CI: "true"
+          STAGING_URL: ${{ inputs.staging_url || 'https://staging.co.artelonga.com.br' }}
+          CO_STAGING_EMAIL: ${{ secrets.CO_STAGING_EMAIL }}
+          CO_STAGING_PASSWORD: ${{ secrets.CO_STAGING_PASSWORD }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          STAGING_RESET: ${{ inputs.reset_fixtures == 'true' && '1' || '0' }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          npx playwright test \
+            --config=e2e-staging/playwright.staging.config.ts \
+            --project="${{ matrix.project }}"
+
+      - name: Upload Playwright report — ${{ matrix.project }}
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-playwright-report-${{ matrix.project }}-${{ github.sha }}
+          path: co-web/playwright-report/${{ github.sha }}/
+          retention-days: 30
+
+  staging-e2e-summary:
+    name: Staging E2E — summary
+    runs-on: ubuntu-latest
+    needs: staging-e2e
+    if: always()
+    steps:
+      - name: Check all projects passed
+        run: |
+          if [ "${{ needs.staging-e2e.result }}" = "success" ]; then
+            echo "✅ All Staging E2E projects passed"
+          else
+            echo "❌ One or more Staging E2E projects failed"
+            exit 1
+          fi
