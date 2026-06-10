@@ -39,6 +39,7 @@ pub use content::asset_crypto;
 pub use content::asset_routes;
 pub use content::blob_routes;
 pub use content::branch_routes;
+pub use content::delivery_routes;
 pub use content::entry_index;
 pub use content::entry_routes;
 pub use content::graph_routes;
