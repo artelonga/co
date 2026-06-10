@@ -461,6 +461,60 @@ impl<'a> EntryIndex<'a> {
         }
     }
 
+    /// CO-354: persist the suggest/review lifecycle columns for one entry.
+    ///
+    /// `review_status` is the new lifecycle state (`draft` | `reviewed` |
+    /// `published`). The provenance columns are written verbatim — pass `None`
+    /// to leave a column NULL. Callers also mirror these values into the
+    /// entry's frontmatter so the read path (which only reads `frontmatter_json`)
+    /// stays in sync; this method keeps the indexed columns authoritative for
+    /// the review-queue query and its partial index.
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_review_fields(
+        &self,
+        universe_key: &str,
+        path: &str,
+        review_status: &str,
+        submitted_by: Option<&str>,
+        submitted_at: Option<&str>,
+        reviewed_by: Option<&str>,
+        reviewed_at: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.conn.execute(
+            "UPDATE entries SET \
+               review_status = ?3, submitted_by = ?4, submitted_at = ?5, \
+               reviewed_by = ?6, reviewed_at = ?7 \
+             WHERE universe_key = ?1 AND path = ?2",
+            params![
+                universe_key,
+                path,
+                review_status,
+                submitted_by,
+                submitted_at,
+                reviewed_by,
+                reviewed_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// CO-354: the owner-facing review queue — every entry whose
+    /// `review_status` is not `published`, newest submission first.
+    ///
+    /// Reads through the `idx_entries_review_status` partial index. The
+    /// returned `EntryRow.frontmatter` carries the submitter/reviewer detail
+    /// (mirrored at write time), so the API layer needs no extra columns.
+    pub fn list_review_queue(&self, universe_key: &str) -> anyhow::Result<Vec<EntryRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT path, universe_key, entry_type, title, frontmatter_json, body, body_hash, created_at, updated_at \
+             FROM entries \
+             WHERE universe_key = ?1 AND review_status != 'published' \
+             ORDER BY COALESCE(submitted_at, created_at) DESC, path ASC",
+        )?;
+        let rows = stmt.query_map(params![universe_key], row_to_entry_row)?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
     /// Full-text search across title + body using FTS5.
     pub fn search(&self, universe_key: &str, query: &str) -> anyhow::Result<Vec<EntryRow>> {
         let mut stmt = self.conn.prepare(

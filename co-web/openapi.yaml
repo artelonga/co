@@ -37,6 +37,8 @@ tags:
     description: "workspace endpoints"
   - name: "workspace-templates"
     description: "workspace-templates endpoints"
+  - name: "suggest/review"
+    description: "suggest/review endpoints"
   - name: "entries"
     description: "entries endpoints"
   - name: "vault"
@@ -3511,6 +3513,79 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/review:
+    get:
+      tags: ["suggest/review"]
+      summary: "List draft + reviewed entries for the review queue"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    get:
+      tags: ["suggest/review"]
+      summary: "Owner review queue page (shared/review.html)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["suggest/review"]
+      summary: "Edit a draft before approving"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/review/approve:
+    post:
+      tags: ["suggest/review"]
+      summary: "Approve → review_status published"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/review/reject:
+    post:
+      tags: ["suggest/review"]
+      summary: "Reject → entry removed"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/source:
     patch:
       tags: ["universes"]
@@ -3648,6 +3723,33 @@ paths:
     get:
       tags: ["universes"]
       summary: "My subscription state"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/suggest:
+    get:
+      tags: ["suggest/review"]
+      summary: "Public suggest form page (shared/suggest.html)"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["suggest/review"]
+      summary: "Submit a suggestion (anon-friendly, rate-limited) — creates a draft entry"
       security:
         - sessionCookie: []
       parameters:

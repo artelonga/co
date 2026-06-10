@@ -274,6 +274,39 @@ fn filter_published_for_anon(
         .collect()
 }
 
+/// CO-354: strip entries that are still in the suggest/review pipeline
+/// (`review_status` = `draft` | `reviewed`) from a listing. The universe owner
+/// sees everything; any other caller sees a non-published entry only when they
+/// are its submitter (matched by `submitted_by` == their submitter key).
+fn filter_review_status(entries: Vec<EntryRow>, is_owner: bool, viewer_key: &str) -> Vec<EntryRow> {
+    if is_owner {
+        return entries;
+    }
+    entries
+        .into_iter()
+        .filter(|e| is_review_visible(&e.frontmatter, false, viewer_key))
+        .collect()
+}
+
+/// CO-354: single-entry version of [`filter_review_status`].
+fn is_review_visible(frontmatter: &serde_json::Value, is_owner: bool, viewer_key: &str) -> bool {
+    if is_owner {
+        return true;
+    }
+    let status = frontmatter
+        .get("review_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("published");
+    if status == "published" {
+        return true;
+    }
+    frontmatter
+        .get("submitted_by")
+        .and_then(|v| v.as_str())
+        .map(|s| s == viewer_key)
+        .unwrap_or(false)
+}
+
 /// CO-330: single-entry version — returns false when the entry is not visible
 /// to anonymous callers because the universe requires `published: true`.
 fn is_published_for_anon(
@@ -472,6 +505,15 @@ pub async fn list_entries(
     let is_anon = caller_is_anon(&state, &headers);
     let entries = filter_published_for_anon(is_anon, anon_published_only, entries);
 
+    // CO-354: review-pipeline filter — draft/reviewed entries are hidden from
+    // everyone except the universe owner and the original submitter.
+    let viewer_key = crate::review_routes::submitter_key(&state, &headers);
+    let is_owner = universe
+        .as_ref()
+        .map(|u| u.owner_id == viewer_key)
+        .unwrap_or(false);
+    let entries = filter_review_status(entries, is_owner, &viewer_key);
+
     // CO-266: total = full visible count; entries = paginated slice.
     let effective_limit = q.limit.unwrap_or(5_000).min(50_000);
     let total = entries.len();
@@ -655,6 +697,17 @@ pub async fn get_entry(
     // CO-330: published-only filter — anon callers cannot read unpublished entries.
     let is_anon = caller_is_anon(&state, &headers);
     if !is_published_for_anon(is_anon, anon_published_only, &entry.frontmatter) {
+        return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
+    }
+
+    // CO-354: review-pipeline filter — a draft/reviewed entry is visible only to
+    // the universe owner and its submitter; everyone else gets a 404.
+    let viewer_key = crate::review_routes::submitter_key(&state, &headers);
+    let is_owner = universe
+        .as_ref()
+        .map(|u| u.owner_id == viewer_key)
+        .unwrap_or(false);
+    if !is_review_visible(&entry.frontmatter, is_owner, &viewer_key) {
         return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
     }
 

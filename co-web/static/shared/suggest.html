@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sugerir conteúdo — CO</title>
+  <link rel="stylesheet" href="/shared/production.css" />
+  <style>
+    body { max-width: 640px; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; }
+    label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
+    input, textarea, select { width: 100%; padding: 0.5rem; box-sizing: border-box; }
+    textarea { min-height: 8rem; }
+    .hp { position: absolute; left: -9999px; }
+    button { margin-top: 1.25rem; padding: 0.6rem 1.2rem; cursor: pointer; }
+    .msg { margin-top: 1rem; padding: 0.75rem; border-radius: 4px; }
+    .ok { background: #e6f4ea; color: #1e4620; }
+    .err { background: #fce8e6; color: #5b1a14; }
+    .hint { color: #666; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <h1>Sugerir conteúdo</h1>
+  <p class="hint">Sua sugestão entra como <strong>rascunho</strong> e fica aguardando revisão do responsável pelo universo. Nada é publicado automaticamente.</p>
+
+  <form id="suggest-form">
+    <label for="title">Título *</label>
+    <input id="title" name="title" required maxlength="200" />
+
+    <label for="entry_type">Tipo</label>
+    <select id="entry_type" name="entry_type">
+      <option value="note">Nota</option>
+      <option value="task">Tarefa</option>
+      <option value="event">Evento</option>
+    </select>
+
+    <label for="body">Conteúdo</label>
+    <textarea id="body" name="body"></textarea>
+
+    <label for="name">Seu nome (opcional)</label>
+    <input id="name" name="name" />
+
+    <label for="email">E-mail (opcional, privado)</label>
+    <input id="email" name="email" type="email" />
+    <span class="hint">Usado apenas para avisar você quando a sugestão for revisada. Nunca é exibido.</span>
+
+    <!-- honeypot: invisível para humanos, atrai bots -->
+    <input class="hp" id="honeypot" name="honeypot" tabindex="-1" autocomplete="off" />
+
+    <button type="submit">Enviar sugestão</button>
+  </form>
+
+  <div id="msg"></div>
+
+  <script>
+    // Slug is the first path segment: /{slug}/suggest
+    const slug = location.pathname.split('/').filter(Boolean)[0];
+    const form = document.getElementById('suggest-form');
+    const msg = document.getElementById('msg');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      msg.className = '';
+      msg.textContent = '';
+      const payload = {
+        title: form.title.value.trim(),
+        entry_type: form.entry_type.value,
+        body: form.body.value,
+        name: form.name.value || null,
+        email: form.email.value || null,
+        honeypot: form.honeypot.value,
+      };
+      try {
+        const res = await fetch(`/api/v1/universes/${encodeURIComponent(slug)}/suggest`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          msg.className = 'msg ok';
+          msg.textContent = 'Obrigado! Sua sugestão foi enviada e está aguardando revisão.';
+          form.reset();
+        } else if (res.status === 429) {
+          msg.className = 'msg err';
+          msg.textContent = 'Muitas sugestões em pouco tempo. Tente novamente mais tarde.';
+        } else {
+          const err = await res.json().catch(() => ({}));
+          msg.className = 'msg err';
+          msg.textContent = 'Não foi possível enviar: ' + (err.message || res.status);
+        }
+      } catch (_) {
+        msg.className = 'msg err';
+        msg.textContent = 'Erro de rede. Tente novamente.';
+      }
+    });
+  </script>
+</body>
+</html>
