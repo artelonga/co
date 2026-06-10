@@ -15,6 +15,15 @@ pub mod sync;
 // Universe-specific extensions
 pub mod universes;
 
+// CO-390 spike: layered architecture proof-of-concept (entries module).
+// These modules demonstrate the domain/dto/repository/service/mapper pattern.
+// NOT merged to main — archival only. See docs/spikes/library-manager-decision.md.
+pub mod domain;
+pub mod dto;
+pub mod mapper;
+pub mod repository;
+pub mod service;
+
 // Re-exports — every crate::module_name path that existed before the reorganization
 // continues to resolve, so no call sites need to change.
 

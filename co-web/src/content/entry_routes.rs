@@ -17,6 +17,8 @@ use serde_json::Value as JsonValue;
 use crate::entry_index::{EntryRow, make_entry};
 use crate::error::AppError;
 use crate::server::AppState;
+// CO-390 spike: thin controller delegates business rules to EntryService.
+use crate::service::EntryService;
 
 // ---------------------------------------------------------------------------
 // Manifest validation helpers
@@ -46,34 +48,16 @@ async fn load_manifest_cached(
         .await
 }
 
-/// Validate `frontmatter` against the manifest's content type for `entry_type`.
+/// CO-390 spike: thin wrapper — delegates to `EntryService::validate_entry_type`.
 ///
-/// Returns `Ok(())` when:
-/// - `manifest` is `None` (no `_universe.yaml`).
-/// - The manifest has no schema for `entry_type`.
-/// - The payload passes all schema checks.
-///
-/// Returns `Err(AppError::UnprocessableEntity)` with a field-path message
-/// when validation fails.
+/// Kept as a local function so all call sites in this file stay unchanged,
+/// but the business rule is now tested in isolation via the service layer.
 fn validate_against_manifest(
     manifest: Option<&co::manifest::Manifest>,
     entry_type: &str,
     frontmatter: &JsonValue,
 ) -> Result<(), AppError> {
-    let manifest = match manifest {
-        Some(m) => m,
-        None => return Ok(()),
-    };
-    let ct = match manifest
-        .content_types
-        .iter()
-        .find(|ct| ct.name == entry_type)
-    {
-        Some(ct) => ct,
-        None => return Ok(()),
-    };
-    co::payload::validate_payload(ct, frontmatter)
-        .map_err(|e| AppError::UnprocessableEntity(format!("payload validation failed: {e}")))
+    EntryService::validate_entry_type(manifest, entry_type, frontmatter)
 }
 
 // ---------------------------------------------------------------------------
@@ -214,13 +198,7 @@ fn is_public_path(path: &str) -> bool {
     path.starts_with("public/") || path == "public"
 }
 
-/// Strip non-public entries when the caller is anon AND the universe
-/// uses the `public/` convention AND the universe is not public-subscribable.
-///
-/// `universe_is_pub_sub` must be `true` when the universe's `visibility`
-/// field equals `"public-subscribable"`. In that case the path filter is
-/// skipped: the visibility gate (CO-161) already controls who can reach
-/// the universe, so restricting individual entry paths is redundant.
+/// CO-390 spike: thin wrapper — delegates to `EntryService::apply_public_convention_filter`.
 fn filter_public_for_anon(
     state: &AppState,
     headers: &HeaderMap,
@@ -228,14 +206,8 @@ fn filter_public_for_anon(
     universe_is_pub_sub: bool,
     entries: Vec<EntryRow>,
 ) -> Vec<EntryRow> {
-    // CO-268: public-subscribable universes expose all entries to anon callers.
-    if !is_public_convention(slug) || !caller_is_anon(state, headers) || universe_is_pub_sub {
-        return entries;
-    }
-    entries
-        .into_iter()
-        .filter(|e| is_public_path(&e.path))
-        .collect()
+    let is_anon = caller_is_anon(state, headers);
+    EntryService::apply_public_convention_filter(entries, is_anon, slug, universe_is_pub_sub)
 }
 
 fn is_public_for_anon(
@@ -252,40 +224,18 @@ fn is_public_for_anon(
     is_public_path(path)
 }
 
-/// CO-330: strip entries whose `published` frontmatter field is not `true`
-/// when the universe has `anon_published_only=1` and the caller is anonymous.
-/// Owner / authenticated callers see all entries.
+/// CO-390 spike: thin wrapper — delegates to `EntryService::apply_published_filter`.
 fn filter_published_for_anon(
     is_anon: bool,
     anon_published_only: bool,
     entries: Vec<EntryRow>,
 ) -> Vec<EntryRow> {
-    if !is_anon || !anon_published_only {
-        return entries;
-    }
-    entries
-        .into_iter()
-        .filter(|e| {
-            e.frontmatter
-                .get("published")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false)
-        })
-        .collect()
+    EntryService::apply_published_filter(entries, is_anon, anon_published_only)
 }
 
-/// CO-354: strip entries that are still in the suggest/review pipeline
-/// (`review_status` = `draft` | `reviewed`) from a listing. The universe owner
-/// sees everything; any other caller sees a non-published entry only when they
-/// are its submitter (matched by `submitted_by` == their submitter key).
+/// CO-390 spike: thin wrapper — delegates to `EntryService::apply_review_status_filter`.
 fn filter_review_status(entries: Vec<EntryRow>, is_owner: bool, viewer_key: &str) -> Vec<EntryRow> {
-    if is_owner {
-        return entries;
-    }
-    entries
-        .into_iter()
-        .filter(|e| is_review_visible(&e.frontmatter, false, viewer_key))
-        .collect()
+    EntryService::apply_review_status_filter(entries, is_owner, viewer_key)
 }
 
 /// CO-354: single-entry version of [`filter_review_status`].
@@ -784,20 +734,18 @@ pub async fn create_entry(
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
 
         // CO-383: reject writes on event-bus-backed universes (e.g. yggdrasil notes).
-        if universe.source_kind.as_deref() == Some("event-bus") {
-            return Err(AppError::ReadOnlyUniverse {
-                source_kind: universe.source_kind.unwrap_or_default(),
-                source_url: universe.source_url,
-            });
-        }
+        // CO-390 spike: delegated to EntryService::check_not_event_bus.
+        EntryService::check_not_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_url.clone(),
+        )?;
 
         // CO-80: quota check — anonymous usage gate or tier-based storage quota.
+        // CO-390 spike: anon quota rule delegated to EntryService::check_anon_quota.
         if let Some((uid, tier)) = crate::rate_limit::extract_auth_identity(&headers) {
             crate::rate_limit::check_storage_quota(&storage, &uid, tier, &headers)?;
-        } else if universe.owner_id.starts_with("anon-") && universe.content_count >= 100 {
-            return Err(AppError::UsageLimitExceeded {
-                current: universe.content_count,
-            });
+        } else if universe.owner_id.starts_with("anon-") {
+            EntryService::check_anon_quota(universe.content_count)?;
         }
 
         storage.universe_root(&slug)
@@ -978,12 +926,11 @@ pub async fn update_entry(
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         // CO-383: reject writes on event-bus-backed universes.
-        if universe.source_kind.as_deref() == Some("event-bus") {
-            return Err(AppError::ReadOnlyUniverse {
-                source_kind: universe.source_kind.unwrap_or_default(),
-                source_url: universe.source_url,
-            });
-        }
+        // CO-390 spike: delegated to EntryService::check_not_event_bus.
+        EntryService::check_not_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_url.clone(),
+        )?;
         storage.universe_root(&slug)
     };
 
@@ -1188,12 +1135,11 @@ pub async fn delete_entry(
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
         // CO-383: reject writes on event-bus-backed universes.
-        if universe.source_kind.as_deref() == Some("event-bus") {
-            return Err(AppError::ReadOnlyUniverse {
-                source_kind: universe.source_kind.unwrap_or_default(),
-                source_url: universe.source_url,
-            });
-        }
+        // CO-390 spike: delegated to EntryService::check_not_event_bus.
+        EntryService::check_not_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_url.clone(),
+        )?;
         storage.universe_root(&slug)
     };
 
