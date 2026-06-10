@@ -1,0 +1,101 @@
+{
+  "co_id": "CO-374",
+  "spec_title": "Playwright E2E suite for staging — universe recursion, promotion, lead funnel, user routes",
+  "timestamp": "2026-06-10T01:51:26.492Z",
+  "items": [
+    {
+      "text": "`npm run test:staging` runs the full suite against `staging.co.artelonga.com.br`",
+      "pattern": "staging|suite|against",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Universe recursion test: A → A/B → A/B/C breadcrumbs green",
+      "pattern": "b/c|universe|recursion|breadcrumbs|green",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Subuniverse promotion test: A/B → root B, A/B/C reparents",
+      "pattern": "b/c|subuniverse|promotion|reparents",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Lead funnel test: visit → CTA → signup → verify → tier check green",
+      "pattern": "funnel|visit|signup|verify",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "onboard-with-email returns dev_code in test env and verify succeeds",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "General user routes: 8 routes load < 3s, no console errors",
+      "pattern": "general|routes|console",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Security headers: X-RateLimit + Retry-After on `/api/v1/*`",
+      "pattern": "x[- _]ratelimit|retry[- _]after|api/v1/|security|headers",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Auth flows: magic code, password, cross-env token, logout",
+      "pattern": "cross[- _]env|flows|magic|password",
+      "matched_file": "co-web/e2e/archived/uat-flow.spec.ts",
+      "matched_test": "yuri login with correct password returns 200 + JWT",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`scripts/scrum/acceptance-to-playwright.ts` generates stubs from `work/co/CO-*.md`",
+      "pattern": "acceptance[- _]to[- _]playwright|scrum/acceptance[- _]to[- _]playwright.ts|co/co[- _]|scripts|scrum|generates",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/dod/verify.ts generates e2e-generated/CO-N-dod.spec.ts stubs",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "CI matrix: Pixel 7, iPhone 14, iPad Pro projects (3 devices)",
+      "pattern": "matrix|pixel|iphone|projects",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "anonymous API: /co returns projects (not an empty array)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Failed suite blocks `prod-release.yml` workflow (precondition check)",
+      "pattern": "prod[- _]release|failed|suite|blocks",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "HTML report browsable at `staging.../playwright-report/<sha>/`",
+      "pattern": "playwright[- _]report|playwright[- _]report/|report|browsable|staging",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "GET /api/v1/universes/:slug reports content_count",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 11,
+  "passed": 7,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 64
+}

@@ -1,0 +1,117 @@
+{
+  "co_id": "CO-354",
+  "spec_title": "Suggest / review pipeline — entry lifecycle (draft → reviewed → published) with anon submissions",
+  "timestamp": "2026-06-10T01:51:26.373Z",
+  "items": [
+    {
+      "text": "Migration adds 5 columns + partial index (idempotent)",
+      "pattern": "migration|columns|partial|index",
+      "matched_file": "co-web/e2e/co-landing.spec.ts",
+      "matched_test": "board renders below hero with kanban columns",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`POST /suggest` accepts anon submissions, rate-limited",
+      "pattern": "rate[- _]limited|suggest|accepts|submissions",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Submitted entries land with `review_status: draft`, hidden from public listings",
+      "pattern": "submitted|entries|review|status",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Submitter can see their own draft via session (anon) or login (authenticated)",
+      "pattern": "submitter|their|draft|session",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/logout clears the session cookie",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Owner sees review queue at `/u/{key}/review` with pending items",
+      "pattern": "u/|review|owner|queue",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "clone returns owner_id with anon- prefix",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Approve → entry becomes `published`, appears in public listings",
+      "pattern": "approve|entry|becomes|published",
+      "matched_file": "co-web/e2e/archived/co-270-pub-sub-entries.spec.ts",
+      "matched_test": "anonymous /co board renders at least one entry card",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Reject → entry removed (or archived; pick one and document)",
+      "pattern": "reject|entry|removed|archived",
+      "matched_file": "co-web/e2e/pipeline-workflow.spec.ts",
+      "matched_test": "archived task is hidden by default",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Edit-then-approve mutates body/frontmatter then publishes",
+      "pattern": "edit[- _]then[- _]approve|frontmatter|mutates|publishes",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Owner notified on new suggestion (email + in-app via CO-329)",
+      "pattern": "in[- _]app|co[- _]329|owner|notified|suggestion|email",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Submitter notified on approve/reject (if email/login provided)",
+      "pattern": "reject|login|submitter|notified|approve",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Atividades log records every lifecycle transition (if CO-351 shipped)",
+      "pattern": "co[- _]351|atividades|records|every|lifecycle",
+      "matched_file": "co-web/e2e/seed-links.spec.ts",
+      "matched_test": "every link in every seeded template page returns 2xx/3xx",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`btn-sugerir` in Sala (CO-352) wired to this endpoint",
+      "pattern": "btn[- _]sugerir|co[- _]352|wired|endpoint",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "E2E test: anon submits → owner approves → entry visible in public listing",
+      "pattern": "submits|owner|approves|entry",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "clone returns owner_id with anon- prefix",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 13,
+  "passed": 11,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 85
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-354",
+  "title": "Suggest / review pipeline — entry lifecycle (draft → reviewed → published) with anon submissions",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-354.md",
+  "branch": "feat/CO-354-suggest-review-pipeline-entry-lifecycle-",
+  "merge_sha": "c58ddd53e2d4e9635bb80a96cc035c5a0d8e5464",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/182",
+    "number": 182
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T01:50:42Z",
+  "files_changed": 15,
+  "lines_added": 1624,
+  "lines_removed": 4,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:co-web"
+  ],
+  "changelog_entry": "## CO-354 — Suggest / review pipeline — entry lifecycle (draft → reviewed → published) with anon submissions\n\nA generalized suggest/review pipeline as a CO primitive: every entry now carries\na `review_status` lifecycle (`draft` | `reviewed` | `published`, default\n`published`), and universes can open up to community contribution without\ngranting write access.\n\n### What changed\n\n- **Schema (additive, per-universe DB, idempotent):** `entries` gains\n  `review_status`, `submitted_by`, `submitted_at`, `reviewed_by`, `reviewed_at`,\n  plus a partial index `idx_entries_review_status` that only indexes\n  non-published rows so published reads stay cheap. Applied as per-universe\n  migration v18 (v17 is CO-389 on main) with unconditional drift guards (CO-241/CO-267 pattern).\n- **Endpoints** (under `/api/v1/universes/{slug}`):\n  - `POST /suggest` — accepts anonymous submissions (sits outside the writer\n    gate), rate-limited per submitter + honeypot field. Creates an entry with\n    `review_status: draft`.\n  - `GET /review` — owner-only queue of draft/reviewed entries, newest first.\n  - `POST /review/approve` — `{path}` → publishes the entry.\n  - `POST /review/reject` — `{path}` → **deletes** the entry (archival is a\n    Phase-2 concern; delete is the documented v1 choice).\n  - `PATCH /review` — `{path, frontmatter?, body?}` → edit-then-approve.\n- **Read-path filtering:** draft/reviewed entries are hidden from public\n  `GET /entries` and `GET /entries/*path` listings. The universe owner sees\n  everything; an anonymous submitter still sees their own draft (matched by a\n  stable `submitted_by` session/IP key).\n- **Notifications (CO-329):** the owner is notified on each new suggestion\n  (in-app + email); the submitter is notified on approve/reject (in-app when\n  logged in, direct email when an anon submitter left one).\n- **Atividades log (CO-351 / CO-380):** every lifecycle transition publishes an\n  EDA event (`entry.suggest` / `entry.review.approve` / `entry.review.reject` /\n  `entry.review.edit`).\n- **Frontend:** a public suggest form at `/{slug}/suggest` and an owner review\n  queue at `/{slug}/review` (served like the existing `/{slug}/graph` page).\n\n### Why\n\nYggdrasil's bespoke `seed_status` pattern (mbya/yoruba lexicon) becomes a\nuniversal CO capability, and contributors can propose corrections/new entries\nwithout commit access. The \"anon can suggest\" + \"owner reviews\" halves compose\ncleanly with notifications, the atividades log, and surface keys.\n\n### Notes / deviations\n\n- Owner review actions take the entry path in the request body (`{path}`)\n  rather than as a URL segment, since suggestion paths contain slashes.\n- Routes use the repo's `/{slug}/…` page convention rather than `/u/{key}/…`.\n- The Sala `btn-sugerir` wiring (CO-352) targets the standalone suggest form;\n  CO-352's `sala.html` surface is not present on this branch, so the form is\n  reachable directly at `/{slug}/suggest`.",
+  "summary": "a universe owner curating user-contributed content (mbya term suggestions, comunicacao source submissions, event proposals from visitors) — and as a visitor who wants to *contribute* a correction or a",
+  "co_auto_version": "0.1.0"
+}
