@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-374",
+  "title": "Playwright E2E suite for staging — universe recursion, promotion, lead funnel, user routes",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-374.md",
+  "branch": "feat/CO-374-playwright-e2e-suite-for-staging-univers",
+  "merge_sha": "bea76f4636df6401e41eb106fe9340690592b2d1",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/181",
+    "number": 181
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T01:46:55Z",
+  "files_changed": 16,
+  "lines_added": 7165,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:test",
+    "module:e2e",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-374 — Playwright E2E suite for staging — universe recursion, promotion, lead funnel, user routes\n\nAdds `co-web/e2e-staging/` — a Playwright suite that runs against the live\nstaging environment (`staging.co.artelonga.com.br`) rather than an ephemeral\nlocal server.\n\nSix scenario files cover universe recursion (parent_key chain + breadcrumbs),\nsub-universe promotion (pre-conditions + fixme stubs for the Wave 4 endpoint),\nlead funnel (POST /api/v1/leads + magic-code onboarding), general user routes\n(8 pages load < 3 s, no console errors), security headers (X-RateLimit,\nRetry-After, HSTS, CSP), and auth flows (magic-code, password, cross-env\ntoken, logout, expired-token 401).\n\n`scripts/scrum/acceptance-to-playwright.ts` walks all `work/co/CO-*.md` specs,\nparses every `## Acceptance` checkbox, and emits\n`e2e-staging/generated/from-acceptance.spec.ts` with one `test.fixme()` stub\nper item (1 316 stubs across 173 specs). Devs fill stubs in during PRs;\nCI can track Wave 4 DoD completion by counting remaining fixmes.\n\nThree Playwright projects (Pixel 7, iPhone 14, iPad Pro) run via `npm run\ntest:staging`. The new `staging-e2e.yml` workflow triggers automatically after\neach staging deploy and on manual dispatch. `prod-release.yml` (manual,\nThursday release gate) checks that the latest staging E2E run succeeded before\ndeploying to production.\n\nHTML reports are uploaded as GitHub Actions artifacts at\n`playwright-report/<sha>/` per device project.\n\n### Why\n\nWave 4 lands 16 PRs with heavy schema and UI changes. Continuous validation\nagainst live staging catches drift that unit tests miss. The Thursday 12:00 BRT\nrelease window needed an objective pass/fail gate to replace the manual smoke\nchecklist.",
+  "summary": "As The platform operator running the bi-weekly Thursday release",
+  "co_auto_version": "0.1.0"
+}
