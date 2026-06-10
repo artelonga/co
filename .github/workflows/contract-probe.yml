@@ -34,6 +34,11 @@ jobs:
     if: >-
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion == 'success'
+    # Advisory on PRs: staging is hand-deployed and auto-stops between
+    # deploys, so a PR probe can fail purely from staleness or a sleeping
+    # machine. The strict gate is release.yml's contract-check, which runs
+    # when staging is freshly deployed per the release cadence.
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
 
     env:
       STAGING_URL: ${{ github.event.inputs.staging_url || 'https://co-artelonga-staging.fly.dev' }}
