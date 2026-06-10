@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-371",
+  "title": "Single funnel report endpoint — discover → onboard, end-to-end with drop-off per step",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-371.md",
+  "branch": "feat/CO-371-single-funnel-report-endpoint-discover-o",
+  "merge_sha": "b8a6d1ed4d7a44910d4cde15fcbd0eeacbee02e8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/190",
+    "number": 190
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T16:27:51Z",
+  "files_changed": 6,
+  "lines_added": 1237,
+  "lines_removed": 11,
+  "labels": [
+    "type:feat",
+    "module:analytics",
+    "module:funnel"
+  ],
+  "changelog_entry": "## CO-371 — Single funnel report endpoint — discover → onboard, end-to-end with drop-off per step\n\nAdds the 8-step acquisition funnel to `GET /api/v1/analytics/public/funnel?window=30d` (admin-only when `window` param is present). The funnel covers the full acquisition arc: Discover → Engage → Intent → Capture → Qualify → Register → Convert → Onboard, with per-step drop-off percentages and 5 KPI ratios.\n\nSteps 1–3 are sourced from `telemetry_events`; step 4 uses the CO-370 email join (`users UNION leads`); steps 5–6 from `leads`/`users`; steps 7–8 gracefully return 0 until CO-366 (billing_events) lands.\n\nBreakdowns by `source` (referrer), `day`, and `country` are supported. The `/gestao/resumo` dashboard gains a \"Funil\" tab rendering the vertical bar chart with drop-off labels and KPI grid.\n\n### Why\nEnables the platform operator to answer \"of visitors from HN this week, what % converted to paid?\" in a single query instead of manual SQL across 4 stores. Provides the killer metric for the `/gestao/resumo` dashboard (CO-360).",
+  "summary": "As The platform operator wanting to see end-to-end conversion in one place",
+  "co_auto_version": "0.1.0"
+}
