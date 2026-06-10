@@ -1,0 +1,112 @@
+name: Staging Suite — Contract + E2E
+
+# CO-382: Post-merge staging validation — steps 8 and 9 of the deterministic route.
+#
+# Runs after every push to main (step 7 — deploy — is handled by staging-deploy.yml).
+# Steps run here:
+#   8. Contract probe vs staging (smoke test key endpoints)
+#   9. E2E staging suite (Playwright against live staging URL)
+#
+# These steps do NOT block merge (post-merge) but block Thursday's release gate.
+# If they fail, the release-gate.yml will catch it before v-tag fires.
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  staging-contract-probe:
+    runs-on: ubuntu-latest
+    env:
+      STAGING_URL: "https://staging.co.artelonga.com.br"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Wait for staging deploy
+        run: |
+          echo "Waiting up to 5 minutes for staging to be healthy…"
+          for i in $(seq 1 30); do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+              "${STAGING_URL}/api/health" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "200" ]; then
+              echo "Staging healthy after $((i * 10))s"
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "::warning::Staging did not become healthy within 5 min — skipping contract probe"
+              exit 0
+            fi
+            sleep 10
+          done
+
+      # Step 8: Contract probe — verify key API contracts still hold
+      - name: Contract probe
+        run: |
+          BASE="${STAGING_URL}"
+
+          check() {
+            local desc="$1"
+            local url="$2"
+            local expected="$3"
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${url}" 2>/dev/null || echo "000")
+            if [ "$STATUS" = "$expected" ]; then
+              echo "✅ ${desc} → ${STATUS}"
+            else
+              echo "❌ ${desc} → ${STATUS} (expected ${expected})"
+              FAILED=1
+            fi
+          }
+
+          FAILED=0
+
+          check "GET /api/health"               "${BASE}/api/health"                             "200"
+          check "GET /api/v1/universes/template" "${BASE}/api/v1/universes/template"              "200"
+          check "GET /agora (live timeline)"      "${BASE}/agora"                                  "200"
+          check "GET /live (live timeline en)"    "${BASE}/live"                                   "200"
+          check "GET / (main page)"               "${BASE}/"                                       "200"
+          check "POST /api/auth/login (no body)"  "${BASE}/api/auth/login"                        "400"
+
+          if [ "${FAILED:-0}" = "1" ]; then
+            echo "::error::Contract probe failed — see above"
+            exit 1
+          fi
+          echo "All contract probes passed"
+
+  staging-e2e:
+    runs-on: ubuntu-latest
+    needs: staging-contract-probe
+    env:
+      STAGING_URL: "https://staging.co.artelonga.com.br"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: co-web/package-lock.json
+
+      - name: Install Playwright dependencies
+        working-directory: co-web
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: co-web
+        run: npx playwright install --with-deps chromium
+
+      # Step 9: E2E staging suite
+      - name: Run Playwright E2E against staging
+        working-directory: co-web
+        run: npx playwright test --project=chromium-desktop
+        env:
+          BASE_URL: ${{ env.STAGING_URL }}
+          CI: "true"
+        continue-on-error: true  # results captured in artifact; release-gate evaluates
+
+      - name: Upload staging E2E report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-e2e-report-${{ github.sha }}
+          path: co-web/playwright-report/
+          retention-days: 30

@@ -502,6 +502,22 @@ CO-380 universal event bus + CO-381 live timeline WebSocket fanout.
 | GET | `/api/v1/events` | authed (cookie or token) | WebSocket — subscribe to scoped event stream; filter via `?scope=mine|universe:<key>|public|admin` |
 | GET | `/api/v1/events/bridge` | bridge-jwt | CO-384 — federated bridge: remote producers (Yggdrasil) dial in to publish events; CO is the hub |
 
+### CO-382 CI/CD event types
+
+Published by CI workflows to the event bus via the bridge endpoint.
+Rendered in the `/agora` live timeline with 🛠️ icon.
+
+| `event_type` | Payload fields | When published |
+|---|---|---|
+| `ci.step.passed` | `step` (1-10), `step_name`, `pr_number`, `co_id`, `duration_ms` | Each CI step completes successfully |
+| `ci.step.failed` | `step`, `step_name`, `pr_number`, `co_id`, `error` | Each CI step fails |
+| `ci.dod.verified` | `co_id`, `dod_pct`, `passed`, `total`, `pr_number` | DoD verification passes (100%) |
+| `ci.dod.failed` | `co_id`, `dod_pct`, `passed`, `total`, `failed_items`, `pr_number` | DoD verification fails |
+| `release.gate.passed` | `version`, `wave_co_ids`, `sprint_number` | Thursday release gate clears |
+| `release.gate.blocked` | `blocked_co_ids`, `sprint_number`, `reason` | Thursday release gate is blocked |
+
+All CI events use `visibility: System` (admin stream only, never forwarded to anonymous WebSocket).
+
 ---
 
 ## sync — `/api/v1/sync/*` + `/api/v1/me/sync/*` (sync/routes.rs)
