@@ -24,6 +24,16 @@ export function injectKanbanCallbacks(callbacks) {
     _renderContent = callbacks.renderContent;
 }
 
+const MOBILE_COL_KEY = 'co.board.mobileActiveColumn';
+
+function getMobileActiveColumn() {
+    return localStorage.getItem(MOBILE_COL_KEY) || (STATUSES[0]?.key ?? '');
+}
+
+function setMobileActiveColumn(key) {
+    localStorage.setItem(MOBILE_COL_KEY, key);
+}
+
 export function renderKanban() {
     // Detach previous drag listener before rebuilding the DOM.
     if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
@@ -34,10 +44,25 @@ export function renderKanban() {
     const taskIds = new Set(tasks.map(t => t.id));
     const rootTasks = tasks.filter(t => !t.parent || !taskIds.has(t.parent));
 
-    content.innerHTML = `<div class="kanban">${STATUSES.map(s => {
+    const activeCol = getMobileActiveColumn();
+
+    // CO-358: segmented control for mobile single-column view
+    const segmentedControl = `
+        <div class="kanban-segment-control" id="kanban-segment-control">
+            ${STATUSES.map(s => `
+                <button class="kanban-segment-btn${s.key === activeCol ? ' active' : ''}"
+                        data-status="${s.key}"
+                        aria-label="${s.label}">
+                    ${s.label}
+                    <span class="column-count">${rootTasks.filter(t => t.status === s.key).length}</span>
+                </button>`).join('')}
+        </div>`;
+
+    content.innerHTML = segmentedControl + `<div class="kanban">${STATUSES.map(s => {
         const colTasks = rootTasks.filter(t => t.status === s.key);
+        const isMobileActive = s.key === activeCol;
         return `
-            <div class="kanban-column" data-status="${s.key}">
+            <div class="kanban-column${isMobileActive ? ' mobile-active' : ''}" data-status="${s.key}">
                 <div class="kanban-column-header">
                     ${s.label}
                     <span class="column-count">${colTasks.length}</span>
@@ -48,11 +73,31 @@ export function renderKanban() {
             </div>`;
     }).join('')}</div>`;
 
+    setupSegmentedControl();
     setupDragDrop();
     setupCardClicks();
     setupSubtreeToggles();
     // CO-275: lazy-load agent session footers; fire-and-forget
     loadAgentSessionFooters();
+}
+
+function setupSegmentedControl() {
+    const ctrl = document.getElementById('kanban-segment-control');
+    if (!ctrl) return;
+    ctrl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.kanban-segment-btn');
+        if (!btn) return;
+        const status = btn.dataset.status;
+        setMobileActiveColumn(status);
+        // Update active button
+        ctrl.querySelectorAll('.kanban-segment-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.status === status);
+        });
+        // Show/hide columns
+        document.querySelectorAll('.kanban-column').forEach(col => {
+            col.classList.toggle('mobile-active', col.dataset.status === status);
+        });
+    });
 }
 
 export function renderTaskCard(task) {

@@ -805,6 +805,59 @@ function bindStaticEvents() {
     });
 
     document.addEventListener('co:langchange', () => { rebuildI18nConstants(); render(); });
+
+    // CO-358: header overflow menu — visible at ≤640px
+    setupHeaderOverflowMenu();
+}
+
+function setupHeaderOverflowMenu() {
+    const btn = document.getElementById('header-overflow-btn');
+    const menu = document.getElementById('header-overflow-menu');
+    if (!btn || !menu) return;
+
+    // Show button only on mobile
+    const mq = window.matchMedia('(max-width: 640px)');
+    const syncBtn = () => { btn.style.display = mq.matches ? '' : 'none'; };
+    syncBtn();
+    mq.addEventListener('change', syncBtn);
+
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = !menu.classList.contains('hidden');
+        menu.classList.toggle('hidden', open);
+        btn.setAttribute('aria-expanded', String(!open));
+    });
+
+    // Close on outside click
+    document.addEventListener('click', (e) => {
+        if (!menu.classList.contains('hidden') && !btn.contains(e.target) && !menu.contains(e.target)) {
+            menu.classList.add('hidden');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+    });
+
+    // Overflow: search toggle
+    document.getElementById('overflow-search-toggle')?.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+        const si = document.querySelector('#search-input');
+        if (si) { si.classList.remove('hide-mobile'); si.focus(); }
+    });
+
+    // Overflow: language toggle
+    document.getElementById('overflow-lang-toggle')?.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+        window.setLang(window.currentLang === 'pt' ? 'en' : 'pt');
+        render();
+    });
+
+    // Overflow: universe info
+    document.getElementById('overflow-universe-info')?.addEventListener('click', () => {
+        menu.classList.add('hidden');
+        btn.setAttribute('aria-expanded', 'false');
+        document.getElementById('btn-universe-info')?.click();
+    });
 }
 
 // CO-202: WS chat hook — called by chat.js when a message arrives in any room.
