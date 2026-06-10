@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-372",
+  "title": "Sprint calendar with Definition of Done + ICS export",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-372.md",
+  "branch": "feat/CO-372-sprint-calendar-with-definition-of-done-",
+  "merge_sha": "b25c79ad247264f6b1274930f981d108b1466a4d",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/189",
+    "number": 189
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T14:01:10Z",
+  "files_changed": 14,
+  "lines_added": 1050,
+  "lines_removed": 7,
+  "labels": [
+    "type:feat",
+    "module:scrum",
+    "module:calendar"
+  ],
+  "changelog_entry": "## CO-372 — Sprint calendar with Definition of Done + ICS export\n\nAdds a sprint calendar view and iCalendar export to the scrum tooling.\n\n- `GET /api/v1/scrum/calendar?past=6&future=4` — JSON response with past and future sprints, DoD percentages computed from `## Acceptance` checkboxes in spec files, sprint events (planning/review/retro) as ISO-8601 UTC timestamps.\n- `GET /api/v1/scrum/calendar.ics` — iCalendar export for Google/Apple Calendar subscription; includes VALARM 15-min reminders and one VEVENT per sprint event.\n- `/scrum/calendar` SPA — standalone dark-theme HTML page with current-sprint hero + live countdown (60s updates), velocity sparkline, past/future sprint cards, and ICS subscription link.\n- `co-web/scripts/scrum/cutoff-check.ts` — PR cutoff gate: exits 1 if merges landed after Wednesday 23:59 BRT (sprint_end − 15h01m); integrated into `scripts/release-commit.sh` (bypassed by `--ignore-dod`).\n- Sprint data embedded at compile time via `include_str!` from `docs/scrum/sprints/_index.json`; Dockerfile updated to include that path in build context.\n\n### Why\nProvides a single always-up-to-date view of sprint history and upcoming milestones, with calendar subscription so stakeholders see sprint ceremonies in their own clients. The cutoff gate enforces the scrum discipline of not merging after the Wednesday freeze.",
+  "summary": "As A team member following CO's bi-weekly sprint cadence",
+  "co_auto_version": "0.1.0"
+}
