@@ -87,6 +87,10 @@ backup-gcs = []
 eda-redis = []
 eda-nats = []
 eda-persistence = []
+# CO-388: Security audit backend alternatives
+security-claude = []
+security-semgrep = []
+security-sonar = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

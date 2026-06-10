@@ -44,6 +44,32 @@ components:
       bearerFormat: JWT
 
   schemas:
+    # --- CO-388: security ---
+    SecurityFinding:
+      type: object
+      required: [id, pr_number, severity, category, file_path, description, detected_at]
+      properties:
+        id: { type: string, description: "ULID" }
+        pr_number: { type: integer }
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        category: { type: string }
+        file_path: { type: string }
+        line_start: { type: integer, nullable: true }
+        line_end: { type: integer, nullable: true }
+        description: { type: string }
+        cwe: { type: string, nullable: true }
+        cve_match: { type: string, nullable: true }
+        suggested_patch: { type: string, nullable: true }
+        detected_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        resolution_kind:
+          type: string
+          nullable: true
+          enum: [patched, accepted-risk, false-positive, wont-fix, null]
+        resolution_pr: { type: integer, nullable: true }
+
     # --- content ---
     Entry:
       type: object
@@ -1305,3 +1331,194 @@ paths:
         - id: post.gone
           rule: "Subsequent GET /messages does not include the deleted message."
       x-safety: destructive
+
+  # CO-388: Security audit pipeline endpoints (admin-gated)
+  /api/v1/gestao/security/findings:
+    get:
+      operationId: securityListFindings
+      summary: "List security findings"
+      tags: [admin, security]
+      parameters:
+        - name: severity
+          in: query
+          schema: { type: string, enum: [critical, high, medium, low, info] }
+        - name: resolved
+          in: query
+          schema: { type: boolean }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, maximum: 200 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: "List of security findings"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  findings:
+                    type: array
+                    items: { $ref: '#/components/schemas/SecurityFinding' }
+                  limit: { type: integer }
+                  offset: { type: integer }
+        '401': { description: "Auth required" }
+        '403': { description: "Admin required" }
+      security:
+        - bearerAuth: []
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has GitHub admin role (CO_GESTAO_GITHUB_ADMINS)."
+      x-postconditions:
+        - id: post.list
+          rule: "Response contains security_findings rows filtered by query params."
+      x-safety: snapshot-restore
+
+  /api/v1/gestao/security/findings/{id}:
+    get:
+      operationId: securityGetFinding
+      summary: "Get a single security finding"
+      tags: [admin, security]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, description: "ULID finding identifier" }
+      responses:
+        '200':
+          description: "Security finding"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SecurityFinding' }
+        '401': { description: "Auth required" }
+        '403': { description: "Admin required" }
+        '404': { description: "Finding not found" }
+      security:
+        - bearerAuth: []
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has GitHub admin role."
+        - id: pre.exists
+          rule: "Finding with {id} exists in security_findings."
+      x-postconditions:
+        - id: post.finding
+          rule: "Response matches the security_findings row for {id}."
+      x-safety: snapshot-restore
+
+    patch:
+      operationId: securityResolveFinding
+      summary: "Resolve a security finding"
+      tags: [admin, security]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [resolution_kind]
+              properties:
+                resolution_kind:
+                  type: string
+                  enum: [patched, accepted-risk, false-positive, wont-fix]
+                resolution_pr:
+                  type: integer
+                  nullable: true
+      responses:
+        '200':
+          description: "Finding resolved"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  resolved_at: { type: string, format: date-time }
+        '401': { description: "Auth required" }
+        '403': { description: "Admin required" }
+        '404': { description: "Finding not found or already resolved" }
+        '422': { description: "Invalid resolution_kind" }
+      security:
+        - bearerAuth: []
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has GitHub admin role."
+        - id: pre.unresolved
+          rule: "Finding {id} has resolved_at = NULL."
+      x-postconditions:
+        - id: post.resolved
+          rule: "Finding.resolved_at is set; resolution_kind matches body."
+      x-safety: snapshot-restore
+
+  /api/v1/gestao/security/scan/status:
+    get:
+      operationId: securityScanStatus
+      summary: "Security scan backend status and daily counts"
+      tags: [admin, security]
+      responses:
+        '200':
+          description: "Scan status"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backend: { type: string }
+                  max_scans_per_day: { type: integer }
+                  unresolved_findings: { type: integer }
+                  high_critical_unresolved: { type: integer }
+                  release_blocked: { type: boolean }
+        '401': { description: "Auth required" }
+        '403': { description: "Admin required" }
+      security:
+        - bearerAuth: []
+      x-safety: snapshot-restore
+
+  /api/v1/gestao/security/scan:
+    post:
+      operationId: securityTriggerScan
+      summary: "Trigger a manual security scan"
+      tags: [admin, security]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                base_ref: { type: string, default: "origin/main" }
+                head_ref: { type: string, default: "HEAD" }
+                full_scan: { type: boolean, default: false }
+                ignore_security_findings:
+                  type: boolean
+                  default: false
+                  description: "Emergency override — logged and alerted"
+      responses:
+        '200':
+          description: "Scan complete"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  backend: { type: string }
+                  finding_count: { type: integer }
+                  blocked: { type: boolean }
+        '401': { description: "Auth required" }
+        '403': { description: "Admin required" }
+        '500': { description: "Scan failed" }
+      security:
+        - bearerAuth: []
+      x-preconditions:
+        - id: pre.admin
+          rule: "Caller has GitHub admin role."
+      x-postconditions:
+        - id: post.findings_published
+          rule: "Each finding is published to the EDA bus as security.finding_detected."
+      x-safety: snapshot-restore

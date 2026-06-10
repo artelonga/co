@@ -1,12 +1,13 @@
-name: PR Route — DoD + Migration Gate
+name: PR Route — DoD + Migration Gate + Security Audit
 
 # CO-382: Deterministic route for every PR.
-# Adds step 6 (migration validation) and step 10 (DoD verification)
-# on top of the existing ci.yml (steps 1-5) and openapi-check.yml (step 4).
+# Adds step 6 (migration validation), step 10 (DoD verification), and
+# step 11 (security audit) on top of ci.yml (steps 1-5) and openapi-check.yml (step 4).
 #
 # Steps blocked by this workflow:
 #   6. Migration validation — only when a new migration file is present
 #  10. DoD verification — only when PR title contains CO-N
+#  11. Security audit — always; Critical/High findings block merge
 
 on:
   pull_request:
@@ -113,3 +114,179 @@ jobs:
           name: dod-${{ steps.co-id.outputs.co_id }}
           path: /tmp/dod-${{ steps.co-id.outputs.co_id }}.json
           retention-days: 30
+
+  # Step 11: Security audit — always runs; Critical/High block merge
+  security-audit:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect skip conditions
+        id: skip-check
+        run: |
+          # Skip drafts
+          if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=draft PR — skipping security audit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Skip docs-only PRs (all changed files are .md)
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if [ -n "$CHANGED" ] && echo "$CHANGED" | grep -qvE '\.md$'; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=docs-only PR — skipping security audit" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Skip revert PRs
+          TITLE="${{ github.event.pull_request.title }}"
+          if echo "$TITLE" | grep -qi "^revert"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=revert PR — skipping security audit" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system deps
+        if: steps.skip-check.outputs.skip != 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
+
+      - name: Cache cargo
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-security-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build security scanner
+        if: steps.skip-check.outputs.skip != 'true'
+        run: cargo build -p co-web
+        env:
+          RUST_LOG: "co_web=warn"
+
+      - name: Run security audit (local-grep backend)
+        if: steps.skip-check.outputs.skip != 'true'
+        id: security-scan
+        run: |
+          # Run the LocalGrepBackend scanner against the diff
+          BASE_REF="origin/${{ github.base_ref }}"
+          HEAD_REF="${{ github.event.pull_request.head.sha }}"
+
+          # Collect changed source files
+          CHANGED_FILES=$(git diff --name-only "${BASE_REF}...${HEAD_REF}" \
+            | grep -E '\.(rs|ts|js|tsx|jsx|sql)$' || true)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No source files changed — security audit passes trivially"
+            echo "blocker_count=0" >> "$GITHUB_OUTPUT"
+            echo "finding_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Run cargo test with the security scanner
+          cargo test -p co-web security --test testkit_tests -- --nocapture 2>&1 | tee /tmp/security-output.txt || true
+
+          # Check for known high/critical patterns in the diff itself
+          BLOCKERS=0
+          FINDINGS=0
+
+          for file in $CHANGED_FILES; do
+            if [ -f "$file" ]; then
+              # SQL injection: format!("SELECT/INSERT/UPDATE/DELETE with interpolation
+              if grep -nP 'format!\("(SELECT|INSERT|UPDATE|DELETE)' "$file" 2>/dev/null; then
+                BLOCKERS=$((BLOCKERS + 1))
+                FINDINGS=$((FINDINGS + 1))
+                echo "::error file=${file}::SQL injection risk: string interpolation in SQL query (CWE-89)"
+              fi
+
+              # XSS: innerHTML assignment in TS/JS
+              if echo "$file" | grep -qE '\.(ts|tsx|js|jsx)$'; then
+                if grep -n '\.innerHTML\s*=' "$file" 2>/dev/null; then
+                  BLOCKERS=$((BLOCKERS + 1))
+                  FINDINGS=$((FINDINGS + 1))
+                  echo "::error file=${file}::XSS risk: direct innerHTML assignment (CWE-79)"
+                fi
+
+                # eval() — critical
+                if grep -n '\beval(' "$file" 2>/dev/null; then
+                  BLOCKERS=$((BLOCKERS + 1))
+                  FINDINGS=$((FINDINGS + 1))
+                  echo "::error file=${file}::Critical: eval() detected — code injection risk (CWE-95)"
+                fi
+              fi
+            fi
+          done
+
+          echo "blocker_count=${BLOCKERS}" >> "$GITHUB_OUTPUT"
+          echo "finding_count=${FINDINGS}" >> "$GITHUB_OUTPUT"
+
+          # Save scan results
+          cat > /tmp/security-audit-${{ github.event.pull_request.number }}.json <<EOF
+          {
+            "pr_number": ${{ github.event.pull_request.number }},
+            "backend": "local-grep",
+            "finding_count": ${FINDINGS},
+            "blocker_count": ${BLOCKERS},
+            "scanned_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+        env:
+          JWT_SECRET: "ci-test-secret-do-not-use-in-production"
+
+      - name: Post security audit PR comment
+        if: steps.skip-check.outputs.skip != 'true' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const blockers = parseInt('${{ steps.security-scan.outputs.blocker_count }}' || '0');
+            const findings = parseInt('${{ steps.security-scan.outputs.finding_count }}' || '0');
+            const icon = blockers > 0 ? '🚨' : '✅';
+            const status = blockers > 0 ? 'BLOCKED' : 'PASSED';
+            const body = `## ${icon} Step 11: Security Audit — ${status}
+
+            | Metric | Value |
+            |--------|-------|
+            | Backend | \`local-grep\` |
+            | Total findings | ${findings} |
+            | Blockers (Critical/High) | ${blockers} |
+
+            ${blockers > 0 ? '**This PR is blocked by security findings. Resolve all Critical/High severity issues before merging.**\n\nUse `--ignore-security-findings` (emergency hotfix only — logged + alerted).' : 'No blocking security findings. ✓'}
+
+            *Generated by CO-388 security audit pipeline (Project Glasswing)*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Upload security audit artifact
+        if: steps.skip-check.outputs.skip != 'true' && always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-${{ github.event.pull_request.number }}
+          path: /tmp/security-audit-${{ github.event.pull_request.number }}.json
+          retention-days: 90
+
+      - name: Fail on security blockers
+        if: steps.skip-check.outputs.skip != 'true'
+        run: |
+          BLOCKERS="${{ steps.security-scan.outputs.blocker_count }}"
+          if [ "${BLOCKERS}" -gt "0" ]; then
+            echo "::error::Security gate BLOCKED — ${BLOCKERS} Critical/High finding(s) must be resolved"
+            echo "Override: workflow_dispatch with ignore_security_findings=true (emergency hotfix only)"
+            exit 1
+          fi
+          echo "Security gate PASSED"

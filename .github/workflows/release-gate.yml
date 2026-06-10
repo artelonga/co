@@ -26,6 +26,11 @@ on:
         required: false
         default: "false"
         type: boolean
+      ignore_security_findings:
+        description: "Ignore unresolved security findings (emergency hotfix only — logged + alerted)"
+        required: false
+        default: "false"
+        type: boolean
 
 jobs:
   release-gate:
@@ -123,8 +128,54 @@ jobs:
             echo "gate_passed=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Check unresolved security findings
+        id: security-gate
+        env:
+          IGNORE_SECURITY: ${{ github.event.inputs.ignore_security_findings || 'false' }}
+        run: |
+          # Count any security-audit artifacts from wave PRs that have blockers.
+          # Artefacts: security-audit-<PR_NUMBER>.json in docs/scrum/security/
+          SECURITY_BLOCKED=false
+          SECURITY_SUMMARY=""
+
+          for audit_file in docs/scrum/security/security-audit-*.json; do
+            [ -f "$audit_file" ] || continue
+            BLOCKERS=$(python3 -c "import json,sys; d=json.load(open('$audit_file')); print(d.get('blocker_count',0))" 2>/dev/null || echo "0")
+            PR=$(python3 -c "import json,sys; d=json.load(open('$audit_file')); print(d.get('pr_number','?'))" 2>/dev/null || echo "?")
+            if [ "$BLOCKERS" -gt "0" ] 2>/dev/null; then
+              SECURITY_BLOCKED=true
+              SECURITY_SUMMARY="${SECURITY_SUMMARY}🚨 PR #${PR} — ${BLOCKERS} unresolved Critical/High finding(s)\n"
+            fi
+          done
+
+          if [ "$SECURITY_BLOCKED" = "true" ]; then
+            if [ "$IGNORE_SECURITY" = "true" ]; then
+              echo "::warning::--ignore-security-findings override active — proceeding despite blockers"
+              echo "::warning::AUDIT TRAIL: Security gate bypassed at $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+              echo "security_passed=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "security_passed=false" >> "$GITHUB_OUTPUT"
+              echo "security_summary<<EOF" >> "$GITHUB_OUTPUT"
+              printf "$SECURITY_SUMMARY" >> "$GITHUB_OUTPUT"
+              echo "EOF" >> "$GITHUB_OUTPUT"
+            fi
+          else
+            echo "security_passed=true" >> "$GITHUB_OUTPUT"
+            echo "security_summary=No unresolved Critical/High security findings" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fail on security gate block
+        if: steps.security-gate.outputs.security_passed == 'false'
+        run: |
+          echo "::error::Release gate blocked by unresolved security findings:"
+          printf "${{ steps.security-gate.outputs.security_summary }}"
+          echo ""
+          echo "Resolve findings via PATCH /api/v1/gestao/security/findings/:id"
+          echo "Emergency override: workflow_dispatch with ignore_security_findings=true"
+          exit 1
+
       - name: Generate sprint review (14:30 BRT)
-        if: steps.dod-gate.outputs.gate_passed == 'true'
+        if: steps.dod-gate.outputs.gate_passed == 'true' && steps.security-gate.outputs.security_passed == 'true'
         working-directory: co-web
         run: node --import tsx scripts/scrum/sprint-review.ts
         env:
@@ -134,7 +185,7 @@ jobs:
           GIT_COMMITTER_EMAIL: "ci@artelonga.com.br"
 
       - name: Push sprint review commit
-        if: steps.dod-gate.outputs.gate_passed == 'true'
+        if: steps.dod-gate.outputs.gate_passed == 'true' && steps.security-gate.outputs.security_passed == 'true'
         run: |
           git push origin HEAD:main || echo "Nothing to push"
 

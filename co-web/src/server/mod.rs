@@ -719,6 +719,17 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         );
         // Phase 2: start the LiveTimeline forward task (channel was created in from_storage_full).
         crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
+
+        // CO-388: security audit subscribers.
+        crate::security::subscribers::findings_persistor::spawn(
+            Arc::clone(&bus),
+            Arc::clone(&state.core.storage),
+        );
+        crate::security::subscribers::pbi_backlogger::spawn(
+            Arc::clone(&bus),
+            Arc::clone(&state.core.storage),
+        );
+        crate::security::subscribers::release_blocker::spawn(Arc::clone(&bus));
     }
 
     // CO-384: spawn outbound bridge clients (no-op when CO_BRIDGE_OUTBOUND_TOKENS_JSON not set).

@@ -1,6 +1,6 @@
-# CO-382: CI/CD Route — Deterministic 10-Step Pipeline
+# CO-382: CI/CD Route — Deterministic 11-Step Pipeline
 
-Every PR follows a fixed 10-step route. Steps 1–6 and 10 block merge.
+Every PR follows a fixed 11-step route. Steps 1–6, 10, and 11 block merge.
 Steps 7–9 run post-merge and block the Thursday release.
 
 ## The 10-Step Route
@@ -14,6 +14,7 @@ PR opened
  ├── Step 4: openapi:check             (openapi-check.yml — PRs touching routes/spec)
  ├── Step 5: e2e local (Playwright)    (ci.yml → e2e job)
  ├── Step 6: migration validation      (pr-route.yml — only when migration file present)
+ ├── Step 11: security audit           (pr-route.yml — skips drafts/docs/reverts)
  │
  ├── All green? → Mergeable
  │
@@ -26,6 +27,7 @@ PR opened
 Thursday 14:00 BRT
  │
  ├── Step 10: DoD verification (wave)  (release-gate.yml + pr-route.yml per PR)
+ ├── Step 11: Security findings gate   (release-gate.yml — blocks if Critical/High unresolved)
  └── Sprint review commit              (release-gate.yml → scrum/sprint-review.ts)
 ```
 
@@ -43,6 +45,7 @@ Thursday 14:00 BRT
 | 8. Contract probe | `staging-suite.yml` | ❌ (post-merge) | Health + key endpoint smoke tests vs staging |
 | 9. E2E staging | `staging-suite.yml` | ❌ (post-merge) | Full Playwright suite vs `staging.co.artelonga.com.br` |
 | 10. DoD verification | `pr-route.yml` + `release-gate.yml` | ✅ (per PR) + blocks release (wave) | Parses `## Acceptance` from `work/co/CO-N.md`, maps to test patterns |
+| 11. Security audit | `pr-route.yml` | ✅ (Critical/High findings) | LocalGrepBackend default; Claude backend optional; skips drafts/docs/reverts |
 
 ## Workflow Files
 
@@ -53,7 +56,7 @@ Thursday 14:00 BRT
 | `.github/workflows/pr-route.yml` | PR to main | 6, 10 |
 | `.github/workflows/staging-deploy.yml` | push to main | 7 |
 | `.github/workflows/staging-suite.yml` | push to main | 8, 9 |
-| `.github/workflows/release-gate.yml` | Thursday 14:00 BRT (cron) | 10 (wave), sprint review |
+| `.github/workflows/release-gate.yml` | Thursday 14:00 BRT (cron) | 10 (wave), 11 (security gate), sprint review |
 
 ## DoD Verification (Step 10)
 

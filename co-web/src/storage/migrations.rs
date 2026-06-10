@@ -2624,6 +2624,45 @@ impl Storage {
                 "CO-367: entry_kb_index + entry_kb_latest + entry_kb_fts (universal KB sync)"
             );
         }
+
+        // v72 belongs to CO-398 (task_status_log, PR #194 in flight).
+        if current_version < 73 {
+            // CO-388: security_findings — stores vulnerability scan results from
+            // the security audit pipeline (Project Glasswing step 11).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS security_findings (
+                       id              TEXT PRIMARY KEY,
+                       pr_number       INTEGER NOT NULL,
+                       severity        TEXT NOT NULL
+                         CHECK (severity IN ('critical','high','medium','low','info')),
+                       category        TEXT NOT NULL,
+                       file_path       TEXT NOT NULL,
+                       line_start      INTEGER,
+                       line_end        INTEGER,
+                       description     TEXT NOT NULL,
+                       cwe             TEXT,
+                       cve_match       TEXT,
+                       suggested_patch TEXT,
+                       detected_at     TEXT NOT NULL,
+                       resolved_at     TEXT,
+                       resolution_kind TEXT
+                         CHECK (resolution_kind IS NULL OR
+                                resolution_kind IN ('patched','accepted-risk','false-positive','wont-fix')),
+                       resolution_pr   INTEGER
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_security_findings_severity
+                       ON security_findings (severity, detected_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_security_findings_unresolved
+                       ON security_findings (detected_at DESC) WHERE resolved_at IS NULL;",
+                )
+                .expect("CO-388 v73: security_findings table + indexes");
+            crate::record_migration!(
+                self.conn,
+                73,
+                "CO-388: security_findings — pre-release vulnerability scan results (Project Glasswing)"
+            );
+        }
     }
 }
 

@@ -7,6 +7,7 @@ pub mod infra;
 pub mod integrations;
 pub mod platform;
 pub mod scrum;
+pub mod security;
 pub mod server;
 pub mod social;
 pub mod storage;
