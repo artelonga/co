@@ -724,6 +724,18 @@ CO-354 page shells (the API lives in the suggest/review section above).
 
 ---
 
+## scrum — `/api/v1/scrum/*` (scrum/calendar.rs)
+
+CO-372: Sprint calendar with Definition of Done + ICS export. Public endpoints, no auth required.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/scrum/calendar` | anon | Sprint calendar JSON (past + future sprints, DoD %, events). Query params: `past=6` (default), `future=4` (default). |
+| GET | `/api/v1/scrum/calendar.ics` | anon | iCalendar export for Google/Apple Calendar subscription. Returns `text/calendar`. |
+| GET | `/scrum/calendar` | anon | Sprint calendar SPA page (standalone HTML). |
+
+---
+
 ## SPA + page routes (server.rs)
 
 | Path | Purpose |

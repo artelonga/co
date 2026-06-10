@@ -67,6 +67,8 @@ COPY CHANGELOG.md README.md LICENSE ./
 # CO-211: openapi_routes.rs uses include_str!("../../../docs/api/openapi.yaml")
 # which resolves relative to the workspace root at compile time.
 COPY docs/api/ docs/api/
+# CO-372: calendar.rs uses include_str! to embed the sprint index at compile time.
+COPY docs/scrum/sprints/ docs/scrum/sprints/
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \

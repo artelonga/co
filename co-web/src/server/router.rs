@@ -336,6 +336,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route("/u/{universe}/sala", get(serve_sala_page))
         .route("/u/{universe}/sala/{workspace_slug}", get(serve_sala_page))
         .route("/sala/{share_token}", get(serve_sala_page))
+        // CO-372: sprint calendar SPA — must be before the {*subpath} wildcard.
+        .route(
+            "/scrum/calendar",
+            get(crate::scrum::calendar::serve_calendar_page),
+        )
         // CO-144: deeper SPA paths — must come AFTER the more specific routes.
         // CO-232: serve_deep_link validates entry existence and returns 404 when absent.
         .route("/{slug}/{*subpath}", get(serve_deep_link));
@@ -536,6 +541,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     if let Some(plugin_router) = plugin_routes {
         router = router.nest("/api/v1/plugins", plugin_router);
     }
+
+    // CO-372: Sprint calendar + ICS export (public, no auth).
+    router = router.nest("/api/v1/scrum", crate::scrum::router());
 
     // CO-328: AI provider endpoints (Ollama + Claude Code hook).
     router = router.nest("/api/v1", crate::ai_routes::router(state.clone()));

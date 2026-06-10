@@ -95,6 +95,8 @@ tags:
     description: "live timeline endpoints"
   - name: "suggest/review pages"
     description: "suggest/review pages endpoints"
+  - name: "scrum"
+    description: "scrum endpoints"
   - name: "Health"
     description: "Health endpoints"
   - name: "crawl"
@@ -2265,6 +2267,20 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/scrum/calendar:
+    get:
+      tags: ["scrum"]
+      summary: "Sprint calendar JSON (past + future sprints, DoD %, events). Query params: `past=6` (default), `future=4` (default)."
+      responses:
+        "200":
+          description: OK
+  /api/v1/scrum/calendar.ics:
+    get:
+      tags: ["scrum"]
+      summary: "iCalendar export for Google/Apple Calendar subscription. Returns `text/calendar`."
+      responses:
+        "200":
+          description: OK
   /api/v1/search:
     get:
       tags: ["entries"]
@@ -4173,6 +4189,13 @@ paths:
     get:
       tags: ["crawl"]
       summary: "Crawl policy (private paths disallowed)"
+      responses:
+        "200":
+          description: OK
+  /scrum/calendar:
+    get:
+      tags: ["scrum"]
+      summary: "Sprint calendar SPA page (standalone HTML)."
       responses:
         "200":
           description: OK

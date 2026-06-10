@@ -49,6 +49,21 @@ PENDING_DIR="CHANGELOG-PENDING"
 DOD_DIR="docs/scrum/dod"
 
 # ---------------------------------------------------------------------------
+# CO-372: Sprint cutoff gate — refuse if PRs merged after Wednesday 23:59 BRT.
+# ---------------------------------------------------------------------------
+
+CUTOFF_SCRIPT="co-web/scripts/scrum/cutoff-check.ts"
+if [[ -f "$CUTOFF_SCRIPT" ]] && command -v node >/dev/null 2>&1; then
+  CUTOFF_FLAGS=""
+  [[ "$IGNORE_DOD" == "true" ]] && CUTOFF_FLAGS="--ignore-cutoff"
+  if ! node --import tsx "$CUTOFF_SCRIPT" $CUTOFF_FLAGS 2>&1; then
+    echo "" >&2
+    echo "   Pass --ignore-dod to also bypass the cutoff check." >&2
+    exit 1
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # CO-382: DoD gate — check every pending task has 100% DoD before releasing.
 # ---------------------------------------------------------------------------
 
