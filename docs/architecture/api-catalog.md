@@ -133,6 +133,22 @@ CO-345: publishable saved graph views (universe + type filter + depth + root + l
 
 ---
 
+## workspace — `/api/v1/universes/{key}/workspaces/*` + `/u/{universe}/sala` (workspace_routes.rs)
+
+CO-352: Sala primitive — spatial canvas anchored to a universe, with per-user state and shareable public state.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/universes/{key}/workspaces/{slug}/state` | authed (member) | Get current user's workspace state for this sala |
+| GET | `/api/v1/universes/{key}/workspaces/{slug}/state/public` | anon | Get public/shared workspace state |
+| PUT | `/api/v1/universes/{key}/workspaces/{slug}/state` | authed | Persist workspace state (positions, custom edges) |
+| POST | `/api/v1/universes/{key}/workspaces/{slug}/state/share` | authed | Publish workspace state as shareable |
+| GET | `/api/v1/workspace-states/{token}` | anon | Fetch a shared workspace state by token |
+| GET | `/u/{universe}/sala` | anon | Sala SPA shell (default workspace for universe) |
+| GET | `/u/{universe}/sala/{workspace_slug}` | anon | Sala SPA shell (specific workspace) |
+
+---
+
 ## entries — `/api/v1/universes/{slug}/...` (entry_routes.rs, all under owner/visibility gates)
 
 | Method | Path | Auth | Purpose |

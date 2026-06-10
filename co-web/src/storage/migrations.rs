@@ -2538,6 +2538,36 @@ impl Storage {
                 "CO-378: analytics_rollups.path_private — private rollup redaction"
             );
         }
+
+        // v70: CO-352 (CO-355's sibling workspace_states block takes v71).
+        if current_version < 70 {
+            // CO-352: per-user spatial canvas state for sala (workspace canvas).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS workspace_states (
+                       id             TEXT PRIMARY KEY,
+                       universe_key   TEXT NOT NULL,
+                       workspace_slug TEXT NOT NULL,
+                       user_id        TEXT NOT NULL,
+                       layout_json    TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+                       is_public      INTEGER NOT NULL DEFAULT 0,
+                       share_token    TEXT,
+                       created_at     TEXT NOT NULL,
+                       updated_at     TEXT NOT NULL,
+                       UNIQUE (universe_key, workspace_slug, user_id)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_workspace_states_user
+                       ON workspace_states (user_id);
+                     CREATE INDEX IF NOT EXISTS idx_workspace_states_token
+                       ON workspace_states (share_token) WHERE share_token IS NOT NULL;",
+                )
+                .expect("CO-352 v70: workspace_states table + indexes");
+            crate::record_migration!(
+                self.conn,
+                70,
+                "CO-352: workspace_states — per-user spatial canvas state"
+            );
+        }
     }
 }
 

@@ -322,6 +322,27 @@ pub(super) async fn serve_graph_page(State(state): State<AppState>) -> Response 
     (StatusCode::NOT_FOUND, "Graph page not found").into_response()
 }
 
+/// CO-352: Serve the sala (spatial canvas) page at `/u/{universe}/sala` etc.
+pub(super) async fn serve_sala_page(State(state): State<AppState>) -> Response {
+    let embed_path = "shared/sala.html";
+    let fs_path = std::path::Path::new(&state.core.config.static_dir).join(embed_path);
+    if let Some(contents) = resolve_asset(embed_path, Some(&fs_path)) {
+        return (
+            StatusCode::OK,
+            [
+                (
+                    header::CONTENT_TYPE,
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                ),
+                (header::CACHE_CONTROL, HeaderValue::from_static("no-store")),
+            ],
+            contents,
+        )
+            .into_response();
+    }
+    (StatusCode::NOT_FOUND, "Sala page not found").into_response()
+}
+
 /// CO-150: Serve the asset browser page at `/{slug}/assets`.
 pub(super) async fn serve_assets_page(State(state): State<AppState>) -> Response {
     let embed_path = "shared/assets.html";
