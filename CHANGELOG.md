@@ -5,6 +5,344 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0] — 2026-06-10 — public launch — brain on any device
+
+## CO-352 — Workspace ("Sala") primitive — spatial canvas view anchored to a universe
+
+Adds a first-class "Sala" workspace view alongside kanban and conteudo. Each workspace is a personal spatial canvas that persists node positions, typed edges, and the camera transform per user.
+
+### What changed
+
+- **Schema migration v70**: new `workspace_states` table stores per-user canvas state (layout_json, is_public, share_token).
+- **Backend**: `workspace_routes.rs` — GET/PUT state, POST share-token, share-token resolution (`/api/v1/universes/{key}/workspaces/{slug}/state`, `/api/v1/workspace-states/{token}`).
+- **Server routes**: `/u/{universe}/sala`, `/u/{universe}/sala/{slug}`, `/sala/{share_token}` serve `shared/sala.html` — a dedicated canvas page reusing `co-graph.js`.
+- **SPA integration**: new "Sala" tab in variant-a view bar (i18n: PT/EN "Sala"). Per the one-surface decision (`docs/architecture/sala-surface.md` — one surface, fractal scope: per universe / all / any subset, recursive), the tab is a **launcher** that opens the canvas page; the SPA carries no canvas of its own.
+- **Design doc**: `docs/architecture/sala-surface.md` records the Sala scoping model and the launcher-vs-surface split (decision 2026-06-09).
+- **i18n**: `workspace` key added to PT and EN dictionaries in `shared/i18n.js`.
+- **E2E tests**: `co-352-sala.spec.ts` — anon visits sala, btn-add triggers login CTA, API round-trip (PUT → GET), share-token lifecycle.
+
+### Why
+
+Yggdrasil's `/universos/comunicacao` spatial editor is absorbed into CO as a reusable primitive. Any universe can now have a Sala for free — giving study-mode users, game content authors, and researchers a persistent working canvas.
+
+## CO-354 — Suggest / review pipeline — entry lifecycle (draft → reviewed → published) with anon submissions
+
+A generalized suggest/review pipeline as a CO primitive: every entry now carries
+a `review_status` lifecycle (`draft` | `reviewed` | `published`, default
+`published`), and universes can open up to community contribution without
+granting write access.
+
+### What changed
+
+- **Schema (additive, per-universe DB, idempotent):** `entries` gains
+  `review_status`, `submitted_by`, `submitted_at`, `reviewed_by`, `reviewed_at`,
+  plus a partial index `idx_entries_review_status` that only indexes
+  non-published rows so published reads stay cheap. Applied as per-universe
+  migration v18 (v17 is CO-389 on main) with unconditional drift guards (CO-241/CO-267 pattern).
+- **Endpoints** (under `/api/v1/universes/{slug}`):
+  - `POST /suggest` — accepts anonymous submissions (sits outside the writer
+    gate), rate-limited per submitter + honeypot field. Creates an entry with
+    `review_status: draft`.
+  - `GET /review` — owner-only queue of draft/reviewed entries, newest first.
+  - `POST /review/approve` — `{path}` → publishes the entry.
+  - `POST /review/reject` — `{path}` → **deletes** the entry (archival is a
+    Phase-2 concern; delete is the documented v1 choice).
+  - `PATCH /review` — `{path, frontmatter?, body?}` → edit-then-approve.
+- **Read-path filtering:** draft/reviewed entries are hidden from public
+  `GET /entries` and `GET /entries/*path` listings. The universe owner sees
+  everything; an anonymous submitter still sees their own draft (matched by a
+  stable `submitted_by` session/IP key).
+- **Notifications (CO-329):** the owner is notified on each new suggestion
+  (in-app + email); the submitter is notified on approve/reject (in-app when
+  logged in, direct email when an anon submitter left one).
+- **Atividades log (CO-351 / CO-380):** every lifecycle transition publishes an
+  EDA event (`entry.suggest` / `entry.review.approve` / `entry.review.reject` /
+  `entry.review.edit`).
+- **Frontend:** a public suggest form at `/{slug}/suggest` and an owner review
+  queue at `/{slug}/review` (served like the existing `/{slug}/graph` page).
+
+### Why
+
+Yggdrasil's bespoke `seed_status` pattern (mbya/yoruba lexicon) becomes a
+universal CO capability, and contributors can propose corrections/new entries
+without commit access. The "anon can suggest" + "owner reviews" halves compose
+cleanly with notifications, the atividades log, and surface keys.
+
+### Notes / deviations
+
+- Owner review actions take the entry path in the request body (`{path}`)
+  rather than as a URL segment, since suggestion paths contain slashes.
+- Routes use the repo's `/{slug}/…` page convention rather than `/u/{key}/…`.
+- The Sala `btn-sugerir` wiring (CO-352) targets the standalone suggest form;
+  CO-352's `sala.html` surface is not present on this branch, so the form is
+  reachable directly at `/{slug}/suggest`.
+
+## CO-355 — Workspace template registry — _workspace.yaml per universe seeds Sala layouts
+
+Universe owners can now define opinionated starting layouts for the Sala canvas
+by placing `_workspace.yaml` (default) or `_workspaces/<slug>.yaml` (named) in
+their universe content root. Templates specify pre-placed nodes, edges, study-mode
+config, and allowed entry types in a plain YAML schema.
+
+New API:
+- `GET /api/v1/universes/{key}/workspace-templates` — list all templates (always
+  includes a synthetic "blank" template).
+- `GET /api/v1/universes/{key}/workspace-templates/{slug}` — fetch one template.
+- `POST /api/v1/universes/{key}/workspaces/{ws}/from-template/{tpl}` — create a
+  new `workspace_states` row seeded with the template's node/edge layout. Works for
+  anonymous and authenticated users. Entry paths that don't exist in the universe
+  are silently dropped (warning logged); the rest of the template still loads.
+
+Frontend:
+- New "Sala" tab in the view-tabs bar (`data-view="workspace"`) — a **launcher**
+  for the unified Sala surface, per `docs/architecture/sala-surface.md` (one
+  surface, fractal scope: per universe / all universes / any subset; nodes can
+  recurse into universes). The SPA never grows its own canvas.
+- Template picker modal opens on "+ Nova Sala" — lists all templates from the API.
+- Selecting a template calls the `from-template` endpoint and navigates to the
+  canvas at `/u/{universe}/sala/{slug}` (CO-352's surface).
+
+Database:
+- No new migration — rows are written to the `workspace_states` table created
+  by CO-352's v70 migration.
+
+Seed fixture:
+- `co-web/seed/universe-templates/comunicacao/_workspaces/mbya-basics.yaml` — 12-node
+  reference template for the comunicacao universe (copy into the universe repo to
+  activate).
+
+### Why
+
+Newcomers to a universe need a useful surface immediately. Curators can codify
+canonical study starting-points as versioned YAML that travels with the universe
+repo, replacing Yggdrasil's hardcoded `data-tpl` attribute.
+
+## CO-356 — Touch DnD on board — pointer-event based drag for mobile (replaces HTML5 DnD)
+
+Replaced the kanban board's HTML5 drag-and-drop (`dragstart`/`dragover`/`drop`)
+with a pointer-event based implementation that works on iOS Safari and Android Chrome.
+
+A new reusable primitive `lib/pointer-drag.js` (`attachPointerDrag`) handles
+`pointerdown`/`pointermove`/`pointerup`/`pointercancel` with a 200 ms hold-or-8 px
+horizontal-movement threshold to prevent accidental drags during scroll or tap.
+During a drag, a ghost clone of the card follows the pointer; hit-testing via
+`document.elementsFromPoint` highlights the target column and resolves the drop.
+
+E2E tests updated: removed the `vp.width <= 640` skip, added mobile-viewport
+coverage for iPhone 13 (390×844), iPad Mini (768×1024), and Pixel 5 (393×851),
+plus threshold-guard tests verifying quick taps and vertical swipes do not fire.
+
+### Why
+
+HTML5 DnD events do not fire on touch screens — a 15-year browser limitation.
+The board was silently read-only on all mobile devices.  Pointer events are the
+W3C-standard unification of mouse, touch, and pen input and are supported on
+iOS 13+, all modern Android, and all desktop browsers.
+
+## CO-357 — PWA shell — manifest, service worker, install prompt, offline cache for content
+
+Full PWA implementation: web app manifest with correct icons, service worker upgrade to
+`co-v6-offline`, install prompt for Android Chrome and iOS Safari tip, and offline
+navigation fallback to `/offline.html`.
+
+### Changes
+
+- `static/manifest.json` (new root): `CO — Collective Consciousness`, theme `#2563eb`,
+  scope `/`, display `standalone`, PNG icons at 192/512/maskable sizes.
+- `static/shared/icons/`: `icon-192.png`, `icon-512.png`, `icon-maskable-512.png`,
+  `apple-touch-icon.png` (180 px) — solid CO-brand blue (#2563eb) placeholder PNGs.
+- `static/shared/sw.js` + `static/sw.js`: CACHE_NAME bumped to `co-v6-offline`;
+  STATIC_ASSETS now caches `/manifest.json` and `/offline.html`; API strategy upgraded
+  to network-first-with-cache-fallback; navigation offline fallback to `/offline.html`.
+- `static/offline.html` (new): minimal "you're offline" page served when navigation
+  fails and no cached page is available.
+- All `variants/*/index.html`: manifest link updated to `/manifest.json`; theme-color
+  updated to `#2563eb`; viewport gets `viewport-fit=cover`; apple-touch-icon,
+  apple-mobile-web-app-capable/status-bar-style/title metas added.
+- `variants/a/modules/install/wire.js` (new): listens for `beforeinstallprompt`,
+  shows the existing `#pwa-install-wrap` button, prompts on confirm, persists
+  30-day dismissal. iOS Safari gets a one-shot "Tap Share → Add to Home Screen" tooltip.
+  Emits `pwa_install_prompt_shown`, `pwa_install_prompt_dismissed`, `pwa_installed`
+  telemetry events.
+- `static_files.rs`: `manifest.json` and `offline.html` served from root (not shared/);
+  `manifest.json` MIME type corrected to `application/manifest+json`;
+  `sw.js` now includes `Service-Worker-Allowed: /` response header.
+
+### Why
+
+Lighthouse PWA category was failing (manifest 404, no icons, wrong MIME type, no apple
+meta tags). CO mobile users could not install the app to their home screen.
+
+## CO-358 — Mobile IA pass — drawer sidebar, breadcrumb collapse, board → list reflow
+
+Full mobile responsive pass for the CO SPA: the app is now designed for small screens
+rather than being a desktop layout shrunken to 360 px.
+
+- **Sidebar drawer**: off-canvas at ≤640px with slide transition (`translateX`). Hamburger
+  button (fixed, 44×44 hit area) toggles it. Swipe from left edge (<20px) opens; swipe
+  right on open drawer closes. ESC closes. Focus trap active while open. Tap-outside closes.
+- **Breadcrumb collapse**: at ≤480px shows `← <title>` instead of full trail. Tapping the
+  title opens a popover with the full navigation trail; items are full-touch-target links.
+  Back arrow navigates to parent directly.
+- **Board single-column**: at ≤640px kanban columns stack vertically; a segmented control
+  at the top lets the user switch the active column. Selection persists via `localStorage`
+  (`co.board.mobileActiveColumn`).
+- **Tables → card view**: at ≤640px `<thead>` hidden, each `<tr>` rendered as a stacked
+  card using `display: block`. `data-label` attributes on `<td>` elements drive `::before`
+  pseudo-element labels. CSS-only transformation, no JS change needed.
+- **Modals full-screen**: at ≤640px `.modal` takes `100vw × 100dvh`, no border-radius,
+  with sticky `modal-header` containing a 44×44 close button.
+- **Touch targets**: all `button`, `.btn`, `.view-tab`, `.nav-item` etc. get
+  `min-height: 44px` at ≤640px. Inline badges use padding expansion.
+- **Header overflow menu**: at ≤640px a kebab button (⋮) replaces non-essential header
+  controls (search, lang toggle, universe info) with a dropdown menu.
+- **Breakpoint variables**: `--bp-mobile: 640px`, `--bp-tablet: 900px`,
+  `--touch-target: 44px` added to `:root`.
+- **iOS safe areas**: `env(safe-area-inset-top/bottom)` applied to header and
+  bottom-sheet elements.
+
+### Why
+
+Mobile users bounced because the SPA was a desktop layout shrunken to 360 px: sidebar
+had no drawer affordance, breadcrumbs wrapped across three lines, the kanban board
+horizontal-scrolled inside a vertical-scroll page, tables overflowed, and modals floated
+at 320 px on a 360 px viewport. This pass makes CO usable on the device most people read on.
+
+## CO-359 — Mobile E2E coverage in CI matrix — Pixel 7 / iPhone 14 / iPad Pro
+
+CI's e2e job now runs a device matrix: `desktop-chromium` and `pixel-7` gate every
+PR; `iphone-14` and `ipad-pro` projects are available for local/full runs. Shared
+helpers became viewport-aware (drawer-aware `selectProject`, `openSidebarIfMobile`),
+and desktop-only cross-column assertions are explicitly skipped at ≤640px where the
+dedicated Mobile drag suite covers the same behavior through the segmented control.
+
+### Why
+
+The mobile shell (CO-356/357/358) is only as good as the regression net under it —
+the matrix caught a real interaction loss (hidden-column drag) the same night it
+was introduced.
+
+## CO-374 — Playwright E2E suite for staging — universe recursion, promotion, lead funnel, user routes
+
+Adds `co-web/e2e-staging/` — a Playwright suite that runs against the live
+staging environment (`staging.co.artelonga.com.br`) rather than an ephemeral
+local server.
+
+Six scenario files cover universe recursion (parent_key chain + breadcrumbs),
+sub-universe promotion (pre-conditions + fixme stubs for the Wave 4 endpoint),
+lead funnel (POST /api/v1/leads + magic-code onboarding), general user routes
+(8 pages load < 3 s, no console errors), security headers (X-RateLimit,
+Retry-After, HSTS, CSP), and auth flows (magic-code, password, cross-env
+token, logout, expired-token 401).
+
+`scripts/scrum/acceptance-to-playwright.ts` walks all `work/co/CO-*.md` specs,
+parses every `## Acceptance` checkbox, and emits
+`e2e-staging/generated/from-acceptance.spec.ts` with one `test.fixme()` stub
+per item (1 316 stubs across 173 specs). Devs fill stubs in during PRs;
+CI can track Wave 4 DoD completion by counting remaining fixmes.
+
+Three Playwright projects (Pixel 7, iPhone 14, iPad Pro) run via `npm run
+test:staging`. The new `staging-e2e.yml` workflow triggers automatically after
+each staging deploy and on manual dispatch. `prod-release.yml` (manual,
+Thursday release gate) checks that the latest staging E2E run succeeded before
+deploying to production.
+
+HTML reports are uploaded as GitHub Actions artifacts at
+`playwright-report/<sha>/` per device project.
+
+### Why
+
+Wave 4 lands 16 PRs with heavy schema and UI changes. Continuous validation
+against live staging catches drift that unit tests miss. The Thursday 12:00 BRT
+release window needed an objective pass/fail gate to replace the manual smoke
+checklist.
+
+## CO-375 — API contract enforcement against running staging — probe every endpoint, detect drift
+
+Added a runtime contract probe that hits every endpoint declared in `co-web/openapi.yaml`
+against the staging environment and reports status-code or response-shape drift.
+
+New files:
+- `co-web/scripts/contract/probe-staging.ts` — probe script (~280 lines): parses
+  openapi.yaml, resolves known path params (`{slug}` → `template`, etc.), skips
+  token-issuance and unparameterizable endpoints, probes the rest concurrently,
+  validates status codes and JSON shapes, writes `contract-probe-report.json`.
+- `.github/workflows/contract-probe.yml` — triggers after every staging deploy
+  (`workflow_run`) and on API-surface PRs (`pull_request`); posts a drift diff
+  as a PR comment when drift is found.
+
+Modified files:
+- `.github/workflows/release.yml` — added `contract-check` job that gates all
+  `build` jobs; prod artifacts are not published until the staging probe passes.
+- `co-web/package.json` — added `contract:probe` npm script.
+
+### Why
+CO-350 already prevents catalog/code/openapi.yaml divergence statically. This
+adds the third axis: **actual runtime response shapes on staging**. Wave 4 PRs
+that silently change HTTP status codes or drop required fields in JSON responses
+are now caught before a prod release is tagged.
+
+## CO-382 — Scrum-aligned CI/CD with DoD verification — deterministic route per task, release gate
+
+Introduces a deterministic 10-step CI/CD route for every PR, with DoD (Definition of Done)
+verification as a mandatory merge gate and release gate.
+
+**New scripts:**
+- `co-web/scripts/dod/verify.ts` — parses `## Acceptance` from `work/co/CO-N.md`, maps each
+  item to a test pattern, searches `e2e/` and `e2e-generated/` for matching Playwright tests,
+  reports per-item ✅/❌, posts a DoD table as a PR comment, generates stub spec files, and
+  saves a JSON report to `docs/scrum/dod/CO-N.json`.
+- `co-web/scripts/scrum/sprint-review.ts` — reads DoD JSON reports + git history, generates
+  `docs/scrum/sprints/sprint-<N>.md` and commits it (Thursday 14:30 BRT).
+
+**New GitHub Actions workflows:**
+- `.github/workflows/pr-route.yml` — step 6 (migration validation, conditional) + step 10
+  (DoD verification per PR); blocks merge on any ❌ acceptance item.
+- `.github/workflows/staging-suite.yml` — step 8 (contract probe) + step 9 (E2E staging suite)
+  after every push to main; results gate Thursday release.
+- `.github/workflows/release-gate.yml` — Thursday 14:00 BRT cron; validates all wave PRs have
+  green DoD, generates sprint review, blocks release if any PR is below 100%.
+
+**Release gate in `scripts/release-commit.sh`:**
+- Reads `docs/scrum/dod/CO-N.json` for each pending `CHANGELOG-PENDING/CO-N.md` task.
+- Refuses release if any task has `dod_pct < 100`.
+- `--ignore-dod` override flag for emergency hotfixes (logged in release commit theme).
+
+**Live timeline (CO-381):**
+- `ci.*` and `release.gate.*` event types now render with 🛠️ / 🚀 / 🚫 icons in `/agora`.
+
+**Documentation:**
+- `docs/ci-route.md` — full 10-step route reference.
+
+### Why
+
+CO-382 gives the scrum process teeth: DoD becomes a CI gate, not just documentation.
+A merged PR with unchecked acceptance items is now structurally impossible.
+
+### Directories added
+
+- `co-web/e2e-generated/` — stub spec files generated by `dod:verify --generate-stubs`
+- `docs/scrum/dod/` — per-task DoD JSON reports consumed by release gate
+
+## CO-397 — Public API rate limits + abuse protection (Phase 1 of CO-278 epic)
+
+Added the minimum rate-limiting and abuse-protection layer needed to safely open the CO public API at v3.0.
+
+- **Token-bucket rate limits** for anonymous (60 GET/min) and authenticated (600 GET/min, 10×) traffic via in-memory middleware. Anonymous write budget: 5/min; authenticated: 60/min.
+- **X-RateLimit-Limit / Remaining / Reset headers** on every `/api/v1/*` response so clients can self-pace.
+- **X-Co-Server-Version** header on all responses for agent identification.
+- **User-Agent gate**: empty or single-character UA is rejected with 400 `missing_user_agent`.
+- **Abuse heuristics**: 30+ 404s or 10+ 401s within a 1-minute window → 15-minute temp ban. Bans are in-memory and clear on restart.
+- **Trusted-IP bypass**: set `CO_TRUSTED_IPS=CSV-of-CIDRs` to exempt monitoring IPs and CI runners.
+- **`GET /robots.txt`** and **`GET /sitemap.xml`**: crawl policy + auto-generated sitemap from public universes.
+- **Abuse events logged to `atividades`** (`entidade=api_abuse`, `tipo=sistema`) so they surface in the `/gestao/resumo` recent-activity feed.
+- **OpenAPI spec updated** with `components/responses/RateLimited` and 429 responses on entries, universes, and feedback endpoints.
+
+### Why
+
+The public API was fully open with no IP-level rate limit beyond CO-339's feedback path. A single misconfigured crawler or LLM agent loop could exhaust the Fly machine before v3.0 launch. This is the minimum viable protection layer — per-tier billing semantics and persistent bans are deferred to CO-80 / CO-278-A (post-v3.0).
+
+
 ## [2.43.0] — 2026-06-09 — federated event bus + sync + privacy
 
 ## CO-376 — Pre-prod migration validation (MVP) — `migrate_check` against a staging snapshot
