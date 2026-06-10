@@ -45,6 +45,7 @@ pub use content::reference_index;
 pub use content::reference_routes;
 pub use content::relation_index;
 pub use content::relation_routes;
+pub use content::review_routes;
 pub use content::search_routes;
 pub use content::state_routes;
 pub use content::universe_routes;

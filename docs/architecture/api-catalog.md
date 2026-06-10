@@ -159,6 +159,22 @@ CO-355: per-universe `_workspace.yaml` template registry — seeds Sala layouts.
 
 ---
 
+## suggest/review — `/api/v1/universes/{slug}/suggest` + `/{slug}/review*` (review_routes.rs)
+
+CO-354: entry lifecycle (draft → reviewed → published) with anon submissions. Outside the writer gate so anonymous visitors can suggest; review actions enforce ownership in-handler.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/universes/{slug}/suggest` | visibility | Submit a suggestion (anon-friendly, rate-limited) — creates a draft entry |
+| GET | `/api/v1/universes/{slug}/review` | owner (in-handler) | List draft + reviewed entries for the review queue |
+| PATCH | `/api/v1/universes/{slug}/review` | owner (in-handler) | Edit a draft before approving |
+| POST | `/api/v1/universes/{slug}/review/approve` | owner (in-handler) | Approve → review_status published |
+| POST | `/api/v1/universes/{slug}/review/reject` | owner (in-handler) | Reject → entry removed |
+| GET | `/{slug}/suggest` | anon | Public suggest form page (shared/suggest.html) |
+| GET | `/{slug}/review` | anon page, owner data | Owner review queue page (shared/review.html) |
+
+---
+
 ## entries — `/api/v1/universes/{slug}/...` (entry_routes.rs, all under owner/visibility gates)
 
 | Method | Path | Auth | Purpose |

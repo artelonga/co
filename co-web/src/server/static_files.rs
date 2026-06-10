@@ -324,7 +324,21 @@ pub(super) async fn serve_graph_page(State(state): State<AppState>) -> Response 
 
 /// CO-352: Serve the sala (spatial canvas) page at `/u/{universe}/sala` etc.
 pub(super) async fn serve_sala_page(State(state): State<AppState>) -> Response {
-    let embed_path = "shared/sala.html";
+    serve_shared_html("shared/sala.html", "Sala page not found", &state)
+}
+
+/// CO-354: Serve the public suggest form at `/{slug}/suggest`.
+pub(super) async fn serve_suggest_page(State(state): State<AppState>) -> Response {
+    serve_shared_html("shared/suggest.html", "Suggest page not found", &state)
+}
+
+/// CO-354: Serve the owner review queue at `/{slug}/review`.
+pub(super) async fn serve_review_page(State(state): State<AppState>) -> Response {
+    serve_shared_html("shared/review.html", "Review page not found", &state)
+}
+
+/// Shared helper: serve a `shared/*.html` page with no-store caching.
+fn serve_shared_html(embed_path: &str, not_found: &'static str, state: &AppState) -> Response {
     let fs_path = std::path::Path::new(&state.core.config.static_dir).join(embed_path);
     if let Some(contents) = resolve_asset(embed_path, Some(&fs_path)) {
         return (
@@ -340,7 +354,7 @@ pub(super) async fn serve_sala_page(State(state): State<AppState>) -> Response {
         )
             .into_response();
     }
-    (StatusCode::NOT_FOUND, "Sala page not found").into_response()
+    (StatusCode::NOT_FOUND, not_found).into_response()
 }
 
 /// CO-150: Serve the asset browser page at `/{slug}/assets`.

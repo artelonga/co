@@ -201,6 +201,15 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             crate::auth::universe_visibility_gate,
         ));
 
+    // CO-354: suggest/review pipeline. The `/suggest` endpoint accepts
+    // anonymous submissions, so this router deliberately sits OUTSIDE the
+    // `universe_writer_gate` (which would 401 anon POSTs). The visibility gate
+    // still applies — private universes require auth to reach — and the
+    // owner-only review actions enforce ownership in-handler via `OwnerOf`.
+    let suggest_review_api = crate::review_routes::router().layer(
+        axum::middleware::from_fn_with_state(state.clone(), crate::auth::universe_visibility_gate),
+    );
+
     let contact_api = crate::contact_routes::contact_router();
 
     let log_drain_api = crate::log_drain_routes::router();
@@ -313,6 +322,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // the `{*subpath}` wildcard below, so add an explicit trailing-slash route
         // to serve the SPA shell. Without this, `/entrar/`, `/sobre/`, `/termos/` 404.
         .route("/{slug}/", get(serve_co_index))
+        // CO-354: suggest form + owner review queue — before the {*subpath} wildcard.
+        .route("/{slug}/suggest", get(serve_suggest_page))
+        .route("/{slug}/review", get(serve_review_page))
         // CO-335: universe graph viewer — must be before the {*subpath} wildcard.
         .route("/{slug}/graph", get(serve_graph_page))
         // CO-345: saved graph view viewer — must be before the {*subpath} wildcard.
@@ -407,6 +419,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-326: public contact form — no auth required
             .nest("/api/v1/universes", contact_api)
             .nest("/api/v1/universes", universe_content_api)
+            // CO-354: suggest/review pipeline — outside the writer gate so
+            // anonymous visitors can submit suggestions.
+            .nest("/api/v1/universes", suggest_review_api)
             // CO-244: read-only SQL query — auth required, but outside writer gate
             // since POST here is a query (not a mutation).
             .nest(

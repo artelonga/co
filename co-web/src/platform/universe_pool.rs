@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS entries (
     created_at        TEXT,
     updated_at        TEXT,
     entry_origin      TEXT NOT NULL DEFAULT '',
+    review_status     TEXT NOT NULL DEFAULT 'published',
+    submitted_by      TEXT,
+    submitted_at      TEXT,
+    reviewed_by       TEXT,
+    reviewed_at       TEXT,
     PRIMARY KEY (universe_key, path)
 );
 CREATE INDEX IF NOT EXISTS idx_entries_type    ON entries(universe_key, entry_type);
@@ -50,6 +55,10 @@ CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(universe_key, updated_
 -- CO-330: supports anon published-only filter (json_extract over frontmatter_json).
 CREATE INDEX IF NOT EXISTS idx_entries_published
     ON entries(universe_key, json_extract(frontmatter_json, '$.published'));
+-- CO-354: partial index over the suggest/review lifecycle — only draft/reviewed
+-- rows are indexed, so published reads (the common case) stay cheap.
+CREATE INDEX IF NOT EXISTS idx_entries_review_status
+    ON entries(universe_key, review_status) WHERE review_status != 'published';
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     universe_key UNINDEXED,
@@ -588,6 +597,41 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     }
     // CO-389 unconditional drift guard.
     ensure_universe_column(conn, "entries", "source_marker", "TEXT");
+
+    if v < 18 {
+        // CO-354: suggest/review lifecycle. Every entry gains a review_status
+        // (draft | reviewed | published) plus submitter/reviewer provenance.
+        // Default 'published' so existing rows are unaffected — purely additive.
+        // New universes already have the columns from UNIVERSE_SCHEMA; existing
+        // ones get them here via ALTER TABLE. (v18 — v17 is CO-389 on main.)
+        ensure_universe_column(
+            conn,
+            "entries",
+            "review_status",
+            "TEXT NOT NULL DEFAULT 'published'",
+        );
+        ensure_universe_column(conn, "entries", "submitted_by", "TEXT");
+        ensure_universe_column(conn, "entries", "submitted_at", "TEXT");
+        ensure_universe_column(conn, "entries", "reviewed_by", "TEXT");
+        ensure_universe_column(conn, "entries", "reviewed_at", "TEXT");
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_entries_review_status \
+             ON entries(universe_key, review_status) WHERE review_status != 'published'; \
+             INSERT OR IGNORE INTO schema_version (version) VALUES (18);",
+        )
+        .expect("universe schema_version v18");
+    }
+    // CO-354 unconditional drift guard — same partial-apply safety as CO-241/CO-267.
+    ensure_universe_column(
+        conn,
+        "entries",
+        "review_status",
+        "TEXT NOT NULL DEFAULT 'published'",
+    );
+    ensure_universe_column(conn, "entries", "submitted_by", "TEXT");
+    ensure_universe_column(conn, "entries", "submitted_at", "TEXT");
+    ensure_universe_column(conn, "entries", "reviewed_by", "TEXT");
+    ensure_universe_column(conn, "entries", "reviewed_at", "TEXT");
 
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet

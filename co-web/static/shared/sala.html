@@ -637,7 +637,9 @@
   });
 
   btnSugerir.addEventListener('click', function () {
-    showToast('Sugestão enviada para revisão — em breve (CO-354)');
+    // CO-354: open the universe's public suggest form (anon-friendly).
+    if (!universeKey) { showToast('Sala compartilhada — sem universo para sugerir'); return; }
+    window.location.href = '/' + encodeURIComponent(universeKey) + '/suggest';
   });
 
   btnPublish.addEventListener('click', function () {

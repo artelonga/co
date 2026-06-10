@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Fila de revisão — CO</title>
+  <link rel="stylesheet" href="/shared/production.css" />
+  <style>
+    body { max-width: 880px; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; }
+    .card { border: 1px solid #ddd; border-radius: 6px; padding: 1rem; margin: 1rem 0; }
+    .meta { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; }
+    .excerpt { white-space: pre-wrap; background: #fafafa; padding: 0.5rem; border-radius: 4px; }
+    .actions { margin-top: 0.75rem; display: flex; gap: 0.5rem; }
+    button { padding: 0.4rem 0.9rem; cursor: pointer; }
+    .approve { background: #1e7d34; color: #fff; border: none; border-radius: 4px; }
+    .reject { background: #b3261e; color: #fff; border: none; border-radius: 4px; }
+    .empty { color: #666; }
+    .badge { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; background: #eee; font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <h1>Fila de revisão</h1>
+  <p id="status" class="empty">Carregando…</p>
+  <div id="queue"></div>
+
+  <script>
+    // Slug is the first path segment: /{slug}/review
+    const slug = location.pathname.split('/').filter(Boolean)[0];
+    const api = (p) => `/api/v1/universes/${encodeURIComponent(slug)}${p}`;
+    const statusEl = document.getElementById('status');
+    const queueEl = document.getElementById('queue');
+
+    function fmFor(e) { return e.frontmatter || {}; }
+
+    async function load() {
+      statusEl.textContent = 'Carregando…';
+      queueEl.innerHTML = '';
+      try {
+        const res = await fetch(api('/review'), { credentials: 'include' });
+        if (res.status === 401 || res.status === 403) {
+          statusEl.textContent = 'Acesso restrito ao responsável pelo universo. Faça login.';
+          return;
+        }
+        const data = await res.json();
+        const entries = data.entries || [];
+        if (entries.length === 0) {
+          statusEl.textContent = 'Nenhuma sugestão pendente. 🎉';
+          return;
+        }
+        statusEl.textContent = `${data.total} sugestão(ões) pendente(s).`;
+        for (const e of entries) {
+          const fm = fmFor(e);
+          const card = document.createElement('div');
+          card.className = 'card';
+          const who = fm.submitted_name || fm.submitted_by || 'anônimo';
+          card.innerHTML = `
+            <div class="meta">
+              <span class="badge">${fm.review_status || 'draft'}</span>
+              ${e.entry_type} · enviado por ${who} · ${fm.submitted_at || ''}
+            </div>
+            <strong>${fm.title || e.title || e.path}</strong>
+            <div class="excerpt">${(e.body || '').slice(0, 400)}</div>
+            <div class="actions">
+              <button class="approve">Aprovar</button>
+              <button class="reject">Rejeitar</button>
+            </div>`;
+          card.querySelector('.approve').addEventListener('click', () => act('/review/approve', e.path));
+          card.querySelector('.reject').addEventListener('click', () => act('/review/reject', e.path));
+          queueEl.appendChild(card);
+        }
+      } catch (_) {
+        statusEl.textContent = 'Erro ao carregar a fila.';
+      }
+    }
+
+    async function act(route, path) {
+      const res = await fetch(api(route), {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      if (res.ok) {
+        load();
+      } else {
+        alert('Ação falhou: ' + res.status);
+      }
+    }
+
+    load();
+  </script>
+</body>
+</html>
