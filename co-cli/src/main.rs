@@ -525,6 +525,30 @@ enum Commands {
         data_dir: Option<std::path::PathBuf>,
     },
 
+    /// Build a universe into a Quartz static garden (public site)
+    ///
+    /// Feeds the universe's content/ markdown through the redearte Quartz
+    /// template and writes a static site to --out (default: public/).
+    /// Only content/ is included; _source/ PII dirs are excluded by design.
+    ///
+    /// Run from within the universe directory:
+    ///   co construir                          # build, key from dir name
+    ///   co construir grcsamazonia             # same, explicit key
+    ///   co construir --out dist/              # custom output dir
+    ///   co construir --redearte ~/dev/redearte  # custom template path
+    Construir {
+        /// Universe key (default: derived from current directory name)
+        key: Option<String>,
+
+        /// Output directory for the static site (default: public/)
+        #[arg(short, long, default_value = "public")]
+        out: String,
+
+        /// Path to the redearte Quartz template (default: CO_REDEARTE_PATH or ~/projects/redearte)
+        #[arg(long)]
+        redearte: Option<std::path::PathBuf>,
+    },
+
     /// Start the project management board (web UI)
     ///
     /// Launches a local web server with Kanban/Calendar views.
@@ -1497,6 +1521,9 @@ fn main() {
                         .unwrap_or_else(|| "./co-data".to_string())
                 });
             commands::launch::run(key, name, public, now, port, resolved);
+        }
+        Commands::Construir { key, out, redearte } => {
+            commands::construir::run(key, out, redearte);
         }
         Commands::Board {
             action,
