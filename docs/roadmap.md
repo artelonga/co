@@ -10,11 +10,11 @@ Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/doc
 
 ## Current state (2026-06-05)
 
-- **Version**: v2.40.0 → v2.41.0 (Wave 3 in flight: CO-368 + CO-370 pending)
+- **Version**: v2.43.0 released 2026-06-09 (`v2.43.0` tag, federated event bus + sync + privacy); main carries the v3.0.0 candidate bundle in `CHANGELOG-PENDING/`
 - **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
-- **Staging** (post-CO-379): `https://staging.co.artelonga.com.br`
-- **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-372 cron-driven from Wave 4
-- **Open work items**: ~90 (after closing CO-94/146/162/277/143)
+- **Staging** (post-CO-379): `https://staging.co.artelonga.com.br` — hand-deployed, auto-stops; PR-level contract probe is advisory for this reason (strict gate lives in release.yml)
+- **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-382 release-gate cron live since #180
+- **Release gate**: CO-382 DoD gate in `release-commit.sh` — blocks on `blocking_failures > 0` or missing `docs/scrum/dod/CO-N.json`; all current pending entries have reports at 0 blocking
 - **Per-wave DoD**: `docs/release-checklist.md`
 
 ## Wave-aligned releases
@@ -25,9 +25,11 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 |---|---|---|---|
 | ⏪ done | v2.39.0 | Foundation (CO-211/280/291/301/337/338) | 6 |
 | ⏪ done | **v2.40.0** | Substrate stable + OSS integrations | 10 |
-| 🟡 active | **v2.41.0** | Brain interlink + scrum + retro sim | 7 |
-| 🔵 next | **v3.0.0 — PUBLIC LAUNCH** | EDA spine (federated) + Sala + mobile + staging + edge protection + privacy + scrum CI + Yggdrasil read | **21** |
-| ⚪ planned | v3.1.0 | Monetization + KB + funnel + calendar + time-rendering + UPSERT conflict tree + lexicon-sala live overlay | 7 |
+| ⏪ done | v2.41.0 | Brain interlink + scrum + retro sim | 7 |
+| ⏪ done | **v2.42.0** | Unified gestão + cross-env identity + live timeline (CO-360/377/…) | — |
+| ⏪ done | **v2.43.0** | Federated event bus + sync + privacy (CO-376/378/383/384/385/389/391/394) | 8 |
+| 🟡 closing | **v3.0.0 — PUBLIC LAUNCH** | Workspace (Sala) + mobile + verification + edge protection — see as-built ledger below | **21 (19 merged)** |
+| ⚪ planned | v3.1.0 | Deploy/pipeline (CO-395/392/398) + time/forma (CO-387/396) + conteúdo×forma (CO-393) + monetization/KB/funnel/calendar (CO-366/367/371/372) — CO-385/389 already shipped in v2.43.0 | ~11 |
 | ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web, Glasswing-aligned audit pipeline) | 5 |
 | ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
 | ⚪ planned | v3.4.0 | Scale (job queue, cache, rate tiers, load tests) | 6 |
@@ -35,6 +37,48 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⚪ planned | v3.6.0 | Native shells (Capacitor) + advanced | 3 |
 
 ## Wave 4 — v3.0 (the big public release push)
+
+### As-built ledger (reconciled 2026-06-10)
+
+Everything below merged to `main`; `CHANGELOG-PENDING/` holds the entries that will
+form the v3.0.0 changelog. Releases v2.42.0/v2.43.0 already shipped the early items.
+
+| Task | Theme | PR | Merge commit | Shipped in |
+|---|---|---|---|---|
+| CO-380 universal event bus | 1 EDA spine | (pre-wave) | — | v2.41.0 |
+| CO-381 live timeline /agora·/live | 1 | — | — | v2.42.0 |
+| CO-384 federated bus bridge | 1 | #171-era | — | v2.43.0 |
+| CO-383 Yggdrasil notes ingestion | 7 | #171 | `be80b9f` | v2.43.0 |
+| CO-391 WS bridge integration test | 1 | #172 | `451fd46` | v2.43.0 |
+| CO-385 UPSERT conflict tree (pulled fwd from v3.1) | — | — | — | v2.43.0 |
+| CO-389 lexicon-sala live overlay (pulled fwd) | — | — | — | v2.43.0 |
+| CO-394 seed relation extraction | — | #178 | `3cb790d` | v2.43.0 |
+| CO-376 pre-prod migration validation | 6 | #173 | `6825eee` | v2.43.0 |
+| CO-378 analytics privacy (noindex) | 2 | #166 | `7867729` | v2.43.0 |
+| CO-365 storage backend trait | 3 | (batch A) | — | v2.42.0 |
+| CO-360 unified /gestao | 3 | — | — | v2.42.0 |
+| CO-377 cross-env identity | 6 | — | — | v2.42.0 |
+| CO-379 staging app + DNS | 6 | — | — | v2.41.0 |
+| CO-352 Sala primitive (one surface) | 4 | #164 | `a3d6062` | pending → v3.0.0 |
+| CO-355 workspace template registry | 4 | #163 | `c3c3200` | pending → v3.0.0 |
+| CO-354 suggest/review pipeline | 4 | #182 | `c58ddd5` | pending → v3.0.0 |
+| CO-375 API contract probe | 6 | #179 | `f95ce22` | pending → v3.0.0 |
+| CO-382 scrum DoD CI/CD | 7 | #180 | `423645e` | pending → v3.0.0 |
+| CO-374 Playwright staging suite | 6 | #181 | `bea76f4` | pending → v3.0.0 |
+| CO-397 rate limits + robots/sitemap (was CO-278-B) | 2 | #183 | `71ec4ad` | pending → v3.0.0 |
+| CO-356 touch DnD (pointer events) | 5 | #185 | `7848975` | pending → v3.0.0 |
+| CO-357 PWA shell | 5 | #186 | `052375f` | pending → v3.0.0 |
+| CO-358 mobile IA reflow | 5 | #187 | in CI | pending → v3.0.0 |
+| CO-359 mobile E2E CI matrix | 6 | #184 | parked: rebase after #187 | pending → v3.0.0 |
+
+**Design decision (2026-06-09)**: the Sala is ONE surface with fractal scope —
+`docs/architecture/sala-surface.md`. SPA tab = launcher; canvas lives only in
+`shared/sala.html`. All-universes/subset scope + universe-as-node recursion are
+"Open work" there and still need CO-N ids (CO-398 was taken by the delivery pipeline).
+
+**v3.0.0 ships when**: #187 + #184 merge → `release-commit.sh 3.0.0 "public launch"`
+(DoD gate green) → Thursday ritual: staging deploy → full Playwright suite →
+release-gate → tag → retrospective.
 
 **Theme**: Brain on any device, observable in real time, public.
 
@@ -95,13 +139,25 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 
 ## All open todo/in_progress work mapped
 
+**Wave-5 suggested order** (session 2026-06-10): CO-395 → CO-398 → CO-387 → CO-396+YG-123,
+with CO-372→CO-371→CO-367 co-auto-able in parallel, CO-366 supervised last,
+CO-388 gating any new public surface, CO-390 feeding implementation style.
+
+
 | ID | Title | Wave |
 |---|---|---|
-| CO-368 | Scrum entry types | v2.41 (in flight) |
-| CO-370 | Lead funnel + unified capture | v2.41 (in flight) |
-| CO-352, 353, 354, 355, 356, 357, 358, 359, 360 | Workspace + mobile + admin | **v3.0 Wave 4** |
-| CO-365, 374, 375, 376, 377, 378, 379, 278-B | Storage + staging + privacy + rate limits | **v3.0 Wave 4** |
-| CO-366, 367, 371, 372 | Monetization + KB + funnel + calendar | v3.1 Wave 5 |
+| CO-352…360, 365, 374…379, 397 | Workspace + mobile + verification + edge (see as-built ledger) | **v3.0 Wave 4 — merged** |
+| CO-387 | Time-rendering primitive `<co-time-grid>` (high — prerequisite of CO-396/YG-123) | v3.1 Wave 5 — time/forma |
+| CO-396 | Project timeline lens (gantt over `<co-time-grid>`, shared engine with YG-123) | v3.1 Wave 5 — time/forma |
+| CO-393 | Composable universe UI — content lenses, schema-driven forms (spec CO-387/396 against this frame: one lens system) | v3.1 Wave 5 — conteúdo×forma |
+| CO-395 | construir — markdown → Quartz public site (de-facto pattern of grcsamazonia/mse) | v3.1 Wave 5 — deploy/pipeline (first) |
+| CO-392 | co push — CLI → remote universe CRUD via Vault API | v3.1 Wave 5 — deploy/pipeline |
+| CO-398 | Delivery pipeline no quadro — VC/deploy events drive status via CO-380 bus + GitHub webhooks (automation fills, never locks; client deploys keep stakeholder go) | v3.1 Wave 5 — deploy/pipeline |
+| CO-388 | Security audit pipeline (Glasswing) — slot BEFORE any new public surface ships | v3.1 gate |
+| CO-390 | SPIKE layered architecture — feeds implementation style of the rest | v3.1 input |
+| Sala fractal scope (all-universes /sala, subset, universe-as-node) | needs CO-N ids — `sala-surface.md` Open work | v3.1 candidate |
+| CO-366, 367, 371, 372 | Monetization (supervised, not headless) + KB + funnel + calendar (cheap post-CO-382) | v3.1 Wave 5 |
+| **CO-104, 119** | **S3 backup + restore drill — not started; same S3 dep behind interim git backups and the failing CO-143 backup cron. Highest-leverage ops item on the board.** | **ops, schedule now** |
 | CO-145 | Encrypted assets | v3.2 Wave 6 |
 | CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web | v3.2 Wave 6 |
 | CO-61, 62, 128, 58 | Sync protocol + adapter + conflict UI + PWA offline | v3.3 Wave 7 |
