@@ -1,12 +1,11 @@
 /**
- * CO-33 — Board CRUD: drag-and-drop between columns
+ * CO-356 — Board drag: pointer-event based DnD (replaces HTML5 DnD)
  *
- * Covers the full Board CRUD sequence:
- *   - create project → create task → drag between columns → edit task → delete task
- *
- * Drag tests use Playwright's built-in dragTo() API which dispatches
- * dragstart / dragenter / dragover / drop events matching the app's
- * ondragstart / ondragover / ondrop handlers.
+ * Covers:
+ *   - Card → column drag on desktop (mouse)
+ *   - Mobile viewport drag: iPhone 13 (390×844), iPad Mini (768×1024), Pixel 5 (393×851)
+ *   - Threshold guards: quick tap and vertical swipe do NOT trigger drag
+ *   - Full CRUD sequence: create → drag → edit → delete
  */
 
 import { test, expect } from "./fixtures";
@@ -16,17 +15,76 @@ import {
   waitForBoard,
   createTask,
 } from "./helpers";
+import type { Locator, Page } from "@playwright/test";
 
-// Skip all tests on mobile — sidebar is hidden at ≤ 640 px
-test.beforeEach(async ({ page }) => {
-  const vp = page.viewportSize();
-  test.skip(
-    !!(vp && vp.width <= 640),
-    "Sidebar not available on mobile viewport",
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Open the mobile hamburger sidebar, select a project, then close the sidebar
+ * so the content area is accessible for interaction.
+ * Used on viewports ≤ 640 px where the sidebar is hidden behind a hamburger menu.
+ */
+async function selectProjectOnMobile(page: Page, key: string): Promise<void> {
+  await page.locator("#hamburger-btn").click();
+  // Wait for sidebar to slide open (CSS class toggles display)
+  await page.locator("#sidebar.open").waitFor({ state: "attached", timeout: 5_000 });
+
+  const tasksLoaded = page.waitForResponse(
+    (r) =>
+      r.url().includes(`/api/projects/${key}/tasks`) && r.status() === 200,
+    { timeout: 15_000 },
   );
-});
+  await page.locator(`#project-list .sidebar-item-key:text-is("${key}")`).click();
+  await tasksLoaded;
 
-// ─── Drag between columns ─────────────────────────────────────────────────────
+  // Close sidebar overlay so view tabs are reachable.
+  await page.locator("#sidebar-overlay.visible").click();
+  await page.waitForFunction(
+    () => !document.querySelector("#sidebar.open"),
+    { timeout: 5_000 },
+  );
+
+  await page
+    .waitForFunction(
+      () => !document.querySelector("#content .loading-spinner"),
+      { timeout: 10_000 },
+    )
+    .catch(() => {});
+
+  await page.locator('#view-tabs .view-tab[data-view="kanban"]').click();
+  await page.waitForSelector(".kanban-column", {
+    state: "visible",
+    timeout: 10_000,
+  });
+}
+
+/**
+ * Simulate a long-press drag: hold > 200 ms (activating the hold threshold in
+ * pointer-drag.js) then move to the target element.  Used on mobile viewports
+ * where kanban columns are stacked vertically so the drag is downward, not
+ * horizontal, and the 8 px horizontal threshold never triggers.
+ *
+ * The 250 ms wait is intentional — it tests the 200 ms hold threshold feature
+ * in pointer-drag.js, not an arbitrary sleep.
+ */
+async function holdAndDrag(page: Page, from: Locator, to: Locator): Promise<void> {
+  const fromBox = await from.boundingBox();
+  const toBox = await to.boundingBox();
+  if (!fromBox || !toBox) throw new Error("holdAndDrag: bounding boxes null");
+
+  const fx = fromBox.x + fromBox.width / 2;
+  const fy = fromBox.y + fromBox.height / 2;
+  const tx = toBox.x + toBox.width / 2;
+  const ty = toBox.y + toBox.height / 2;
+
+  await page.mouse.move(fx, fy);
+  await page.mouse.down();
+  await page.waitForTimeout(250); // exceed 200 ms hold threshold
+  await page.mouse.move(tx, ty, { steps: 10 });
+  await page.mouse.up();
+}
+
+// ─── Desktop drag ─────────────────────────────────────────────────────────────
 
 test.describe("Drag: move task card between kanban columns", () => {
   test("drag from 'To Do' to 'In Progress' updates the task status via API", async ({
@@ -46,7 +104,6 @@ test.describe("Drag: move task card between kanban columns", () => {
     const card = page.locator(`.task-card[data-task-id="${task.id}"]`);
     await expect(card).toBeVisible();
 
-    // Target: the In Progress column drop zone
     const inProgressCol = page
       .locator('.kanban-column[data-status="in_progress"]')
       .or(page.locator(".kanban-column").filter({ hasText: "In Progress" }));
@@ -54,7 +111,6 @@ test.describe("Drag: move task card between kanban columns", () => {
 
     await card.dragTo(inProgressCol);
 
-    // Card should now be inside the In Progress column
     await expect(
       inProgressCol.locator(`.task-card[data-task-id="${task.id}"]`),
     ).toBeVisible({ timeout: 5_000 });
@@ -87,6 +143,132 @@ test.describe("Drag: move task card between kanban columns", () => {
   });
 });
 
+// ─── Drag threshold guards ─────────────────────────────────────────────────────
+
+test.describe("Drag threshold: tap and vertical swipe do not trigger drag", () => {
+  test("quick tap (< 8 px movement) does not move the card", async ({
+    page,
+    apiContext,
+    seedProject,
+  }) => {
+    const task = await createTask(apiContext, seedProject.key, {
+      title: "Tap guard task",
+      status: "todo",
+    });
+
+    await navigateTo(page, "/");
+    await selectProject(page, seedProject.key);
+    await waitForBoard(page);
+
+    const card = page.locator(`.task-card[data-task-id="${task.id}"]`);
+    const box = await card.boundingBox();
+    if (!box) throw new Error("card bounding box null");
+
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    // Press, move only 4 px horizontally (below 8 px threshold), release.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 4, cy);
+    await page.mouse.up();
+
+    // Card must remain in the todo column — no drag fired.
+    const todoCol = page.locator('.kanban-column[data-status="todo"]');
+    await expect(
+      todoCol.locator(`.task-card[data-task-id="${task.id}"]`),
+    ).toBeVisible();
+  });
+
+  test("vertical swipe on a card does not trigger drag", async ({
+    page,
+    apiContext,
+    seedProject,
+  }) => {
+    const task = await createTask(apiContext, seedProject.key, {
+      title: "Scroll guard task",
+      status: "todo",
+    });
+
+    await navigateTo(page, "/");
+    await selectProject(page, seedProject.key);
+    await waitForBoard(page);
+
+    const card = page.locator(`.task-card[data-task-id="${task.id}"]`);
+    const box = await card.boundingBox();
+    if (!box) throw new Error("card bounding box null");
+
+    const cx = box.x + box.width / 2;
+    const cy = box.y + box.height / 2;
+
+    // Purely vertical swipe (dy=40 >> dx=0) — should cancel gesture as scroll.
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx, cy - 40, { steps: 5 });
+    await page.mouse.up();
+
+    const todoCol = page.locator('.kanban-column[data-status="todo"]');
+    await expect(
+      todoCol.locator(`.task-card[data-task-id="${task.id}"]`),
+    ).toBeVisible();
+  });
+});
+
+// ─── Mobile viewport drag ─────────────────────────────────────────────────────
+
+const MOBILE_VIEWPORTS = [
+  { name: "iPhone 13", width: 390, height: 844 },
+  { name: "iPad Mini", width: 768, height: 1024 },
+  { name: "Pixel 5", width: 393, height: 851 },
+] as const;
+
+for (const device of MOBILE_VIEWPORTS) {
+  test.describe(`Mobile drag — ${device.name} (${device.width}×${device.height})`, () => {
+    test.use({ viewport: { width: device.width, height: device.height } });
+
+    test(`drag card from 'To Do' to 'In Progress' on ${device.name}`, async ({
+      page,
+      apiContext,
+      seedProject,
+    }) => {
+      const task = await createTask(apiContext, seedProject.key, {
+        title: `Mobile drag — ${device.name}`,
+        status: "todo",
+      });
+
+      await navigateTo(page, "/");
+
+      // Sidebar is hidden at ≤ 640 px (single-column kanban layout); open it via
+      // the hamburger button.  At 768 px (iPad Mini) the sidebar is always visible.
+      if (device.width <= 640) {
+        await selectProjectOnMobile(page, seedProject.key);
+      } else {
+        await selectProject(page, seedProject.key);
+      }
+
+      const card = page.locator(`.task-card[data-task-id="${task.id}"]`);
+      await expect(card).toBeVisible();
+
+      const inProgressCol = page.locator('.kanban-column[data-status="in_progress"]');
+      await expect(inProgressCol).toBeVisible();
+
+      // On ≤ 640 px the kanban uses grid-template-columns: 1fr (stacked vertically),
+      // so dragging between columns is downward, not horizontal.  The 8 px horizontal
+      // threshold never fires; we rely on the 200 ms hold threshold instead.
+      // On 768 px (iPad Mini) columns are side by side — dragTo() works directly.
+      if (device.width <= 640) {
+        await holdAndDrag(page, card, inProgressCol);
+      } else {
+        await card.dragTo(inProgressCol);
+      }
+
+      await expect(
+        inProgressCol.locator(`.task-card[data-task-id="${task.id}"]`),
+      ).toBeVisible({ timeout: 5_000 });
+    });
+  });
+}
+
 // ─── Full CRUD sequence ───────────────────────────────────────────────────────
 
 test.describe("Full CRUD: create → drag → edit → delete", () => {
@@ -95,7 +277,6 @@ test.describe("Full CRUD: create → drag → edit → delete", () => {
     apiContext,
     seedProject,
   }) => {
-    // Step 1: Create task via API (represents "create project task")
     const task = await createTask(apiContext, seedProject.key, {
       title: "CRUD flow task",
       status: "todo",

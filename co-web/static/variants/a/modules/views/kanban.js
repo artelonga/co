@@ -3,6 +3,7 @@ import { state } from '../state.js';
 import { api } from '../api.js';
 import { esc, filteredTasks, getSubtasks, getSubtaskProgress, isOverdue, formatDate, assigneeInitials, toggleSubtree } from '../helpers.js';
 import { STATUSES } from '../constants.js';
+import { attachPointerDrag } from '../../lib/pointer-drag.js';
 
 // Callbacks injected by app.js
 let _openTaskModal = () => {};
@@ -10,6 +11,10 @@ let _ensureOwnUniverse = async () => true;
 let _renderKanban = () => {};
 let _showToast = () => {};
 let _renderContent = () => {};
+
+// Cleanup function for the currently active pointer-drag listener.
+// Called before each re-render to prevent duplicate listeners.
+let _dragCleanup = null;
 
 export function injectKanbanCallbacks(callbacks) {
     _openTaskModal = callbacks.openTaskModal;
@@ -20,6 +25,9 @@ export function injectKanbanCallbacks(callbacks) {
 }
 
 export function renderKanban() {
+    // Detach previous drag listener before rebuilding the DOM.
+    if (_dragCleanup) { _dragCleanup(); _dragCleanup = null; }
+
     const content = document.querySelector('#content');
     content.className = 'content';
     const tasks = filteredTasks();
@@ -72,7 +80,7 @@ export function renderTaskCard(task) {
     const descSnippet = rawPreview.length > 100 ? rawPreview.slice(0, 100) + '…' : rawPreview;
 
     return `
-        <div class="task-card" draggable="true" data-task-id="${task.id}" data-task-key="${esc(task.key)}">
+        <div class="task-card" data-task-id="${task.id}" data-task-key="${esc(task.key)}">
             <div class="task-card-header">
                 <span class="task-key">${esc(task.key)}</span>
                 ${parentKey ? `<span class="task-parent-key">${esc(parentKey)}</span>` : ''}
@@ -208,34 +216,81 @@ export function setupCardClicks() {
 }
 
 export function setupDragDrop() {
-    const cards = document.querySelectorAll('.task-card');
-    const zones = document.querySelectorAll('.kanban-cards');
+    const kanban = document.querySelector('.kanban');
+    if (!kanban) return;
 
-    cards.forEach(card => {
-        card.addEventListener('dragstart', (e) => {
-            card.classList.add('dragging');
-            e.dataTransfer.setData('text/plain', card.dataset.taskId);
-            e.dataTransfer.effectAllowed = 'move';
-        });
-        card.addEventListener('dragend', () => {
-            card.classList.remove('dragging');
-            zones.forEach(z => z.classList.remove('drag-over'));
-        });
-    });
+    let activeCard = null;
+    let ghost = null;
+    let offsetX = 0;
+    let offsetY = 0;
 
-    zones.forEach(zone => {
-        zone.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = 'move';
-            zone.classList.add('drag-over');
-        });
-        zone.addEventListener('dragleave', () => {
-            zone.classList.remove('drag-over');
-        });
-        zone.addEventListener('drop', async (e) => {
-            e.preventDefault();
-            zone.classList.remove('drag-over');
-            const taskId = parseInt(e.dataTransfer.getData('text/plain'));
+    function findDropZone(x, y) {
+        for (const el of document.elementsFromPoint(x, y)) {
+            // Skip the ghost and its children to see through it during hit-test.
+            if (el === ghost || ghost?.contains(el)) continue;
+            if (el.classList.contains('kanban-cards')) return el;
+            const col = el.closest('.kanban-column');
+            if (col) return col.querySelector('.kanban-cards');
+        }
+        return null;
+    }
+
+    function clearHighlights() {
+        document.querySelectorAll('.kanban-cards.drag-over')
+            .forEach(z => z.classList.remove('drag-over'));
+    }
+
+    function cleanupDrag() {
+        if (ghost) { ghost.remove(); ghost = null; }
+        if (activeCard) { activeCard.style.opacity = ''; activeCard = null; }
+        clearHighlights();
+    }
+
+    _dragCleanup = attachPointerDrag(kanban, '.task-card', {
+        onDragStart(card, _pointerId, x, y) {
+            activeCard = card;
+            card.style.opacity = '0.4';
+
+            const rect = card.getBoundingClientRect();
+            offsetX = x - rect.left;
+            offsetY = y - rect.top;
+
+            ghost = card.cloneNode(true);
+            ghost.classList.add('dragging-ghost');
+            Object.assign(ghost.style, {
+                position: 'fixed',
+                left: `${rect.left}px`,
+                top: `${rect.top}px`,
+                width: `${rect.width}px`,
+                pointerEvents: 'none',
+                opacity: '0.9',
+                zIndex: '9999',
+                transform: 'rotate(2deg)',
+                boxShadow: '0 8px 24px rgba(0,0,0,.25)',
+                transition: 'none',
+                margin: '0',
+            });
+            document.body.appendChild(ghost);
+        },
+
+        onDragMove(x, y) {
+            if (ghost) {
+                ghost.style.left = `${x - offsetX}px`;
+                ghost.style.top = `${y - offsetY}px`;
+            }
+            clearHighlights();
+            const zone = findDropZone(x, y);
+            if (zone) zone.classList.add('drag-over');
+        },
+
+        async onDragEnd(x, y) {
+            const card = activeCard;
+            const zone = findDropZone(x, y);
+            cleanupDrag();
+
+            if (!card || !zone) return;
+
+            const taskId = parseInt(card.dataset.taskId);
             const newStatus = zone.dataset.status;
             const task = state.tasks.find(t => t.id === taskId);
             if (task && task.status !== newStatus) {
@@ -250,7 +305,11 @@ export function setupDragDrop() {
                     _showToast('Failed to move task. Reverted.', 'error');
                 }
             }
-        });
+        },
+
+        onDragCancel() {
+            cleanupDrag();
+        },
     });
 }
 
