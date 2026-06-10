@@ -1,0 +1,77 @@
+{
+  "co_id": "CO-392",
+  "spec_title": "co push — CLI → remote universe CRUD over the Vault API (the missing edge)",
+  "timestamp": "2026-06-10T19:32:31.817Z",
+  "items": [
+    {
+      "text": "`co push --remote <url> --token <t>` creates the universe if absent, updates if present",
+      "pattern": "[- _][- _]remote|[- _][- _]token|creates|universe",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "All `content/**/*.md` land as entries via the Vault API; `GET …/vault/` confirms count",
+      "pattern": "vault/|content|entries|vault",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`--dry-run` prints create/update/delete plan, writes nothing",
+      "pattern": "dry[- _]run|update/delete|[- _][- _]dry[- _]run|prints|create|update",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`--delete-missing` removes server entries absent locally; without it, no deletes",
+      "pattern": "delete[- _]missing|[- _][- _]delete[- _]missing|removes|server|entries",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "?type=feat returns only feat entries",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`_source/` and `.gitignore`d paths are never pushed",
+      "pattern": "source|gitignore|paths|never",
+      "matched_file": "co-web/e2e/integration.spec.ts",
+      "matched_test": "POST /v1/auth/login returns 200 (never reveals user existence)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Re-running is idempotent (no dupes, converges)",
+      "pattern": "re[- _]running|idempotent|dupes|converges",
+      "matched_file": "co-web/e2e/archived/unsubscribed-access.spec.ts",
+      "matched_test": "POST /api/v1/universes/:slug/subscribe succeeds for logged-in user and is idempotent",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`CO_TOKEN` / `CO_REMOTE` env fallbacks honored",
+      "pattern": "token|remote|fallbacks|honored",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Doc `docs/universe-crud.md` updated to mark the gap closed",
+      "pattern": "universe[- _]crud|universe[- _]crud.md|updated|closed",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 8,
+  "passed": 7,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 88
+}
