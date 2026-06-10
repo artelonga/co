@@ -8,6 +8,7 @@ pub mod board;
 pub mod collab;
 pub mod conduct;
 pub mod config;
+pub mod construir;
 pub mod create;
 pub mod define;
 pub mod delete;

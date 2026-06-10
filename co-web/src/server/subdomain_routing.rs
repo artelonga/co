@@ -35,6 +35,11 @@ fn extract_subdomain_universe(req: &Request<Body>) -> Option<String> {
     if RESERVED.contains(&slug) {
         return None;
     }
+    // Skip slugs served by a dedicated static site (DNS points to Fly static app,
+    // not co-web). Configure via CO_STATIC_SITES=grcsamazonia,retro-umarizal.
+    if is_static_site_slug_in(slug, std::env::var("CO_STATIC_SITES").ok().as_deref()) {
+        return None;
+    }
     // Validate: lowercase alphanumeric + hyphens, no leading/trailing hyphens
     if !slug.is_empty()
         && slug
@@ -47,6 +52,14 @@ fn extract_subdomain_universe(req: &Request<Body>) -> Option<String> {
     } else {
         None
     }
+}
+
+/// Returns true if `slug` is in the comma-separated `env_val` list.
+/// Exposed as a pure function so it can be tested without mutating the environment.
+fn is_static_site_slug_in(slug: &str, env_val: Option<&str>) -> bool {
+    env_val
+        .map(|v| v.split(',').any(|s| s.trim() == slug))
+        .unwrap_or(false)
 }
 
 #[cfg(test)]
@@ -118,5 +131,33 @@ mod tests {
     fn ignores_leading_hyphen() {
         let req = req_with_host("-bad.artelonga.com.br");
         assert!(extract_subdomain_universe(&req).is_none());
+    }
+
+    #[test]
+    fn static_site_slug_matches_single() {
+        assert!(is_static_site_slug_in("grcsamazonia", Some("grcsamazonia")));
+    }
+
+    #[test]
+    fn static_site_slug_matches_list() {
+        assert!(is_static_site_slug_in(
+            "grcsamazonia",
+            Some("retro,grcsamazonia")
+        ));
+        assert!(is_static_site_slug_in("retro", Some("retro,grcsamazonia")));
+    }
+
+    #[test]
+    fn static_site_slug_no_match() {
+        assert!(!is_static_site_slug_in("yuri", Some("grcsamazonia")));
+        assert!(!is_static_site_slug_in("grcsamazonia", None));
+    }
+
+    #[test]
+    fn static_site_slug_trims_whitespace() {
+        assert!(is_static_site_slug_in(
+            "grcsamazonia",
+            Some("retro, grcsamazonia")
+        ));
     }
 }

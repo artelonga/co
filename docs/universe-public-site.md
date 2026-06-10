@@ -73,9 +73,79 @@ Privacy carries over: only published/public entries are built into the static si
 
 construir gives every universe a public garden from its markdown **without a bespoke app**.
 
+## Shipped: `co construir` (CO-395)
+
+### 1. Build
+
+```bash
+# From within the universe directory:
+cd ~/projects/grcsamazonia
+co construir grcsamazonia
+# → builds content/ via redearte Quartz template → public/
+```
+
+The command locates the universe repo (walks up from CWD to `.git`/`.jj`), runs
+`npx quartz build -d <content_dir> -o <out_dir>` inside the
+[redearte](https://github.com/artelonga/redearte) template, and writes the static
+garden to `--out` (default: `<repo>/public/`).
+
+**Prerequisites**: Node.js + npm installed; redearte cloned and `npm install` run.
+Override the template path via `CO_REDEARTE_PATH=/path/to/redearte`.
+
+Only `content/` is passed to Quartz. `_source/` (PII originals) is never included
+by construction. Quartz renders `[[wikilinks]]`, backlinks, and the graph natively.
+
+### 2. Deploy scaffold (per-universe)
+
+Each universe that wants a public static site ships its own `deploy/` scaffold
+(the `retro-umarizal` pattern):
+
+```
+<universe>/
+├── content/          ← markdown source
+├── public/           ← co construir output (gitignored or committed)
+└── deploy/
+    ├── fly.toml      ← app = "artelonga-<slug>", region gru, 256 MB shared-cpu-1x
+    ├── Dockerfile    ← nginx:alpine, COPY public /usr/share/nginx/html
+    └── nginx.conf    ← try_files $uri $uri.html $uri/ /404.html
+```
+
+One-time setup per universe:
+
+```bash
+fly apps create artelonga-<slug>
+fly certs add <slug>.artelonga.com.br --app artelonga-<slug>
+# DNS: add CNAME <slug>.artelonga.com.br → <fly-target> at Hostinger
+```
+
+Deploy after each `co construir`:
+
+```bash
+cd ~/projects/<slug>
+fly deploy --config deploy/fly.toml --dockerfile deploy/Dockerfile --remote-only --ha=false
+```
+
+### 3. Routing split
+
+Once DNS points `<slug>.artelonga.com.br` at the Fly static app, set
+`CO_STATIC_SITES=<slug>` (comma-separated) on the co-web Fly machine so the
+subdomain middleware does not inject the universe into the board SPA:
+
+```bash
+fly secrets set CO_STATIC_SITES=grcsamazonia --app co-artelonga
+```
+
+The board remains at `co.artelonga.com.br/<slug>` (gated, unchanged).
+
+### First target: grcsamazonia
+
+- `grcsamazonia.artelonga.com.br` → Fly app `artelonga-grcsamazonia`
+  (Quartz static garden of founding docs + operacional + cultural)
+- `co.artelonga.com.br/grcsamazonia` → CO board for diretoria / subscribers
+
 ## Alternative considered (lighter, not chosen)
 
 A server-side **reader mode** in co-web (SSR clean HTML at the subdomain, no board chrome)
 avoids a separate deploy but needs a new SSR render path in co-web and isn't truly
 static. Quartz/redearte is preferred: it's the existing tool, produces genuinely static
-output, and already does garden rendering. Tracked in **CO-395**.
+output, and already does garden rendering. Shipped as **CO-395**.
