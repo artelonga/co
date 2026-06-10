@@ -127,7 +127,7 @@ pub async fn post_message_handler(
             .map_err(|_| AppError::Internal("Rate limiter lock failed".into()))?;
         let key = format!("chat:post:{}", user_id.0);
         match limiter.check(&key, 20) {
-            Ok(()) => {}
+            Ok(_remaining) => {}
             Err(retry_after) => {
                 return Err(AppError::RateLimited {
                     retry_after_secs: retry_after,

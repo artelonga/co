@@ -95,6 +95,8 @@ tags:
     description: "live timeline endpoints"
   - name: "Health"
     description: "Health endpoints"
+  - name: "crawl"
+    description: "crawl endpoints"
 
 paths:
   /.well-known/jwks.json:
@@ -4195,6 +4197,20 @@ paths:
       summary: "OIDC userinfo"
       security:
         - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /robots.txt:
+    get:
+      tags: ["crawl"]
+      summary: "Crawl policy (private paths disallowed)"
+      responses:
+        "200":
+          description: OK
+  /sitemap.xml:
+    get:
+      tags: ["crawl"]
+      summary: "Public universes/entries only"
       responses:
         "200":
           description: OK

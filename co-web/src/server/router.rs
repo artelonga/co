@@ -246,6 +246,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         )
         .with_state(state.clone());
 
+    // CO-397: robots.txt + sitemap.xml (must be before the /{slug} catch-all).
+    let crawl_routes = crate::server::crawl_routes::router();
+
     // All literal routes are registered before `/{slug}` so axum's matcher
     // prefers them over the param capture.
     let co_routes = Router::new()
@@ -354,6 +357,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(analytics_ws_route)
             .merge(eda_events_ws_route)
             .merge(eda_bridge_ws_route)
+            // CO-397: robots.txt + sitemap.xml (merged before co_routes so
+            // literal paths win over the /{slug} catch-all in co_routes).
+            .merge(crawl_routes)
             .merge(co_routes)
             .nest("/api", openapi_api)
             .nest("/api", board_public)
@@ -570,6 +576,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("strict-origin-when-cross-origin"),
+        ))
+        // CO-397: server version on all responses so LLM agents can identify
+        // the CO release they are talking to.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("x-co-server-version"),
+            HeaderValue::from_static(env!("CARGO_PKG_VERSION")),
         ))
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())

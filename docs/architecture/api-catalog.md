@@ -752,3 +752,14 @@ CO-381: real-time deployed-interface visualization. SPA shell connecting to the 
 |---|---|---|---|
 | GET | `/api/health` | anon | Liveness |
 | GET | `/api/health/deep` | anon | Includes storage check |
+
+---
+
+## crawl — robots + sitemap (server/crawl_routes.rs)
+
+CO-397: edge protection — crawl policy respects per-universe visibility and noindex.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/robots.txt` | anon | Crawl policy (private paths disallowed) |
+| GET | `/sitemap.xml` | anon | Public universes/entries only |
