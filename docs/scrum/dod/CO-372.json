@@ -1,0 +1,85 @@
+{
+  "co_id": "CO-372",
+  "spec_title": "Sprint calendar with Definition of Done + ICS export",
+  "timestamp": "2026-06-10T16:24:43.888Z",
+  "items": [
+    {
+      "text": "`GET /api/v1/scrum/calendar?past=6&future=4` returns 10 sprints with DoD percentages",
+      "pattern": "api/v1/scrum/calendar|scrum|calendar|future|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`/scrum/calendar` SPA route renders past + future sprints",
+      "pattern": "scrum/calendar|scrum|calendar|route|renders",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "ICS export at `/api/v1/scrum/calendar.ics` validates against ICS spec (cf. `ical.js` parser)",
+      "pattern": "api/v1/scrum/calendar.ics|export|scrum|calendar|validates",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Adding the ICS subscription to Google Calendar shows planning/review/retro events",
+      "pattern": "review/retro|adding|subscription|google|calendar",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "PR cutoff check refuses release if merges after Wed 23:59 unless `--ignore-cutoff` set",
+      "pattern": "ignore[- _]cutoff|cutoff|check|refuses|release",
+      "matched_file": "co-web/e2e/archived/uat-flow.spec.ts",
+      "matched_test": "health check passes",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "DoD percentage = (checked acceptance items) / (total) per sprint",
+      "pattern": "percentage|checked|acceptance|items",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sub-universe items are indented relative to their parent",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Current sprint countdown updates live (every 60s on the page)",
+      "pattern": "current|sprint|countdown|updates",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "OpenAPI (CO-211) documents the 2 new endpoints",
+      "pattern": "co[- _]211|openapi|documents|endpoints",
+      "matched_file": "co-web/e2e/archived/auth-crdt.spec.ts",
+      "matched_test": "authenticated user can access protected write endpoints",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Atividades log shows calendar/ICS events",
+      "pattern": "ics|atividades|shows|calendar|events",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 9,
+  "passed": 7,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 78
+}
