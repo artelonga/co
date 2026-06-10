@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-359",
+  "title": "Mobile E2E coverage in CI matrix — Pixel 7 / iPhone 14 / iPad Pro projects",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-359.md",
+  "branch": "feat/CO-359-mobile-e2e-coverage-in-ci-matrix-pixel-7",
+  "merge_sha": "85019a5bc145e5541176e3de030a4109e9da8d06",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/184",
+    "number": 184
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T04:46:45Z",
+  "files_changed": 15,
+  "lines_added": 122,
+  "lines_removed": 102,
+  "labels": [
+    "type:test",
+    "module:co-web",
+    "module:ci"
+  ],
+  "changelog_entry": "## CO-359 — Mobile E2E coverage in CI matrix — Pixel 7 / iPhone 14 / iPad Pro\n\nExtended Playwright configuration to run the test suite against four named device projects:\n`desktop-chromium`, `pixel-7`, `iphone-14`, and `ipad-pro`. Removed the\n`test.skip(!!(vp && vp.width <= 640), …)` gates that blocked mobile runs in\n`localhost-trial.spec.ts`, `pipeline-workflow.spec.ts`, `codemirror.spec.ts`,\n`subtask-tree.spec.ts`, and `board-drag.spec.ts`. Added `openSidebarIfMobile()` helper\n(opens the `#hamburger-btn` drawer on ≤640 px viewports) and wired it into `selectProject`\nso sidebar navigation works on phone-sized devices. Sala canvas tests (`co-352-sala.spec.ts`)\nkeep an explicit mobile skip — that surface is desktop-only (CO-352). CI now runs a\ntwo-project PR path (`desktop-chromium` + `pixel-7`, ≤15 min) and a full four-project\nnightly matrix (adds `iphone-14` + `ipad-pro`); each matrix job uploads its HTML report\nas a separate artifact for easy triage.\n\n### Why\n\nMobile regressions were caught by users rather than by CI because every affected spec\nfile carried a blanket skip gate added when the mobile UX was unfinished. CO-358 shipped\nthe drawer sidebar and mobile board reflow; these gates became obsolete and have been\nremoved so phones and tablets are now first-class CI citizens.",
+  "summary": "the maintainer of the CO test suite",
+  "co_auto_version": "0.1.0"
+}

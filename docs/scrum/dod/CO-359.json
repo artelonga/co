@@ -1,0 +1,77 @@
+{
+  "co_id": "CO-359",
+  "spec_title": "Mobile E2E coverage in CI matrix — Pixel 7 / iPhone 14 / iPad Pro projects",
+  "timestamp": "2026-06-10T04:47:25.017Z",
+  "items": [
+    {
+      "text": "`playwright.config.ts` defines 4 projects: desktop-chromium, pixel-7, iphone-14, ipad-pro",
+      "pattern": "desktop[- _]chromium|pixel[- _]7|iphone[- _]14|ipad[- _]pro|playwright|config|defines|projects",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "anonymous API: /co returns projects (not an empty array)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Skip gates removed in `localhost-trial.spec.ts`, `pipeline-workflow.spec.ts`, `codemirror.spec.ts`, `subtask-tree.spec.ts`, `board-drag.spec.ts`",
+      "pattern": "localhost[- _]trial|pipeline[- _]workflow|subtask[- _]tree|board[- _]drag|gates|removed",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Sala canvas tests remain explicitly skipped on mobile (CO-352)",
+      "pattern": "co[- _]352|canvas|tests|remain|explicitly",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "anonymous visitor to /u/template/sala sees the canvas page",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "CI workflow runs the 4-project matrix on PRs (or 2 on PR + 4 nightly per budget decision)",
+      "pattern": "workflow|4[- _]project|matrix|nightly",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] PR with title CO-N — ... triggers DoD verification workflow",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "All 4 projects green for: land, theme switch, language toggle, sidebar nav, entry open, search, suggest",
+      "pattern": "projects|green|theme|switch",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "anonymous API: /co returns projects (not an empty array)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Hover-only selectors refactored to data-testid + tap where they blocked mobile",
+      "pattern": "hover[- _]only|data[- _]testid|selectors|refactored",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "HTML reports uploaded per project as CI artifacts",
+      "pattern": "reports|uploaded|project|artifacts",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "create project task, drag to In Progress, edit title, then delete",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Total CI runtime stays under 15 minutes for the PR path",
+      "pattern": "total|runtime|stays|under",
+      "matched_file": "co-web/e2e/co-346-co-board.spec.ts",
+      "matched_test": "logged-in user navigating to /co stays on /co — no auto-bounce",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 8,
+  "passed": 5,
+  "pending": 3,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 63
+}
