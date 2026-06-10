@@ -114,10 +114,22 @@ export function renderBreadcrumbs() {
         closeBtn.addEventListener('click', () => popover.classList.add('hidden'));
     }
 
-    // Close popover on outside click
+    ensureOutsideClickClose();
+}
+
+// Singleton outside-click closer — renderBreadcrumbs() runs on every render,
+// so the handler must NOT be re-registered per render (it would leak one
+// closure per render onto document). Queries the live DOM instead of
+// capturing the popover node.
+let _outsideCloseWired = false;
+function ensureOutsideClickClose() {
+    if (_outsideCloseWired) return;
+    _outsideCloseWired = true;
     document.addEventListener('click', (e) => {
-        if (popover && !popover.classList.contains('hidden') && !el.contains(e.target)) {
+        const popover = document.getElementById('bc-trail-popover');
+        const root = document.getElementById('breadcrumbs');
+        if (popover && !popover.classList.contains('hidden') && root && !root.contains(e.target)) {
             popover.classList.add('hidden');
         }
-    }, { once: false });
+    });
 }

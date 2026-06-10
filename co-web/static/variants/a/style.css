@@ -2472,10 +2472,14 @@ body.co-single-universe-mode .hamburger-btn {
         z-index: 100;
         overflow-y: auto;
         transform: translateX(-100%);
-        transition: transform 0.2s ease;
+        /* visibility removes the closed drawer from the tab order / a11y
+           tree — translateX alone keeps offscreen links keyboard-reachable. */
+        visibility: hidden;
+        transition: transform 0.2s ease, visibility 0.2s;
     }
     .sidebar.open {
         transform: translateX(0);
+        visibility: visible;
     }
     .sidebar-overlay { display: none; }
     .sidebar-overlay.visible {
