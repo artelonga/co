@@ -833,6 +833,18 @@ pub async fn create_entry(
         crate::eda::Visibility::UniverseMembers,
     ));
 
+    // CO-367: non-blocking KB ingest — fires async, never blocks the write response.
+    crate::kb_routes::fire_kb_ingest(
+        &state,
+        &slug,
+        &body.path,
+        &entry.body_hash,
+        &entry.entry_type,
+        &body.body,
+        &body.frontmatter,
+        &chrono::Utc::now().to_rfc3339(),
+    );
+
     // CO-79: invalidate query cache entries for this universe after a write.
     state
         .index
@@ -1046,6 +1058,18 @@ pub async fn update_entry(
         serde_json::json!({ "path": path, "entry_type": entry.entry_type }),
         crate::eda::Visibility::UniverseMembers,
     ));
+
+    // CO-367: non-blocking KB ingest — fires async, never blocks the write response.
+    crate::kb_routes::fire_kb_ingest(
+        &state,
+        &slug,
+        &path,
+        &entry.body_hash,
+        &entry.entry_type,
+        &new_body,
+        &new_fm,
+        &chrono::Utc::now().to_rfc3339(),
+    );
 
     // CO-79: invalidate query cache entries for this universe after a write.
     state

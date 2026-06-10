@@ -169,6 +169,103 @@ components:
   schemas:
 
     # --------------------------------------------------------------------------
+    # CO-367: KB sync
+    # --------------------------------------------------------------------------
+
+    KbIngestBody:
+      type: object
+      required: [universe_key, entry_path, body_hash, updated_at]
+      properties:
+        universe_key:
+          type: string
+          description: Universe that owns this entry
+        entry_path:
+          type: string
+          description: Relative path within the universe (e.g. notes/2026-06-05.md)
+        entry_type:
+          type: string
+          description: Content type (note, article, task, …)
+        body_hash:
+          type: string
+          description: "SHA-256 of the entry body — format: sha256:<hex>"
+        frontmatter_json:
+          type: object
+          description: Parsed frontmatter as a JSON object
+          additionalProperties: true
+        body_preview:
+          type: string
+          description: First 500 characters of the body (used for FTS search)
+          maxLength: 500
+        size_bytes:
+          type: integer
+          description: Full body size in bytes
+        updated_at:
+          type: string
+          format: date-time
+          description: ISO 8601 timestamp of the last content modification
+        asset_refs:
+          type: array
+          items:
+            type: string
+          description: "CAS sha256 references to binary assets embedded in this entry"
+
+    KbIngestResponse:
+      type: object
+      required: [ok, universe_key, entry_path, indexed_at]
+      properties:
+        ok:
+          type: boolean
+        universe_key:
+          type: string
+        entry_path:
+          type: string
+        indexed_at:
+          type: string
+          format: date-time
+
+    KbEntry:
+      type: object
+      required: [universe_key, entry_path, updated_at, indexed_at]
+      properties:
+        universe_key:
+          type: string
+        entry_path:
+          type: string
+        entry_type:
+          type: string
+        body_preview:
+          type: string
+        frontmatter_json:
+          type: object
+          additionalProperties: true
+        updated_at:
+          type: string
+          format: date-time
+        indexed_at:
+          type: string
+          format: date-time
+
+    KbSearchResponse:
+      type: object
+      required: [results, total]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/KbEntry'
+        total:
+          type: integer
+
+    KbRecentResponse:
+      type: object
+      required: [entries]
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/KbEntry'
+
+    # --------------------------------------------------------------------------
     # Error
     # --------------------------------------------------------------------------
 
@@ -1634,4 +1731,106 @@ paths:
         "401":
           description: Not authenticated
         "404":
-          description: Conflict not found or already resolved
+          description: Conflict not found
+
+  # ---------------------------------------------------------------------------
+  # CO-367: Universal KB sync
+  # ---------------------------------------------------------------------------
+
+  /api/v1/kb/ingest:
+    post:
+      summary: Ingest an entry into the KB warehouse
+      description: >
+        Idempotent upsert keyed by (universe_key, entry_path, body_hash).
+        Same payload sent twice produces exactly one row.
+        Auth: `Authorization: Bearer <CO_KB_TOKEN>` (env var).
+        Returns 503 when CO_KB_TOKEN is not set (ingest disabled).
+      tags: [kb]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KbIngestBody'
+      responses:
+        "202":
+          description: Entry accepted and indexed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KbIngestResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+        "401":
+          $ref: '#/components/responses/Unauthorized'
+        "503":
+          description: KB ingest disabled — CO_KB_TOKEN not set
+
+  /api/v1/kb/search:
+    get:
+      summary: Full-text search over the KB warehouse
+      description: >
+        FTS5 search over `body_preview`. Optionally filtered to a single universe.
+        Returns up to 100 results (default 20).
+      tags: [kb]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+          description: FTS5 query string
+        - name: universe_key
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Restrict results to a specific universe
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KbSearchResponse'
+        "400":
+          $ref: '#/components/responses/BadRequest'
+
+  /api/v1/kb/recent:
+    get:
+      summary: Recently-indexed KB entries
+      description: >
+        Returns the most recently-indexed entries (one per entry_path, latest version).
+        Optionally filtered to a single universe. Limit clamped to [1, 100].
+      tags: [kb]
+      parameters:
+        - name: universe_key
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Recently-indexed entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KbRecentResponse'

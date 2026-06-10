@@ -713,6 +713,18 @@ CO-381: real-time deployed-interface visualization. SPA shell connecting to the 
 
 ---
 
+## kb — `/api/v1/kb/*` (kb_routes.rs)
+
+CO-367: universal content → KB sync warehouse (history + latest + FTS).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/kb/ingest` | authed | Ingest entry version into the KB warehouse |
+| GET | `/api/v1/kb/search` | authed | Full-text search over body previews (FTS5) |
+| GET | `/api/v1/kb/recent` | authed | Latest synced entry versions |
+
+---
+
 ## suggest/review pages — top-level, served before the SPA wildcard
 
 CO-354 page shells (the API lives in the suggest/review section above).

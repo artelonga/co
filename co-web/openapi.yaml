@@ -93,6 +93,8 @@ tags:
     description: "game endpoints"
   - name: "live timeline"
     description: "live timeline endpoints"
+  - name: "kb"
+    description: "kb endpoints"
   - name: "suggest/review pages"
     description: "suggest/review pages endpoints"
   - name: "scrum"
@@ -1649,6 +1651,33 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/kb/ingest:
+    post:
+      tags: ["kb"]
+      summary: "Ingest entry version into the KB warehouse"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/kb/recent:
+    get:
+      tags: ["kb"]
+      summary: "Latest synced entry versions"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/kb/search:
+    get:
+      tags: ["kb"]
+      summary: "Full-text search over body previews (FTS5)"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK

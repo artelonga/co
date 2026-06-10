@@ -554,6 +554,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // CO-333: Feedback system (public submit, owner-only management).
     router = router.nest("/api/v1", crate::feedback_routes::router());
 
+    // CO-367: Universal KB sync — POST /ingest (bearer token), GET /search, GET /recent.
+    router = router.nest("/api/v1/kb", crate::kb_routes::router());
+
     router = router.nest("/api/v1/interactions", crate::interactions::router());
 
     // CO-329: analytics request tracking (runs inside rate-limit layer).
