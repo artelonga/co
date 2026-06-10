@@ -6,6 +6,7 @@ pub mod changelog_parser;
 pub mod changelog_routes;
 pub mod deployment_dashboard;
 pub mod dev_board;
+pub mod funnel_routes;
 pub mod gestao_routes;
 pub mod interactions;
 pub mod lead_routes;
