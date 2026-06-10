@@ -549,6 +549,40 @@ enum Commands {
         redearte: Option<std::path::PathBuf>,
     },
 
+    /// Upload a local universe to a remote CO server over the Vault API
+    ///
+    /// Resolves the universe from the current directory (same discovery as `co launch`),
+    /// reads `_universe.yaml` for key/name, then calls `POST /api/v1/universes` +
+    /// `PUT .../vault/{path}` for each `content/**/*.md` file. Re-running converges
+    /// (idempotent). Token via --token or CO_TOKEN env; base URL via --remote or CO_REMOTE.
+    ///
+    /// Examples:
+    ///   co push --remote https://co.example.com --token mytoken
+    ///   CO_REMOTE=https://co.example.com CO_TOKEN=mytoken co push
+    ///   co push --dry-run                        # preview without writing
+    ///   co push --delete-missing                 # also remove server entries absent locally
+    Push {
+        /// Base URL of the remote CO server (or set CO_REMOTE)
+        #[arg(long, env = "CO_REMOTE")]
+        remote: Option<String>,
+
+        /// API token for authentication (or set CO_TOKEN)
+        #[arg(long, env = "CO_TOKEN")]
+        token: Option<String>,
+
+        /// Override the derived universe key (default: lowercased + sanitized dir name)
+        #[arg(long)]
+        key: Option<String>,
+
+        /// Preview create/update/delete plan without writing anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Delete server entries that are not present locally
+        #[arg(long)]
+        delete_missing: bool,
+    },
+
     /// Start the project management board (web UI)
     ///
     /// Launches a local web server with Kanban/Calendar views.
@@ -1524,6 +1558,15 @@ fn main() {
         }
         Commands::Construir { key, out, redearte } => {
             commands::construir::run(key, out, redearte);
+        }
+        Commands::Push {
+            remote,
+            token,
+            key,
+            dry_run,
+            delete_missing,
+        } => {
+            commands::push::run(remote, token, key, dry_run, delete_missing);
         }
         Commands::Board {
             action,
