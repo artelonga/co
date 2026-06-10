@@ -725,6 +725,20 @@ CO-367: universal content → KB sync warehouse (history + latest + FTS).
 
 ---
 
+## security — `/api/v1/gestao/security/*` (security/routes.rs)
+
+CO-388: Glasswing security audit pipeline — scan findings + release blocker.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/gestao/security/findings` | admin (gh) | List vulnerability findings |
+| GET | `/api/v1/gestao/security/findings/{id}` | admin (gh) | Finding detail |
+| PATCH | `/api/v1/gestao/security/findings/{id}` | admin (gh) | Resolve finding (patched / accepted-risk / false-positive / wont-fix) |
+| GET | `/api/v1/gestao/security/scan/status` | admin (gh) | Last scan status |
+| POST | `/api/v1/gestao/security/scan` | admin (gh) | Trigger a scan |
+
+---
+
 ## suggest/review pages — top-level, served before the SPA wildcard
 
 CO-354 page shells (the API lives in the suggest/review section above).

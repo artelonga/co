@@ -95,6 +95,8 @@ tags:
     description: "live timeline endpoints"
   - name: "kb"
     description: "kb endpoints"
+  - name: "security"
+    description: "security endpoints"
   - name: "suggest/review pages"
     description: "suggest/review pages endpoints"
   - name: "scrum"
@@ -1445,6 +1447,62 @@ paths:
     get:
       tags: ["gestao"]
       summary: "CO-361 — current schema version + app version"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/security/findings:
+    get:
+      tags: ["security"]
+      summary: "List vulnerability findings"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/security/findings/{id}:
+    get:
+      tags: ["security"]
+      summary: "Finding detail"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    patch:
+      tags: ["security"]
+      summary: "Resolve finding (patched / accepted-risk / false-positive / wont-fix)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/security/scan:
+    post:
+      tags: ["security"]
+      summary: "Trigger a scan"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/gestao/security/scan/status:
+    get:
+      tags: ["security"]
+      summary: "Last scan status"
       security:
         - sessionCookie: []
       responses:
