@@ -18,7 +18,9 @@
     "test:staging": "npx playwright test --config=e2e-staging/playwright.staging.config.ts",
     "test:staging:headed": "npx playwright test --config=e2e-staging/playwright.staging.config.ts --headed",
     "acceptance:gen": "node --import tsx scripts/scrum/acceptance-to-playwright.ts",
-    "acceptance:check": "node --import tsx scripts/scrum/acceptance-to-playwright.ts --check"
+    "acceptance:check": "node --import tsx scripts/scrum/acceptance-to-playwright.ts --check",
+    "scrum:cutoff": "node --import tsx scripts/scrum/cutoff-check.ts",
+    "scrum:cutoff:override": "node --import tsx scripts/scrum/cutoff-check.ts --ignore-cutoff"
   },
   "devDependencies": {
     "@axe-core/playwright": "^4.10.0",

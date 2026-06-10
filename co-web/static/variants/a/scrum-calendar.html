@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CO — Sprint Calendar</title>
+<style>
+:root{--bg:#0f0f1a;--card:#161625;--border:#252540;--text:#dde;--accent:#7c6fcd;--dim:#778;--green:#66bb6a;--red:#e57373;--yellow:#ffd54f;--blue:#4fc3f7;--orange:#ffa726}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font:13px/1.5 system-ui,sans-serif}
+header{display:flex;align-items:center;gap:14px;padding:12px 20px;border-bottom:1px solid var(--border);background:var(--card)}
+header h1{font-size:1rem;font-weight:600;color:var(--accent);letter-spacing:.04em}
+header .spacer{flex:1}
+header a{color:var(--dim);text-decoration:none;font-size:12px}
+header a:hover{color:var(--text)}
+main{padding:20px;max-width:900px;margin:0 auto}
+.hero{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px 24px;margin-bottom:20px}
+.hero-row{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.hero .sprint-num{font-size:2rem;font-weight:700;color:var(--accent)}
+.hero .sprint-label{color:var(--dim);font-size:.85rem}
+.hero .goal{font-size:.95rem;margin:10px 0 6px}
+.hero .countdown{font-size:.85rem;color:var(--orange)}
+.hero .dod-bar-wrap{margin-top:14px}
+.hero .dod-label{font-size:.7rem;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px}
+.hero .dod-bar{height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.hero .dod-bar-fill{height:100%;background:var(--green);border-radius:3px;transition:width .4s}
+.section-title{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin:20px 0 10px}
+.sprint-card{background:var(--card);border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden}
+.sprint-card.future{opacity:.7}
+.sprint-header{display:flex;align-items:center;gap:10px;padding:12px 16px;cursor:pointer;user-select:none}
+.sprint-header:hover{background:rgba(255,255,255,.03)}
+.sprint-header .num{font-weight:600;min-width:64px;color:var(--accent)}
+.sprint-header .dates{color:var(--dim);font-size:.8rem;flex:1}
+.sprint-header .release{font-size:.75rem;background:rgba(124,111,205,.15);color:var(--accent);padding:2px 7px;border-radius:3px;font-family:monospace}
+.sprint-header .dod-pct{font-size:.8rem;font-variant-numeric:tabular-nums;min-width:40px;text-align:right}
+.sprint-header .chevron{font-size:.7rem;color:var(--dim);transition:transform .2s}
+.sprint-card.open .chevron{transform:rotate(90deg)}
+.sprint-body{display:none;padding:14px 16px;border-top:1px solid var(--border)}
+.sprint-card.open .sprint-body{display:block}
+.events{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.event-chip{background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:4px;padding:4px 10px;font-size:.75rem}
+.event-chip .evt-type{color:var(--dim);margin-right:4px}
+.event-chip .evt-time{color:var(--text)}
+.pbis{margin-top:10px}
+.pbi-row{display:flex;align-items:baseline;gap:8px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+.pbi-row:last-child{border:none}
+.pbi-row .pbi-id{font-family:monospace;font-size:.75rem;color:var(--dim);min-width:64px}
+.pbi-row .pbi-title{flex:1;font-size:.8rem}
+.pbi-row .pbi-tag{font-size:.7rem;background:rgba(102,187,106,.12);color:var(--green);padding:1px 5px;border-radius:3px;font-family:monospace}
+.sparkline-wrap{margin:0 0 18px}
+.sparkline{display:flex;align-items:flex-end;gap:3px;height:40px}
+.sparkline .bar{flex:1;min-height:2px;background:var(--accent);border-radius:1px 1px 0 0;opacity:.65;cursor:default;transition:opacity .1s}
+.sparkline .bar:hover{opacity:1}
+.sparkline .bar.future-bar{background:var(--dim);opacity:.25}
+.ics-link{display:inline-flex;align-items:center;gap:6px;margin-top:10px;font-size:.8rem;color:var(--accent);text-decoration:none;border:1px solid var(--border);border-radius:5px;padding:6px 12px;transition:background .15s}
+.ics-link:hover{background:rgba(124,111,205,.1)}
+.loading{color:var(--dim);text-align:center;padding:40px 0;font-size:.9rem}
+.err{color:var(--red);text-align:center;padding:24px 0}
+</style>
+</head>
+<body>
+<header>
+  <h1>CO — Sprint Calendar</h1>
+  <span class="spacer"></span>
+  <a href="/">← CO</a>
+</header>
+<main id="main">
+  <div class="loading" id="loading">Carregando calendário de sprints…</div>
+</main>
+<script>
+const API = '/api/v1/scrum/calendar?past=12&future=4';
+
+function fmt(isoStr) {
+  if (!isoStr) return '—';
+  const d = new Date(isoStr);
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function fmtTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function fmtDate(isoStr) {
+  return fmt(isoStr) + ' ' + fmtTime(isoStr);
+}
+
+function countdown(endIso) {
+  const end = new Date(endIso);
+  const now = new Date();
+  const diffMs = end - now;
+  if (diffMs <= 0) return 'Sprint encerrado';
+  const days = Math.floor(diffMs / 86400000);
+  const hours = Math.floor((diffMs % 86400000) / 3600000);
+  const mins = Math.floor((diffMs % 3600000) / 60000);
+  if (days > 0) return `${days}d ${hours}h até o Release`;
+  if (hours > 0) return `${hours}h ${mins}m até o Release`;
+  return `${mins}m até o Release`;
+}
+
+function dodColor(pct) {
+  if (pct >= 80) return 'var(--green)';
+  if (pct >= 50) return 'var(--yellow)';
+  return 'var(--red)';
+}
+
+function renderCard(sprint, isCurrent) {
+  const div = document.createElement('div');
+  div.className = 'sprint-card' + (sprint.number > 0 && !isCurrent ? ' future' : '');
+  if (isCurrent) div.setAttribute('data-current', '');
+
+  const release = sprint.release_tag || (sprint.number <= 0 ? '' : '(futuro)');
+  const pct = sprint.dod_complete_pct;
+
+  div.innerHTML = `
+    <div class="sprint-header" onclick="toggleCard(this)">
+      <span class="num">Sprint ${sprint.number}</span>
+      <span class="dates">${fmt(sprint.start_at)} → ${fmt(sprint.end_at)}</span>
+      ${release ? `<span class="release">${release}</span>` : ''}
+      <span class="dod-pct" style="color:${dodColor(pct)}">${pct.toFixed(0)}%</span>
+      <span class="chevron">▶</span>
+    </div>
+    <div class="sprint-body">
+      <div class="events">
+        ${sprint.events.map(e => `
+          <div class="event-chip">
+            <span class="evt-type">${e.type}</span>
+            <span class="evt-time">${fmtDate(e.at)}</span>
+          </div>`).join('')}
+      </div>
+      ${sprint.pbis_delivered > 0 ? `
+        <div style="font-size:.75rem;color:var(--dim);margin:4px 0 8px">
+          ${sprint.pbis_delivered} PBIs entregues • DoD: ${pct.toFixed(1)}%
+        </div>
+      ` : `<div style="font-size:.75rem;color:var(--dim);margin:4px 0 8px">Sem PBIs entregues</div>`}
+    </div>`;
+  return div;
+}
+
+function toggleCard(header) {
+  const card = header.parentElement;
+  card.classList.toggle('open');
+}
+
+let countdownTimer = null;
+function startCountdown(endIso, el) {
+  function tick() { el.textContent = countdown(endIso); }
+  tick();
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(tick, 60000);
+}
+
+async function render() {
+  const main = document.getElementById('main');
+  try {
+    const resp = await fetch(API);
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+
+    main.innerHTML = '';
+
+    // Hero: current sprint
+    const cs = data.current_sprint;
+    const review = cs.events ? cs.events.find(e => e.type === 'review') : null;
+    const hero = document.createElement('div');
+    hero.className = 'hero';
+    hero.innerHTML = `
+      <div class="hero-row">
+        <span class="sprint-num">Sprint ${cs.number}</span>
+        <span class="sprint-label">${fmt(cs.start_at)} → ${fmt(cs.end_at)}</span>
+      </div>
+      ${cs.goal ? `<div class="goal">${cs.goal}</div>` : ''}
+      <div class="countdown" id="countdown"></div>
+      <a class="ics-link" href="/api/v1/scrum/calendar.ics" title="Subscrever no Google Calendar / Apple Calendar">
+        📅 Subscrever via ICS
+      </a>`;
+    main.appendChild(hero);
+
+    if (review) startCountdown(review.at, document.getElementById('countdown'));
+
+    // Velocity sparkline
+    const past = data.sprints.filter(s => s.number < cs.number);
+    if (past.length > 0) {
+      const maxPbis = Math.max(...past.map(s => s.pbis_delivered), 1);
+      const wrap = document.createElement('div');
+      wrap.className = 'sparkline-wrap';
+      wrap.innerHTML = `<div class="section-title">Velocidade (sprints passados)</div>
+        <div class="sparkline">${past.map(s =>
+          `<div class="bar" style="height:${Math.max(4, (s.pbis_delivered/maxPbis)*100)}%" title="Sprint ${s.number}: ${s.pbis_delivered} PBIs"></div>`
+        ).join('')}</div>`;
+      main.appendChild(wrap);
+    }
+
+    // Past sprints (most recent first)
+    const pastSprints = data.sprints.filter(s => s.number < cs.number).reverse();
+    if (pastSprints.length) {
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'Sprints anteriores';
+      main.appendChild(title);
+      for (const sprint of pastSprints) main.appendChild(renderCard(sprint, false));
+    }
+
+    // Future sprints
+    const futureSprints = data.sprints.filter(s => s.number > cs.number);
+    if (futureSprints.length) {
+      const title = document.createElement('div');
+      title.className = 'section-title';
+      title.textContent = 'Próximos sprints';
+      main.appendChild(title);
+      for (const sprint of futureSprints) main.appendChild(renderCard(sprint, false));
+    }
+
+  } catch (err) {
+    main.innerHTML = `<div class="err">Erro ao carregar calendário: ${err.message}</div>`;
+  }
+}
+
+render();
+</script>
+</body>
+</html>
