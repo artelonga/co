@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-390",
+  "title": "SPIKE — layered architecture (domain/dto/repository/service) proof-of-concept on entries module",
+  "type": "spike",
+  "status": "done",
+  "semver_bump": "none",
+  "spec_path": "work/co/CO-390.md",
+  "branch": "feat/CO-390-spike-layered-architecture-domain-dto-re",
+  "merge_sha": "435860e6db17c7767ee8ec17beedd6bed805042d",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/191",
+    "number": 191
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-10T16:29:30Z",
+  "files_changed": 23,
+  "lines_added": 1586,
+  "lines_removed": 86,
+  "labels": [
+    "type:spike",
+    "module:architecture",
+    "module:refactor"
+  ],
+  "changelog_entry": "## CO-390 — SPIKE — layered architecture (domain/dto/repository/service) proof-of-concept on entries module\n\nSpike branch (`feat/CO-390-spike-layered-architecture-domain-dto-re`) exploring the\n`alineaos/gerenciador-de-bibliotecas` layered architecture pattern for CO's `entries`\nmodule. Added 12 new files in `co-web/src/{domain,dto,repository,service,mapper}/`\ndemonstrating the pattern; modified `entry_routes.rs` to use `EntryService` for\n6 business rules; wrote a decision document with quantified metrics.\n\nResult: **partial adoption recommended** — DTO families + service layer per feature,\nwithout global directory restructure. All 4 hypotheses passed (coverage ↑, OpenAPI\nricher, 26% LOC overhead within 60% budget, wire-compat verified). Spike branch is\narchival; not merged to main.\n\n### Why\n\nArchitecture spike to reduce uncertainty before committing to a multi-month refactor.\n3-day box to know if the pattern fits Rust + CO ergonomics. Informs CO-227 (server\ndecomposition) and CO-228 (type safety).",
+  "summary": "Time-boxed spike to validate whether CO should adopt the layered architecture pattern from `alineaos/gerenciador-de-bibliotecas` (domain entities + DTO families + repository traits + service layer + t",
+  "co_auto_version": "0.1.0"
+}
