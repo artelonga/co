@@ -252,15 +252,18 @@ for (const device of MOBILE_VIEWPORTS) {
       await expect(card).toBeVisible();
 
       const inProgressCol = page.locator('.kanban-column[data-status="in_progress"]');
-      await expect(inProgressCol).toBeVisible();
 
-      // On ≤ 640 px the kanban uses grid-template-columns: 1fr (stacked vertically),
-      // so dragging between columns is downward, not horizontal.  The 8 px horizontal
-      // threshold never fires; we rely on the 200 ms hold threshold instead.
-      // On 768 px (iPad Mini) columns are side by side — dragTo() works directly.
+      // CO-358: at ≤ 640 px the board shows ONE column (segmented control on
+      // top); the other columns are hidden, so the cross-column drop target
+      // is the segment button. The view then follows the card to its new
+      // column. On 768 px (iPad Mini) columns are side by side — dragTo()
+      // onto the visible column works directly.
       if (device.width <= 640) {
-        await holdAndDrag(page, card, inProgressCol);
+        const segBtn = page.locator('.kanban-segment-btn[data-status="in_progress"]');
+        await expect(segBtn).toBeVisible();
+        await holdAndDrag(page, card, segBtn);
       } else {
+        await expect(inProgressCol).toBeVisible();
         await card.dragTo(inProgressCol);
       }
 

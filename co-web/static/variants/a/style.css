@@ -6754,10 +6754,13 @@ body.co-single-universe-mode .hamburger-btn {
     .conversas-drawer { padding-bottom: env(safe-area-inset-bottom); }
 }
 
-/* Kanban segmented control — hidden on desktop */
-.kanban-segment-control { display: none; }
-
-/* Header overflow button — hidden on desktop */
-.header-overflow-btn { display: none; }
-.header-overflow-menu { display: none; }
+/* Kanban segmented control + header overflow — hidden on desktop.
+   Scoped to min-width so they don't override the max-width:640px rules
+   above (an unconditional rule later in the file would win the cascade
+   at every width and hide the controls on mobile too). */
+@media (min-width: 641px) {
+    .kanban-segment-control { display: none; }
+    .header-overflow-btn { display: none; }
+    .header-overflow-menu { display: none; }
+}
 .header-overflow-menu:not(.hidden) { display: flex; }

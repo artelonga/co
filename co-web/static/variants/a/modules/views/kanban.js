@@ -273,6 +273,11 @@ export function setupDragDrop() {
         for (const el of document.elementsFromPoint(x, y)) {
             // Skip the ghost and its children to see through it during hit-test.
             if (el === ghost || ghost?.contains(el)) continue;
+            // CO-358: in mobile single-column view the other columns are
+            // hidden, so the segmented-control buttons act as drop targets
+            // for cross-column moves (they carry data-status).
+            const seg = el.closest('.kanban-segment-btn');
+            if (seg) return seg;
             if (el.classList.contains('kanban-cards')) return el;
             const col = el.closest('.kanban-column');
             if (col) return col.querySelector('.kanban-cards');
@@ -281,7 +286,7 @@ export function setupDragDrop() {
     }
 
     function clearHighlights() {
-        document.querySelectorAll('.kanban-cards.drag-over')
+        document.querySelectorAll('.kanban-cards.drag-over, .kanban-segment-btn.drag-over')
             .forEach(z => z.classList.remove('drag-over'));
     }
 
@@ -342,6 +347,11 @@ export function setupDragDrop() {
                 if (!(await _ensureOwnUniverse())) return;
                 const oldStatus = task.status;
                 task.status = newStatus;
+                // Dropped on a segment button → follow the card to its new
+                // column so it stays visible in mobile single-column view.
+                if (zone.classList.contains('kanban-segment-btn')) {
+                    setMobileActiveColumn(newStatus);
+                }
                 _renderKanban();
                 const result = await api.updateTask(state.currentProject.key, taskId, { status: newStatus });
                 if (!result) {
