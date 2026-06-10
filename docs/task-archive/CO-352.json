@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-352",
+  "title": "Workspace (\\\"Sala\\\") primitive — spatial canvas view anchored to a universe",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-352.md",
+  "branch": "feat/CO-352-workspace-sala-primitive-spatial-canvas-",
+  "merge_sha": "a3d60629cdb0b4cfb83ead8157a07894cfdb23db",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/164",
+    "number": 164
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T00:06:29Z",
+  "files_changed": 19,
+  "lines_added": 1712,
+  "lines_removed": 4,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:co-web",
+    "module:storage"
+  ],
+  "changelog_entry": "## CO-352 — Workspace (\"Sala\") primitive — spatial canvas view anchored to a universe\n\nAdds a first-class \"Sala\" workspace view alongside kanban and conteudo. Each workspace is a personal spatial canvas that persists node positions, typed edges, and the camera transform per user.\n\n### What changed\n\n- **Schema migration v70**: new `workspace_states` table stores per-user canvas state (layout_json, is_public, share_token).\n- **Backend**: `workspace_routes.rs` — GET/PUT state, POST share-token, share-token resolution (`/api/v1/universes/{key}/workspaces/{slug}/state`, `/api/v1/workspace-states/{token}`).\n- **Server routes**: `/u/{universe}/sala`, `/u/{universe}/sala/{slug}`, `/sala/{share_token}` serve `shared/sala.html` — a dedicated canvas page reusing `co-graph.js`.\n- **SPA integration**: new \"Sala\" tab in variant-a view bar (i18n: PT/EN \"Sala\"). Per the one-surface decision (`docs/architecture/sala-surface.md` — one surface, fractal scope: per universe / all / any subset, recursive), the tab is a **launcher** that opens the canvas page; the SPA carries no canvas of its own.\n- **Design doc**: `docs/architecture/sala-surface.md` records the Sala scoping model and the launcher-vs-surface split (decision 2026-06-09).\n- **i18n**: `workspace` key added to PT and EN dictionaries in `shared/i18n.js`.\n- **E2E tests**: `co-352-sala.spec.ts` — anon visits sala, btn-add triggers login CTA, API round-trip (PUT → GET), share-token lifecycle.\n\n### Why\n\nYggdrasil's `/universos/comunicacao` spatial editor is absorbed into CO as a reusable primitive. Any universe can now have a Sala for free — giving study-mode users, game content authors, and researchers a persistent working canvas.",
+  "summary": "a user studying / composing / curating across a content universe (mbya lexicon, comunicacao sources, ArteLonga refs, my personal notes) — today I can list, kanban, or graph these entries, but I can't ",
+  "co_auto_version": "0.1.0"
+}
