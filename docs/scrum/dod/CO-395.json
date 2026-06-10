@@ -1,0 +1,21 @@
+{
+  "co_id": "CO-395",
+  "spec_title": "construir — universe markdown → Quartz static public site (board stays the app)",
+  "timestamp": "2026-06-10T10:39:38.473Z",
+  "items": [
+    {
+      "text": "`co construir grcsama",
+      "pattern": "construir|grcsama",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 1,
+  "passed": 0,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 0
+}
