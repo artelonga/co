@@ -35,6 +35,8 @@ tags:
     description: "graph-views endpoints"
   - name: "workspace"
     description: "workspace endpoints"
+  - name: "workspace-templates"
+    description: "workspace-templates endpoints"
   - name: "entries"
     description: "entries endpoints"
   - name: "vault"
@@ -3809,6 +3811,66 @@ paths:
         - sessionCookie: []
       parameters:
         - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/workspace-templates:
+    get:
+      tags: ["workspace-templates"]
+      summary: "List available workspace templates"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/workspace-templates/{template_slug}:
+    get:
+      tags: ["workspace-templates"]
+      summary: "Fetch a specific template"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: template_slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/workspaces/{workspace_slug}/from-template/{template_slug}:
+    post:
+      tags: ["workspace-templates"]
+      summary: "Seed a new workspace from a template"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: workspace_slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: template_slug
           in: path
           required: true
           schema:

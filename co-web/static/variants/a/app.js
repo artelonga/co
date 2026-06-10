@@ -556,7 +556,7 @@ function renderContent() {
     else if (state.view === 'timeline') renderTimeline();
     else if (state.view === 'dashboard') renderDashboard();
     else if (state.view === 'changelog') renderChangelog();
-    else if (state.view === 'workspace') renderWorkspace(state.currentUniverse, state.currentProject?.key);
+    else if (state.view === 'workspace') renderWorkspace();
 }
 
 function render() {
@@ -659,7 +659,7 @@ function wireModules() {
     injectTimelineCallbacks({ openTaskModal, refreshTasks, renderContent });
     injectDashboardCallbacks({ openTaskModal });
     injectChangelogCallbacks({ showToast, showLoginModal });
-    injectWorkspaceCallbacks({ showLoginModal, showToast, isLoggedIn: () => !!state.currentUser });
+    injectWorkspaceCallbacks({ showToast });
     injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });
