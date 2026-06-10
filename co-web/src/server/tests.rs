@@ -276,8 +276,9 @@ fn test_seed_admin_user_from_env_hash_drift_updates() {
 
 // --- CO-80: rate limiting + quota integration tests ---
 
-/// Anonymous user gets HTTP 429 after exhausting the anonymous read bucket
-/// (bumped from 20 to 120 reads/min in 2.7.21 for public-content traffic).
+/// CO-397: Anonymous user gets HTTP 429 after exhausting the 60-read/min bucket.
+/// No X-Forwarded-For is set so abuse tracking (which uses the IP) is bypassed;
+/// the rate-limit bucket is still enforced via the "anon:unknown:r" key.
 #[tokio::test]
 async fn test_rate_limit_anonymous_reads_returns_429() {
     let dir = tempdir().unwrap();
@@ -286,13 +287,14 @@ async fn test_rate_limit_anonymous_reads_returns_429() {
     let make_req = || {
         Request::builder()
             .method("GET")
-            .uri("/api/v1/universes/template")
+            .uri("/api/v1/universes")
             .body(Body::empty())
             .unwrap()
     };
 
-    // First 120 requests: rate limiter allows them (bucket starts full at 120).
-    for i in 0..120 {
+    // First 60 requests: bucket starts full at 60 → all succeed (may return 401
+    // for auth, but the rate-limit layer passes them regardless of status).
+    for i in 0..60 {
         let status = app.clone().oneshot(make_req()).await.unwrap().status();
         assert_ne!(
             status,
@@ -301,12 +303,12 @@ async fn test_rate_limit_anonymous_reads_returns_429() {
         );
     }
 
-    // 121st request: bucket is empty → 429.
+    // 61st request: bucket is empty → 429.
     let status = app.clone().oneshot(make_req()).await.unwrap().status();
     assert_eq!(
         status,
         StatusCode::TOO_MANY_REQUESTS,
-        "121st request should be rate limited"
+        "61st request should be rate limited"
     );
 }
 
@@ -319,13 +321,13 @@ async fn test_rate_limit_429_has_retry_after_header() {
     let make_req = || {
         Request::builder()
             .method("GET")
-            .uri("/api/v1/universes/template")
+            .uri("/api/v1/universes")
             .body(Body::empty())
             .unwrap()
     };
 
-    // Exhaust the anonymous read bucket (120 slots).
-    for _ in 0..120 {
+    // Exhaust the anonymous read bucket (60 slots, CO-397).
+    for _ in 0..60 {
         let _ = app.clone().oneshot(make_req()).await.unwrap();
     }
 

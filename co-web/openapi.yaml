@@ -1046,6 +1046,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /api/v1/feedback/all/public:
     get:
       tags: ["feedback"]
@@ -2346,6 +2348,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
     post:
       tags: ["universes"]
       summary: "Create universe"
@@ -2354,6 +2358,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /api/v1/universes/apply-template-all:
     post:
       tags: ["universes"]
@@ -3038,6 +3044,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
     post:
       tags: ["entries"]
       summary: "Create entry"
@@ -3052,6 +3060,8 @@ paths:
       responses:
         "200":
           description: OK
+        "429":
+          $ref: "#/components/responses/RateLimited"
   /api/v1/universes/{slug}/entries/history:
     get:
       tags: ["entries"]
@@ -4270,6 +4280,41 @@ components:
       in: header
       name: X-Shared-Secret
       description: Shared secret for server-to-server endpoints (e.g. log drains)
+
+  responses:
+    # CO-397: standard 429 shape returned by all rate-limited endpoints.
+    RateLimited:
+      description: Too Many Requests — rate limit exceeded
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Seconds to wait before retrying
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request budget for the current window
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in the current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix epoch when the window resets
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error, retry_after_s]
+            properties:
+              error:
+                type: string
+                enum: [rate_limited]
+              retry_after_s:
+                type: integer
+                description: Seconds until the client may retry
+                example: 15
 
   schemas:
     # --- Erros ---

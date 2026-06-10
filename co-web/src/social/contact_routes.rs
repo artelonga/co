@@ -315,6 +315,7 @@ mod tests {
                     .uri("/api/v1/universes/space_c1/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", "198.51.100.10")
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"visitor@example.com","from_name":"Test Visitor","subject":"Hello","body":"This is a test."}"#,
                     ))
@@ -347,6 +348,7 @@ mod tests {
                     .uri("/api/v1/universes/space_c2/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", "198.51.100.20")
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"bot@spam.com","from_name":"Bot","subject":"Buy now","body":"spam","website":"http://spam.example.com"}"#,
                     ))
@@ -384,6 +386,7 @@ mod tests {
                         .uri("/api/v1/universes/space_c3/messages")
                         .header("content-type", "application/json")
                         .header("x-forwarded-for", test_ip)
+                        .header("user-agent", "CO-test/1.0")
                         .body(Body::from(format!(
                             r#"{{"from_email":"v{i}@example.com","from_name":"V","subject":"Hi {i}","body":"Msg {i}"}}"#
                         )))
@@ -401,6 +404,7 @@ mod tests {
                     .uri("/api/v1/universes/space_c3/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", test_ip)
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"v@example.com","from_name":"V","subject":"6th","body":"Should be blocked"}"#,
                     ))
@@ -431,6 +435,7 @@ mod tests {
                     .uri("/api/v1/universes/space_c4/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", "198.51.100.40")
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"","from_name":"Visitor","subject":"Hello","body":"Hi"}"#,
                     ))
@@ -459,6 +464,7 @@ mod tests {
                     .uri("/api/v1/universes/does-not-exist/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", "198.51.100.50")
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"v@example.com","from_name":"V","subject":"Hi","body":"Hello"}"#,
                     ))
@@ -489,6 +495,7 @@ mod tests {
                     .uri("/api/v1/universes/space_c6/messages")
                     .header("content-type", "application/json")
                     .header("x-forwarded-for", "198.51.100.60")
+                    .header("user-agent", "CO-test/1.0")
                     .body(Body::from(
                         r#"{"from_email":"sender@example.com","from_name":"Sender","subject":"Test notif","body":"Hello owner"}"#,
                     ))

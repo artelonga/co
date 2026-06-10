@@ -913,8 +913,8 @@ mod tests {
                 .method("POST")
                 .uri("/api/v1/leads")
                 .header("Content-Type", "application/json")
-                // Consistent IP via X-Forwarded-For
                 .header("X-Forwarded-For", "1.2.3.4")
+                .header("User-Agent", "CO-test/1.0")
                 .body(Body::from(r#"{"mensagem":"test message"}"#))
                 .unwrap()
         };
