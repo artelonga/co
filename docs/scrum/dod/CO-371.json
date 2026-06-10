@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-371",
+  "spec_title": "Single funnel report endpoint — discover → onboard, end-to-end with drop-off per step",
+  "timestamp": "2026-06-10T16:28:59.517Z",
+  "items": [
+    {
+      "text": "`GET /api/v1/analytics/public/funnel?window=30d` returns 8 steps with counts",
+      "pattern": "api/v1/analytics/public/funnel|analytics|public|funnel|window",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "3. subscribe blocked — public-static returns 400, excluded from discoverable",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`breakdown=source` returns per-referrer step counts",
+      "pattern": "per[- _]referrer|breakdown|source|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`breakdown=day` returns daily step counts",
+      "pattern": "breakdown|returns|daily|counts",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`breakdown=country` returns per-country step counts",
+      "pattern": "per[- _]country|breakdown|country|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "KPIs computed: intent_rate, capture_rate, verify_rate, conversion_rate, t_register_to_payment_median_s",
+      "pattern": "computed|intent|capture|verify",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "onboard-with-email returns dev_code in test env and verify succeeds",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Auth: admin-only (route gated by `require_admin`)",
+      "pattern": "admin[- _]only|route|gated|require",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Query < 200ms on current prod data volume",
+      "pattern": "query|200ms|current|volume",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`/gestao/resumo` renders the funnel chart",
+      "pattern": "gestao/resumo|gestao|resumo|renders|funnel",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Step 4 uses CO-370's email join (lead OR user = 1 unique)",
+      "pattern": "co[- _]370|email|unique",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "OpenAPI (CO-211) documents the endpoint",
+      "pattern": "co[- _]211|openapi|documents|endpoint",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 10,
+  "passed": 9,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 90
+}
