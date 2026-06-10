@@ -25,6 +25,7 @@ pub mod lead;
 pub mod list;
 pub mod locate;
 pub mod new;
+pub mod push;
 pub mod query;
 pub mod repo;
 pub mod schema;

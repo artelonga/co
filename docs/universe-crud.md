@@ -72,23 +72,49 @@ Under the hood (`co-cli/src/commands/launch.rs`) it:
 `co serve` then serves it at `/{key}`. `co init` / `co new` create spaces / content
 *within* a universe.
 
-## The gap: CLI → remote
+## The gap: CLI → remote (closed by CO-392)
 
 | Path | Status |
 |------|--------|
 | Local dev (`co launch` → local SQLite) | ✅ |
 | Prod deployed (Vault API `PUT` from web / script) | ✅ |
-| **CLI → remote running server over HTTP** | ❌ no `co push` |
+| **CLI → remote running server over HTTP** | ✅ `co push` (CO-392) |
 
-The CLI writes only local storage; pushing a local universe's content to a deployed
-server today means hitting the Vault API via a script. The missing edge — a
-`co push --remote <url> --token <t>` that wraps `POST /universes` + Vault `PUT`s so the
-CLI and web hit identical endpoints — is specced in **CO-392**.
+`co push` wraps `POST /api/v1/universes` + Vault `PUT`s into a first-class verb. It
+supersedes the ad-hoc `scripts/bulk-upload.py` Vault loop (see
+`reference_admin_scripts`).
+
+```bash
+# Push from inside a universe directory
+cd ~/projects/grcsamazonia
+co push --remote https://co.artelonga.com.br --token $CO_TOKEN
+
+# Or via env vars
+CO_REMOTE=https://co.artelonga.com.br CO_TOKEN=$CO_TOKEN co push
+
+# Preview without writing
+co push --dry-run
+
+# Push and remove server entries absent locally
+co push --delete-missing
+```
+
+### Behaviour
+
+- Walks `content/**/*.md` relative to the git/jj repo root.
+- Skips `_source/` (PII originals — LGPD) and hidden files/dirs.
+- Respects `.gitignore` (exact component, prefix, and `*.ext` wildcard patterns).
+- `POST /api/v1/universes` if absent; `PUT /api/v1/universes/{key}` if present.
+- `PUT /api/v1/universes/{key}/vault/{path}` for each file (last-write-wins).
+- With `--delete-missing`: `GET …/vault/` then `DELETE` for remote paths absent locally.
+- Re-running converges (no duplicates).
+- Token via `--token` / `CO_TOKEN`; base URL via `--remote` / `CO_REMOTE`, or stored
+  credentials from `co auth login`.
 
 ## Recommended end state
 
 1. `POST /universes` + Vault `PUT`s as the **canonical add path**; retire the
    hardcoded universe list in `seed.rs` (`co launch` already proves the no-hardcoding
    path).
-2. Ship **CO-392 `co push`** so "add a universe" is **one verb, identical semantics,
+2. `co push` is now shipped — "add a universe" is **one verb, identical semantics,
    web or CLI, no deploy**.
