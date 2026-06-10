@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-355",
+  "title": "Workspace template registry — _workspace.yaml per universe seeds Sala layouts",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-355.md",
+  "branch": "feat/CO-355-workspace-template-registry-workspace-ya",
+  "merge_sha": "c3c3200f94710adc4abca1c9c37f954d8db1bd45",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/163",
+    "number": 163
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-10T00:32:34Z",
+  "files_changed": 14,
+  "lines_added": 940,
+  "lines_removed": 22,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:workspace"
+  ],
+  "changelog_entry": "## CO-355 — Workspace template registry — _workspace.yaml per universe seeds Sala layouts\n\nUniverse owners can now define opinionated starting layouts for the Sala canvas\nby placing `_workspace.yaml` (default) or `_workspaces/<slug>.yaml` (named) in\ntheir universe content root. Templates specify pre-placed nodes, edges, study-mode\nconfig, and allowed entry types in a plain YAML schema.\n\nNew API:\n- `GET /api/v1/universes/{key}/workspace-templates` — list all templates (always\n  includes a synthetic \"blank\" template).\n- `GET /api/v1/universes/{key}/workspace-templates/{slug}` — fetch one template.\n- `POST /api/v1/universes/{key}/workspaces/{ws}/from-template/{tpl}` — create a\n  new `workspace_states` row seeded with the template's node/edge layout. Works for\n  anonymous and authenticated users. Entry paths that don't exist in the universe\n  are silently dropped (warning logged); the rest of the template still loads.\n\nFrontend:\n- New \"Sala\" tab in the view-tabs bar (`data-view=\"workspace\"`) — a **launcher**\n  for the unified Sala surface, per `docs/architecture/sala-surface.md` (one\n  surface, fractal scope: per universe / all universes / any subset; nodes can\n  recurse into universes). The SPA never grows its own canvas.\n- Template picker modal opens on \"+ Nova Sala\" — lists all templates from the API.\n- Selecting a template calls the `from-template` endpoint and navigates to the\n  canvas at `/u/{universe}/sala/{slug}` (CO-352's surface).\n\nDatabase:\n- No new migration — rows are written to the `workspace_states` table created\n  by CO-352's v70 migration.\n\nSeed fixture:\n- `co-web/seed/universe-templates/comunicacao/_workspaces/mbya-basics.yaml` — 12-node\n  reference template for the comunicacao universe (copy into the universe repo to\n  activate).\n\n### Why\n\nNewcomers to a universe need a useful surface immediately. Curators can codify\ncanonical study starting-points as versioned YAML that travels with the universe\nrepo, replacing Yggdrasil's hardcoded `data-tpl` attribute.",
+  "summary": "a universe owner (mbya curator, comunicacao editor, ArteLonga publisher) — I want to offer **opinionated starting layouts** for the Sala canvas: a \"basics\" workspace seeded with the foundational terms",
+  "co_auto_version": "0.1.0"
+}
