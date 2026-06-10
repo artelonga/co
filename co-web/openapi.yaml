@@ -640,46 +640,10 @@ paths:
   /api/v1/analytics/public/funnel:
     get:
       tags: ["analytics + telemetry"]
-      summary: "CO-378/CO-371 — funnel report (path-based public OR 8-step acquisition admin)"
-      description: |
-        Two modes based on query params:
-        - **CO-378** (default, no auth): `?days=N` — per-path funnel with private-path redaction.
-        - **CO-371** (admin-only): `?window=7d|30d|90d|custom` — 8-step acquisition funnel
-          (discover→engage→intent→capture→qualify→register→convert→onboard) with drop-off per step.
-          Optional: `&start=<YYYY-MM-DD>&end=<YYYY-MM-DD>` (for custom window),
-          `&breakdown=source|day|country|none`.
-          Returns 8 steps, KPIs (intent_rate, capture_rate, verify_rate, conversion_rate,
-          t_register_to_payment_median_s), and optional breakdown arrays.
-      parameters:
-        - name: window
-          in: query
-          schema: { type: string, enum: [7d, 30d, 90d, custom] }
-          description: "CO-371: acquisition funnel window (admin-only when present)"
-        - name: start
-          in: query
-          schema: { type: string, format: date }
-          description: "CO-371: start date for custom window (YYYY-MM-DD)"
-        - name: end
-          in: query
-          schema: { type: string, format: date }
-          description: "CO-371: end date for custom window (YYYY-MM-DD)"
-        - name: breakdown
-          in: query
-          schema: { type: string, enum: [source, day, country, none] }
-          description: "CO-371: breakdown dimension"
-        - name: days
-          in: query
-          schema: { type: integer, minimum: 1, maximum: 365 }
-          description: "CO-378: window in days for path-based funnel (no auth)"
-      security:
-        - sessionCookie: []
+      summary: "CO-378 — conversion funnel report with private-path redaction"
       responses:
         "200":
           description: OK
-        "401":
-          description: "Unauthorized (CO-371 mode only — window param present without auth)"
-        "403":
-          description: "Forbidden (CO-371 mode only — non-admin auth)"
   /api/v1/analytics/public/popularity:
     get:
       tags: ["analytics + telemetry"]
