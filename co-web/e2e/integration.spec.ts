@@ -54,6 +54,8 @@ test.describe("CRUD round-trip", () => {
     apiContext,
     seedProject,
   }) => {
+    test.skip((page.viewportSize()?.width ?? 1280) <= 640,
+      "single-column mobile board (CO-358) — cross-column visibility is a desktop assertion");
     const task = await createTask(apiContext, seedProject.key, { title: "Status task" });
 
     await navigateTo(page, "/");

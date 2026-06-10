@@ -76,6 +76,20 @@ export async function selectProject(page: Page, key: string): Promise<void> {
   );
   await link.click();
   await tasksLoaded;
+  // CO-359: on mobile the drawer stays open after selection and intercepts
+  // every later interaction — close it. The open sidebar covers the
+  // overlay's center, so dispatch the click straight to the overlay.
+  const vp = page.viewportSize();
+  if (vp && vp.width <= 640) {
+    const overlay = page.locator("#sidebar-overlay.visible");
+    if ((await overlay.count()) > 0) {
+      await overlay.dispatchEvent("click");
+      await page.waitForFunction(
+        () => !document.getElementById("sidebar")?.classList.contains("open"),
+        { timeout: 3_000 },
+      );
+    }
+  }
   // CO-304: render() fires renderConteudo() which is async (6 API calls). Those
   // calls complete and overwrite content.innerHTML AFTER we switch to kanban.
   // renderConteudo() now has a stale-view guard, but we also wait here for the

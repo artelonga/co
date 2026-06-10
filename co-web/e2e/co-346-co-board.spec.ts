@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from "./fixtures";
-import { navigateTo, loginAsAdmin } from "./helpers";
+import { navigateTo, loginAsAdmin, openSidebarIfMobile } from "./helpers";
 
 test.describe("CO-346: /co board visibility", () => {
   test("anonymous visitor to /co sees content rendered with at least one project", async ({
@@ -29,6 +29,8 @@ test.describe("CO-346: /co board visibility", () => {
     );
 
     // The CO project (or any project) must appear in the sidebar project list.
+    // CO-359: on mobile the project list lives in the drawer — open it first.
+    await openSidebarIfMobile(page);
     const projectItems = page.locator("#project-list .sidebar-item-key");
     await expect(projectItems.first()).toBeVisible({ timeout: 5_000 });
   });
