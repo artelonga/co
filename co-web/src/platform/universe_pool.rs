@@ -55,10 +55,10 @@ CREATE INDEX IF NOT EXISTS idx_entries_updated ON entries(universe_key, updated_
 -- CO-330: supports anon published-only filter (json_extract over frontmatter_json).
 CREATE INDEX IF NOT EXISTS idx_entries_published
     ON entries(universe_key, json_extract(frontmatter_json, '$.published'));
--- CO-354: partial index over the suggest/review lifecycle — only draft/reviewed
--- rows are indexed, so published reads (the common case) stay cheap.
-CREATE INDEX IF NOT EXISTS idx_entries_review_status
-    ON entries(universe_key, review_status) WHERE review_status != 'published';
+-- CO-354: the partial review_status index is created by migration v18, NOT
+-- here. The base batch runs on existing DBs whose entries table predates the
+-- column (added in v18); an index referencing it here panics the server at
+-- boot before migrations can run (staging crash, 2026-06-10).
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     universe_key UNINDEXED,
@@ -808,5 +808,54 @@ fn ensure_universe_column(conn: &Connection, table: &str, column: &str, def: &st
     if !exists {
         conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))
             .unwrap_or_else(|e| panic!("ensure_universe_column {table}.{column}: {e}"));
+    }
+}
+
+#[cfg(test)]
+mod base_schema_tests {
+    use super::*;
+
+    /// Regression (2026-06-10 staging boot crash): the base UNIVERSE_SCHEMA
+    /// batch runs on EXISTING databases whose `entries` table predates newer
+    /// columns. Any statement in the batch that references a
+    /// migration-added column (e.g. CO-354's review_status partial index)
+    /// fails the whole batch and panics the server before migrations run.
+    /// Simulate a pre-CO-354 database and assert open+migrate succeeds.
+    #[test]
+    fn base_schema_batch_survives_pre_co354_entries_table() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Old entries table: no review_status / submitted_* / reviewed_* /
+        // source_marker columns — the shape deployed before v17/v18.
+        conn.execute_batch(
+            "CREATE TABLE entries (
+                universe_key      TEXT NOT NULL,
+                path              TEXT NOT NULL,
+                entry_type        TEXT NOT NULL DEFAULT 'note',
+                title             TEXT NOT NULL DEFAULT '',
+                body              TEXT NOT NULL DEFAULT '',
+                frontmatter_json  TEXT NOT NULL DEFAULT '{}',
+                body_chars        INTEGER NOT NULL DEFAULT 0,
+                created_at        TEXT NOT NULL DEFAULT '',
+                updated_at        TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (universe_key, path)
+            );
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (16);",
+        )
+        .unwrap();
+
+        // Must not panic: base batch is column-agnostic; v17/v18 add columns
+        // and only then create the dependent index.
+        run_universe_migrations(&conn, "legacy-universe");
+
+        assert!(universe_column_exists(&conn, "entries", "review_status"));
+        let idx: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_entries_review_status'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1, "v18 must create the review_status partial index");
     }
 }
