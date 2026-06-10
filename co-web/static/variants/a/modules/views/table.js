@@ -31,6 +31,13 @@ export function sortArrow(col) {
         : ' <span class="sort-arrow">&#9660;</span>';
 }
 
+// CO-358: mobile card labels via the shared i18n table (window.t),
+// falling back to pt literals when a key is missing.
+function tt(key, fallback) {
+    const v = window.t ? window.t(key) : null;
+    return v && v !== key ? v : fallback;
+}
+
 export function renderTable() {
     const content = document.querySelector('#content');
     content.className = 'content no-padding';
@@ -113,32 +120,32 @@ export function renderTable() {
                 : '<span class="tree-toggle-spacer"></span>';
             html += `
                 <tr data-task-id="${task.id}" class="${selected ? 'selected' : ''}${depth > 0 ? ' subtask-row' : ''}">
-                    <td>
+                    <td class="col-checkbox">
                         <div class="row-checkbox">
                             <input type="checkbox" class="task-cb" data-task-id="${task.id}" ${selected ? 'checked' : ''}>
                         </div>
                     </td>
-                    <td><span class="cell-key">${esc(task.key)}</span></td>
-                    <td>
+                    <td data-label="Key"><span class="cell-key">${esc(task.key)}</span></td>
+                    <td data-label="${tt('title', 'Título')}">
                         <div class="cell-title-tree" style="padding-left:${indent}px">
                             ${connector}${toggleBtn}<span class="cell-title">${esc(task.title)}</span>
                         </div>
                     </td>
-                    <td>
+                    <td data-label="${tt('status', 'Status')}">
                         <span class="status-badge status-${task.status}" data-task-id="${task.id}">
                             <span class="status-badge-dot"></span>
                             ${STATUS_LABELS[task.status]}
                         </span>
                     </td>
-                    <td>
+                    <td data-label="${tt('priority', 'Prioridade')}">
                         <span class="cell-priority">
                             <span class="priority-dot ${task.priority}"></span>
                             <span class="priority-label">${PRIORITY_LABELS[task.priority]}</span>
                         </span>
                     </td>
-                    <td><span class="cell-due-date${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span></td>
-                    <td>${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}</td>
-                    <td><span class="cell-labels">${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}</span></td>
+                    <td data-label="${tt('due_date', 'Data Limite')}"><span class="cell-due-date${overdue ? ' overdue' : ''}">${formatDate(task.due_date)}</span></td>
+                    <td data-label="${tt('assignee', 'Responsável')}">${task.assignee ? `<span class="assignee-badge" title="${esc(task.assignee)}">${esc(assigneeInitials(task.assignee))}</span>` : ''}</td>
+                    <td data-label="Labels"><span class="cell-labels">${task.labels.map(l => `<span class="label-badge">${esc(l)}</span>`).join('')}</span></td>
                 </tr>`;
         }
 

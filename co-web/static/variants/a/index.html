@@ -139,6 +139,19 @@
                     </div>
                     <button class="btn btn-ghost btn-sm" id="btn-universe-info" title="Informações e estatísticas deste universo" style="padding:4px 10px">ℹ</button>
                     <button class="btn btn-primary btn-new-task" id="btn-new-task" data-i18n="new_task">+ Nova Tarefa</button>
+                    <!-- CO-358: overflow menu — hides non-essential controls at ≤640px -->
+                    <button class="header-overflow-btn" id="header-overflow-btn" aria-label="Mais opções" aria-expanded="false" style="display:none">⋮</button>
+                    <div class="header-overflow-menu hidden" id="header-overflow-menu" role="menu">
+                        <button class="header-overflow-item" id="overflow-search-toggle" role="menuitem">
+                            <span>🔍</span> <span data-i18n="filter_tasks">Filtrar tarefas</span>
+                        </button>
+                        <button class="header-overflow-item" id="overflow-lang-toggle" role="menuitem">
+                            <span>🌐</span> <span id="overflow-lang-label" data-i18n="lang.switch">English</span>
+                        </button>
+                        <button class="header-overflow-item" id="overflow-universe-info" role="menuitem">
+                            <span>ℹ</span> <span>Informações</span>
+                        </button>
+                    </div>
                 </div>
             </header>
             <div class="content" id="content">
