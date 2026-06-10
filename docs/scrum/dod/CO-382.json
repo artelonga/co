@@ -1,0 +1,117 @@
+{
+  "co_id": "CO-382",
+  "spec_title": "Scrum-aligned CI/CD with DoD verification — deterministic route per task, release gate",
+  "timestamp": "2026-06-10T01:11:25.364Z",
+  "items": [
+    {
+      "text": "PR with title `CO-N — ...` triggers DoD verification workflow",
+      "pattern": "co[- _]n|title|triggers|verification|workflow",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "create project task, drag to In Progress, edit title, then delete",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`## Acceptance` items parsed from spec",
+      "pattern": "acceptance|items|parsed",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sub-universe items are indented relative to their parent",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Each item mapped to a test pattern; matching tests executed",
+      "pattern": "mapped|pattern|matching|tests",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] Each item mapped to a test pattern; matching tests executed",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "DoD table posted as PR comment with per-item ✅/❌",
+      "pattern": "per[- _]item|table|posted|comment",
+      "matched_file": "co-web/e2e/universe.spec.ts",
+      "matched_test": "after universe creation the board is editable: '+ Nova Tarefa' button visible",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Merge blocked if any acceptance item is ❌",
+      "pattern": "merge|blocked|acceptance",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "3. subscribe blocked — public-static returns 400, excluded from discoverable",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`scripts/dod/verify.ts` generates `e2e-generated/CO-N-dod.spec.ts` stubs",
+      "pattern": "e2e[- _]generated|co[- _]n[- _]dod|dod/verify.ts|co[- _]n[- _]dod.spec.ts|scripts|verify|generates",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "onboard-with-email returns dev_code in test env and verify succeeds",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`scripts/scrum/sprint-review.ts` runs Thursday 14:30 BRT + commits sprint review",
+      "pattern": "sprint[- _]review|scrum/sprint[- _]review.ts|scripts|scrum|thursday",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/dod/verify.ts generates e2e-generated/CO-N-dod.spec.ts stubs",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`scripts/release-commit.sh` refuses release if any wave PR has DoD < 100%",
+      "pattern": "release[- _]commit|release[- _]commit.sh|scripts|refuses|release",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/dod/verify.ts generates e2e-generated/CO-N-dod.spec.ts stubs",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`--ignore-dod` override flag exists (emergency only, logged)",
+      "pattern": "ignore[- _]dod|[- _][- _]ignore[- _]dod|override|exists|emergency",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L1 — Breadcrumbs element exists in the page",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "CO-380 event bus captures `ci.*` and `release.gate.*` events",
+      "pattern": "co[- _]380|event|captures|release",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/release-commit.sh refuses release if any wave PR has DoD < 100%",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Live timeline (CO-381) renders CI events with 🛠️ icon",
+      "pattern": "co[- _]381|timeline|renders|events",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "OpenAPI documents the new CI events",
+      "pattern": "openapi|documents|events",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] CO-380 event bus captures ci.* and release.gate.* events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "All 10 route steps implemented + documented in `docs/ci-route.md`",
+      "pattern": "ci[- _]route|ci[- _]route.md|route|steps|implemented|documented",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] All 10 route steps implemented + documented in docs/ci-route.md",
+      "is_stub": true,
+      "status": "pending"
+    }
+  ],
+  "total": 13,
+  "passed": 7,
+  "pending": 6,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 54
+}

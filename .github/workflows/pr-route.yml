@@ -1,0 +1,115 @@
+name: PR Route — DoD + Migration Gate
+
+# CO-382: Deterministic route for every PR.
+# Adds step 6 (migration validation) and step 10 (DoD verification)
+# on top of the existing ci.yml (steps 1-5) and openapi-check.yml (step 4).
+#
+# Steps blocked by this workflow:
+#   6. Migration validation — only when a new migration file is present
+#  10. DoD verification — only when PR title contains CO-N
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+
+  # Step 6: Migration validation (conditional — skip if no migration in diff)
+  migration-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new migration files
+        id: migration-detect
+        run: |
+          MIGRATIONS=$(git diff --name-only origin/main...HEAD \
+            | grep 'co-web/src/db/migrations/v.*\.sql' || true)
+          if [ -n "$MIGRATIONS" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "Migration files changed:"
+            echo "$MIGRATIONS"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No migration files changed — skipping migration check"
+          fi
+
+      - name: Install system deps
+        if: steps.migration-detect.outputs.found == 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
+
+      - name: Cache cargo
+        if: steps.migration-detect.outputs.found == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-migration-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build co-web (migration test)
+        if: steps.migration-detect.outputs.found == 'true'
+        run: cargo build -p co-web
+
+      - name: Run migration tests
+        if: steps.migration-detect.outputs.found == 'true'
+        run: cargo test -p co-web migration --test testkit_tests
+        env:
+          RUST_LOG: "co_web=warn"
+          JWT_SECRET: "ci-test-secret-do-not-use-in-production"
+
+  # Step 10: DoD verification — only when PR title matches CO-N pattern
+  dod-verify:
+    runs-on: ubuntu-latest
+    if: contains(github.event.pull_request.title, 'CO-')
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract CO-N from PR title
+        id: co-id
+        run: |
+          CO_ID=$(echo "${{ github.event.pull_request.title }}" \
+            | grep -oP 'CO-\d+' | head -1)
+          if [ -z "$CO_ID" ]; then
+            echo "::error::Could not extract CO-N from PR title: ${{ github.event.pull_request.title }}"
+            exit 1
+          fi
+          echo "co_id=${CO_ID}" >> "$GITHUB_OUTPUT"
+          echo "Verifying DoD for: ${CO_ID}"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: co-web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: co-web
+        run: npm ci
+
+      - name: Run DoD verification
+        id: dod
+        working-directory: co-web
+        run: |
+          node --import tsx scripts/dod/verify.ts \
+            --spec "${{ steps.co-id.outputs.co_id }}" \
+            --output "/tmp/dod-${{ steps.co-id.outputs.co_id }}.json" \
+            --post-comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+
+      - name: Upload DoD JSON artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dod-${{ steps.co-id.outputs.co_id }}
+          path: /tmp/dod-${{ steps.co-id.outputs.co_id }}.json
+          retention-days: 30

@@ -177,7 +177,14 @@ var EVT_META = {
   'sync.comunicacao.event_dedup_skipped'  :{ icon:'⏭️', color:'var(--dim)',    cat:'system' },
   'sync.yggdrasil.sala.published'         :{ icon:'🎪', color:'var(--blue)',   cat:'system' },
   'sync.yggdrasil.sala.term_contributed'  :{ icon:'✍️', color:'var(--yellow)', cat:'system' },
-  'sync.yggdrasil.sala.user_joined'       :{ icon:'👋', color:'var(--gray)',   cat:'system' }
+  'sync.yggdrasil.sala.user_joined'       :{ icon:'👋', color:'var(--gray)',   cat:'system' },
+  // CO-382: CI/CD pipeline events
+  'ci.step.passed'         :{ icon:'🛠️', color:'var(--green)',    cat:'ci' },
+  'ci.step.failed'         :{ icon:'🛠️', color:'var(--red)',      cat:'ci' },
+  'ci.dod.verified'        :{ icon:'🛠️', color:'var(--green)',    cat:'ci' },
+  'ci.dod.failed'          :{ icon:'🛠️', color:'var(--red)',      cat:'ci' },
+  'release.gate.passed'    :{ icon:'🚀', color:'var(--green)',    cat:'ci' },
+  'release.gate.blocked'   :{ icon:'🚫', color:'var(--red)',      cat:'ci' }
 };
 function meta(type){
   var exact = EVT_META[type];
@@ -185,7 +192,8 @@ function meta(type){
   var prefix = type.split('.')[0];
   var defaults = { crud:{icon:'📄',color:'var(--green)'},auth:{icon:'👤',color:'var(--blue)'},
     analytics:{icon:'📊',color:'var(--gray)'},billing:{icon:'💳',color:'var(--gold)'},
-    system:{icon:'⚙️',color:'var(--dim)'},live:{icon:'⚡',color:'var(--accent)'} };
+    system:{icon:'⚙️',color:'var(--dim)'},live:{icon:'⚡',color:'var(--accent)'},
+    ci:{icon:'🛠️',color:'var(--orange)'},release:{icon:'🚀',color:'var(--blue)'} };
   return defaults[prefix] || {icon:'●',color:'var(--dim)',cat:'system'};
 }
 
