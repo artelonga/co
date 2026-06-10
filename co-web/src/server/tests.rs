@@ -207,6 +207,32 @@ fn test_looks_like_static_asset_recognizes_filenames_and_prefixes() {
     assert!(!looks_like_static_asset("/co/telemetria"));
 }
 
+/// manifest.json must use application/manifest+json, not application/json.
+/// Required for Lighthouse PWA installability checks.
+#[test]
+fn test_guess_content_type_manifest() {
+    assert_eq!(
+        guess_content_type("manifest.json"),
+        "application/manifest+json"
+    );
+    assert_eq!(
+        guess_content_type("shared/manifest.json"),
+        "application/manifest+json"
+    );
+    // Other JSON files remain application/json.
+    assert_eq!(guess_content_type("data.json"), "application/json");
+    assert_eq!(
+        guess_content_type("shared/openapi.json"),
+        "application/json"
+    );
+}
+
+/// offline.html must be treated as a static asset (routed to serve_variant_file).
+#[test]
+fn test_looks_like_static_asset_offline_html() {
+    assert!(looks_like_static_asset("/offline.html"));
+}
+
 // --- seed_admin_user_from_env drift detection tests ---
 
 #[test]

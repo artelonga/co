@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>CO — Gestão de conteúdo em grafo</title>
     <meta name="description" content="CO — Gestão de conteúdo em grafo, livre e aberto. Graph-based content management, free and open source.">
     <meta property="og:title" content="CO — Gestão de conteúdo em grafo">
@@ -19,9 +19,13 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&family=Work+Sans:wght@300;400;500;600&family=Manrope:wght@300;400;500;600&display=swap" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap" rel="stylesheet">
-    <link rel="manifest" href="/shared/manifest.json">
+    <link rel="manifest" href="/manifest.json">
     <link rel="icon" type="image/svg+xml" href="/shared/favicon.svg">
-    <meta name="theme-color" content="#1a1a2e">
+    <link rel="apple-touch-icon" href="/shared/icons/apple-touch-icon.png">
+    <meta name="theme-color" content="#2563eb">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="CO">
 </head>
 <body>
     <div id="app" class="app">
@@ -689,7 +693,7 @@
         // page (i.e. a deploy happened), reload once so the user gets the
         // fresh app.js / style.css instead of whatever the old SW had cached.
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('/sw.js').then(function (reg) {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' }).then(function (reg) {
                 // Listen for an updated SW being installed.
                 reg.addEventListener('updatefound', function () {
                     var newSW = reg.installing;
@@ -840,5 +844,6 @@
         </div>
     </div>
     <script type="module" src="/modules/assistant.js"></script>
+    <script type="module" src="/modules/install/wire.js"></script>
 </body>
 </html>

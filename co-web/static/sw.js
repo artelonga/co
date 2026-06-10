@@ -13,10 +13,11 @@
 //
 // Bump CACHE_NAME on every behaviour change so existing clients purge old
 // caches when the new SW activates.
-const CACHE_NAME = 'co-v5-offline';
+const CACHE_NAME = 'co-v6-offline';
 const STATIC_ASSETS = [
-  '/shared/manifest.json',
+  '/manifest.json',
   '/favicon.svg',
+  '/offline.html',
 ];
 
 // ===== IndexedDB helpers (SW context) =====
@@ -201,15 +202,21 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // API: network-first, no cache fallback (don't serve stale data quietly).
+  // API: network-first with cache fallback (stale read shown when offline).
   if (url.pathname.startsWith('/api/')) {
     e.respondWith(
-      fetch(req).catch(() =>
-        new Response(
+      fetch(req)
+        .then(resp => {
+          if (resp.ok) {
+            const clone = resp.clone();
+            caches.open(CACHE_NAME).then(cache => cache.put(req, clone)).catch(() => {});
+          }
+          return resp;
+        })
+        .catch(() => caches.match(req).then(cached => cached || new Response(
           JSON.stringify({ error: 'offline', message: 'No connection' }),
           { status: 503, headers: { 'Content-Type': 'application/json' } }
-        )
-      )
+        )))
     );
     return;
   }
@@ -237,7 +244,17 @@ self.addEventListener('fetch', (e) => {
           }
           return resp;
         })
-        .catch(() => caches.match(req))
+        .catch(() =>
+          caches.match(req).then(cached => {
+            if (cached) return cached;
+            if (req.mode === 'navigate') {
+              return caches.match('/offline.html').then(
+                offline => offline || new Response('Offline', { status: 503 })
+              );
+            }
+            return new Response('Offline', { status: 503 });
+          })
+        )
     );
     return;
   }

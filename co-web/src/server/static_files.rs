@@ -522,15 +522,10 @@ pub(super) async fn serve_variant_file(
         }
     }
 
-    // Try shared/ first (for experiment.js, experiment.css)
-    if path.starts_with("shared/") || path == "manifest.json" || path == "sw.js" {
-        let embed_path = if path.starts_with("shared/") {
-            path.to_string()
-        } else {
-            format!("shared/{}", path)
-        };
-        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
-        if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
+    // Root-level PWA files served directly (not remapped to shared/).
+    if path == "manifest.json" || path == "offline.html" {
+        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(path);
+        if let Some(contents) = resolve_asset(path, Some(&fs_path)) {
             let content_type = guess_content_type(path);
             let cache_header = cache_control_for(path);
             return (
@@ -542,6 +537,38 @@ pub(super) async fn serve_variant_file(
                 contents,
             )
                 .into_response();
+        }
+    }
+
+    // Try shared/ first (for experiment.js, experiment.css, sw.js)
+    if path.starts_with("shared/") || path == "sw.js" {
+        let embed_path = if path.starts_with("shared/") {
+            path.to_string()
+        } else {
+            format!("shared/{}", path)
+        };
+        let fs_path = std::path::Path::new(&state.core.config.static_dir).join(&embed_path);
+        if let Some(contents) = resolve_asset(&embed_path, Some(&fs_path)) {
+            let content_type = guess_content_type(path);
+            let cache_header = cache_control_for(path);
+            let mut response = (
+                StatusCode::OK,
+                [
+                    (header::CONTENT_TYPE, HeaderValue::from_static(content_type)),
+                    (header::CACHE_CONTROL, cache_header),
+                ],
+                contents,
+            )
+                .into_response();
+            // Service workers must be served with Service-Worker-Allowed when the
+            // script path differs from the desired scope (RFC: SW spec §6.4).
+            if path == "sw.js" {
+                response.headers_mut().insert(
+                    HeaderName::from_static("service-worker-allowed"),
+                    HeaderValue::from_static("/"),
+                );
+            }
+            return response;
         }
     }
 
@@ -610,6 +637,10 @@ pub(super) async fn serve_variant_file(
 }
 
 pub(super) fn guess_content_type(path: &str) -> &'static str {
+    let basename = path.rsplit('/').next().unwrap_or(path);
+    if basename == "manifest.json" {
+        return "application/manifest+json";
+    }
     match path.rsplit('.').next() {
         Some("html") => "text/html; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
