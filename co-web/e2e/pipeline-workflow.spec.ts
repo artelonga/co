@@ -12,11 +12,6 @@ import {
   createTask,
 } from "./helpers";
 
-test.beforeEach(async ({ page }) => {
-  const vp = page.viewportSize();
-  test.skip(!!(vp && vp.width <= 640), "Sidebar not available on mobile");
-});
-
 test.describe("Auth: unauthenticated writes rejected", () => {
   test("POST tasks without session returns 401", async ({
     request,  // unauthenticated plain context — no uat-login cookie

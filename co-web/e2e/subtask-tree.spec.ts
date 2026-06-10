@@ -11,11 +11,6 @@ import {
   createTask,
 } from "./helpers";
 
-test.beforeEach(async ({ page }) => {
-  const vp = page.viewportSize();
-  test.skip(!!(vp && vp.width <= 640), "Sidebar not available on mobile");
-});
-
 test.describe("Subtask: kanban view", () => {
   test("parent card shows subtask toggle with count", async ({
     page,

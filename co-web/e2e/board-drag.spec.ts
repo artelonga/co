@@ -87,6 +87,7 @@ async function holdAndDrag(page: Page, from: Locator, to: Locator): Promise<void
 }
 
 // ─── Desktop drag ─────────────────────────────────────────────────────────────
+// ─── Drag between columns ─────────────────────────────────────────────────────
 
 test.describe("Drag: move task card between kanban columns", () => {
   test("drag from 'To Do' to 'In Progress' updates the task status via API", async ({
