@@ -11,6 +11,8 @@ pub mod server;
 pub mod social;
 pub mod storage;
 pub mod sync;
+// CO-387: time-rendering primitive (calendar lenses + conversion math)
+pub mod time;
 
 // Universe-specific extensions
 pub mod universes;

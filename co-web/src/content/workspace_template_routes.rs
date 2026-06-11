@@ -179,7 +179,7 @@ fn parse_template_file(path: &Path) -> Option<WorkspaceTemplate> {
 
 /// Resolve the content-root directory for a universe.
 /// Prefers `local_repo_path` from the DB (CO-330); falls back to storage default.
-fn resolve_universe_content_root(state: &AppState, universe_key: &str) -> PathBuf {
+pub(crate) fn resolve_universe_content_root(state: &AppState, universe_key: &str) -> PathBuf {
     let (local_repo_path, fallback) = {
         let storage = lock_storage(state);
         let path: Option<String> = storage
