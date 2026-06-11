@@ -190,7 +190,7 @@ async fn test_themes_available_logged_in() {
         themes.palettes,
         vec!["", "scholarly", "scholarly-dark", "relic", "relic-light"]
     );
-    assert_eq!(themes.variants.len(), 8);
+    assert_eq!(themes.variants.len(), 9);
     assert_eq!(themes.custom, Some(true));
 }
 
