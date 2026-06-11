@@ -1,4 +1,4 @@
-# CO Roadmap — Wave-based, v3.0 mobile public release in Wave 4
+# CO Roadmap — Wave-based; v3.0.0 (public launch) and v3.1.0 (deploy/pipeline + KB) shipped — next: v3.2
 
 Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/docs/intelligence-as-a-service.html`](https://artelonga.com.br/docs/intelligence-as-a-service.html), renamed from BaaS 2026-06-06).
 
@@ -8,9 +8,9 @@ Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/doc
 
 **`yuri`** is the reference brain. **`artelonga`** is the business. **CO** is the bounded service — identity · warehouse · payment · sync · event bus.
 
-## Current state (2026-06-05)
+## Current state (2026-06-11)
 
-- **Version**: v2.43.0 released 2026-06-09 (`v2.43.0` tag, federated event bus + sync + privacy); main carries the v3.0.0 candidate bundle in `CHANGELOG-PENDING/`
+- **Version**: v3.1.0 released 2026-06-11 (delivery pipeline + knowledge base); v3.0.0 public launch shipped 2026-06-10. `CHANGELOG-PENDING/` is empty post-release — CO-403 (onboarding/pipeline docs) opens the next cycle
 - **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
 - **Staging** (post-CO-379): `https://staging.co.artelonga.com.br` — hand-deployed, auto-stops; PR-level contract probe is advisory for this reason (strict gate lives in release.yml)
 - **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-382 release-gate cron live since #180
@@ -28,9 +28,9 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⏪ done | v2.41.0 | Brain interlink + scrum + retro sim | 7 |
 | ⏪ done | **v2.42.0** | Unified gestão + cross-env identity + live timeline (CO-360/377/…) | — |
 | ⏪ done | **v2.43.0** | Federated event bus + sync + privacy (CO-376/378/383/384/385/389/391/394) | 8 |
-| 🟡 closing | **v3.0.0 — PUBLIC LAUNCH** | Workspace (Sala) + mobile + verification + edge protection — see as-built ledger below | **21 (19 merged)** |
-| ⚪ planned | v3.1.0 | Deploy/pipeline (CO-395/392/398) + time/forma (CO-387/396) + conteúdo×forma (CO-393) + monetization/KB/funnel/calendar (CO-366/367/371/372) — CO-385/389 already shipped in v2.43.0 | ~11 |
-| ⚪ planned | v3.2.0 | Security epic (encrypted assets, .co format, fs-as-web, Glasswing-aligned audit pipeline) | 5 |
+| ⏪ done | **v3.0.0 — PUBLIC LAUNCH** (2026-06-10) | Workspace (Sala) + mobile + verification + edge protection — see as-built ledger below | 21 |
+| ⏪ done | **v3.1.0** (2026-06-11) | Deploy/pipeline (CO-395/392/398) + KB/funnel/calendar (CO-367/371/372) + layered-arch spike (CO-390, informs CO-227/228). Time/forma (CO-387/396), conteúdo×forma (CO-393) and monetization (CO-366 — funnel steps 7–8 return 0 until billing_events lands) slipped to the next wave | 7 |
+| ⚪ next | v3.2.0 | Carry-over: time/forma (CO-387/396) + conteúdo×forma (CO-393) + CO-366 monetization (supervised) + CO-388 security gate. Security epic (encrypted assets, .co format, fs-as-web) + docs wave (CO-402 design doc, CO-403 onboarding/pipeline docs) | ~11 |
 | ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
 | ⚪ planned | v3.4.0 | Scale (job queue, cache, rate tiers, load tests) | 6 |
 | ⚪ planned | v3.5.0 | Universe types (manifest plugins, git-backed) | 4 |
@@ -139,24 +139,27 @@ release-gate → tag → retrospective.
 
 ## All open todo/in_progress work mapped
 
-**Wave-5 suggested order** (session 2026-06-10): CO-395 → CO-398 → CO-387 → CO-396+YG-123,
-with CO-372→CO-371→CO-367 co-auto-able in parallel, CO-366 supervised last,
-CO-388 gating any new public surface, CO-390 feeding implementation style.
+**Wave-5 outcome** (v3.1.0, 2026-06-11): CO-395/392/398 + CO-367/371/372 + CO-390
+shipped (7 entries). The time/forma leg (CO-387 → CO-396+YG-123), CO-393, and
+CO-366 monetization (still `todo` — funnel steps 7–8 await billing_events) did not
+make the cut and carry over to v3.2, where CO-388 still gates any new public surface.
 
 
 | ID | Title | Wave |
 |---|---|---|
 | CO-352…360, 365, 374…379, 397 | Workspace + mobile + verification + edge (see as-built ledger) | **v3.0 Wave 4 — merged** |
-| CO-387 | Time-rendering primitive `<co-time-grid>` (high — prerequisite of CO-396/YG-123) | v3.1 Wave 5 — time/forma |
-| CO-396 | Project timeline lens (gantt over `<co-time-grid>`, shared engine with YG-123) | v3.1 Wave 5 — time/forma |
-| CO-393 | Composable universe UI — content lenses, schema-driven forms (spec CO-387/396 against this frame: one lens system) | v3.1 Wave 5 — conteúdo×forma |
-| CO-395 | construir — markdown → Quartz public site (de-facto pattern of grcsamazonia/mse) | v3.1 Wave 5 — deploy/pipeline (first) |
-| CO-392 | co push — CLI → remote universe CRUD via Vault API | v3.1 Wave 5 — deploy/pipeline |
-| CO-398 | Delivery pipeline no quadro — VC/deploy events drive status via CO-380 bus + GitHub webhooks (automation fills, never locks; client deploys keep stakeholder go) | v3.1 Wave 5 — deploy/pipeline |
-| CO-388 | Security audit pipeline (Glasswing) — slot BEFORE any new public surface ships | v3.1 gate |
-| CO-390 | SPIKE layered architecture — feeds implementation style of the rest | v3.1 input |
-| Sala fractal scope (all-universes /sala, subset, universe-as-node) | needs CO-N ids — `sala-surface.md` Open work | v3.1 candidate |
-| CO-366, 367, 371, 372 | Monetization (supervised, not headless) + KB + funnel + calendar (cheap post-CO-382) | v3.1 Wave 5 |
+| CO-387 | Time-rendering primitive `<co-time-grid>` (high — prerequisite of CO-396/YG-123) | v3.2 carry-over — time/forma |
+| CO-396 | Project timeline lens (gantt over `<co-time-grid>`, shared engine with YG-123) | v3.2 carry-over — time/forma |
+| CO-393 | Composable universe UI — content lenses, schema-driven forms (spec CO-387/396 against this frame: one lens system) | v3.2 carry-over — conteúdo×forma |
+| CO-395 | construir — markdown → Quartz public site (de-facto pattern of grcsamazonia/mse) | ✅ shipped v3.1.0 |
+| CO-392 | co push — CLI → remote universe CRUD via Vault API | ✅ shipped v3.1.0 |
+| CO-398 | Delivery pipeline no quadro — VC/deploy events drive status via CO-380 bus + GitHub webhooks (automation fills, never locks; client deploys keep stakeholder go) | ✅ shipped v3.1.0 |
+| CO-388 | Security audit pipeline (Glasswing) — slot BEFORE any new public surface ships | v3.2 gate |
+| CO-390 | SPIKE layered architecture — feeds implementation style of the rest | ✅ shipped v3.1.0 |
+| Sala fractal scope (all-universes /sala, subset, universe-as-node) | needs CO-N ids — `sala-surface.md` Open work | v3.2 candidate |
+| CO-367, 371, 372 | KB + funnel + calendar (cheap post-CO-382) | ✅ shipped v3.1.0 |
+| CO-366 | Monetization — conversão/pagamento Hostinger (supervised, not headless; funnel steps 7–8 return 0 until its billing_events land) | v3.2 carry-over |
+| CO-403 | Onboarding & pipeline docs — WELCOME.md (history-teller onboarding, two-doors universe in/out) + delivery-pipeline invariant (review localhost → approve → merge, git × jj) | next release — docs |
 | **CO-104, 119** | **S3 backup + restore drill — not started; same S3 dep behind interim git backups and the failing CO-143 backup cron. Highest-leverage ops item on the board.** | **ops, schedule now** |
 | CO-145 | Encrypted assets | v3.2 Wave 6 |
 | CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web | v3.2 Wave 6 |

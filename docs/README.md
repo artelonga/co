@@ -6,6 +6,7 @@ Documentation for the **Co platform** (graph-based content management — CLI, w
 
 | Document | When to read it |
 |----------|----------------|
+| [`WELCOME.md`](./WELCOME.md) | You just arrived. The CO philosophy, abstractions, history timeline, and a first CRUD example. |
 | [`OPERATIONS.md`](./OPERATIONS.md) | You're deploying, smoke-testing, recovering, or rotating secrets. |
 | [`feedback-checklist.md`](./feedback-checklist.md) | You're a public-test user and want to know what to try + how to report. |
 | [`BREAKING-CHANGES.md`](./BREAKING-CHANGES.md) | You're upgrading a deployment across a minor version. |
