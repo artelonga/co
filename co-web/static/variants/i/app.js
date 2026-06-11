@@ -20,7 +20,7 @@ import {
     injectShowLoginModal as injectSidebarShowLogin,
 } from '/variants/a/modules/sidebar.js';
 import { renderKanban, injectKanbanCallbacks } from '/variants/a/modules/views/kanban.js';
-import { renderCalendar, renderGantt, renderEventsTimeline, injectCalendarCallbacks } from '/variants/a/modules/views/calendar.js';
+import { renderCalendar, renderEventsTimeline, injectCalendarCallbacks } from '/variants/a/modules/views/calendar.js';
 import { renderTable, closeStatusDropdown, injectTableCallbacks } from '/variants/a/modules/views/table.js';
 import { renderTimeline, initTimelineStart, scrollToDate, injectTimelineCallbacks } from '/variants/a/modules/views/timeline.js';
 import { renderDashboard, injectDashboardCallbacks } from '/variants/a/modules/views/dashboard.js';
@@ -53,6 +53,7 @@ import './modules/lenses/table.js';
 import './modules/lenses/timeline.js';
 import './modules/lenses/calendar.js';
 import './modules/lenses/dashboard.js';
+import './modules/lenses/time-grid.js'; // CO-387: <co-time-grid> lens
 import { graphLens } from './modules/lenses/graph.js';
 import { renderConteudo, openZoomModal, injectConteudoCallbacks } from './modules/lenses/document.js';
 import { setupDom } from './modules/dom-setup.js';
@@ -295,10 +296,16 @@ function renderContent() {
     if (state.loading) return;
     if (state.view === 'conteudo' || state.view === 'document') { renderConteudo(); return; }
     if (state.view === 'graph') { graphLens.render(); return; }
-    if (state.view.startsWith('gantt:')) {
-        const viewName = state.view.slice(6);
-        const viewDef = state.universeManifest && (state.universeManifest.views || []).find(v => v.type === 'gantt' && v.name === viewName);
-        if (viewDef) { renderGantt(viewDef); return; }
+    // CO-387: generalized named manifest views — any lens with namedViews
+    // renders via `<type>:<name>` keys (gantt:<name>, time-grid:<name>, …).
+    if (state.view.includes(':')) {
+        const sep = state.view.indexOf(':');
+        const lensId = state.view.slice(0, sep);
+        const viewName = state.view.slice(sep + 1);
+        const lens = getLensById(lensId);
+        const viewDef = state.universeManifest && (state.universeManifest.views || [])
+            .find(v => (v.type || v.id) === lensId && (v.name || 'default') === viewName);
+        if (lens && viewDef && typeof lens.render === 'function') { lens.render(viewDef); return; }
     }
     const hasCalendar = (state.universeManifest?.content_types || []).some(ct => ct.presentation?.calendar?.date_field);
     if (state.view === 'calendar' && hasCalendar) { renderCalendar(); return; }

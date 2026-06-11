@@ -23,6 +23,7 @@ export const ganttLens = {
     id: 'gantt',
     label: 'Gantt',
     icon: 'view_timeline',
+    namedViews: true, // CO-387: one tab per named manifest view (gantt:<name>)
     supports(contentType) {
         const schema = contentType?.schema || {};
         return !!(schema.start_date || schema.due_date || schema.end_date);
