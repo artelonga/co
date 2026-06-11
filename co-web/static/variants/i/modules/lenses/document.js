@@ -11,7 +11,7 @@ import {
     renderConteudo as _renderConteudo,
     openZoomModal as _openZoomModal,
     injectConteudoCallbacks as _injectConteudoCallbacks,
-} from '../../../a/modules/views/conteudo.js';
+} from '/variants/a/modules/views/conteudo.js';
 
 // Re-export tree and asset utilities (making them available as split modules).
 export { buildFolderTree, countFolderEntries, categorizeEntries } from './document-tree.js';

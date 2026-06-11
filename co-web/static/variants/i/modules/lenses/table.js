@@ -1,6 +1,6 @@
 // CO-393: Table lens — wraps the existing table view.
 import { registerLens } from './registry.js';
-import { renderTable, closeStatusDropdown, injectTableCallbacks } from '../../../a/modules/views/table.js';
+import { renderTable, closeStatusDropdown, injectTableCallbacks } from '/variants/a/modules/views/table.js';
 
 export { injectTableCallbacks };
 

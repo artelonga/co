@@ -1,6 +1,6 @@
 // CO-393: Document view — asset rendering utilities (split from conteudo.js).
 
-import { esc } from '../../../a/modules/helpers.js';
+import { esc } from '/variants/a/modules/helpers.js';
 
 export function shouldRenderInlinePdf(entry) {
     const fm = entry.frontmatter || {};

@@ -1,6 +1,6 @@
 // CO-393: Dashboard lens — wraps the existing dashboard view.
 import { registerLens } from './registry.js';
-import { renderDashboard, injectDashboardCallbacks } from '../../../a/modules/views/dashboard.js';
+import { renderDashboard, injectDashboardCallbacks } from '/variants/a/modules/views/dashboard.js';
 
 export { injectDashboardCallbacks };
 

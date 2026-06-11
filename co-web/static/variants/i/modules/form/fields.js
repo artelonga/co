@@ -1,7 +1,7 @@
 // CO-393: Form field renderers — one renderer per schema field type.
 // All renderers return an HTMLElement with a name attribute matching the field key.
 
-import { esc } from '../../../a/modules/helpers.js';
+import { esc } from '/variants/a/modules/helpers.js';
 
 const t = (k) => (window.t ? window.t(k) : k);
 
@@ -71,6 +71,9 @@ export function collectField(fieldKey, def, fieldEl) {
     if (def.type === 'number') {
         const inp = fieldEl.querySelector(`[name="${fieldKey}"]`);
         if (!inp) return undefined;
+        // Number('') === 0 — an untouched input must collect as undefined,
+        // not a phantom 0 that also bypasses required-field validation.
+        if (inp.value.trim() === '') return undefined;
         const n = Number(inp.value);
         return isNaN(n) ? undefined : n;
     }

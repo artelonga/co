@@ -1,6 +1,6 @@
 // CO-393: Kanban lens — wraps the existing kanban view.
 import { registerLens } from './registry.js';
-import { renderKanban, injectKanbanCallbacks } from '../../../a/modules/views/kanban.js';
+import { renderKanban, injectKanbanCallbacks } from '/variants/a/modules/views/kanban.js';
 
 export { injectKanbanCallbacks };
 

@@ -5,49 +5,49 @@
 //  3. Universe create/edit uses form engine (via dom-setup.js setupCriarUniverseModal)
 //  4. conteudo.js split behind document.js lens facade
 
-import { state, canEditCurrentUniverse } from '../a/modules/state.js';
-import { renderBreadcrumbs } from '../a/modules/breadcrumbs.js';
-import { api, apiFetch, injectApiCallbacks } from '../a/modules/api.js';
-import { esc, loadSubtreeState, addDays, todayDate } from '../a/modules/helpers.js';
-import { ZOOM_DAYS, rebuildI18nConstants } from '../a/modules/constants.js';
+import { state, canEditCurrentUniverse } from '/variants/a/modules/state.js';
+import { renderBreadcrumbs } from '/variants/a/modules/breadcrumbs.js';
+import { api, apiFetch, injectApiCallbacks } from '/variants/a/modules/api.js';
+import { esc, loadSubtreeState, addDays, todayDate } from '/variants/a/modules/helpers.js';
+import { ZOOM_DAYS, rebuildI18nConstants } from '/variants/a/modules/constants.js';
 import {
     showToast, showLoading, hideLoading, injectSwitchView,
-} from '../a/modules/settings.js';
+} from '/variants/a/modules/settings.js';
 import {
     renderSidebar, renderHeader, renderUsageCount, renderHeaderUserArea,
     renderUserBadge, renderMiniCalendar, injectSidebarCallbacks,
     injectSetUniverseSlugInUrl, injectScrollToDate,
     injectShowLoginModal as injectSidebarShowLogin,
-} from '../a/modules/sidebar.js';
-import { renderKanban, injectKanbanCallbacks } from '../a/modules/views/kanban.js';
-import { renderCalendar, renderGantt, renderEventsTimeline, injectCalendarCallbacks } from '../a/modules/views/calendar.js';
-import { renderTable, closeStatusDropdown, injectTableCallbacks } from '../a/modules/views/table.js';
-import { renderTimeline, initTimelineStart, scrollToDate, injectTimelineCallbacks } from '../a/modules/views/timeline.js';
-import { renderDashboard, injectDashboardCallbacks } from '../a/modules/views/dashboard.js';
-import { renderChangelog, injectChangelogCallbacks } from '../a/modules/views/changelog.js';
-import { renderWorkspace, injectWorkspaceCallbacks } from '../a/modules/views/workspace.js';
+} from '/variants/a/modules/sidebar.js';
+import { renderKanban, injectKanbanCallbacks } from '/variants/a/modules/views/kanban.js';
+import { renderCalendar, renderGantt, renderEventsTimeline, injectCalendarCallbacks } from '/variants/a/modules/views/calendar.js';
+import { renderTable, closeStatusDropdown, injectTableCallbacks } from '/variants/a/modules/views/table.js';
+import { renderTimeline, initTimelineStart, scrollToDate, injectTimelineCallbacks } from '/variants/a/modules/views/timeline.js';
+import { renderDashboard, injectDashboardCallbacks } from '/variants/a/modules/views/dashboard.js';
+import { renderChangelog, injectChangelogCallbacks } from '/variants/a/modules/views/changelog.js';
+import { renderWorkspace, injectWorkspaceCallbacks } from '/variants/a/modules/views/workspace.js';
 import {
     openTaskModal, closeModal, loadEditorBundle,
     handleFormSubmit, handleDelete, handleArchive,
     showUsageLimitModal, setupUsageLimitModal,
     showSubscribePromptModal, setupSubscribePromptModal,
     toggleActivityPanel, setupUniverseInfoModal, injectModalCallbacks,
-} from '../a/modules/modals.js';
-import { showLoginModal, hideLoginModal, setupLoginModal, setupSecurityModal, injectLoginCallbacks } from '../a/modules/login.js';
-import { setupOnboarding, injectOnboardingCallbacks } from '../a/modules/onboarding.js';
-import { bootYggdrasil, injectYggdrasilCallbacks } from '../a/modules/yggdrasil.js';
-import { bootAppForUniverse, renderUniverseHome, bootApp as _bootApp, injectBootCallbacks } from '../a/modules/boot.js';
+} from '/variants/a/modules/modals.js';
+import { showLoginModal, hideLoginModal, setupLoginModal, setupSecurityModal, injectLoginCallbacks } from '/variants/a/modules/login.js';
+import { setupOnboarding, injectOnboardingCallbacks } from '/variants/a/modules/onboarding.js';
+import { bootYggdrasil, injectYggdrasilCallbacks } from '/variants/a/modules/yggdrasil.js';
+import { bootAppForUniverse, renderUniverseHome, bootApp as _bootApp, injectBootCallbacks } from '/variants/a/modules/boot.js';
 import {
     setupInvitationsPage, setupInvitationsPanel, injectInvitationsCallbacks,
     consumePendingInviteToken, injectOpenDmWith,
-} from '../a/modules/invitations.js';
-import { openDmWith } from '../a/modules/dm.js';
-import { openConversas, destroyConversas, injectOpenDmWithForConversas } from '../a/modules/conversas.js';
-import { setupNotifications } from '../a/modules/notifications.js';
-import { setupSettingsPanel } from '../a/modules/settings.js';
+} from '/variants/a/modules/invitations.js';
+import { openDmWith } from '/variants/a/modules/dm.js';
+import { openConversas, destroyConversas, injectOpenDmWithForConversas } from '/variants/a/modules/conversas.js';
+import { setupNotifications } from '/variants/a/modules/notifications.js';
+import { setupSettingsPanel } from '/variants/a/modules/settings.js';
 
 // CO-393: variant-i lens registry + lens wrappers (self-register on import)
-import { computeDynamicTabs } from './modules/lenses/registry.js';
+import { computeDynamicTabs, getLensById } from './modules/lenses/registry.js';
 import './modules/lenses/kanban.js';
 import './modules/lenses/table.js';
 import './modules/lenses/timeline.js';
@@ -158,7 +158,7 @@ function injectManifestViewTabs(manifest) {
     for (const tab of tabs) {
         const btn = document.createElement('button');
         btn.className = `view-tab ${MANIFEST_TAB_CLASS}`;
-        btn.dataset.view = tab.id;
+        btn.dataset.view = tab.viewKey || tab.id;
         btn.innerHTML = `<span class="view-tab-icon material-symbols-outlined">${esc(tab.icon || 'view_module')}</span><span class="view-tab-label">${esc(tab.label)}</span>`;
         btn.addEventListener('click', () => switchView(btn.dataset.view));
         viewTabs.appendChild(btn);
@@ -253,7 +253,13 @@ async function openContentEditor(taskId) {
             const cmDiv = document.createElement('div');
             cmDiv.className = 'content-editor-cm';
             document.getElementById('content-editor-body').appendChild(cmDiv);
-            window.CoEditor.initEditor(cmDiv, { content: task.description || '', readOnly: false });
+            window.CoEditor.initEditor(cmDiv, {
+                content: task.description || '',
+                readOnly: false,
+                // Keep the hidden textarea in sync — the save handler reads
+                // from it; without this every save persists the stale text.
+                onChange: (val) => { if (ta) ta.value = val; },
+            });
         }
     } catch (_) {}
 }
@@ -305,6 +311,12 @@ function renderContent() {
     else if (state.view === 'dashboard') renderDashboard();
     else if (state.view === 'changelog') renderChangelog();
     else if (state.view === 'workspace') renderWorkspace();
+    else {
+        // Registry dispatch: any lens registered via registerLens() renders
+        // without touching this chain (CO-387/CO-396 extension point).
+        const lens = getLensById(state.view);
+        if (lens && typeof lens.render === 'function') lens.render();
+    }
 }
 
 function render() {
@@ -375,7 +387,7 @@ function wireModules() {
     injectWorkspaceCallbacks({ showToast });
     injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     // injectOpenContentEditor is from a's conteudo.js — variant i delegates openContentEditor
-    import('../a/modules/views/conteudo.js').then(({ injectOpenContentEditor }) => injectOpenContentEditor(openContentEditor)).catch(() => {});
+    import('/variants/a/modules/views/conteudo.js').then(({ injectOpenContentEditor }) => injectOpenContentEditor(openContentEditor)).catch(() => {});
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });
     setupUniverseInfoModal({});
     injectInvitationsCallbacks({ showToast, showLoginModal, loadMeUniverses });

@@ -3,7 +3,7 @@ import { registerLens } from './registry.js';
 import {
     renderTimeline, getTimelineRange, initTimelineStart, scrollToDate,
     injectTimelineCallbacks,
-} from '../../../a/modules/views/timeline.js';
+} from '/variants/a/modules/views/timeline.js';
 
 export { injectTimelineCallbacks, initTimelineStart, scrollToDate };
 

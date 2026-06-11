@@ -1,34 +1,33 @@
 // CO-393: DOM setup — event wiring and boot sequence for variant i.
 // Extracted from app.js so that app.js stays ≤ 500 LoC.
 
-import { state } from '../../a/modules/state.js';
-import { api, apiFetch } from '../../a/modules/api.js';
-import { esc } from '../../a/modules/helpers.js';
-import { ZOOM_DAYS, rebuildI18nConstants } from '../../a/modules/constants.js';
-import { addDays, todayDate } from '../../a/modules/helpers.js';
+import { state } from '/variants/a/modules/state.js';
+import { api, apiFetch } from '/variants/a/modules/api.js';
+import { esc } from '/variants/a/modules/helpers.js';
+import { ZOOM_DAYS, rebuildI18nConstants } from '/variants/a/modules/constants.js';
+import { addDays, todayDate } from '/variants/a/modules/helpers.js';
 import {
-    showLoading, hideLoading, setupSettingsPanel, setupLoginModal, setupSecurityModal,
-} from '../../a/modules/settings.js';
+    showLoading, hideLoading, setupSettingsPanel,
+} from '/variants/a/modules/settings.js';
 import {
     renderHeaderUserArea, renderUserBadge, renderUsageCount,
-    renderMiniCalendar, setupHamburgerMenu, injectSidebarShowLogin,
-    renderNotificationSettings,
-} from '../../a/modules/sidebar.js';
-import { closeModal, closeStatusDropdown, handleFormSubmit, handleDelete, handleArchive,
+    renderMiniCalendar, setupHamburgerMenu,
+} from '/variants/a/modules/sidebar.js';
+import { closeModal, handleFormSubmit, handleDelete, handleArchive,
     setupUsageLimitModal, setupSubscribePromptModal, toggleActivityPanel,
     setupUniverseInfoModal,
-} from '../../a/modules/modals.js';
-import { setupLoginModal as _setupLoginModalFn, showLoginModal, hideLoginModal, setupSecurityModal as _setupSecurityModalFn } from '../../a/modules/login.js';
-import { setupOnboarding, injectOnboardingCallbacks } from '../../a/modules/onboarding.js';
-import { setupInvitationsPage, setupInvitationsPanel } from '../../a/modules/invitations.js';
-import { bootAppForUniverse, renderUniverseHome } from '../../a/modules/boot.js';
-import { bootYggdrasil } from '../../a/modules/yggdrasil.js';
-import { renderNotificationsPage } from '../../a/modules/notifications.js';
-import { openConversas, destroyConversas } from '../../a/modules/conversas.js';
-import { setupNotifications, bumpUnreadCount } from '../../a/modules/notifications.js';
-import { openDmWith, mountDmInbox } from '../../a/modules/dm.js';
+} from '/variants/a/modules/modals.js';
+import { closeStatusDropdown } from '/variants/a/modules/views/table.js';
+import { setupLoginModal, setupSecurityModal, showLoginModal, hideLoginModal } from '/variants/a/modules/login.js';
+import { setupOnboarding, injectOnboardingCallbacks } from '/variants/a/modules/onboarding.js';
+import { setupInvitationsPage, setupInvitationsPanel } from '/variants/a/modules/invitations.js';
+import { bootAppForUniverse, renderUniverseHome } from '/variants/a/modules/boot.js';
+import { bootYggdrasil } from '/variants/a/modules/yggdrasil.js';
+import { renderNotificationsPage } from '/variants/a/modules/notifications.js';
+import { openConversas, destroyConversas } from '/variants/a/modules/conversas.js';
+import { setupNotifications, bumpUnreadCount } from '/variants/a/modules/notifications.js';
+import { openDmWith, mountDmInbox } from '/variants/a/modules/dm.js';
 import { openZoomModal } from './lenses/document.js';
-import { renderForm, collect } from './form/engine.js';
 import { renderUniverseForm } from './form/engine.js';
 
 let _notifSetupDone = false;
@@ -147,6 +146,9 @@ export function setupDom(callbacks) {
                 const btn2 = modal.querySelector('#co-criar-submit');
                 btn2.disabled = true;
                 try {
+                    // apiFetch never throws — it toasts and returns null on
+                    // non-2xx — so the button must be re-enabled on the falsy
+                    // path, not in catch.
                     const created = await apiFetch('/api/v1/universes', {
                         method: 'POST',
                         body: JSON.stringify({ key: data.key, name: data.name, description: data.description, visibility: data.visibility || 'private' }),
@@ -156,6 +158,8 @@ export function setupDom(callbacks) {
                         close();
                         await loadMeUniverses();
                         render();
+                    } else {
+                        btn2.disabled = false;
                     }
                 } catch (err) {
                     btn2.disabled = false;
@@ -175,7 +179,7 @@ export function setupDom(callbacks) {
         setupLoginModal();
         setupSecurityModal();
         document.getElementById('btn-security')?.addEventListener('click', () => {
-            import('../../a/modules/notification-settings.js').then(({ renderNotificationSettings: rns }) => {
+            import('/variants/a/modules/notification-settings.js').then(({ renderNotificationSettings: rns }) => {
                 rns(document.getElementById('notif-settings-content'));
             }).catch(() => {});
         });

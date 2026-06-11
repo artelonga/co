@@ -3,9 +3,9 @@
 // to span child universes into the parent graph view.
 
 import { registerLens } from './registry.js';
-import { state } from '../../../a/modules/state.js';
-import { apiFetch } from '../../../a/modules/api.js';
-import { esc } from '../../../a/modules/helpers.js';
+import { state } from '/variants/a/modules/state.js';
+import { apiFetch } from '/variants/a/modules/api.js';
+import { esc } from '/variants/a/modules/helpers.js';
 
 const t = (k) => (window.t ? window.t(k) : k);
 

@@ -2,7 +2,7 @@
 import { registerLens } from './registry.js';
 import {
     renderCalendar, renderGantt, renderEventsTimeline, injectCalendarCallbacks,
-} from '../../../a/modules/views/calendar.js';
+} from '/variants/a/modules/views/calendar.js';
 
 export { injectCalendarCallbacks };
 
