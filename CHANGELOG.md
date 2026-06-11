@@ -5,6 +5,151 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.1.0] — 2026-06-11 — delivery pipeline + knowledge base
+
+## CO-367 — Universal content → KB sync — generalize the rollup pattern to all entry types
+
+Introduces a universal KB ingest pipeline that makes every entry write (note,
+article, poem, asset reference) visible to downstream consumers — search, agents,
+analytics — without changing how users interact with CO.
+
+- **Migration v71** adds three new tables to `meta.db`:
+  - `entry_kb_index` — history table, PK `(universe_key, entry_path, body_hash)`
+  - `entry_kb_latest` — latest-version view per `(universe_key, entry_path)`
+  - `entry_kb_fts` — FTS5 virtual table for full-text search over `body_preview`
+- **POST /api/v1/kb/ingest** — idempotent upsert, auth via `CO_KB_TOKEN` bearer (503 if unset)
+- **GET /api/v1/kb/search?q=...** — FTS5 search; optional `universe_key` filter
+- **GET /api/v1/kb/recent?universe_key=...** — latest indexed entries per path
+- **Entry write wiring** — `create_entry` and `update_entry` fire `kb_routes::fire_kb_ingest`
+  via `tokio::spawn`; the write response never waits for KB sync
+- **Frontend retry queue** (`modules/kb-sync.js`) — queues `KbIngestEvent`s in IndexedDB
+  when the endpoint is unreachable and drains on reconnect (exponential backoff: 1m → 5m → 30m → 2h)
+- **Atividades** — `event_type = 'kb.ingested'` lands in the audit log per new ingest
+- **Asset refs** — `asset_refs` JSON array preserved in both history and latest tables
+- **OpenAPI** — three KB endpoints documented with request/response schemas
+
+### Why
+
+CO-340 shipped analytics rollups as a one-off pattern. This PR retroactively
+generalises that shape — local write → cache-first render → consented async sync →
+downstream availability — so the BaaS §6 promise "add anything → registered,
+synced, delivered" holds for all content types.
+
+## CO-371 — Single funnel report endpoint — discover → onboard, end-to-end with drop-off per step
+
+Adds the 8-step acquisition funnel to `GET /api/v1/analytics/public/funnel?window=30d` (admin-only when `window` param is present). The funnel covers the full acquisition arc: Discover → Engage → Intent → Capture → Qualify → Register → Convert → Onboard, with per-step drop-off percentages and 5 KPI ratios.
+
+Steps 1–3 are sourced from `telemetry_events`; step 4 uses the CO-370 email join (`users UNION leads`); steps 5–6 from `leads`/`users`; steps 7–8 gracefully return 0 until CO-366 (billing_events) lands.
+
+Breakdowns by `source` (referrer), `day`, and `country` are supported. The `/gestao/resumo` dashboard gains a "Funil" tab rendering the vertical bar chart with drop-off labels and KPI grid.
+
+### Why
+Enables the platform operator to answer "of visitors from HN this week, what % converted to paid?" in a single query instead of manual SQL across 4 stores. Provides the killer metric for the `/gestao/resumo` dashboard (CO-360).
+
+## CO-372 — Sprint calendar with Definition of Done + ICS export
+
+Adds a sprint calendar view and iCalendar export to the scrum tooling.
+
+- `GET /api/v1/scrum/calendar?past=6&future=4` — JSON response with past and future sprints, DoD percentages computed from `## Acceptance` checkboxes in spec files, sprint events (planning/review/retro) as ISO-8601 UTC timestamps.
+- `GET /api/v1/scrum/calendar.ics` — iCalendar export for Google/Apple Calendar subscription; includes VALARM 15-min reminders and one VEVENT per sprint event.
+- `/scrum/calendar` SPA — standalone dark-theme HTML page with current-sprint hero + live countdown (60s updates), velocity sparkline, past/future sprint cards, and ICS subscription link.
+- `co-web/scripts/scrum/cutoff-check.ts` — PR cutoff gate: exits 1 if merges landed after Wednesday 23:59 BRT (sprint_end − 15h01m); integrated into `scripts/release-commit.sh` (bypassed by `--ignore-dod`).
+- Sprint data embedded at compile time via `include_str!` from `docs/scrum/sprints/_index.json`; Dockerfile updated to include that path in build context.
+
+### Why
+Provides a single always-up-to-date view of sprint history and upcoming milestones, with calendar subscription so stakeholders see sprint ceremonies in their own clients. The cutoff gate enforces the scrum discipline of not merging after the Wednesday freeze.
+
+## CO-390 — SPIKE — layered architecture (domain/dto/repository/service) proof-of-concept on entries module
+
+Spike branch (`feat/CO-390-spike-layered-architecture-domain-dto-re`) exploring the
+`alineaos/gerenciador-de-bibliotecas` layered architecture pattern for CO's `entries`
+module. Added 12 new files in `co-web/src/{domain,dto,repository,service,mapper}/`
+demonstrating the pattern; modified `entry_routes.rs` to use `EntryService` for
+6 business rules; wrote a decision document with quantified metrics.
+
+Result: **partial adoption recommended** — DTO families + service layer per feature,
+without global directory restructure. All 4 hypotheses passed (coverage ↑, OpenAPI
+richer, 26% LOC overhead within 60% budget, wire-compat verified). Spike branch is
+archival; not merged to main.
+
+### Why
+
+Architecture spike to reduce uncertainty before committing to a multi-month refactor.
+3-day box to know if the pattern fits Rust + CO ergonomics. Informs CO-227 (server
+decomposition) and CO-228 (type safety).
+
+## CO-392 — co push — CLI → remote universe CRUD over the Vault API (the missing edge)
+
+Adds `co push`, a first-class CLI verb that uploads a local universe to a deployed
+CO server over HTTP. It wraps `POST /api/v1/universes` (create-or-update) plus
+`PUT …/vault/{path}` for every `content/**/*.md` file, using the same REST endpoints
+the web front-end calls. Re-running converges (idempotent; no duplicates).
+
+Flags: `--remote <url>` / `CO_REMOTE`, `--token <t>` / `CO_TOKEN`, `--key`, `--dry-run`,
+`--delete-missing`. Skips `_source/` (LGPD), hidden files, and `.gitignore`d paths.
+
+Supersedes the ad-hoc `scripts/bulk-upload.py` Vault loop.
+
+### Why
+
+The CLI and web front-end share the same REST API but were not connected for the
+"publish to production" path: `co launch` seeds into *local* SQLite only, while pushing
+to a deployed server required a separate script. CO-392 closes that edge so "add a
+universe" is one verb with identical semantics regardless of surface, and no `seed.rs`
+edit or redeploy is needed (`feedback_no_hardcoded_content_mappings`).
+
+## CO-395 — construir — universe markdown → Quartz static public site (board stays the app)
+
+Added `co construir [<key>] [--out <dir>] [--redearte <path>]`, a new CLI command
+that feeds a universe's `content/*.md` through the redearte Quartz template and
+writes a self-contained static digital-garden site to `--out` (default: `public/`).
+
+- Wikilinks, backlinks, and the graph render natively via Quartz — no CO chrome,
+  read-only. `_source/` PII and non-content files are excluded by construction
+  (Quartz only sees `content/`).
+- Universe discovery follows `co launch`: walks up from CWD to the repo root
+  (`.git` or `.jj`). `CO_REDEARTE_PATH` overrides the default `~/projects/redearte`.
+- `co-web` subdomain middleware now skips slugs listed in `CO_STATIC_SITES`
+  (comma-separated) so the subdomain routes to the Fly static app while
+  `co.artelonga.com.br/<slug>` continues to serve the gated board.
+- Documented the full flow (build → deploy scaffold → routing split) in
+  `docs/universe-public-site.md`.
+
+### Why
+
+Every universe now gets a public static site from its markdown with no bespoke
+per-universe app. Board and site share one source (`content/`): board via
+`co launch`, site via `co construir`. First target: `grcsamazonia`.
+
+## CO-398 — Delivery pipeline no quadro — status dirigido por VC/deploy
+
+Implementa o pipeline de entrega padrão: o status de cada tarefa passa a ser
+dirigido pelos eventos de VC/deploy em vez de drag-and-drop manual.
+
+### O que mudou
+
+- **Novo enum de status** `[todo, started, in_progress, review, done]` como padrão do `default_manifest()` para universos-projeto novos. Boards legados `[todo, doing, done]` permanecem válidos.
+- **Campos de PR/preview** `pr_url` e `preview_url` adicionados ao schema padrão de task (sinaliza revisão incompleta quando `preview_url` está ausente).
+- **Migration v71** — tabela `task_status_log` para rastreio de lead time por coluna.
+- **EDA `task.status_changed`** publicado sempre que o campo `status` muda (via `update_entry` ou webhook do GitHub).
+- **EDA `deploy.triggered`** emitido quando uma tarefa chega em `done` (gancho para CO-395 e fluxo UAT→prod).
+- **Subscriber `DeliveryPipelinePersistor`** — persiste cada transição em `task_status_log` e republica `deploy.triggered`.
+- **`POST /api/v1/delivery/github?universe=<slug>`** — endpoint de webhook do GitHub (HMAC-SHA256 validado via `CO_GITHUB_WEBHOOK_SECRET`):
+  - `create` (branch com `CO-<n>`) → `started`
+  - `push` (commits na branch) → `in_progress`
+  - `pull_request opened` (título/corpo com `CO-<n>`) → `review` + `pr_url`
+  - `pull_request closed merged` → `done`
+- **`GET /api/v1/universes/:slug/delivery/metrics`** — lead time médio por coluna + contagem de tarefas entregues.
+- **Docs** em `docs/delivery-pipeline.md`.
+
+### Why
+
+O quadro era um espelho manual do trabalho real que vivia no git. Com o pipeline,
+o status da tarefa é sempre o estado verdadeiro: "done" implica "aprovado e em
+produção". Transição manual (drag) continua possível — a automação preenche,
+não tranca.
+
+
 ## [3.0.0] — 2026-06-10 — public launch — brain on any device
 
 ## CO-352 — Workspace ("Sala") primitive — spatial canvas view anchored to a universe
