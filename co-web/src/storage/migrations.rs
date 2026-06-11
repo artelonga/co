@@ -2625,7 +2625,33 @@ impl Storage {
             );
         }
 
-        // v72 belongs to CO-398 (task_status_log, PR #194 in flight).
+        if current_version < 72 {
+            // CO-398: delivery pipeline — task_status_log tracks every status
+            // transition for lead-time telemetry (time per column, todo→done).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS task_status_log (
+                       id           TEXT PRIMARY KEY,
+                       universe_key TEXT NOT NULL,
+                       entry_path   TEXT NOT NULL,
+                       status_from  TEXT,
+                       status_to    TEXT NOT NULL,
+                       trigger      TEXT NOT NULL DEFAULT 'manual',
+                       triggered_at TEXT NOT NULL
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_task_status_log_entry
+                       ON task_status_log(universe_key, entry_path, triggered_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_task_status_log_status
+                       ON task_status_log(universe_key, status_to, triggered_at DESC);",
+                )
+                .expect("CO-398 v72: task_status_log table + indexes");
+            crate::record_migration!(
+                self.conn,
+                72,
+                "CO-398: task_status_log — delivery pipeline lead-time tracking"
+            );
+        }
+
         if current_version < 73 {
             // CO-388: security_findings — stores vulnerability scan results from
             // the security audit pipeline (Project Glasswing step 11).

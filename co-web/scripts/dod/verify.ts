@@ -106,12 +106,11 @@ function parseSpecFile(coId: string): { title: string; items: AcceptanceItem[] }
   const title = titleMatch ? titleMatch[1].trim() : coId;
 
   // Find ## Acceptance section and extract checklist items
-  const acceptanceMatch = content.match(/^##\s+Acceptance\s*\n([\s\S]*?)(?=^##|\z)/m);
-  if (!acceptanceMatch) {
-    return { title, items: [] };
-  }
-
-  const section = acceptanceMatch[1];
+  const acceptanceMatch = content.match(/^##\s+(?:Acceptance|Crit[ée]rios)\s*\n([\s\S]*?)(?=^##|\z)/m);
+  // Fallback: specs without an Acceptance section (pt-style Escopo specs)
+  // still get their checkboxes harvested from the whole document, so the
+  // DoD report is never a trivial 0/0 = 100%.
+  const section = acceptanceMatch ? acceptanceMatch[1] : content;
   const items: AcceptanceItem[] = [];
   for (const line of section.split('\n')) {
     const unchecked = line.match(/^[-*]\s+\[\s\]\s+(.+)/);

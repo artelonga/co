@@ -1,0 +1,77 @@
+{
+  "co_id": "CO-398",
+  "spec_title": "Delivery pipeline no quadro — status dirigido por VC/deploy: todo → started (branch) → in_progress → review (PR + localhost) → done (merge aprovado ⇒ deploy)",
+  "timestamp": "2026-06-10T22:42:41.754Z",
+  "items": [
+    {
+      "text": "Enum default `[todo, started, in_progress, review, done]` no schema de task dos universos-projeto novos (template); boards legados `[todo, doing, done]` seguem válidos",
+      "pattern": "universos[- _]projeto|default|started|progress|review",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Eventos de transição no bus (CO-380): `task.status_changed{task, from, to, trigger}`",
+      "pattern": "co[- _]380|eventos|transi|status",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Integração GitHub (reusa `co gh`/collab + WebhookWorker): branch criada com `CO-<n>` no nome ⇒ `started`; PR aberto referenciando a task ⇒ `review`; merge ⇒ `done`",
+      "pattern": "collab|integra|github|reusa",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Cartão em `review` exibe as duas pernas: link do PR + link do preview (localhost/UAT); sem preview, o cartão sinaliza revisão incompleta",
+      "pattern": "uat|review|exibe|pernas|preview",
+      "matched_file": "co-web/e2e/codemirror.spec.ts",
+      "matched_test": "typing ## Heading renders in preview pane",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`done` emite evento de deploy (gancho para CO-395 `construir` em universos de conteúdo e para o fluxo UAT→prod em código)",
+      "pattern": "co[- _]395|emite|evento|deploy|gancho",
+      "matched_file": "co-web/e2e/archived/co-280-sidebar-sections.spec.ts",
+      "matched_test": "Platforms section lists 5 sister deployable units",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Transição manual continua possível (drag) — automação preenche, não tranca",
+      "pattern": "transi|manual|continua|automa",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Telemetria: lead time por coluna (todo→done) visível no dashboard",
+      "pattern": "telemetria|coluna|dashboard",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Docs: `docs/delivery-pipeline.md` + CHANGELOG-PENDING/CO-398.md",
+      "pattern": "delivery[- _]pipeline|changelog[- _]pending|co[- _]398|delivery[- _]pipeline.md|co[- _]398.md",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 8,
+  "passed": 4,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}

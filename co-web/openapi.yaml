@@ -97,6 +97,8 @@ tags:
     description: "kb endpoints"
   - name: "security"
     description: "security endpoints"
+  - name: "delivery"
+    description: "delivery endpoints"
   - name: "suggest/review pages"
     description: "suggest/review pages endpoints"
   - name: "scrum"
@@ -3067,6 +3069,36 @@ paths:
     put:
       tags: ["universes"]
       summary: "Update config"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/delivery/github:
+    post:
+      tags: ["delivery"]
+      summary: "GitHub webhook — branch/PR/merge events → status transitions"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/delivery/metrics:
+    get:
+      tags: ["delivery"]
+      summary: "Lead-time metrics per column (task_status_log)"
       security:
         - sessionCookie: []
       parameters:

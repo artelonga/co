@@ -1051,13 +1051,49 @@ pub async fn update_entry(
         });
 
     // CO-380: also publish to EDA bus.
+    let old_status = existing
+        .frontmatter
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let new_status = new_fm
+        .get("status")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     state.core.eda_bus.publish(crate::eda::Event::new(
         "entry.updated",
         Some(slug.clone()),
         None,
-        serde_json::json!({ "path": path, "entry_type": entry.entry_type }),
+        serde_json::json!({
+            "path": path,
+            "entry_type": entry.entry_type,
+            "status": new_status,
+        }),
         crate::eda::Visibility::UniverseMembers,
     ));
+    // CO-398: publish task.status_changed when the status field transitions.
+    if old_status != new_status
+        && let Some(ref to) = new_status
+    {
+        let title = new_fm
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        state.core.eda_bus.publish(crate::eda::Event::new(
+            "task.status_changed",
+            Some(slug.clone()),
+            None,
+            serde_json::json!({
+                "path": path,
+                "title": title,
+                "from": old_status,
+                "to": to,
+                "trigger": "manual",
+            }),
+            crate::eda::Visibility::UniverseMembers,
+        ));
+    }
 
     // CO-367: non-blocking KB ingest — fires async, never blocks the write response.
     crate::kb_routes::fire_kb_ingest(

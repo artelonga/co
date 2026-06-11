@@ -737,6 +737,15 @@ CO-388: Glasswing security audit pipeline — scan findings + release blocker.
 | GET | `/api/v1/gestao/security/scan/status` | admin (gh) | Last scan status |
 | POST | `/api/v1/gestao/security/scan` | admin (gh) | Trigger a scan |
 
+## delivery — pipeline no quadro (delivery_routes.rs)
+
+CO-398: VC/deploy events drive board status via the CO-380 bus + GitHub webhooks.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/universes/{slug}/delivery/github` | webhook secret | GitHub webhook — branch/PR/merge events → status transitions |
+| GET | `/api/v1/universes/{slug}/delivery/metrics` | visibility | Lead-time metrics per column (task_status_log) |
+
 ---
 
 ## suggest/review pages — top-level, served before the SPA wildcard
