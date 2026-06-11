@@ -7,6 +7,50 @@ title: Delivery Pipeline
 
 CO-398 introduced a **delivery pipeline** for project universes: task status is driven by version-control and deploy events instead of manual drag-and-drop. The board becomes a live map of the work's actual state.
 
+## The invariant — review on localhost, approve, merge
+
+However the statuses are spelled, the pipeline is always the same three gestures, in this order:
+
+1. **Review on localhost.** The change is seen *running* — `co serve`, a Quartz preview, or UAT — not just read as a diff. This is why a `review` card without a `preview_url` is signalled as incomplete.
+2. **Approve.** The stakeholder says yes to what they saw. Approval is a human gate: automation fills statuses, it never grants approval.
+3. **Merge.** The merge is the durable record of that approval — and the only thing that may trigger a production deploy. Prod follows merge, never precedes it.
+
+CO speaks two version-control vocabularies — traditional git (code universes, PRs on GitHub) and CO-native versioning backed by jujutsu (content universes; states, branches, proposals and merges as universe operations, not a git wrapper). The three gestures map onto both:
+
+| Gesture | Traditional git (code) | CO-native / jujutsu (content) |
+|---|---|---|
+| Open work | branch `feat/CO-<n>-…` | `jj new` — the working copy is itself a change, snapshotted automatically |
+| Iterate | conventional commits, pushed | `jj commit -m "tipo(escopo): …"` — states on the universe |
+| **Review on localhost** | PR opened (`CO-<n>` in title) + reviewer runs it (`co serve` / UAT), `preview_url` attached | proposal (proposta) open + stakeholder sees it served locally (`co serve` / `co construir` preview) |
+| **Approve** | PR approval, given after seeing the preview | stakeholder approves the proposta (visitors go through suggest/review) |
+| **Merge ⇒ deploy** | PR merged = the approval record; UAT→prod deploy follows | mesclar / `jj bookmark set main -r @-` + `jj git push`; then `co push` or `construir` publishes |
+
+### Example — a code change, the git way
+
+```bash
+git checkout -b feat/CO-412-novo-filtro     # card → started
+# … TDD commits …                            # card → in_progress
+gh pr create --title "feat: novo filtro (CO-412)"   # card → review
+co serve                                     # reviewer sees it RUN on localhost
+# approval happens here, looking at the running thing
+scripts/safe-merge-pr.sh artelonga/co <pr>   # card → done ⇒ deploy
+```
+
+### Example — a content change, the jj way
+
+```bash
+cd ~/projects/miguel
+# edit content/diario/2026-06-18.md          (jj snapshots the working copy)
+jj commit -m "feat(diario): nota de reuniao"
+co serve                                     # stakeholder reviews on localhost
+# approval happens here
+jj bookmark set main -r @-                   # the "merge": main now points at the approved state
+jj git push                                  # the approval record leaves the machine
+co push --remote https://co.artelonga.com.br --token $CO_TOKEN   # deploy
+```
+
+Same shape both times: nothing reaches production that was not first seen running on localhost and approved, and the merge — PR merge or bookmark move — is the artifact that proves it.
+
 ## Status sequence
 
 | Status | Meaning | Triggered by |
