@@ -37,6 +37,8 @@ tags:
     description: "workspace endpoints"
   - name: "workspace-templates"
     description: "workspace-templates endpoints"
+  - name: "calendar"
+    description: "calendar endpoints"
   - name: "suggest/review"
     description: "suggest/review endpoints"
   - name: "entries"
@@ -2776,6 +2778,19 @@ paths:
           schema:
             type: string
         - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/calendar:
+    get:
+      tags: ["calendar"]
+      summary: "Calendar lens config: `{ default_lens, lenses[] }`. Each lens: `id`, `name`, `scale` (linear or log), `epoch_ms?`, `canonical_field?` (default `event_at_ms`), `canonical_type?` (i64_ms, f64_years or i64_units), `week_length_days?`, `weekday_names?[]`, `month_length?`, `timezone?`, `display_format?`, `display_unit?`, `epoch?`, `custom_event_field?`, `cell_duration_ms?`, `break_duration_ms?`, `label_periods?[{name,at}]`. Falls back to the built-in Gregorian lens when the universe has no `_calendar.yaml`."
+      parameters:
+        - name: slug
           in: path
           required: true
           schema:

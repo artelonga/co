@@ -158,6 +158,17 @@ CO-355: per-universe `_workspace.yaml` template registry — seeds Sala layouts.
 
 ---
 
+## calendar — `/api/v1/universes/{slug}/calendar` (time/routes.rs)
+
+CO-387: per-universe calendar lens configuration (`_calendar.yaml`) for the
+`<co-time-grid>` time-rendering primitive. Lens metadata only — no entry data.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/universes/{slug}/calendar` | anon | Calendar lens config: `{ default_lens, lenses[] }`. Each lens: `id`, `name`, `scale` (linear or log), `epoch_ms?`, `canonical_field?` (default `event_at_ms`), `canonical_type?` (i64_ms, f64_years or i64_units), `week_length_days?`, `weekday_names?[]`, `month_length?`, `timezone?`, `display_format?`, `display_unit?`, `epoch?`, `custom_event_field?`, `cell_duration_ms?`, `break_duration_ms?`, `label_periods?[{name,at}]`. Falls back to the built-in Gregorian lens when the universe has no `_calendar.yaml`. |
+
+---
+
 ## suggest/review — `/api/v1/universes/{slug}/suggest` + `/{slug}/review*` (review_routes.rs)
 
 CO-354: entry lifecycle (draft → reviewed → published) with anon submissions. Outside the writer gate so anonymous visitors can suggest; review actions enforce ownership in-handler.
