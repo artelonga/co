@@ -583,6 +583,25 @@ enum Commands {
         delete_missing: bool,
     },
 
+    /// Release notes — what changed in recent CO versions
+    ///
+    /// Shows the latest release section from the CHANGELOG embedded in this
+    /// binary (always matches the installed version).
+    ///
+    /// Examples:
+    ///   co updates                   # latest release notes
+    ///   co updates -n 3              # three most recent releases
+    ///   co updates --all             # full release history (headers)
+    Updates {
+        /// Number of recent releases to show in detail
+        #[arg(short = 'n', long, default_value_t = 1)]
+        count: usize,
+
+        /// List every release header instead of detailed notes
+        #[arg(long)]
+        all: bool,
+    },
+
     /// Start the project management board (web UI)
     ///
     /// Launches a local web server with Kanban/Calendar views.
@@ -1567,6 +1586,9 @@ fn main() {
             delete_missing,
         } => {
             commands::push::run(remote, token, key, dry_run, delete_missing);
+        }
+        Commands::Updates { count, all } => {
+            commands::updates::run(count, all);
         }
         Commands::Board {
             action,
