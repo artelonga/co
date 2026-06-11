@@ -240,7 +240,7 @@
             const data = await res.json();
             currentVariant = data.variant;
         } catch (_) {
-            const match = document.cookie.match(/co_variant=([a-h])/);
+            const match = document.cookie.match(/co_variant=([a-i])/);
             if (match) currentVariant = match[1];
         }
 

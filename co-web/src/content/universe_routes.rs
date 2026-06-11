@@ -32,7 +32,7 @@ const FREE_PALETTES: &[&str] = &[
 const PREMIUM_PALETTES: &[&str] = &["", "modern"];
 
 /// Variant keys (a–h) available only to real logged-in users.
-const PREMIUM_VARIANTS: &[&str] = &["a", "b", "c", "d", "e", "f", "g", "h"];
+const PREMIUM_VARIANTS: &[&str] = &["a", "b", "c", "d", "e", "f", "g", "h", "i"];
 
 /// Public universe info returned by GET /:slug — no sensitive owner_id.
 #[derive(Debug, Serialize)]

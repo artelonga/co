@@ -21,5 +21,6 @@ pub mod schema;
 pub mod space;
 pub mod store;
 pub mod tools;
+pub mod updates;
 pub mod validate;
 pub mod write;

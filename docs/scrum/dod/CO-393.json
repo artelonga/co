@@ -1,0 +1,69 @@
+{
+  "co_id": "CO-393",
+  "spec_title": "Composable universe UI — content lenses + schema-driven form engine, manifest-driven",
+  "timestamp": "2026-06-11T17:10:22.593Z",
+  "items": [
+    {
+      "text": "Lens registry: all existing views registered; manifest drives visible lenses (no `gantt`-only hardcode)",
+      "pattern": "registry|existing|views|registered",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Form engine renders + collects from a `content_types[].schema`; entry create/edit uses it",
+      "pattern": "edit|engine|renders|collects|content",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Universe create/edit (the CRUD from `docs/universe-crud.md`) uses the form engine",
+      "pattern": "universe[- _]crud|edit|universe[- _]crud.md|universe|create|engine",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "create project task, drag to In Progress, edit title, then delete",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Adding a new `content_type` to `_universe.yaml` produces a working form + eligible lenses with **no JS change** (demonstrated test)",
+      "pattern": "adding|content|universe|produces",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Sidebar renders `parent_key` children; graph lens spans universes",
+      "pattern": "sidebar|renders|parent|children",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`conteudo.js` split; no SPA file > 500 LoC",
+      "pattern": "conteudo|split",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "No regression to `variants/a`; new variant promoted only after parity",
+      "pattern": "regression|variants|variant|promoted",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "no-regression — board navigation still works after CO-280 changes",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 7,
+  "passed": 5,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 71
+}

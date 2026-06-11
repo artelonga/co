@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-403",
+  "title": "Onboarding & pipeline documentation — WELCOME.md + delivery-pipeline invariant (git × jj)",
+  "type": "task",
+  "status": "in_progress",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-403.md",
+  "branch": "docs/CO-403-onboarding-pipeline-docs",
+  "merge_sha": "d7a682cf0034ca632cf7b86308a00dfc96203998",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/197",
+    "number": 197
+  },
+  "started_at": "2026-06-11T00:00:00Z",
+  "merged_at": "2026-06-11T16:06:12Z",
+  "files_changed": 7,
+  "lines_added": 472,
+  "lines_removed": 19,
+  "labels": [
+    "type:docs",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-403 — Onboarding & pipeline documentation — WELCOME.md + delivery-pipeline invariant\n\nAdds the platform's front-door documentation:\n\n- **`docs/WELCOME.md`** — a history-teller onboarding in seven movements: the\n  co- prefix as the feature list (Collective Consciousness, ñandé posture),\n  the abstractions in arrival order, requirements-as-layers, the five-act\n  changelog history, the inhabited universes (including miguel → mse as the\n  stakeholder↔project pattern), a worked CRUD example on the Vault API\n  (`scholars/` in miguel), and \"Bringing a universe with you — two doors\":\n  add a local folder via `co push` (CO-392) or clone one from its git remote.\n- **`docs/delivery-pipeline.md`** — new section \"The invariant — review on\n  localhost, approve, merge\", explaining the pipeline (CO-398) in both\n  version-control vocabularies: traditional git (branch → PR + preview →\n  approval → merge ⇒ deploy) and CO-native/jujutsu (change → states →\n  proposta + localhost serve → approval → mesclar/bookmark move ⇒ publish),\n  with a worked example of each.\n- Cross-links from `README.md`, `docs/README.md`, and WELCOME §7.\n\n### Why\n\n3.0.0 opened the public door; this gives the people walking through it the\nstory, the vocabulary, and the two everyday gestures — without reading source.",
+  "summary": "A person arriving at CO for the first time (the concrete case: Miguel, stakeholder of the `miguel` universe), I need onboarding documentation that tells the story of the platform and shows the two eve",
+  "co_auto_version": "0.1.0"
+}

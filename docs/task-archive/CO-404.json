@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-404",
+  "title": "co updates — release notes in the CLI from the embedded CHANGELOG",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-404.md",
+  "branch": "feat/CO-404-co-updates-release-notes-in-cli",
+  "merge_sha": "bc093ef68f52d8af632d28ea3b4b0d3aa81d9f3c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/198",
+    "number": 198
+  },
+  "started_at": "2026-06-11T00:00:00Z",
+  "merged_at": "2026-06-11T17:08:02Z",
+  "files_changed": 7,
+  "lines_added": 274,
+  "lines_removed": 0,
+  "labels": [
+    "type:feat",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-404 — `co updates` — release notes in the CLI\n\nAdds `co updates`, a new CLI command that prints release notes straight from\nthe CHANGELOG embedded in the binary at compile time:\n\n- `co updates` — the most recent release section (version — date — theme +\n  its task entries), lightly styled for the terminal\n- `co updates -n 3` — the N most recent releases in detail\n- `co updates --all` — compact release-history list (every version header)\n\nNo network, works offline, and always matches the installed version. Every\n`release-commit.sh` run automatically becomes the next note — the release\nprocess needs no extra authoring step.\n\n### Why\n\n3.0.0 opened the public door and CO-403 wrote the welcome; this puts the\n\"what's new\" channel inside the tool itself, where content authors already\nlive. Release notes become a product surface instead of a repo artifact.",
+  "summary": "A CO user at the terminal, I need `co updates` to show what changed in recent releases, so that release notes reach me where I already am — without opening the repo or the hosted changelog viewer.",
+  "co_auto_version": "0.1.0"
+}

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-393",
+  "title": "Composable universe UI — content lenses + schema-driven form engine, manifest-driven",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-393.md",
+  "branch": "feat/CO-393-composable-universe-ui-content-lenses-sc",
+  "merge_sha": "e00c88f44511f93fc4872dff4a7b585ea4b8598e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/196",
+    "number": 196
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-11T16:54:35Z",
+  "files_changed": 24,
+  "lines_added": 2150,
+  "lines_removed": 6,
+  "labels": [
+    "type:feat",
+    "module:web",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-393 — Composable universe UI — content lenses + schema-driven form engine, manifest-driven\n\nNew `variants/i` SPA that replaces hardcoded view wiring with a composable lens registry\nand a schema-driven form engine. The variant ships alongside stable `variants/a` and is\npromoted only after parity verification.\n\n### What changed\n\n- **Lens registry** (`variants/i/modules/lenses/registry.js`): uniform `{ id, label, icon, supports, render }` interface. `computeDynamicTabs(manifest)` replaces the gantt-only `injectManifestViewTabs` — all `manifest.views` types and declared `content_types` drive visible tabs with no JS change.\n- **Form engine** (`variants/i/modules/form/engine.js`, `fields.js`): `renderForm(schema, value)` → `<form>`, `collect(form, schema)` → plain object. Handles `string`, `text`, `number`, `date`, `boolean`, `enum`, `ref` field types. Universe create/edit uses it via `renderUniverseForm()` in `dom-setup.js`.\n- **`conteudo.js` split**: 1502-line monolith decomposed into `document-tree.js` (pure tree utils), `document-assets.js` (asset rendering utils), `document.js` (lens facade). No file in `variants/i/` exceeds 500 LoC.\n- **Graph lens** (`variants/i/modules/lenses/graph.js`): multi-universe graph via `GET /api/v1/universes/{slug}/graph?universes=…` (CO-345). Auto-detects parent + child universes from `state.meUniverses`. `renderContent` routes `state.view === 'graph'` to it.\n- **Graph tab injection**: `computeDynamicTabs` auto-injects a graph tab when the universe has a `parent_key` or child universes (AC4+AC5: no JS change needed).\n- **AC4 test** (`variants/i/modules/form/test.js`): demonstrates adding an `article` content_type yields a working form + eligible lenses with zero JS change.\n- **i18n keys** added to both pt and en dicts in `shared/i18n.js`: `lens.graph`, `lens.graph.universes`, `form.required`, `form.field_ref`, `sidebar.children`.\n\n### Why\n\nThe gap in the previous architecture: content was composable lenses; forms were bespoke HTML with no schema→form generation. `_universe.yaml` `content_types[].schema` declared field shapes but the form layer never used them. CO-393 closes that gap by making the manifest the single source of truth for both what you can see (lenses) and what you can edit (forms).",
+  "summary": "As A universe author (grcsamazonia, retro-umarizal, comunicacao …) and the platform maintainer",
+  "co_auto_version": "0.1.0"
+}

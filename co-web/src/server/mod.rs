@@ -137,7 +137,7 @@ fn extract_variant(headers: &HeaderMap, config: &WebConfig) -> String {
             let part = part.trim();
             if let Some(val) = part.strip_prefix("co_variant=") {
                 let v = val.trim();
-                if matches!(v, "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h") {
+                if matches!(v, "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i") {
                     return v.to_string();
                 }
             }

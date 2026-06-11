@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-398",
+  "title": "Delivery pipeline no quadro — status dirigido por VC/deploy: todo → started (branch) → in_progress → review (PR + localhost) → done (merge aprovado ⇒ deploy)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-398.md",
+  "branch": "feat/CO-398-delivery-pipeline-no-quadro-status-dirig",
+  "merge_sha": "f97f5aaa465124da96d0c60b84b146fc1b3d3868",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/194",
+    "number": 194
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-10T20:07:52Z",
+  "files_changed": 15,
+  "lines_added": 957,
+  "lines_removed": 8,
+  "labels": [
+    "type:feat",
+    "module:board",
+    "module:collab",
+    "module:eda"
+  ],
+  "changelog_entry": null,
+  "summary": "As Dono/membro de um universo-projeto que hoje move cartões à mão enquanto o estado real do trabalho vive no git/jj e no deploy",
+  "co_auto_version": "0.1.0"
+}

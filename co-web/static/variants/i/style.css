@@ -1,0 +1,83 @@
+/* CO-393: variant i — composable universe UI */
+/* Inherits all styles from the shared /style.css.
+   Only variant-specific overrides live here. */
+
+/* Graph lens container */
+.co-graph-container {
+    width: 100%;
+    height: 100%;
+    min-height: 480px;
+    position: relative;
+    overflow: hidden;
+}
+
+.co-graph-fallback {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 320px;
+    gap: 12px;
+    color: var(--text-muted, #6b7280);
+    font-size: 0.9rem;
+}
+
+/* Form engine field styles */
+.co-form-field {
+    margin-bottom: 1rem;
+}
+
+.co-form-field label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    margin-bottom: 4px;
+    color: var(--text, #111);
+}
+
+.co-form-field label .required-star {
+    color: var(--error, #ef4444);
+    margin-left: 2px;
+}
+
+.co-form-field input,
+.co-form-field select,
+.co-form-field textarea {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border, #d1d5db);
+    border-radius: 6px;
+    background: var(--input-bg, #fff);
+    color: var(--text, #111);
+    font-size: 0.9rem;
+    box-sizing: border-box;
+}
+
+.co-form-field input:focus,
+.co-form-field select:focus,
+.co-form-field textarea:focus {
+    outline: none;
+    border-color: var(--accent, #6366f1);
+    box-shadow: 0 0 0 2px var(--accent-muted, rgba(99, 102, 241, 0.15));
+}
+
+.co-form-error {
+    color: var(--error, #ef4444);
+    font-size: 0.8rem;
+    margin-top: 3px;
+}
+
+/* Sidebar child-universe tree (AC5) */
+.sidebar-children-section {
+    margin-top: 8px;
+    padding-left: 12px;
+    border-left: 2px solid var(--border, #e5e7eb);
+}
+
+.sidebar-children-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #6b7280);
+    padding: 4px 0 2px;
+}
