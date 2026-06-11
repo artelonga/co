@@ -56,7 +56,9 @@ CUTOFF_SCRIPT="co-web/scripts/scrum/cutoff-check.ts"
 if [[ -f "$CUTOFF_SCRIPT" ]] && command -v node >/dev/null 2>&1; then
   CUTOFF_FLAGS=""
   [[ "$IGNORE_DOD" == "true" ]] && CUTOFF_FLAGS="--ignore-cutoff"
-  if ! node --import tsx "$CUTOFF_SCRIPT" $CUTOFF_FLAGS 2>&1; then
+  # tsx resolves from co-web/node_modules — run with co-web as cwd (cutoff-check
+  # only shells out to git, which works from any subdirectory).
+  if ! (cd co-web && node --import tsx scripts/scrum/cutoff-check.ts $CUTOFF_FLAGS) 2>&1; then
     echo "" >&2
     echo "   Pass --ignore-dod to also bypass the cutoff check." >&2
     exit 1
