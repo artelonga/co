@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-422",
+  "title": "In-prod degradation alerter — email on degraded-but-alive events via the Fly RESEND_API_KEY (no GH secret)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-422.md",
+  "branch": "feat/CO-422-in-prod-degradation-alerter-email-on-deg",
+  "merge_sha": "c28c736f7e28bc7b4a56d5125352627dcc75bb99",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/210",
+    "number": 210
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T16:16:41Z",
+  "files_changed": 9,
+  "lines_added": 674,
+  "lines_removed": 8,
+  "labels": [
+    "type:feat",
+    "module:observability",
+    "ops"
+  ],
+  "changelog_entry": "## CO-422 — In-prod degradation alerter — email on degraded-but-alive events via Fly RESEND_API_KEY\n\nAdds a `DegradationAlerter` EDA subscriber that watches for degradation events and\nsends alert emails via the Resend API (`RESEND_API_KEY`) to `CO_ALERT_TO` (default\n`yuri@artelonga.com.br`). Without `RESEND_API_KEY` a one-time WARN is logged and the\nalerter becomes a no-op — never panics, never breaks startup.\n\nEvents covered:\n- `backup.skipped_low_disk` (emitted by the backup worker, CO-405)\n- `universe.unavailable` (emitted by the universe pool, CO-406 — wired and ready)\n- `system.disk_pressure` — new event emitted by the new disk monitor when free space\n  on the data volume falls below `CO_DISK_ALERT_THRESHOLD_PCT` (default 15%)\n\nEach email includes what happened, where (universe/resource), and the actionable\nnumber (e.g. \"Livre: 480 MB de 3072 MB\"). Anti-spam debounce: max 1 email per event\ntype per `CO_ALERT_DEBOUNCE_HOURS` (default 2 h).\n\nAll degradation events flow through the EDA bus so they appear in the event_log and\nthe atividades admin dashboard automatically.\n\n### Why\nThe 2026-06-11 disk-full outage revealed a gap: the server was degrading (backups\npiling up, disk filling) hours before the crash-loop, but there was no alert. CO-407\ncovers total outages via an external probe; this task covers the precursor window\nwhere the machine is still alive but heading toward failure.\n\nNew env vars:\n| Variable | Default | Description |\n|---|---|---|\n| `CO_ALERT_TO` | `yuri@artelonga.com.br` | Alert recipient |\n| `CO_ALERT_FROM` | `CO Alertas <alertas@artelonga.com.br>` | Sender address |\n| `CO_ALERT_DEBOUNCE_HOURS` | `2` | Min hours between alerts per event type |\n| `CO_DISK_CHECK_INTERVAL_SECS` | `900` | Disk check interval (15 min) |\n| `CO_DISK_ALERT_THRESHOLD_PCT` | `15` | Free-% threshold for disk_pressure event |",
+  "summary": "As Yuri (operador), QUERO ser avisado por e-mail quando prod estiver **vivo mas degradando** (disco enchendo, universo indisponível, backup pulado), usando o `RESEND_API_KEY` que JÁ existe na máquina ",
+  "co_auto_version": "0.1.0"
+}
