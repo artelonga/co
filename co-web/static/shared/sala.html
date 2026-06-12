@@ -15,12 +15,7 @@
     --muted: #8c8674;
     --accent: #d4af37;
     --danger: #ef4444;
-    --co-graph-node-default: #5a7a9a;
-    --co-graph-edge-color: rgba(180,190,220,0.18);
     --co-graph-label-color: #c8d0dc;
-    --co-graph-sublabel-color: #8c8674;
-    --co-graph-hover-ring: #d4af37;
-    --co-graph-selected-ring: #d4af37;
     --co-graph-grid-color: rgba(200,210,255,0.05);
   }
 
@@ -72,6 +67,22 @@
     overflow: hidden;
   }
 
+  /* Inline cell editor */
+  #cell-editor {
+    position: absolute;
+    display: none;
+    background: var(--surface);
+    color: var(--text);
+    border: 1.5px solid var(--accent);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    text-align: center;
+    outline: none;
+    z-index: 30;
+    padding: 0 4px;
+  }
+  #cell-editor.show { display: block; }
+
   /* Status */
   #status {
     position: absolute;
@@ -82,6 +93,22 @@
     border-radius: 20px;
     padding: 5px 14px;
     font-size: .75rem;
+    color: var(--muted);
+    pointer-events: none;
+    z-index: 10;
+    white-space: nowrap;
+  }
+
+  /* Hint pill */
+  #hint {
+    position: absolute;
+    top: 12px; left: 50%;
+    transform: translateX(-50%);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 5px 14px;
+    font-size: .72rem;
     color: var(--muted);
     pointer-events: none;
     z-index: 10;
@@ -106,7 +133,7 @@
   #tooltip .tt-title { font-weight: 600; margin-bottom: 3px; }
   #tooltip .tt-type  { color: var(--muted); font-size: .75rem; }
 
-  /* Node panel */
+  /* Node / folder panel */
   #node-panel {
     position: absolute;
     right: 16px; top: 16px;
@@ -122,9 +149,24 @@
   #node-panel.show { display: block; }
   #node-panel .p-close { float: right; cursor: pointer; color: var(--muted); font-size: 1.1rem; line-height: 1; }
   #node-panel .p-close:hover { color: var(--text); }
-  #node-panel .p-title { font-weight: 600; font-size: .95rem; margin-bottom: 4px; padding-right: 20px; }
+  #node-panel .p-title { font-weight: 600; font-size: .95rem; margin-bottom: 4px; padding-right: 20px; word-break: break-word; }
   #node-panel .p-type  { color: var(--muted); font-size: .75rem; margin-bottom: 10px; }
   #node-panel .p-path  { font-size: .72rem; color: var(--muted); word-break: break-all; }
+  #node-panel .p-list  { margin-top: 8px; max-height: 220px; overflow-y: auto; }
+  #node-panel .fp-item {
+    padding: 6px 8px; border-radius: 6px; cursor: pointer;
+    font-size: .8rem; border: 1px solid transparent;
+  }
+  #node-panel .fp-item:hover { background: rgba(255,255,255,.05); border-color: var(--border); }
+  #node-panel .fp-item .fp-hint { color: var(--muted); font-size: .68rem; }
+  #node-panel .p-actions { margin-top: 10px; display: flex; gap: 6px; }
+  #node-panel .p-actions button {
+    flex: 1; background: var(--bg); color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 8px; font-size: .75rem; cursor: pointer;
+  }
+  #node-panel .p-actions button:hover { border-color: var(--accent); }
+  #node-panel .p-actions button.danger:hover { border-color: var(--danger); color: var(--danger); }
 
   /* Login CTA modal */
   #login-cta-backdrop {
@@ -237,7 +279,7 @@
 
   <div id="toolbar">
     <button class="toolbar-btn" id="btn-add" title="Adicionar entrada / Add entry">＋ Adicionar</button>
-    <button class="toolbar-btn" id="btn-link" title="Ligar nós / Link nodes">⟵ Ligar</button>
+    <button class="toolbar-btn" id="btn-link" title="Ligar itens / Link items">⟵ Ligar</button>
     <div class="toolbar-sep"></div>
     <button class="toolbar-btn" id="btn-compor" title="Compor nova entrada / Compose entry">✎ Compor</button>
     <button class="toolbar-btn" id="btn-sugerir" title="Sugerir / Suggest (anon allowed)">💬 Sugerir</button>
@@ -250,12 +292,16 @@
   </div>
 
   <div id="canvas-wrap">
+    <input id="cell-editor" autocomplete="off" spellcheck="false">
+    <div id="hint">clique num quadrado e digite · letra = letra · texto = nota · /nome = pasta · arraste para mover</div>
     <div id="tooltip"><div class="tt-title"></div><div class="tt-type"></div></div>
     <div id="node-panel">
       <span class="p-close" id="panel-close">×</span>
       <div class="p-title" id="panel-title"></div>
       <div class="p-type"  id="panel-type"></div>
       <div class="p-path"  id="panel-path"></div>
+      <div class="p-list"  id="panel-list"></div>
+      <div class="p-actions" id="panel-actions"></div>
     </div>
     <div id="status">carregando…</div>
   </div>
@@ -285,10 +331,26 @@
 
 <div id="toast"></div>
 
-<script src="/lib/co-graph.js"></script>
 <script>
 (function () {
   'use strict';
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Sala — grid landscape canvas.
+  //
+  // The sala is a "natural landscape": an infinite grid of squares over
+  // procedural terrain. Every square holds a value:
+  //   · a single character  — type one letter, it renders on the square
+  //   · a nota              — type a word/phrase, it becomes a note card
+  //   · a pasta (folder)    — type /nome, it becomes a draggable group unit
+  // Notas and pastas drag-and-drop with the pointer (mouse and touch); a nota
+  // dropped on a pasta joins it, and the pasta moves as one unit.
+  //
+  // Layout JSON (v2) — persisted via workspace_states, superset of v1:
+  //   { v: 2, cells: {"gx,gy": "A"}, notes: [...], folders: [...],
+  //     nodes: [], edges: [{from,to,type}], view: {tx,ty,scale} }
+  // v1 layouts (nodes with world x/y) are migrated to notes on load.
+  // ═══════════════════════════════════════════════════════════════════════════
 
   // ── URL detection ─────────────────────────────────────────────────────────
   // Supports:
@@ -315,6 +377,7 @@
   }
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
+  var wrap          = document.getElementById('canvas-wrap');
   var universeLink  = document.getElementById('universe-link');
   var salaName      = document.getElementById('sala-name');
   var salaStatus    = document.getElementById('sala-status');
@@ -323,6 +386,7 @@
   var nodePanel     = document.getElementById('node-panel');
   var saveStatusEl  = document.getElementById('toolbar-save-status');
   var readonlyBanner = document.getElementById('readonly-banner');
+  var editor        = document.getElementById('cell-editor');
 
   var btnAdd     = document.getElementById('btn-add');
   var btnLink    = document.getElementById('btn-link');
@@ -334,13 +398,55 @@
   var btnSalas   = document.getElementById('btn-salas');
 
   // ── App state ─────────────────────────────────────────────────────────────
-  var graphHandle = null;
-  var layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
+  var CELL = 56;              // world units per grid square
+  var layout = emptyLayout();
   var allEntries = [];        // fetched entry list for picker
   var saveDebounce = null;
   var linkMode = false;       // true when btn-link is active
-  var linkFrom = null;        // node selected as link source
+  var linkFrom = null;        // item selected as link source
   var isLoggedIn = false;
+
+  function emptyLayout() {
+    return { v: 2, cells: {}, notes: [], folders: [], nodes: [], edges: [],
+             view: { tx: 0, ty: 0, scale: 1 } };
+  }
+
+  function newId(prefix) {
+    return prefix + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+  }
+
+  // ── Layout normalization / v1 migration ──────────────────────────────────
+  function normalizeLayout(l) {
+    if (!l || typeof l !== 'object') l = {};
+    l.v = 2;
+    l.cells   = (l.cells && typeof l.cells === 'object') ? l.cells : {};
+    l.folders = Array.isArray(l.folders) ? l.folders : [];
+    l.edges   = Array.isArray(l.edges)   ? l.edges   : [];
+    l.nodes   = Array.isArray(l.nodes)   ? l.nodes   : [];
+    l.view    = (l.view && typeof l.view === 'object') ? l.view : { tx: 0, ty: 0, scale: 1 };
+
+    if (!Array.isArray(l.notes)) {
+      // v1 → v2: graph nodes (world coords) become notas snapped to the grid.
+      // Note id = entry_path so existing edges keep resolving.
+      l.notes = l.nodes.map(function (n) {
+        return {
+          id: n.entry_path || newId('n'),
+          text: n.label || String(n.entry_path || '').split('/').pop().replace(/\.md$/i, ''),
+          entry_path: n.entry_path || null,
+          x: Math.floor((n.x || 0) / CELL),
+          y: Math.floor((n.y || 0) / CELL),
+          folder: null,
+        };
+      });
+      l.nodes = [];
+    }
+
+    // A brand-new sala starts with the root pasta `/` at the origin square.
+    if (!l.notes.length && !l.folders.length && !Object.keys(l.cells).length) {
+      l.folders.push({ id: 'root', name: '', x: 0, y: 0 });
+    }
+    return l;
+  }
 
   // ── Toast ─────────────────────────────────────────────────────────────────
   var toastTimer = null;
@@ -377,93 +483,798 @@
     };
   }
 
-  // ── Graph render ──────────────────────────────────────────────────────────
-  function buildGraphData() {
-    var byPath = {};
-    layout.nodes.forEach(function (n) { byPath[n.entry_path] = n; });
-    var nodes = layout.nodes.map(function (n) {
-      return {
-        id: n.entry_path,
-        label: n.label || n.entry_path.split('/').pop().replace(/\.md$/i, ''),
-        color: n.color || null,
-        size: 9,
-        x: n.x || 0,
-        y: n.y || 0,
-        fixed: true,
-      };
-    });
-    var edges = layout.edges.map(function (e) {
-      return { source: e.from, target: e.to, kind: e.type || '', directed: true };
-    });
-    return { nodes: nodes, edges: edges };
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Canvas engine
+  // ═══════════════════════════════════════════════════════════════════════════
+  var canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:absolute;top:0;left:0;width:100%;height:100%;display:block;cursor:default;touch-action:none;';
+  wrap.appendChild(canvas);
+  var ctx = canvas.getContext('2d');
+  var W = 0, H = 0;
+  var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+
+  function resize() {
+    W = wrap.clientWidth  || 1;
+    H = wrap.clientHeight || 1;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width  = W + 'px';
+    canvas.style.height = H + 'px';
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (typeof invalidate === 'function') invalidate();
   }
 
-  function renderGraph() {
-    var wrap = document.getElementById('canvas-wrap');
-    var data = buildGraphData();
-    if (graphHandle) {
-      graphHandle.update(data);
-    } else {
-      graphHandle = co_graph.render(wrap, {
-        data: data,
-        layout: 'manual',
-        grid: { size: 60 },
-        onNodeClick: onNodeClick,
-        onNodeHover: onNodeHover,
-        onNodeMoveEnd: onNodeMoveEnd,
-      });
+  // ── Camera ────────────────────────────────────────────────────────────────
+  var cam = { x: CELL / 2, y: CELL / 2, s: 1 };
+  var camTarget = null;
+
+  function w2s(x, y) {
+    return [(x - cam.x) * cam.s + W / 2, (y - cam.y) * cam.s + H / 2];
+  }
+  function s2w(sx, sy) {
+    return [(sx - W / 2) / cam.s + cam.x, (sy - H / 2) / cam.s + cam.y];
+  }
+  function cellAt(sx, sy) {
+    var w = s2w(sx, sy);
+    return [Math.floor(w[0] / CELL), Math.floor(w[1] / CELL)];
+  }
+  function cellScreenRect(gx, gy) {
+    var p = w2s(gx * CELL, gy * CELL);
+    var gs = CELL * cam.s;
+    return { x: p[0], y: p[1], w: gs, h: gs };
+  }
+
+  // ── Procedural terrain (the "default filled map") ─────────────────────────
+  // Deterministic value noise per square: the landscape looks the same for
+  // everyone, every visit, with no assets and no storage.
+  function hash2(x, y) {
+    var h = (Math.imul(x, 374761393) + Math.imul(y, 668265263)) | 0;
+    h = Math.imul(h ^ (h >>> 13), 1274126177);
+    h = h ^ (h >>> 16);
+    return (h >>> 0) / 4294967295;
+  }
+  function smoothstep(t) { return t * t * (3 - 2 * t); }
+  function vnoise(x, y) {
+    var x0 = Math.floor(x), y0 = Math.floor(y);
+    var fx = smoothstep(x - x0), fy = smoothstep(y - y0);
+    var a = hash2(x0, y0),     b = hash2(x0 + 1, y0);
+    var c = hash2(x0, y0 + 1), d = hash2(x0 + 1, y0 + 1);
+    return a + (b - a) * fx + (c - a) * fy + (a - b - c + d) * fx * fy;
+  }
+  function terrainColor(gx, gy) {
+    var v = 0.62 * vnoise(gx / 9, gy / 9) + 0.38 * vnoise(gx / 3.1, gy / 3.1);
+    var j = (hash2(gx, gy) - 0.5) * 0.045;   // per-square texture jitter
+    v += j;
+    if (v < 0.34) return '#121f2d';          // água
+    if (v < 0.42) return '#1b2a25';          // margem
+    if (v < 0.62) return '#16241a';          // campo
+    if (v < 0.78) return '#111d15';          // mata
+    if (v < 0.88) return '#231e17';          // terra
+    return '#252531';                        // rocha
+  }
+
+  // ── Item helpers ──────────────────────────────────────────────────────────
+  function visibleItems() {
+    // Folders + notas not inside a folder, in draw order (folders first so
+    // notas render on top when overlapping).
+    var items = [];
+    layout.folders.forEach(function (f) { items.push(f); });
+    layout.notes.forEach(function (n) { if (!n.folder) items.push(n); });
+    return items;
+  }
+  function isFolder(item) { return item && item.name !== undefined; }
+  function folderById(id) {
+    return layout.folders.find(function (f) { return f.id === id; }) || null;
+  }
+  function itemById(id) {
+    return folderById(id) ||
+      layout.notes.find(function (n) { return n.id === id; }) || null;
+  }
+  function folderMembers(folderId) {
+    return layout.notes.filter(function (n) { return n.folder === folderId; });
+  }
+  function itemAtCell(gx, gy, except) {
+    var items = visibleItems();
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it !== except && it.x === gx && it.y === gy) return it;
     }
-    var view = layout.view || {};
-    statusEl.textContent = data.nodes.length + ' nós · ' + data.edges.length + ' arestas';
+    return null;
   }
-
-  function onNodeClick(node, sx, sy) {
-    if (linkMode && linkFrom) {
-      if (node.id !== linkFrom.id) {
-        addEdge(linkFrom.id, node.id, 'relates_to');
-        exitLinkMode();
+  // Anchor of an item for edge drawing — a nota inside a pasta resolves to the
+  // pasta's square.
+  function itemAnchor(id) {
+    var it = itemById(id);
+    if (!it) return null;
+    if (!isFolder(it) && it.folder) {
+      var f = folderById(it.folder);
+      if (f) it = f;
+    }
+    return [(it.x + 0.5) * CELL, (it.y + 0.5) * CELL];
+  }
+  function findFreeCell(gx, gy) {
+    if (!itemAtCell(gx, gy)) return [gx, gy];
+    for (var r = 1; r <= 8; r++) {
+      for (var dy = -r; dy <= r; dy++) {
+        for (var dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          if (!itemAtCell(gx + dx, gy + dy)) return [gx + dx, gy + dy];
+        }
       }
-      return;
     }
-    if (linkMode) {
-      linkFrom = node;
-      salaStatus.textContent = '↩ Clique no nó de destino…';
-      return;
-    }
-    showNodePanel(node);
+    return [gx, gy];
   }
 
-  function onNodeHover(node) {
-    if (node) {
-      tooltip.querySelector('.tt-title').textContent = node.label || node.id;
-      tooltip.querySelector('.tt-type').textContent = node.id;
-      var pos = graphHandle.worldToScreen(node.x || 0, node.y || 0);
-      tooltip.style.left = (pos[0] + 12) + 'px';
-      tooltip.style.top  = (pos[1] - 40) + 'px';
-      tooltip.classList.add('show');
+  // ── Draw ──────────────────────────────────────────────────────────────────
+  var hoveredItem = null;
+  var dragState = null;   // { item, wx, wy, moved } — wx/wy follow the pointer
+
+  function rounded(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function drawNote(n, rect, ghost) {
+    var pad = Math.max(2, rect.w * 0.055);
+    var x = rect.x + pad, y = rect.y + pad, w = rect.w - pad * 2, h = rect.h - pad * 2;
+    ctx.globalAlpha = ghost ? 0.75 : 1;
+    rounded(x, y, w, h, Math.max(3, rect.w * 0.08));
+    ctx.fillStyle = '#1d1d2a';
+    ctx.fill();
+    ctx.lineWidth = (hoveredItem === n || (linkFrom && linkFrom === n)) ? 2 : 1.2;
+    ctx.strokeStyle = (hoveredItem === n || (linkFrom && linkFrom === n)) ? '#d4af37' : '#3a3a4c';
+    ctx.stroke();
+    if (n.entry_path) {
+      // gold spine = backed by a real entrada
+      ctx.fillStyle = '#d4af37';
+      ctx.fillRect(x, y + 2, Math.max(2, rect.w * 0.045), h - 4);
+    }
+    if (rect.w > 18) {
+      var fs = Math.max(8, Math.min(14, rect.w * 0.22));
+      ctx.font = '500 ' + fs + 'px system-ui,sans-serif';
+      ctx.fillStyle = '#e8e3d3';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      var label = n.text || '';
+      var maxChars = Math.max(2, Math.floor(w / (fs * 0.58)));
+      if (label.length > maxChars) label = label.slice(0, maxChars - 1) + '…';
+      ctx.fillText(label, x + w / 2, y + h / 2);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function drawFolder(f, rect, ghost, highlight) {
+    var pad = Math.max(2, rect.w * 0.045);
+    var x = rect.x + pad, y = rect.y + pad, w = rect.w - pad * 2, h = rect.h - pad * 2;
+    var tabH = Math.max(3, h * 0.18);
+    ctx.globalAlpha = ghost ? 0.75 : 1;
+    // tab
+    rounded(x, y, w * 0.42, tabH * 2, Math.max(2, rect.w * 0.05));
+    ctx.fillStyle = '#2c2616';
+    ctx.fill();
+    // body
+    rounded(x, y + tabH, w, h - tabH, Math.max(3, rect.w * 0.07));
+    ctx.fillStyle = '#262011';
+    ctx.fill();
+    ctx.lineWidth = (highlight || hoveredItem === f || (linkFrom && linkFrom === f)) ? 2.2 : 1.3;
+    ctx.strokeStyle = (highlight || hoveredItem === f || (linkFrom && linkFrom === f)) ? '#d4af37' : '#6b5a23';
+    ctx.stroke();
+    if (rect.w > 18) {
+      var fs = Math.max(8, Math.min(14, rect.w * 0.22));
+      ctx.font = '600 ' + fs + 'px ui-monospace,monospace';
+      ctx.fillStyle = '#d4af37';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      var label = '/' + (f.name || '');
+      var maxChars = Math.max(2, Math.floor(w / (fs * 0.62)));
+      if (label.length > maxChars) label = label.slice(0, maxChars - 1) + '…';
+      ctx.fillText(label, x + w / 2, y + tabH + (h - tabH) / 2);
+      // member count badge
+      var count = folderMembers(f.id).length;
+      if (count > 0) {
+        var bfs = Math.max(7, fs * 0.7);
+        ctx.font = '600 ' + bfs + 'px system-ui,sans-serif';
+        ctx.fillStyle = '#1a1a1a';
+        var bw = bfs * (String(count).length * 0.62 + 1);
+        ctx.beginPath();
+        ctx.arc(x + w - bw / 2 - 2, y + tabH + bfs * 0.7, bfs * 0.75, 0, 6.2832);
+        ctx.fillStyle = '#d4af37';
+        ctx.fill();
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillText(String(count), x + w - bw / 2 - 2, y + tabH + bfs * 0.72);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  function draw() {
+    // Smooth camera animation
+    if (camTarget) {
+      cam.x += (camTarget.x - cam.x) * 0.12;
+      cam.y += (camTarget.y - cam.y) * 0.12;
+      cam.s += (camTarget.s - cam.s) * 0.12;
+      if (Math.abs(camTarget.x - cam.x) < 0.4 &&
+          Math.abs(camTarget.y - cam.y) < 0.4 &&
+          Math.abs(camTarget.s - cam.s) < 0.01) {
+        camTarget = null;
+      }
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    var gs = CELL * cam.s;
+
+    // Terrain — fill every visible square with its landscape color.
+    var tl = s2w(0, 0), br = s2w(W, H);
+    var gx0 = Math.floor(tl[0] / CELL), gy0 = Math.floor(tl[1] / CELL);
+    var gx1 = Math.floor(br[0] / CELL), gy1 = Math.floor(br[1] / CELL);
+    if (gs >= 10) {
+      for (var gy = gy0; gy <= gy1; gy++) {
+        for (var gx = gx0; gx <= gx1; gx++) {
+          var p = w2s(gx * CELL, gy * CELL);
+          ctx.fillStyle = terrainColor(gx, gy);
+          ctx.fillRect(p[0], p[1], gs + 0.5, gs + 0.5);
+        }
+      }
     } else {
-      tooltip.classList.remove('show');
+      ctx.fillStyle = '#141d18';
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // Grid lines
+    if (gs > 10) {
+      ctx.strokeStyle = 'rgba(200,210,255,0.06)';
+      ctx.lineWidth = 1;
+      var o = w2s(0, 0);
+      for (var lx = ((o[0] % gs) + gs) % gs; lx < W; lx += gs) {
+        ctx.beginPath(); ctx.moveTo(lx, 0); ctx.lineTo(lx, H); ctx.stroke();
+      }
+      for (var ly = ((o[1] % gs) + gs) % gs; ly < H; ly += gs) {
+        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W, ly); ctx.stroke();
+      }
+    }
+
+    // Origin marker (subtle) so the default `/` neighborhood reads as "home"
+    var op = w2s(0, 0);
+    if (op[0] > -gs && op[0] < W + gs && op[1] > -gs && op[1] < H + gs) {
+      ctx.strokeStyle = 'rgba(212,175,55,0.18)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(op[0], op[1], gs, gs);
+    }
+
+    // Cell characters
+    if (gs >= 9) {
+      var cfs = Math.max(7, gs * 0.55);
+      ctx.font = '500 ' + cfs + 'px ui-monospace,SFMono-Regular,Menlo,monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      for (var key in layout.cells) {
+        var comma = key.indexOf(',');
+        var cx = parseInt(key.slice(0, comma), 10);
+        var cy = parseInt(key.slice(comma + 1), 10);
+        if (cx < gx0 - 1 || cx > gx1 + 1 || cy < gy0 - 1 || cy > gy1 + 1) continue;
+        var cp = w2s((cx + 0.5) * CELL, (cy + 0.5) * CELL);
+        ctx.fillStyle = '#c8d0dc';
+        ctx.fillText(layout.cells[key], cp[0], cp[1]);
+      }
+    }
+
+    // Edges (between item anchors)
+    layout.edges.forEach(function (e) {
+      var a = itemAnchor(e.from), b = itemAnchor(e.to);
+      if (!a || !b) return;
+      var p = w2s(a[0], a[1]), q = w2s(b[0], b[1]);
+      ctx.strokeStyle = 'rgba(180,190,220,0.25)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(q[0], q[1]); ctx.stroke();
+    });
+
+    // Drop-target highlight while dragging a nota over a pasta
+    var dropFolder = null;
+    if (dragState && dragState.moved && !isFolder(dragState.item)) {
+      var dc = [Math.floor(dragState.wx / CELL), Math.floor(dragState.wy / CELL)];
+      var t = itemAtCell(dc[0], dc[1], dragState.item);
+      if (t && isFolder(t)) dropFolder = t;
+    }
+
+    // Items
+    visibleItems().forEach(function (it) {
+      if (dragState && dragState.moved && dragState.item === it) return; // drawn last as ghost
+      var rect = cellScreenRect(it.x, it.y);
+      if (rect.x > W + gs || rect.y > H + gs || rect.x + gs < -gs || rect.y + gs < -gs) return;
+      if (isFolder(it)) drawFolder(it, rect, false, it === dropFolder);
+      else drawNote(it, rect, false);
+    });
+
+    // Dragged item ghost — follows the pointer, snap preview on its cell
+    if (dragState && dragState.moved) {
+      var sc = [Math.floor(dragState.wx / CELL), Math.floor(dragState.wy / CELL)];
+      var snapRect = cellScreenRect(sc[0], sc[1]);
+      ctx.strokeStyle = 'rgba(212,175,55,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(snapRect.x, snapRect.y, snapRect.w, snapRect.h);
+      ctx.setLineDash([]);
+      var gp = w2s(dragState.wx - CELL / 2, dragState.wy - CELL / 2);
+      var ghostRect = { x: gp[0], y: gp[1], w: gs, h: gs };
+      if (isFolder(dragState.item)) drawFolder(dragState.item, ghostRect, true, false);
+      else drawNote(dragState.item, ghostRect, true);
     }
   }
 
-  function onNodeMoveEnd(node) {
-    var n = layout.nodes.find(function (n) { return n.entry_path === node.id; });
-    if (n) { n.x = node.x; n.y = node.y; }
-    scheduleSave();
+  // ── RAF loop (dirty-flag: redraw only on interaction/animation) ──────────
+  var rafId = null;
+  var needsDraw = true;
+  function invalidate() { needsDraw = true; }
+  function loop() {
+    if (needsDraw || camTarget || dragState) {
+      draw();
+      needsDraw = !!(camTarget || dragState);
+    }
+    rafId = requestAnimationFrame(loop);
   }
 
-  function showNodePanel(node) {
-    document.getElementById('panel-title').textContent = node.label || node.id;
-    document.getElementById('panel-type').textContent = '';
-    document.getElementById('panel-path').textContent = node.id;
+  // ── Fit ───────────────────────────────────────────────────────────────────
+  function fit(animate) {
+    var xs = [], ys = [];
+    visibleItems().forEach(function (it) { xs.push(it.x); ys.push(it.y); });
+    for (var key in layout.cells) {
+      var comma = key.indexOf(',');
+      xs.push(parseInt(key.slice(0, comma), 10));
+      ys.push(parseInt(key.slice(comma + 1), 10));
+    }
+    if (!xs.length) { xs = [0]; ys = [0]; }
+    var mnX = Math.min.apply(null, xs), mxX = Math.max.apply(null, xs);
+    var mnY = Math.min.apply(null, ys), mxY = Math.max.apply(null, ys);
+    var bw = (mxX - mnX + 3) * CELL;
+    var bh = (mxY - mnY + 3) * CELL;
+    var v = {
+      x: (mnX + mxX + 1) / 2 * CELL,
+      y: (mnY + mxY + 1) / 2 * CELL,
+      s: Math.max(0.15, Math.min(2.5, Math.min(W / bw, H / bh))),
+    };
+    if (animate) { camTarget = v; } else { cam = { x: v.x, y: v.y, s: v.s }; camTarget = null; }
+    invalidate();
+  }
+
+  // ── Status line (every mutation funnels through here → repaint) ──────────
+  function updateStatus() {
+    invalidate();
+    var chars = Object.keys(layout.cells).length;
+    statusEl.textContent =
+      layout.notes.length + ' notas · ' +
+      layout.folders.length + ' pastas · ' +
+      chars + ' letras · ' +
+      layout.edges.length + ' ligações';
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Inline cell editor — type directly on the grid
+  // ═══════════════════════════════════════════════════════════════════════════
+  var editing = null;   // { gx, gy, note? }  note set when editing an existing nota
+
+  function openEditor(gx, gy, note) {
+    if (isReadOnly) return;
+    if (!isLoggedIn) { requireLogin(function () {}); return; }
+    closePanel();
+    editing = { gx: gx, gy: gy, note: note || null };
+    var rect = cellScreenRect(gx, gy);
+    var fs = Math.max(11, Math.min(20, rect.w * 0.4));
+    editor.style.left = rect.x + 'px';
+    editor.style.top = rect.y + 'px';
+    editor.style.width = Math.max(rect.w, 120) + 'px';
+    editor.style.height = rect.h + 'px';
+    editor.style.fontSize = fs + 'px';
+    editor.value = note ? note.text
+                 : (layout.cells[gx + ',' + gy] || '');
+    editor.classList.add('show');
+    editor.focus();
+    editor.select();
+  }
+
+  function closeEditor() {
+    editing = null;
+    editor.classList.remove('show');
+    editor.value = '';
+  }
+
+  // Commit rules — the heart of "type on the landscape":
+  //   /nome        → pasta (folder unit)
+  //   1 character  → letter on the square, cursor advances right
+  //   longer text  → nota
+  //   empty        → clears whatever was on the square
+  function commitEditor(advance) {
+    if (!editing) return;
+    var gx = editing.gx, gy = editing.gy;
+    var raw = editor.value;
+    var text = raw.trim();
+    var note = editing.note;
+    closeEditor();
+
+    if (note) {
+      // Editing an existing nota in place.
+      if (!text) {
+        layout.notes = layout.notes.filter(function (n) { return n !== note; });
+        layout.edges = layout.edges.filter(function (e) { return e.from !== note.id && e.to !== note.id; });
+        showToast('Nota removida');
+      } else if (text.charAt(0) === '/' && text.length > 1) {
+        // nota → pasta
+        layout.notes = layout.notes.filter(function (n) { return n !== note; });
+        layout.folders.push({ id: newId('f'), name: text.slice(1), x: gx, y: gy });
+      } else {
+        note.text = text;
+      }
+      updateStatus(); scheduleSave();
+      return;
+    }
+
+    var key = gx + ',' + gy;
+    if (!text) {
+      if (layout.cells[key]) { delete layout.cells[key]; updateStatus(); scheduleSave(); }
+      return;
+    }
+
+    if (text.charAt(0) === '/') {
+      // `/nome` creates a pasta; bare `/` creates an unnamed root-like pasta.
+      var name = text.slice(1).trim();
+      var spot = findFreeCell(gx, gy);
+      layout.folders.push({ id: newId('f'), name: name, x: spot[0], y: spot[1] });
+      delete layout.cells[key];
+    } else if (Array.from(text).length === 1) {
+      // Single character (incl. emoji/surrogate pairs) → it IS the square.
+      layout.cells[key] = text;
+    } else {
+      var spot2 = findFreeCell(gx, gy);
+      layout.notes.push({ id: newId('n'), text: text, entry_path: null,
+                          x: spot2[0], y: spot2[1], folder: null });
+      delete layout.cells[key];
+    }
+    updateStatus(); scheduleSave();
+    // Enter/Tab keep the typing flow going on the next square to the right.
+    if (advance) openEditor(gx + 1, gy, null);
+  }
+
+  editor.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); commitEditor(true); }
+    else if (e.key === 'Escape') { closeEditor(); }
+    else if (e.key === 'Tab') { e.preventDefault(); commitEditor(true); }
+  });
+  editor.addEventListener('blur', function () {
+    // Commit on click-away (without cursor advance).
+    if (editing) commitEditor(false);
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Panels (nota details / pasta contents)
+  // ═══════════════════════════════════════════════════════════════════════════
+  var panelItem = null;
+
+  function closePanel() {
+    panelItem = null;
+    nodePanel.classList.remove('show');
+  }
+  document.getElementById('panel-close').addEventListener('click', closePanel);
+
+  function esc(s) {
+    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function showNotePanel(note) {
+    panelItem = note;
+    document.getElementById('panel-title').textContent = note.text;
+    document.getElementById('panel-type').textContent = note.entry_path ? 'entrada' : 'nota';
+    document.getElementById('panel-path').textContent = note.entry_path || '';
+    document.getElementById('panel-list').innerHTML = '';
+    var actions = document.getElementById('panel-actions');
+    actions.innerHTML = '';
+    if (!isReadOnly) {
+      var editBtn = document.createElement('button');
+      editBtn.textContent = '✎ Editar';
+      editBtn.onclick = function () { closePanel(); openEditor(note.x, note.y, note); };
+      actions.appendChild(editBtn);
+      var delBtn = document.createElement('button');
+      delBtn.className = 'danger';
+      delBtn.textContent = '✕ Remover';
+      delBtn.onclick = function () {
+        layout.notes = layout.notes.filter(function (n) { return n !== note; });
+        layout.edges = layout.edges.filter(function (e) { return e.from !== note.id && e.to !== note.id; });
+        closePanel(); updateStatus(); scheduleSave();
+      };
+      actions.appendChild(delBtn);
+    }
     nodePanel.classList.add('show');
   }
 
-  document.getElementById('panel-close').addEventListener('click', function () {
-    nodePanel.classList.remove('show');
+  function showFolderPanel(folder) {
+    panelItem = folder;
+    var members = folderMembers(folder.id);
+    document.getElementById('panel-title').textContent = '/' + (folder.name || '');
+    document.getElementById('panel-type').textContent = 'pasta · ' + members.length +
+      (members.length === 1 ? ' item' : ' itens');
+    document.getElementById('panel-path').textContent = '';
+    var list = document.getElementById('panel-list');
+    list.innerHTML = members.length
+      ? members.map(function (n) {
+          return '<div class="fp-item" data-id="' + esc(n.id) + '">' + esc(n.text) +
+                 ' <span class="fp-hint">· clique para tirar da pasta</span></div>';
+        }).join('')
+      : '<div style="color:var(--muted);font-size:.78rem;padding:4px">Vazia — arraste notas para dentro</div>';
+    if (!isReadOnly) {
+      list.querySelectorAll('.fp-item').forEach(function (el) {
+        el.addEventListener('click', function () {
+          var n = layout.notes.find(function (x) { return x.id === el.dataset.id; });
+          if (!n) return;
+          var spot = findFreeCell(folder.x + 1, folder.y);
+          n.folder = null; n.x = spot[0]; n.y = spot[1];
+          showFolderPanel(folder); updateStatus(); scheduleSave();
+        });
+      });
+    }
+    var actions = document.getElementById('panel-actions');
+    actions.innerHTML = '';
+    if (!isReadOnly) {
+      var renameBtn = document.createElement('button');
+      renameBtn.textContent = '✎ Renomear';
+      renameBtn.onclick = function () {
+        var name = prompt('Nome da pasta:', folder.name || '');
+        if (name === null) return;
+        folder.name = name.replace(/^\//, '').trim();
+        showFolderPanel(folder); scheduleSave();
+      };
+      actions.appendChild(renameBtn);
+      var delBtn = document.createElement('button');
+      delBtn.className = 'danger';
+      delBtn.textContent = '✕ Remover';
+      delBtn.onclick = function () {
+        // Members spill back onto the landscape around the pasta's square.
+        folderMembers(folder.id).forEach(function (n) {
+          var spot = findFreeCell(folder.x, folder.y);
+          n.folder = null; n.x = spot[0]; n.y = spot[1];
+        });
+        layout.folders = layout.folders.filter(function (f) { return f !== folder; });
+        layout.edges = layout.edges.filter(function (e) { return e.from !== folder.id && e.to !== folder.id; });
+        closePanel(); updateStatus(); scheduleSave();
+      };
+      actions.appendChild(delBtn);
+    }
+    nodePanel.classList.add('show');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Pointer interaction — pan, drag-and-drop, click-to-type
+  // ═══════════════════════════════════════════════════════════════════════════
+  var panning  = false;
+  var downPos  = null;
+  var lastPos  = null;
+  var moved    = false;
+
+  function canvasPos(e) {
+    var rc = canvas.getBoundingClientRect();
+    return [e.clientX - rc.left, e.clientY - rc.top];
+  }
+
+  function hitItem(sx, sy) {
+    var c = cellAt(sx, sy);
+    return itemAtCell(c[0], c[1]);
+  }
+
+  canvas.addEventListener('pointerdown', function (e) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (pinch) return;
+    canvas.setPointerCapture && canvas.setPointerCapture(e.pointerId);
+    var p = canvasPos(e);
+    downPos = p; lastPos = p; moved = false;
+    var it = hitItem(p[0], p[1]);
+    if (it && !isReadOnly && isLoggedIn) {
+      var w = s2w(p[0], p[1]);
+      dragState = { item: it, wx: w[0], wy: w[1], moved: false };
+      panning = false;
+    } else {
+      dragState = null;
+      panning = true;
+    }
   });
 
-  // ── State persistence ─────────────────────────────────────────────────────
+  canvas.addEventListener('pointermove', function (e) {
+    var p = canvasPos(e);
+    if (downPos && Math.hypot(p[0] - downPos[0], p[1] - downPos[1]) > 5) {
+      moved = true;
+    }
+
+    if (dragState && moved) {
+      var w = s2w(p[0], p[1]);
+      dragState.wx = w[0];
+      dragState.wy = w[1];
+      dragState.moved = true;
+      canvas.style.cursor = 'grabbing';
+    } else if (panning && moved) {
+      cam.x -= (p[0] - lastPos[0]) / cam.s;
+      cam.y -= (p[1] - lastPos[1]) / cam.s;
+      camTarget = null;
+      canvas.style.cursor = 'grabbing';
+      if (editing) { closeEditor(); }
+      invalidate();
+    } else if (!downPos) {
+      // Hover (no button held)
+      var h = hitItem(p[0], p[1]);
+      if (h !== hoveredItem) {
+        hoveredItem = h;
+        invalidate();
+        if (h) {
+          tooltip.querySelector('.tt-title').textContent = isFolder(h) ? '/' + (h.name || '') : h.text;
+          tooltip.querySelector('.tt-type').textContent = isFolder(h)
+            ? 'pasta · ' + folderMembers(h.id).length + ' itens — arraste para mover'
+            : (h.entry_path || 'nota — arraste para mover · clique para abrir');
+          tooltip.style.left = (p[0] + 14) + 'px';
+          tooltip.style.top  = (p[1] - 44) + 'px';
+          tooltip.classList.add('show');
+        } else {
+          tooltip.classList.remove('show');
+        }
+      } else if (h) {
+        tooltip.style.left = (p[0] + 14) + 'px';
+        tooltip.style.top  = (p[1] - 44) + 'px';
+      }
+      canvas.style.cursor = h ? 'pointer' : '';
+    }
+
+    lastPos = p;
+  });
+
+  canvas.addEventListener('pointerup', function (e) {
+    canvas.style.cursor = '';
+    var p = canvasPos(e);
+
+    if (dragState) {
+      var it = dragState.item;
+      if (dragState.moved) {
+        // ── Drop ──
+        var gx = Math.floor(dragState.wx / CELL);
+        var gy = Math.floor(dragState.wy / CELL);
+        var target = itemAtCell(gx, gy, it);
+        if (!isFolder(it) && target && isFolder(target)) {
+          // nota dropped onto a pasta → joins it
+          it.folder = target.id;
+          showToast('Nota guardada em /' + (target.name || ''));
+        } else if (target) {
+          // occupied by another nota/pasta → nearest free square
+          var spot = findFreeCell(gx, gy);
+          it.x = spot[0]; it.y = spot[1];
+        } else {
+          it.x = gx; it.y = gy;
+        }
+        updateStatus(); scheduleSave();
+      } else {
+        // ── Click on an item ──
+        if (linkMode) {
+          handleLinkClick(it);
+        } else if (isFolder(it)) {
+          showFolderPanel(it);
+        } else if (it.entry_path) {
+          showNotePanel(it);
+        } else {
+          openEditor(it.x, it.y, it);
+        }
+      }
+    } else if (panning && !moved) {
+      // ── Click without drag ── (read-only viewers also land here on items,
+      // since dragState is only armed for writers)
+      var clicked = hitItem(p[0], p[1]);
+      if (clicked) {
+        if (isFolder(clicked)) { showFolderPanel(clicked); }
+        else { showNotePanel(clicked); }
+      } else if (linkMode) {
+        exitLinkMode();
+      } else if (isReadOnly && !isLoggedIn && mode !== 'share-token') {
+        requireLogin(function () {});
+      } else if (!isReadOnly) {
+        var c = cellAt(p[0], p[1]);
+        openEditor(c[0], c[1], null);
+      }
+    } else if (panning && moved) {
+      scheduleSave();  // persist the view
+    }
+
+    dragState = null;
+    downPos = null;
+    panning = false;
+    moved = false;
+    invalidate();
+  });
+
+  canvas.addEventListener('pointercancel', function () {
+    dragState = null; downPos = null; panning = false; moved = false;
+    canvas.style.cursor = '';
+    invalidate();
+  });
+
+  // ── Zoom (wheel) ──────────────────────────────────────────────────────────
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var p = canvasPos(e);
+    var wx = (p[0] - W / 2) / cam.s + cam.x;
+    var wy = (p[1] - H / 2) / cam.s + cam.y;
+    cam.s = Math.max(0.1, Math.min(6, cam.s * Math.exp(-e.deltaY * 0.0015)));
+    cam.x = wx - (p[0] - W / 2) / cam.s;
+    cam.y = wy - (p[1] - H / 2) / cam.s;
+    camTarget = null;
+    if (editing) closeEditor();
+    invalidate();
+    scheduleSave();
+  }, { passive: false });
+
+  // ── Pinch zoom (touch) ────────────────────────────────────────────────────
+  var pinch = null;
+  canvas.addEventListener('touchstart', function (e) {
+    if (e.touches.length === 2) {
+      e.preventDefault();
+      dragState = null; panning = false; downPos = null;
+      var t0 = e.touches[0], t1 = e.touches[1];
+      var dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      var rect = canvas.getBoundingClientRect();
+      var cxs = (t0.clientX + t1.clientX) / 2 - rect.left;
+      var cys = (t0.clientY + t1.clientY) / 2 - rect.top;
+      var wxy = s2w(cxs, cys);
+      pinch = { dist0: dist, s0: cam.s, wx: wxy[0], wy: wxy[1] };
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchmove', function (e) {
+    if (pinch && e.touches.length === 2) {
+      e.preventDefault();
+      var t0 = e.touches[0], t1 = e.touches[1];
+      var dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+      var rect = canvas.getBoundingClientRect();
+      var cxs = (t0.clientX + t1.clientX) / 2 - rect.left;
+      var cys = (t0.clientY + t1.clientY) / 2 - rect.top;
+      var newS = Math.max(0.1, Math.min(6, pinch.s0 * (dist / pinch.dist0)));
+      cam.s = newS;
+      cam.x = pinch.wx - (cxs - W / 2) / newS;
+      cam.y = pinch.wy - (cys - H / 2) / newS;
+      camTarget = null;
+      invalidate();
+    }
+  }, { passive: false });
+  canvas.addEventListener('touchend', function () { pinch = null; scheduleSave(); }, { passive: true });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Link mode
+  // ═══════════════════════════════════════════════════════════════════════════
+  function handleLinkClick(item) {
+    if (!linkFrom) {
+      linkFrom = item;
+      salaStatus.textContent = '↩ Clique no item de destino…';
+      invalidate();
+      return;
+    }
+    if (item.id !== linkFrom.id) {
+      layout.edges.push({ from: linkFrom.id, to: item.id, type: 'relates_to' });
+      updateStatus(); scheduleSave();
+    }
+    exitLinkMode();
+  }
+
+  function enterLinkMode() {
+    linkMode = true;
+    linkFrom = null;
+    btnLink.classList.add('active');
+    salaStatus.textContent = 'Clique no item de origem…';
+  }
+
+  function exitLinkMode() {
+    linkMode = false;
+    linkFrom = null;
+    btnLink.classList.remove('active');
+    salaStatus.textContent = '';
+    invalidate();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // State persistence
+  // ═══════════════════════════════════════════════════════════════════════════
   function scheduleSave() {
     if (isReadOnly || !isLoggedIn) return;
     saveStatusEl.textContent = '…';
@@ -473,6 +1284,7 @@
 
   function saveState() {
     if (isReadOnly || !isLoggedIn) return;
+    layout.view = { tx: cam.x, ty: cam.y, scale: cam.s };
     var body = JSON.stringify({ layout_json: JSON.stringify(layout), is_public: false });
     fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
       method: 'PUT',
@@ -487,7 +1299,16 @@
       .catch(function () { saveStatusEl.textContent = '⚠ sem conexão'; });
   }
 
-  // ── Load state ────────────────────────────────────────────────────────────
+  function applyLoadedLayout(parsed) {
+    layout = normalizeLayout(parsed);
+    if (layout.view && layout.view.scale) {
+      cam = { x: layout.view.tx || 0, y: layout.view.ty || 0, s: layout.view.scale || 1 };
+    } else {
+      fit(false);
+    }
+    updateStatus();
+  }
+
   function loadState() {
     if (mode === 'share-token') {
       return loadByShareToken(shareToken);
@@ -497,12 +1318,10 @@
     })
       .then(function (r) { return r.json(); })
       .then(function (data) {
-        try {
-          layout = data.layout_json ? JSON.parse(data.layout_json) : { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
-        } catch (_) {
-          layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
-        }
-        renderGraph();
+        var parsed;
+        try { parsed = data.layout_json ? JSON.parse(data.layout_json) : null; }
+        catch (_) { parsed = null; }
+        applyLoadedLayout(parsed);
       })
       .catch(function (err) {
         statusEl.textContent = 'Erro ao carregar: ' + err.message;
@@ -522,19 +1341,19 @@
         document.title = 'Sala — ' + universeKey + ' — CO';
         universeLink.href = '/' + universeKey;
         universeLink.textContent = universeKey;
-        try {
-          layout = JSON.parse(data.layout_json);
-        } catch (_) {
-          layout = { nodes: [], edges: [], view: { tx: 0, ty: 0, scale: 1 } };
-        }
-        renderGraph();
+        var parsed;
+        try { parsed = JSON.parse(data.layout_json); }
+        catch (_) { parsed = null; }
+        applyLoadedLayout(parsed);
       })
       .catch(function (err) {
         statusEl.textContent = 'Erro ao carregar: ' + err.message;
       });
   }
 
-  // ── Add entry to canvas ───────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Entry picker — bring an existing entrada onto the landscape
+  // ═══════════════════════════════════════════════════════════════════════════
   function openEntryPicker() {
     var backdrop = document.getElementById('entry-picker-backdrop');
     var list = document.getElementById('entry-list');
@@ -580,46 +1399,25 @@
     search.addEventListener('input', function () { renderList(search.value); });
   }
 
-  function esc(s) {
-    return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
   function addEntryToCanvas(path) {
-    var exists = layout.nodes.some(function (n) { return n.entry_path === path; });
+    var exists = layout.notes.some(function (n) { return n.entry_path === path; });
     if (exists) { showToast('Já está no canvas'); return; }
     var entry = allEntries.find(function (e) { return e.path === path; });
-    layout.nodes.push({
+    var center = cellAt(W / 2, H / 2);
+    var spot = findFreeCell(center[0], center[1]);
+    layout.notes.push({
+      id: path,
+      text: entry ? (entry.title || path.split('/').pop().replace(/\.md$/i, '')) : path,
       entry_path: path,
-      label: entry ? (entry.title || path.split('/').pop().replace(/\.md$/i, '')) : path,
-      x: (Math.random() - 0.5) * 400,
-      y: (Math.random() - 0.5) * 300,
+      x: spot[0], y: spot[1],
+      folder: null,
     });
-    renderGraph();
-    scheduleSave();
+    updateStatus(); scheduleSave();
   }
 
-  // ── Add edge ──────────────────────────────────────────────────────────────
-  function addEdge(fromPath, toPath, edgeType) {
-    layout.edges.push({ from: fromPath, to: toPath, type: edgeType });
-    renderGraph();
-    scheduleSave();
-  }
-
-  function enterLinkMode() {
-    linkMode = true;
-    linkFrom = null;
-    btnLink.classList.add('active');
-    salaStatus.textContent = 'Clique no nó de origem…';
-  }
-
-  function exitLinkMode() {
-    linkMode = false;
-    linkFrom = null;
-    btnLink.classList.remove('active');
-    salaStatus.textContent = '';
-  }
-
-  // ── Toolbar wiring ────────────────────────────────────────────────────────
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Toolbar wiring
+  // ═══════════════════════════════════════════════════════════════════════════
   btnAdd.addEventListener('click', function () {
     requireLogin(openEntryPicker);
   });
@@ -653,7 +1451,8 @@
   });
 
   btnFit.addEventListener('click', function () {
-    if (graphHandle) graphHandle.fit(true);
+    fit(true);
+    scheduleSave();
   });
 
   btnSalas.addEventListener('click', function () {
@@ -677,6 +1476,7 @@
   function applyReadOnly(hardDisable) {
     isReadOnly = true;
     readonlyBanner.classList.add('show');
+    document.getElementById('hint').style.display = 'none';
     [btnAdd, btnLink, btnCompor, btnPublish].forEach(function (b) {
       if (hardDisable) {
         b.disabled = true;
@@ -686,8 +1486,18 @@
     });
   }
 
+  // ── Resize observer ───────────────────────────────────────────────────────
+  if (typeof ResizeObserver !== 'undefined') {
+    new ResizeObserver(function () { resize(); }).observe(wrap);
+  } else {
+    window.addEventListener('resize', resize, { passive: true });
+  }
+
   // ── Boot ──────────────────────────────────────────────────────────────────
   function boot() {
+    resize();
+    loop();
+
     if (mode === 'share-token') {
       applyReadOnly(true);
       salaName.textContent = 'Sala compartilhada';

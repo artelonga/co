@@ -5,6 +5,152 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.3.1] — 2026-06-11 — backup nunca derruba o boot
+
+## CO-405 — backup nunca mais derruba a produção — guard de disco, debounce e retenção por contagem
+
+The backup worker is now defensive by construction, closing the 2026-06-11
+double outage (disk-full crash-loop in the morning; >6 min boot-blocked bind
+at night):
+
+- **Out of the boot path**: the first backup tick is deferred
+  `CO_BACKUP_BOOT_DELAY_SECS` (default 10 min) via a new
+  `Worker::initial_delay()` supervisor hook, and the tarball now builds in
+  `spawn_blocking` — it can never again starve the 1-vCPU machine before the
+  HTTP listener binds.
+- **Free-space guard**: snapshot skipped when available space <
+  max(2× last snapshot, `CO_BACKUP_MIN_FREE_BYTES`, default 256 MiB), with a
+  `backup.skipped_low_disk` EDA event, WARN log, and atividade entry.
+- **Restart debounce**: no new snapshot while the newest is younger than
+  `CO_BACKUP_MIN_INTERVAL_HOURS` (default 6 h) — deploy/restart bursts produce
+  one snapshot per window instead of four in a day.
+- **Count/size retention**: `CO_BACKUP_RETAIN_COUNT` (default 3) and
+  `CO_BACKUP_RETAIN_MAX_BYTES` now prune oldest-first; the 30-day rule is
+  secondary; the newest snapshot is always kept as a restore point.
+- Atividades now record snapshot size, free space after, and every skip.
+
+### Why
+
+Snapshots-on-restart filled the volume twice in one day (264+266+280+299 MB
+on 3 GB) and the boot-time snapshot blocked health checks during tonight's
+3.3.0 deploy. Stopgap until CO-104 (S3 backend) makes local headroom
+irrelevant.
+
+
+## [3.3.0] — 2026-06-11 — sala paisagem — grid landscape
+
+## CO-410 — Sala grid landscape — type-on-square, working drag-and-drop, pastas
+
+The sala canvas (`/u/{universe}/sala`) is now a **natural landscape**: an
+infinite grid over procedural terrain instead of a free-form graph void. Every
+square holds a value — click and type directly on the grid:
+
+- a **single letter** renders on the square and the cursor advances (write
+  across the land like text)
+- **`/nome`** creates a **pasta** — a draggable folder unit
+- **longer text** becomes a **nota** card
+- new salas start with the root pasta **`/`** on the origin square
+
+Drag-and-drop now works (pointer events, mouse + touch, snap-to-grid with
+ghost preview): notas dropped on a pasta join it, and a pasta drags as one
+unit with everything inside. Read-only/share-token modes, the CO-352 state
+API (layout v2, v1 layouts migrate on load), and the anon login-CTA contract
+are preserved. Rendering is dirty-flag (no idle repaints); `graph.html`
+continues to use co-graph.js unchanged.
+
+### Why
+
+Direct user feedback: click-and-drag on the old graph canvas didn't work, and
+an empty canvas gave new arrivals nothing to react to. A pre-filled landscape
+plus type-anywhere makes the sala a place you inhabit immediately — the
+folder/note/letter trio maps the file→folder→universo ladder onto the canvas.
+
+
+## [3.2.0] — 2026-06-11 — lentes compostas + co updates
+
+- **`co updates`** — release notes no terminal. `-n 3` últimas, `--all` histórico desde 0.1.0. Offline, embutido no binário.
+- **UI por lentes** — 8 lentes (kanban, tabela, calendário, timeline, gantt, dashboard, grafo, documento) sobre um registry único; formulários derivam do schema. CO-387/396 plugam sem tocar despacho.
+- **WELCOME.md** — onboarding completo + a invariante do pipeline (*localhost → aprovar → mesclar*) em git e jj.
+
+### Detalhes
+
+- Lentes (CO-393, user story): universo renderiza por lentes registráveis, manifest-driven — endurecido em review: 3 defeitos fatais de alcance corrigidos, boot verificado em navegador (zero erros JS).
+- Docs (CO-403, task): exemplo CRUD vivo no universo miguel; correções factuais de roadmap no mesmo PR.
+- CLI (CO-404, task): `include_str!` do CHANGELOG → cada `release-commit.sh` vira a próxima nota automaticamente.
+
+### Referências
+
+| Item | PR | Spec |
+|---|---|---|
+| CO-393 lentes | [#196](https://github.com/artelonga/co/pull/196) → `e00c88f` | `work/co/CO-393.md` |
+| CO-403 docs | [#197](https://github.com/artelonga/co/pull/197) → `d7a682c` | `work/co/CO-403.md` |
+| CO-404 co updates | [#198](https://github.com/artelonga/co/pull/198) → `bc093ef` | `work/co/CO-404.md` |
+
+## CO-393 — Composable universe UI — content lenses + schema-driven form engine, manifest-driven
+
+New `variants/i` SPA that replaces hardcoded view wiring with a composable lens registry
+and a schema-driven form engine. The variant ships alongside stable `variants/a` and is
+promoted only after parity verification.
+
+### What changed
+
+- **Lens registry** (`variants/i/modules/lenses/registry.js`): uniform `{ id, label, icon, supports, render }` interface. `computeDynamicTabs(manifest)` replaces the gantt-only `injectManifestViewTabs` — all `manifest.views` types and declared `content_types` drive visible tabs with no JS change.
+- **Form engine** (`variants/i/modules/form/engine.js`, `fields.js`): `renderForm(schema, value)` → `<form>`, `collect(form, schema)` → plain object. Handles `string`, `text`, `number`, `date`, `boolean`, `enum`, `ref` field types. Universe create/edit uses it via `renderUniverseForm()` in `dom-setup.js`.
+- **`conteudo.js` split**: 1502-line monolith decomposed into `document-tree.js` (pure tree utils), `document-assets.js` (asset rendering utils), `document.js` (lens facade). No file in `variants/i/` exceeds 500 LoC.
+- **Graph lens** (`variants/i/modules/lenses/graph.js`): multi-universe graph via `GET /api/v1/universes/{slug}/graph?universes=…` (CO-345). Auto-detects parent + child universes from `state.meUniverses`. `renderContent` routes `state.view === 'graph'` to it.
+- **Graph tab injection**: `computeDynamicTabs` auto-injects a graph tab when the universe has a `parent_key` or child universes (AC4+AC5: no JS change needed).
+- **AC4 test** (`variants/i/modules/form/test.js`): demonstrates adding an `article` content_type yields a working form + eligible lenses with zero JS change.
+- **i18n keys** added to both pt and en dicts in `shared/i18n.js`: `lens.graph`, `lens.graph.universes`, `form.required`, `form.field_ref`, `sidebar.children`.
+
+### Why
+
+The gap in the previous architecture: content was composable lenses; forms were bespoke HTML with no schema→form generation. `_universe.yaml` `content_types[].schema` declared field shapes but the form layer never used them. CO-393 closes that gap by making the manifest the single source of truth for both what you can see (lenses) and what you can edit (forms).
+
+## CO-403 — Onboarding & pipeline documentation — WELCOME.md + delivery-pipeline invariant
+
+Adds the platform's front-door documentation:
+
+- **`docs/WELCOME.md`** — a history-teller onboarding in seven movements: the
+  co- prefix as the feature list (Collective Consciousness, ñandé posture),
+  the abstractions in arrival order, requirements-as-layers, the five-act
+  changelog history, the inhabited universes (including miguel → mse as the
+  stakeholder↔project pattern), a worked CRUD example on the Vault API
+  (`scholars/` in miguel), and "Bringing a universe with you — two doors":
+  add a local folder via `co push` (CO-392) or clone one from its git remote.
+- **`docs/delivery-pipeline.md`** — new section "The invariant — review on
+  localhost, approve, merge", explaining the pipeline (CO-398) in both
+  version-control vocabularies: traditional git (branch → PR + preview →
+  approval → merge ⇒ deploy) and CO-native/jujutsu (change → states →
+  proposta + localhost serve → approval → mesclar/bookmark move ⇒ publish),
+  with a worked example of each.
+- Cross-links from `README.md`, `docs/README.md`, and WELCOME §7.
+
+### Why
+
+3.0.0 opened the public door; this gives the people walking through it the
+story, the vocabulary, and the two everyday gestures — without reading source.
+
+## CO-404 — `co updates` — release notes in the CLI
+
+Adds `co updates`, a new CLI command that prints release notes straight from
+the CHANGELOG embedded in the binary at compile time:
+
+- `co updates` — the most recent release section (version — date — theme +
+  its task entries), lightly styled for the terminal
+- `co updates -n 3` — the N most recent releases in detail
+- `co updates --all` — compact release-history list (every version header)
+
+No network, works offline, and always matches the installed version. Every
+`release-commit.sh` run automatically becomes the next note — the release
+process needs no extra authoring step.
+
+### Why
+
+3.0.0 opened the public door and CO-403 wrote the welcome; this puts the
+"what's new" channel inside the tool itself, where content authors already
+live. Release notes become a product surface instead of a repo artifact.
+
+
 ## [3.1.0] — 2026-06-11 — delivery pipeline + knowledge base
 
 ## CO-367 — Universal content → KB sync — generalize the rollup pattern to all entry types
