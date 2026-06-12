@@ -3910,6 +3910,36 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/translate/{*path}:
+    post:
+      tags: ["entries"]
+      summary: "CO-416 — generate pt↔en content twin (`?to=en`); 503 if backend unconfigured"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/translation/{*path}:
+    get:
+      tags: ["entries"]
+      summary: "CO-416 — does a translation twin exist (+ stale flag)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/vault/:
     get:
       tags: ["vault"]

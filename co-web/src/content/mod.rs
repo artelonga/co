@@ -23,6 +23,8 @@ pub mod relation_routes;
 pub mod review_routes;
 pub mod search_routes;
 pub mod state_routes;
+pub mod translate;
+pub mod translate_routes;
 pub mod universe_routes;
 pub mod universo;
 pub mod vault_routes;

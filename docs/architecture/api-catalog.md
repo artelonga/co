@@ -201,6 +201,8 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | GET | `/{slug}/entries/{*path}` | visibility | Get entry by path |
 | PUT | `/{slug}/entries/{*path}` | owner | Update entry |
 | DELETE | `/{slug}/entries/{*path}` | owner | Delete entry |
+| POST | `/{slug}/translate/{*path}` | owner | CO-416 — generate pt↔en content twin (`?to=en`); 503 if backend unconfigured |
+| GET | `/{slug}/translation/{*path}` | visibility | CO-416 — does a translation twin exist (+ stale flag) |
 | GET | `/{slug}/citations` | visibility | Inbound references |
 | GET | `/{slug}/citations/orphan-wikilinks` | visibility | Wikilinks with no target entry |
 | GET | `/{slug}/relations/inbound` | visibility | CO-153 inbound typed FKs |
