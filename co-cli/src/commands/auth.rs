@@ -25,6 +25,7 @@ use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
 const DEFAULT_BASE_URL: &str = "https://co.artelonga.com.br";
+const USER_AGENT: &str = concat!("co-cli/", env!("CARGO_PKG_VERSION"));
 
 // ─── Credential types ─────────────────────────────────────────────────────────
 
@@ -210,6 +211,10 @@ impl ApiClient {
     fn new(base_url: &str, bearer: Option<&str>) -> Self {
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
+            // CO-411: prod's abuse heuristics (CO-278-B/CO-397) reject
+            // UA-less requests with 400 missing_user_agent — every CLI
+            // client must identify itself.
+            .user_agent(USER_AGENT)
             .build()
             .expect("HTTP client");
         Self {
@@ -1069,6 +1074,40 @@ mod tests {
         assert_eq!(
             loaded.get("uat").unwrap().base_url.as_deref(),
             Some("https://co-artelonga-uat.fly.dev")
+        );
+    }
+}
+
+#[cfg(test)]
+mod ua_tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    /// CO-411: every ApiClient request must carry a User-Agent — prod's
+    /// abuse heuristics reject UA-less requests with 400 missing_user_agent.
+    #[test]
+    fn test_api_client_sends_user_agent() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 2048];
+            let n = sock.read(&mut buf).unwrap();
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let _ = sock.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}");
+            req
+        });
+        let client = ApiClient::new(&format!("http://{addr}"), None);
+        let _ = client.client.get(client.url("/probe")).send();
+        let req = handle.join().unwrap();
+        let ua_line = req
+            .lines()
+            .find(|l| l.to_lowercase().starts_with("user-agent:"))
+            .unwrap_or_else(|| panic!("no User-Agent header in request:\n{req}"));
+        assert!(
+            ua_line.contains("co-cli/"),
+            "expected co-cli/<version> UA, got: {ua_line}"
         );
     }
 }
