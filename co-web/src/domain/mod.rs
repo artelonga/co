@@ -5,4 +5,4 @@
 
 pub mod entity;
 
-pub use entity::EntryDomain;
+pub use entity::{EntryDomain, ReferenceDomain, RelationDomain};

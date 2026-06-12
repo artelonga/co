@@ -8,19 +8,21 @@
 //! Unlike `JpaRepository<Book, Long>` in Spring, Rust requires explicit trait
 //! definitions and manual SQLite connection management.  `EntryIndex<'a>` uses
 //! `&'a Connection` with lifetime constraints that don't compose cleanly with
-//! `Box<dyn EntryRepository>`.  The spike works around this by embedding an
-//! `Arc<parking_lot::Mutex<Connection>>` in `SqliteEntryRepository` — the same
-//! pattern used for universe connections in `co-web/src/platform/universe_pool.rs`.
-//! This adds one allocation per repository but avoids lifetime leakage.
+//! `Box<dyn EntryRepository>`.  The repository works around this by embedding
+//! the shared per-universe connection (`Arc<std::sync::Mutex<Connection>>` —
+//! the exact type returned by `Storage::universe_conn` and
+//! `UniversePool::get_or_open`) and constructing the short-lived
+//! `EntryIndex<'_>` internally on every call.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
-use anyhow::Result;
-use parking_lot::Mutex;
+use anyhow::{Result, anyhow};
 use rusqlite::Connection;
 
 use crate::domain::EntryDomain;
 use crate::mapper::entry_mapper::EntryMapper;
+
+mod index_ops;
 
 // ---------------------------------------------------------------------------
 // Repository trait
@@ -66,11 +68,17 @@ impl SqliteEntryRepository {
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
         Self { conn }
     }
+
+    fn lock(&self) -> Result<MutexGuard<'_, Connection>> {
+        self.conn
+            .lock()
+            .map_err(|_| anyhow!("universe conn lock poisoned"))
+    }
 }
 
 impl EntryRepository for SqliteEntryRepository {
     fn find(&self, universe_key: &str, path: &str) -> Result<Option<EntryDomain>> {
-        let conn = self.conn.lock();
+        let conn = self.lock()?;
         let index = crate::entry_index::EntryIndex::new(&conn);
         let row = index.get(universe_key, path)?;
         Ok(row.map(|r| EntryMapper::row_to_domain(r, universe_key)))
@@ -83,7 +91,7 @@ impl EntryRepository for SqliteEntryRepository {
         filter: &serde_json::Value,
         limit: Option<usize>,
     ) -> Result<Vec<EntryDomain>> {
-        let conn = self.conn.lock();
+        let conn = self.lock()?;
         let index = crate::entry_index::EntryIndex::new(&conn);
         let rows = index.query_with_limit(universe_key, entry_type, filter, limit)?;
         Ok(rows
@@ -93,7 +101,7 @@ impl EntryRepository for SqliteEntryRepository {
     }
 
     fn upsert(&self, universe_key: &str, entry: &EntryDomain) -> Result<()> {
-        let conn = self.conn.lock();
+        let conn = self.lock()?;
         let index = crate::entry_index::EntryIndex::new(&conn);
         let core_entry = EntryMapper::domain_to_core_entry(entry);
         index.upsert(universe_key, &core_entry)?;
@@ -101,14 +109,14 @@ impl EntryRepository for SqliteEntryRepository {
     }
 
     fn delete(&self, universe_key: &str, path: &str) -> Result<()> {
-        let conn = self.conn.lock();
+        let conn = self.lock()?;
         let index = crate::entry_index::EntryIndex::new(&conn);
         index.remove(universe_key, path)?;
         Ok(())
     }
 
     fn count(&self, universe_key: &str, entry_type: Option<&str>) -> i64 {
-        let conn = self.conn.lock();
+        let Ok(conn) = self.lock() else { return 0 };
         let index = crate::entry_index::EntryIndex::new(&conn);
         index.count(universe_key, entry_type)
     }
@@ -142,6 +150,7 @@ impl EntryRepository for InMemoryEntryRepository {
         Ok(self
             .entries
             .lock()
+            .unwrap()
             .iter()
             .find(|e| e.universe_key == universe_key && e.path == path)
             .cloned())
@@ -154,7 +163,7 @@ impl EntryRepository for InMemoryEntryRepository {
         _filter: &serde_json::Value,
         limit: Option<usize>,
     ) -> Result<Vec<EntryDomain>> {
-        let entries = self.entries.lock();
+        let entries = self.entries.lock().unwrap();
         let results: Vec<EntryDomain> = entries
             .iter()
             .filter(|e| {
@@ -170,14 +179,14 @@ impl EntryRepository for InMemoryEntryRepository {
     }
 
     fn upsert(&self, _universe_key: &str, entry: &EntryDomain) -> Result<()> {
-        let mut entries = self.entries.lock();
+        let mut entries = self.entries.lock().unwrap();
         entries.retain(|e| !(e.universe_key == entry.universe_key && e.path == entry.path));
         entries.push(entry.clone());
         Ok(())
     }
 
     fn delete(&self, universe_key: &str, path: &str) -> Result<()> {
-        let mut entries = self.entries.lock();
+        let mut entries = self.entries.lock().unwrap();
         entries.retain(|e| !(e.universe_key == universe_key && e.path == path));
         Ok(())
     }
@@ -185,6 +194,7 @@ impl EntryRepository for InMemoryEntryRepository {
     fn count(&self, universe_key: &str, entry_type: Option<&str>) -> i64 {
         self.entries
             .lock()
+            .unwrap()
             .iter()
             .filter(|e| {
                 e.universe_key == universe_key && entry_type.map_or(true, |t| e.entry_type == t)

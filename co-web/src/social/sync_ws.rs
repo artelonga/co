@@ -392,7 +392,7 @@ async fn handle_uplink(
 }
 
 fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &str) {
-    use crate::entry_index::{EntryIndex, make_entry};
+    use crate::entry_index::make_entry;
     use co::proto::sync::sync_delta::{Body, Kind};
 
     let storage = state.core.storage.lock();
@@ -440,14 +440,13 @@ fn apply_deltas_to_storage(batch: &SyncBatch, state: &AppState, universe_key: &s
                     continue;
                 }
 
-                if let Ok(guard) = conn_arc.lock() {
-                    let idx = EntryIndex::new(&guard);
-                    if let Err(e) = idx.upsert(universe_key, &entry) {
-                        warn!(
-                            "sync-ws index upsert failed for {path}: {e}",
-                            path = d.entry_path
-                        );
-                    }
+                if let Err(e) = crate::repository::SqliteEntryRepository::new(conn_arc.clone())
+                    .upsert_entry(universe_key, &entry)
+                {
+                    warn!(
+                        "sync-ws index upsert failed for {path}: {e}",
+                        path = d.entry_path
+                    );
                 }
             }
             Kind::Deleted => {
