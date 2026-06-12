@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-415",
+  "title": "Login com GitHub em co.artelonga.com.br (OAuth) — pedido do Miguel",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-415.md",
+  "branch": "feat/CO-415-github-oauth-login",
+  "merge_sha": "063694eabf5ef989520a65552013ebfa6835bd57",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/211",
+    "number": 211
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T16:17:00Z",
+  "files_changed": 15,
+  "lines_added": 944,
+  "lines_removed": 10,
+  "labels": [
+    "type:feat",
+    "module:collab"
+  ],
+  "changelog_entry": "## CO-415 — GitHub OAuth login (mirrors Google)\n\nVisitors can now sign in to `co.artelonga.com.br` with their GitHub account —\nthe GitHub twin of the CO-177 Google OAuth flow. Pedido do Miguel: não criar\nmais uma senha.\n\n### Added\n\n- **GitHub OAuth 2.0 sign-in** (`co-web/src/integrations/oauth_github.rs`), a\n  full authorization-code flow mirroring `oauth_google.rs`:\n  - `GET /api/v1/auth/github/start?return_to=` — signs a state JWT (return_to +\n    nonce + origin + short expiry, `return_to` safelist-checked via\n    `recovery_routes::is_allowed_return_to`) and redirects to GitHub's consent\n    screen with scope `read:user user:email`.\n  - `GET /api/v1/auth/github/callback?code=&state=` — verifies the state JWT,\n    exchanges the code for a token (`Accept: application/json`), fetches\n    `GET /user` + `GET /user/emails`, selects the **primary verified** email,\n    finds-or-creates a CO user by the new `users.github_login` column (falling\n    back to email), sets the session cookie, and redirects to the safelisted\n    `return_to` (CO-186 cross-apex handover token attached when applicable).\n  - `GET /api/v1/auth/github/status` — reports whether GitHub OAuth is\n    configured, so the SPA hides the \"Entrar com GitHub\" button when it isn't.\n- **`users.github_login` column** + partial unique index (migration v74),\n  mirroring `users.google_sub`. `find_or_create_user_by_github` links a GitHub\n  identity onto an existing email-bearing account or creates a fresh user.\n- **Login UI** — \"Entrar com GitHub\" / \"Cadastrar com GitHub\" buttons, gated on\n  `/github/status` exactly like the Google button (hidden until configured).\n\n### Behavior\n\n- Both endpoints return **503** when `GITHUB_OAUTH_CLIENT_ID` /\n  `GITHUB_OAUTH_CLIENT_SECRET` are unset — no half-broken state.\n- A GitHub account with **no verified email** → **401**.\n- The OAuth client id/secret are **distinct** from any admin PAT\n  (`github_auth.rs` is unaffected — that is admin PAT verification, not login).\n\n### Operator setup (Fly secrets — per environment)\n\n```\nflyctl secrets set GITHUB_OAUTH_CLIENT_ID=<id> \\\n                   GITHUB_OAUTH_CLIENT_SECRET=<secret> -a co-artelonga\n# optional override (defaults to https://co.artelonga.com.br/api/v1/auth/github/callback):\nflyctl secrets set GITHUB_OAUTH_REDIRECT_URI=<uri> -a co-artelonga\n```\n\nRegister the OAuth app at GitHub with the callback URL\n`https://co.artelonga.com.br/api/v1/auth/github/callback`.",
+  "summary": "As Miguel (e qualquer visitante), QUERO entrar no co.artelonga.com.br com minha conta do GitHub, PARA não criar mais uma senha.",
+  "co_auto_version": "0.1.0"
+}
