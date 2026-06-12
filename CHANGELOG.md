@@ -5,6 +5,442 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.0] — 2026-06-12 — security gate + ops resilience + Miguel
+
+## CO-388 — Security audit pipeline integration — Claude Security in CO-382 CI route (Project Glasswing-aligned)
+
+Adds step 11 (security audit) to the deterministic 10-step CI route (CO-382).
+Every PR is scanned for vulnerabilities using the `LocalGrepBackend` (always
+available) or `ClaudeSecurityBackend` (when `CO_SECURITY_BACKEND=claude`).
+Findings flow through the EDA bus: Critical/High block merge and create sprint
+PBIs; Medium creates advisory PBIs; Low/Info log to atividades only.
+
+### What changed
+
+- `SecurityAuditBackend` trait with `LocalGrepBackend` (default) and
+  `ClaudeSecurityBackend` (full implementation using Claude API)
+- `NoOpBackend` for dev/test (`CO_SECURITY_BACKEND=disabled`)
+- Cargo feature stubs: `security-semgrep`, `security-sonar`
+- Migration v71: `security_findings` table + severity/unresolved indexes
+- EDA subscribers: `FindingsPersistor`, `PBIBacklogger`, `ReleaseBlocker`
+- Admin REST API: `GET/PATCH /api/v1/gestao/security/findings`,
+  `GET /api/v1/gestao/security/scan/status`, `POST /api/v1/gestao/security/scan`
+- `pr-route.yml` step 11: `security-audit` job (skips drafts, docs-only, reverts)
+- `release-gate.yml`: security gate blocks Thursday release on unresolved
+  Critical/High findings; `--ignore-security-findings` override is logged + alerted
+- `docs/security-audit-pipeline.md`: 11-step route reference
+- `docs/security-disclosure.md`: manual disclosure process for Critical findings
+- 3 new env vars: `CO_SECURITY_BACKEND`, `CO_SECURITY_API_KEY`,
+  `CO_SECURITY_MAX_SCANS_PER_DAY`
+- Cost guardrails: skip drafts/docs/reverts; daily scan cap (default 50);
+  cache by SHA-256 file hash
+
+### Why
+
+Anthropic's Project Glasswing announced June 2026: cyber-capable models are
+near. CO is exactly the kind of system that becomes a high-value target as it
+scales (per-brain identity, payment data, federated event bus, OAuth flows, vault
+writes). This spec wires the security bottleneck ("verify, disclose, patch") into
+CO's existing scrum CI spine instead of creating a separate process.
+
+### Security hardening (pre-merge review)
+
+The security-gate PR was itself audited; eleven confirmed issues were fixed
+(correctness here is paramount — this *is* the gate):
+
+- **Auth (was fully unauthenticated):** the security router only layered the
+  admin DATA extensions, never the `require_github_admin` enforcement
+  middleware — every `/api/v1/gestao/security/*` endpoint (including
+  `resolve_finding`, which opens the release gate) was reachable by anyone. The
+  middleware is now applied inside the router, matching every sibling admin
+  router. The acting admin is recorded on resolve (new `resolved_by` column +
+  event field) and on the scan override, for audit trail.
+- **Injection / DoS:** `list_findings` now uses bound params (no SQL
+  interpolation) and clamps `LIMIT` to `[1,200]` (SQLite `LIMIT -1` =
+  unlimited). `git diff` ref ranges are validated against a safe git-ref
+  charset and terminated with `--` (argument-injection defence). The daily
+  scan cap is now a DB-backed per-UTC-day counter (`security_scan_counts`) that
+  persists across requests — the previous in-memory counter was rebuilt every
+  request so `CO_SECURITY_MAX_SCANS_PER_DAY` never tripped; over-cap requests
+  return 429.
+- **Panic / dead code:** the Claude diff truncation now slices on a UTF-8 char
+  boundary (`&diff[..100_000]` panicked on accents/emoji). The `PBIBacklogger`
+  INSERT referenced a nonexistent `entries.id` column (PK is
+  `(universe_key, path)`); the error was swallowed by a `warn!`, so PBIs were
+  never created — it now matches the real schema (`frontmatter_json` +
+  NOT NULL `body_hash`) and is covered by a test that asserts the row appears.
+- **CI:** `pr-route.yml` gains `CARGO_INCREMENTAL=0` + per-job timeouts
+  (disk-full guard); all PR-controlled values (title, draft, base ref) move out
+  of `run:` interpolation into `env:` (script-injection defence); the scanner
+  step is fail-CLOSED (`set -euo pipefail`, no `|| true`). `release-gate.yml`
+  now reads audit records that `pr-route.yml` actually commits into
+  `docs/scrum/security/`, and FAILS LOUDLY when a wave that shipped work has
+  zero audit records (previously the glob matched a path nothing wrote, so the
+  gate was vacuously green every release).
+
+> Note: the `security_findings` table ships as migration **v73** (not v71 as
+> the draft above stated); v73 also adds `resolved_by` and the
+> `security_scan_counts` daily-cap table.
+
+## CO-402 — Wave-6 security-epic design + roadmap reconcile + epics backlog
+
+Forward-looking documentation made release-ready for the v3.5.0 cut. Docs only —
+no feature code, no deploy.
+
+- **`docs/architecture/wave6-security-epic.md`** (new) — the design doc for the
+  Wave-6 security epic: `.co` protobuf-wrapped markdown format (CO-86),
+  composable protocol stack (CO-87), filesystem-as-web flow + pairing ceremony
+  (CO-110), and the per-universe encryption envelope (CO-145/148 — Argon2id KEK →
+  per-universe DEK → ChaCha20-Poly1305 blob ciphertext). Includes a threat model
+  (assets × trust boundaries × mitigations), the plaintext-for-search boundary,
+  the migration path for existing universes, and the CO-104/119 restore-drill
+  blocking precondition ("never encrypt what you cannot restore"). CO-402 set to
+  `done` — for a design doc, done = the decisions are written and pinned.
+- **`docs/roadmap.md`** (reconciled) — corrected the stale "Current state" block
+  to 2026-06-12 / prod = v3.4.0; rebuilt the wave table to mark v3.1.0–v3.4.0
+  done with real contents and v3.5.0 as next (security gate + ops hardening +
+  prod-e2e); remapped open work to what actually shipped vs is pending, verified
+  against `git tag` + `CHANGELOG.md` + each `work/co/CO-N.md` status (e.g. CO-366
+  is **still `todo`**, not shipped; CO-104/119 are now done, unblocking Wave 6).
+- **`docs/architecture/epics-backlog.md`** (new) — single organized index of all
+  open `type: epic` work items grouped by theme (security, scale/data-infra,
+  server-decomposition, sync, platform), each with its child user-stories and the
+  Wave/version it targets. Flags the decomposition epics (CO-227…231) and CO-145
+  as closeable-at-release (children all done).
+
+### Why
+The v3.5.0 release needs its forward-looking docs to be factually current and the
+security epic to have an agreed architecture before any implementation agent
+touches `.co` format, fs-as-web, or encryption — these are decisions, not
+features.
+
+## CO-406 — graceful startup degradation (no crash-loop on pool failure)
+
+A single universe whose per-universe SQLite DB cannot be opened or migrated
+(disk full, I/O error, corrupt `-shm`) no longer panics the whole process.
+The 2026-06-11 outage (`SQLITE_IOERR_SHMSIZE` on a full disk) converted one
+pool-open failure into a global outage: `panic → exit 101 → Fly crash loop →
+max-restart cap → total site down`. This change isolates that failure to the
+one affected universe.
+
+### What changed
+
+- `UniversePool` gained `try_get_or_open()` — a non-panicking open that, on any
+  environment failure (mkdir / open / pragmas / migrations), records the
+  universe as **unavailable** with the failure reason and returns `Err(PoolError)`
+  instead of panicking. Per-universe migrations (`run_universe_migrations`,
+  `ensure_universe_column`, `recreate_references_meta_v8`) now return
+  `rusqlite::Result` and propagate errors rather than `.expect()`-panicking.
+- **Lazy retry / self-heal:** failures are never cached as a connection, so the
+  next access re-attempts the open. Once the environment failure clears (disk
+  freed, volume extended) the universe recovers automatically — no restart. An
+  admin `reopen()` forces immediate recovery.
+- **Request path → 503:** the `universe_visibility_gate` middleware (CO-161, the
+  single chokepoint for every `/api/v1/universes/{slug}/…` route) now probes the
+  pool and short-circuits with **503 Service Unavailable** + a clear reason when
+  the universe is down. Every other universe keeps serving 200. The probe drops
+  the `Mutex<Storage>` lock before any `.await` (no lock held across await).
+- **Startup seed is tolerant:** `seed_template_universe` skips seeding and logs
+  if the template universe's DB can't be opened at boot — the server starts
+  degraded instead of crash-looping.
+- **Admin surface (`/gestao`):** `GET /gestao/universos/indisponiveis` lists
+  unavailable universes; `POST /gestao/universos/{key}/reabrir` reopens one.
+- `PoolError → AppError::ServiceUnavailable` conversion (503) + Portuguese
+  translation for `service_unavailable`.
+
+### Why
+
+Panic-on-environment-failure at startup is the same family as the 2026-05-12
+mutex-poisoning incident: one bad condition must never take the whole site down.
+The per-universe pool is the natural isolation boundary — a partial failure
+(one pool open) must stay partial.
+
+### Startup-path audit
+
+Converted (single-universe isolation is possible):
+- per-universe pool open + migrations (all `.expect()` → `Result`).
+- template seed at boot (skips on failure).
+
+Deliberately left fatal (no per-universe isolation; failing fast is correct):
+- `Storage::new` meta.db open / WAL pragma / data-dir create
+  (`co-web/src/storage/mod.rs`): meta.db is the single shared DB (users,
+  universes, sessions). If it can't open, the site genuinely cannot run — fail
+  fast and let the platform restart.
+- auth-store / game-storage open in `server::serve` startup: shared singletons,
+  not per-universe.
+- `baseline.rs` UAT-reset `remove_file` expect: dev-only destructive reset path.
+
+## CO-407 — Uptime alerting (external health probe + notify)
+
+Added an external uptime probe so prod outages no longer wait for manual
+discovery (three user-found outages to date: disk-full panic, column-read
+regression, mutex poisoning).
+
+A scheduled GitHub Actions workflow (`.github/workflows/uptime-probe.yml`, cron
+every 5 minutes) curls `https://co.artelonga.com.br/api/health` from outside the
+prod machine. The probe logic lives in `scripts/uptime-probe.sh`:
+
+- Requires **N consecutive** in-run failures (default 3, ~20s apart) before
+  declaring an outage, so a single transient blip never raises a false alarm.
+- On a down transition it emits `health.down`; on recovery it emits
+  `health.recovered` with the **downtime duration**, computed from a tiny JSON
+  state file persisted across runs via the Actions cache.
+- Notification channels (configured by repo secret, never committed):
+  `RESEND_API_KEY` (e-mail via Resend, already used by prod) and/or `NTFY_URL`
+  (ntfy push). With neither set, alerts still surface as GitHub Actions
+  annotations + run summary, so the probe is useful immediately and never
+  silently green.
+- Staging (`https://staging.co.artelonga.com.br/api/health`) is probed too but
+  at `digest` priority: warning-level annotation + summary only, no push.
+
+### Why
+2026-06-11: prod crash-looped for ~3 hours (disk-full panic) and was found only
+by manually testing the site. Three strikes — alerting is no longer optional.
+GH Actions cron costs nothing and needs no new infra.
+
+### Operator note
+Add a notification channel to enable push alerts:
+
+```
+gh secret set RESEND_API_KEY --body "<resend key>"
+# and/or
+gh secret set NTFY_URL --body "https://ntfy.sh/<your-topic>"
+```
+
+## CO-408 — Ops small-batch: OAuth error body + git-credential startup noise (+ staging DNS doc)
+
+Three small, independent ops fixes in one patch.
+
+### Fixed
+
+- **Google OAuth token-exchange errors are now diagnosable.** The callback used
+  `reqwest::error_for_status()`, which discards Google's response body — so
+  `invalid_grant` (harmless authorization-code reuse) and `invalid_client`
+  (rotated client secret → *every* login broken) were indistinguishable in the
+  logs and required a manual `curl`-from-prod to tell apart. We now read the
+  body on a non-2xx token response, parse Google's `{error, error_description}`,
+  surface it in the 401 returned to the browser, and emit a `WARN` log line
+  (`co-web/src/integrations/oauth_google.rs`).
+
+- **No more `fatal: could not read Username for 'https://github.com'` ×2 on
+  startup.** The CO-337 remote sister-repo sync (`run_remote_sister_repo_seeds`)
+  shelled out to `git clone`/`git fetch` for universes with an HTTPS `remote_url`
+  (e.g. `mbya`) even when no git credential was configured, producing fatal log
+  noise on every boot and every 15-min worker tick. The sync now checks for a
+  configured credential (`CO_GIT_TOKEN` or `CO_GIT_SSH_KEY_PATH`) before touching
+  a network remote and skips with an `info` log when none is present. The feature
+  is intact — set `CO_GIT_TOKEN` and the next worker tick syncs, no redeploy
+  needed (`co-web/src/platform/vcs.rs`, `co-web/src/server/seed_orchestrator.rs`).
+
+### Ops (manual — not a code change)
+
+- **`staging.co.artelonga.com.br` has no DNS record.** The Fly app
+  `co-artelonga-staging.fly.dev` works; the custom domain resolves to nothing
+  (the record was lost when the staging app was recreated, CO-379). This cannot
+  be fixed from code. **Manual steps for the operator:**
+
+  1. At the **dns-parking nameservers** for `artelonga.com.br`, add a CNAME:
+     ```
+     staging.co  CNAME  co-artelonga-staging.fly.dev.
+     ```
+  2. Issue the Fly certificate so HTTPS works:
+     ```
+     flyctl certs add staging.co.artelonga.com.br -a co-artelonga-staging
+     flyctl certs show staging.co.artelonga.com.br -a co-artelonga-staging   # verify
+     ```
+  Verify: `dig +short staging.co.artelonga.com.br` returns the Fly target and
+  `curl -sI https://staging.co.artelonga.com.br/api/health` returns 200.
+
+## CO-415 — GitHub OAuth login (mirrors Google)
+
+Visitors can now sign in to `co.artelonga.com.br` with their GitHub account —
+the GitHub twin of the CO-177 Google OAuth flow. Pedido do Miguel: não criar
+mais uma senha.
+
+### Added
+
+- **GitHub OAuth 2.0 sign-in** (`co-web/src/integrations/oauth_github.rs`), a
+  full authorization-code flow mirroring `oauth_google.rs`:
+  - `GET /api/v1/auth/github/start?return_to=` — signs a state JWT (return_to +
+    nonce + origin + short expiry, `return_to` safelist-checked via
+    `recovery_routes::is_allowed_return_to`) and redirects to GitHub's consent
+    screen with scope `read:user user:email`.
+  - `GET /api/v1/auth/github/callback?code=&state=` — verifies the state JWT,
+    exchanges the code for a token (`Accept: application/json`), fetches
+    `GET /user` + `GET /user/emails`, selects the **primary verified** email,
+    finds-or-creates a CO user by the new `users.github_login` column (falling
+    back to email), sets the session cookie, and redirects to the safelisted
+    `return_to` (CO-186 cross-apex handover token attached when applicable).
+  - `GET /api/v1/auth/github/status` — reports whether GitHub OAuth is
+    configured, so the SPA hides the "Entrar com GitHub" button when it isn't.
+- **`users.github_login` column** + partial unique index (migration v74),
+  mirroring `users.google_sub`. `find_or_create_user_by_github` links a GitHub
+  identity onto an existing email-bearing account or creates a fresh user.
+- **Login UI** — "Entrar com GitHub" / "Cadastrar com GitHub" buttons, gated on
+  `/github/status` exactly like the Google button (hidden until configured).
+
+### Behavior
+
+- Both endpoints return **503** when `GITHUB_OAUTH_CLIENT_ID` /
+  `GITHUB_OAUTH_CLIENT_SECRET` are unset — no half-broken state.
+- A GitHub account with **no verified email** → **401**.
+- The OAuth client id/secret are **distinct** from any admin PAT
+  (`github_auth.rs` is unaffected — that is admin PAT verification, not login).
+
+### Operator setup (Fly secrets — per environment)
+
+```
+flyctl secrets set GITHUB_OAUTH_CLIENT_ID=<id> \
+                   GITHUB_OAUTH_CLIENT_SECRET=<secret> -a co-artelonga
+# optional override (defaults to https://co.artelonga.com.br/api/v1/auth/github/callback):
+flyctl secrets set GITHUB_OAUTH_REDIRECT_URI=<uri> -a co-artelonga
+```
+
+Register the OAuth app at GitHub with the callback URL
+`https://co.artelonga.com.br/api/v1/auth/github/callback`.
+
+## CO-416 — automatic pt↔en content translation (structure-preserving)
+
+Adds on-demand translation of **entry content** (the markdown body), distinct
+from the existing UI i18n. A `lang: pt` entry can mint a sibling `lang: en` twin
+(and vice-versa) that is traceable to its source and never overwrites it.
+
+### What changed
+
+- New `content::translate` module: a structure-preserving translation engine.
+  Fenced code blocks, inline code, and wikilinks (`[[key::path]]`) are masked
+  with opaque sentinels before any prose reaches the backend, then restored —
+  so code and link targets can never be corrupted regardless of model behavior.
+  Frontmatter machine fields (`type`, `lang`, dates, refs) are carried through
+  untouched; only `title` is translated.
+- Pluggable `TranslateBackend` selected by `CO_TRANSLATE_BACKEND`:
+  - unset / `none` / `manual` → `NoopBackend` (route answers **503**, graceful).
+  - `llm` → `LlmBackend`, which reuses the existing `infra::ai::AiRouter`
+    (provider via `CO_TRANSLATE_PROVIDER`, default `ollama`). No new LLM client.
+- New `content::translate_routes`:
+  - `POST /api/v1/universes/{slug}/translate/{*path}?to=en` — owner-gated. Writes
+    a twin entry at a parallel path (`foo.md` → `foo.en.md`) carrying
+    `translated_from`, `translated_from_hash`, and `translated_at` frontmatter.
+    Re-translation is **idempotent** by source body hash (no-op `unchanged` when
+    the source is unchanged). The `translated_from` field becomes a CO-74 typed
+    relation via `sync_entry_relations`.
+  - `GET /api/v1/universes/{slug}/translation/{*path}` — reports whether a twin
+    exists, its path/lang, and a `stale` flag (source changed since translation).
+    This is the data the UI language toggle needs to switch or offer "generate".
+- Routes added to `docs/architecture/api-catalog.md`; `openapi.yaml` regenerated;
+  `openapi:check` clean.
+
+### Why
+
+Miguel asked for his universe's content to appear in both pt-br and en without
+hand-translating. No schema migration was needed — provenance lives in
+frontmatter + the existing `entry_relations` table.
+
+### Notes
+
+- The catch-all entry path forces the action verb to precede the path
+  (`/translate/{*path}`), since Axum only allows `{*path}` at the end of a route.
+- Twin paths never stack lang suffixes (`foo.en.md` + `pt` → `foo.pt.md`).
+
+## CO-420 — Yggdrasil UX centralizada: epics/user-stories + timeline real + tempo mediano por universo
+
+Adiciona `docs/scrum/yggdrasil-ux-overview.md`: reestrutura a narrativa de UX do
+yggdrasil (`docs/experiencia-usuario-exemplo.md`, persona Marina) numa visão de
+alto nível **epics → user stories** (8 epics, A–H, com princípio de design e
+release datado por story), plota uma **timeline de datas reais** de release dos
+três universos (co · artelonga · yggdrasil) extraídas dos CHANGELOG.md, e reporta
+o **tempo mediano de conclusão por universo** com método auditável.
+
+### Why
+Centralizar a UX como backlog (não narrativa solta) dá critério de aceitação por
+epic; a timeline real e a métrica de cadência tornam visível que o ecossistema
+converge em 2026-06-11/12. Análise/documentação — sem código nem deploy.
+
+### Achados (médias por universo)
+- Tempo mediano por item (`updated_at − created_at`, itens `done`): co=0d (n=254),
+  artelonga=0d (n=40), yggdrasil=0d (n=107) — ~80% são tarefas de um dia.
+- Cadência de release (gap mediano entre dias de release): co=1d (298 releases),
+  artelonga=2d (25), yggdrasil=3d (48). Fonte: CHANGELOG.md + frontmatter work/.
+- Nenhum dos repos popula `completed_at` consistentemente (co:1, al:0, yg:0); a
+  métrica usa pares de datas reais existentes, sem fabricar conclusões.
+
+## CO-421 — Gate de usabilidade prod: suite Playwright anônima read-only vs co.artelonga.com.br
+
+Adiciona `co-web/e2e/prod-usability.spec.ts` (tag `@prod`): uma suite Playwright
+curada, **anônima e read-only**, que valida a usabilidade real de produção — o que
+um smoke de health 200 não pega. Roda como gate de release (pré e pós-deploy) contra
+`https://co.artelonga.com.br`. Sem staging (decisão 2026-06-12); o alvo é prod direto.
+
+Cobre cinco caminhos de usabilidade:
+- board do template (`/template`) carrega com tarefas tutorial visíveis (stat `tarefas` > 0 + card visível após expandir seção);
+- troca de tema aplica (`html[data-palette]` muda);
+- toggle pt/en muda os rótulos do botão de idioma;
+- deep-link de entrada (`/template/projects/CO/1`) renderiza markdown no zoom — não cai no 404;
+- grafo/lente (stats de conteúdo, com fallback opportunista para o dashboard) abre.
+
+### Read-only por construção
+Um interceptor `page.route("**/*")` instalado no `beforeEach` **aborta** qualquer
+request `POST/PUT/PATCH/DELETE` e registra a violação; o `afterEach` falha a suite se
+houver qualquer mutação. A suite **nunca muta prod** — garantia estrutural, não por
+convenção. A suite usa o `test`/`expect` puro do `@playwright/test` (sem o fixture
+`uat-login` de `e2e/fixtures.ts`, que retorna 404 em prod), então não há login.
+
+### Como rodar (gate de usabilidade prod)
+```bash
+cd co-web && BASE_URL=https://co.artelonga.com.br \
+  npx playwright test e2e/prod-usability.spec.ts \
+  --project=desktop-chromium --workers=2
+```
+Sem `BASE_URL` roda contra `http://localhost:3000` (um `co serve` local), servindo de
+smoke em CI. Documentado em `docs/release-checklist.md` como o gate de usabilidade
+prod, substituindo o smoke manual de UAT.
+
+### Why
+O smoke de health só prova que o servidor sobe; não pega regressão de UX (board vazio,
+tema quebrado, deep-link caindo em 404). Este é o conjunto que pode tocar prod com
+segurança e bloquear a promoção se a usabilidade real estiver vermelha.
+
+### Verificação
+Verde local (`co serve` em :3000, ~2.7s) e verde contra prod v3.4.0 ao vivo (~40s,
+< 2 min alvo); o guard read-only foi confirmado falhando uma sonda que emite um POST.
+Sem código Rust tocado — apenas TS/e2e + docs.
+
+## CO-422 — In-prod degradation alerter — email on degraded-but-alive events via Fly RESEND_API_KEY
+
+Adds a `DegradationAlerter` EDA subscriber that watches for degradation events and
+sends alert emails via the Resend API (`RESEND_API_KEY`) to `CO_ALERT_TO` (default
+`yuri@artelonga.com.br`). Without `RESEND_API_KEY` a one-time WARN is logged and the
+alerter becomes a no-op — never panics, never breaks startup.
+
+Events covered:
+- `backup.skipped_low_disk` (emitted by the backup worker, CO-405)
+- `universe.unavailable` (emitted by the universe pool, CO-406 — wired and ready)
+- `system.disk_pressure` — new event emitted by the new disk monitor when free space
+  on the data volume falls below `CO_DISK_ALERT_THRESHOLD_PCT` (default 15%)
+
+Each email includes what happened, where (universe/resource), and the actionable
+number (e.g. "Livre: 480 MB de 3072 MB"). Anti-spam debounce: max 1 email per event
+type per `CO_ALERT_DEBOUNCE_HOURS` (default 2 h).
+
+All degradation events flow through the EDA bus so they appear in the event_log and
+the atividades admin dashboard automatically.
+
+### Why
+The 2026-06-11 disk-full outage revealed a gap: the server was degrading (backups
+piling up, disk filling) hours before the crash-loop, but there was no alert. CO-407
+covers total outages via an external probe; this task covers the precursor window
+where the machine is still alive but heading toward failure.
+
+New env vars:
+| Variable | Default | Description |
+|---|---|---|
+| `CO_ALERT_TO` | `yuri@artelonga.com.br` | Alert recipient |
+| `CO_ALERT_FROM` | `CO Alertas <alertas@artelonga.com.br>` | Sender address |
+| `CO_ALERT_DEBOUNCE_HOURS` | `2` | Min hours between alerts per event type |
+| `CO_DISK_CHECK_INTERVAL_SECS` | `900` | Disk check interval (15 min) |
+| `CO_DISK_ALERT_THRESHOLD_PCT` | `15` | Free-% threshold for disk_pressure event |
+
+
 ## [3.4.0] — 2026-06-12 — fontes (source:github) + lente de tempo + traceback
 
 ## CO-387 — Time-rendering primitive — `<co-time-grid>` + calendar lenses
