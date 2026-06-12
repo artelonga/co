@@ -312,31 +312,6 @@ jobs:
             "$AUDIT_JSON" > "/tmp/security-audit-${PR_NUMBER}.json"
           echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
 
-      - name: Commit audit record to PR branch
-        # Only commits for same-repo PRs (forks have no push access — there the
-        # release gate falls back to its zero-files guard). Best-effort: a push
-        # race must not fail the security check.
-        if: >-
-          steps.skip-check.outputs.skip != 'true' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        continue-on-error: true
-        env:
-          AUDIT_JSON: ${{ steps.security-scan.outputs.audit_json }}
-          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          set -euo pipefail
-          [ -n "${AUDIT_JSON:-}" ] || { echo "no audit json to commit"; exit 0; }
-          git config user.name "CO Security Audit"
-          git config user.email "ci@artelonga.com.br"
-          git add "$AUDIT_JSON"
-          if git diff --cached --quiet; then
-            echo "audit record unchanged — nothing to commit"
-            exit 0
-          fi
-          git commit -m "chore(security): CO-388 audit record for PR #${PR_NUMBER}"
-          git push origin "HEAD:${HEAD_BRANCH}" || echo "push failed (race/permission) — artifact upload still covers this run"
-
       - name: Post security audit PR comment
         if: ${{ always() && steps.skip-check.outputs.skip != 'true' }}
         uses: actions/github-script@v7
