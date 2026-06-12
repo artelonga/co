@@ -16,12 +16,38 @@ Mesmos canais que `feedback-checklist.md` — issues, e-mail, bate-papo.
 
 - [ ] Todos os PRs da wave atual mergeados em `main` antes do corte (quarta 23:59 BRT)
 - [ ] `CHANGELOG-PENDING/` contém entrada para cada CO-N da wave
-- [ ] Suite Playwright em staging verde (CO-374) — bloqueia release se vermelha
+- [ ] **Gate de usabilidade prod (CO-421) verde** — bloqueia release se vermelho (ver abaixo)
 - [ ] Drift check OpenAPI verde (CO-350) — bloqueia release se vermelha
 - [ ] Migration validation verde para qualquer PR com migração nova (CO-376)
 - [ ] `gh pr list --state open` mostra zero PRs com label `release-blocker`
-- [ ] `flyctl deploy --config fly.staging.toml` rodou nas últimas 24h sem erros
-- [ ] yuri@artelonga.com.br consegue logar em prod E staging com mesma senha (CO-377)
+- [ ] yuri@artelonga.com.br consegue logar em prod com senha (CO-377)
+
+### Gate de usabilidade prod — CO-421 (substitui o smoke manual de UAT)
+
+Sem staging (decisão 2026-06-12): o alvo é **prod direto**. Uma suite Playwright
+**anônima e read-only** valida a usabilidade real de produção — o que o health 200
+não pega. É **read-only por construção**: um interceptor de request aborta e falha a
+suite se qualquer `POST/PUT/PATCH/DELETE` for emitido, então **nunca muta prod**.
+
+Rode como gate pré-deploy (e novamente pós-deploy) — bloqueia a promoção se vermelho:
+
+```bash
+cd co-web && BASE_URL=https://co.artelonga.com.br \
+  npx playwright test e2e/prod-usability.spec.ts \
+  --project=desktop-chromium --workers=2
+```
+
+Cobre (tempo total < ~2 min; verificado verde em ~40s):
+
+- [ ] Board do template (`/template`) carrega com tarefas tutorial visíveis (stat `tarefas` > 0 + card visível)
+- [ ] Troca de tema aplica (`html[data-palette]` muda)
+- [ ] Toggle pt/en muda os rótulos do botão de idioma
+- [ ] Deep-link de entrada (`/template/projects/CO/1`) renderiza markdown no zoom (não cai no 404)
+- [ ] Grafo/lente (stats de conteúdo / dashboard) abre
+
+> CI / localhost: sem `BASE_URL` a mesma suite roda contra `http://localhost:3000`
+> (um `co serve` local), então também serve de smoke em PR. O alvo prod só é
+> exercido quando `BASE_URL=https://co.artelonga.com.br` é passado explicitamente.
 
 ## Roteiro por wave
 
@@ -238,7 +264,7 @@ Critérios de pronto (DoD por entregável):
 ## Critérios de "shippable" — quando pode marcar uma wave como done
 
 1. Todos os DoD items da wave marcados ✅
-2. Staging Playwright suite verde por 24h consecutivas (sem flake)
+2. Gate de usabilidade prod (CO-421) verde no pré-deploy E pós-deploy
 3. Drift check OpenAPI verde
 4. Backup snapshot < 24h existe
 5. Migration validation verde para qualquer PR com migração nova
