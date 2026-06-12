@@ -62,6 +62,8 @@ pub use content::relation_routes;
 pub use content::review_routes;
 pub use content::search_routes;
 pub use content::state_routes;
+pub use content::translate;
+pub use content::translate_routes;
 pub use content::universe_routes;
 pub use content::universo;
 pub use content::vault_routes;

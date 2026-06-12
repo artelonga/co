@@ -187,6 +187,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let universe_content_api = Router::new()
         .merge(vault_api)
         .merge(entry_api)
+        // CO-416: content translation (pt↔en) — owner-gated twin generation.
+        .merge(crate::translate_routes::router())
         .merge(relation_api)
         .merge(asset_api)
         .merge(reference_api)
