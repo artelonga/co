@@ -63,6 +63,10 @@ pub struct UpdateUniverseRequest {
     pub name: Option<String>,
     pub description: Option<String>,
     pub visibility: Option<String>,
+    /// CO-423: re-parent a universe (CO-98 hierarchy). Owner-only. An empty
+    /// string clears the parent (sets `parent_key` to NULL); a non-empty key
+    /// must reference an existing universe. `None` leaves it unchanged.
+    pub parent_key: Option<String>,
 }
 
 /// Typed response for `PUT /api/v1/universes/:slug`.
@@ -72,6 +76,9 @@ pub struct UpdateUniverseResponse {
     pub name: String,
     pub description: String,
     pub visibility: String,
+    /// CO-423: current parent universe key (`None` for top-level).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_key: Option<String>,
 }
 
 /// Typed response for `DELETE /api/v1/universes/:slug`.
@@ -403,15 +410,56 @@ pub async fn update_universe(
     // universe they can see. The visibility gate (private vs subscribable
     // vs public) is the only access control that remains. A future `static`
     // flag will be the single read-only exception.
-    let _caller_id = extract_optional_user_id(&headers, &state)
+    let caller_id = extract_optional_user_id(&headers, &state)
         .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
 
     let storage = lock_storage(&state);
-    let _universe = storage
+    let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+    let is_owner = universe.owner_id == caller_id;
 
     drop(storage);
+
+    // CO-423: re-parenting is owner-only. Validate the parent exists (or clear
+    // it when an empty string is supplied) before any write.
+    if let Some(parent) = body.parent_key.as_deref() {
+        if !is_owner {
+            return Err(AppError::Forbidden(
+                "Only the owner can re-parent a universe".into(),
+            ));
+        }
+        let parent = parent.trim();
+        let storage = lock_storage(&state);
+        if parent.is_empty() {
+            // Clear the parent → top-level universe.
+            storage
+                .conn()
+                .execute(
+                    "UPDATE universes SET parent_key = NULL WHERE key = ?1",
+                    rusqlite::params![slug],
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+        } else {
+            if parent == slug {
+                return Err(AppError::BadRequest(
+                    "A universe cannot be its own parent".into(),
+                ));
+            }
+            if storage.get_universe(parent).is_none() {
+                return Err(AppError::BadRequest(format!(
+                    "Parent universe '{parent}' not found"
+                )));
+            }
+            storage
+                .conn()
+                .execute(
+                    "UPDATE universes SET parent_key = ?1 WHERE key = ?2",
+                    rusqlite::params![parent, slug],
+                )
+                .map_err(|e| AppError::Internal(e.to_string()))?;
+        }
+    }
 
     if let Some(name) = body.name.as_deref() {
         let name = name.trim();
@@ -478,6 +526,7 @@ pub async fn update_universe(
         name: updated.name,
         description: updated.description,
         visibility: updated.visibility,
+        parent_key: updated.parent_key,
     }))
 }
 

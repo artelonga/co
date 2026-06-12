@@ -58,6 +58,15 @@ struct VaultEntry {
     path: String,
 }
 
+/// CO-423: minimal shape of `GET /api/v1/universes/{key}` used to confirm the
+/// universe **really** exists. The SPA serves HTTP 200 for unknown routes, so a
+/// bare status check false-positives; a parsed `key` that matches is the real
+/// signal.
+#[derive(Debug, Deserialize)]
+struct UniverseInfoProbe {
+    key: Option<String>,
+}
+
 // ─── Entry point ──────────────────────────────────────────────────────────────
 
 #[allow(clippy::too_many_arguments)]
@@ -69,6 +78,8 @@ pub fn run(
     token: Option<String>,
     dry_run: bool,
     delete_missing: bool,
+    parent: Option<String>,
+    no_index: bool,
 ) {
     if let Err(e) = do_add_github(
         owner_repo,
@@ -78,6 +89,8 @@ pub fn run(
         token,
         dry_run,
         delete_missing,
+        parent,
+        no_index,
     ) {
         eprintln!("{} {:#}", "error:".red().bold(), e);
         std::process::exit(1);
@@ -93,6 +106,8 @@ fn do_add_github(
     token: Option<String>,
     dry_run: bool,
     delete_missing: bool,
+    parent: Option<String>,
+    no_index: bool,
 ) -> Result<()> {
     let (owner, repo) = parse_owner_repo(&owner_repo)?;
     let universe_key = universe.unwrap_or_else(|| sanitize_key(&repo));
@@ -113,7 +128,14 @@ fn do_add_github(
 
     // 2. Materialize (pure) — parse each file and stamp provenance frontmatter.
     let slug = format!("{owner}/{repo}");
-    let entries = materialize(&files, &slug, &sha);
+    let mut entries = materialize(&files, &slug, &sha);
+
+    // CO-423: ensure a navigable landing exists. If the repo didn't bring an
+    // `index.md` (at the content root), synthesize a minimal one linking the
+    // imported tree. `--no-index` disables; an existing index is never replaced.
+    if !no_index && !has_index_entry(&entries) {
+        entries.insert(0, synth_index(&entries, &slug, &repo));
+    }
 
     if dry_run {
         eprintln!("{}", "dry-run — no writes will be made".yellow().bold());
@@ -124,13 +146,14 @@ fn do_add_github(
         .build()
         .context("build HTTP client")?;
 
-    // 3. Ensure target universe exists.
+    // 3. Ensure target universe exists (and re-parent if requested).
     ensure_universe(
         &client,
         &base_url,
         &api_token,
         &universe_key,
         &repo,
+        parent.as_deref(),
         dry_run,
     )?;
 
@@ -432,6 +455,58 @@ fn title_from_path(rel_path: &str) -> String {
         .unwrap_or_else(|| rel_path.to_string())
 }
 
+// ─── Auto-index / landing (CO-423) ─────────────────────────────────────────────
+
+/// True if the import already contains a content-root `index.md` (case-insensitive)
+/// — in which case we never synthesize or overwrite one.
+fn has_index_entry(entries: &[MaterializedEntry]) -> bool {
+    entries
+        .iter()
+        .any(|e| e.vault_path.eq_ignore_ascii_case("content/index.md"))
+}
+
+/// Build a minimal navigable `content/index.md` landing that links each
+/// imported top-level entry, so the universe opens with a curated entry point
+/// instead of falling back to the SPA shell.
+fn synth_index(entries: &[MaterializedEntry], slug: &str, repo: &str) -> MaterializedEntry {
+    // Link the shallowest entries first (top-level files), then the rest, to
+    // keep the landing readable. Paths are vault paths under `content/`.
+    let mut links: Vec<String> = entries
+        .iter()
+        .map(|e| {
+            let rel = e
+                .vault_path
+                .strip_prefix("content/")
+                .unwrap_or(&e.vault_path);
+            let label = title_from_path(rel);
+            format!("- [{label}]({rel})")
+        })
+        .collect();
+    links.sort();
+
+    let body = if links.is_empty() {
+        format!("Imported from [`{slug}`](https://github.com/{slug}).\n")
+    } else {
+        format!(
+            "Imported from [`{slug}`](https://github.com/{slug}).\n\n## Conteúdo\n\n{}\n",
+            links.join("\n")
+        )
+    };
+
+    let frontmatter = format!(
+        "---\n\
+         title: {repo}\n\
+         source_kind: github\n\
+         entry_type: page\n\
+         ---\n\n"
+    );
+
+    MaterializedEntry {
+        vault_path: "content/index.md".to_string(),
+        markdown: format!("{frontmatter}{body}"),
+    }
+}
+
 // ─── ipynb → markdown (the key transform) ──────────────────────────────────────
 
 /// Render a Jupyter notebook (`.ipynb` JSON) to readable markdown.
@@ -537,24 +612,19 @@ fn resolve_auth(remote: Option<String>, token: Option<String>) -> Result<(String
 
 // ─── Universe + Vault operations (mirrors push.rs) ─────────────────────────────
 
+#[allow(clippy::too_many_arguments)]
 fn ensure_universe(
     client: &reqwest::blocking::Client,
     base_url: &str,
     token: &str,
     key: &str,
     name: &str,
+    parent: Option<&str>,
     dry_run: bool,
 ) -> Result<()> {
-    let get_url = format!("{base_url}/api/v1/universes/{key}");
-    let resp = client
-        .get(&get_url)
-        .bearer_auth(token)
-        .send()
-        .context("GET universe")?;
-
-    if resp.status().is_success() {
+    if universe_exists(client, base_url, token, key)? {
         eprintln!("Universe '{key}' exists — importing into it");
-    } else if resp.status() == reqwest::StatusCode::NOT_FOUND {
+    } else {
         eprintln!("Universe '{key}' not found — creating");
         if !dry_run {
             let post_url = format!("{base_url}/api/v1/universes");
@@ -572,13 +642,94 @@ fn ensure_universe(
             if !r.status().is_success() {
                 let status = r.status();
                 let text = r.text().unwrap_or_default();
+                // CO-423: creating a universe needs a *session* (browser login),
+                // not an API token. Surface a clear, actionable message instead
+                // of a bare 401 so the operator knows the credential is wrong.
+                if status == reqwest::StatusCode::UNAUTHORIZED
+                    || status == reqwest::StatusCode::FORBIDDEN
+                {
+                    bail!(
+                        "cannot create universe '{key}' with an API token (HTTP {status}). \
+                         Creating a universe requires a logged-in session. Either create \
+                         '{key}' in the web UI first, then re-run `co source add`, or run \
+                         against a server where the token's user can create universes."
+                    );
+                }
                 bail!("POST /universes — HTTP {status} — {text}");
             }
         } else {
             eprintln!("  [dry-run] POST {base_url}/api/v1/universes");
         }
-    } else {
-        bail!("GET /universes/{key} — HTTP {}", resp.status());
+    }
+
+    // CO-423: re-parent via the new PUT API (item 1). Owner-only server-side.
+    if let Some(parent) = parent {
+        if dry_run {
+            eprintln!("  [dry-run] PUT {base_url}/api/v1/universes/{key} {{parent_key:{parent}}}");
+        } else {
+            set_parent(client, base_url, token, key, parent)?;
+            eprintln!("Set parent of '{key}' to '{parent}'");
+        }
+    }
+    Ok(())
+}
+
+/// CO-423: confirm a universe exists by a REAL signal — parse the universe API
+/// JSON and check it has a `key` field matching the requested slug. The SPA
+/// returns HTTP 200 (its shell) for unknown routes, so a status check alone
+/// false-positives.
+fn universe_exists(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    token: &str,
+    key: &str,
+) -> Result<bool> {
+    let get_url = format!("{base_url}/api/v1/universes/{key}");
+    let resp = client
+        .get(&get_url)
+        .bearer_auth(token)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .context("GET universe")?;
+
+    let status = resp.status();
+    if status == reqwest::StatusCode::NOT_FOUND {
+        return Ok(false);
+    }
+    if !status.is_success() {
+        // 401/403/5xx etc. are real errors, not "exists".
+        bail!("GET /universes/{key} — HTTP {status}");
+    }
+    // 200: only trust it if the body parses as the universe JSON AND the key
+    // matches. The SPA shell is HTML, so JSON parse fails → treat as absent.
+    let body = resp.text().context("read universe body")?;
+    let probe: UniverseInfoProbe = match serde_json::from_str(&body) {
+        Ok(p) => p,
+        Err(_) => return Ok(false), // HTML shell — not a real universe.
+    };
+    Ok(probe.key.as_deref() == Some(key))
+}
+
+/// CO-423: set `parent_key` via `PUT /api/v1/universes/{key}`.
+fn set_parent(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    token: &str,
+    key: &str,
+    parent: &str,
+) -> Result<()> {
+    let url = format!("{base_url}/api/v1/universes/{key}");
+    let body = serde_json::json!({ "parent_key": parent });
+    let r = client
+        .put(&url)
+        .bearer_auth(token)
+        .json(&body)
+        .send()
+        .context("PUT /universes (parent_key)")?;
+    if !r.status().is_success() {
+        let status = r.status();
+        let text = r.text().unwrap_or_default();
+        bail!("PUT /universes/{key} (parent_key) — HTTP {status} — {text}");
     }
     Ok(())
 }
@@ -962,5 +1113,75 @@ mod tests {
     fn sanitize_key_works() {
         assert_eq!(sanitize_key("SensorySpeech"), "sensoryspeech");
         assert_eq!(sanitize_key("My_Repo.v2"), "my-repo-v2");
+    }
+
+    // ── auto-index / landing (CO-423) ──────────────────────────────────────────
+
+    #[test]
+    fn has_index_entry_detects_content_root_index() {
+        let with = vec![MaterializedEntry {
+            vault_path: "content/index.md".into(),
+            markdown: "x".into(),
+        }];
+        assert!(has_index_entry(&with));
+
+        // case-insensitive
+        let caps = vec![MaterializedEntry {
+            vault_path: "content/INDEX.md".into(),
+            markdown: "x".into(),
+        }];
+        assert!(has_index_entry(&caps));
+
+        // a nested index is NOT the content-root landing
+        let nested = vec![MaterializedEntry {
+            vault_path: "content/docs/index.md".into(),
+            markdown: "x".into(),
+        }];
+        assert!(!has_index_entry(&nested));
+    }
+
+    #[test]
+    fn synth_index_links_imported_tree() {
+        let entries = vec![
+            MaterializedEntry {
+                vault_path: "content/README.md".into(),
+                markdown: "x".into(),
+            },
+            MaterializedEntry {
+                vault_path: "content/analysis/run.md".into(),
+                markdown: "y".into(),
+            },
+        ];
+        let idx = synth_index(&entries, "yuri/nlp", "nlp");
+        assert_eq!(idx.vault_path, "content/index.md");
+        assert!(idx.markdown.contains("entry_type: page"));
+        assert!(idx.markdown.contains("[README](README.md)"));
+        assert!(idx.markdown.contains("[run](analysis/run.md)"));
+        assert!(idx.markdown.contains("github.com/yuri/nlp"));
+    }
+
+    /// The materialize+index pipeline synthesizes a landing only when the repo
+    /// brought none, and never overwrites an existing `index.md`.
+    #[test]
+    fn index_is_synthesized_only_when_absent() {
+        // No index.md in the repo → one is synthesized at the front.
+        let files = vec![SourceFile {
+            rel_path: "README.md".into(),
+            text: Some("# Readme".into()),
+        }];
+        let mut entries = materialize(&files, "o/r", "sha");
+        assert!(!has_index_entry(&entries));
+        entries.insert(0, synth_index(&entries, "o/r", "r"));
+        assert_eq!(entries[0].vault_path, "content/index.md");
+        assert_eq!(has_index_entry(&entries) as usize, 1);
+
+        // Repo already ships index.md → has_index_entry short-circuits, no synth.
+        let files = vec![SourceFile {
+            rel_path: "index.md".into(),
+            text: Some("# Home".into()),
+        }];
+        let entries = materialize(&files, "o/r", "sha");
+        assert!(has_index_entry(&entries));
+        assert!(entries[0].markdown.contains("# Home"));
     }
 }

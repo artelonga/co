@@ -2669,7 +2669,7 @@ paths:
           description: OK
     put:
       tags: ["universes"]
-      summary: "Update name/visibility"
+      summary: "Update name/visibility/parent_key (CO-423)"
       security:
         - sessionCookie: []
       parameters:

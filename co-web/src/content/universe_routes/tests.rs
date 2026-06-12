@@ -973,6 +973,227 @@ fn test_update_universe_request_parses() {
     assert_eq!(req.name.as_deref(), Some("New Name"));
     assert_eq!(req.visibility.as_deref(), Some("public-subscribable"));
     assert!(req.description.is_none());
+    assert!(req.parent_key.is_none());
+}
+
+/// CO-423: UpdateUniverseRequest parses `parent_key` (key, empty, absent).
+#[test]
+fn test_update_universe_request_parses_parent_key() {
+    let with = r#"{"parent_key":"yuri"}"#;
+    let req: super::UpdateUniverseRequest = serde_json::from_str(with).unwrap();
+    assert_eq!(req.parent_key.as_deref(), Some("yuri"));
+
+    let clear = r#"{"parent_key":""}"#;
+    let req: super::UpdateUniverseRequest = serde_json::from_str(clear).unwrap();
+    assert_eq!(req.parent_key.as_deref(), Some(""));
+
+    let absent = r#"{"name":"x"}"#;
+    let req: super::UpdateUniverseRequest = serde_json::from_str(absent).unwrap();
+    assert!(req.parent_key.is_none());
+}
+
+/// CO-423: helper — create a universe via the API as the given user.
+#[cfg(test)]
+async fn create_universe_via_api(
+    router: &axum::Router,
+    token: &str,
+    key: &str,
+    name: &str,
+) -> axum::http::StatusCode {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    let payload = serde_json::json!({ "key": key, "name": name, "description": "" });
+    let resp = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(payload.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    resp.status()
+}
+
+/// CO-423: the owner can re-parent a universe via PUT {"parent_key":"..."},
+/// and clear it again with an empty string.
+#[tokio::test]
+async fn test_reparent_universe_owner_can_set_and_clear() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    let (storage, dir) = make_storage();
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at, usuario) \
+             VALUES ('usr_rp','rp@example.com','RP','player',?1,'rp')",
+            params![now],
+        )
+        .unwrap();
+
+    let (router, _tmp) = make_universe_router(storage, dir.path());
+    let (token, _) =
+        crate::auth::sign_jwt("usr_rp", "rp@example.com", "player", "test-jwt-secret").unwrap();
+
+    // Create parent + child universes via the API (so the caller owns both).
+    assert_eq!(
+        create_universe_via_api(&router, &token, "yuri", "Yuri").await,
+        axum::http::StatusCode::CREATED
+    );
+    assert_eq!(
+        create_universe_via_api(&router, &token, "nlp", "NLP").await,
+        axum::http::StatusCode::CREATED
+    );
+
+    // Re-parent nlp under yuri.
+    let put_resp = router
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/nlp")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(r#"{"parent_key":"yuri"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_resp.status(), axum::http::StatusCode::OK);
+    let body = body_bytes(put_resp).await;
+    let resp: super::UpdateUniverseResponse = serde_json::from_str(&body).unwrap();
+    assert_eq!(resp.parent_key.as_deref(), Some("yuri"));
+
+    // Clear the parent with an empty string.
+    let clear_resp = router
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/nlp")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(r#"{"parent_key":""}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(clear_resp.status(), axum::http::StatusCode::OK);
+    let body = body_bytes(clear_resp).await;
+    let resp: super::UpdateUniverseResponse = serde_json::from_str(&body).unwrap();
+    assert!(resp.parent_key.is_none());
+}
+
+/// CO-423: a non-owner cannot re-parent a universe (403).
+#[tokio::test]
+async fn test_reparent_universe_non_owner_forbidden() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    let (storage, dir) = make_storage();
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at, usuario) \
+             VALUES ('usr_owner','owner@example.com','Owner','player',?1,'owner'), \
+                    ('usr_other','other@example.com','Other','player',?1,'other')",
+            params![now],
+        )
+        .unwrap();
+
+    let (router, _tmp) = make_universe_router(storage, dir.path());
+    let (owner_token, _) = crate::auth::sign_jwt(
+        "usr_owner",
+        "owner@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
+    let (other_token, _) = crate::auth::sign_jwt(
+        "usr_other",
+        "other@example.com",
+        "player",
+        "test-jwt-secret",
+    )
+    .unwrap();
+
+    assert_eq!(
+        create_universe_via_api(&router, &owner_token, "yuri", "Yuri").await,
+        axum::http::StatusCode::CREATED
+    );
+    assert_eq!(
+        create_universe_via_api(&router, &owner_token, "child", "Child").await,
+        axum::http::StatusCode::CREATED
+    );
+
+    let put_resp = router
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/child")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {other_token}"))
+                .body(Body::from(r#"{"parent_key":"yuri"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_resp.status(), axum::http::StatusCode::FORBIDDEN);
+}
+
+/// CO-423: re-parenting to a nonexistent parent is rejected (400).
+#[tokio::test]
+async fn test_reparent_universe_nonexistent_parent_rejected() {
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    let (storage, dir) = make_storage();
+    let now = chrono::Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT INTO users (id, email, display_name, tier, created_at, usuario) \
+             VALUES ('usr_np','np@example.com','NP','player',?1,'np')",
+            params![now],
+        )
+        .unwrap();
+
+    let (router, _tmp) = make_universe_router(storage, dir.path());
+    let (token, _) =
+        crate::auth::sign_jwt("usr_np", "np@example.com", "player", "test-jwt-secret").unwrap();
+
+    assert_eq!(
+        create_universe_via_api(&router, &token, "solo", "Solo").await,
+        axum::http::StatusCode::CREATED
+    );
+
+    let put_resp = router
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri("/api/v1/universes/solo")
+                .header("Content-Type", "application/json")
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(r#"{"parent_key":"does-not-exist"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(put_resp.status(), axum::http::StatusCode::BAD_REQUEST);
 }
 
 /// DELETE /api/v1/universes/:slug returns typed DeleteUniverseResponse.

@@ -88,7 +88,7 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | GET | `/api/v1/universes/search` | anon | Search public universes |
 | GET | `/api/v1/universes/public` | anon | Public universe directory |
 | GET | `/api/v1/universes/{slug}` | visibility | Universe info |
-| PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility |
+| PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility/parent_key (CO-423) |
 | DELETE | `/api/v1/universes/{slug}` | owner | Delete universe |
 | GET | `/api/v1/universes/{slug}/config` | visibility | Universe config |
 | PUT | `/api/v1/universes/{slug}/config` | owner | Update config |
