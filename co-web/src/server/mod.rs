@@ -735,6 +735,23 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
             Arc::clone(&state.core.storage),
         );
         crate::security::subscribers::release_blocker::spawn(Arc::clone(&bus));
+
+        // CO-422: in-prod degradation alerter — email on disk/backup/universe events.
+        {
+            let alert_to = std::env::var("CO_ALERT_TO")
+                .unwrap_or_else(|_| "yuri@artelonga.com.br".to_string());
+            let debounce_hours = std::env::var("CO_ALERT_DEBOUNCE_HOURS")
+                .ok()
+                .and_then(|s| s.parse::<u64>().ok())
+                .unwrap_or(2);
+            let mailer = crate::eda::subscribers::degradation_alerter::mailer_from_env();
+            crate::eda::subscribers::degradation_alerter::spawn(
+                Arc::clone(&bus),
+                mailer,
+                alert_to,
+                debounce_hours,
+            );
+        }
     }
 
     // CO-384: spawn outbound bridge clients (no-op when CO_BRIDGE_OUTBOUND_TOKENS_JSON not set).
@@ -743,6 +760,15 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         Arc::clone(&state.core.storage),
         crate::eda::bridge::our_deployment_id(),
     );
+
+    // CO-422: disk pressure monitor — emits system.disk_pressure when free < threshold.
+    {
+        let data_dir = {
+            let storage = state.core.storage.lock();
+            storage.data_dir.clone()
+        };
+        crate::platform::disk_monitor::spawn(Arc::clone(&state.core.eda_bus), data_dir);
+    }
 
     // CO-380: nightly 30-day event_log retention purge.
     tokio::spawn(crate::eda::event_log_retention_task(state.clone()));

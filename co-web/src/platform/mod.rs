@@ -6,6 +6,7 @@ pub mod cache;
 pub mod config;
 pub mod deployment_snapshot_worker;
 pub mod desktop_notify;
+pub mod disk_monitor;
 pub mod doc_gen;
 pub mod embedding;
 pub mod embedding_index;
