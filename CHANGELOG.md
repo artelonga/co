@@ -5,6 +5,121 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.4.0] — 2026-06-12 — fontes (source:github) + lente de tempo + traceback
+
+## CO-387 — Time-rendering primitive — `<co-time-grid>` + calendar lenses
+
+Decouples canonical time storage from rendering. Universe-pool migration v19
+adds `event_at_ms`/`due_at_ms`/`scheduled_at_ms` to `entries` (backfilled from
+the CO-73 `entry_dates` ISO rows with millisecond precision; kept in sync on
+every write by `EntryIndex::upsert_dates`). A per-universe `_calendar.yaml`
+declares calendar lenses with **per-lens canonical units** — `i64_ms` for
+human/fictional/Pomodoro scales, `f64_years` (log) for cosmic (13.8 Gyr
+overflows i64 ms), `i64_units` for custom fields like `shandara_year` —
+served at `GET /api/v1/universes/{slug}/calendar` with a Gregorian default.
+
+New `<co-time-grid>` component (`static/shared/lib/co-time-grid.js` +
+conversion lib `co-time.js`, a 1:1 mirror of `co-web/src/time/conversion.rs`)
+renders `(entries, lens)` in 4 view modes (grid/timeline/scatter/gantt), with
+a no-reload lens dropdown persisted per universe, multi-universe color coding,
+CO-380 event-bus live updates, and `time.lens_switched`/`time.grid_rendered`
+telemetry. Registered into the CO-393 lens frame as the `time-grid` lens
+(variant i); named manifest views were generalized at the registry level
+(`lens.namedViews`), replacing the gantt-only special case.
+`/timeline?lens=A,B,C` pins stacked lenses over the `?u=` universes.
+
+### Why
+The IaaS principle applied to time: a 4-day-week org review, a Pomodoro day,
+or a Milky-Way-to-fiction `/timeline` are *lenses* over the same bounded,
+deterministic timestamps — no schema migration per calendar, and the brain's
+creative time (custom calendars, fictional epochs) stays liberated.
+
+## CO-411 — fix: CLI envia User-Agent + referência de comandos (docs/CLI.md)
+
+`co auth` era rejeitado pelo próprio gate anti-abuso do servidor
+(`400 missing_user_agent`) — o client HTTP do auth não enviava User-Agent
+(o do `co push` já enviava). Agora todo request do CLI identifica
+`co-cli/<versão>`, com teste de regressão. Junto: `docs/CLI.md`, referência
+revisada do binário (cinco verbos do dia a dia + tabelas completas),
+linkada de `docs/README.md`.
+
+## CO-412 — Tutorial espelha a release — 3 novas tarefas (lentes, co updates, história)
+
+O tutorial do universo template ganha o "Ato 5: novidades": **Um conteúdo,
+muitas lentes** (CO-393), **Novidades sem sair do terminal** (CO-404) e
+**Leia a história do CO** (WELCOME.md, CO-403). Em produção as entradas
+foram criadas em runtime via Vault API — sem deploy; este PR garante a
+paridade para instalações novas (seed 9 → 12 tarefas).
+
+## CO-417 — feat: adapter `source: github` (repo → árvore de universo, ipynb→md)
+
+Novo verbo de CLI `co source add github <owner/repo>` — um adapter geral de
+*source* que clona um repositório GitHub (shallow `git clone`, sem auth para
+repos públicos; `GITHUB_TOKEN` opcional para privados/rate-limit) e materializa
+sua árvore de arquivos como entradas de um universo CO, **preservando a
+hierarquia de pastas** (pastas → nós da árvore na UI).
+
+Parse por arquivo:
+- `.md` → corpo da entrada direto;
+- `.ipynb` → JSON do notebook renderizado em markdown legível (células
+  markdown verbatim, células de código em blocos cercados ``` com a linguagem
+  do kernel, na ordem original; células vazias ignoradas);
+- demais → entrada-asset linkando o original no sha fixado.
+
+Cada entrada importada carrega frontmatter de proveniência consumido pelo
+traceback do CO-418: `source: github:<owner/repo>@<sha>` e
+`source_path: <caminho/no/repo>` (mais `source_kind: github` e `entry_type`).
+A escrita usa a Vault API (`PUT .../vault/{path}`), então o re-sync converge
+(idempotente por conteúdo); `--delete-missing` reflete (soft) remoções do repo.
+`--dry-run` mostra o plano sem escrever.
+
+### Why
+Generaliza o conceito de `source_kind` (que hoje só cobre event-bus) para uma
+fonte de primeira classe por-entrada, demonstrando a capacidade de *source* do
+CO de ponta a ponta. Fetch e parse/materialize são unidades separadas — o
+transform (incl. ipynb→md) é testado sem rede via fixtures.
+
+## CO-418 — feat: render-review-publish with traceback (source + requested_by)
+
+Adds the render→review→edit→publish capability for imported content (the
+consumer of CO-417's `source: github` provenance). A new owner-only route
+publishes an entry as a *conventional, semver-aware* publication that traces
+back to (a) its original source and (b) the task that requested it.
+
+### What changed
+- **Publish surface**: `POST /api/v1/universes/{slug}/publish` (owner-only,
+  under the visibility gate, in `review_routes.rs`). Body:
+  `{ path, requested_by, commit_type?, commit_scope?, commit_subject?,
+  frontmatter?, body? }`.
+- **Conventional commit + semver intent**: the publish records a conventional
+  commit message (`feat(scope): subject` / `docs: …`) and the implied semver
+  bump (`feat→minor`, `fix|docs|refactor|perf→patch`). Per CO-258 it records
+  the *intended* bump only — it never touches `Cargo.toml`/`CHANGELOG.md`.
+- **Provenance stamping**: preserves CO-417's `source`/`source_path`/
+  `source_kind`/`entry_type` untouched and ADDS `requested_by` plus a publish
+  record (`published_commit`, `published_semver`, `published_sha`,
+  `published_at`).
+- **Traceback as typed relations (CO-74)**: `extract_provenance_relations`
+  derives two manifest-independent edges from frontmatter on every save —
+  `origin` → `source` and `requested_by` → the task. Because they derive from
+  frontmatter they survive `replace_all` and are idempotent. The entry GET
+  response already surfaces outbound relations, so "Origem" + "Pedido por" are
+  queryable for the SPA.
+- **Idempotent**: re-publishing unchanged content (same body + source +
+  requested_by + commit message) yields the same `published_sha` and records
+  no new commit (`published: false`).
+- **EDA**: emits an `entry.published` event carrying the commit message,
+  semver bump, source, and requesting task.
+- **Render-local**: imported entries already serve clean markdown bodies
+  (frontmatter stripped at parse time); a test confirms the served body is
+  renderable and free of provenance leakage.
+
+### Why
+The Yuri "source capability" journey (epic CO-414) requires that every
+publication be auditable from origin to request. This makes that flow a
+reusable CO capability rather than a manual process.
+
+
 ## [3.3.1] — 2026-06-11 — backup nunca derruba o boot
 
 ## CO-405 — backup nunca mais derruba a produção — guard de disco, debounce e retenção por contagem
