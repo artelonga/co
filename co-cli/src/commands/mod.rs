@@ -13,6 +13,7 @@ pub mod create;
 pub mod define;
 pub mod delete;
 pub mod deploy;
+pub mod digest;
 pub mod engine;
 pub mod gh;
 pub mod help;

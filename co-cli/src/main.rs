@@ -601,6 +601,22 @@ enum Commands {
         action: SourceSubcommand,
     },
 
+    /// Universe registry operations (CO-428)
+    ///
+    /// `co universe digest [<key>]` emits a deterministic, recursive
+    /// (via parent_key), token-bounded summary of the universe forest from the
+    /// local registry — built for prompt caching (byte-stable, no timestamps).
+    ///
+    /// Examples:
+    ///   co universe digest                    # full forest from the roots
+    ///   co universe digest miguel             # just `miguel` and its subtree
+    ///   co universe digest --depth 1          # roots + direct children only
+    ///   co universe digest --format json      # machine-readable
+    Universe {
+        #[command(subcommand)]
+        action: UniverseSubcommand,
+    },
+
     /// Release notes — what changed in recent CO versions
     ///
     /// Shows the latest release section from the CHANGELOG embedded in this
@@ -767,6 +783,32 @@ enum SourceProvider {
         /// Soft-reflect repo deletions: remove imported entries no longer present
         #[arg(long)]
         delete_missing: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum UniverseSubcommand {
+    /// Deterministic, recursive, token-bounded digest of the universe forest
+    ///
+    /// Sourced from the local registry (never a hardcoded mapping). Output is
+    /// byte-stable for a given DB state so it can serve as a cacheable prompt
+    /// prefix. Stable layers (identity, hierarchy) are emitted first; volatile
+    /// counts last.
+    Digest {
+        /// Universe key to start from (default: full forest from the roots)
+        key: Option<String>,
+
+        /// Maximum recursion depth into children (default: 16)
+        #[arg(long, default_value_t = 16)]
+        depth: usize,
+
+        /// Output format: md (default) or json
+        #[arg(long, default_value = "md")]
+        format: String,
+
+        /// Data directory for SQLite + universe files (default: platform data dir / co)
+        #[arg(short, long, env = "CO_SERVE_DATA")]
+        data_dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -1669,6 +1711,28 @@ fn main() {
                     );
                 }
             },
+        },
+        Commands::Universe { action } => match action {
+            UniverseSubcommand::Digest {
+                key,
+                depth,
+                format,
+                data_dir,
+            } => {
+                let resolved = data_dir
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| {
+                        dirs::data_local_dir()
+                            .map(|d| d.join("co").to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "./co-data".to_string())
+                    });
+                commands::digest::run(
+                    key,
+                    depth,
+                    commands::digest::DigestFormat::parse(&format),
+                    resolved,
+                );
+            }
         },
         Commands::Updates { count, all } => {
             commands::updates::run(count, all);
