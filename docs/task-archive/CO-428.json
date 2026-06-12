@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-428",
+  "title": "Context engineering: digest recursivo de universos + camadas de contexto enxutas no co-auto",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-428.md",
+  "branch": "feat/CO-428-universe-digest",
+  "merge_sha": "899a5dc7bc734532a5959f87088305d7e33fc343",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/215",
+    "number": 215
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T17:53:45Z",
+  "files_changed": 9,
+  "lines_added": 855,
+  "lines_removed": 29,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-428 — `co universe digest`: deterministic, recursive, cache-friendly universe summaries\n\nAdded `co universe digest [<key>] [--depth N] [--format md|json] [--data-dir DIR]`,\na new co-cli command that emits a generated (not hand-written) summary of the\nuniverse forest sourced from the local registry (SQLite), for token-efficient\nco-auto / Claude sessions.\n\n- **Deterministic / byte-stable**: same DB state → identical bytes. Fixed\n  key-sorted ordering (DFS over `parent_key`), no timestamps, no random\n  iteration (`BTreeMap` throughout, hand-rolled stable JSON). This makes the\n  digest usable as a cacheable prompt prefix.\n- **Recursive** via `parent_key` (CO-98): roots first (key-sorted), each\n  followed by its subtree; `--depth N` bounds recursion.\n- **Token-bounded**: each universe block targets ≤200 tokens (chars/4); a\n  warning is printed if a block exceeds the budget. Measured ~48 tokens/universe\n  average, 56 for the richest block.\n- **Cache-friendly layer ordering**: stable identity/hierarchy first, volatile\n  counts (entries, tasks-by-status) last within each block, so edits to one\n  universe's counts do not invalidate the cached prefix of earlier universes.\n- **No hardcoded mappings**: data comes only from the registry (CO-424 constraint).\n\nPer-universe fields: key, name, purpose (truncated description), parent,\nchildren, content types (\"modelos\") in use, page/project/task counts, and\ntask counts grouped by status.\n\n### Measured token reduction (CO-424 ≥40% target)\n\nOn the real content-universe forest (`co → template → {comunicacao, time,\ntopologia}`, `miguel → mse`, …), the digest replaces the verbose universe-landscape\nprose an agent otherwise reads:\n\n- Universe-landscape layer: **990 → 488 est. tokens (50.7% fewer)** on a single task.\n- Across a co-auto wave (same universe, digest byte-stable → cached after the\n  first task): uncached tokens drop **83.6% (3 tasks) … 95.1% (10 tasks)**.\n\nThe target is met on a single task and exceeded across a wave.\n\n### Tests\n\n10 unit tests (token estimate, purpose truncation, forest DFS/depth/orphan\nordering, counts-last layout, JSON escaping) + 5 CLI integration tests over a\nseeded 3-level universe tree, including two **byte-stable determinism** tests\n(md + json) that run the digest twice and assert identical output.",
+  "summary": "As Sessão co-auto (e qualquer agente interagindo com o CO), QUERO um overview breve e **recursivo** de cada universo — gerado, não escrito à mão — e camadas de contexto mínimas e estáveis, PARA entend",
+  "co_auto_version": "0.1.0"
+}
