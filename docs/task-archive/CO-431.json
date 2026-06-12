@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-431",
+  "title": "Mythos: promote the Universo domain to core + UniversoFactory seam",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-431.md",
+  "branch": "feat/CO-431-mythos-promote-the-universo-domain-to-co",
+  "merge_sha": "e4256cf80499c2029b34f9b3d876dc08a4b6b23a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/220",
+    "number": 220
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T22:53:44Z",
+  "files_changed": 7,
+  "lines_added": 545,
+  "lines_removed": 134,
+  "labels": [
+    "type:refactor",
+    "module:content"
+  ],
+  "changelog_entry": null,
+  "summary": "As An external service (a universe runtime, Yggdrasil, a CLI), QUERO depender de `core` para obter o trait `Universo` e seus tipos de domínio — e poder fornecer minha própria implementação — PARA reus",
+  "co_auto_version": "0.1.0"
+}
