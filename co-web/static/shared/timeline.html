@@ -590,6 +590,9 @@ function updateEventCount() {
 // ===== Init =====
 
 (async function init() {
+    // CO-387: ?lens=A,B,C switches to stacked <co-time-grid> mode (module
+    // script below) — skip the SVG timeline entirely.
+    if ((new URLSearchParams(location.search).get('lens') || '').trim()) return;
     state.activeKeys = readActiveFromUrl();
     if (state.activeKeys.size === 0) state.activeKeys.add('tempo');
 
@@ -615,6 +618,31 @@ function updateEventCount() {
     render();
 })();
 
+})();
+</script>
+
+<script type="module">
+// CO-387: multi-lens stacked mode — /timeline?lens=cosmic,gregorian,shandara
+// pins one <co-time-grid> section per lens over the same universes (?u=...).
+// Cosmic renders log-scale (Big Bang → now); human/fictional render linear.
+(async function lensMode() {
+    const params = new URLSearchParams(location.search);
+    const lenses = (params.get('lens') || '').split(',').map(s => s.trim()).filter(Boolean);
+    if (lenses.length === 0) return;
+    await import('/shared/lib/co-time-grid.js');
+    for (const id of ['timeline-svg', 'focus-readout', 'hint', 'nav-controls', 'universe-toggles']) {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    }
+    const wrap = document.createElement('div');
+    wrap.id = 'lens-stack';
+    wrap.style.cssText = 'position:absolute;top:56px;bottom:0;left:0;right:0;overflow:auto;padding:16px 24px;';
+    const grid = document.createElement('co-time-grid');
+    grid.setAttribute('universe', params.get('u') || 'tempo,universo,humanity');
+    grid.setAttribute('lens', lenses.join(','));
+    grid.setAttribute('view-mode', 'timeline');
+    wrap.appendChild(grid);
+    document.body.appendChild(wrap);
 })();
 </script>
 

@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-410",
+  "title": "Sala grid landscape — type-on-square (letra/nota//pasta), working drag-and-drop, drop-into-folder",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-410.md",
+  "branch": "feat/CO-410-tutorial-mirrors-release-content",
+  "merge_sha": "8eeb3ab2c78dd731abcef028c53bd88829d853fd",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/200",
+    "number": 200
+  },
+  "started_at": "2026-06-11T20:30:00Z",
+  "merged_at": "2026-06-12T10:21:07Z",
+  "files_changed": 6,
+  "lines_added": 82,
+  "lines_removed": 58,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "sala"
+  ],
+  "changelog_entry": null,
+  "summary": "GIVEN / WHEN / THEN",
+  "co_auto_version": "0.1.0"
+}

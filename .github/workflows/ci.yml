@@ -10,9 +10,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  # CI builds are one-shot — incremental compilation only bloats target/
-  # (third disk-full runner failure on 2026-06-11 was the incremental
-  # query cache exhausting the runner disk on a cold build).
+  # CI builds are one-shot — incremental compilation only bloats target/ and
+  # has caused repeated runner disk-full failures on cold builds.
   CARGO_INCREMENTAL: "0"
 
 jobs:

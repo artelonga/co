@@ -31,6 +31,11 @@ const BASE_TAB_IDS = new Set(['kanban', 'table', 'timeline', 'calendar', 'dashbo
 //
 // This replaces the gantt-only injectManifestViewTabs from variant a. Any registered
 // lens type in manifest.views is handled, not just gantt.
+//
+// CO-387: named manifest views are generalized — any lens with
+// `namedViews: true` (gantt, time-grid, …) gets one tab per named view,
+// keyed `<type>:<name>`; renderContent passes the matching view definition
+// to lens.render(viewDef).
 export function computeDynamicTabs(manifest) {
     const tabs = [];
     const seen = new Set();
@@ -40,12 +45,12 @@ export function computeDynamicTabs(manifest) {
         const lens = getLensById(type);
         if (!lens) continue;
 
-        const viewKey = type === 'gantt' ? `gantt:${v.name || 'default'}` : type;
+        const viewKey = lens.namedViews ? `${type}:${v.name || 'default'}` : type;
         if (seen.has(viewKey)) continue;
         seen.add(viewKey);
 
-        // Base tabs are already in the HTML — only inject non-base or gantt named views
-        if (BASE_TAB_IDS.has(type) && type !== 'gantt') continue;
+        // Base tabs are already in the HTML — only inject non-base or named views
+        if (BASE_TAB_IDS.has(type) && !lens.namedViews) continue;
 
         tabs.push({
             id: type,

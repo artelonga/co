@@ -48,6 +48,9 @@ CREATE TABLE IF NOT EXISTS entries (
     submitted_at      TEXT,
     reviewed_by       TEXT,
     reviewed_at       TEXT,
+    event_at_ms       INTEGER,
+    due_at_ms         INTEGER,
+    scheduled_at_ms   INTEGER,
     PRIMARY KEY (universe_key, path)
 );
 CREATE INDEX IF NOT EXISTS idx_entries_type    ON entries(universe_key, entry_type);
@@ -59,6 +62,8 @@ CREATE INDEX IF NOT EXISTS idx_entries_published
 -- here. The base batch runs on existing DBs whose entries table predates the
 -- column (added in v18); an index referencing it here panics the server at
 -- boot before migrations can run (staging crash, 2026-06-10).
+-- CO-387: idx_entries_event_ms lives in migration v19 for the same reason —
+-- the ms columns are migration-added on existing DBs.
 
 CREATE VIRTUAL TABLE IF NOT EXISTS entries_fts USING fts5(
     universe_key UNINDEXED,
@@ -621,6 +626,58 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         )
         .expect("universe schema_version v18");
     }
+    if v < 19 {
+        // CO-387: canonical Unix-ms columns for the time-rendering primitive.
+        // ISO strings in `entry_dates` (CO-73) remain the durable source of
+        // truth; these columns are the per-lens math fast path (i64 ms covers
+        // ±292 Myr — human / historical / fictional / Pomodoro scales; cosmic
+        // scale uses frontmatter_json fields instead, see CO-387 spec).
+        // New universes already have the columns from UNIVERSE_SCHEMA;
+        // existing ones get them here via ALTER TABLE.
+        ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER");
+        ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER");
+        ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER");
+        // Backfill from entry_dates ISO values. julianday() keeps millisecond
+        // precision (strftime('%s', …) floors to whole seconds) and handles
+        // pre-epoch dates (negative ms).
+        for (semantic, column) in [
+            ("event_at", "event_at_ms"),
+            ("due_at", "due_at_ms"),
+            ("scheduled_at", "scheduled_at_ms"),
+        ] {
+            conn.execute(
+                &format!(
+                    "UPDATE entries SET {column} = (
+                        SELECT CAST(ROUND((julianday(ed.value) - 2440587.5) * 86400000.0) AS INTEGER)
+                        FROM entry_dates ed
+                        WHERE ed.universe_key = entries.universe_key
+                          AND ed.entry_path   = entries.path
+                          AND ed.semantic     = '{semantic}'
+                    )
+                    WHERE {column} IS NULL
+                      AND EXISTS (
+                        SELECT 1 FROM entry_dates ed
+                        WHERE ed.universe_key = entries.universe_key
+                          AND ed.entry_path   = entries.path
+                          AND ed.semantic     = '{semantic}'
+                      )"
+                ),
+                [],
+            )
+            .expect("CO-387 v19: backfill ms column");
+        }
+        conn.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_entries_event_ms \
+             ON entries(universe_key, event_at_ms) WHERE event_at_ms IS NOT NULL; \
+             INSERT OR IGNORE INTO schema_version (version) VALUES (19);",
+        )
+        .expect("universe schema_version v19");
+    }
+    // CO-387 unconditional drift guard — same partial-apply safety as CO-241/CO-267.
+    ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER");
+    ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER");
+    ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER");
+
     // CO-354 unconditional drift guard — same partial-apply safety as CO-241/CO-267.
     ensure_universe_column(
         conn,
@@ -808,6 +865,91 @@ fn ensure_universe_column(conn: &Connection, table: &str, column: &str, def: &st
     if !exists {
         conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))
             .unwrap_or_else(|e| panic!("ensure_universe_column {table}.{column}: {e}"));
+    }
+}
+
+#[cfg(test)]
+mod time_migration_tests {
+    use super::*;
+
+    /// CO-387 v19: canonical ms columns are added to `entries` and backfilled
+    /// from the CO-73 `entry_dates` ISO rows (semantic = event_at / due_at /
+    /// scheduled_at). ISO strings stay the durable source (entry_dates); the
+    /// ms columns are the lens-math fast path.
+    #[test]
+    fn v19_adds_ms_columns_and_backfills_from_entry_dates() {
+        let conn = Connection::open_in_memory().unwrap();
+        // Pre-v19 database: entries without ms columns + entry_dates rows.
+        conn.execute_batch(
+            "CREATE TABLE entries (
+                universe_key      TEXT NOT NULL,
+                path              TEXT NOT NULL,
+                entry_type        TEXT NOT NULL DEFAULT 'note',
+                title             TEXT NOT NULL DEFAULT '',
+                body              TEXT NOT NULL DEFAULT '',
+                frontmatter_json  TEXT NOT NULL DEFAULT '{}',
+                body_chars        INTEGER NOT NULL DEFAULT 0,
+                created_at        TEXT NOT NULL DEFAULT '',
+                updated_at        TEXT NOT NULL DEFAULT '',
+                PRIMARY KEY (universe_key, path)
+            );
+            CREATE TABLE entry_dates (
+                universe_key TEXT NOT NULL,
+                entry_path   TEXT NOT NULL,
+                semantic     TEXT NOT NULL,
+                value        TEXT NOT NULL,
+                PRIMARY KEY (universe_key, entry_path, semantic)
+            );
+            CREATE TABLE schema_version (version INTEGER NOT NULL);
+            INSERT INTO schema_version (version) VALUES (18);
+            INSERT INTO entries (universe_key, path) VALUES ('uni', 'events/moon.md');
+            INSERT INTO entry_dates VALUES ('uni', 'events/moon.md', 'event_at', '1969-07-20T20:17:00Z');
+            INSERT INTO entry_dates VALUES ('uni', 'events/moon.md', 'due_at',   '1970-01-01T00:00:01Z');",
+        )
+        .unwrap();
+
+        run_universe_migrations(&conn, "uni");
+
+        assert!(universe_column_exists(&conn, "entries", "event_at_ms"));
+        assert!(universe_column_exists(&conn, "entries", "due_at_ms"));
+        assert!(universe_column_exists(&conn, "entries", "scheduled_at_ms"));
+
+        let (event_ms, due_ms, sched_ms): (Option<i64>, Option<i64>, Option<i64>) = conn
+            .query_row(
+                "SELECT event_at_ms, due_at_ms, scheduled_at_ms FROM entries \
+                 WHERE universe_key='uni' AND path='events/moon.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        // 1969-07-20T20:17:00Z = -14_182_980_000 ms (pre-epoch dates must work)
+        assert_eq!(event_ms, Some(-14_182_980_000));
+        assert_eq!(due_ms, Some(1_000));
+        assert_eq!(sched_ms, None);
+
+        // v19 must be recorded and the supporting index created.
+        let v: i64 = conn
+            .query_row("SELECT MAX(version) FROM schema_version", [], |r| r.get(0))
+            .unwrap();
+        assert!(v >= 19, "schema_version must reach v19, got {v}");
+        let idx: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name='idx_entries_event_ms'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(idx, 1, "v19 must create idx_entries_event_ms");
+    }
+
+    /// Fresh databases get the ms columns from the base schema and the
+    /// backfill is a no-op (idempotent re-run safety).
+    #[test]
+    fn v19_is_idempotent_on_fresh_database() {
+        let conn = Connection::open_in_memory().unwrap();
+        run_universe_migrations(&conn, "uni");
+        run_universe_migrations(&conn, "uni"); // re-run must not panic
+        assert!(universe_column_exists(&conn, "entries", "event_at_ms"));
     }
 }
 
