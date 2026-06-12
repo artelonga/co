@@ -658,6 +658,13 @@ impl<'a> EntryIndex<'a> {
             "DELETE FROM entry_dates WHERE universe_key = ?1 AND entry_path = ?2",
             params![universe_key, entry.path],
         )?;
+        // CO-387: reset the canonical ms fast-path columns; re-populated below
+        // for each semantic that still has a value.
+        self.conn.execute(
+            "UPDATE entries SET event_at_ms = NULL, due_at_ms = NULL, scheduled_at_ms = NULL \
+             WHERE universe_key = ?1 AND path = ?2",
+            params![universe_key, entry.path],
+        )?;
 
         let manifest = match manifest {
             Some(m) => m,
@@ -693,6 +700,17 @@ impl<'a> EntryIndex<'a> {
                  VALUES (?1, ?2, ?3, ?4)",
                 params![universe_key, entry.path, semantic, utc_val],
             )?;
+            // CO-387: keep the canonical ms fast-path column in sync (lens math).
+            if let Some(ms_column) = ms_column_for_semantic(semantic)
+                && let Ok(dt) = utc_val.parse::<chrono::DateTime<chrono::Utc>>()
+            {
+                self.conn.execute(
+                    &format!(
+                        "UPDATE entries SET {ms_column} = ?1 WHERE universe_key = ?2 AND path = ?3"
+                    ),
+                    params![dt.timestamp_millis(), universe_key, entry.path],
+                )?;
+            }
         }
         Ok(())
     }
@@ -937,6 +955,17 @@ fn value_to_sql_string(val: &JsonValue) -> String {
 ///
 /// Accepts full RFC3339 datetimes and `YYYY-MM-DD` date-only strings.
 /// Returns `None` if the input cannot be parsed.
+/// CO-387: map a CO-73 date semantic to its canonical ms column on `entries`.
+/// Returns `None` for semantics without a fast-path column.
+fn ms_column_for_semantic(semantic: &str) -> Option<&'static str> {
+    match semantic {
+        "event_at" => Some("event_at_ms"),
+        "due_at" => Some("due_at_ms"),
+        "scheduled_at" => Some("scheduled_at_ms"),
+        _ => None,
+    }
+}
+
 pub fn normalize_date_to_utc(s: &str) -> Option<String> {
     if let Ok(dt) = s.parse::<chrono::DateTime<chrono::Utc>>() {
         return Some(dt.to_rfc3339());
@@ -1111,6 +1140,51 @@ mod tests {
             )
             .unwrap();
         assert!(val.contains("2026-07-15"), "value should be updated: {val}");
+    }
+
+    /// CO-387: upsert_dates also maintains the canonical ms fast-path columns
+    /// on `entries` (event_at_ms / due_at_ms / scheduled_at_ms).
+    #[test]
+    fn test_upsert_dates_syncs_canonical_ms_columns() {
+        let conn = open_mem_db();
+        let idx = EntryIndex::new(&conn);
+        let manifest = manifest_with_event_at();
+
+        insert_entry(
+            &conn,
+            "uni",
+            "events/1.md",
+            "evento",
+            r#"{"type":"evento","event_at":"2026-06-01"}"#,
+        );
+        let entry = make_entry(
+            "events/1.md",
+            json!({"type":"evento","event_at":"2026-06-01"}),
+            "",
+        );
+        idx.upsert_dates("uni", &entry, Some(&manifest)).unwrap();
+
+        let ms: Option<i64> = conn
+            .query_row(
+                "SELECT event_at_ms FROM entries WHERE universe_key='uni' AND path='events/1.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        // 2026-06-01T00:00:00Z = 1780272000000 ms
+        assert_eq!(ms, Some(1_780_272_000_000));
+
+        // Removing the date field must clear the ms column too.
+        let entry_v2 = make_entry("events/1.md", json!({"type":"evento"}), "");
+        idx.upsert_dates("uni", &entry_v2, Some(&manifest)).unwrap();
+        let ms2: Option<i64> = conn
+            .query_row(
+                "SELECT event_at_ms FROM entries WHERE universe_key='uni' AND path='events/1.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ms2, None, "cleared date field must null the ms column");
     }
 
     #[test]

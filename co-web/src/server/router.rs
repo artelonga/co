@@ -451,6 +451,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                 "/api/v1/universes",
                 crate::workspace_template_routes::router(),
             )
+            // CO-387: calendar lens config (_calendar.yaml) — public read,
+            // lens metadata only (no entry data).
+            .nest("/api/v1/universes", crate::time::routes::router())
             // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
             // enforces its own auth + path constraints.
             .nest("/api/v1/universes", crate::proposal_routes::inline_router())
