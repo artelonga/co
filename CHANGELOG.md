@@ -5,6 +5,250 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] — 2026-06-12 — fleet observability & model routing
+
+## CO-423 — source-deploy toolchain: re-parent API + adapter existence-check + auto-index
+
+Three concrete gaps exposed by the CO-419 `nlp` deploy are fixed so importing a
+repository into a universe produces a **complete** universe — correct parent,
+landing page, real existence detection — with no manual patching.
+
+### Re-parent via API (the blocker)
+`PUT /api/v1/universes/{slug}` now accepts `parent_key: Option<String>`. When
+provided, the owner (only) can re-parent a universe: a non-empty key (validated
+to exist, and not the universe itself) sets `universes.parent_key`; an empty
+string clears it to NULL. Non-owners get 403; a nonexistent parent is rejected
+with 400. The `UpdateUniverseResponse` now echoes `parent_key`. This makes
+`PUT /api/v1/universes/nlp {"parent_key":"yuri"}` work — the last open item of
+CO-419 §E. No new migration: `universes.parent_key` already exists (CO-98 v22).
+
+### Adapter existence-check no longer fooled by the SPA fallback
+`co source add` previously treated any HTTP 200 from `GET /universes/{key}` as
+"exists" — but the SPA serves 200 (its HTML shell) for unknown routes, so it
+false-positived. It now parses the universe JSON and requires a `key` field that
+matches the requested slug; an HTML shell (JSON parse failure) is treated as
+absent. When creating is needed but the credential is an API token (POST
+/universes requires a session), it now surfaces a clear, actionable error
+instead of a bare 401.
+
+### `--parent` and auto-index
+`co source add github` gains `--parent <key>` (sets `parent_key` after create via
+the new PUT API) and `--no-index`. By default, if the imported repo brought no
+content-root `index.md`, a minimal navigable landing is synthesized linking the
+imported tree; an existing `index.md` is never overwritten.
+
+### Why
+Unblocks CO-419 and any future repo import: the deploy toolchain now makes the
+universe whole (parent, landing, real source detection) without hand-patches.
+
+## CO-425 — co-auto: capture Claude usage via stream-json, POST best-effort
+
+co-auto now invokes headless Claude Code with `--output-format stream-json --verbose`
+and parses the streamed NDJSON events for per-message token `usage`
+(`input_tokens`, `output_tokens`, `cache_creation_input_tokens`,
+`cache_read_input_tokens`, `model`) plus the final `result` event
+(`num_turns`, `duration_ms`, `total_cost_usd`). Usage is aggregated per task
+into a serializable `SessionUsage` and POSTed best-effort to the CO ingestion
+endpoint.
+
+- New `co-auto::usage` module: `SessionUsage` struct + `parse_stream_json()` +
+  `assistant_text()` (re-emits the human assistant text to the launcher log so
+  task visibility is unchanged).
+- The aggregated tokens now feed the existing `AgentSessionRecord` (preferring
+  stream-json over the legacy stdout scraping), and a one-line summary is printed
+  per task: `usage: 19.0k in (89% cached) / 460 out — sonnet — 6m12s`.
+- New best-effort POST to `CO_USAGE_ENDPOINT` (`/api/v1/usage/sessions`),
+  **default OFF** — a no-op when the env var is unset. Auth reuses the existing
+  `CO_SESSION_TOKEN` bearer scheme. Hostname/model/outcome included in the payload
+  (CO-426 defines the canonical schema).
+
+### Why
+
+Telemetry must never block or fail a co-auto task. Every failure mode — parse
+error on a stream line, missing endpoint, network/POST failure, serialize error —
+is swallowed and logged; the task still succeeds. Subscription auth reports no
+USD, so cost is only attached when the `result` event carries `total_cost_usd`.
+This is the data source for the real-time usage dashboard (CO-424 epic / CO-426).
+
+## CO-426 — co-web: ingestão de usage + registry de launchers + dashboard Gestão em tempo real
+
+Centralized, real-time fleet-usage observability for co-auto across machines and
+deployments: which launchers are active, where tokens are going, and how the
+current inference window is being consumed.
+
+### Added
+
+- **Migration v75** — `usage_sessions` table in the meta DB (fleet-wide token/cost
+  ledger: `task_key`, `universe_key`, `machine`, `model`, in/out/cache-read/cache-write
+  tokens, nullable `cost_usd`, `started_at`/`ended_at`/`outcome`/`reported_at`), with
+  indexes per window dimension. Deliberately a **new** table, not the CO-275
+  `agent_sessions` (per-task kanban provenance) — distinct shape and purpose.
+- **`POST /api/v1/usage/sessions`** — ingests the CO-425 stream-json usage report
+  (matches co-auto's canonical payload exactly), inserts a row, and publishes a
+  `DomainEvent::UsageReported` bridged to `AnalyticsEvent::Usage` so the dashboard
+  updates over the existing AnalyticsBuffer broadcast — no polling.
+- **`POST /api/v1/usage/heartbeat`** — launchers register/refresh an active session in
+  an in-memory TTL registry (`ActiveLaunchers`, 90s). A crashed machine simply stops
+  beating and ages out — no DELETE. Each beat broadcasts a full `LauncherSnapshot`.
+- **`GET /api/v1/usage/summary?window=5h|day|week&by=universe|model|machine|task`** —
+  aggregates for the dashboard and the CO-427 downshift policy, plus always-present 5h
+  and week window totals and configurable soft-limit markers
+  (`CO_USAGE_SOFT_LIMIT_5H` / `_WEEK`).
+- **`GET /api/v1/usage/active`** — launchers active right now.
+- **`GET /api/v1/usage/projects`** — fleet roll-up: usage accumulated per universe, with
+  best-effort board task counts (per-universe DB) and last deploy.
+- **Gestão "Uso" panel** — active launchers, current-window consumption bars, usage by
+  universe/model/machine/task with grouping selector, and the projetos roll-up. Updates
+  live by subscribing to the existing `/api/v1/analytics/stream` WebSocket (no
+  setInterval+fetch).
+
+### Why
+
+Yuri operates co-auto across several machines and deployments. To prioritize the
+inference window (opus/fable vs sonnet/haiku) with data rather than intuition, the fleet
+needs one real-time view of projects, boards, active launchers and token consumption.
+
+### Notes
+
+- Auth, two tiers (review hardening): **writes** (`POST /sessions`, `/heartbeat`) take
+  any valid vault token or JWT — the reporting launchers; **reads** (`GET /summary`,
+  `/active`, `/projects`) additionally require `tier == "admin"` (verified through the
+  same `auth_provider` as the write path → **403** for non-admins). Fleet-wide cost and
+  live launcher inventory are API-gated like every other Gestão data router, not merely
+  hidden behind the admin-only page (page-gating does not stop a direct token request).
+  The CO-427 downshift consumer reads `/summary` with the operator's admin session token.
+- The panel shows **observed consumption** + configurable milestones, not official
+  Anthropic subscription limits (those aren't exposed by API).
+- No universe→machine/repo mapping is hardcoded — everything comes from the DB or payload.
+
+## CO-427 — Model routing: modelo por task (frontmatter) + política priority→model + downshift por janela de uso
+
+co-auto now resolves the executor model **per task** instead of using one global
+`--model` for the whole run. Resolution follows a four-level precedence:
+
+1. `--model` on the CLI (operator override — pins every task).
+2. `model:` in the task frontmatter (per-task override; invalid value → warn + ignore).
+3. Priority→model policy (`high→opus`, `medium→sonnet`, `low→haiku`), configurable
+   in `project.yaml` — **opt-in via `by_priority: true`** (or
+   `CO_AUTO_ROUTING_BY_PRIORITY=1`); off by default.
+4. Quality-first default (`opus`) — the **default** for any task with no `--model`
+   and no frontmatter, per the binding owner decision (default = opus, *not* the
+   priority tier; tiers are opt-in).
+
+A best-effort **window downshift** runs before each launch: co-auto reads CO-426's
+`GET /api/v1/usage/summary?window=5h`, and if the rolling 5h token consumption has
+crossed the configured soft limit (`usage_soft_limit_5h_tokens` /
+`CO_AUTO_SOFT_LIMIT_5H_TOKENS`), it degrades the model one tier (`opus→sonnet→haiku`).
+The decision is printed to the launcher log and included in the usage report
+(`model_requested` vs `model_used`, plus a `downshifted` record) so the dashboard
+can surface the degradation. Every failure path (no endpoint, no network,
+unparseable response, no soft limit, already-lowest tier) is fail-open — the
+requested model is kept.
+
+New module `dev/co-auto/src/routing.rs`; `--model` is now optional (no longer
+defaults to `sonnet`). Docs: "Model routing" section in `dev/co-auto/README.md`
+and a frontmatter example in `work/co/CLAUDE.md`.
+
+### Why
+Maximize what the subscription delivers per usage window: spend Opus on hard work,
+fall back to cheaper tiers automatically near the budget, and never burn Opus on
+chore. Routing is decided at launch and never rebalances running tasks; model
+aliases pass through to the `claude` CLI without hardcoded-id validation.
+
+## CO-428 — `co universe digest`: deterministic, recursive, cache-friendly universe summaries
+
+Added `co universe digest [<key>] [--depth N] [--format md|json] [--data-dir DIR]`,
+a new co-cli command that emits a generated (not hand-written) summary of the
+universe forest sourced from the local registry (SQLite), for token-efficient
+co-auto / Claude sessions.
+
+- **Deterministic / byte-stable**: same DB state → identical bytes. Fixed
+  key-sorted ordering (DFS over `parent_key`), no timestamps, no random
+  iteration (`BTreeMap` throughout, hand-rolled stable JSON). This makes the
+  digest usable as a cacheable prompt prefix.
+- **Recursive** via `parent_key` (CO-98): roots first (key-sorted), each
+  followed by its subtree; `--depth N` bounds recursion.
+- **Token-bounded**: each universe block targets ≤200 tokens (chars/4); a
+  warning is printed if a block exceeds the budget. Measured ~48 tokens/universe
+  average, 56 for the richest block.
+- **Cache-friendly layer ordering**: stable identity/hierarchy first, volatile
+  counts (entries, tasks-by-status) last within each block, so edits to one
+  universe's counts do not invalidate the cached prefix of earlier universes.
+- **No hardcoded mappings**: data comes only from the registry (CO-424 constraint).
+
+Per-universe fields: key, name, purpose (truncated description), parent,
+children, content types ("modelos") in use, page/project/task counts, and
+task counts grouped by status.
+
+### Measured token reduction (CO-424 ≥40% target)
+
+On the real content-universe forest (`co → template → {comunicacao, time,
+topologia}`, `miguel → mse`, …), the digest replaces the verbose universe-landscape
+prose an agent otherwise reads:
+
+- Universe-landscape layer: **990 → 488 est. tokens (50.7% fewer)** on a single task.
+- Across a co-auto wave (same universe, digest byte-stable → cached after the
+  first task): uncached tokens drop **83.6% (3 tasks) … 95.1% (10 tasks)**.
+
+The target is met on a single task and exceeded across a wave.
+
+### Tests
+
+10 unit tests (token estimate, purpose truncation, forest DFS/depth/orphan
+ordering, counts-last layout, JSON escaping) + 5 CLI integration tests over a
+seeded 3-level universe tree, including two **byte-stable determinism** tests
+(md + json) that run the digest twice and assert identical output.
+
+## CO-429 — claude-code como universo (source:github) + catálogo de superfícies de integração
+
+The `claude-code` universe (registered by CO-364) now has the correct metadata:
+`parent: co` and `visibility: private`. Boot-time reconcile UPDATEs fix existing
+installs. The upstream repo's content subdirs were corrected from `docs/` (which does
+not exist) to `examples/` and `plugins/`. Seven integration-surface entries were added
+to `tools/claude-code/` in the `co` universe — one per surface: `headless-stream-json`,
+`model-flag`, `claude-md`, `skills`, `hooks`, `session-jsonl`, `otel-telemetry`. Each
+entry documents what the surface is, when CO uses it (linked task), a minimal example,
+and a cross-universe link (`[[claude-code::...]]`) to the canonical upstream doc.
+
+### Why
+
+Agents and launchers operating on CO need a navigable, on-demand reference for Claude
+Code integration surfaces instead of loading that knowledge into each session's context.
+The tool catalog lets `co universe digest co` surface the integration points, and
+`co source sync claude-code` keeps the upstream docs current.
+
+## CO-437 — Usage metadata enrichment: tool usage + outputs + PR links, and per-model×per-universe breakdown
+
+Extends the CO-425/CO-426 usage pipeline so each captured session carries more
+than tokens, and the Gestão "Uso" dashboard can break consumption down by
+**model × universe** (the cross-tab, not just each dimension alone).
+
+- **Capture (CO-425 extended):** `parse_stream_json` now harvests `tool_uses`
+  (tool name → invocation count) and `output_chars` (total assistant text size)
+  from the stream-json content blocks, and co-auto attaches the opened `pr_url`
+  (parsed from stdout) and `turns` to the reported usage. All best-effort /
+  default-empty — telemetry never fails or blocks a run.
+- **Schema (CO-426 extended):** meta-DB migration **v76** adds
+  `usage_sessions.tool_uses TEXT` (JSON), `pr_url TEXT`, `turns INTEGER DEFAULT 0`
+  via additive `ALTER TABLE` under a version guard. New columns are read with
+  explicit SELECTs (never `.ok()`-swallowed).
+- **Cross model×universe:** `GET /api/v1/usage/summary?cross=universe,model`
+  (also accepts a comma-bearing `by=`) returns the matrix — rows per universe,
+  columns per model, cells with tokens/cost/sessions. Admin-gated like the rest
+  of CO-426.
+- **Per-session listing:** `GET /api/v1/usage/sessions` returns recent sessions
+  with their tool usage + PR link (admin-gated).
+- **Dashboard:** the "Uso" panel gains the model×universe matrix and a
+  "Sessões recentes" table showing tool usage + PR link per session. Updates in
+  real time over the existing analytics stream (no polling).
+
+### Why
+To measure the real cost of each wave (e.g. Mythos in Fable) at model×universe
+granularity — the base for estimating whether a future `mythos` model pays off
+against Fable/Opus/Sonnet. Official subscription limits aren't exposed by API,
+so the matrix reports observed consumption.
+
+
 ## [3.5.0] — 2026-06-12 — security gate + ops resilience + Miguel
 
 ## CO-388 — Security audit pipeline integration — Claude Security in CO-382 CI route (Project Glasswing-aligned)
