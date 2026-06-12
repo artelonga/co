@@ -2651,6 +2651,57 @@ impl Storage {
                 "CO-398: task_status_log — delivery pipeline lead-time tracking"
             );
         }
+
+        if current_version < 73 {
+            // CO-388: security_findings — stores vulnerability scan results from
+            // the security audit pipeline (Project Glasswing step 11).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS security_findings (
+                       id              TEXT PRIMARY KEY,
+                       pr_number       INTEGER NOT NULL,
+                       severity        TEXT NOT NULL
+                         CHECK (severity IN ('critical','high','medium','low','info')),
+                       category        TEXT NOT NULL,
+                       file_path       TEXT NOT NULL,
+                       line_start      INTEGER,
+                       line_end        INTEGER,
+                       description     TEXT NOT NULL,
+                       cwe             TEXT,
+                       cve_match       TEXT,
+                       suggested_patch TEXT,
+                       detected_at     TEXT NOT NULL,
+                       resolved_at     TEXT,
+                       resolution_kind TEXT
+                         CHECK (resolution_kind IS NULL OR
+                                resolution_kind IN ('patched','accepted-risk','false-positive','wont-fix')),
+                       resolution_pr   INTEGER,
+                       -- CO-388 (security hardening): audit trail — which admin
+                       -- resolved this finding (flips it to accepted-risk etc.,
+                       -- which can open the release gate).
+                       resolved_by     TEXT
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_security_findings_severity
+                       ON security_findings (severity, detected_at DESC);
+                     CREATE INDEX IF NOT EXISTS idx_security_findings_unresolved
+                       ON security_findings (detected_at DESC) WHERE resolved_at IS NULL;
+                     -- CO-388 (security hardening): DB-backed per-day scan counter.
+                     -- The previous in-memory AtomicU32 was rebuilt on every
+                     -- request (build_backend() per call) so the daily cap never
+                     -- tripped. One row per UTC day; the count persists across
+                     -- requests and process restarts.
+                     CREATE TABLE IF NOT EXISTS security_scan_counts (
+                       scan_day TEXT PRIMARY KEY,   -- 'YYYY-MM-DD' (UTC)
+                       count    INTEGER NOT NULL DEFAULT 0
+                     );",
+                )
+                .expect("CO-388 v73: security_findings table + indexes");
+            crate::record_migration!(
+                self.conn,
+                73,
+                "CO-388: security_findings — pre-release vulnerability scan results (Project Glasswing)"
+            );
+        }
     }
 }
 

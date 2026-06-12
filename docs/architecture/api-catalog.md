@@ -737,6 +737,18 @@ CO-367: universal content → KB sync warehouse (history + latest + FTS).
 
 ---
 
+## security — `/api/v1/gestao/security/*` (security/routes.rs)
+
+CO-388: Glasswing security audit pipeline — scan findings + release blocker.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/gestao/security/findings` | admin (gh) | List vulnerability findings |
+| GET | `/api/v1/gestao/security/findings/{id}` | admin (gh) | Finding detail |
+| PATCH | `/api/v1/gestao/security/findings/{id}` | admin (gh) | Resolve finding (patched / accepted-risk / false-positive / wont-fix) |
+| GET | `/api/v1/gestao/security/scan/status` | admin (gh) | Last scan status |
+| POST | `/api/v1/gestao/security/scan` | admin (gh) | Trigger a scan |
+
 ## delivery — pipeline no quadro (delivery_routes.rs)
 
 CO-398: VC/deploy events drive board status via the CO-380 bus + GitHub webhooks.
