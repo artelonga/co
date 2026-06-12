@@ -2562,7 +2562,10 @@ mod tests {
         let u = storage
             .get_universe("claude-code")
             .expect("claude-code must exist after seed");
-        assert_eq!(u.visibility, "private", "claude-code.visibility must be private initially");
+        assert_eq!(
+            u.visibility, "private",
+            "claude-code.visibility must be private initially"
+        );
         assert_eq!(
             u.parent_key.as_deref(),
             Some("co"),
@@ -2617,7 +2620,10 @@ mod tests {
         storage.seed_admin_content_universes();
 
         let u = storage.get_universe("claude-code").unwrap();
-        assert_eq!(u.visibility, "private", "reconcile must set visibility=private");
+        assert_eq!(
+            u.visibility, "private",
+            "reconcile must set visibility=private"
+        );
         assert_eq!(
             u.parent_key.as_deref(),
             Some("co"),
