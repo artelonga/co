@@ -49,9 +49,12 @@ struct Cli {
     #[arg(long)]
     teams: bool,
 
-    /// Model to use.
-    #[arg(long, default_value = "sonnet")]
-    model: String,
+    /// Model override (CLI alias: `opus`/`sonnet`/`haiku`/…). When set, it wins
+    /// over per-task routing for every task in the run. When omitted, the model
+    /// is resolved PER TASK (CO-427): frontmatter `model:` → priority policy →
+    /// quality-first default (opus), with an optional window downshift.
+    #[arg(long)]
+    model: Option<String>,
 
     /// Timeout per task in seconds (default: 1800 = 30 min).
     #[arg(long, default_value = "1800")]

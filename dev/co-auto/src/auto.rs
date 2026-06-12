@@ -27,7 +27,9 @@ pub struct AutoConfig {
     pub dry_run: bool,
     pub max_tasks: Option<usize>,
     pub teams: bool,
-    pub model: String,
+    /// CO-427: explicit `--model` operator override. `None` means "let per-task
+    /// routing decide" (frontmatter → priority policy → quality-first default).
+    pub model: Option<String>,
     pub timeout_secs: u64,
     pub workdir: Option<String>,
     pub data_dir: Option<String>,
@@ -49,6 +51,10 @@ pub struct Task {
     pub labels: Vec<String>,
     #[allow(dead_code)]
     pub module: Option<String>,
+    /// CO-427: optional `model:` frontmatter override (per-task routing). A
+    /// present-but-invalid value is dropped to `None` at parse time (with a
+    /// warning) so routing falls through to the policy.
+    pub model: Option<String>,
     pub body: String,
     pub file_path: PathBuf,
 }
@@ -148,6 +154,10 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
     }
 
     let project_key = load_project_key(&data_dir)?;
+
+    // CO-427: load the model-routing policy once for the whole run. The model is
+    // resolved PER TASK inside the loop below (not a single model for the run).
+    let routing_cfg = crate::routing::RoutingConfig::load(&data_dir);
 
     println!(
         "{} {} (space: {})",
@@ -302,7 +312,34 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
         update_task_status(&task, "in_progress")?;
         println!("  {} Status: in_progress", "◆".dimmed());
 
-        // 4. EXECUTE via Claude Code
+        // 4. RESOLVE MODEL (CO-427) — per task, decided at launch.
+        // Precedence: --model > frontmatter `model:` > priority policy >
+        // quality-first default. Then a best-effort window downshift.
+        let (model_requested, source) = crate::routing::resolve_model(
+            config.model.as_deref(),
+            task.model.as_deref(),
+            &task.priority,
+            &routing_cfg,
+        );
+        let (model_used, downshift) =
+            crate::routing::apply_downshift(&model_requested, &routing_cfg);
+        println!(
+            "  {} Model: {} ({})",
+            "◆".dimmed(),
+            model_requested.cyan(),
+            source.label().dimmed()
+        );
+        if let Some(ref d) = downshift {
+            println!(
+                "  {} model.downshifted {} → {} — {}",
+                "⚠".yellow(),
+                d.from.yellow(),
+                d.to.green(),
+                d.reason.dimmed()
+            );
+        }
+
+        // 5. EXECUTE via Claude Code
 
         let spawn_time = Utc::now().timestamp();
         let wall_start = std::time::Instant::now();
@@ -311,7 +348,7 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             &context,
             &workdir,
             config.teams,
-            &config.model,
+            &model_used,
             config.timeout_secs,
             config.interactive,
             &task.key,
@@ -323,7 +360,7 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
         let success = claude_out.success;
 
         if success {
-            // 5. REVIEW acceptance criteria
+            // 6. REVIEW acceptance criteria
             let review = review_criteria(&task)?;
 
             if review.passed {
@@ -508,7 +545,8 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             context_chars: Some(context.len() as i64),
             final_commit_sha: read_head_sha(&workdir),
             pr_number: parse_pr_number(&claude_out.stdout),
-            model: Some(config.model.clone()),
+            // CO-427: record the model actually used (post-downshift).
+            model: Some(model_used.clone()),
             co_auto_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         };
         post_session_to_co(&session);
@@ -525,6 +563,9 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
                 finish_time,
                 outcome,
                 &usage,
+                &model_requested,
+                &model_used,
+                downshift.as_ref(),
             );
         }
 
@@ -634,6 +675,7 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
         .get(serde_yaml::Value::String("module".into()))
         .and_then(|v| v.as_str())
         .map(String::from);
+    let model = parse_task_model(map, path);
 
     Some(Task {
         id,
@@ -644,9 +686,32 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
         parent,
         labels,
         module,
+        model,
         body,
         file_path: path.to_path_buf(),
     })
+}
+
+/// CO-427: parse the optional `model:` frontmatter field.
+///
+/// Absent → `None` (normal — routing falls through to the policy, no warning).
+/// Present but not a non-empty string → invalid: warn and ignore (also falls
+/// through). The value is a CLI alias and is passed through verbatim — never
+/// validated against a hardcoded id list (the `claude` CLI is the authority).
+fn parse_task_model(map: &serde_yaml::Mapping, path: &Path) -> Option<String> {
+    let raw = map.get(serde_yaml::Value::String("model".into()))?;
+    match raw.as_str() {
+        Some(s) if !s.trim().is_empty() => Some(s.trim().to_string()),
+        _ => {
+            eprintln!(
+                "  {} {}: invalid `model:` frontmatter (expected a non-empty string alias) \
+                 — ignoring, falling back to routing policy",
+                "⚠".yellow(),
+                path.display()
+            );
+            None
+        }
+    }
 }
 
 fn select_next_task(tasks: &[Task]) -> Option<Task> {
@@ -1900,6 +1965,7 @@ fn human_duration(ms: i64) -> String {
 /// {"task_key","universe_key","machine","model","usage":{...},
 ///  "started_at","ended_at","outcome"}
 /// ```
+#[allow(clippy::too_many_arguments)]
 fn post_usage_to_co(
     task_key: &str,
     universe_key: &str,
@@ -1907,6 +1973,9 @@ fn post_usage_to_co(
     ended_at: i64,
     outcome: &str,
     usage: &crate::usage::SessionUsage,
+    model_requested: &str,
+    model_used: &str,
+    downshift: Option<&crate::routing::Downshift>,
 ) {
     let endpoint = match std::env::var("CO_USAGE_ENDPOINT") {
         Ok(v) if !v.is_empty() => v,
@@ -1925,7 +1994,16 @@ fn post_usage_to_co(
         "task_key": task_key,
         "universe_key": universe_key,
         "machine": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
-        "model": usage.primary_model_short(),
+        "model": model_used,
+        // CO-427: routing transparency — what was asked for vs what ran, plus the
+        // downshift record (if any) so the CO-426 dashboard can surface degradations.
+        "model_requested": model_requested,
+        "model_used": model_used,
+        "downshifted": downshift.map(|d| serde_json::json!({
+            "from": d.from,
+            "to": d.to,
+            "reason": d.reason,
+        })),
         "usage": usage,
         "started_at": started_at,
         "ended_at": ended_at,
@@ -2314,6 +2392,7 @@ mod tests {
             parent: None,
             labels: vec![],
             module: None,
+            model: None,
             body: String::new(),
             file_path: PathBuf::from("/tmp/nonexistent"),
         }
@@ -2476,6 +2555,38 @@ mod tests {
         );
     }
 
+    // -------------------- CO-427: model frontmatter parsing --------------------
+
+    #[test]
+    fn parse_task_accepts_valid_model_frontmatter() {
+        let content =
+            "---\nid: 1\ntitle: T\nstatus: todo\npriority: high\nmodel: opus\n---\n\nbody\n";
+        let path = PathBuf::from("/tmp/CO-1.md");
+        let task = parse_task(content, &path, "CO").unwrap();
+        assert_eq!(task.model.as_deref(), Some("opus"));
+    }
+
+    #[test]
+    fn parse_task_absent_model_is_none_no_warning() {
+        let content = "---\nid: 1\ntitle: T\nstatus: todo\npriority: high\n---\n\nbody\n";
+        let path = PathBuf::from("/tmp/CO-1.md");
+        let task = parse_task(content, &path, "CO").unwrap();
+        assert_eq!(task.model, None);
+    }
+
+    #[test]
+    fn parse_task_invalid_model_is_ignored() {
+        // A non-string / empty `model:` is invalid → dropped to None (warned),
+        // so routing falls back to the policy. Must not fail parsing.
+        for bad in ["model: []", "model: 42", "model: \"\"", "model: {a: b}"] {
+            let content =
+                format!("---\nid: 1\ntitle: T\nstatus: todo\npriority: high\n{bad}\n---\n\nbody\n");
+            let path = PathBuf::from("/tmp/CO-1.md");
+            let task = parse_task(&content, &path, "CO").unwrap();
+            assert_eq!(task.model, None, "input: {bad}");
+        }
+    }
+
     // -------------------- CO-425: usage capture --------------------
 
     #[test]
@@ -2502,7 +2613,9 @@ mod tests {
             r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":5}}}"#,
         );
         // Must not panic; returns unit.
-        post_usage_to_co("CO-425", "co", 1, 2, "success", &usage);
+        post_usage_to_co(
+            "CO-425", "co", 1, 2, "success", &usage, "opus", "opus", None,
+        );
 
         // Restore prior env (other tests may rely on it being unset/set).
         unsafe {
