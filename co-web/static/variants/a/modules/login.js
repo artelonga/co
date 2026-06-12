@@ -325,7 +325,31 @@ export function setupLoginModal() {
             const startHref = returnTo
                 ? `/api/v1/auth/google/start?return_to=${encodeURIComponent(returnTo)}`
                 : '/api/v1/auth/google/start';
-            document.querySelectorAll('.oauth-btn').forEach(a => { a.href = startHref; });
+            document.querySelectorAll('.oauth-btn-google').forEach(a => { a.href = startHref; });
+            document.getElementById('oauth-providers')?.classList.remove('hidden');
+            document.getElementById('oauth-providers-signup')?.classList.remove('hidden');
+        } catch (_) { /* leave hidden on any error */ }
+    })();
+
+    // CO-415: probe whether GitHub OAuth is configured on this deploy. Same
+    // gating posture as Google above — the GitHub buttons stay hidden when
+    // GITHUB_OAUTH_CLIENT_ID isn't set so users never hit a 503. Forwards
+    // `?return_to=` for cross-deployment round-trips.
+    (async () => {
+        try {
+            const r = await fetch('/api/v1/auth/github/status');
+            if (!r.ok) return;
+            const { configured } = await r.json();
+            if (!configured) return;
+            const here = new URLSearchParams(window.location.search);
+            const returnTo = here.get('return_to');
+            const startHref = returnTo
+                ? `/api/v1/auth/github/start?return_to=${encodeURIComponent(returnTo)}`
+                : '/api/v1/auth/github/start';
+            document.querySelectorAll('.oauth-btn-github').forEach(a => {
+                a.href = startHref;
+                a.classList.remove('hidden');
+            });
             document.getElementById('oauth-providers')?.classList.remove('hidden');
             document.getElementById('oauth-providers-signup')?.classList.remove('hidden');
         } catch (_) { /* leave hidden on any error */ }

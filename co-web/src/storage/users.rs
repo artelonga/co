@@ -911,6 +911,103 @@ impl Storage {
         })
     }
 
+    /// CO-415: find an existing CO user by GitHub `login`, or by email if no
+    /// `github_login` matches yet, or insert a new `users` row. Returns the
+    /// canonical user record. Mirrors `find_or_create_user_by_google`.
+    /// Side-effects:
+    /// - Always sets `users.github_login` on the matching row (links email-only
+    ///   accounts to their GitHub identity on first GitHub sign-in).
+    /// - Auto-promotes the email as a verified recovery channel when newly
+    ///   linked, mirroring the cadastro path.
+    pub fn find_or_create_user_by_github(
+        &mut self,
+        github_login: &str,
+        email: &str,
+        github_name: &str,
+        origin: Option<&str>,
+    ) -> anyhow::Result<crate::models::User> {
+        let email = email.trim().to_lowercase();
+        let now = chrono::Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // 1. Match by github_login.
+        let by_login: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM users WHERE github_login = ?1",
+                rusqlite::params![github_login],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = by_login
+            && let Some(u) = self.get_user_by_id(&id)
+        {
+            return Ok(u);
+        }
+
+        // 2. Match by email — link GitHub login to the existing CO user.
+        let by_email: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM users WHERE email = ?1",
+                rusqlite::params![email],
+                |row| row.get(0),
+            )
+            .ok();
+        if let Some(id) = by_email {
+            self.conn.execute(
+                "UPDATE users SET github_login = ?1 WHERE id = ?2",
+                rusqlite::params![github_login, id],
+            )?;
+            let _ = self.ensure_email_recovery_channel(&id, &email);
+            if let Some(u) = self.get_user_by_id(&id) {
+                return Ok(u);
+            }
+        }
+
+        // 3. Insert a new user. Pick a unique `usuario` from the email
+        //    local-part with a `-N` suffix on collision (mirrors migration v37).
+        let local = email.split('@').next().unwrap_or("user");
+        let mut candidate = local.to_lowercase();
+        let mut n = 2;
+        while self.get_user_by_usuario(&candidate).is_some() {
+            candidate = format!("{}-{}", local.to_lowercase(), n);
+            n += 1;
+            if n > 100 {
+                candidate = format!("{}-{}", local.to_lowercase(), nanoid::nanoid!(6));
+                break;
+            }
+        }
+
+        let id = format!("usr_{}", nanoid::nanoid!(10));
+        let display = if github_name.trim().is_empty() {
+            candidate.clone()
+        } else {
+            github_name.trim().to_string()
+        };
+        self.conn.execute(
+            "INSERT INTO users \
+             (id, usuario, email, display_name, tier, created_at, github_login, origin) \
+             VALUES (?1, ?2, ?3, ?4, 'player', ?5, ?6, ?7)",
+            rusqlite::params![id, candidate, email, display, now_str, github_login, origin],
+        )?;
+        if let Err(e) = self.subscribe_user_to_default_universes(&id) {
+            tracing::warn!(
+                "find_or_create_user_by_github: default subscriptions failed for {id}: {e}"
+            );
+        }
+        let _ = self.ensure_email_recovery_channel(&id, &email);
+
+        Ok(crate::models::User {
+            id,
+            email,
+            display_name: display,
+            tier: "player".to_string(),
+            created_at: now,
+            usuario: Some(candidate),
+        })
+    }
+
     /// CO-206: look up a CO user's linked yggdrasil user id.
     pub fn get_yggdrasil_user_id(&self, co_user_id: &str) -> Option<String> {
         self.conn

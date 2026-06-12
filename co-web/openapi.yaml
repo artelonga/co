@@ -707,6 +707,27 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/auth/github/callback:
+    get:
+      tags: ["auth"]
+      summary: "CO-415 — GitHub OAuth callback"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/github/start:
+    get:
+      tags: ["auth"]
+      summary: "CO-415 — begin GitHub OAuth (oauth_github.rs)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/auth/github/status:
+    get:
+      tags: ["auth"]
+      summary: "Whether GitHub OAuth is configured"
+      responses:
+        "200":
+          description: OK
   /api/v1/auth/google/callback:
     get:
       tags: ["auth"]

@@ -31,15 +31,22 @@ pub(super) struct GoogleStatusResponse {
     pub configured: bool,
 }
 
+/// CO-415: typed response for `GET /api/v1/auth/github/status`.
+#[derive(Debug, serde::Serialize)]
+pub(super) struct GithubStatusResponse {
+    pub configured: bool,
+}
+
 /// CO-303: Available login methods for this deployment.
 /// The SPA calls `GET /api/v1/auth/login-options` on modal mount and renders
-/// only the supported paths (magic-code is always available; password and
-/// Google are conditional).
+/// only the supported paths (magic-code is always available; password, Google
+/// and GitHub are conditional).
 #[derive(Debug, serde::Serialize)]
 pub(super) struct LoginOptionsResponse {
     pub magic_code: bool,
     pub password: bool,
     pub google: bool,
+    pub github: bool,
 }
 
 // --- Experiment Handlers ---
@@ -853,6 +860,16 @@ pub(super) async fn google_status_handler() -> Json<GoogleStatusResponse> {
     Json(GoogleStatusResponse { configured })
 }
 
+/// CO-415: tells the UI whether GitHub OAuth is configured on this deploy.
+/// Lets the login modal hide the "Entrar com GitHub" button when the
+/// `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` env vars aren't set
+/// — avoids a button that lands on 503.
+pub(super) async fn github_status_handler() -> Json<GithubStatusResponse> {
+    let configured = std::env::var("GITHUB_OAUTH_CLIENT_ID").is_ok()
+        && std::env::var("GITHUB_OAUTH_CLIENT_SECRET").is_ok();
+    Json(GithubStatusResponse { configured })
+}
+
 /// CO-303: `GET /api/v1/auth/login-options` — available authentication methods.
 ///
 /// The SPA calls this on modal mount to decide which sign-in tabs to render:
@@ -865,10 +882,13 @@ pub(super) async fn login_options_handler(
 ) -> Json<LoginOptionsResponse> {
     let google =
         std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
+    let github = std::env::var("GITHUB_OAUTH_CLIENT_ID").is_ok()
+        && std::env::var("GITHUB_OAUTH_CLIENT_SECRET").is_ok();
     Json(LoginOptionsResponse {
         magic_code: true,
         password: state.core.config.allows_uat_login(),
         google,
+        github,
     })
 }
 
@@ -955,18 +975,28 @@ mod tests {
         assert_eq!(json["configured"], false);
     }
 
-    /// CO-303: LoginOptionsResponse serializes correctly.
+    /// CO-415: GithubStatusResponse serializes with configured field.
+    #[test]
+    fn test_github_status_response_serializes() {
+        let r = GithubStatusResponse { configured: false };
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["configured"], false);
+    }
+
+    /// CO-303/CO-415: LoginOptionsResponse serializes correctly.
     #[test]
     fn test_login_options_response_serializes() {
         let r = LoginOptionsResponse {
             magic_code: true,
             password: false,
             google: false,
+            github: false,
         };
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["magic_code"], true);
         assert_eq!(json["password"], false);
         assert_eq!(json["google"], false);
+        assert_eq!(json["github"], false);
     }
 
     /// CO-303: dev_code is absent from LoginResponse when not set.
