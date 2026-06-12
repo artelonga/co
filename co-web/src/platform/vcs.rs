@@ -77,6 +77,42 @@ pub fn sync_repo(remote_url: &str, ref_name: &str, dest: &Path) -> anyhow::Resul
     }
 }
 
+/// Whether any git credential is configured in the environment.
+///
+/// True when either `CO_GIT_TOKEN` (HTTPS) or `CO_GIT_SSH_KEY_PATH` (SSH) is
+/// set and non-empty. CO-408.
+pub fn has_git_credentials() -> bool {
+    let nonempty = |k: &str| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false);
+    nonempty("CO_GIT_TOKEN") || nonempty("CO_GIT_SSH_KEY_PATH")
+}
+
+/// Whether `remote_url` points at a network host (vs a local path / `file://`).
+///
+/// Network remotes (`https://`, `http://`, `ssh://`, `git://`, or `git@host:`
+/// scp-style) require authentication for private repos. Local remotes (`file://`,
+/// bare filesystem paths used in tests/dev) never do. CO-408.
+fn is_network_remote(remote_url: &str) -> bool {
+    remote_url.starts_with("https://")
+        || remote_url.starts_with("http://")
+        || remote_url.starts_with("ssh://")
+        || remote_url.starts_with("git://")
+        // scp-style: `git@github.com:org/repo.git` (a `:` before any `/`).
+        || (remote_url.contains('@')
+            && remote_url
+                .split_once(':')
+                .map(|(host, _)| !host.contains('/'))
+                .unwrap_or(false))
+}
+
+/// Whether syncing `remote_url` would prompt git for credentials we don't have.
+///
+/// With no credential configured, a network remote makes git emit
+/// `fatal: could not read Username for 'https://...'` on the prod machine and the
+/// sync is doomed anyway. CO-408.
+pub fn remote_needs_credentials(remote_url: &str) -> bool {
+    is_network_remote(remote_url) && !has_git_credentials()
+}
+
 /// Inject authentication credentials into a git `Command` via env vars.
 ///
 /// Supported env vars:
@@ -172,6 +208,24 @@ mod tests {
             .output()
             .expect("git push");
         (origin, work)
+    }
+
+    #[test]
+    fn network_remotes_are_detected() {
+        assert!(is_network_remote("https://github.com/artelonga/mbya"));
+        assert!(is_network_remote("http://example.com/repo.git"));
+        assert!(is_network_remote("ssh://git@github.com/org/repo.git"));
+        assert!(is_network_remote("git://example.com/repo.git"));
+        assert!(is_network_remote("git@github.com:artelonga/mbya.git"));
+    }
+
+    #[test]
+    fn local_remotes_are_not_network() {
+        assert!(!is_network_remote("file:///data/origin.git"));
+        assert!(!is_network_remote("/tmp/xyz/origin.git"));
+        assert!(!is_network_remote("./relative/origin.git"));
+        // A bare path with no scheme and no scp-style colon.
+        assert!(!is_network_remote("origin.git"));
     }
 
     #[test]
