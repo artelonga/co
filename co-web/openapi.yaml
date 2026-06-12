@@ -71,6 +71,8 @@ tags:
     description: "openapi endpoints"
   - name: "agent-sessions"
     description: "agent-sessions endpoints"
+  - name: "usage"
+    description: "usage endpoints"
   - name: "ai"
     description: "ai endpoints"
   - name: "chat-llm"
@@ -4305,6 +4307,51 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/usage/active:
+    get:
+      tags: ["usage"]
+      summary: "Launchers active right now"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/usage/heartbeat:
+    post:
+      tags: ["usage"]
+      summary: "Register/refresh an active launcher (in-memory TTL)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/usage/projects:
+    get:
+      tags: ["usage"]
+      summary: "Fleet roll-up: usage + board + last deploy per universe"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/usage/sessions:
+    post:
+      tags: ["usage"]
+      summary: "Ingest a session's token/cost report (CO-425 producer)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/usage/summary:
+    get:
+      tags: ["usage"]
+      summary: "Aggregates by universe\"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK

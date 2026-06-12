@@ -53,6 +53,26 @@ pub enum AnalyticsEvent {
         workers: Vec<WorkerInfo>,
         ts: DateTime<Utc>,
     },
+    /// CO-426: a usage report landed (co-auto POSTed token/cost for a session).
+    /// The Gestão usage panel increments live totals from these.
+    Usage {
+        task_key: String,
+        universe_key: String,
+        machine: String,
+        model: String,
+        total_tokens: i64,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        cost_usd: Option<f64>,
+        outcome: String,
+        ts: DateTime<Utc>,
+    },
+    /// CO-426: full snapshot of currently-active launchers, broadcast on every
+    /// heartbeat (TTL-filtered server-side). The panel replaces its list on each
+    /// one — so a crashed machine drops off as soon as any other launcher beats.
+    LauncherSnapshot {
+        launchers: Vec<LauncherInfo>,
+        ts: DateTime<Utc>,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -74,6 +94,72 @@ impl From<crate::worker_supervisor::WorkerStatus> for WorkerInfo {
             error_count: s.error_count,
             last_tick_at: s.last_tick_at,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CO-426: active-launcher registry (in-memory, TTL)
+// ---------------------------------------------------------------------------
+
+/// One launcher (a co-auto process on some machine) that is currently working a
+/// task. Kept in memory only — a crashed machine simply stops heartbeating and
+/// ages out of [`ActiveLaunchers`] after [`LAUNCHER_TTL`], no DELETE required.
+#[derive(Clone, Debug, Serialize)]
+pub struct LauncherInfo {
+    pub task_key: String,
+    pub universe_key: String,
+    pub machine: String,
+    pub model: String,
+    /// Epoch seconds the launcher started this task.
+    pub started_at: i64,
+    /// When the most recent heartbeat arrived (server clock).
+    pub last_seen: DateTime<Utc>,
+    /// Optional free-form progress note from the launcher.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<String>,
+}
+
+/// A heartbeat with no follow-up within this window is considered dead.
+const LAUNCHER_TTL: chrono::Duration = chrono::Duration::seconds(90);
+
+/// In-memory registry of active launchers, keyed by `machine:task_key`.
+///
+/// Lives in `CoreState` (one per server) — *not* a process-global singleton —
+/// so parallel integration tests each get an isolated registry.
+#[derive(Default)]
+pub struct ActiveLaunchers {
+    inner: Mutex<std::collections::HashMap<String, LauncherInfo>>,
+}
+
+impl ActiveLaunchers {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn key(machine: &str, task_key: &str) -> String {
+        format!("{machine}:{task_key}")
+    }
+
+    /// Record/refresh a heartbeat. `last_seen` is stamped to `Utc::now()`.
+    pub fn heartbeat(&self, mut info: LauncherInfo) {
+        info.last_seen = Utc::now();
+        let key = Self::key(&info.machine, &info.task_key);
+        self.inner.lock().insert(key, info);
+    }
+
+    /// The currently-active launchers (heartbeat within TTL of `now`), pruning
+    /// any that have aged out. Sorted by `started_at` descending (newest first).
+    pub fn active_as_of(&self, now: DateTime<Utc>) -> Vec<LauncherInfo> {
+        let mut map = self.inner.lock();
+        map.retain(|_, v| now.signed_duration_since(v.last_seen) <= LAUNCHER_TTL);
+        let mut list: Vec<LauncherInfo> = map.values().cloned().collect();
+        list.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+        list
+    }
+
+    /// Active launchers as of the wall clock now.
+    pub fn active(&self) -> Vec<LauncherInfo> {
+        self.active_as_of(Utc::now())
     }
 }
 
@@ -211,6 +297,24 @@ pub fn from_domain_event(event: &crate::events::DomainEvent) -> Option<Analytics
             tokens_in: *tokens_in,
             tokens_out: *tokens_out,
             exit_code: *exit_code,
+            ts,
+        }),
+        crate::events::DomainEvent::UsageReported {
+            task_key,
+            universe_key,
+            machine,
+            model,
+            total_tokens,
+            cost_usd,
+            outcome,
+        } => Some(AnalyticsEvent::Usage {
+            task_key: task_key.clone(),
+            universe_key: universe_key.clone(),
+            machine: machine.clone(),
+            model: model.clone(),
+            total_tokens: *total_tokens,
+            cost_usd: *cost_usd,
+            outcome: outcome.clone(),
             ts,
         }),
         crate::events::DomainEvent::NotificationRequested { .. } => None,

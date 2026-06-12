@@ -66,6 +66,17 @@ pub enum DomainEvent {
         final_commit_sha: Option<String>,
         pr_number: Option<u32>,
     },
+    /// CO-426: emitted when a usage report is ingested at `/api/v1/usage/sessions`.
+    /// Bridged to `AnalyticsEvent::Usage` so the Gestão usage panel updates live.
+    UsageReported {
+        task_key: String,
+        universe_key: String,
+        machine: String,
+        model: String,
+        total_tokens: i64,
+        cost_usd: Option<f64>,
+        outcome: String,
+    },
 }
 
 /// Coarse-grained filter for `Bus::subscribe`.
@@ -78,6 +89,7 @@ pub enum EventFilter {
     InvitationAccepted,
     ProposalDecided,
     AgentSession,
+    Usage,
 }
 
 impl EventFilter {
@@ -103,6 +115,7 @@ impl EventFilter {
             EventFilter::AgentSession => {
                 matches!(event, DomainEvent::AgentSessionComplete { .. })
             }
+            EventFilter::Usage => matches!(event, DomainEvent::UsageReported { .. }),
         }
     }
 }

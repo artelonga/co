@@ -2729,6 +2729,53 @@ impl Storage {
                 "CO-415: users.github_login + idx_users_github_login (GitHub OAuth login)"
             );
         }
+
+        if current_version < 75 {
+            // CO-426: usage_sessions — fleet-wide token/cost telemetry, one row
+            // per co-auto Claude invocation (producer: CO-425's stream-json
+            // capture, POSTed to /api/v1/usage/sessions). Deliberately a NEW
+            // table, NOT the CO-275 `agent_sessions` table: that one is per-task
+            // kanban provenance (task_id, finished_at, exit_code, tool_calls);
+            // this is the cross-machine usage ledger (task_key, machine,
+            // cache-split tokens, cost_usd, outcome) that feeds the Gestão usage
+            // dashboard and the CO-427 downshift policy. Global fleet telemetry
+            // → meta DB (not per-universe `universe_pool.rs`).
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS usage_sessions (
+                        id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                        task_key           TEXT NOT NULL,
+                        universe_key       TEXT NOT NULL,
+                        machine            TEXT NOT NULL,
+                        model              TEXT NOT NULL,
+                        tokens_in          INTEGER NOT NULL DEFAULT 0,
+                        tokens_out         INTEGER NOT NULL DEFAULT 0,
+                        tokens_cache_read  INTEGER NOT NULL DEFAULT 0,
+                        tokens_cache_write INTEGER NOT NULL DEFAULT 0,
+                        cost_usd           REAL,
+                        started_at         INTEGER NOT NULL,
+                        ended_at           INTEGER NOT NULL,
+                        outcome            TEXT NOT NULL DEFAULT '',
+                        reported_at        INTEGER NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_usage_sessions_started
+                        ON usage_sessions(started_at);
+                    CREATE INDEX IF NOT EXISTS idx_usage_sessions_universe_started
+                        ON usage_sessions(universe_key, started_at);
+                    CREATE INDEX IF NOT EXISTS idx_usage_sessions_model_started
+                        ON usage_sessions(model, started_at);
+                    CREATE INDEX IF NOT EXISTS idx_usage_sessions_machine_started
+                        ON usage_sessions(machine, started_at);
+                    CREATE INDEX IF NOT EXISTS idx_usage_sessions_task_started
+                        ON usage_sessions(task_key, started_at);",
+                )
+                .expect("migration v75: usage_sessions");
+            crate::record_migration!(
+                self.conn,
+                75,
+                "CO-426: usage_sessions (fleet token/cost telemetry for Gestão usage dashboard)"
+            );
+        }
     }
 }
 

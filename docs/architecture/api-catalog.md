@@ -491,6 +491,22 @@ CO-275 agent session tracking for the co-auto pipeline.
 
 ---
 
+## usage — `/api/v1/usage/*` (usage_routes.rs)
+
+CO-426 fleet usage ingestion + active-launcher registry + Gestão dashboard
+queries. All require a vault token or JWT (`require_auth_with_token`). The
+`sessions` producer is CO-425; `summary` also backs the CO-427 downshift policy.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/usage/sessions` | token-or-jwt | Ingest a session's token/cost report (CO-425 producer) |
+| POST | `/api/v1/usage/heartbeat` | token-or-jwt | Register/refresh an active launcher (in-memory TTL) |
+| GET | `/api/v1/usage/summary` | token-or-jwt | Aggregates by universe\|model\|machine\|task over a window |
+| GET | `/api/v1/usage/active` | token-or-jwt | Launchers active right now |
+| GET | `/api/v1/usage/projects` | token-or-jwt | Fleet roll-up: usage + board + last deploy per universe |
+
+---
+
 ## ai — `/api/v1/ai/*` (ai_routes.rs)
 
 CO-328 AI provider endpoints (Ollama / Claude Code hook).
