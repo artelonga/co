@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-423",
+  "title": "Source-deploy toolchain — re-parent API + adapter existence-check + auto-index on import (unblocks CO-419)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-423.md",
+  "branch": "fix/CO-423-source-deploy-toolchain",
+  "merge_sha": "1505e2a4b5b5b8b114978804d13422d06f916425",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/213",
+    "number": 213
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T17:27:49Z",
+  "files_changed": 8,
+  "lines_added": 635,
+  "lines_removed": 18,
+  "labels": [
+    "type:fix",
+    "module:source",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-423 — source-deploy toolchain: re-parent API + adapter existence-check + auto-index\n\nThree concrete gaps exposed by the CO-419 `nlp` deploy are fixed so importing a\nrepository into a universe produces a **complete** universe — correct parent,\nlanding page, real existence detection — with no manual patching.\n\n### Re-parent via API (the blocker)\n`PUT /api/v1/universes/{slug}` now accepts `parent_key: Option<String>`. When\nprovided, the owner (only) can re-parent a universe: a non-empty key (validated\nto exist, and not the universe itself) sets `universes.parent_key`; an empty\nstring clears it to NULL. Non-owners get 403; a nonexistent parent is rejected\nwith 400. The `UpdateUniverseResponse` now echoes `parent_key`. This makes\n`PUT /api/v1/universes/nlp {\"parent_key\":\"yuri\"}` work — the last open item of\nCO-419 §E. No new migration: `universes.parent_key` already exists (CO-98 v22).\n\n### Adapter existence-check no longer fooled by the SPA fallback\n`co source add` previously treated any HTTP 200 from `GET /universes/{key}` as\n\"exists\" — but the SPA serves 200 (its HTML shell) for unknown routes, so it\nfalse-positived. It now parses the universe JSON and requires a `key` field that\nmatches the requested slug; an HTML shell (JSON parse failure) is treated as\nabsent. When creating is needed but the credential is an API token (POST\n/universes requires a session), it now surfaces a clear, actionable error\ninstead of a bare 401.\n\n### `--parent` and auto-index\n`co source add github` gains `--parent <key>` (sets `parent_key` after create via\nthe new PUT API) and `--no-index`. By default, if the imported repo brought no\ncontent-root `index.md`, a minimal navigable landing is synthesized linking the\nimported tree; an existing `index.md` is never overwritten.\n\n### Why\nUnblocks CO-419 and any future repo import: the deploy toolchain now makes the\nuniverse whole (parent, landing, real source detection) without hand-patches.",
+  "summary": "As Quem importa um repositório para um universo (jornada 2), QUERO que o toolchain de deploy faça o universo ficar **completo** — pai correto, página inicial, fonte detectada — sem remendos manuais, P",
+  "co_auto_version": "0.1.0"
+}
