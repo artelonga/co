@@ -1,0 +1,29 @@
+{
+  "co_id": "CO-405",
+  "spec_title": "Backup free-space guard + count-based retention — stop snapshot-driven disk-full",
+  "timestamp": "2026-06-12T00:10:52.193Z",
+  "items": [
+    {
+      "text": "Free-space guard: snapshot skipped when available < max(2× last snapshot, `CO_BACKUP_MIN_FREE_BYTES` default 256 MiB); emits `backup.skipped_low_disk` on the EDA bus, WARN log, atividade entry — never errors the app",
+      "pattern": "free[- _]space|guard|snapshot|skipped",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Count/si",
+      "pattern": "si|count",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/logout clears the session cookie",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 2,
+  "passed": 1,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}
