@@ -141,6 +141,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(axum::Extension(allowed_admins.clone()));
 
     let webhook_admin = crate::webhook_routes::router()
+        .layer(axum::Extension(github_token_cache.clone()))
+        .layer(axum::Extension(allowed_admins.clone()));
+
+    // CO-388: Security findings admin API (GitHub admin auth).
+    let security_admin = crate::security::routes::router()
         .layer(axum::Extension(github_token_cache))
         .layer(axum::Extension(allowed_admins));
 
@@ -405,6 +410,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/gestao", crate::resumo_routes::api_router())
             .nest("/api/v1/gestao", gestao_api)
             .nest("/api/v1/gestao", webhook_admin)
+            // CO-388: Security findings API (admin-gated).
+            .nest("/api/v1/gestao/security", security_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
             .nest("/api/v1/admin", dev_board_api)
             .nest("/api/v1/universes", universe_api)

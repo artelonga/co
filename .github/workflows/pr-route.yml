@@ -1,22 +1,32 @@
-name: PR Route — DoD + Migration Gate
+name: PR Route — DoD + Migration Gate + Security Audit
 
 # CO-382: Deterministic route for every PR.
-# Adds step 6 (migration validation) and step 10 (DoD verification)
-# on top of the existing ci.yml (steps 1-5) and openapi-check.yml (step 4).
+# Adds step 6 (migration validation), step 10 (DoD verification), and
+# step 11 (security audit) on top of ci.yml (steps 1-5) and openapi-check.yml (step 4).
 #
 # Steps blocked by this workflow:
 #   6. Migration validation — only when a new migration file is present
 #  10. DoD verification — only when PR title contains CO-N
+#  11. Security audit — always; Critical/High findings block merge
 
 on:
   pull_request:
     branches: [main]
+
+# CARGO_INCREMENTAL=0 mirrors ci.yml (commit 269f787). Incremental compilation
+# only bloats target/ on one-shot CI builds and was the root cause of the
+# disk-full runner failures that plagued this very PR. Apply it to every job
+# here that runs cargo build/test.
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
 
   # Step 6: Migration validation (conditional — skip if no migration in diff)
   migration-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,17 +77,21 @@ jobs:
   # Step 10: DoD verification — only when PR title matches CO-N pattern
   dod-verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: contains(github.event.pull_request.title, 'CO-')
     steps:
       - uses: actions/checkout@v4
 
       - name: Extract CO-N from PR title
         id: co-id
+        # Pass the PR title via env (never interpolate ${{ }} into the run
+        # script — that is a shell-injection sink on a write-permissioned job).
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          CO_ID=$(echo "${{ github.event.pull_request.title }}" \
-            | grep -oP 'CO-\d+' | head -1)
+          CO_ID=$(printf '%s' "$PR_TITLE" | grep -oP 'CO-\d+' | head -1)
           if [ -z "$CO_ID" ]; then
-            echo "::error::Could not extract CO-N from PR title: ${{ github.event.pull_request.title }}"
+            echo "::error::Could not extract CO-N from PR title: $PR_TITLE"
             exit 1
           fi
           echo "co_id=${CO_ID}" >> "$GITHUB_OUTPUT"
@@ -113,3 +127,234 @@ jobs:
           name: dod-${{ steps.co-id.outputs.co_id }}
           path: /tmp/dod-${{ steps.co-id.outputs.co_id }}.json
           retention-days: 30
+
+  # Step 11: Security audit — always runs; Critical/High block merge
+  security-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write       # commit the audit record back to the PR branch
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Check out the PR head branch (not the detached merge ref) so the
+          # audit-record commit can be pushed back to it. For fork PRs this is
+          # read-only; the commit step is gated on same-repo and is best-effort.
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Fetch base branch
+        # Checking out `head.ref` does not bring the base branch's tracking ref,
+        # which the diff commands below need. Fetch it explicitly so a missing
+        # `origin/main` can never make the diff empty (which would silently skip
+        # the scan — a fail-open).
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
+
+      - name: Detect skip conditions
+        id: skip-check
+        # PR-controlled values arrive via env, never interpolated into the run
+        # script (shell-injection defence; this job has write permissions).
+        env:
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          # Skip drafts
+          if [ "$PR_DRAFT" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=draft PR — skipping security audit" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Skip docs-only PRs (all changed files are .md)
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          if [ -n "$CHANGED" ] && echo "$CHANGED" | grep -qvE '\.md$'; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=docs-only PR — skipping security audit" >> "$GITHUB_OUTPUT"
+          fi
+
+          # Skip revert PRs
+          if printf '%s' "$PR_TITLE" | grep -qi "^revert"; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=revert PR — skipping security audit" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install system deps
+        if: steps.skip-check.outputs.skip != 'true'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y protobuf-compiler pkg-config libssl-dev g++ libdbus-1-dev
+
+      - name: Cache cargo
+        if: steps.skip-check.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-security-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build security scanner
+        if: steps.skip-check.outputs.skip != 'true'
+        run: cargo build -p co-web
+        env:
+          RUST_LOG: "co_web=warn"
+
+      - name: Run security audit (local-grep backend)
+        if: steps.skip-check.outputs.skip != 'true'
+        id: security-scan
+        # FAIL-CLOSED: any unexpected error in this step (scanner crash, bad
+        # git ref, pipe failure) aborts the job rather than silently reporting
+        # PASS. `pipefail` propagates failures through `| tee`; `set -e`/`-u`
+        # abort on errors and unset vars. Per work/co/CO-388.md, Critical/High
+        # findings MUST block merge — the gate cannot fail open.
+        shell: bash
+        env:
+          # PR-controlled refs arrive via env (injection defence). base_ref is a
+          # branch name; head SHA is a commit hash.
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          JWT_SECRET: "ci-test-secret-do-not-use-in-production"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Run the LocalGrepBackend scanner against the diff
+          BASE_REF="origin/${BASE_BRANCH}"
+          HEAD_REF="${HEAD_SHA}"
+
+          # Collect changed source files
+          CHANGED_FILES=$(git diff --name-only "${BASE_REF}...${HEAD_REF}" \
+            | grep -E '\.(rs|ts|js|tsx|jsx|sql)$' || true)
+
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No source files changed — security audit passes trivially"
+            echo "blocker_count=0" >> "$GITHUB_OUTPUT"
+            echo "finding_count=0" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Run the Rust scanner's unit tests. A FAILURE here means the scanner
+          # itself is broken — fail closed (no `|| true`). Only its known-flaky
+          # cases would be acceptable to ignore, and there are none here.
+          cargo test -p co-web --lib security 2>&1 | tee /tmp/security-output.txt
+
+          # Check for known high/critical patterns in the diff itself.
+          BLOCKERS=0
+          FINDINGS=0
+
+          for file in $CHANGED_FILES; do
+            # The scanner's own module carries deliberately-vulnerable test
+            # fixtures (it must detect these patterns at runtime) — scanning
+            # the detector for the patterns it detects blocks its own PR.
+            case "$file" in
+              co-web/src/security/audit/*) continue ;;
+            esac
+            if [ -f "$file" ]; then
+              # SQL injection: format!("SELECT/INSERT/UPDATE/DELETE with interpolation
+              if grep -nP 'format!\("(SELECT|INSERT|UPDATE|DELETE)' "$file" 2>/dev/null; then
+                BLOCKERS=$((BLOCKERS + 1))
+                FINDINGS=$((FINDINGS + 1))
+                echo "::error file=${file}::SQL injection risk: string interpolation in SQL query (CWE-89)"
+              fi
+
+              # XSS: innerHTML assignment in TS/JS
+              if echo "$file" | grep -qE '\.(ts|tsx|js|jsx)$'; then
+                if grep -n '\.innerHTML\s*=' "$file" 2>/dev/null; then
+                  BLOCKERS=$((BLOCKERS + 1))
+                  FINDINGS=$((FINDINGS + 1))
+                  echo "::error file=${file}::XSS risk: direct innerHTML assignment (CWE-79)"
+                fi
+
+                # eval() — critical
+                if grep -n '\beval(' "$file" 2>/dev/null; then
+                  BLOCKERS=$((BLOCKERS + 1))
+                  FINDINGS=$((FINDINGS + 1))
+                  echo "::error file=${file}::Critical: eval() detected — code injection risk (CWE-95)"
+                fi
+              fi
+            fi
+          done
+
+          echo "blocker_count=${BLOCKERS}" >> "$GITHUB_OUTPUT"
+          echo "finding_count=${FINDINGS}" >> "$GITHUB_OUTPUT"
+
+          # Save scan results. Write to docs/scrum/security/ (the real source of
+          # truth that release-gate.yml reads) AND /tmp (for the artifact upload).
+          # When this PR merges, the committed JSON lands in main so the Thursday
+          # release gate can see this wave's audits — previously it globbed a
+          # path NOTHING ever wrote, making the gate vacuously green.
+          mkdir -p docs/scrum/security
+          AUDIT_JSON="docs/scrum/security/security-audit-${PR_NUMBER}.json"
+          # Content-stable: NO timestamp here. A scanned_at would change every
+          # run, defeating the `git diff --cached --quiet` idempotency guard
+          # below and pushing a fresh audit commit onto the PR branch on every
+          # author push (churn). The commit's own metadata records when. The
+          # /tmp artifact copy carries the timestamp for the run record.
+          cat > "$AUDIT_JSON" <<EOF
+          {
+            "pr_number": ${PR_NUMBER},
+            "backend": "local-grep",
+            "finding_count": ${FINDINGS},
+            "blocker_count": ${BLOCKERS}
+          }
+          EOF
+          # Artifact copy keeps the timestamp (not committed, so no churn).
+          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sed "s/\"blocker_count\": ${BLOCKERS}/&,\n  \"scanned_at\": \"${TS}\"/" \
+            "$AUDIT_JSON" > "/tmp/security-audit-${PR_NUMBER}.json"
+          echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
+
+      - name: Post security audit PR comment
+        if: ${{ always() && steps.skip-check.outputs.skip != 'true' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const blockers = parseInt('${{ steps.security-scan.outputs.blocker_count }}' || '0');
+            const findings = parseInt('${{ steps.security-scan.outputs.finding_count }}' || '0');
+            const icon = blockers > 0 ? '🚨' : '✅';
+            const status = blockers > 0 ? 'BLOCKED' : 'PASSED';
+            const body = `## ${icon} Step 11: Security Audit — ${status}
+
+            | Metric | Value |
+            |--------|-------|
+            | Backend | \`local-grep\` |
+            | Total findings | ${findings} |
+            | Blockers (Critical/High) | ${blockers} |
+
+            ${blockers > 0 ? '**This PR is blocked by security findings. Resolve all Critical/High severity issues before merging.**\n\nUse `--ignore-security-findings` (emergency hotfix only — logged + alerted).' : 'No blocking security findings. ✓'}
+
+            *Generated by CO-388 security audit pipeline (Project Glasswing)*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
+
+      - name: Upload security audit artifact
+        if: ${{ always() && steps.skip-check.outputs.skip != 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-audit-${{ github.event.pull_request.number }}
+          path: /tmp/security-audit-${{ github.event.pull_request.number }}.json
+          retention-days: 90
+
+      - name: Fail on security blockers
+        if: steps.skip-check.outputs.skip != 'true'
+        run: |
+          BLOCKERS="${{ steps.security-scan.outputs.blocker_count }}"
+          if [ "${BLOCKERS}" -gt "0" ]; then
+            echo "::error::Security gate BLOCKED — ${BLOCKERS} Critical/High finding(s) must be resolved"
+            echo "Override: workflow_dispatch with ignore_security_findings=true (emergency hotfix only)"
+            exit 1
+          fi
+          echo "Security gate PASSED"

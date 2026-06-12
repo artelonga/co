@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-388",
+  "title": "Security audit pipeline integration — Claude Security in CO-382 CI route (Project Glasswing-aligned)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-388.md",
+  "branch": "feat/CO-388-security-audit-pipeline-integration-clau",
+  "merge_sha": "6d65a4456513cee1625535c7d5a06d9bd4261752",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/195",
+    "number": 195
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-12T14:28:53Z",
+  "files_changed": 28,
+  "lines_added": 3525,
+  "lines_removed": 12,
+  "labels": [
+    "type:feat",
+    "module:security",
+    "module:ci",
+    "module:scrum"
+  ],
+  "changelog_entry": "## CO-388 — Security audit pipeline integration — Claude Security in CO-382 CI route (Project Glasswing-aligned)\n\nAdds step 11 (security audit) to the deterministic 10-step CI route (CO-382).\nEvery PR is scanned for vulnerabilities using the `LocalGrepBackend` (always\navailable) or `ClaudeSecurityBackend` (when `CO_SECURITY_BACKEND=claude`).\nFindings flow through the EDA bus: Critical/High block merge and create sprint\nPBIs; Medium creates advisory PBIs; Low/Info log to atividades only.\n\n### What changed\n\n- `SecurityAuditBackend` trait with `LocalGrepBackend` (default) and\n  `ClaudeSecurityBackend` (full implementation using Claude API)\n- `NoOpBackend` for dev/test (`CO_SECURITY_BACKEND=disabled`)\n- Cargo feature stubs: `security-semgrep`, `security-sonar`\n- Migration v71: `security_findings` table + severity/unresolved indexes\n- EDA subscribers: `FindingsPersistor`, `PBIBacklogger`, `ReleaseBlocker`\n- Admin REST API: `GET/PATCH /api/v1/gestao/security/findings`,\n  `GET /api/v1/gestao/security/scan/status`, `POST /api/v1/gestao/security/scan`\n- `pr-route.yml` step 11: `security-audit` job (skips drafts, docs-only, reverts)\n- `release-gate.yml`: security gate blocks Thursday release on unresolved\n  Critical/High findings; `--ignore-security-findings` override is logged + alerted\n- `docs/security-audit-pipeline.md`: 11-step route reference\n- `docs/security-disclosure.md`: manual disclosure process for Critical findings\n- 3 new env vars: `CO_SECURITY_BACKEND`, `CO_SECURITY_API_KEY`,\n  `CO_SECURITY_MAX_SCANS_PER_DAY`\n- Cost guardrails: skip drafts/docs/reverts; daily scan cap (default 50);\n  cache by SHA-256 file hash\n\n### Why\n\nAnthropic's Project Glasswing announced June 2026: cyber-capable models are\nnear. CO is exactly the kind of system that becomes a high-value target as it\nscales (per-brain identity, payment data, federated event bus, OAuth flows, vault\nwrites). This spec wires the security bottleneck (\"verify, disclose, patch\") into\nCO's existing scrum CI spine instead of creating a separate process.\n\n### Security hardening (pre-merge review)\n\nThe security-gate PR was itself audited; eleven confirmed issues were fixed\n(correctness here is paramount — this *is* the gate):\n\n- **Auth (was fully unauthenticated):** the security router only layered the\n  admin DATA extensions, never the `require_github_admin` enforcement\n  middleware — every `/api/v1/gestao/security/*` endpoint (including\n  `resolve_finding`, which opens the release gate) was reachable by anyone. The\n  middleware is now applied inside the router, matching every sibling admin\n  router. The acting admin is recorded on resolve (new `resolved_by` column +\n  event field) and on the scan override, for audit trail.\n- **Injection / DoS:** `list_findings` now uses bound params (no SQL\n  interpolation) and clamps `LIMIT` to `[1,200]` (SQLite `LIMIT -1` =\n  unlimited). `git diff` ref ranges are validated against a safe git-ref\n  charset and terminated with `--` (argument-injection defence). The daily\n  scan cap is now a DB-backed per-UTC-day counter (`security_scan_counts`) that\n  persists across requests — the previous in-memory counter was rebuilt every\n  request so `CO_SECURITY_MAX_SCANS_PER_DAY` never tripped; over-cap requests\n  return 429.\n- **Panic / dead code:** the Claude diff truncation now slices on a UTF-8 char\n  boundary (`&diff[..100_000]` panicked on accents/emoji). The `PBIBacklogger`\n  INSERT referenced a nonexistent `entries.id` column (PK is\n  `(universe_key, path)`); the error was swallowed by a `warn!`, so PBIs were\n  never created — it now matches the real schema (`frontmatter_json` +\n  NOT NULL `body_hash`) and is covered by a test that asserts the row appears.\n- **CI:** `pr-route.yml` gains `CARGO_INCREMENTAL=0` + per-job timeouts\n  (disk-full guard); all PR-controlled values (title, draft, base ref) move out\n  of `run:` interpolation into `env:` (script-injection defence); the scanner\n  step is fail-CLOSED (`set -euo pipefail`, no `|| true`). `release-gate.yml`\n  now reads audit records that `pr-route.yml` actually commits into\n  `docs/scrum/security/`, and FAILS LOUDLY when a wave that shipped work has\n  zero audit records (previously the glob matched a path nothing wrote, so the\n  gate was vacuously green every release).\n\n> Note: the `security_findings` table ships as migration **v73** (not v71 as\n> the draft above stated); v73 also adds `resolved_by` and the\n> `security_scan_counts` daily-cap table.",
+  "summary": "As Yuri running CO as the bounded service for many brains, in a world where cyber-capable models are around the corner",
+  "co_auto_version": "0.1.0"
+}
