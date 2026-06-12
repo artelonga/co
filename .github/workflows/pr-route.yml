@@ -221,6 +221,8 @@ jobs:
           # branch name; head SHA is a commit hash.
           BASE_BRANCH: ${{ github.base_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          JWT_SECRET: "ci-test-secret-do-not-use-in-production"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
 
@@ -309,9 +311,6 @@ jobs:
           sed "s/\"blocker_count\": ${BLOCKERS}/&,\n  \"scanned_at\": \"${TS}\"/" \
             "$AUDIT_JSON" > "/tmp/security-audit-${PR_NUMBER}.json"
           echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
-        env:
-          JWT_SECRET: "ci-test-secret-do-not-use-in-production"
-          PR_NUMBER: ${{ github.event.pull_request.number }}
 
       - name: Commit audit record to PR branch
         # Only commits for same-repo PRs (forks have no push access — there the
