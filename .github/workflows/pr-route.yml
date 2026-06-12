@@ -305,13 +305,9 @@ jobs:
           }
           EOF
           # Artifact copy keeps the timestamp (not committed, so no churn).
-          python3 - "$AUDIT_JSON" "/tmp/security-audit-${PR_NUMBER}.json" <<'PY'
-import json, sys, datetime
-src, dst = sys.argv[1], sys.argv[2]
-d = json.load(open(src))
-d["scanned_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-json.dump(d, open(dst, "w"), indent=2)
-PY
+          TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          sed "s/\"blocker_count\": ${BLOCKERS}/&,\n  \"scanned_at\": \"${TS}\"/" \
+            "$AUDIT_JSON" > "/tmp/security-audit-${PR_NUMBER}.json"
           echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
         env:
           JWT_SECRET: "ci-test-secret-do-not-use-in-production"
