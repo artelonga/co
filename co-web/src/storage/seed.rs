@@ -220,6 +220,37 @@ impl Storage {
                 due_days: None,
                 parent: None,
             },
+            // --- Act 5: What's new (v3.2.0 — mirrors the release) ---
+            SeedTask {
+                id: 10,
+                title: "Um conteúdo, muitas lentes",
+                description: "Desde a versão **3.2.0**, o CO renderiza universos através de **lentes** — o mesmo conteúdo, formas diferentes de ver.\n\nVocê já conhece Kanban, Tabela e Conteúdo. Experimente também:\n\n- **Calendário** — tarefas com data viram eventos\n- **Timeline** — o tempo como eixo\n- **Grafo** — seus textos como rede de conexões\n\nPor baixo, todas são lentes registradas num único sistema — e os formulários nascem do *schema* de cada tipo de conteúdo. Novas lentes (linha do tempo de projeto, grade temporal) chegam nas próximas versões sem mudar nada do seu conteúdo.",
+                status: "todo",
+                priority: "medium",
+                labels: vec!["novidades"],
+                due_days: None,
+                parent: None,
+            },
+            SeedTask {
+                id: 11,
+                title: "Novidades sem sair do terminal",
+                description: "O CO também vive na linha de comando. A partir da **3.2.0**, as notas de release moram no próprio binário:\n\n```bash\nco updates           # a release mais recente\nco updates -n 3      # as três últimas\nco updates --all     # o histórico inteiro, desde a 0.1.0\n```\n\nSem rede, sem navegador — a nota sempre corresponde à versão instalada. Cada release nova vira automaticamente a próxima nota.",
+                status: "todo",
+                priority: "low",
+                labels: vec!["novidades"],
+                due_days: None,
+                parent: None,
+            },
+            SeedTask {
+                id: 12,
+                title: "Leia a história do CO",
+                description: "**CO** não é sigla — é o pedaço de língua que significa *junto*: **co**nectar, **co**letar, **co**municar, **co**nstruir, **co**laborar, **co**criar. Empilhadas, soletram **Collective Consciousness**.\n\nA história completa — as abstrações, as cinco eras, os universos vizinhos e o seu primeiro CRUD guiado — está em [WELCOME.md](https://github.com/artelonga/co/blob/main/docs/WELCOME.md).\n\nVocê não é a audiência deste sistema. Você está no \"nós\" — *ñandé*, o nós que inclui quem escuta.",
+                status: "todo",
+                priority: "low",
+                labels: vec!["novidades"],
+                due_days: None,
+                parent: None,
+            },
         ];
 
         for t in &tasks {

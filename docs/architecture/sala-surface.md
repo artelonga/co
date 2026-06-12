@@ -14,6 +14,29 @@ parameterized by *scope*, never reimplemented per context:
 universe's own sala — the same surface with a narrower scope. Zooming out
 widens the scope. Universes nest (`parent_key`), so salas nest with them.
 
+## The landscape model (CO-410, 2026-06-11)
+
+The surface renders as a **grid landscape**: infinite squares over
+deterministic procedural terrain (value noise — same map for everyone, no
+assets, no storage). Every square holds a value:
+
+| You type on a square | It becomes |
+|---|---|
+| a single character | that character, rendered on the square; Enter advances right |
+| `/nome` | a **pasta** — a draggable folder unit |
+| longer text | a **nota** card |
+| (empty) | clears the square |
+
+Notas and pastas drag-and-drop with pointer events (mouse + touch, snap to
+grid). A nota dropped on a pasta joins it; the pasta moves as one unit. New
+salas seed the root pasta `/` at the origin square.
+
+Layout JSON is v2 — `{ v, cells, notes, folders, nodes, edges, view }` — a
+superset of the CO-352 shape, persisted through the same `workspace_states`
+PUT. v1 graph layouts (nodes with world x/y) migrate to notas on load with
+`id = entry_path`, so saved edges keep resolving. `co-graph.js` is no longer
+used by sala.html (graph.html still uses it).
+
 ## What this means for implementations
 
 - `co-web/static/shared/sala.html` (CO-352) **is the surface.** All canvas
