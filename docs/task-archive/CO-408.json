@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-408",
+  "title": "Ops small-batch — staging DNS record, Google OAuth error body in logs, git-credential startup noise",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-408.md",
+  "branch": "feat/CO-408-ops-small-batch",
+  "merge_sha": "34a69a2d20f7c4f0410213964c10ca96cf971474",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/206",
+    "number": 206
+  },
+  "started_at": "2026-06-11T18:00:00Z",
+  "merged_at": "2026-06-12T13:46:23Z",
+  "files_changed": 5,
+  "lines_added": 267,
+  "lines_removed": 5,
+  "labels": [
+    "type:fix",
+    "ops"
+  ],
+  "changelog_entry": "## CO-408 — Ops small-batch: OAuth error body + git-credential startup noise (+ staging DNS doc)\n\nThree small, independent ops fixes in one patch.\n\n### Fixed\n\n- **Google OAuth token-exchange errors are now diagnosable.** The callback used\n  `reqwest::error_for_status()`, which discards Google's response body — so\n  `invalid_grant` (harmless authorization-code reuse) and `invalid_client`\n  (rotated client secret → *every* login broken) were indistinguishable in the\n  logs and required a manual `curl`-from-prod to tell apart. We now read the\n  body on a non-2xx token response, parse Google's `{error, error_description}`,\n  surface it in the 401 returned to the browser, and emit a `WARN` log line\n  (`co-web/src/integrations/oauth_google.rs`).\n\n- **No more `fatal: could not read Username for 'https://github.com'` ×2 on\n  startup.** The CO-337 remote sister-repo sync (`run_remote_sister_repo_seeds`)\n  shelled out to `git clone`/`git fetch` for universes with an HTTPS `remote_url`\n  (e.g. `mbya`) even when no git credential was configured, producing fatal log\n  noise on every boot and every 15-min worker tick. The sync now checks for a\n  configured credential (`CO_GIT_TOKEN` or `CO_GIT_SSH_KEY_PATH`) before touching\n  a network remote and skips with an `info` log when none is present. The feature\n  is intact — set `CO_GIT_TOKEN` and the next worker tick syncs, no redeploy\n  needed (`co-web/src/platform/vcs.rs`, `co-web/src/server/seed_orchestrator.rs`).\n\n### Ops (manual — not a code change)\n\n- **`staging.co.artelonga.com.br` has no DNS record.** The Fly app\n  `co-artelonga-staging.fly.dev` works; the custom domain resolves to nothing\n  (the record was lost when the staging app was recreated, CO-379). This cannot\n  be fixed from code. **Manual steps for the operator:**\n\n  1. At the **dns-parking nameservers** for `artelonga.com.br`, add a CNAME:\n     ```\n     staging.co  CNAME  co-artelonga-staging.fly.dev.\n     ```\n  2. Issue the Fly certificate so HTTPS works:\n     ```\n     flyctl certs add staging.co.artelonga.com.br -a co-artelonga-staging\n     flyctl certs show staging.co.artelonga.com.br -a co-artelonga-staging   # verify\n     ```\n  Verify: `dig +short staging.co.artelonga.com.br` returns the Fly target and\n  `curl -sI https://staging.co.artelonga.com.br/api/health` returns 200.",
+  "summary": "Three small fixes, one PR",
+  "co_auto_version": "0.1.0"
+}

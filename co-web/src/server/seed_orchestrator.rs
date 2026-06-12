@@ -337,6 +337,20 @@ pub fn run_remote_sister_repo_seeds(config: &WebConfig) {
         let ref_name = remote_ref.as_deref().unwrap_or("main");
         let dest = remote_repos_dir.join(universe_key);
 
+        // CO-408: a credential-less HTTPS/SSH clone makes git emit
+        // `fatal: could not read Username for 'https://github.com'` on the prod
+        // machine — pure log noise, and the sync would fail anyway. Skip quietly
+        // (info, not fatal) when no token/SSH key is configured for this remote.
+        // The 15-min worker retries, so configuring CO_GIT_TOKEN later recovers
+        // without a redeploy.
+        if crate::vcs::remote_needs_credentials(remote_url) {
+            tracing::info!(
+                "CO-337/CO-408: skipping remote sync for {universe_key} ({remote_url}) — \
+                 no git credentials configured (set CO_GIT_TOKEN or CO_GIT_SSH_KEY_PATH)"
+            );
+            continue;
+        }
+
         if let Err(e) = crate::vcs::sync_repo(remote_url, ref_name, &dest) {
             tracing::warn!("CO-337: failed to sync remote repo for {universe_key}: {e}");
             continue;

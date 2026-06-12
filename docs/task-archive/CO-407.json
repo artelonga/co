@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-407",
+  "title": "Uptime alerting — prod health probe with push notification (outages must not wait for manual testing)",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-407.md",
+  "branch": "feat/CO-407-uptime-alerting",
+  "merge_sha": "89b9c118cd68f8cd945a0869e8e6a1d9580e19b3",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/205",
+    "number": 205
+  },
+  "started_at": "2026-06-11T18:00:00Z",
+  "merged_at": "2026-06-12T13:45:52Z",
+  "files_changed": 4,
+  "lines_added": 377,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:observability",
+    "ops"
+  ],
+  "changelog_entry": "## CO-407 — Uptime alerting (external health probe + notify)\n\nAdded an external uptime probe so prod outages no longer wait for manual\ndiscovery (three user-found outages to date: disk-full panic, column-read\nregression, mutex poisoning).\n\nA scheduled GitHub Actions workflow (`.github/workflows/uptime-probe.yml`, cron\nevery 5 minutes) curls `https://co.artelonga.com.br/api/health` from outside the\nprod machine. The probe logic lives in `scripts/uptime-probe.sh`:\n\n- Requires **N consecutive** in-run failures (default 3, ~20s apart) before\n  declaring an outage, so a single transient blip never raises a false alarm.\n- On a down transition it emits `health.down`; on recovery it emits\n  `health.recovered` with the **downtime duration**, computed from a tiny JSON\n  state file persisted across runs via the Actions cache.\n- Notification channels (configured by repo secret, never committed):\n  `RESEND_API_KEY` (e-mail via Resend, already used by prod) and/or `NTFY_URL`\n  (ntfy push). With neither set, alerts still surface as GitHub Actions\n  annotations + run summary, so the probe is useful immediately and never\n  silently green.\n- Staging (`https://staging.co.artelonga.com.br/api/health`) is probed too but\n  at `digest` priority: warning-level annotation + summary only, no push.\n\n### Why\n2026-06-11: prod crash-looped for ~3 hours (disk-full panic) and was found only\nby manually testing the site. Three strikes — alerting is no longer optional.\nGH Actions cron costs nothing and needs no new infra.\n\n### Operator note\nAdd a notification channel to enable push alerts:\n\n```\ngh secret set RESEND_API_KEY --body \"<resend key>\"\n# and/or\ngh secret set NTFY_URL --body \"https://ntfy.sh/<your-topic>\"\n```",
+  "summary": "GIVEN / WHEN / THEN",
+  "co_auto_version": "0.1.0"
+}
