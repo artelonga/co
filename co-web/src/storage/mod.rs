@@ -188,7 +188,8 @@ pub use agent_sessions::{AgentSession, NewAgentSession};
 pub use onboarding::derive_usuario_from_email;
 pub use tool::ToolRecord;
 pub use usage_sessions::{
-    NewUsageSession, UsageDimension, UsageGroup, UsageProjectRow, UsageTotals,
+    NewUsageSession, UsageCell, UsageDimension, UsageGroup, UsageProjectRow, UsageSessionRow,
+    UsageTotals,
 };
 
 pub use invitations::Invitation;

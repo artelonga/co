@@ -34,7 +34,10 @@ use serde::{Deserialize, Serialize};
 use crate::observability::{AnalyticsEvent, LauncherInfo, buffer};
 use crate::platform::error::AppError;
 use crate::server::AppState;
-use crate::storage::{NewUsageSession, UsageDimension, UsageGroup, UsageProjectRow, UsageTotals};
+use crate::storage::{
+    NewUsageSession, UsageCell, UsageDimension, UsageGroup, UsageProjectRow, UsageSessionRow,
+    UsageTotals,
+};
 
 // ---------------------------------------------------------------------------
 // Window helpers
@@ -89,8 +92,9 @@ async fn require_admin(state: &AppState, headers: &axum::http::HeaderMap) -> Res
 // POST /usage/sessions — ingest a usage report
 // ---------------------------------------------------------------------------
 
-/// Inner `usage` object — mirrors co-auto's `SessionUsage` (CO-425). Every field
-/// has a default so a partial/best-effort payload never 400s on a missing token.
+/// Inner `usage` object — mirrors co-auto's `SessionUsage` (CO-425/CO-437).
+/// Every field has a default so a partial/best-effort payload never 400s on a
+/// missing token.
 #[derive(Debug, Default, Deserialize)]
 pub struct UsageInner {
     #[serde(default)]
@@ -105,6 +109,18 @@ pub struct UsageInner {
     pub models: Vec<String>,
     #[serde(default)]
     pub total_cost_usd: Option<f64>,
+    /// CO-437: tool name → count map captured from the stream-json.
+    #[serde(default)]
+    pub tool_uses: std::collections::BTreeMap<String, i64>,
+    /// CO-437: total characters of assistant text output (best-effort proxy).
+    #[serde(default)]
+    pub output_chars: i64,
+    /// CO-437: the PR link co-auto opened, when any.
+    #[serde(default)]
+    pub pr_url: Option<String>,
+    /// CO-437: agent turns, from the stream-json `result` event.
+    #[serde(default)]
+    pub num_turns: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -179,6 +195,15 @@ async fn post_session(
     let tokens_cache_write = body.usage.cache_creation_input_tokens;
     let total_tokens = tokens_in + tokens_out + tokens_cache_read + tokens_cache_write;
 
+    // CO-437: persist the tool-use map as a JSON object string (omit when empty
+    // so the column stays NULL rather than `{}`). Best-effort: a serialize
+    // failure simply drops the metadata, never the row.
+    let tool_uses = if body.usage.tool_uses.is_empty() {
+        None
+    } else {
+        serde_json::to_string(&body.usage.tool_uses).ok()
+    };
+
     let new_session = NewUsageSession {
         task_key: body.task_key.clone(),
         universe_key: body.universe_key.clone(),
@@ -193,6 +218,9 @@ async fn post_session(
         ended_at: body.ended_at,
         outcome: outcome.clone(),
         reported_at: chrono::Utc::now().timestamp(),
+        tool_uses,
+        pr_url: body.usage.pr_url.clone(),
+        turns: body.usage.num_turns.unwrap_or(0),
     };
 
     let id = {
@@ -294,6 +322,27 @@ pub struct SummaryQuery {
     pub window: Option<String>,
     #[serde(default)]
     pub by: Option<String>,
+    /// CO-437: when present, a comma-separated pair of dimensions
+    /// (e.g. `universe,model`) requesting the cross-tab matrix. The first is the
+    /// row dimension, the second the column dimension. A single-dimension `by`
+    /// with a comma (`by=universe,model`) is accepted as an alias.
+    #[serde(default)]
+    pub cross: Option<String>,
+}
+
+/// CO-437: the model×universe (or any two-dimension) cross-tab matrix.
+#[derive(Debug, Serialize)]
+pub struct UsageMatrix {
+    /// The dimension keying the rows (e.g. `universe`).
+    pub row_dim: String,
+    /// The dimension keying the columns (e.g. `model`).
+    pub col_dim: String,
+    /// Distinct row keys, ordered by descending total tokens.
+    pub rows: Vec<String>,
+    /// Distinct column keys, ordered by descending total tokens.
+    pub cols: Vec<String>,
+    /// One cell per non-empty `(row, col)` pair.
+    pub cells: Vec<UsageCell>,
 }
 
 #[derive(Debug, Serialize)]
@@ -307,11 +356,31 @@ pub struct SummaryResponse {
     /// the requested `window`.
     pub window_5h: UsageTotals,
     pub window_week: UsageTotals,
+    /// CO-437: the cross-tab matrix, present only when `cross=` (or a
+    /// comma-separated `by=`) was requested.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub matrix: Option<UsageMatrix>,
     /// Configurable soft-limit markers (env `CO_USAGE_SOFT_LIMIT_5H` / `_WEEK`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_limit_5h: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_limit_week: Option<i64>,
+}
+
+/// Parse a `cross=` / comma-`by=` spec into its (row, col) dimensions. Returns
+/// `BadRequest` on anything but exactly two known dimensions.
+fn parse_cross(spec: &str) -> Result<(UsageDimension, UsageDimension), AppError> {
+    let parts: Vec<&str> = spec.split(',').map(|s| s.trim()).collect();
+    if parts.len() != 2 {
+        return Err(AppError::BadRequest(format!(
+            "cross expects two dimensions, got '{spec}'"
+        )));
+    }
+    let row = UsageDimension::parse(parts[0])
+        .ok_or_else(|| AppError::BadRequest(format!("invalid cross dimension '{}'", parts[0])))?;
+    let col = UsageDimension::parse(parts[1])
+        .ok_or_else(|| AppError::BadRequest(format!("invalid cross dimension '{}'", parts[1])))?;
+    Ok((row, col))
 }
 
 async fn get_summary(
@@ -322,13 +391,32 @@ async fn get_summary(
     require_admin(&state, &headers).await?;
     let window = q.window.unwrap_or_else(|| "day".to_string());
     let by_str = q.by.unwrap_or_else(|| "universe".to_string());
-    let by = UsageDimension::parse(&by_str)
-        .ok_or_else(|| AppError::BadRequest(format!("invalid by='{by_str}'")))?;
+
+    // CO-437: a `cross=` param — or a comma-bearing `by=` alias — switches on
+    // the matrix. The non-cross `by` still drives the flat `groups` list, so the
+    // dashboard's existing group view keeps working alongside the matrix.
+    let cross_spec = q
+        .cross
+        .clone()
+        .or_else(|| by_str.contains(',').then(|| by_str.clone()));
+    let cross_dims = match cross_spec {
+        Some(spec) => Some(parse_cross(&spec)?),
+        None => None,
+    };
+    // For the flat groups, fall back to the row dimension of a comma `by`, else
+    // parse the plain `by`.
+    let group_by_str = if by_str.contains(',') {
+        by_str.split(',').next().unwrap_or("universe").to_string()
+    } else {
+        by_str.clone()
+    };
+    let by = UsageDimension::parse(&group_by_str)
+        .ok_or_else(|| AppError::BadRequest(format!("invalid by='{group_by_str}'")))?;
 
     let now = chrono::Utc::now().timestamp();
     let since = now - window_secs(&window);
 
-    let (groups, totals, window_5h, window_week) = {
+    let (groups, totals, window_5h, window_week, matrix) = {
         let storage = state.core.storage.lock();
         let groups = storage
             .usage_summary(since, by)
@@ -342,7 +430,16 @@ async fn get_summary(
         let window_week = storage
             .usage_window_totals(now - WINDOW_WEEK_SECS)
             .map_err(|e| AppError::Internal(e.to_string()))?;
-        (groups, totals, window_5h, window_week)
+        let matrix = match cross_dims {
+            Some((row, col)) => {
+                let cells = storage
+                    .usage_cross(since, row, col)
+                    .map_err(|e| AppError::Internal(e.to_string()))?;
+                Some(build_matrix(parts_of(&by_str), cells))
+            }
+            None => None,
+        };
+        (groups, totals, window_5h, window_week, matrix)
     };
 
     Ok(Json(SummaryResponse {
@@ -353,9 +450,41 @@ async fn get_summary(
         totals,
         window_5h,
         window_week,
+        matrix,
         soft_limit_5h: soft_limit("CO_USAGE_SOFT_LIMIT_5H"),
         soft_limit_week: soft_limit("CO_USAGE_SOFT_LIMIT_WEEK"),
     }))
+}
+
+/// The (row_dim, col_dim) name pair from a cross spec, for echoing back in the
+/// response. Assumes the spec has already been validated by `parse_cross`.
+fn parts_of(spec: &str) -> (String, String) {
+    let mut it = spec.split(',').map(|s| s.trim().to_string());
+    let row = it.next().unwrap_or_else(|| "universe".into());
+    let col = it.next().unwrap_or_else(|| "model".into());
+    (row, col)
+}
+
+/// Assemble a [`UsageMatrix`] from flat cells: derive the distinct row/col key
+/// lists in first-seen (token-descending) order so the dashboard can pivot.
+fn build_matrix((row_dim, col_dim): (String, String), cells: Vec<UsageCell>) -> UsageMatrix {
+    let mut rows: Vec<String> = Vec::new();
+    let mut cols: Vec<String> = Vec::new();
+    for c in &cells {
+        if !rows.contains(&c.row) {
+            rows.push(c.row.clone());
+        }
+        if !cols.contains(&c.col) {
+            cols.push(c.col.clone());
+        }
+    }
+    UsageMatrix {
+        row_dim,
+        col_dim,
+        rows,
+        cols,
+        cells,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +541,56 @@ async fn get_projects(
 }
 
 // ---------------------------------------------------------------------------
+// GET /usage/sessions — recent per-session listing (tool usage + PR link)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct RecentQuery {
+    #[serde(default)]
+    pub window: Option<String>,
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RecentResponse {
+    pub window: String,
+    pub sessions: Vec<UsageSessionRow>,
+}
+
+/// CO-437: the most recent usage sessions over a window, newest first, carrying
+/// the enrichment metadata (tool usage + PR link) for the dashboard's
+/// per-session view. Admin-gated like the other reads. `limit` is clamped to
+/// [1, 500] (default 100).
+async fn get_recent_sessions(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    Query(q): Query<RecentQuery>,
+) -> Result<Json<RecentResponse>, AppError> {
+    require_admin(&state, &headers).await?;
+    let window = q.window.unwrap_or_else(|| "week".to_string());
+    let limit = q.limit.unwrap_or(100).clamp(1, 500);
+    let since = chrono::Utc::now().timestamp() - window_secs(&window);
+    let sessions = {
+        let storage = state.core.storage.lock();
+        storage
+            .recent_usage_sessions(since, limit)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    };
+    Ok(Json(RecentResponse { window, sessions }))
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
 /// All usage endpoints. Mounted under `/api/v1` behind `require_auth_with_token`.
 pub fn authed_router() -> Router<AppState> {
     Router::new()
-        .route("/usage/sessions", post(post_session))
+        .route(
+            "/usage/sessions",
+            post(post_session).get(get_recent_sessions),
+        )
         .route("/usage/heartbeat", post(post_heartbeat))
         .route("/usage/summary", get(get_summary))
         .route("/usage/active", get(get_active))
@@ -522,20 +694,34 @@ mod tests {
         format!("Bearer {token}")
     }
 
-    /// The canonical payload co-auto POSTs (CO-425 `post_usage_to_co`).
+    /// The canonical payload co-auto POSTs (CO-425/CO-437 `post_usage_to_co`).
     fn usage_payload(task: &str, universe: &str, started: i64) -> serde_json::Value {
+        usage_payload_model(task, universe, "opus", started)
+    }
+
+    /// As `usage_payload` but with an explicit model — for cross-tab tests.
+    fn usage_payload_model(
+        task: &str,
+        universe: &str,
+        model: &str,
+        started: i64,
+    ) -> serde_json::Value {
         json!({
             "task_key": task,
             "universe_key": universe,
             "machine": "macbook",
-            "model": "opus",
+            "model": model,
             "usage": {
                 "input_tokens": 12_000,
                 "output_tokens": 4_000,
                 "cache_creation_input_tokens": 1_000,
                 "cache_read_input_tokens": 30_000,
-                "models": ["claude-opus-4-8"],
-                "total_cost_usd": 1.23
+                "models": [format!("claude-{model}-x")],
+                "total_cost_usd": 1.23,
+                "tool_uses": {"Read": 3, "Edit": 1},
+                "output_chars": 4200,
+                "pr_url": "https://github.com/artelonga/co/pull/217",
+                "num_turns": 6
             },
             "started_at": started,
             "ended_at": started + 120,
@@ -589,6 +775,7 @@ mod tests {
             "/api/v1/usage/summary?window=week&by=model",
             "/api/v1/usage/active",
             "/api/v1/usage/projects?window=week",
+            "/api/v1/usage/sessions?window=week",
         ] {
             let req = Request::builder()
                 .method("GET")
@@ -645,6 +832,100 @@ mod tests {
         // total = 2 * (12000 + 4000 + 1000 + 30000)
         assert_eq!(v["totals"]["total_tokens"].as_i64().unwrap(), 2 * 47_000);
         assert_eq!(v["window_5h"]["sessions"].as_i64().unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn summary_cross_returns_model_universe_matrix() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let now = chrono::Utc::now().timestamp();
+        // co×opus (×2), co×sonnet, ygg×opus.
+        post_json(
+            &app,
+            "/api/v1/usage/sessions",
+            usage_payload_model("CO-1", "co", "opus", now),
+        )
+        .await;
+        post_json(
+            &app,
+            "/api/v1/usage/sessions",
+            usage_payload_model("CO-2", "co", "opus", now),
+        )
+        .await;
+        post_json(
+            &app,
+            "/api/v1/usage/sessions",
+            usage_payload_model("CO-3", "co", "sonnet", now),
+        )
+        .await;
+        post_json(
+            &app,
+            "/api/v1/usage/sessions",
+            usage_payload_model("CO-4", "ygg", "opus", now),
+        )
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/usage/summary?window=week&cross=universe,model")
+            .header("authorization", test_bearer())
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let m = &v["matrix"];
+        assert_eq!(m["row_dim"], "universe");
+        assert_eq!(m["col_dim"], "model");
+        let rows = m["rows"].as_array().unwrap();
+        let cols = m["cols"].as_array().unwrap();
+        assert!(rows.iter().any(|r| r == "co"));
+        assert!(rows.iter().any(|r| r == "ygg"));
+        assert!(cols.iter().any(|c| c == "opus"));
+        assert!(cols.iter().any(|c| c == "sonnet"));
+        // co×opus has two sessions.
+        let cells = m["cells"].as_array().unwrap();
+        let co_opus = cells
+            .iter()
+            .find(|c| c["row"] == "co" && c["col"] == "opus")
+            .unwrap();
+        assert_eq!(co_opus["sessions"].as_i64().unwrap(), 2);
+        assert_eq!(co_opus["total_tokens"].as_i64().unwrap(), 2 * 47_000);
+    }
+
+    #[tokio::test]
+    async fn recent_sessions_expose_tool_uses_and_pr_link() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let now = chrono::Utc::now().timestamp();
+        post_json(
+            &app,
+            "/api/v1/usage/sessions",
+            usage_payload("CO-437", "co", now),
+        )
+        .await;
+
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/usage/sessions?window=week&limit=10")
+            .header("authorization", test_bearer())
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let sessions = v["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        let s = &sessions[0];
+        assert_eq!(s["task_key"], "CO-437");
+        assert_eq!(s["turns"].as_i64().unwrap(), 6);
+        assert_eq!(s["pr_url"], "https://github.com/artelonga/co/pull/217");
+        // tool_uses round-trips as a JSON object string.
+        let tu: serde_json::Value = serde_json::from_str(s["tool_uses"].as_str().unwrap()).unwrap();
+        assert_eq!(tu["Read"].as_i64().unwrap(), 3);
+        assert_eq!(tu["Edit"].as_i64().unwrap(), 1);
     }
 
     #[tokio::test]

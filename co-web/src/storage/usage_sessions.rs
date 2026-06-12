@@ -27,6 +27,13 @@ pub struct NewUsageSession {
     pub ended_at: i64,
     pub outcome: String,
     pub reported_at: i64,
+    /// CO-437: tool name→count map, stored as a JSON object string. `None` when
+    /// the producer reported no tool usage.
+    pub tool_uses: Option<String>,
+    /// CO-437: the PR link co-auto opened for this session, if any.
+    pub pr_url: Option<String>,
+    /// CO-437: number of agent turns, from the stream-json `result` event.
+    pub turns: i64,
 }
 
 /// The dimension to group a usage summary by.
@@ -106,6 +113,45 @@ pub struct UsageProjectRow {
     pub last_deploy_at: Option<String>,
 }
 
+/// One cell of the model×universe (or any two-dimension) cross-tab.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct UsageCell {
+    /// Row key (e.g. the universe).
+    pub row: String,
+    /// Column key (e.g. the model).
+    pub col: String,
+    pub sessions: i64,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub tokens_cache_read: i64,
+    pub tokens_cache_write: i64,
+    pub total_tokens: i64,
+    pub cost_usd: Option<f64>,
+}
+
+/// CO-437: one usage session row, including the enrichment metadata, for the
+/// per-session dashboard listing. `tool_uses` is the raw JSON string as stored.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct UsageSessionRow {
+    pub id: i64,
+    pub task_key: String,
+    pub universe_key: String,
+    pub machine: String,
+    pub model: String,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub tokens_cache_read: i64,
+    pub tokens_cache_write: i64,
+    pub total_tokens: i64,
+    pub cost_usd: Option<f64>,
+    pub started_at: i64,
+    pub ended_at: i64,
+    pub outcome: String,
+    pub tool_uses: Option<String>,
+    pub pr_url: Option<String>,
+    pub turns: i64,
+}
+
 impl Storage {
     /// Insert a usage row. Returns the new row id.
     pub fn insert_usage_session(&self, s: &NewUsageSession) -> anyhow::Result<i64> {
@@ -113,8 +159,8 @@ impl Storage {
             "INSERT INTO usage_sessions \
              (task_key, universe_key, machine, model, tokens_in, tokens_out, \
               tokens_cache_read, tokens_cache_write, cost_usd, started_at, ended_at, \
-              outcome, reported_at) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13)",
+              outcome, reported_at, tool_uses, pr_url, turns) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 s.task_key,
                 s.universe_key,
@@ -129,6 +175,9 @@ impl Storage {
                 s.ended_at,
                 s.outcome,
                 s.reported_at,
+                s.tool_uses,
+                s.pr_url,
+                s.turns,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -170,6 +219,102 @@ impl Storage {
                 tokens_cache_write: cache_write,
                 total_tokens: tokens_in + tokens_out + cache_read + cache_write,
                 cost_usd: row.get(6)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// CO-437: cross-tabulate usage by two dimensions (e.g. universe × model)
+    /// over sessions started at/after `since`. Returns one [`UsageCell`] per
+    /// non-empty `(row, col)` pair, ordered by total tokens descending. Both
+    /// column names come from the [`UsageDimension`] whitelist, so the
+    /// `format!` is injection-safe.
+    pub fn usage_cross(
+        &self,
+        since: i64,
+        row: UsageDimension,
+        col: UsageDimension,
+    ) -> anyhow::Result<Vec<UsageCell>> {
+        let row_col = row.column();
+        let col_col = col.column();
+        let sql = format!(
+            "SELECT {row_col} AS r, {col_col} AS c, \
+                    COUNT(*) AS sessions, \
+                    COALESCE(SUM(tokens_in), 0), \
+                    COALESCE(SUM(tokens_out), 0), \
+                    COALESCE(SUM(tokens_cache_read), 0), \
+                    COALESCE(SUM(tokens_cache_write), 0), \
+                    SUM(cost_usd) \
+             FROM usage_sessions \
+             WHERE started_at >= ?1 \
+             GROUP BY {row_col}, {col_col} \
+             ORDER BY (COALESCE(SUM(tokens_in), 0) + COALESCE(SUM(tokens_out), 0) \
+                     + COALESCE(SUM(tokens_cache_read), 0) \
+                     + COALESCE(SUM(tokens_cache_write), 0)) DESC"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map(params![since], |row| {
+            let tokens_in: i64 = row.get(3)?;
+            let tokens_out: i64 = row.get(4)?;
+            let cache_read: i64 = row.get(5)?;
+            let cache_write: i64 = row.get(6)?;
+            Ok(UsageCell {
+                row: row.get(0)?,
+                col: row.get(1)?,
+                sessions: row.get(2)?,
+                tokens_in,
+                tokens_out,
+                tokens_cache_read: cache_read,
+                tokens_cache_write: cache_write,
+                total_tokens: tokens_in + tokens_out + cache_read + cache_write,
+                cost_usd: row.get(7)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// CO-437: the most recent usage sessions (started at/after `since`),
+    /// newest first, capped at `limit`. Carries the enrichment metadata
+    /// (`tool_uses`, `pr_url`, `turns`) for the per-session dashboard listing.
+    /// New columns are read by explicit index — never `.ok()`-swallowed — so a
+    /// missing migration fails loudly rather than masquerading as "no rows".
+    pub fn recent_usage_sessions(
+        &self,
+        since: i64,
+        limit: i64,
+    ) -> anyhow::Result<Vec<UsageSessionRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task_key, universe_key, machine, model, \
+                    tokens_in, tokens_out, tokens_cache_read, tokens_cache_write, \
+                    cost_usd, started_at, ended_at, outcome, tool_uses, pr_url, turns \
+             FROM usage_sessions \
+             WHERE started_at >= ?1 \
+             ORDER BY started_at DESC, id DESC \
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![since, limit], |row| {
+            let tokens_in: i64 = row.get(5)?;
+            let tokens_out: i64 = row.get(6)?;
+            let cache_read: i64 = row.get(7)?;
+            let cache_write: i64 = row.get(8)?;
+            Ok(UsageSessionRow {
+                id: row.get(0)?,
+                task_key: row.get(1)?,
+                universe_key: row.get(2)?,
+                machine: row.get(3)?,
+                model: row.get(4)?,
+                tokens_in,
+                tokens_out,
+                tokens_cache_read: cache_read,
+                tokens_cache_write: cache_write,
+                total_tokens: tokens_in + tokens_out + cache_read + cache_write,
+                cost_usd: row.get(9)?,
+                started_at: row.get(10)?,
+                ended_at: row.get(11)?,
+                outcome: row.get(12)?,
+                tool_uses: row.get(13)?,
+                pr_url: row.get(14)?,
+                turns: row.get(15)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -316,6 +461,9 @@ mod tests {
             ended_at: started + 60,
             outcome: "success".into(),
             reported_at: started + 61,
+            tool_uses: Some(r#"{"Read":3,"Edit":1}"#.into()),
+            pr_url: Some(format!("https://github.com/artelonga/co/pull/{started}")),
+            turns: 4,
         }
     }
 
@@ -396,6 +544,63 @@ mod tests {
         // No board / deploy rows in a fresh DB — best-effort enrichment is zero/null.
         assert_eq!(projects[0].tasks_todo, 0);
         assert_eq!(projects[0].last_deploy_at, None);
+    }
+
+    #[test]
+    fn cross_tab_groups_by_universe_and_model() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        storage
+            .insert_usage_session(&sample("CO-1", "co", "m1", "opus", 1000))
+            .unwrap();
+        storage
+            .insert_usage_session(&sample("CO-2", "co", "m1", "opus", 1100))
+            .unwrap();
+        storage
+            .insert_usage_session(&sample("CO-3", "co", "m1", "sonnet", 1200))
+            .unwrap();
+        storage
+            .insert_usage_session(&sample("CO-4", "ygg", "m2", "opus", 1300))
+            .unwrap();
+
+        let cells = storage
+            .usage_cross(0, UsageDimension::Universe, UsageDimension::Model)
+            .unwrap();
+        // (co,opus), (co,sonnet), (ygg,opus) → three non-empty cells.
+        assert_eq!(cells.len(), 3);
+        let co_opus = cells
+            .iter()
+            .find(|c| c.row == "co" && c.col == "opus")
+            .unwrap();
+        assert_eq!(co_opus.sessions, 2);
+        assert_eq!(co_opus.tokens_in, 2000);
+        assert_eq!(co_opus.total_tokens, 2 * (1000 + 500 + 200 + 100));
+        assert_eq!(co_opus.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn recent_sessions_carry_enrichment_metadata() {
+        let dir = tempdir().unwrap();
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        storage
+            .insert_usage_session(&sample("CO-1", "co", "m1", "opus", 1000))
+            .unwrap();
+        storage
+            .insert_usage_session(&sample("CO-2", "co", "m1", "sonnet", 2000))
+            .unwrap();
+
+        let rows = storage.recent_usage_sessions(0, 10).unwrap();
+        assert_eq!(rows.len(), 2);
+        // Newest first.
+        assert_eq!(rows[0].task_key, "CO-2");
+        assert_eq!(rows[0].turns, 4);
+        assert_eq!(rows[0].tool_uses.as_deref(), Some(r#"{"Read":3,"Edit":1}"#));
+        assert_eq!(
+            rows[0].pr_url.as_deref(),
+            Some("https://github.com/artelonga/co/pull/2000")
+        );
+        // Limit is honoured.
+        assert_eq!(storage.recent_usage_sessions(0, 1).unwrap().len(), 1);
     }
 
     #[test]

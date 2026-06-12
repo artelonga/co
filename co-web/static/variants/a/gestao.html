@@ -178,6 +178,20 @@ a:hover{text-decoration:underline}
       <tbody></tbody>
     </table></div>
 
+    <!-- CO-437: model×universe cross-tab matrix (tokens per cell) -->
+    <div class="section-title">Matriz modelo × universo <span style="color:var(--dim);font-size:9px">tokens / sessões</span></div>
+    <div class="card" style="overflow-x:auto"><table id="uso-matrix-table">
+      <thead><tr></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+    <!-- CO-437: per-session metadata — tool usage + PR link -->
+    <div class="section-title">Sessões recentes <span style="color:var(--dim);font-size:9px">tool usage + PR</span></div>
+    <div class="card"><table id="uso-sessions-table">
+      <thead><tr><th>Task</th><th>Universo</th><th>Modelo</th><th>Turns</th><th>Tokens</th><th>Custo US$</th><th>Ferramentas</th><th>PR</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
     <div class="section-title">Projetos (frota)</div>
     <div class="card"><table id="uso-projects-table">
       <thead><tr><th>Universo</th><th>A fazer</th><th>Em progresso</th><th>Sessões</th><th>Tokens</th><th>Custo US$</th><th>Último deploy</th></tr></thead>
@@ -427,7 +441,7 @@ function renderFunil(d){
 // ---------------------------------------------------------------------------
 // Uso (CO-426) — fleet usage & active launchers, real-time via analytics stream
 // ---------------------------------------------------------------------------
-var usoState = { summary:null, active:[], projects:[] };
+var usoState = { summary:null, active:[], projects:[], sessions:[] };
 var usoWS = null;
 var usoRefreshTimer = null;
 
@@ -441,14 +455,18 @@ function usoJson(r){
 function fetchUso(){
   var win=(document.getElementById('uso-window')||{}).value||'week';
   var by=(document.getElementById('uso-by')||{}).value||'universe';
+  // CO-437: ?cross=universe,model returns the matrix alongside the flat groups;
+  // /usage/sessions returns the per-session metadata (tool usage + PR link).
   return Promise.all([
-    fetch('/api/v1/usage/summary?window='+encodeURIComponent(win)+'&by='+encodeURIComponent(by),{credentials:'same-origin'}).then(usoJson),
+    fetch('/api/v1/usage/summary?window='+encodeURIComponent(win)+'&by='+encodeURIComponent(by)+'&cross=universe,model',{credentials:'same-origin'}).then(usoJson),
     fetch('/api/v1/usage/active',{credentials:'same-origin'}).then(usoJson),
-    fetch('/api/v1/usage/projects?window='+encodeURIComponent(win),{credentials:'same-origin'}).then(usoJson)
+    fetch('/api/v1/usage/projects?window='+encodeURIComponent(win),{credentials:'same-origin'}).then(usoJson),
+    fetch('/api/v1/usage/sessions?window='+encodeURIComponent(win)+'&limit=50',{credentials:'same-origin'}).then(usoJson)
   ]).then(function(res){
     if(res[0]) usoState.summary=res[0];
     if(res[1]) usoState.active=res[1].launchers||[];
     if(res[2]) usoState.projects=res[2].projects||[];
+    if(res[3]) usoState.sessions=res[3].sessions||[];
     cache['uso']={ts:Date.now(),data:usoState};
     if(currentTab==='uso') renderUso();
     document.getElementById('ts').textContent=new Date().toLocaleTimeString('pt-BR');
@@ -466,7 +484,7 @@ function fmtAgo(epoch){
 function fmtTok(n){ n=Number(n||0); if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1e3) return (n/1e3).toFixed(1)+'k'; return ''+n; }
 function fmtCost(c){ return c==null?'—':'$'+Number(c).toFixed(2); }
 
-function renderUso(){ renderUsoActive(); renderUsoWindow(); renderUsoGroups(); renderUsoProjects(); }
+function renderUso(){ renderUsoActive(); renderUsoWindow(); renderUsoGroups(); renderUsoMatrix(); renderUsoSessions(); renderUsoProjects(); }
 
 function renderUsoActive(){
   var rows=usoState.active||[];
@@ -502,6 +520,51 @@ function renderUsoGroups(){
   document.querySelector('#uso-groups-table tbody').innerHTML=g.length
     ?g.map(function(r){ return '<tr><td class="mono">'+esc(r.key)+'</td><td class="num">'+fmt(r.sessions)+'</td><td class="num">'+fmtTok(r.tokens_in)+'</td><td class="num">'+fmtTok(r.tokens_out)+'</td><td class="num">'+fmtTok(r.tokens_cache_read)+'</td><td class="num">'+fmtTok(r.tokens_cache_write)+'</td><td class="num">'+fmtTok(r.total_tokens)+'</td><td class="num">'+fmtCost(r.cost_usd)+'</td></tr>'; }).join('')
     :'<tr><td colspan="8" style="color:var(--dim);text-align:center">Sem dados na janela</td></tr>';
+}
+
+// CO-437: model×universe cross-tab. Rows = universe, cols = model, cell shows
+// total tokens + session count. A trailing "Total" column sums the row.
+function renderUsoMatrix(){
+  var m=(usoState.summary||{}).matrix;
+  var head=document.querySelector('#uso-matrix-table thead tr');
+  var body=document.querySelector('#uso-matrix-table tbody');
+  if(!m||!m.cells||!m.cells.length){
+    if(head) head.innerHTML='<th>Universo</th>';
+    if(body) body.innerHTML='<tr><td style="color:var(--dim);text-align:center">Sem dados na janela</td></tr>';
+    return;
+  }
+  // Index cells by row|col for O(1) lookup.
+  var idx={}; m.cells.forEach(function(c){ idx[c.row+' '+c.col]=c; });
+  head.innerHTML='<th>'+esc(m.row_dim||'Universo')+' \\ '+esc(m.col_dim||'Modelo')+'</th>'
+    +m.cols.map(function(c){ return '<th>'+esc(c)+'</th>'; }).join('')+'<th>Total</th>';
+  body.innerHTML=m.rows.map(function(r){
+    var rowTotal=0, rowSess=0;
+    var tds=m.cols.map(function(c){
+      var cell=idx[r+' '+c];
+      if(!cell) return '<td class="num" style="color:var(--dim)">—</td>';
+      rowTotal+=Number(cell.total_tokens||0); rowSess+=Number(cell.sessions||0);
+      return '<td class="num" title="'+fmt(cell.sessions)+' sessões · '+fmtCost(cell.cost_usd)+'">'+fmtTok(cell.total_tokens)+'<span style="color:var(--dim)"> ('+fmt(cell.sessions)+')</span></td>';
+    }).join('');
+    return '<tr><td class="mono">'+esc(r)+'</td>'+tds+'<td class="num">'+fmtTok(rowTotal)+'<span style="color:var(--dim)"> ('+fmt(rowSess)+')</span></td></tr>';
+  }).join('');
+}
+
+// CO-437: per-session listing with tool usage + PR link.
+function fmtTools(json){
+  if(!json) return '<span style="color:var(--dim)">—</span>';
+  var obj; try{ obj=JSON.parse(json); }catch(e){ return '<span style="color:var(--dim)">—</span>'; }
+  var keys=Object.keys(obj); if(!keys.length) return '<span style="color:var(--dim)">—</span>';
+  keys.sort(function(a,b){ return obj[b]-obj[a]; });
+  return keys.map(function(k){ return esc(k)+'×'+obj[k]; }).join(', ');
+}
+function renderUsoSessions(){
+  var rows=usoState.sessions||[];
+  document.querySelector('#uso-sessions-table tbody').innerHTML=rows.length
+    ?rows.map(function(s){
+      var pr=s.pr_url?'<a href="'+esc(s.pr_url)+'" target="_blank" rel="noopener">#'+esc((s.pr_url.split('/pull/')[1]||'').replace(/[^0-9].*$/,''))+'</a>':'<span style="color:var(--dim)">—</span>';
+      return '<tr><td class="mono"><a href="/'+esc(s.universe_key)+'">'+esc(s.task_key)+'</a></td><td class="mono">'+esc(s.universe_key)+'</td><td>'+esc(s.model)+'</td><td class="num">'+fmt(s.turns)+'</td><td class="num">'+fmtTok(s.total_tokens)+'</td><td class="num">'+fmtCost(s.cost_usd)+'</td><td class="mono" style="color:var(--dim)">'+fmtTools(s.tool_uses)+'</td><td class="mono">'+pr+'</td></tr>';
+    }).join('')
+    :'<tr><td colspan="8" style="color:var(--dim);text-align:center">Sem sessões na janela</td></tr>';
 }
 
 function renderUsoProjects(){

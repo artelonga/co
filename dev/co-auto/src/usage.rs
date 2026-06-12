@@ -13,6 +13,8 @@
 //! propagated; missing fields default to zero / `None`. Telemetry must never
 //! fail or block a co-auto task.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 /// Aggregated token usage for one Claude Code session.
@@ -21,6 +23,11 @@ use serde::{Deserialize, Serialize};
 /// fields are summed across every per-message `usage` block; `models` lists the
 /// distinct models seen (usually one). `num_turns`, `duration_ms` and
 /// `total_cost_usd` come from the final `result` event when present.
+///
+/// CO-437 enrichment: `tool_uses` (a name→count map harvested from `tool_use`
+/// content blocks), `output_chars` (the total length of assistant text emitted)
+/// and `pr_url` (the PR link co-auto opened, set by the caller from stdout —
+/// never present in the stream itself). All best-effort / default-empty.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SessionUsage {
     /// Sum of `input_tokens` across all assistant messages.
@@ -33,6 +40,18 @@ pub struct SessionUsage {
     pub cache_read_input_tokens: i64,
     /// Distinct models observed, in first-seen order (usually one).
     pub models: Vec<String>,
+    /// CO-437: tool name → invocation count, from `tool_use` content blocks.
+    /// `BTreeMap` so serialization is deterministic. Omitted when empty.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tool_uses: BTreeMap<String, i64>,
+    /// CO-437: total characters of assistant text emitted across the session
+    /// (a cheap proxy for output size when output tokens aren't enough).
+    #[serde(default)]
+    pub output_chars: i64,
+    /// CO-437: the PR link co-auto opened, set by the caller from co-auto's
+    /// stdout (not part of the stream-json). `None` when no PR was opened.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pr_url: Option<String>,
     /// Number of agent turns, from the `result` event (None if absent).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub num_turns: Option<i64>,
@@ -145,6 +164,33 @@ pub fn parse_stream_json(ndjson: &str) -> SessionUsage {
                 .unwrap_or(0);
         }
 
+        // CO-437: harvest tool usage + output size from assistant content
+        // blocks. `tool_use` blocks carry a `name`; `text` blocks carry the
+        // human-readable output we measure for size. Both best-effort.
+        if let Some(content) = value
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        {
+            for block in content {
+                match block.get("type").and_then(|v| v.as_str()) {
+                    Some("tool_use") => {
+                        if let Some(name) = block.get("name").and_then(|v| v.as_str())
+                            && !name.is_empty()
+                        {
+                            *usage.tool_uses.entry(name.to_string()).or_insert(0) += 1;
+                        }
+                    }
+                    Some("text") => {
+                        if let Some(t) = block.get("text").and_then(|v| v.as_str()) {
+                            usage.output_chars += t.chars().count() as i64;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         // Model id: prefer `message.model`, fall back to top-level `model`.
         if let Some(model) = value
             .get("message")
@@ -220,6 +266,48 @@ mod tests {
         assert_eq!(u.num_turns, Some(4));
         assert_eq!(u.duration_ms, Some(372000));
         assert_eq!(u.total_cost_usd, Some(0.0421));
+    }
+
+    #[test]
+    fn captures_tool_uses_and_output_chars() {
+        // Two assistant turns: one with two tool_use blocks (Read, Read, Edit),
+        // both with text blocks. "Reading the file." = 17 chars + "Done." = 5.
+        let stream = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"text","text":"Reading the file."},{"type":"tool_use","name":"Read"},{"type":"tool_use","name":"Read"}]}}
+{"type":"assistant","message":{"model":"claude-opus-4-8","content":[{"type":"tool_use","name":"Edit"},{"type":"text","text":"Done."}]}}"#;
+        let u = parse_stream_json(stream);
+        assert_eq!(u.tool_uses.get("Read"), Some(&2));
+        assert_eq!(u.tool_uses.get("Edit"), Some(&1));
+        assert_eq!(u.output_chars, 17 + 5);
+        // pr_url is never derived from the stream — caller sets it.
+        assert_eq!(u.pr_url, None);
+    }
+
+    #[test]
+    fn fixture_counts_output_chars_with_no_tools() {
+        let u = parse_stream_json(FIXTURE);
+        // "Reading the file." (17) + "Done." (5) = 22; no tool_use blocks.
+        assert_eq!(u.output_chars, 22);
+        assert!(u.tool_uses.is_empty());
+    }
+
+    #[test]
+    fn enrichment_fields_serialize_only_when_present() {
+        let mut u = SessionUsage {
+            input_tokens: 10,
+            ..Default::default()
+        };
+        // Empty tool_uses + None pr_url are omitted; output_chars always present.
+        let json = serde_json::to_string(&u).unwrap();
+        assert!(!json.contains("tool_uses"), "got: {json}");
+        assert!(!json.contains("pr_url"), "got: {json}");
+        assert!(json.contains("output_chars"), "got: {json}");
+
+        u.tool_uses.insert("Bash".into(), 3);
+        u.pr_url = Some("https://github.com/artelonga/co/pull/9".into());
+        let json = serde_json::to_string(&u).unwrap();
+        assert!(json.contains("tool_uses"), "got: {json}");
+        assert!(json.contains("Bash"), "got: {json}");
+        assert!(json.contains("/pull/9"), "got: {json}");
     }
 
     #[test]
