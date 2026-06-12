@@ -1,0 +1,61 @@
+{
+  "co_id": "CO-415",
+  "spec_title": "Login com GitHub em co.artelonga.com.br (OAuth) — pedido do Miguel",
+  "timestamp": "2026-06-12T16:23:54.610Z",
+  "items": [
+    {
+      "text": "`GET /api/v1/auth/github/start?return_to=` redireciona ao consent do",
+      "pattern": "api/v1/auth/github/start|github|start|return|redireciona",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /api/v1/auth/github/callback?code=&state=` troca code→token",
+      "pattern": "api/v1/auth/github/callback|github|callback|state|troca",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Env `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` (distintos do",
+      "pattern": "github|oauth|client",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "email não-verificado → 401. Reusa `maybe_attach_co_handover_token`",
+      "pattern": "o[- _]verificado|email|reusa|maybe",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Testes: round-trip do state JWT (encode↔decode, rejeita segredo errado),",
+      "pattern": "round[- _]trip|testes|state|encode",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Rotas no `api-catalog.md` + openapi regenerado (`openapi:check` sem drift).",
+      "pattern": "api[- _]catalog|rotas|openapi|regenerado",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] OpenAPI documents the new CI events",
+      "is_stub": true,
+      "status": "pending"
+    }
+  ],
+  "total": 6,
+  "passed": 4,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 67
+}

@@ -1,0 +1,29 @@
+{
+  "co_id": "CO-421",
+  "spec_title": "Prod e2e usability gate — anonymous read-only Playwright smoke against co.artelonga.com.br as a release gate",
+  "timestamp": "2026-06-12T16:23:54.874Z",
+  "items": [
+    {
+      "text": "Uma suite `e2e/prod-usability.spec.ts` (tag `@prod`) que roda contra",
+      "pattern": "prod[- _]usability|prod[- _]usability.spec.ts|suite|contra",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Cobre o caminho de usabilidade que o health não pega: board do template",
+      "pattern": "cobre|caminho|usabilidade|health",
+      "matched_file": "co-web/e2e/smoke.spec.ts",
+      "matched_test": "server is running and healthy",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 2,
+  "passed": 1,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}

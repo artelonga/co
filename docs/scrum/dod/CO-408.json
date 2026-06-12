@@ -1,0 +1,53 @@
+{
+  "co_id": "CO-408",
+  "spec_title": "Ops small-batch — staging DNS record, Google OAuth error body in logs, git-credential startup noise",
+  "timestamp": "2026-06-12T16:23:54.519Z",
+  "items": [
+    {
+      "text": "Google OAuth token-exchange failures include Google's `error` /",
+      "pattern": "token[- _]exchange|google|oauth|failures",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Credential-less startup no longer emits",
+      "pattern": "credential[- _]less|startup|longer|emits",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Staging DNS fix documented as a manual ops step (CNAME + `flyctl certs",
+      "pattern": "staging|documented|manual|cname",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] All 10 route steps implemented + documented in docs/ci-route.md",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`cargo fmt`, `cargo clippy -p co-web -- -D warnings` clean, `cargo test",
+      "pattern": "co[- _]web|cargo|clippy",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "CHANGELOG-PENDING/CO-408.md written; no edits to `Cargo.toml` /",
+      "pattern": "changelog[- _]pending|co[- _]408|co[- _]408.md|written|edits",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 5,
+  "passed": 0,
+  "pending": 5,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 0
+}

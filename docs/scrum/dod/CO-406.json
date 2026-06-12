@@ -1,0 +1,45 @@
+{
+  "co_id": "CO-406",
+  "spec_title": "Graceful startup degradation — universe pool pragma failure must not crash-loop the site",
+  "timestamp": "2026-06-12T16:23:54.333Z",
+  "items": [
+    {
+      "text": "A universe whose pool open/pragmas/migrations fail no longer panics:",
+      "pattern": "pragmas/migrations|universe|whose|pragmas|migrations",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "The server still BOOTS when a universe is bad — `seed_template_universe`",
+      "pattern": "server|still|boots|universe",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "The failing universe's routes return **503** (via `universe_visibility_gate`,",
+      "pattern": "failing|universe|routes|return",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "La",
+      "pattern": "la",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "overlay headline is in Portuguese",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 4,
+  "passed": 4,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

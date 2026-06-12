@@ -1,0 +1,45 @@
+{
+  "co_id": "CO-416",
+  "spec_title": "Tradução automática pt-br ↔ en de conteúdo — pedido do Miguel",
+  "timestamp": "2026-06-12T16:23:54.700Z",
+  "items": [
+    {
+      "text": "Entrada `lang: pt` gera tradução `lang: en` (e vice-versa) sob demanda via",
+      "pattern": "vice[- _]versa|entrada|tradu|demanda",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Preserva frontmatter, estrutura markdown, code-blocks e wikilinks",
+      "pattern": "code[- _]blocks|preserva|frontmatter|estrutura|markdown",
+      "matched_file": "co-web/e2e/prod-usability.spec.ts",
+      "matched_test": "deep-linked template entry renders markdown (not a 404)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Provider plugável `CO_TRANSLATE_BACKEND`: default no-op → **503** gracioso;",
+      "pattern": "no[- _]op|provider|translate|backend|default",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "versions are sorted newest-first by default",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Twin é entrada irmã rastreável (`translated_from` + relação tipada CO-74),",
+      "pattern": "co[- _]74|entrada|rastre|translated|tipada",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 4,
+  "passed": 2,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}
