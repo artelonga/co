@@ -59,6 +59,7 @@ pub mod space;
 pub mod storage;
 pub mod sync;
 pub mod types;
+pub mod universo;
 pub mod validate;
 pub mod wikilink;
 

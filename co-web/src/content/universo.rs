@@ -1,137 +1,16 @@
-//! Universo trait and filesystem implementation.
+//! Filesystem implementation of the `Universo` domain (CO-431).
 //!
-//! A universo is a content workspace backed by markdown files on disk.
-//! The trait provides standard views: quadro (tasks), jardim (notes),
-//! eventos, membros, publicacoes, and raw content access.
+//! The `Universo` trait and its domain types (`Tarefa`, `Nota`, `Evento`,
+//! `Membro`, `Relato`, `Conteudo`, `Entrada`) live in `core::universo` so
+//! external services can depend on `core` alone. This module re-exports them
+//! for compatibility and keeps the disk-backed implementation
+//! (`UniversoLocal`) plus the default [`UniversoFactory`] used by AppState.
 
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-// ---- Domain types ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Tarefa {
-    pub id: String,
-    pub titulo: String,
-    pub status: String,
-    pub tags: Vec<String>,
-    pub data: String,
-    pub conteudo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Nota {
-    pub id: String,
-    pub titulo: String,
-    pub tags: Vec<String>,
-    pub data: String,
-    pub preview: String,
-    pub conteudo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Evento {
-    pub id: String,
-    pub titulo: String,
-    pub data: String,
-    pub hora: String,
-    pub local: String,
-    pub tags: Vec<String>,
-    pub conteudo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Membro {
-    pub id: String,
-    pub nome: String,
-    pub papel: String,
-    #[serde(default)]
-    pub bio: String,
-    #[serde(default)]
-    pub foto_url: String,
-    pub tags: Vec<String>,
-    pub conteudo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Relato {
-    pub id: String,
-    pub titulo: String,
-    pub descricao: String,
-    pub data: String,
-    pub slug: String,
-    pub tags: Vec<String>,
-    pub publicado: bool,
-    pub conteudo: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Conteudo {
-    pub caminho: String,
-    pub titulo: String,
-    pub corpo: String,
-    pub frontmatter: HashMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Entrada {
-    pub nome: String,
-    pub caminho: String,
-    pub tipo: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub filhos: Vec<Entrada>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UniversoInfo {
-    pub nome: String,
-    pub descricao: String,
-    pub caminho: String,
-}
-
-// ---- Config ----
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct UniversoConfig {
-    pub nome: String,
-    #[serde(default)]
-    pub descricao: String,
-    #[serde(default)]
-    pub tipo: String,
-    #[serde(default)]
-    pub locale: String,
-}
-
-// ---- Trait ----
-
-pub trait Universo: Send + Sync {
-    fn nome(&self) -> &str;
-    fn descricao(&self) -> &str;
-    fn quadro(&self) -> Result<Vec<Tarefa>, String>;
-    fn jardim(&self) -> Result<Vec<Nota>, String>;
-    fn eventos(&self) -> Result<Vec<Evento>, String>;
-    fn membros(&self) -> Result<Vec<Membro>, String>;
-    fn relatos(&self) -> Result<Vec<Relato>, String>;
-    fn conteudo(&self, caminho: &str) -> Result<Conteudo, String>;
-    fn arvore(&self) -> Result<Vec<Entrada>, String>;
-
-    /// Get content with locale fallback.
-    ///
-    /// Tries `{caminho}.{locale}.md` first, then falls back to `{caminho}.md`.
-    /// For example, `conteudo_locale("sobre", "en")` tries `sobre.en.md`,
-    /// then `sobre.md`.
-    ///
-    /// Default implementation delegates to `conteudo()` with fallback logic.
-    fn conteudo_locale(&self, caminho: &str, locale: &str) -> Result<Conteudo, String> {
-        let localized = format!("{}.{}", caminho, locale);
-        match self.conteudo(&localized) {
-            Ok(c) => Ok(c),
-            Err(_) => self.conteudo(caminho),
-        }
-    }
-}
+pub use co::universo::*;
 
 // ---- Filesystem implementation ----
 
@@ -151,6 +30,15 @@ impl UniversoLocal {
             caminho: caminho.to_path_buf(),
             config,
         })
+    }
+}
+
+/// Default `UniversoFactory`: opens `root.join(key)` from disk.
+pub struct UniversoLocalFactory;
+
+impl UniversoFactory for UniversoLocalFactory {
+    fn abrir(&self, key: &str, root: &Path) -> Result<Box<dyn Universo>, String> {
+        Ok(Box::new(UniversoLocal::abrir(&root.join(key))?))
     }
 }
 
@@ -614,5 +502,239 @@ mod tests {
         assert!(nomes.contains(&"eventos"));
         assert!(nomes.contains(&"membros"));
         assert!(!nomes.contains(&".universo.yaml"));
+    }
+
+    #[test]
+    fn test_factory_local_abre_root_join_key() {
+        let dir = tempdir().unwrap();
+        let demo = dir.path().join("demo");
+        fs::create_dir_all(&demo).unwrap();
+        fs::write(
+            demo.join(".universo.yaml"),
+            "nome: demo\ndescricao: aberto pela factory\n",
+        )
+        .unwrap();
+
+        let fabrica: Box<dyn UniversoFactory> = Box::new(UniversoLocalFactory);
+        let u = fabrica.abrir("demo", dir.path()).unwrap();
+        assert_eq!(u.nome(), "demo");
+        assert_eq!(u.descricao(), "aberto pela factory");
+    }
+
+    #[test]
+    fn test_factory_local_universo_inexistente_erra() {
+        let dir = tempdir().unwrap();
+        let err = match UniversoLocalFactory.abrir("nao-existe", dir.path()) {
+            Ok(_) => panic!("abrir deveria falhar para universo inexistente"),
+            Err(e) => e,
+        };
+        assert!(err.contains(".universo.yaml"));
+    }
+}
+
+/// CO-431 swap proof: the same handler, mounted on the same route, serves a
+/// filesystem universo with the default factory and an in-memory universo
+/// when a fake `UniversoFactory` is plugged into AppState — no route or
+/// handler edits between the two scenarios.
+#[cfg(test)]
+mod factory_swap_tests {
+    use super::*;
+    use crate::server::{
+        AppState, AppStateInner, CoreState, IndexState, IntegrationsState, RealtimeState,
+    };
+    use axum::body::Body;
+    use axum::extract::State;
+    use axum::http::{Request, StatusCode};
+    use axum::routing::get;
+    use axum::{Json, Router};
+    use std::sync::{Arc, Mutex as StdMutex};
+    use tempfile::tempdir;
+    use tower::ServiceExt;
+
+    /// Handler under test: obtains the universo through the AppState factory,
+    /// never via `UniversoLocal::abrir` hardcoded.
+    async fn quadro_handler(
+        State(state): State<AppState>,
+    ) -> Result<Json<Vec<Tarefa>>, (StatusCode, String)> {
+        let root = PathBuf::from(&state.core.config.universo_dir);
+        let universo = state
+            .core
+            .universo_factory
+            .abrir("demo", &root)
+            .map_err(|e| (StatusCode::NOT_FOUND, e))?;
+        universo
+            .quadro()
+            .map(Json)
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))
+    }
+
+    fn rotas(state: AppState) -> Router {
+        Router::new()
+            .route("/universos/demo/quadro", get(quadro_handler))
+            .with_state(state)
+    }
+
+    fn build_state(
+        dir: &Path,
+        universo_dir: &Path,
+        factory: Option<Arc<dyn UniversoFactory>>,
+    ) -> AppState {
+        let config = crate::config::WebConfig {
+            port: 3000,
+            data_dir: dir.to_str().unwrap().to_string(),
+            static_dir: "co-web/static".to_string(),
+            default_variant: "a".to_string(),
+            experiments: false,
+            plugins_dir: "plugins".to_string(),
+            game_db_path: None,
+            universo_dir: universo_dir.to_str().unwrap().to_string(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: "prod".into(),
+            wae_api_key: None,
+            wae_endpoint: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        };
+        let storage = crate::storage::Storage::new(&config.data_dir);
+        let experiment = crate::experiment::ExperimentStore::new(&config.data_dir);
+        let auth_store = crate::auth::AuthStore::new(dir).unwrap();
+        let mail: Arc<dyn co::MailProvider> = Arc::new(co::LogMailProvider);
+        let game_storage = Arc::new(
+            game_core::storage::Storage::open(&dir.join("game_test.db"))
+                .expect("Failed to open test game storage"),
+        );
+        let (embedding_tx, _embedding_rx) = crate::embedding_worker::channel();
+        let mut core_state = CoreState::from_storage(storage, config, auth_store);
+        if let Some(factory) = factory {
+            core_state = core_state.with_universo_factory(factory);
+        }
+        AppState::new(AppStateInner {
+            core: Arc::new(core_state),
+            realtime: Arc::new(RealtimeState {
+                doc_rooms: crate::ws::new_room_manager(),
+                sync_rooms: crate::sync_ws::new_sync_room_manager(),
+                chat_rooms_broadcast: StdMutex::new(std::collections::HashMap::new()),
+                chat_presence: StdMutex::new(std::collections::HashMap::new()),
+            }),
+            index: Arc::new(IndexState {
+                cache: crate::cache::CacheLayer::new(),
+                embeddings: Arc::new(crate::embedding::EmbeddingService::disabled()),
+                embedding_tx,
+            }),
+            integrations: Arc::new(IntegrationsState {
+                mail,
+                geo: Arc::new(crate::geo::GeoDb::disabled()),
+                plugin_registry: game_core::plugin::PluginRegistry::new(),
+                game_storage,
+                wae: crate::wae::WaeEmitter::new(None, None),
+                jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
+                rate_limiter: StdMutex::new(crate::rate_limit::RateLimiter::new()),
+                experiment: StdMutex::new(experiment),
+                worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
+            }),
+        })
+    }
+
+    async fn get_quadro(app: Router) -> (StatusCode, Vec<Tarefa>) {
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/universos/demo/quadro")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let tarefas = serde_json::from_slice(&body).unwrap_or_default();
+        (status, tarefas)
+    }
+
+    #[tokio::test]
+    async fn default_factory_serve_universo_de_filesystem() {
+        let dir = tempdir().unwrap();
+        let universos = dir.path().join("universos");
+        let demo = universos.join("demo");
+        fs::create_dir_all(demo.join("quadro")).unwrap();
+        fs::write(demo.join(".universo.yaml"), "nome: demo\n").unwrap();
+        fs::write(
+            demo.join("quadro/do-disco.md"),
+            "---\ntitulo: Tarefa do disco\nstatus: todo\n---\nCorpo.\n",
+        )
+        .unwrap();
+
+        let state = build_state(dir.path(), &universos, None);
+        let (status, tarefas) = get_quadro(rotas(state)).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tarefas.len(), 1);
+        assert_eq!(tarefas[0].titulo, "Tarefa do disco");
+    }
+
+    struct UniversoMemoria;
+
+    impl Universo for UniversoMemoria {
+        fn nome(&self) -> &str {
+            "memoria"
+        }
+        fn descricao(&self) -> &str {
+            "sem filesystem"
+        }
+        fn quadro(&self) -> Result<Vec<Tarefa>, String> {
+            Ok(vec![Tarefa {
+                id: "mem-1".into(),
+                titulo: "Tarefa da memoria".into(),
+                status: "doing".into(),
+                tags: vec![],
+                data: String::new(),
+                conteudo: String::new(),
+            }])
+        }
+        fn jardim(&self) -> Result<Vec<Nota>, String> {
+            Ok(vec![])
+        }
+        fn eventos(&self) -> Result<Vec<Evento>, String> {
+            Ok(vec![])
+        }
+        fn membros(&self) -> Result<Vec<Membro>, String> {
+            Ok(vec![])
+        }
+        fn relatos(&self) -> Result<Vec<Relato>, String> {
+            Ok(vec![])
+        }
+        fn conteudo(&self, caminho: &str) -> Result<Conteudo, String> {
+            Err(format!("Conteudo nao encontrado: {caminho}"))
+        }
+        fn arvore(&self) -> Result<Vec<Entrada>, String> {
+            Ok(vec![])
+        }
+    }
+
+    struct FabricaMemoria;
+
+    impl UniversoFactory for FabricaMemoria {
+        fn abrir(&self, _key: &str, _root: &Path) -> Result<Box<dyn Universo>, String> {
+            Ok(Box::new(UniversoMemoria))
+        }
+    }
+
+    #[tokio::test]
+    async fn fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers() {
+        let dir = tempdir().unwrap();
+        // No universe on disk at all — only the in-memory factory.
+        let universos = dir.path().join("universos");
+
+        let state = build_state(dir.path(), &universos, Some(Arc::new(FabricaMemoria)));
+        let (status, tarefas) = get_quadro(rotas(state)).await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(tarefas.len(), 1);
+        assert_eq!(tarefas[0].titulo, "Tarefa da memoria");
+        assert_eq!(tarefas[0].status, "doing");
     }
 }
