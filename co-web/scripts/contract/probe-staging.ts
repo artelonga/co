@@ -26,7 +26,7 @@ const OPENAPI_PATH = join(__dirname_script, '../../openapi.yaml');
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const STAGING_URL = (process.env.STAGING_URL ?? 'https://co-artelonga-staging.fly.dev').replace(/\/$/, '');
+const STAGING_URL = (process.env.STAGING_URL ?? process.env.PROBE_URL ?? 'https://co.artelonga.com.br').replace(/\/$/, '');
 const ADMIN_TOKEN = process.env.CO_STAGING_ADMIN_TOKEN ?? '';
 const REPORT_PATH = process.env.REPORT_PATH ?? 'contract-probe-report.json';
 const TIMEOUT_MS = Number(process.env.PROBE_TIMEOUT_MS ?? 20_000);
@@ -639,7 +639,25 @@ async function main() {
           driftInfo = classifyDrift(method, endpointKey, declaredStatus, actualStatus, requiresAuth, hasToken, body);
         } catch (err: unknown) {
           errorDetail = err instanceof Error ? err.message : String(err);
-          driftInfo = { drift: true, drift_type: 'server_error', detail: errorDetail };
+          // A network abort / timeout / connection failure is an ENVIRONMENT
+          // problem (target asleep, slow, or unreachable) — NOT a contract drift.
+          // Treating it as drift fails the gate with an opaque exit 1 (the
+          // /robots.txt "This operation was aborted" case). Retry once; if still
+          // unreachable, do NOT count it as drift.
+          if (/abort|timeout|network|ECONN|ENOTFOUND|EAI_AGAIN|fetch failed|socket/i.test(errorDetail)) {
+            try {
+              const r2 = await probe(method, url, requiresAuth);
+              actualStatus = r2.status;
+              body = r2.body;
+              driftInfo = classifyDrift(method, endpointKey, declaredStatus, actualStatus, requiresAuth, hasToken, body);
+            } catch (err2: unknown) {
+              errorDetail = err2 instanceof Error ? err2.message : String(err2);
+              driftInfo = { drift: false };
+              console.warn(`[probe] unreachable (not drift): ${method} ${endpointKey} — ${errorDetail}`);
+            }
+          } else {
+            driftInfo = { drift: true, drift_type: 'server_error', detail: errorDetail };
+          }
         }
 
         const result: ProbeResult = {

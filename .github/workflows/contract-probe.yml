@@ -12,7 +12,7 @@ on:
       staging_url:
         description: "Staging URL to probe"
         required: false
-        default: "https://co-artelonga-staging.fly.dev"
+        default: "https://co.artelonga.com.br"
 
   # Run on PRs that touch the API surface so drift is caught before merge
   pull_request:
@@ -41,7 +41,7 @@ jobs:
     continue-on-error: ${{ github.event_name == 'pull_request' }}
 
     env:
-      STAGING_URL: ${{ github.event.inputs.staging_url || 'https://co-artelonga-staging.fly.dev' }}
+      STAGING_URL: ${{ github.event.inputs.staging_url || 'https://co.artelonga.com.br' }}
       CO_STAGING_ADMIN_TOKEN: ${{ secrets.CO_STAGING_ADMIN_TOKEN }}
 
     steps:
