@@ -10,6 +10,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI builds are one-shot — incremental compilation only bloats target/ and
+  # has caused repeated runner disk-full failures on cold builds.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   test:
