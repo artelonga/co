@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-425",
+  "title": "co-auto: capturar usage da sessão (stream-json) e reportar ao CO via API",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-425.md",
+  "branch": "feat/CO-425-coauto-usage-capture",
+  "merge_sha": "89a998478b732a1971298928156cc65327d89ca4",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/214",
+    "number": 214
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T17:29:29Z",
+  "files_changed": 5,
+  "lines_added": 607,
+  "lines_removed": 15,
+  "labels": [
+    "type:feat",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-425 — co-auto: capture Claude usage via stream-json, POST best-effort\n\nco-auto now invokes headless Claude Code with `--output-format stream-json --verbose`\nand parses the streamed NDJSON events for per-message token `usage`\n(`input_tokens`, `output_tokens`, `cache_creation_input_tokens`,\n`cache_read_input_tokens`, `model`) plus the final `result` event\n(`num_turns`, `duration_ms`, `total_cost_usd`). Usage is aggregated per task\ninto a serializable `SessionUsage` and POSTed best-effort to the CO ingestion\nendpoint.\n\n- New `co-auto::usage` module: `SessionUsage` struct + `parse_stream_json()` +\n  `assistant_text()` (re-emits the human assistant text to the launcher log so\n  task visibility is unchanged).\n- The aggregated tokens now feed the existing `AgentSessionRecord` (preferring\n  stream-json over the legacy stdout scraping), and a one-line summary is printed\n  per task: `usage: 19.0k in (89% cached) / 460 out — sonnet — 6m12s`.\n- New best-effort POST to `CO_USAGE_ENDPOINT` (`/api/v1/usage/sessions`),\n  **default OFF** — a no-op when the env var is unset. Auth reuses the existing\n  `CO_SESSION_TOKEN` bearer scheme. Hostname/model/outcome included in the payload\n  (CO-426 defines the canonical schema).\n\n### Why\n\nTelemetry must never block or fail a co-auto task. Every failure mode — parse\nerror on a stream line, missing endpoint, network/POST failure, serialize error —\nis swallowed and logged; the task still succeeds. Subscription auth reports no\nUSD, so cost is only attached when the `result` event carries `total_cost_usd`.\nThis is the data source for the real-time usage dashboard (CO-424 epic / CO-426).",
+  "summary": "As Operador de launchers co-auto em várias máquinas, QUERO que cada sessão headless capture seu consumo de tokens e o reporte ao CO central, PARA que o dashboard (CO-426) mostre usage real por task/un",
+  "co_auto_version": "0.1.0"
+}
