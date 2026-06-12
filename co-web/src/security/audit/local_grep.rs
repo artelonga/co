@@ -300,10 +300,24 @@ impl LocalGrepBackend {
         files
     }
 
-    /// Run `git diff --name-only base_ref..head_ref` and return changed source files.
+    /// Run `git diff --name-only base_ref...head_ref` and return changed source files.
     async fn changed_files(base_ref: &str, head_ref: &str) -> Vec<PathBuf> {
+        // CO-388 (security hardening): refs are attacker-controllable (they
+        // arrive from the scan request body). Reject anything outside the safe
+        // git-ref charset to prevent argument injection (e.g. a ref of
+        // `--output=...`). The trailing `--` terminates option/revision parsing
+        // so the range can never be reinterpreted as a pathspec or option.
+        if !super::is_safe_git_ref(base_ref) || !super::is_safe_git_ref(head_ref) {
+            warn!("security: refusing git diff with unsafe ref(s): {base_ref:?}...{head_ref:?}");
+            return vec![];
+        }
         let output = tokio::process::Command::new("git")
-            .args(["diff", "--name-only", &format!("{base_ref}...{head_ref}")])
+            .args([
+                "diff",
+                "--name-only",
+                &format!("{base_ref}...{head_ref}"),
+                "--",
+            ])
             .output()
             .await;
 

@@ -169,6 +169,20 @@ impl ClaudeSecurityBackend {
     }
 }
 
+/// Truncate `s` to at most `max_bytes`, never splitting a UTF-8 codepoint.
+/// Walks back from `max_bytes` to the nearest char boundary (cheap — at most 3
+/// bytes). Returns the whole string if it is already within budget.
+fn truncate_on_char_boundary(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 fn parse_findings(text: &str) -> Result<Vec<Finding>, anyhow::Error> {
     // Extract the JSON array from the response (Claude may wrap it in backticks)
     let json_start = text.find('[').unwrap_or(0);
@@ -223,9 +237,18 @@ impl SecurityAuditBackend for ClaudeSecurityBackend {
             return Ok(vec![]);
         }
 
+        // CO-388 (security hardening): refs are attacker-controllable; reject
+        // anything outside the safe git-ref charset to prevent argument
+        // injection (e.g. a ref of `--output=...`). The trailing `--`
+        // terminates option/revision parsing.
+        if !super::is_safe_git_ref(base_ref) || !super::is_safe_git_ref(head_ref) {
+            warn!("security: refusing git diff with unsafe ref(s): {base_ref:?}...{head_ref:?}");
+            return Ok(vec![]);
+        }
+
         // Get the diff content via git
         let output = tokio::process::Command::new("git")
-            .args(["diff", &format!("{base_ref}...{head_ref}")])
+            .args(["diff", &format!("{base_ref}...{head_ref}"), "--"])
             .output()
             .await;
 
@@ -249,12 +272,11 @@ impl SecurityAuditBackend for ClaudeSecurityBackend {
             return Ok(vec![]);
         }
 
-        // Truncate diff to avoid token limits (~100KB)
-        let diff_truncated = if diff.len() > 100_000 {
-            &diff[..100_000]
-        } else {
-            &diff
-        };
+        // Truncate diff to avoid token limits (~100KB). CO-388 (security
+        // hardening): slice on a UTF-8 char boundary — diffs in this repo carry
+        // Portuguese accents and emoji, so `&diff[..100_000]` would panic when
+        // byte 100_000 lands mid-codepoint.
+        let diff_truncated = truncate_on_char_boundary(&diff, 100_000);
 
         self.call_claude(diff_truncated).await
     }
@@ -386,6 +408,24 @@ mod tests {
     fn parse_findings_empty_array() {
         let findings = parse_findings("[]").unwrap();
         assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn truncate_never_splits_a_codepoint() {
+        // 'ç' is 2 bytes; build a string where the byte budget lands mid-char.
+        let s = "açúcar".repeat(10_000); // lots of multibyte chars
+        for budget in [0, 1, 2, 3, 50, 99_999, 100_000] {
+            let t = truncate_on_char_boundary(&s, budget);
+            // Must be valid UTF-8 (it is, by type) AND a real prefix.
+            assert!(t.len() <= budget.min(s.len()) || budget >= s.len());
+            assert!(s.starts_with(t));
+        }
+    }
+
+    #[test]
+    fn truncate_returns_whole_string_when_within_budget() {
+        let s = "small string";
+        assert_eq!(truncate_on_char_boundary(s, 100_000), s);
     }
 
     #[test]

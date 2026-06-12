@@ -153,6 +153,34 @@ impl Finding {
 pub type AuditResult = Result<Vec<Finding>, anyhow::Error>;
 
 // ---------------------------------------------------------------------------
+// Git ref validation (argument-injection defence)
+// ---------------------------------------------------------------------------
+
+/// Validate a git ref against a conservative safe charset before passing it to
+/// `git`. Defends against argument injection (e.g. a ref like
+/// `--output=/etc/passwd` or one embedding whitespace) when the ref is
+/// attacker-controllable (CO-388 security hardening).
+///
+/// Allowed: ASCII alphanumerics plus `_ - . / @ ~ ^`. These cover branch names,
+/// tags, SHAs, and relative refs (`HEAD~3`, `origin/main`, `v1.2.3`, `abc^`).
+/// Rejected: a leading `-` (would be parsed as a git option), any `..`
+/// substring (range/parent-traversal trick beyond the intended `...`), and any
+/// character outside the allowlist (whitespace, `;`, `|`, `=`, etc.).
+pub fn is_safe_git_ref(r: &str) -> bool {
+    if r.is_empty() || r.len() > 256 {
+        return false;
+    }
+    if r.starts_with('-') {
+        return false;
+    }
+    if r.contains("..") {
+        return false;
+    }
+    r.chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.' | '/' | '@' | '~' | '^'))
+}
+
+// ---------------------------------------------------------------------------
 // SecurityAuditBackend trait
 // ---------------------------------------------------------------------------
 
@@ -264,6 +292,41 @@ mod tests {
         for s in &["info", "low", "medium", "high", "critical"] {
             let sev = Severity::parse(s);
             assert_eq!(sev.as_str(), *s);
+        }
+    }
+
+    #[test]
+    fn safe_git_refs_accepted() {
+        for r in &[
+            "main",
+            "origin/main",
+            "HEAD",
+            "HEAD~3",
+            "v1.2.3",
+            "feat/CO-388-thing",
+            "abc123def456",
+            "release@1.0",
+            "topic^",
+        ] {
+            assert!(is_safe_git_ref(r), "expected {r} to be accepted");
+        }
+    }
+
+    #[test]
+    fn unsafe_git_refs_rejected() {
+        for r in &[
+            "",
+            "-",
+            "--output=/etc/passwd",       // option injection
+            "--upload-pack=touch /tmp/x", // option injection
+            "main..evil",                 // double-dot range trick
+            "a b",                        // whitespace
+            "main;rm -rf /",              // shell metacharacter
+            "main|cat",
+            "a=b",
+            "branch$(whoami)",
+        ] {
+            assert!(!is_safe_git_ref(r), "expected {r:?} to be rejected");
         }
     }
 }

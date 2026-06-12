@@ -10,6 +10,7 @@
 //! All endpoints require GitHub admin auth (via `AllowedAdmins` extension).
 
 use axum::extract::{Path, Query, State};
+use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -19,6 +20,7 @@ use serde_json::json;
 use tracing::info;
 
 use crate::eda::event::{Event, Visibility};
+use crate::github_auth::{self, GitHubAdmin};
 use crate::security::audit::Severity;
 use crate::server::AppState;
 
@@ -43,6 +45,7 @@ pub struct FindingResponse {
     pub resolved_at: Option<String>,
     pub resolution_kind: Option<String>,
     pub resolution_pr: Option<i64>,
+    pub resolved_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,29 +84,29 @@ async fn list_findings(
     Query(q): Query<ListQuery>,
 ) -> impl IntoResponse {
     let storage = state.core.storage.lock();
-    let limit = q.limit.unwrap_or(50).min(200);
-    let offset = q.offset.unwrap_or(0);
+    // CO-388 (security hardening): clamp LIMIT to a positive, bounded range.
+    // SQLite treats LIMIT -1 as "unlimited", so a negative `limit` would be a
+    // trivial DoS lever; floor at 1 and cap at 200.
+    let limit = q.limit.unwrap_or(50).clamp(1, 200);
+    let offset = q.offset.unwrap_or(0).max(0);
 
-    let mut sql = "SELECT id, pr_number, severity, category, file_path, \
-                   line_start, line_end, description, cwe, cve_match, \
-                   suggested_patch, detected_at, resolved_at, resolution_kind, \
-                   resolution_pr \
-                   FROM security_findings WHERE 1=1"
-        .to_string();
+    // CO-388 (security hardening): all variable inputs are bound params — no
+    // string interpolation into SQL. The `severity` filter is applied via an
+    // optional bound parameter so the query text is static.
+    let sql = "SELECT id, pr_number, severity, category, file_path, \
+               line_start, line_end, description, cwe, cve_match, \
+               suggested_patch, detected_at, resolved_at, resolution_kind, \
+               resolution_pr, resolved_by \
+               FROM security_findings \
+               WHERE (?1 IS NULL OR severity = ?1) \
+                 AND (?2 IS NULL \
+                      OR (?2 = 1 AND resolved_at IS NOT NULL) \
+                      OR (?2 = 0 AND resolved_at IS NULL)) \
+               ORDER BY detected_at DESC LIMIT ?3 OFFSET ?4";
 
-    if let Some(sev) = &q.severity {
-        sql.push_str(&format!(" AND severity = '{}'", sev.replace('\'', "''")));
-    }
-    match q.resolved {
-        Some(true) => sql.push_str(" AND resolved_at IS NOT NULL"),
-        Some(false) => sql.push_str(" AND resolved_at IS NULL"),
-        None => {}
-    }
-    sql.push_str(&format!(
-        " ORDER BY detected_at DESC LIMIT {limit} OFFSET {offset}"
-    ));
+    let resolved_flag: Option<i64> = q.resolved.map(|b| if b { 1 } else { 0 });
 
-    let mut stmt = match storage.conn().prepare(&sql) {
+    let mut stmt = match storage.conn().prepare(sql) {
         Ok(s) => s,
         Err(e) => {
             return (
@@ -114,28 +117,30 @@ async fn list_findings(
         }
     };
 
-    let findings: Vec<FindingResponse> = match stmt.query_map([], |row| {
-        Ok(FindingResponse {
-            id: row.get(0)?,
-            pr_number: row.get(1)?,
-            severity: row.get(2)?,
-            category: row.get(3)?,
-            file_path: row.get(4)?,
-            line_start: row.get(5)?,
-            line_end: row.get(6)?,
-            description: row.get(7)?,
-            cwe: row.get(8)?,
-            cve_match: row.get(9)?,
-            suggested_patch: row.get(10)?,
-            detected_at: row.get(11)?,
-            resolved_at: row.get(12)?,
-            resolution_kind: row.get(13)?,
-            resolution_pr: row.get(14)?,
-        })
-    }) {
-        Ok(rows) => rows.flatten().collect(),
-        Err(_) => vec![],
-    };
+    let findings: Vec<FindingResponse> =
+        match stmt.query_map(params![q.severity, resolved_flag, limit, offset], |row| {
+            Ok(FindingResponse {
+                id: row.get(0)?,
+                pr_number: row.get(1)?,
+                severity: row.get(2)?,
+                category: row.get(3)?,
+                file_path: row.get(4)?,
+                line_start: row.get(5)?,
+                line_end: row.get(6)?,
+                description: row.get(7)?,
+                cwe: row.get(8)?,
+                cve_match: row.get(9)?,
+                suggested_patch: row.get(10)?,
+                detected_at: row.get(11)?,
+                resolved_at: row.get(12)?,
+                resolution_kind: row.get(13)?,
+                resolution_pr: row.get(14)?,
+                resolved_by: row.get(15)?,
+            })
+        }) {
+            Ok(rows) => rows.flatten().collect(),
+            Err(_) => vec![],
+        };
 
     Json(json!({"findings": findings, "limit": limit, "offset": offset})).into_response()
 }
@@ -145,7 +150,8 @@ async fn get_finding(State(state): State<AppState>, Path(id): Path<String>) -> i
     let result = storage.conn().query_row(
         "SELECT id, pr_number, severity, category, file_path, \
          line_start, line_end, description, cwe, cve_match, \
-         suggested_patch, detected_at, resolved_at, resolution_kind, resolution_pr \
+         suggested_patch, detected_at, resolved_at, resolution_kind, resolution_pr, \
+         resolved_by \
          FROM security_findings WHERE id = ?1",
         params![id],
         |row| {
@@ -165,6 +171,7 @@ async fn get_finding(State(state): State<AppState>, Path(id): Path<String>) -> i
                 resolved_at: row.get(12)?,
                 resolution_kind: row.get(13)?,
                 resolution_pr: row.get(14)?,
+                resolved_by: row.get(15)?,
             })
         },
     );
@@ -186,6 +193,10 @@ async fn get_finding(State(state): State<AppState>, Path(id): Path<String>) -> i
 
 async fn resolve_finding(
     State(state): State<AppState>,
+    // CO-388 (security hardening): the acting admin. The `require_github_admin`
+    // middleware inserts this into request extensions; resolving a finding can
+    // open the release gate, so we record WHO did it for the audit trail.
+    actor: GitHubAdmin,
     Path(id): Path<String>,
     Json(body): Json<ResolveBody>,
 ) -> impl IntoResponse {
@@ -200,13 +211,20 @@ async fn resolve_finding(
             .into_response();
     }
 
+    let actor_login = actor.0;
     let now = chrono::Utc::now().to_rfc3339();
     let storage = state.core.storage.lock();
     let result = storage.conn().execute(
         "UPDATE security_findings \
-         SET resolved_at = ?1, resolution_kind = ?2, resolution_pr = ?3 \
-         WHERE id = ?4 AND resolved_at IS NULL",
-        params![now, body.resolution_kind, body.resolution_pr, id],
+         SET resolved_at = ?1, resolution_kind = ?2, resolution_pr = ?3, resolved_by = ?4 \
+         WHERE id = ?5 AND resolved_at IS NULL",
+        params![
+            now,
+            body.resolution_kind,
+            body.resolution_pr,
+            actor_login,
+            id
+        ],
     );
 
     match result {
@@ -217,6 +235,10 @@ async fn resolve_finding(
             .into_response(),
         Ok(_) => {
             drop(storage);
+            info!(
+                "security: finding {id} resolved as '{}' by admin '{actor_login}'",
+                body.resolution_kind
+            );
             state.core.eda_bus.publish(Event::new(
                 "security.finding_resolved",
                 None,
@@ -225,10 +247,12 @@ async fn resolve_finding(
                     "finding_id": id,
                     "resolution_kind": body.resolution_kind,
                     "resolution_pr": body.resolution_pr,
+                    "resolved_by": actor_login,
                 }),
                 Visibility::System,
             ));
-            Json(json!({"ok": true, "resolved_at": now})).into_response()
+            Json(json!({"ok": true, "resolved_at": now, "resolved_by": actor_login}))
+                .into_response()
         }
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
@@ -277,12 +301,16 @@ async fn scan_status(State(state): State<AppState>) -> impl IntoResponse {
 
 async fn trigger_scan(
     State(state): State<AppState>,
+    // CO-388 (security hardening): record which admin triggered the scan /
+    // activated the emergency override.
+    actor: GitHubAdmin,
     Json(body): Json<ScanBody>,
 ) -> impl IntoResponse {
+    let actor_login = actor.0;
     // Emergency override: log prominently before proceeding.
     if body.ignore_security_findings.unwrap_or(false) {
         tracing::error!(
-            "security: --ignore-security-findings override activated — \
+            "security: --ignore-security-findings override activated by admin '{actor_login}' — \
              operator manually bypassing security gate"
         );
         state.core.eda_bus.publish(Event::new(
@@ -291,10 +319,57 @@ async fn trigger_scan(
             None,
             json!({
                 "override": "ignore-security-findings",
+                "actor": actor_login,
                 "icon": "⚠️",
             }),
             Visibility::System,
         ));
+    }
+
+    // CO-388 (security hardening): enforce the daily scan cap with a DB-backed
+    // counter. `build_backend()` constructs a fresh backend per request, so the
+    // backend's own in-memory counter never tripped — the limit must live in
+    // shared, persistent state.
+    let max_scans = std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(50);
+    let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+    {
+        let storage = state.core.storage.lock();
+        let conn = storage.conn();
+        // Atomic upsert-then-read: increment today's count and read it back.
+        let new_count: i64 = match conn.query_row(
+            "INSERT INTO security_scan_counts (scan_day, count) VALUES (?1, 1) \
+                 ON CONFLICT(scan_day) DO UPDATE SET count = count + 1 \
+                 RETURNING count",
+            params![today],
+            |r| r.get(0),
+        ) {
+            Ok(c) => c,
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        };
+        if new_count > max_scans {
+            tracing::warn!(
+                "security: daily scan limit ({max_scans}) reached on {today} \
+                 — rejecting scan request"
+            );
+            return (
+                axum::http::StatusCode::TOO_MANY_REQUESTS,
+                Json(json!({
+                    "error": "daily scan limit reached",
+                    "max_scans_per_day": max_scans,
+                    "scans_today": new_count,
+                })),
+            )
+                .into_response();
+        }
     }
 
     let backend = crate::security::audit::build_backend();
@@ -371,4 +446,10 @@ pub fn router() -> Router<AppState> {
         .route("/findings/{id}", get(get_finding).patch(resolve_finding))
         .route("/scan/status", get(scan_status))
         .route("/scan", post(trigger_scan))
+        // CO-388 (security hardening): enforce GitHub admin auth on EVERY
+        // security endpoint. Without this layer the whole findings API —
+        // including `resolve_finding` (which opens the release gate) and
+        // `trigger_scan` — was reachable unauthenticated. Mirrors the
+        // pattern used by gestao_routes / webhook_routes.
+        .layer(middleware::from_fn(github_auth::require_github_admin))
 }
