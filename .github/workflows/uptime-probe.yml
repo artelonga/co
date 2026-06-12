@@ -1,0 +1,112 @@
+name: Uptime Probe
+
+# CO-407 — external uptime alerting.
+#
+# Prod outages must NOT wait for manual discovery (three user-found outages so
+# far). This scheduled workflow runs OUTSIDE the prod machine and curls the
+# public /api/health endpoint every 5 minutes. On N consecutive failures within
+# a single run it raises a `health.down` alert; when the endpoint returns it
+# emits `health.recovered` with the downtime duration.
+#
+# It needs no new infra. The notification channel is configured via repo
+# secrets (see scripts/uptime-probe.sh header):
+#   - RESEND_API_KEY  -> e-mail alerts via Resend (already used by prod), and/or
+#   - NTFY_URL        -> push alerts via ntfy.
+# With neither set, alerts still appear as GitHub Actions annotations + run
+# summary, so the probe is useful immediately and never silently green.
+#
+# Add a channel secret with, e.g.:
+#   gh secret set RESEND_API_KEY --body "<key>"
+#   gh secret set NTFY_URL       --body "https://ntfy.sh/<your-topic>"
+
+on:
+  schedule:
+    # Every 5 minutes. ~5 min detection budget matches the AC.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      checks:
+        description: "Consecutive in-run checks required before alerting"
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never let two probe runs overlap (they'd race on the shared state cache).
+  group: uptime-probe
+  cancel-in-progress: false
+
+jobs:
+  probe-prod:
+    name: Probe prod (high priority)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Restore the latest persisted probe state. Cache keys are immutable, so
+      # we save under a per-run key and restore the newest match by prefix.
+      - name: Restore probe state
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .probe-state
+          key: uptime-state-prod-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-prod-
+
+      - name: Probe prod /api/health
+        env:
+          CHECKS: ${{ github.event.inputs.checks || '3' }}
+          CHECK_INTERVAL: "20"
+          PRIORITY: "high"
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          NTFY_URL: ${{ secrets.NTFY_URL }}
+          ALERT_TO: ${{ secrets.ALERT_TO || 'yuri@artelonga.com.br' }}
+        run: |
+          mkdir -p .probe-state
+          bash scripts/uptime-probe.sh prod \
+            https://co.artelonga.com.br/api/health \
+            .probe-state/prod.json
+
+      - name: Persist probe state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .probe-state
+          key: uptime-state-prod-${{ github.run_id }}
+
+  probe-staging:
+    name: Probe staging (digest only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore probe state
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .probe-state
+          key: uptime-state-staging-${{ github.run_id }}
+          restore-keys: |
+            uptime-state-staging-
+
+      - name: Probe staging /api/health
+        env:
+          CHECKS: ${{ github.event.inputs.checks || '3' }}
+          CHECK_INTERVAL: "20"
+          # Digest-only: staging never pushes — annotation + run summary only.
+          PRIORITY: "digest"
+        run: |
+          mkdir -p .probe-state
+          bash scripts/uptime-probe.sh staging \
+            https://staging.co.artelonga.com.br/api/health \
+            .probe-state/staging.json
+
+      - name: Persist probe state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .probe-state
+          key: uptime-state-staging-${{ github.run_id }}
