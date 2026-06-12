@@ -1,0 +1,37 @@
+{
+  "co_id": "CO-428",
+  "spec_title": "Context engineering: digest recursivo de universos + camadas de contexto enxutas no co-auto",
+  "timestamp": "2026-06-12T21:41:20.251Z",
+  "items": [
+    {
+      "text": "`co universe digest [<key>] [--depth N] [--format md|json]` emite digest",
+      "pattern": "universe|digest|[- _][- _]depth|[- _][- _]format",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Fonte = registry SQLite, sem mapeamento hardcoded (restrição CO-424).",
+      "pattern": "co[- _]424|fonte|registry|sqlite|mapeamento",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Byte-a-byte estável: 2 testes de integração (md + json) rodam o digest",
+      "pattern": "byte[- _]a[- _]byte|testes|integra|rodam",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 3,
+  "passed": 1,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 33
+}

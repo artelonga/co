@@ -1,0 +1,21 @@
+{
+  "co_id": "CO-423",
+  "spec_title": "Source-deploy toolchain — re-parent API + adapter existence-check + auto-index on import (unblocks CO-419)",
+  "timestamp": "2026-06-12T21:41:19.881Z",
+  "items": [
+    {
+      "text": "`UpdateUniverseRequest` aceita `parent_key: Option<String>`; o handler",
+      "pattern": "updateuniverserequest|aceita|parent|option",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "login-options returns expected shape",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 1,
+  "passed": 1,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

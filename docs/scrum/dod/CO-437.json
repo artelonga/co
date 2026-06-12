@@ -1,0 +1,21 @@
+{
+  "co_id": "CO-437",
+  "spec_title": "Usage metadata enrichment: tool usage + outputs + PR links, and per-model×per-universe breakdown",
+  "timestamp": "2026-06-12T21:41:20.429Z",
+  "items": [
+    {
+      "text": "**Captura (CO-425 estendido):** o report de usage passa a incluir, do",
+      "pattern": "co[- _]425|captura|estendido|report",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "GET /api/v1/universes/:slug reports content_count",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 1,
+  "passed": 1,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

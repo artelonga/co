@@ -1,0 +1,69 @@
+{
+  "co_id": "CO-427",
+  "spec_title": "Model routing: modelo por task (frontmatter) + política priority→model + downshift por janela de uso",
+  "timestamp": "2026-06-12T21:41:20.163Z",
+  "items": [
+    {
+      "text": "Parser de task aceita `model:` opcional no frontmatter; valor inválido →",
+      "pattern": "parser|aceita|model|opcional",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Política priority→model configurável no config do co-auto",
+      "pattern": "co[- _]auto|priority|model|configur|config",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Downshift implementado com soft-limit configurável",
+      "pattern": "soft[- _]limit|downshift|implementado|configur",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`--model` da CLI continua vencendo tudo (sem regressão).",
+      "pattern": "[- _][- _]model|continua|vencendo|regress",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "no-regression — board navigation still works after CO-280 changes",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`--cycle` resolve o modelo POR TASK (não mais um modelo para o run",
+      "pattern": "[- _][- _]cycle|resolve|modelo",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Testes: precedência (4 níveis), frontmatter inválido, fail-open sem",
+      "pattern": "fail[- _]open|testes|preced|frontmatter",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Docs: seção \"Model routing\" no README do co-auto + exemplo de",
+      "pattern": "co[- _]auto|model|routing|readme",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 7,
+  "passed": 1,
+  "pending": 6,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 14
+}

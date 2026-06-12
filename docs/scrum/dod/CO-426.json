@@ -1,0 +1,101 @@
+{
+  "co_id": "CO-426",
+  "spec_title": "co-web: ingestão de usage + registry de launchers + dashboard Gestão em tempo real",
+  "timestamp": "2026-06-12T21:41:20.070Z",
+  "items": [
+    {
+      "text": "Migration nova (v75): tabela `agent_sessions` (id, task_key, universe_key,",
+      "pattern": "migration|tabela|agent|sessions",
+      "matched_file": "co-web/e2e/archived/co-275-agent-sessions.spec.ts",
+      "matched_test": "GET sessions/latest returns null for unknown task",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`POST /api/v1/usage/sessions` (token auth, mesmo esquema do vault/sync):",
+      "pattern": "api/v1/usage/sessions|sync|usage|sessions|token|mesmo",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`POST /api/v1/usage/heartbeat`: launcher registra sessão ativa",
+      "pattern": "api/v1/usage/heartbeat|usage|heartbeat|launcher|registra",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "usage-limit-overlay contains the expected headline and message",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /api/v1/usage/summary?window=5h|day|week&by=universe|model|machine|task`",
+      "pattern": "api/v1/usage/summary|usage|summary|window|universe",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /api/v1/usage/active` — launchers ativos agora.",
+      "pattern": "api/v1/usage/active|usage|active|launchers|ativos",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Active universe item is highlighted in the sidebar tree",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Painel `usage` na área Gestão: (a) launchers ativos (máquina, task,",
+      "pattern": "painel|usage|launchers|ativos",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "usage-limit-overlay contains the expected headline and message",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Visão \"projetos\": linha por universo com quadro, tasks todo/in_progress,",
+      "pattern": "in|projetos|linha|universo|quadro",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Workers/subscribers novos não dão panic segurando `Mutex<Storage>`.",
+      "pattern": "subscribers|workers|novos|panic",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Testes de integração das 4 rotas (tower::ServiceExt, sem porta real).",
+      "pattern": "testes|integra|rotas|tower",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "openapi.yaml regenerado E `api-catalog.md` atualizado no mesmo PR.",
+      "pattern": "api[- _]catalog|openapi|regenerado|atualizado",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] OpenAPI documents the new CI events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Nenhum mapeamento universo→máquina/repo hardcoded — tudo vem do DB ou",
+      "pattern": "repo|nenhum|mapeamento|universo|quina",
+      "matched_file": "co-web/e2e/co-landing.spec.ts",
+      "matched_test": "'Criar universo' opens criar modal",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 11,
+  "passed": 8,
+  "pending": 3,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 73
+}

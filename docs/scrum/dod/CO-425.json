@@ -1,0 +1,69 @@
+{
+  "co_id": "CO-425",
+  "spec_title": "co-auto: capturar usage da sessão (stream-json) e reportar ao CO via API",
+  "timestamp": "2026-06-12T21:41:19.972Z",
+  "items": [
+    {
+      "text": "Headless: co-auto passa `--output-format stream-json --verbose`, parseia",
+      "pattern": "co[- _]auto|output[- _]format|stream[- _]json|headless|passa|[- _][- _]output[- _]format",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Novo struct `SessionUsage` serializável; ao fim da task (sucesso OU",
+      "pattern": "struct|sessionusage|serializ|sucesso",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "API returns 402 with usage_limit error structure when gate fires",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Endpoint de destino configurável (`CO_USAGE_ENDPOINT`) — nada hardcoded;",
+      "pattern": "endpoint|destino|configur|usage",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Resumo impresso no terminal ao fim de cada task:",
+      "pattern": "resumo|impresso|terminal",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Testes: parser do stream-json com fixtures (mensagens usage + result);",
+      "pattern": "stream[- _]json|testes|parser|fixtures",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Interactive: ao final da sessão, localizar o `.jsonl` mais recente da",
+      "pattern": "interactive|final|localizar|jsonl",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`--no-usage-report` desliga o report (hoje o report já é OFF por default;",
+      "pattern": "no[- _]usage[- _]report|[- _][- _]no[- _]usage[- _]report|desliga|report",
+      "matched_file": "co-web/e2e/archived/usage-gate.spec.ts",
+      "matched_test": "GET /api/v1/universes/:slug reports content_count",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 7,
+  "passed": 3,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 43
+}

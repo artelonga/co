@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-429",
+  "spec_title": "claude-code como universo (source:github) + catálogo de superfícies de integração (tools) consistente com modelos",
+  "timestamp": "2026-06-12T21:41:20.344Z",
+  "items": [
+    {
+      "text": "Importar `anthropics/claude-code` via `co source add` (adapter CO-417,",
+      "pattern": "claude[- _]code|co[- _]417|importar|anthropics|source",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Registro 100% via DB/API (PUT/source add) — nenhum mapeamento",
+      "pattern": "api|source|registro|nenhum|mapeamento",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`index.md` de entrada (o adapter pós-CO-423 garante) apontando para os",
+      "pattern": "s[- _]co[- _]423|index|entrada|adapter",
+      "matched_file": "co-web/e2e/wave-2/co-245-code-editor.spec.ts",
+      "matched_test": "entry is indexed as asset.code after PUT",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Re-sync funciona (rodar `co source sync` duas vezes é idempotente).",
+      "pattern": "re[- _]sync|funciona|rodar|source",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "No universo `co`, criar entradas `tools/claude-code/<superficie>.md`",
+      "pattern": "claude[- _]code|claude[- _]code/|universo|criar|entradas|tools",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L3 — Tools section is visible and distinct from project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Links cross-universe na sintaxe canônica `key::path` (storage) /",
+      "pattern": "cross[- _]universe|links|sintaxe|storage",
+      "matched_file": "co-web/e2e/deep-link-404.spec.ts",
+      "matched_test": "/${universe}/${UNKNOWN_SLUG} renders the 404 SPA view with recovery links",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`co universe digest claude-code` (CO-428) lista o universo com o",
+      "pattern": "claude[- _]code|co[- _]428|universe|digest",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`GET /api/v1/universes/claude-code` → key, parent, contagens corretas.",
+      "pattern": "claude[- _]code|api/v1/universes/claude[- _]code|universes|parent|contagens",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sub-universe items are indented relative to their parent",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Catálogo validado por `co validate all` (schema de tools respeitado).",
+      "pattern": "validado|validate|schema|tools",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L3 — Tools section is visible and distinct from project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Nada de MCP: o catálogo documenta superfícies CLI/arquivo/API apenas",
+      "pattern": "arquivo/api|documenta|superf|arquivo|apenas",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 10,
+  "passed": 7,
+  "pending": 3,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 70
+}
