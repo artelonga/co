@@ -291,16 +291,27 @@ jobs:
           # path NOTHING ever wrote, making the gate vacuously green.
           mkdir -p docs/scrum/security
           AUDIT_JSON="docs/scrum/security/security-audit-${PR_NUMBER}.json"
+          # Content-stable: NO timestamp here. A scanned_at would change every
+          # run, defeating the `git diff --cached --quiet` idempotency guard
+          # below and pushing a fresh audit commit onto the PR branch on every
+          # author push (churn). The commit's own metadata records when. The
+          # /tmp artifact copy carries the timestamp for the run record.
           cat > "$AUDIT_JSON" <<EOF
           {
             "pr_number": ${PR_NUMBER},
             "backend": "local-grep",
             "finding_count": ${FINDINGS},
-            "blocker_count": ${BLOCKERS},
-            "scanned_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            "blocker_count": ${BLOCKERS}
           }
           EOF
-          cp "$AUDIT_JSON" "/tmp/security-audit-${PR_NUMBER}.json"
+          # Artifact copy keeps the timestamp (not committed, so no churn).
+          python3 - "$AUDIT_JSON" "/tmp/security-audit-${PR_NUMBER}.json" <<'PY'
+import json, sys, datetime
+src, dst = sys.argv[1], sys.argv[2]
+d = json.load(open(src))
+d["scanned_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+json.dump(d, open(dst, "w"), indent=2)
+PY
           echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
         env:
           JWT_SECRET: "ci-test-secret-do-not-use-in-production"
