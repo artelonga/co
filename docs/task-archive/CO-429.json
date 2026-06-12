@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-429",
+  "title": "claude-code como universo (source:github) + catálogo de superfícies de integração (tools) consistente com modelos",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-429.md",
+  "branch": "feat/CO-429-claude-code-como-universo-source-github-",
+  "merge_sha": "a9bdb615d8d6ef2e8beb43e6d161970b1b3edbcf",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/219",
+    "number": 219
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T21:38:56Z",
+  "files_changed": 10,
+  "lines_added": 485,
+  "lines_removed": 5,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-429 — claude-code como universo (source:github) + catálogo de superfícies de integração\n\nThe `claude-code` universe (registered by CO-364) now has the correct metadata:\n`parent: co` and `visibility: private`. Boot-time reconcile UPDATEs fix existing\ninstalls. The upstream repo's content subdirs were corrected from `docs/` (which does\nnot exist) to `examples/` and `plugins/`. Seven integration-surface entries were added\nto `tools/claude-code/` in the `co` universe — one per surface: `headless-stream-json`,\n`model-flag`, `claude-md`, `skills`, `hooks`, `session-jsonl`, `otel-telemetry`. Each\nentry documents what the surface is, when CO uses it (linked task), a minimal example,\nand a cross-universe link (`[[claude-code::...]]`) to the canonical upstream doc.\n\n### Why\n\nAgents and launchers operating on CO need a navigable, on-demand reference for Claude\nCode integration surfaces instead of loading that knowledge into each session's context.\nThe tool catalog lets `co universe digest co` surface the integration points, and\n`co source sync claude-code` keeps the upstream docs current.",
+  "summary": "As Launcher/agente operando sobre o CO, QUERO o repo do Claude Code registrado como universo subscrito e um catálogo navegável das superfícies de integração (CLAUDE.md, skills, hooks, headless flags, ",
+  "co_auto_version": "0.1.0"
+}
