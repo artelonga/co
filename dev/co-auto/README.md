@@ -21,9 +21,12 @@ match wins):
 1. **`--model` on the CLI** — operator override. Pins every task in the run.
 2. **`model:` in the task frontmatter** — per-task override (see example below).
 3. **Priority→model policy** — `high → opus`, `medium → sonnet`, `low → haiku`
-   (`critical` maps to the `high` tier). All configurable.
-4. **Quality-first default** — `opus` when nothing else applies (owner decision,
-   2026-06-12: quality-first; unspecified tasks run on Opus).
+   (`critical` maps to the `high` tier), configurable. **Off by default** — only
+   consulted when you opt in with `routing.by_priority: true` (or
+   `CO_AUTO_ROUTING_BY_PRIORITY=1`).
+4. **Quality-first default** — `opus`. This is the **default** for any task with
+   no `--model` and no frontmatter `model:`, per the binding owner decision
+   (2026-06-12: *default = opus, **not** the priority tier; tiers are opt-in*).
 
 Model names are CLI aliases (`opus`/`sonnet`/`haiku`/…) passed through verbatim —
 they are **not** validated against a hardcoded id list, because the `claude` CLI
@@ -60,7 +63,8 @@ fall back to the defaults above.
 # work/<space>/project.yaml
 key: CO
 routing:
-  default: opus       # quality-first fallback
+  default: opus       # quality-first default — used when no model/frontmatter
+  by_priority: false  # opt in (true) to use the tiers below instead of `default`
   high: opus
   medium: sonnet
   low: haiku
@@ -70,7 +74,9 @@ routing:
 
 | Setting | Source | Default |
 |---|---|---|
-| priority policy + default | `project.yaml` `routing:` | `opus`/`sonnet`/`haiku`, default `opus` |
+| `default` (quality-first) | `project.yaml` `routing:` | `opus` |
+| `by_priority` (use tiers) | `routing:` **or** env `CO_AUTO_ROUTING_BY_PRIORITY` | `false` (off → opus default) |
+| priority tiers | `project.yaml` `routing:` | `opus`/`sonnet`/`haiku` (only if `by_priority`) |
 | `usage_soft_limit_5h_tokens` | `routing:` **or** env `CO_AUTO_SOFT_LIMIT_5H_TOKENS` | unset (downshift disabled) |
 | `usage_endpoint` | `routing:` **or** env `CO_USAGE_ENDPOINT` | unset (downshift disabled) |
 

@@ -5,10 +5,12 @@
 //!
 //! 1. `--model` explicit on the CLI (operator override — wins everything).
 //! 2. `model:` in the task's frontmatter (per-task override).
-//! 3. Priority→model policy from config (`high→opus`, `medium→sonnet`,
-//!    `low→haiku` by default, all configurable).
-//! 4. Quality-first default (`opus`) when nothing else applies — per the
-//!    owner decision of 2026-06-12.
+//! 3. Priority→model policy (`high→opus`, `medium→sonnet`, `low→haiku`,
+//!    configurable) — **only when opted in** via `routing.by_priority: true`
+//!    (or `CO_AUTO_ROUTING_BY_PRIORITY=1`). Off by default.
+//! 4. Quality-first default (`opus`) — this is the **default** for any task with
+//!    no `--model` / no frontmatter, per the binding owner decision of
+//!    2026-06-12 ("default = opus, *not* the priority tier; tiers are opt-in").
 //!
 //! After resolution, a **window downshift** runs (best-effort): co-auto reads
 //! CO-426's `GET /api/v1/usage/summary?window=5h`; if the rolling 5h token
@@ -65,6 +67,12 @@ pub struct RoutingConfig {
     pub medium: String,
     /// Model for `low` priority tasks.
     pub low: String,
+    /// Whether the priority→model policy is consulted at all. **Default `false`**
+    /// per the binding CO-427 owner decision: a task with no `--model` and no
+    /// frontmatter `model:` runs on the quality-first default (Opus), *not* its
+    /// priority tier. Set `routing.by_priority: true` (or
+    /// `CO_AUTO_ROUTING_BY_PRIORITY=1`) to opt into tiered routing.
+    pub by_priority: bool,
     /// Soft limit on rolling 5h total tokens that triggers a one-tier downshift.
     /// `None` disables window downshift entirely.
     pub usage_soft_limit_5h_tokens: Option<i64>,
@@ -80,6 +88,7 @@ impl Default for RoutingConfig {
             high: "opus".into(),
             medium: "sonnet".into(),
             low: "haiku".into(),
+            by_priority: false,
             usage_soft_limit_5h_tokens: None,
             usage_endpoint: None,
         }
@@ -94,6 +103,7 @@ struct RoutingFile {
     high: Option<String>,
     medium: Option<String>,
     low: Option<String>,
+    by_priority: Option<bool>,
     usage_soft_limit_5h_tokens: Option<i64>,
     usage_endpoint: Option<String>,
 }
@@ -127,6 +137,9 @@ impl RoutingConfig {
             if let Some(v) = rf.low {
                 cfg.low = v;
             }
+            if let Some(v) = rf.by_priority {
+                cfg.by_priority = v;
+            }
             if rf.usage_soft_limit_5h_tokens.is_some() {
                 cfg.usage_soft_limit_5h_tokens = rf.usage_soft_limit_5h_tokens;
             }
@@ -144,6 +157,10 @@ impl RoutingConfig {
             && !v.is_empty()
         {
             cfg.usage_endpoint = Some(v);
+        }
+        if let Ok(v) = std::env::var("CO_AUTO_ROUTING_BY_PRIORITY") {
+            let v = v.trim();
+            cfg.by_priority = v == "1" || v.eq_ignore_ascii_case("true");
         }
 
         cfg
@@ -176,7 +193,9 @@ pub fn resolve_model(
     if let Some(m) = task_model.filter(|s| !s.trim().is_empty()) {
         return (m.trim().to_string(), ModelSource::Frontmatter);
     }
-    if let Some(m) = cfg.for_priority(priority) {
+    if cfg.by_priority
+        && let Some(m) = cfg.for_priority(priority)
+    {
         return (m.to_string(), ModelSource::PriorityPolicy);
     }
     (cfg.default_model.clone(), ModelSource::DefaultQualityFirst)
@@ -290,6 +309,14 @@ mod tests {
         RoutingConfig::default()
     }
 
+    /// Config with the priority→model policy opted in (the non-default mode).
+    fn cfg_by_priority() -> RoutingConfig {
+        RoutingConfig {
+            by_priority: true,
+            ..RoutingConfig::default()
+        }
+    }
+
     // ---- precedence (4 levels) ----
 
     #[test]
@@ -307,8 +334,21 @@ mod tests {
     }
 
     #[test]
-    fn priority_policy_applies_when_no_override_or_frontmatter() {
+    fn default_is_opus_for_any_priority_when_not_opted_in() {
+        // Binding owner decision (2026-06-12): with no --model and no frontmatter,
+        // the DEFAULT is opus regardless of the task's priority tier. The
+        // priority policy is off unless `by_priority` is set.
         let c = cfg();
+        for priority in ["high", "critical", "medium", "low", "weird"] {
+            let (m, src) = resolve_model(None, None, priority, &c);
+            assert_eq!(m, "opus", "priority={priority} must default to opus");
+            assert_eq!(src, ModelSource::DefaultQualityFirst);
+        }
+    }
+
+    #[test]
+    fn priority_policy_applies_only_when_opted_in() {
+        let c = cfg_by_priority();
         assert_eq!(
             resolve_model(None, None, "high", &c),
             ("opus".to_string(), ModelSource::PriorityPolicy)
@@ -330,15 +370,17 @@ mod tests {
 
     #[test]
     fn unknown_priority_falls_to_quality_first_default() {
-        let (m, src) = resolve_model(None, None, "weird", &cfg());
+        // Even with the policy opted in, an unrecognized priority → opus default.
+        let (m, src) = resolve_model(None, None, "weird", &cfg_by_priority());
         assert_eq!(m, "opus");
         assert_eq!(src, ModelSource::DefaultQualityFirst);
     }
 
     #[test]
     fn empty_strings_are_treated_as_unset() {
-        // Empty CLI + empty frontmatter → falls through to priority policy.
-        let (m, src) = resolve_model(Some("  "), Some(""), "low", &cfg());
+        // Empty CLI + empty frontmatter → falls through to the priority policy
+        // (opted in here so we exercise the fall-through, not the default).
+        let (m, src) = resolve_model(Some("  "), Some(""), "low", &cfg_by_priority());
         assert_eq!(m, "haiku");
         assert_eq!(src, ModelSource::PriorityPolicy);
     }
@@ -347,7 +389,8 @@ mod tests {
 
     #[test]
     fn resolves_per_task_across_a_cycle() {
-        let c = cfg();
+        // Opted into tiered routing so per-task resolution visibly differs.
+        let c = cfg_by_priority();
         // (priority, frontmatter) → expected model, simulating a mixed batch.
         let tasks: Vec<(&str, Option<&str>, &str)> = vec![
             ("high", None, "opus"),
@@ -457,6 +500,8 @@ mod tests {
         assert_eq!(c.high, "opus");
         assert_eq!(c.medium, "sonnet");
         assert_eq!(c.low, "haiku");
+        // Priority routing is OFF by default — unspecified tasks default to opus.
+        assert!(!c.by_priority);
     }
 
     #[test]
