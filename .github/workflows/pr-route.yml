@@ -13,11 +13,20 @@ on:
   pull_request:
     branches: [main]
 
+# CARGO_INCREMENTAL=0 mirrors ci.yml (commit 269f787). Incremental compilation
+# only bloats target/ on one-shot CI builds and was the root cause of the
+# disk-full runner failures that plagued this very PR. Apply it to every job
+# here that runs cargo build/test.
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+
 jobs:
 
   # Step 6: Migration validation (conditional — skip if no migration in diff)
   migration-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -68,17 +77,21 @@ jobs:
   # Step 10: DoD verification — only when PR title matches CO-N pattern
   dod-verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     if: contains(github.event.pull_request.title, 'CO-')
     steps:
       - uses: actions/checkout@v4
 
       - name: Extract CO-N from PR title
         id: co-id
+        # Pass the PR title via env (never interpolate ${{ }} into the run
+        # script — that is a shell-injection sink on a write-permissioned job).
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          CO_ID=$(echo "${{ github.event.pull_request.title }}" \
-            | grep -oP 'CO-\d+' | head -1)
+          CO_ID=$(printf '%s' "$PR_TITLE" | grep -oP 'CO-\d+' | head -1)
           if [ -z "$CO_ID" ]; then
-            echo "::error::Could not extract CO-N from PR title: ${{ github.event.pull_request.title }}"
+            echo "::error::Could not extract CO-N from PR title: $PR_TITLE"
             exit 1
           fi
           echo "co_id=${CO_ID}" >> "$GITHUB_OUTPUT"
@@ -118,19 +131,39 @@ jobs:
   # Step 11: Security audit — always runs; Critical/High block merge
   security-audit:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
+      contents: write       # commit the audit record back to the PR branch
       pull-requests: write
       statuses: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Check out the PR head branch (not the detached merge ref) so the
+          # audit-record commit can be pushed back to it. For fork PRs this is
+          # read-only; the commit step is gated on same-repo and is best-effort.
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Fetch base branch
+        # Checking out `head.ref` does not bring the base branch's tracking ref,
+        # which the diff commands below need. Fetch it explicitly so a missing
+        # `origin/main` can never make the diff empty (which would silently skip
+        # the scan — a fail-open).
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+        run: git fetch --no-tags origin "$BASE_BRANCH:refs/remotes/origin/$BASE_BRANCH"
 
       - name: Detect skip conditions
         id: skip-check
+        # PR-controlled values arrive via env, never interpolated into the run
+        # script (shell-injection defence; this job has write permissions).
+        env:
+          PR_DRAFT: ${{ github.event.pull_request.draft }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
           # Skip drafts
-          if [ "${{ github.event.pull_request.draft }}" = "true" ]; then
+          if [ "$PR_DRAFT" = "true" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "reason=draft PR — skipping security audit" >> "$GITHUB_OUTPUT"
             exit 0
@@ -146,8 +179,7 @@ jobs:
           fi
 
           # Skip revert PRs
-          TITLE="${{ github.event.pull_request.title }}"
-          if echo "$TITLE" | grep -qi "^revert"; then
+          if printf '%s' "$PR_TITLE" | grep -qi "^revert"; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
             echo "reason=revert PR — skipping security audit" >> "$GITHUB_OUTPUT"
           fi
@@ -178,10 +210,23 @@ jobs:
       - name: Run security audit (local-grep backend)
         if: steps.skip-check.outputs.skip != 'true'
         id: security-scan
+        # FAIL-CLOSED: any unexpected error in this step (scanner crash, bad
+        # git ref, pipe failure) aborts the job rather than silently reporting
+        # PASS. `pipefail` propagates failures through `| tee`; `set -e`/`-u`
+        # abort on errors and unset vars. Per work/co/CO-388.md, Critical/High
+        # findings MUST block merge — the gate cannot fail open.
+        shell: bash
+        env:
+          # PR-controlled refs arrive via env (injection defence). base_ref is a
+          # branch name; head SHA is a commit hash.
+          BASE_BRANCH: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          set -euo pipefail
+
           # Run the LocalGrepBackend scanner against the diff
-          BASE_REF="origin/${{ github.base_ref }}"
-          HEAD_REF="${{ github.event.pull_request.head.sha }}"
+          BASE_REF="origin/${BASE_BRANCH}"
+          HEAD_REF="${HEAD_SHA}"
 
           # Collect changed source files
           CHANGED_FILES=$(git diff --name-only "${BASE_REF}...${HEAD_REF}" \
@@ -194,10 +239,12 @@ jobs:
             exit 0
           fi
 
-          # Run cargo test with the security scanner
-          cargo test -p co-web security --test testkit_tests -- --nocapture 2>&1 | tee /tmp/security-output.txt || true
+          # Run the Rust scanner's unit tests. A FAILURE here means the scanner
+          # itself is broken — fail closed (no `|| true`). Only its known-flaky
+          # cases would be acceptable to ignore, and there are none here.
+          cargo test -p co-web --lib security 2>&1 | tee /tmp/security-output.txt
 
-          # Check for known high/critical patterns in the diff itself
+          # Check for known high/critical patterns in the diff itself.
           BLOCKERS=0
           FINDINGS=0
 
@@ -237,18 +284,52 @@ jobs:
           echo "blocker_count=${BLOCKERS}" >> "$GITHUB_OUTPUT"
           echo "finding_count=${FINDINGS}" >> "$GITHUB_OUTPUT"
 
-          # Save scan results
-          cat > /tmp/security-audit-${{ github.event.pull_request.number }}.json <<EOF
+          # Save scan results. Write to docs/scrum/security/ (the real source of
+          # truth that release-gate.yml reads) AND /tmp (for the artifact upload).
+          # When this PR merges, the committed JSON lands in main so the Thursday
+          # release gate can see this wave's audits — previously it globbed a
+          # path NOTHING ever wrote, making the gate vacuously green.
+          mkdir -p docs/scrum/security
+          AUDIT_JSON="docs/scrum/security/security-audit-${PR_NUMBER}.json"
+          cat > "$AUDIT_JSON" <<EOF
           {
-            "pr_number": ${{ github.event.pull_request.number }},
+            "pr_number": ${PR_NUMBER},
             "backend": "local-grep",
             "finding_count": ${FINDINGS},
             "blocker_count": ${BLOCKERS},
             "scanned_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
           EOF
+          cp "$AUDIT_JSON" "/tmp/security-audit-${PR_NUMBER}.json"
+          echo "audit_json=${AUDIT_JSON}" >> "$GITHUB_OUTPUT"
         env:
           JWT_SECRET: "ci-test-secret-do-not-use-in-production"
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+
+      - name: Commit audit record to PR branch
+        # Only commits for same-repo PRs (forks have no push access — there the
+        # release gate falls back to its zero-files guard). Best-effort: a push
+        # race must not fail the security check.
+        if: >-
+          steps.skip-check.outputs.skip != 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        continue-on-error: true
+        env:
+          AUDIT_JSON: ${{ steps.security-scan.outputs.audit_json }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          [ -n "${AUDIT_JSON:-}" ] || { echo "no audit json to commit"; exit 0; }
+          git config user.name "CO Security Audit"
+          git config user.email "ci@artelonga.com.br"
+          git add "$AUDIT_JSON"
+          if git diff --cached --quiet; then
+            echo "audit record unchanged — nothing to commit"
+            exit 0
+          fi
+          git commit -m "chore(security): CO-388 audit record for PR #${PR_NUMBER}"
+          git push origin "HEAD:${HEAD_BRANCH}" || echo "push failed (race/permission) — artifact upload still covers this run"
 
       - name: Post security audit PR comment
         if: steps.skip-check.outputs.skip != 'true' && always()
