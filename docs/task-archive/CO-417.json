@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-417",
+  "title": "source: github — adapter geral de repositório → universo (parse, árvore, ipynb→md)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-417.md",
+  "branch": "feat/CO-417-source-github-adapter",
+  "merge_sha": "3b9a9aa96869b0178adae590c9b64f3100765959",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/202",
+    "number": 202
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T12:39:29Z",
+  "files_changed": 6,
+  "lines_added": 1104,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:source"
+  ],
+  "changelog_entry": "## CO-417 — feat: adapter `source: github` (repo → árvore de universo, ipynb→md)\n\nNovo verbo de CLI `co source add github <owner/repo>` — um adapter geral de\n*source* que clona um repositório GitHub (shallow `git clone`, sem auth para\nrepos públicos; `GITHUB_TOKEN` opcional para privados/rate-limit) e materializa\nsua árvore de arquivos como entradas de um universo CO, **preservando a\nhierarquia de pastas** (pastas → nós da árvore na UI).\n\nParse por arquivo:\n- `.md` → corpo da entrada direto;\n- `.ipynb` → JSON do notebook renderizado em markdown legível (células\n  markdown verbatim, células de código em blocos cercados ``` com a linguagem\n  do kernel, na ordem original; células vazias ignoradas);\n- demais → entrada-asset linkando o original no sha fixado.\n\nCada entrada importada carrega frontmatter de proveniência consumido pelo\ntraceback do CO-418: `source: github:<owner/repo>@<sha>` e\n`source_path: <caminho/no/repo>` (mais `source_kind: github` e `entry_type`).\nA escrita usa a Vault API (`PUT .../vault/{path}`), então o re-sync converge\n(idempotente por conteúdo); `--delete-missing` reflete (soft) remoções do repo.\n`--dry-run` mostra o plano sem escrever.\n\n### Why\nGeneraliza o conceito de `source_kind` (que hoje só cobre event-bus) para uma\nfonte de primeira classe por-entrada, demonstrando a capacidade de *source* do\nCO de ponta a ponta. Fetch e parse/materialize são unidades separadas — o\ntransform (incl. ipynb→md) é testado sem rede via fixtures.",
+  "summary": "As Yuri (e qualquer autor), QUERO apontar o CO a um repositório GitHub e tê-lo ingerido como conteúdo navegável, PARA testar a capacidade de *source* do CO de ponta a ponta.",
+  "co_auto_version": "0.1.0"
+}
