@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-387",
+  "title": "Time-rendering primitive — calendar/timeline lens system (canonical ms, pluggable render)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-387.md",
+  "branch": "feat/CO-387-time-rendering-primitive-co-time-grid",
+  "merge_sha": "975b6b01736f4352682cc7ca118e7d28e9df0216",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/199",
+    "number": 199
+  },
+  "started_at": "2026-06-06T00:00:00Z",
+  "merged_at": "2026-06-12T10:43:03Z",
+  "files_changed": 22,
+  "lines_added": 2024,
+  "lines_removed": 25,
+  "labels": [
+    "type:feat",
+    "module:time",
+    "module:render",
+    "module:spa"
+  ],
+  "changelog_entry": "## CO-387 — Time-rendering primitive — `<co-time-grid>` + calendar lenses\n\nDecouples canonical time storage from rendering. Universe-pool migration v19\nadds `event_at_ms`/`due_at_ms`/`scheduled_at_ms` to `entries` (backfilled from\nthe CO-73 `entry_dates` ISO rows with millisecond precision; kept in sync on\nevery write by `EntryIndex::upsert_dates`). A per-universe `_calendar.yaml`\ndeclares calendar lenses with **per-lens canonical units** — `i64_ms` for\nhuman/fictional/Pomodoro scales, `f64_years` (log) for cosmic (13.8 Gyr\noverflows i64 ms), `i64_units` for custom fields like `shandara_year` —\nserved at `GET /api/v1/universes/{slug}/calendar` with a Gregorian default.\n\nNew `<co-time-grid>` component (`static/shared/lib/co-time-grid.js` +\nconversion lib `co-time.js`, a 1:1 mirror of `co-web/src/time/conversion.rs`)\nrenders `(entries, lens)` in 4 view modes (grid/timeline/scatter/gantt), with\na no-reload lens dropdown persisted per universe, multi-universe color coding,\nCO-380 event-bus live updates, and `time.lens_switched`/`time.grid_rendered`\ntelemetry. Registered into the CO-393 lens frame as the `time-grid` lens\n(variant i); named manifest views were generalized at the registry level\n(`lens.namedViews`), replacing the gantt-only special case.\n`/timeline?lens=A,B,C` pins stacked lenses over the `?u=` universes.\n\n### Why\nThe IaaS principle applied to time: a 4-day-week org review, a Pomodoro day,\nor a Milky-Way-to-fiction `/timeline` are *lenses* over the same bounded,\ndeterministic timestamps — no schema migration per calendar, and the brain's\ncreative time (custom calendars, fictional epochs) stays liberated.",
+  "summary": "As Yuri organizing work with a 4-day-week experiment, AND viewing the Milky Way → human history → fictional epochs side-by-side at `/timeline`",
+  "co_auto_version": "0.1.0"
+}
