@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-406",
+  "title": "Graceful startup degradation — universe pool pragma failure must not crash-loop the site",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-406.md",
+  "branch": "feat/CO-406-graceful-startup-degradation",
+  "merge_sha": "d45eb07395e7510cfc8657bb1139d7f1c2150922",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/207",
+    "number": 207
+  },
+  "started_at": "2026-06-11T18:00:00Z",
+  "merged_at": "2026-06-12T15:48:19Z",
+  "files_changed": 13,
+  "lines_added": 640,
+  "lines_removed": 128,
+  "labels": [
+    "type:fix",
+    "module:storage",
+    "ops"
+  ],
+  "changelog_entry": "## CO-406 — graceful startup degradation (no crash-loop on pool failure)\n\nA single universe whose per-universe SQLite DB cannot be opened or migrated\n(disk full, I/O error, corrupt `-shm`) no longer panics the whole process.\nThe 2026-06-11 outage (`SQLITE_IOERR_SHMSIZE` on a full disk) converted one\npool-open failure into a global outage: `panic → exit 101 → Fly crash loop →\nmax-restart cap → total site down`. This change isolates that failure to the\none affected universe.\n\n### What changed\n\n- `UniversePool` gained `try_get_or_open()` — a non-panicking open that, on any\n  environment failure (mkdir / open / pragmas / migrations), records the\n  universe as **unavailable** with the failure reason and returns `Err(PoolError)`\n  instead of panicking. Per-universe migrations (`run_universe_migrations`,\n  `ensure_universe_column`, `recreate_references_meta_v8`) now return\n  `rusqlite::Result` and propagate errors rather than `.expect()`-panicking.\n- **Lazy retry / self-heal:** failures are never cached as a connection, so the\n  next access re-attempts the open. Once the environment failure clears (disk\n  freed, volume extended) the universe recovers automatically — no restart. An\n  admin `reopen()` forces immediate recovery.\n- **Request path → 503:** the `universe_visibility_gate` middleware (CO-161, the\n  single chokepoint for every `/api/v1/universes/{slug}/…` route) now probes the\n  pool and short-circuits with **503 Service Unavailable** + a clear reason when\n  the universe is down. Every other universe keeps serving 200. The probe drops\n  the `Mutex<Storage>` lock before any `.await` (no lock held across await).\n- **Startup seed is tolerant:** `seed_template_universe` skips seeding and logs\n  if the template universe's DB can't be opened at boot — the server starts\n  degraded instead of crash-looping.\n- **Admin surface (`/gestao`):** `GET /gestao/universos/indisponiveis` lists\n  unavailable universes; `POST /gestao/universos/{key}/reabrir` reopens one.\n- `PoolError → AppError::ServiceUnavailable` conversion (503) + Portuguese\n  translation for `service_unavailable`.\n\n### Why\n\nPanic-on-environment-failure at startup is the same family as the 2026-05-12\nmutex-poisoning incident: one bad condition must never take the whole site down.\nThe per-universe pool is the natural isolation boundary — a partial failure\n(one pool open) must stay partial.\n\n### Startup-path audit\n\nConverted (single-universe isolation is possible):\n- per-universe pool open + migrations (all `.expect()` → `Result`).\n- template seed at boot (skips on failure).\n\nDeliberately left fatal (no per-universe isolation; failing fast is correct):\n- `Storage::new` meta.db open / WAL pragma / data-dir create\n  (`co-web/src/storage/mod.rs`): meta.db is the single shared DB (users,\n  universes, sessions). If it can't open, the site genuinely cannot run — fail\n  fast and let the platform restart.\n- auth-store / game-storage open in `server::serve` startup: shared singletons,\n  not per-universe.\n- `baseline.rs` UAT-reset `remove_file` expect: dev-only destructive reset path.",
+  "summary": "GIVEN / WHEN / THEN",
+  "co_auto_version": "0.1.0"
+}

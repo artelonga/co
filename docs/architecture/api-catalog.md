@@ -400,6 +400,8 @@ Content management via GitHub PAT. Routes under `/api/v1/gestao/` gated by `GEST
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/gestao/schema-status` | admin (gh) | CO-361 — current schema version + app version |
+| GET | `/api/v1/gestao/universos/indisponiveis` | admin (gh) | CO-406 — list universes the pool marks unavailable |
+| POST | `/api/v1/gestao/universos/{key}/reabrir` | admin (gh) | CO-406 — reopen a degraded universe (no restart) |
 | GET | `/api/v1/gestao/analytics/resumo` | admin (gh) | CO-378 — analytics resumo with private-path visibility |
 | GET | `/gestao` | admin (gh) | CO-361 — gestao SPA shell page |
 | POST | `/api/v1/gestao/webhooks` | admin (gh) | CO-168 register outbound webhook |

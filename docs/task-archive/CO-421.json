@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-421",
+  "title": "Prod e2e usability gate — anonymous read-only Playwright smoke against co.artelonga.com.br as a release gate",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-421.md",
+  "branch": "test/CO-421-prod-e2e-usability-gate",
+  "merge_sha": "843e1cfaffd4a08e08e220d2b84c640a0ed4f9df",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/209",
+    "number": 209
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T15:49:49Z",
+  "files_changed": 4,
+  "lines_added": 334,
+  "lines_removed": 14,
+  "labels": [
+    "type:test",
+    "module:co-web",
+    "ops"
+  ],
+  "changelog_entry": "## CO-421 — Gate de usabilidade prod: suite Playwright anônima read-only vs co.artelonga.com.br\n\nAdiciona `co-web/e2e/prod-usability.spec.ts` (tag `@prod`): uma suite Playwright\ncurada, **anônima e read-only**, que valida a usabilidade real de produção — o que\num smoke de health 200 não pega. Roda como gate de release (pré e pós-deploy) contra\n`https://co.artelonga.com.br`. Sem staging (decisão 2026-06-12); o alvo é prod direto.\n\nCobre cinco caminhos de usabilidade:\n- board do template (`/template`) carrega com tarefas tutorial visíveis (stat `tarefas` > 0 + card visível após expandir seção);\n- troca de tema aplica (`html[data-palette]` muda);\n- toggle pt/en muda os rótulos do botão de idioma;\n- deep-link de entrada (`/template/projects/CO/1`) renderiza markdown no zoom — não cai no 404;\n- grafo/lente (stats de conteúdo, com fallback opportunista para o dashboard) abre.\n\n### Read-only por construção\nUm interceptor `page.route(\"**/*\")` instalado no `beforeEach` **aborta** qualquer\nrequest `POST/PUT/PATCH/DELETE` e registra a violação; o `afterEach` falha a suite se\nhouver qualquer mutação. A suite **nunca muta prod** — garantia estrutural, não por\nconvenção. A suite usa o `test`/`expect` puro do `@playwright/test` (sem o fixture\n`uat-login` de `e2e/fixtures.ts`, que retorna 404 em prod), então não há login.\n\n### Como rodar (gate de usabilidade prod)\n```bash\ncd co-web && BASE_URL=https://co.artelonga.com.br \\\n  npx playwright test e2e/prod-usability.spec.ts \\\n  --project=desktop-chromium --workers=2\n```\nSem `BASE_URL` roda contra `http://localhost:3000` (um `co serve` local), servindo de\nsmoke em CI. Documentado em `docs/release-checklist.md` como o gate de usabilidade\nprod, substituindo o smoke manual de UAT.\n\n### Why\nO smoke de health só prova que o servidor sobe; não pega regressão de UX (board vazio,\ntema quebrado, deep-link caindo em 404). Este é o conjunto que pode tocar prod com\nsegurança e bloquear a promoção se a usabilidade real estiver vermelha.\n\n### Verificação\nVerde local (`co serve` em :3000, ~2.7s) e verde contra prod v3.4.0 ao vivo (~40s,\n< 2 min alvo); o guard read-only foi confirmado falhando uma sonda que emite um POST.\nSem código Rust tocado — apenas TS/e2e + docs.",
+  "summary": "As O operador liberando uma release, QUERO um gate e2e que valide a **usabilidade real em produção** (não só health 200), PARA não shippar uma regressão de UX que o smoke de health não pega.",
+  "co_auto_version": "0.1.0"
+}
