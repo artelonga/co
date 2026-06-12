@@ -13,6 +13,7 @@ pub mod analyze;
 pub mod basic;
 pub mod content;
 pub mod create;
+pub mod digest;
 pub mod i18n;
 pub mod init;
 pub mod lead;
