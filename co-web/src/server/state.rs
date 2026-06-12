@@ -31,6 +31,11 @@ pub struct CoreState {
     /// CO-426: in-memory registry of active co-auto launchers (TTL). Heartbeats
     /// land here; the Gestão usage panel reads it via `/api/v1/usage/active`.
     pub active_launchers: Arc<crate::observability::ActiveLaunchers>,
+    /// CO-431: universo backend seam — handlers open universos through this
+    /// factory instead of hardcoding `UniversoLocal::abrir`. Default is the
+    /// filesystem factory; alternative backends plug in via
+    /// [`with_universo_factory`](CoreState::with_universo_factory).
+    pub universo_factory: Arc<dyn co::universo::UniversoFactory>,
 }
 
 impl CoreState {
@@ -104,7 +109,19 @@ impl CoreState {
             eda_bus,
             timeline_tx,
             active_launchers: Arc::new(crate::observability::ActiveLaunchers::new()),
+            universo_factory: Arc::new(crate::content::universo::UniversoLocalFactory),
         }
+    }
+
+    /// Replace the universo backend (CO-431). Builder-style so tests and
+    /// embedders can plug a non-filesystem `UniversoFactory` without touching
+    /// handlers or routes.
+    pub fn with_universo_factory(
+        mut self,
+        factory: Arc<dyn co::universo::UniversoFactory>,
+    ) -> Self {
+        self.universo_factory = factory;
+        self
     }
 }
 
