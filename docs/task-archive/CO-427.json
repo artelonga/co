@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-427",
+  "title": "Model routing: modelo por task (frontmatter) + política priority→model + downshift por janela de uso",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-427.md",
+  "branch": "feat/CO-427-model-routing-modelo-por-task-frontmatte",
+  "merge_sha": "fffa7a8be0708c015ca1915d80ceedf5b27437cc",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/217",
+    "number": 217
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T19:23:44Z",
+  "files_changed": 8,
+  "lines_added": 809,
+  "lines_removed": 11,
+  "labels": [
+    "type:feat",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-427 — Model routing: modelo por task (frontmatter) + política priority→model + downshift por janela de uso\n\nco-auto now resolves the executor model **per task** instead of using one global\n`--model` for the whole run. Resolution follows a four-level precedence:\n\n1. `--model` on the CLI (operator override — pins every task).\n2. `model:` in the task frontmatter (per-task override; invalid value → warn + ignore).\n3. Priority→model policy (`high→opus`, `medium→sonnet`, `low→haiku`), configurable\n   in `project.yaml` — **opt-in via `by_priority: true`** (or\n   `CO_AUTO_ROUTING_BY_PRIORITY=1`); off by default.\n4. Quality-first default (`opus`) — the **default** for any task with no `--model`\n   and no frontmatter, per the binding owner decision (default = opus, *not* the\n   priority tier; tiers are opt-in).\n\nA best-effort **window downshift** runs before each launch: co-auto reads CO-426's\n`GET /api/v1/usage/summary?window=5h`, and if the rolling 5h token consumption has\ncrossed the configured soft limit (`usage_soft_limit_5h_tokens` /\n`CO_AUTO_SOFT_LIMIT_5H_TOKENS`), it degrades the model one tier (`opus→sonnet→haiku`).\nThe decision is printed to the launcher log and included in the usage report\n(`model_requested` vs `model_used`, plus a `downshifted` record) so the dashboard\ncan surface the degradation. Every failure path (no endpoint, no network,\nunparseable response, no soft limit, already-lowest tier) is fail-open — the\nrequested model is kept.\n\nNew module `dev/co-auto/src/routing.rs`; `--model` is now optional (no longer\ndefaults to `sonnet`). Docs: \"Model routing\" section in `dev/co-auto/README.md`\nand a frontmatter example in `work/co/CLAUDE.md`.\n\n### Why\nMaximize what the subscription delivers per usage window: spend Opus on hard work,\nfall back to cheaper tiers automatically near the budget, and never burn Opus on\nchore. Routing is decided at launch and never rebalances running tasks; model\naliases pass through to the `claude` CLI without hardcoded-id validation.",
+  "summary": "As Operador da frota co-auto, QUERO que cada task rode no modelo certo — opus/fable para o que é difícil, sonnet/haiku para o resto — escolhido automaticamente por prioridade e pela janela de uso corr",
+  "co_auto_version": "0.1.0"
+}
