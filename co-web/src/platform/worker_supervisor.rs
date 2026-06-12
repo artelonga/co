@@ -36,6 +36,14 @@ pub trait Worker: Send + 'static {
     /// How long to wait between consecutive ticks.
     fn interval(&self) -> Duration;
 
+    /// Delay before the first tick fires. Defaults to zero (tick immediately
+    /// on spawn). Override for work that must never sit in the boot path —
+    /// CO-405: the boot-time backup snapshot starved a 1-vCPU machine for
+    /// >6 min before the HTTP listener could bind.
+    fn initial_delay(&self) -> Duration {
+        Duration::ZERO
+    }
+
     /// Perform one unit of work.
     ///
     /// Errors are logged and counted but do not restart the loop.
@@ -160,7 +168,10 @@ async fn run_supervised<W: Worker + Clone>(template: W, idx: usize, statuses: St
 
 async fn run_worker_loop<W: Worker>(mut worker: W, idx: usize, statuses: StatusTable) {
     let name = worker.name();
-    let mut ticker = tokio::time::interval(worker.interval());
+    let mut ticker = tokio::time::interval_at(
+        tokio::time::Instant::now() + worker.initial_delay(),
+        worker.interval(),
+    );
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
@@ -241,6 +252,51 @@ mod tests {
         async fn tick(&mut self) -> anyhow::Result<()> {
             panic!("deliberate panic in test");
         }
+    }
+
+    #[derive(Clone)]
+    struct DelayedWorker {
+        counter: Arc<AtomicU64>,
+    }
+
+    #[async_trait]
+    impl Worker for DelayedWorker {
+        fn name(&self) -> &'static str {
+            "delayed"
+        }
+        fn interval(&self) -> Duration {
+            Duration::from_millis(10)
+        }
+        fn initial_delay(&self) -> Duration {
+            // Far beyond the test window — first tick must never fire.
+            Duration::from_secs(3600)
+        }
+        async fn tick(&mut self) -> anyhow::Result<()> {
+            self.counter.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    // CO-405: a worker with an initial_delay must NOT tick at spawn — the
+    // backup snapshot sat in the boot path and starved the listener bind.
+    #[tokio::test]
+    async fn initial_delay_defers_first_tick() {
+        let sup = WorkerSupervisor::new();
+        let counter = Arc::new(AtomicU64::new(0));
+        sup.spawn(DelayedWorker {
+            counter: Arc::clone(&counter),
+        });
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            0,
+            "delayed worker must not tick before its initial_delay"
+        );
+        let s = sup.statuses();
+        assert_eq!(s[0].tick_count, 0);
+        assert!(s[0].running, "worker is armed, just deferred");
     }
 
     #[tokio::test]
