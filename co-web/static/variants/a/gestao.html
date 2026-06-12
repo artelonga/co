@@ -85,6 +85,7 @@ a:hover{text-decoration:underline}
     <button class="tab-btn" onclick="switchTab('usuarios',this)">Usuários</button>
     <button class="tab-btn" onclick="switchTab('atividades',this)">Atividades</button>
     <button class="tab-btn" onclick="switchTab('funil',this)">Funil</button>
+    <button class="tab-btn" onclick="switchTab('uso',this)">Uso</button>
   </div>
 
   <!-- Resumo -->
@@ -140,6 +141,50 @@ a:hover{text-decoration:underline}
     <div id="funil-breakdown-section"></div>
   </div>
 
+  <!-- Uso (CO-426) — fleet usage & launchers, real-time -->
+  <div class="tab-panel" id="panel-uso">
+    <div class="section-title">Launchers ativos <span id="uso-live" style="color:var(--green);font-size:9px">● ao vivo</span></div>
+    <div class="card"><table id="uso-active-table">
+      <thead><tr><th>Máquina</th><th>Task</th><th>Universo</th><th>Modelo</th><th>Há</th><th>Progresso</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+    <div class="section-title">Janela corrente</div>
+    <div class="card">
+      <div class="kpi-grid" id="uso-window-kpis"></div>
+      <div style="margin-top:10px">
+        <div class="funnel-row"><div class="funnel-label">5h</div><div class="funnel-bar-wrap"><div class="funnel-bar" id="uso-bar-5h" style="width:0%"></div></div><div class="funnel-count" id="uso-bar-5h-txt"></div></div>
+        <div class="funnel-row"><div class="funnel-label">Semana</div><div class="funnel-bar-wrap"><div class="funnel-bar" id="uso-bar-week" style="width:0%"></div></div><div class="funnel-count" id="uso-bar-week-txt"></div></div>
+      </div>
+    </div>
+
+    <div class="filters">
+      <label style="color:var(--dim);font-size:11px">Janela</label>
+      <select id="uso-window" onchange="fetchUso()">
+        <option value="5h">5 horas</option>
+        <option value="day">24 horas</option>
+        <option value="week" selected>Semana</option>
+      </select>
+      <label style="color:var(--dim);font-size:11px">Agrupar por</label>
+      <select id="uso-by" onchange="fetchUso()">
+        <option value="universe" selected>Universo</option>
+        <option value="model">Modelo</option>
+        <option value="machine">Máquina</option>
+        <option value="task">Task</option>
+      </select>
+    </div>
+    <div class="card"><table id="uso-groups-table">
+      <thead><tr><th id="uso-groups-key">Universo</th><th>Sessões</th><th>In</th><th>Out</th><th>Cache R</th><th>Cache W</th><th>Total</th><th>Custo US$</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+
+    <div class="section-title">Projetos (frota)</div>
+    <div class="card"><table id="uso-projects-table">
+      <thead><tr><th>Universo</th><th>A fazer</th><th>Em progresso</th><th>Sessões</th><th>Tokens</th><th>Custo US$</th><th>Último deploy</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </div>
+
   <!-- Atividades -->
   <div class="tab-panel" id="panel-atividades">
     <div class="filters">
@@ -190,6 +235,7 @@ function loadTab(name){
   else if(name==='usuarios'){ if(isFresh('resumo')){ renderUsuarios(cache['resumo'].data); } else { fetchResumo().then(function(){ renderUsuarios(cache['resumo'].data); }); } }
   else if(name==='atividades'){ fetchAtividades(); }
   else if(name==='funil'){ if(isFresh('funil')){ renderFunil(cache['funil'].data); } else { fetchFunil(); } }
+  else if(name==='uso'){ if(isFresh('uso')){ renderUso(); } else { fetchUso(); } connectUsoStream(); }
 }
 
 function fetchResumo(){
@@ -376,6 +422,119 @@ function renderFunil(d){
           +'</tr>';
       }).join('')+'</tbody></table></div>';
   }
+}
+
+// ---------------------------------------------------------------------------
+// Uso (CO-426) — fleet usage & active launchers, real-time via analytics stream
+// ---------------------------------------------------------------------------
+var usoState = { summary:null, active:[], projects:[] };
+var usoWS = null;
+var usoRefreshTimer = null;
+
+function usoJson(r){
+  if(r.status===401){ window.location.href='/'; return null; }
+  if(r.status===403){ showErr('Acesso restrito a administradores.'); return null; }
+  if(!r.ok){ showErr('Erro '+r.status+' ao carregar uso.'); return null; }
+  return r.json();
+}
+
+function fetchUso(){
+  var win=(document.getElementById('uso-window')||{}).value||'week';
+  var by=(document.getElementById('uso-by')||{}).value||'universe';
+  return Promise.all([
+    fetch('/api/v1/usage/summary?window='+encodeURIComponent(win)+'&by='+encodeURIComponent(by),{credentials:'same-origin'}).then(usoJson),
+    fetch('/api/v1/usage/active',{credentials:'same-origin'}).then(usoJson),
+    fetch('/api/v1/usage/projects?window='+encodeURIComponent(win),{credentials:'same-origin'}).then(usoJson)
+  ]).then(function(res){
+    if(res[0]) usoState.summary=res[0];
+    if(res[1]) usoState.active=res[1].launchers||[];
+    if(res[2]) usoState.projects=res[2].projects||[];
+    cache['uso']={ts:Date.now(),data:usoState};
+    if(currentTab==='uso') renderUso();
+    document.getElementById('ts').textContent=new Date().toLocaleTimeString('pt-BR');
+  });
+}
+
+function fmtAgo(epoch){
+  if(!epoch) return '—';
+  var s=Math.max(0,Math.floor(Date.now()/1000-epoch));
+  if(s<60) return s+'s';
+  if(s<3600) return Math.floor(s/60)+'m';
+  if(s<86400) return Math.floor(s/3600)+'h';
+  return Math.floor(s/86400)+'d';
+}
+function fmtTok(n){ n=Number(n||0); if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1e3) return (n/1e3).toFixed(1)+'k'; return ''+n; }
+function fmtCost(c){ return c==null?'—':'$'+Number(c).toFixed(2); }
+
+function renderUso(){ renderUsoActive(); renderUsoWindow(); renderUsoGroups(); renderUsoProjects(); }
+
+function renderUsoActive(){
+  var rows=usoState.active||[];
+  document.querySelector('#uso-active-table tbody').innerHTML=rows.length
+    ?rows.map(function(l){ return '<tr><td class="mono">'+esc(l.machine)+'</td><td class="mono"><a href="/'+esc(l.universe_key)+'">'+esc(l.task_key)+'</a></td><td class="mono">'+esc(l.universe_key)+'</td><td>'+esc(l.model)+'</td><td class="num">'+fmtAgo(l.started_at)+'</td><td class="mono" style="color:var(--dim)">'+esc(l.progress||'')+'</td></tr>'; }).join('')
+    :'<tr><td colspan="6" style="color:var(--dim);text-align:center">Nenhum launcher ativo</td></tr>';
+}
+
+function renderUsoWindow(){
+  var s=usoState.summary; if(!s) return; showErr('');
+  var w5=s.window_5h||{}, ww=s.window_week||{};
+  document.getElementById('uso-window-kpis').innerHTML=[
+    ['Tokens 5h',fmtTok(w5.total_tokens)],
+    ['Tokens semana',fmtTok(ww.total_tokens)],
+    ['Sessões semana',fmt(ww.sessions)],
+    ['Custo semana',fmtCost(ww.cost_usd)],
+  ].map(function(k){ return '<div class="kpi"><div class="label">'+k[0]+'</div><div class="value" style="font-size:16px">'+k[1]+'</div></div>'; }).join('');
+
+  function bar(elPct,elTxt,totals,limit){
+    var t=Number((totals||{}).total_tokens||0);
+    if(limit){ var pct=Math.min(100,Math.round(t/limit*100)); document.getElementById(elPct).style.width=pct+'%'; document.getElementById(elTxt).textContent=fmtTok(t)+' / '+fmtTok(limit)+' ('+pct+'%)'; }
+    else { document.getElementById(elPct).style.width=(t>0?100:0)+'%'; document.getElementById(elTxt).textContent=fmtTok(t); }
+  }
+  bar('uso-bar-5h','uso-bar-5h-txt',w5,s.soft_limit_5h);
+  bar('uso-bar-week','uso-bar-week-txt',ww,s.soft_limit_week);
+}
+
+function renderUsoGroups(){
+  var s=usoState.summary; if(!s) return;
+  var labels={universe:'Universo',model:'Modelo',machine:'Máquina',task:'Task'};
+  document.getElementById('uso-groups-key').textContent=labels[s.by]||'Chave';
+  var g=s.groups||[];
+  document.querySelector('#uso-groups-table tbody').innerHTML=g.length
+    ?g.map(function(r){ return '<tr><td class="mono">'+esc(r.key)+'</td><td class="num">'+fmt(r.sessions)+'</td><td class="num">'+fmtTok(r.tokens_in)+'</td><td class="num">'+fmtTok(r.tokens_out)+'</td><td class="num">'+fmtTok(r.tokens_cache_read)+'</td><td class="num">'+fmtTok(r.tokens_cache_write)+'</td><td class="num">'+fmtTok(r.total_tokens)+'</td><td class="num">'+fmtCost(r.cost_usd)+'</td></tr>'; }).join('')
+    :'<tr><td colspan="8" style="color:var(--dim);text-align:center">Sem dados na janela</td></tr>';
+}
+
+function renderUsoProjects(){
+  var p=usoState.projects||[];
+  document.querySelector('#uso-projects-table tbody').innerHTML=p.length
+    ?p.map(function(r){ return '<tr><td class="mono"><a href="/'+esc(r.universe_key)+'">'+esc(r.name||r.universe_key)+'</a></td><td class="num">'+fmt(r.tasks_todo)+'</td><td class="num">'+fmt(r.tasks_in_progress)+'</td><td class="num">'+fmt(r.sessions)+'</td><td class="num">'+fmtTok(r.total_tokens)+'</td><td class="num">'+fmtCost(r.cost_usd)+'</td><td class="mono" style="color:var(--dim)">'+esc(r.last_deploy_at||'—')+'</td></tr>'; }).join('')
+    :'<tr><td colspan="7" style="color:var(--dim);text-align:center">Sem projetos com uso</td></tr>';
+}
+
+// Real-time: subscribe to the existing AnalyticsBuffer stream (no polling).
+// 'launcher_snapshot' replaces the active list; 'usage' triggers a debounced
+// re-fetch of the aggregates (server push, not a timer).
+function connectUsoStream(){
+  if(usoWS && (usoWS.readyState===0||usoWS.readyState===1)) return;
+  try{
+    var proto=location.protocol==='https:'?'wss:':'ws:';
+    usoWS=new WebSocket(proto+'//'+location.host+'/api/v1/analytics/stream');
+  }catch(e){ return; }
+  usoWS.onmessage=function(e){
+    var msg; try{ msg=JSON.parse(e.data); }catch(err){ return; }
+    if(msg.type==='snapshot'){ (msg.events||[]).forEach(handleUsoEvent); return; }
+    handleUsoEvent(msg);
+  };
+  usoWS.onclose=function(){ usoWS=null; };
+}
+function handleUsoEvent(ev){
+  if(!ev||!ev.type) return;
+  if(ev.type==='launcher_snapshot'){ usoState.active=ev.launchers||[]; if(currentTab==='uso') renderUsoActive(); }
+  else if(ev.type==='usage'){ scheduleUsoRefresh(); }
+}
+function scheduleUsoRefresh(){
+  if(usoRefreshTimer) return;
+  usoRefreshTimer=setTimeout(function(){ usoRefreshTimer=null; if(currentTab==='uso') fetchUso(); },1500);
 }
 
 fetchResumo();

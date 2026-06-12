@@ -181,11 +181,15 @@ pub(crate) mod subscriptions;
 pub(crate) mod tasks;
 pub mod tool;
 pub(crate) mod universe;
+pub mod usage_sessions;
 pub(crate) mod users;
 
 pub use agent_sessions::{AgentSession, NewAgentSession};
 pub use onboarding::derive_usuario_from_email;
 pub use tool::ToolRecord;
+pub use usage_sessions::{
+    NewUsageSession, UsageDimension, UsageGroup, UsageProjectRow, UsageTotals,
+};
 
 pub use invitations::Invitation;
 

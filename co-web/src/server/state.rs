@@ -28,6 +28,9 @@ pub struct CoreState {
     pub eda_bus: Arc<dyn crate::eda::EdaBus>,
     /// CO-380: LiveTimeline fan-out channel — drives the `/api/v1/events` WebSocket.
     pub timeline_tx: crate::eda::subscribers::timeline::TimelineSender,
+    /// CO-426: in-memory registry of active co-auto launchers (TTL). Heartbeats
+    /// land here; the Gestão usage panel reads it via `/api/v1/usage/active`.
+    pub active_launchers: Arc<crate::observability::ActiveLaunchers>,
 }
 
 impl CoreState {
@@ -100,6 +103,7 @@ impl CoreState {
             ai_router,
             eda_bus,
             timeline_tx,
+            active_launchers: Arc::new(crate::observability::ActiveLaunchers::new()),
         }
     }
 }

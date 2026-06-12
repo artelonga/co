@@ -66,6 +66,7 @@ pub use content::translate;
 pub use content::translate_routes;
 pub use content::universe_routes;
 pub use content::universo;
+pub use content::usage_routes;
 pub use content::vault_routes;
 pub use content::workspace_routes;
 pub use content::workspace_template_routes;

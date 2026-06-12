@@ -544,6 +544,15 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                     ),
                 ),
             )
+            // CO-426: usage ingestion + launcher registry + fleet query — all
+            // require a vault token or JWT (same scheme as the agent-session write).
+            .nest(
+                "/api/v1",
+                crate::usage_routes::authed_router().layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    crate::auth::require_auth_with_token,
+                )),
+            )
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",

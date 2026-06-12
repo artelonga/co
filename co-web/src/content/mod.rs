@@ -27,6 +27,7 @@ pub mod translate;
 pub mod translate_routes;
 pub mod universe_routes;
 pub mod universo;
+pub mod usage_routes;
 pub mod vault_routes;
 pub mod workspace_routes;
 pub mod workspace_template_routes;
