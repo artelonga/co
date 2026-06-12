@@ -1,0 +1,125 @@
+{
+  "co_id": "CO-387",
+  "spec_title": "Time-rendering primitive — calendar/timeline lens system (canonical ms, pluggable render)",
+  "timestamp": "2026-06-12T12:53:16.189Z",
+  "items": [
+    {
+      "text": "Migration adds `event_at_ms`/`due_at_ms`/`scheduled_at_ms` + backfills — shipped as universe-pool **v19** (the `entries` table lives in per-universe data.db, not the meta-DB; \"v66\" predated the migration-ledger split)",
+      "pattern": "universe[- _]pool|per[- _]universe|meta[- _]db|migration[- _]ledger|migration|event|scheduled|backfills",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] CO-380 event bus captures ci.* and release.gate.* events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`_calendar.yaml` loaded per universe; default = Gregorian if absent",
+      "pattern": "calendar|loaded|universe|default",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "versions are sorted newest-first by default",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`<co-time-grid>` component renders 4 view modes (grid, timeline, scatter, gantt)",
+      "pattern": "co[- _]time[- _]grid|component|renders|modes",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Lens dropdown switches without reload",
+      "pattern": "dropdown|switches|without|reload",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "GET /api/v1/auth/me without session returns 401",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "4-day-week lens correctly groups entries into 91 weeks × 4 days for a year",
+      "pattern": "day[- _]week|4[- _]day[- _]week|correctly|groups|entries",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "?type=feat returns only feat entries",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Cosmic lens (log scale) places Big Bang at one edge, Common Era near the other",
+      "pattern": "cosmic|scale|places|common",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "`?lens=A,B,C` pins multiple lenses stacked",
+      "pattern": "multiple|lenses|stacked",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "localStorage persists lens choice per universe",
+      "pattern": "localstorage|persists|choice|universe",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Live updates: entry created → grid updates within 300ms (via CO-380 bus)",
+      "pattern": "co[- _]380|updates|entry|created",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "drag from 'To Do' to 'In Progress' updates the task status via API",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Pomodoro lens groups by 25-min cells with 5-min breaks",
+      "pattern": "pomodoro|groups|25[- _]min|cells",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Custom `shandara_year` field drives Shandara/fictional lens",
+      "pattern": "fictional|custom|shandara|field|drives",
+      "matched_file": "co-web/e2e/archived/co-272-dev-tasks.spec.ts",
+      "matched_test": "GET /api/v1/universes/co/dev-tasks returns tasks with expected fields",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "No regression in CO-73 existing temporal queries",
+      "pattern": "co[- _]73|regression|existing|temporal",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "no-regression — board navigation still works after CO-280 changes",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "OpenAPI documents the `_calendar.yaml` shape",
+      "pattern": "openapi|documents|calendar|shape",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "login-options returns expected shape",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`docs/time-rendering.md` describes the primitive",
+      "pattern": "time[- _]rendering|time[- _]rendering.md|describes|primitive",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 14,
+  "passed": 9,
+  "pending": 5,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 64
+}

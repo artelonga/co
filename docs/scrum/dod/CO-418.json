@@ -1,0 +1,21 @@
+{
+  "co_id": "CO-418",
+  "spec_title": "Render-review-publish com traceback — localhost render → edit → commit convencional+semver com proveniência",
+  "timestamp": "2026-06-12T12:53:16.561Z",
+  "items": [
+    {
+      "text": "Render local: entrada importada serve markdown limpo (frontmatter",
+      "pattern": "render|local|entrada|importada",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 1,
+  "passed": 1,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

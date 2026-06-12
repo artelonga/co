@@ -1,0 +1,21 @@
+{
+  "co_id": "CO-417",
+  "spec_title": "source: github — adapter geral de repositório → universo (parse, árvore, ipynb→md)",
+  "timestamp": "2026-06-12T12:53:16.472Z",
+  "items": [
+    {
+      "text": "`co source add github <owner/repo>` clona/baixa o repo e materiali",
+      "pattern": "repo|baixa|source|github|owner|clona",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "clone returns owner_id with anon- prefix",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 1,
+  "passed": 1,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

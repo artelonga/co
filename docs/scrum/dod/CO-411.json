@@ -1,0 +1,12 @@
+{
+  "co_id": "CO-411",
+  "spec_title": "CLI sends User-Agent (auth client rejected by own abuse gate) + CLI command reference doc",
+  "timestamp": "2026-06-12T12:53:16.274Z",
+  "items": [],
+  "total": 0,
+  "passed": 0,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
