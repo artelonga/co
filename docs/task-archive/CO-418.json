@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-418",
+  "title": "Render-review-publish com traceback — localhost render → edit → commit convencional+semver com proveniência",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-418.md",
+  "branch": "feat/CO-418-render-review-publish-traceback",
+  "merge_sha": "4e3e80071571cf482aa29a8d009d981901b09d78",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/203",
+    "number": 203
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T12:51:10Z",
+  "files_changed": 6,
+  "lines_added": 693,
+  "lines_removed": 3,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "module:collab"
+  ],
+  "changelog_entry": "## CO-418 — feat: render-review-publish with traceback (source + requested_by)\n\nAdds the render→review→edit→publish capability for imported content (the\nconsumer of CO-417's `source: github` provenance). A new owner-only route\npublishes an entry as a *conventional, semver-aware* publication that traces\nback to (a) its original source and (b) the task that requested it.\n\n### What changed\n- **Publish surface**: `POST /api/v1/universes/{slug}/publish` (owner-only,\n  under the visibility gate, in `review_routes.rs`). Body:\n  `{ path, requested_by, commit_type?, commit_scope?, commit_subject?,\n  frontmatter?, body? }`.\n- **Conventional commit + semver intent**: the publish records a conventional\n  commit message (`feat(scope): subject` / `docs: …`) and the implied semver\n  bump (`feat→minor`, `fix|docs|refactor|perf→patch`). Per CO-258 it records\n  the *intended* bump only — it never touches `Cargo.toml`/`CHANGELOG.md`.\n- **Provenance stamping**: preserves CO-417's `source`/`source_path`/\n  `source_kind`/`entry_type` untouched and ADDS `requested_by` plus a publish\n  record (`published_commit`, `published_semver`, `published_sha`,\n  `published_at`).\n- **Traceback as typed relations (CO-74)**: `extract_provenance_relations`\n  derives two manifest-independent edges from frontmatter on every save —\n  `origin` → `source` and `requested_by` → the task. Because they derive from\n  frontmatter they survive `replace_all` and are idempotent. The entry GET\n  response already surfaces outbound relations, so \"Origem\" + \"Pedido por\" are\n  queryable for the SPA.\n- **Idempotent**: re-publishing unchanged content (same body + source +\n  requested_by + commit message) yields the same `published_sha` and records\n  no new commit (`published: false`).\n- **EDA**: emits an `entry.published` event carrying the commit message,\n  semver bump, source, and requesting task.\n- **Render-local**: imported entries already serve clean markdown bodies\n  (frontmatter stripped at parse time); a test confirms the served body is\n  renderable and free of provenance leakage.\n\n### Why\nThe Yuri \"source capability\" journey (epic CO-414) requires that every\npublication be auditable from origin to request. This makes that flow a\nreusable CO capability rather than a manual process.",
+  "summary": "As Autor revisando conteúdo importado, QUERO ver o markdown renderizado no localhost, editar o necessário e publicar como uma feature convencional e semver-aligned que **rastreia de volta** à fonte e ",
+  "co_auto_version": "0.1.0"
+}
