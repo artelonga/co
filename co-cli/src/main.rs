@@ -583,6 +583,24 @@ enum Commands {
         delete_missing: bool,
     },
 
+    /// Ingest an external source into a CO universe (CO-417)
+    ///
+    /// A general `source` adapter. `co source add github <owner/repo>` clones
+    /// the repo, parses each file (.md → body, .ipynb → markdown, others →
+    /// asset entries), and materializes the file tree as CO entries under a
+    /// target universe — preserving the folder hierarchy. Each entry carries
+    /// provenance frontmatter (`source: github:<owner/repo>@<sha>`,
+    /// `source_path: <path>`). Re-running converges (idempotent by content).
+    ///
+    /// Examples:
+    ///   co source add github yurisugano/SensorySpeech
+    ///   co source add github foo/bar --universe my-nlp --ref main
+    ///   co source add github foo/bar --dry-run
+    Source {
+        #[command(subcommand)]
+        action: SourceSubcommand,
+    },
+
     /// Release notes — what changed in recent CO versions
     ///
     /// Shows the latest release section from the CHANGELOG embedded in this
@@ -707,6 +725,48 @@ enum Commands {
         /// Auto-approve all pipeline stages (no prompts)
         #[arg(long, global = true)]
         auto_approve: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SourceSubcommand {
+    /// Ingest a GitHub repository into a CO universe (CO-417)
+    Add {
+        #[command(subcommand)]
+        provider: SourceProvider,
+    },
+}
+
+#[derive(Subcommand)]
+enum SourceProvider {
+    /// Ingest a GitHub repo: `co source add github <owner/repo>`
+    Github {
+        /// Repository as `owner/repo` (also accepts a full GitHub URL)
+        owner_repo: String,
+
+        /// Target universe key (default: sanitized repo name)
+        #[arg(long)]
+        universe: Option<String>,
+
+        /// Git ref (branch or tag) to import (default: repo default branch)
+        #[arg(long = "ref")]
+        reference: Option<String>,
+
+        /// Base URL of the remote CO server (or set CO_REMOTE)
+        #[arg(long, env = "CO_REMOTE")]
+        remote: Option<String>,
+
+        /// API token for authentication (or set CO_TOKEN)
+        #[arg(long, env = "CO_TOKEN")]
+        token: Option<String>,
+
+        /// Preview the import plan without writing anything
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Soft-reflect repo deletions: remove imported entries no longer present
+        #[arg(long)]
+        delete_missing: bool,
     },
 }
 
@@ -1587,6 +1647,29 @@ fn main() {
         } => {
             commands::push::run(remote, token, key, dry_run, delete_missing);
         }
+        Commands::Source { action } => match action {
+            SourceSubcommand::Add { provider } => match provider {
+                SourceProvider::Github {
+                    owner_repo,
+                    universe,
+                    reference,
+                    remote,
+                    token,
+                    dry_run,
+                    delete_missing,
+                } => {
+                    commands::source::run(
+                        owner_repo,
+                        universe,
+                        reference,
+                        remote,
+                        token,
+                        dry_run,
+                        delete_missing,
+                    );
+                }
+            },
+        },
         Commands::Updates { count, all } => {
             commands::updates::run(count, all);
         }

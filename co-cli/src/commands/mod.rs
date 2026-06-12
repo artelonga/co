@@ -31,6 +31,7 @@ pub mod repo;
 pub mod schema;
 pub mod serve;
 pub mod show;
+pub mod source;
 pub mod space;
 pub mod status;
 pub mod teaser;
