@@ -128,6 +128,81 @@ pub struct EditApproveBody {
     pub body: Option<String>,
 }
 
+/// CO-418: render-review-publish-with-traceback.
+///
+/// Publishes an entry (typically one imported via CO-417's `source: github`
+/// adapter) as a *conventional, semver-aware* publication that traces back to
+/// (a) the original source and (b) the task that requested the publish.
+#[derive(Debug, Deserialize)]
+pub struct PublishBody {
+    /// Vault path of the entry to publish.
+    pub path: String,
+    /// The task that asked for this publish, e.g. `CO-419`. Stamped into
+    /// frontmatter as `requested_by` and surfaced as a typed `requested_by`
+    /// relation (CO-74).
+    pub requested_by: String,
+    /// Conventional-commit type: `feat` | `fix` | `docs` | `chore` | `refactor`.
+    /// Defaults to `docs` (content publication is a docs-level change).
+    pub commit_type: Option<String>,
+    /// Optional conventional-commit scope, e.g. `pipeline`.
+    pub commit_scope: Option<String>,
+    /// Commit subject line. Defaults to a generated `publish <path>`.
+    pub commit_subject: Option<String>,
+    /// Optional frontmatter patch applied before publishing.
+    pub frontmatter: Option<JsonValue>,
+    /// Optional replacement body applied before publishing.
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublishResponse {
+    pub path: String,
+    pub review_status: String,
+    /// The conventional commit message recorded for this publish.
+    pub commit_message: String,
+    /// The semver bump implied by `commit_type` (`minor` | `patch` | `none`).
+    pub semver_bump: String,
+    /// Content hash that gates idempotency. Re-publishing an unchanged entry
+    /// keeps the same `published_sha` and records no new commit.
+    pub published_sha: String,
+    /// `true` when this call recorded a NEW publish; `false` when it was a
+    /// no-op re-publish of unchanged content (idempotent).
+    pub published: bool,
+    pub source: Option<String>,
+    pub requested_by: String,
+}
+
+/// Map a conventional-commit type to its semver bump intent (CO-258: we record
+/// the *intended* bump but never touch `Cargo.toml` — the release commit owns
+/// the actual version mutation).
+fn semver_bump_for(commit_type: &str) -> &'static str {
+    match commit_type {
+        "feat" => "minor",
+        "fix" | "docs" | "refactor" | "perf" => "patch",
+        _ => "none",
+    }
+}
+
+/// Build a conventional-commit message: `type(scope): subject`.
+fn conventional_commit_message(
+    commit_type: &str,
+    commit_scope: Option<&str>,
+    subject: &str,
+) -> String {
+    match commit_scope.filter(|s| !s.trim().is_empty()) {
+        Some(scope) => format!("{commit_type}({}): {subject}", scope.trim()),
+        None => format!("{commit_type}: {subject}"),
+    }
+}
+
+/// Idempotency key for a publish: a stable hash over the published content +
+/// provenance. Re-publishing the same body/source/requested_by/commit yields
+/// the same hash, so no new commit is recorded.
+fn publish_sha(body: &str, source: &str, requested_by: &str, commit_message: &str) -> String {
+    let material = format!("{body}\n{source}\n{requested_by}\n{commit_message}");
+    co::entry::Entry::hash_body(&material)
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -445,6 +520,177 @@ pub async fn edit_approve(
     })))
 }
 
+// ---------------------------------------------------------------------------
+// POST /publish  (CO-418: render-review-publish with traceback)
+// ---------------------------------------------------------------------------
+
+/// Publish an entry as a conventional, semver-aware publication that carries a
+/// traceback to its source (CO-417 `source` frontmatter) and the task that
+/// requested it (`requested_by`). Owner-only. Idempotent: re-publishing the
+/// same content records no new commit.
+pub async fn publish(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<PublishBody>,
+) -> Result<impl IntoResponse, AppError> {
+    let owner = require_owner(&state, &headers, &slug)?;
+    let slug = &owner.slug;
+
+    if body.requested_by.trim().is_empty() {
+        return Err(AppError::BadRequest(
+            "`requested_by` is required (the task that asked for the publish)".into(),
+        ));
+    }
+
+    let existing = state
+        .core
+        .storage_trait
+        .get_entry(slug, &body.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", body.path)))?;
+
+    let from_status = existing
+        .frontmatter
+        .get("review_status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("published")
+        .to_string();
+
+    // Build the conventional commit message + semver intent.
+    let commit_type = body.commit_type.as_deref().unwrap_or("docs").trim();
+    let commit_type = if commit_type.is_empty() {
+        "docs"
+    } else {
+        commit_type
+    };
+    let subject = body
+        .commit_subject
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .unwrap_or_else(|| format!("publish {}", body.path));
+    let commit_message =
+        conventional_commit_message(commit_type, body.commit_scope.as_deref(), &subject);
+    let semver_bump = semver_bump_for(commit_type);
+
+    // Assemble the published frontmatter: existing + optional patch + provenance.
+    let mut fm = existing
+        .frontmatter
+        .as_object()
+        .cloned()
+        .unwrap_or_default();
+    if let Some(JsonValue::Object(patch)) = body.frontmatter.as_ref() {
+        for (k, v) in patch {
+            fm.insert(k.clone(), v.clone());
+        }
+    }
+
+    let new_body = body.body.as_deref().unwrap_or(&existing.body);
+    let source = fm
+        .get("source")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let new_sha = publish_sha(new_body, &source, body.requested_by.trim(), &commit_message);
+
+    // Idempotency: an unchanged re-publish records no new commit.
+    let prev_sha = existing
+        .frontmatter
+        .get("published_sha")
+        .and_then(|v| v.as_str());
+    let already_published = prev_sha == Some(new_sha.as_str());
+
+    if already_published {
+        return Ok(Json(PublishResponse {
+            path: body.path.clone(),
+            review_status: "published".into(),
+            commit_message,
+            semver_bump: semver_bump.into(),
+            published_sha: new_sha,
+            published: false,
+            source: (!source.is_empty()).then_some(source),
+            requested_by: body.requested_by.trim().to_string(),
+        })
+        .into_response());
+    }
+
+    let now = chrono::Utc::now().to_rfc3339();
+    // Provenance + publish-record stamps. `source`/`source_path`/`source_kind`
+    // (from CO-417) are preserved untouched; we ADD `requested_by` + the
+    // publish record so the traceback is complete.
+    fm.insert("requested_by".into(), json!(body.requested_by.trim()));
+    fm.insert("review_status".into(), json!("published"));
+    fm.insert("reviewed_by".into(), json!(owner.user_id));
+    fm.insert("reviewed_at".into(), json!(now));
+    fm.insert("published_at".into(), json!(now));
+    fm.insert("published_commit".into(), json!(commit_message));
+    fm.insert("published_semver".into(), json!(semver_bump));
+    fm.insert("published_sha".into(), json!(new_sha));
+    let frontmatter = JsonValue::Object(fm);
+
+    let entry = make_entry(&body.path, frontmatter, new_body);
+    // write_and_index re-syncs relations → the `origin` + `requested_by` typed
+    // edges (CO-418 / CO-74) are derived from frontmatter here.
+    write_and_index(&state, slug, &entry)?;
+    let submitter = existing
+        .frontmatter
+        .get("submitted_by")
+        .and_then(|v| v.as_str());
+    let submitted_at = existing
+        .frontmatter
+        .get("submitted_at")
+        .and_then(|v| v.as_str());
+    set_review_status(
+        &state,
+        slug,
+        &body.path,
+        "published",
+        submitter,
+        submitted_at,
+        Some(&owner.user_id),
+        Some(&now),
+    )?;
+
+    // EDA: a publish event carrying the commit metadata + traceback so the
+    // atividades/timeline subscribers (CO-351/CO-380) can record it.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "entry.published",
+        Some(slug.to_string()),
+        Some(owner.user_id.clone()),
+        json!({
+            "entry_id": body.path,
+            "actor": owner.user_id,
+            "from_status": from_status,
+            "to_status": "published",
+            "commit_message": commit_message,
+            "semver_bump": semver_bump,
+            "source": source,
+            "requested_by": body.requested_by.trim(),
+        }),
+        crate::eda::Visibility::UniverseOwner,
+    ));
+
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
+
+    Ok(Json(PublishResponse {
+        path: body.path.clone(),
+        review_status: "published".into(),
+        commit_message,
+        semver_bump: semver_bump.into(),
+        published_sha: new_sha,
+        published: true,
+        source: (!source.is_empty()).then_some(source),
+        requested_by: body.requested_by.trim().to_string(),
+    })
+    .into_response())
+}
+
 /// Shared approve / edit-then-approve path: optionally patch the entry, then
 /// flip `review_status` → `published`, reindex, notify, and log.
 async fn publish_entry(
@@ -710,6 +956,8 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/review", get(review_queue).patch(edit_approve))
         .route("/{slug}/review/approve", post(approve))
         .route("/{slug}/review/reject", post(reject))
+        // CO-418: render-review-publish with traceback.
+        .route("/{slug}/publish", post(publish))
 }
 
 #[cfg(test)]
@@ -1073,5 +1321,269 @@ mod tests {
             .unwrap();
         let queue = body_json(resp.into_body()).await;
         assert_eq!(queue["total"], 0, "honeypot submission must not be stored");
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-418: conventional-commit + semver helpers (unit)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_conventional_commit_message_with_scope() {
+        let msg = conventional_commit_message("feat", Some("pipeline"), "publish docs/intro.md");
+        assert_eq!(msg, "feat(pipeline): publish docs/intro.md");
+    }
+
+    #[test]
+    fn test_conventional_commit_message_no_scope() {
+        let msg = conventional_commit_message("docs", None, "publish x");
+        assert_eq!(msg, "docs: publish x");
+    }
+
+    #[test]
+    fn test_semver_bump_mapping() {
+        assert_eq!(semver_bump_for("feat"), "minor");
+        assert_eq!(semver_bump_for("fix"), "patch");
+        assert_eq!(semver_bump_for("docs"), "patch");
+        assert_eq!(semver_bump_for("chore"), "none");
+    }
+
+    #[test]
+    fn test_publish_sha_is_stable_and_content_sensitive() {
+        let a = publish_sha("body", "github:o/r@sha", "CO-418", "docs: publish x");
+        let b = publish_sha("body", "github:o/r@sha", "CO-418", "docs: publish x");
+        assert_eq!(a, b, "same inputs ⇒ same hash (idempotency key)");
+        let c = publish_sha(
+            "body changed",
+            "github:o/r@sha",
+            "CO-418",
+            "docs: publish x",
+        );
+        assert_ne!(a, c, "changed body ⇒ different hash");
+    }
+
+    // -----------------------------------------------------------------------
+    // CO-418 e2e: publish imported entry → conventional commit + both
+    // provenance fields resolvable as typed relations; re-publish is a no-op.
+    // -----------------------------------------------------------------------
+
+    /// Seed an imported entry (CO-417 shape) directly into the DB as an owner
+    /// draft, then return its path. Mirrors what the source adapter writes.
+    async fn seed_imported_entry(app: &axum::Router, dir: &std::path::Path) -> String {
+        let path = "imported/intro.md".to_string();
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/universes/{SLUG}/entries"))
+                    .header(header::AUTHORIZATION, owner_bearer(dir))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({
+                            "path": path,
+                            "frontmatter": {
+                                "type": "page",
+                                "title": "Intro",
+                                "source": "github:yurisugano/SensorySpeech@cafe1234",
+                                "source_path": "docs/intro.md",
+                                "source_kind": "github",
+                            },
+                            "body": "# Intro\n\nImported content.",
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::CREATED,
+            "seed imported entry should 201"
+        );
+        path
+    }
+
+    async fn get_entry_json(app: &axum::Router, dir: &std::path::Path, path: &str) -> JsonValue {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri(format!("/api/v1/universes/{SLUG}/entries/{path}"))
+                    .header(header::AUTHORIZATION, owner_bearer(dir))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        body_json(resp.into_body()).await
+    }
+
+    async fn publish_req(
+        app: &axum::Router,
+        dir: &std::path::Path,
+        payload: serde_json::Value,
+    ) -> (StatusCode, JsonValue) {
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/universes/{SLUG}/publish"))
+                    .header(header::AUTHORIZATION, owner_bearer(dir))
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let status = resp.status();
+        (status, body_json(resp.into_body()).await)
+    }
+
+    #[tokio::test]
+    async fn test_publish_produces_conventional_commit_and_traceback() {
+        let dir = tempdir().unwrap();
+        seed_public_universe(dir.path());
+        let app = build_test_router(dir.path());
+        let path = seed_imported_entry(&app, dir.path()).await;
+
+        // Publish, requesting via CO-419, as a feat(pipeline).
+        let (status, out) = publish_req(
+            &app,
+            dir.path(),
+            json!({
+                "path": path,
+                "requested_by": "CO-419",
+                "commit_type": "feat",
+                "commit_scope": "pipeline",
+                "commit_subject": "publish SensorySpeech intro",
+            }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+
+        // (a) conventional commit + semver intent.
+        assert_eq!(
+            out["commit_message"], "feat(pipeline): publish SensorySpeech intro",
+            "conventional commit message"
+        );
+        assert_eq!(out["semver_bump"], "minor", "feat ⇒ minor");
+        assert_eq!(out["published"], true);
+        assert_eq!(out["review_status"], "published");
+
+        // (b) both provenance fields resolvable: stamped in frontmatter AND
+        // surfaced as typed relations (origin → source, requested_by → task).
+        // `EntryWithRelations` flattens the entry, so frontmatter is top-level.
+        let entry = get_entry_json(&app, dir.path(), &path).await;
+        let fm = &entry["frontmatter"];
+        assert_eq!(fm["source"], "github:yurisugano/SensorySpeech@cafe1234");
+        assert_eq!(fm["requested_by"], "CO-419");
+        assert_eq!(
+            fm["published_commit"],
+            "feat(pipeline): publish SensorySpeech intro"
+        );
+
+        let relations = entry["relations"].as_array().expect("relations array");
+        let origin = relations
+            .iter()
+            .find(|r| r["relation_type"] == "origin")
+            .expect("origin relation");
+        assert_eq!(
+            origin["to_path"],
+            "github:yurisugano/SensorySpeech@cafe1234"
+        );
+        let req = relations
+            .iter()
+            .find(|r| r["relation_type"] == "requested_by")
+            .expect("requested_by relation");
+        assert_eq!(req["to_path"], "CO-419");
+
+        // Render-local AC: the served body is clean markdown (frontmatter is
+        // stripped at parse time), so `co serve` / the SPA renders it without
+        // provenance leaking into the rendered HTML.
+        let body = entry["body"].as_str().expect("body present");
+        assert!(body.contains("# Intro"), "markdown body is renderable");
+        assert!(
+            !body.contains("source:") && !body.contains("requested_by:"),
+            "frontmatter must not leak into the renderable body"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_republish_unchanged_is_noop() {
+        let dir = tempdir().unwrap();
+        seed_public_universe(dir.path());
+        let app = build_test_router(dir.path());
+        let path = seed_imported_entry(&app, dir.path()).await;
+
+        let payload = json!({
+            "path": path,
+            "requested_by": "CO-419",
+            "commit_type": "docs",
+            "commit_subject": "publish intro",
+        });
+
+        let (s1, first) = publish_req(&app, dir.path(), payload.clone()).await;
+        assert_eq!(s1, StatusCode::OK);
+        assert_eq!(first["published"], true, "first publish records a commit");
+        let sha1 = first["published_sha"].as_str().unwrap().to_string();
+
+        // Re-publish identical content ⇒ idempotent no-op (same sha, published=false).
+        let (s2, second) = publish_req(&app, dir.path(), payload).await;
+        assert_eq!(s2, StatusCode::OK);
+        assert_eq!(
+            second["published"], false,
+            "re-publish unchanged ⇒ no new commit"
+        );
+        assert_eq!(
+            second["published_sha"].as_str().unwrap(),
+            sha1,
+            "idempotency key stable"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_publish_requires_requested_by() {
+        let dir = tempdir().unwrap();
+        seed_public_universe(dir.path());
+        let app = build_test_router(dir.path());
+        let path = seed_imported_entry(&app, dir.path()).await;
+
+        let (status, _) = publish_req(
+            &app,
+            dir.path(),
+            json!({ "path": path, "requested_by": "" }),
+        )
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_publish_owner_only() {
+        let dir = tempdir().unwrap();
+        seed_public_universe(dir.path());
+        let app = build_test_router(dir.path());
+        let path = seed_imported_entry(&app, dir.path()).await;
+
+        let intruder = bearer_for(dir.path(), "intruder");
+        let resp = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/api/v1/universes/{SLUG}/publish"))
+                    .header(header::AUTHORIZATION, intruder)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(
+                        json!({ "path": path, "requested_by": "CO-419" }).to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::FORBIDDEN);
     }
 }

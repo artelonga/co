@@ -3498,6 +3498,21 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/publish:
+    post:
+      tags: ["suggest/review"]
+      summary: "CO-418: render-review-publish with traceback — conventional commit + semver intent, stamps `requested_by`, preserves `source`; idempotent re-publish; surfaces `origin`/`requested_by` typed relations"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/query:
     get:
       tags: ["entries"]
