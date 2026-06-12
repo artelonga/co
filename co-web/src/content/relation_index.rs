@@ -331,11 +331,55 @@ pub fn extract_body_wikilinks(body: &str) -> Vec<(String, String, Option<String>
         .collect()
 }
 
+/// CO-418: Extract provenance/traceback relations from frontmatter.
+///
+/// Two manifest-independent typed relations carry the render-review-publish
+/// traceback so the UI can surface "Origem" + "Pedido por":
+/// - `origin` ← the `source` field (e.g. `github:owner/repo@sha`, from CO-417).
+///   The target is an external ref, not a local entry, so `to_universe` is set
+///   to a sentinel `"@source"` to mark it as a non-entry external target.
+/// - `requested_by` ← the `requested_by` field (the task that asked for the
+///   publish, e.g. `CO-418`). `to_universe` is the sentinel `"@task"`.
+///
+/// These derive from frontmatter, so they survive every `replace_all` and are
+/// idempotent: re-saving the same entry reproduces exactly the same edges.
+///
+/// Returns `(relation_type, to_path, to_universe, link_text)` 4-tuples.
+pub fn extract_provenance_relations(
+    frontmatter: &serde_json::Value,
+) -> Vec<(String, String, Option<String>, Option<String>)> {
+    let mut out = Vec::new();
+    if let Some(source) = frontmatter.get("source").and_then(|v| v.as_str()) {
+        let source = source.trim();
+        if !source.is_empty() {
+            out.push((
+                "origin".to_string(),
+                source.to_string(),
+                Some("@source".to_string()),
+                None,
+            ));
+        }
+    }
+    if let Some(req) = frontmatter.get("requested_by").and_then(|v| v.as_str()) {
+        let req = req.trim();
+        if !req.is_empty() {
+            out.push((
+                "requested_by".to_string(),
+                req.to_string(),
+                Some("@task".to_string()),
+                None,
+            ));
+        }
+    }
+    out
+}
+
 /// Sync relations for a single entry: extract from frontmatter + body, replace in DB.
 ///
 /// Combines manifest-declared frontmatter refs (if manifest is provided) with
-/// body wikilinks (CO-363) into one `replace_all` call. Silently skips manifest
-/// extraction if no manifest is given, but always processes body wikilinks.
+/// body wikilinks (CO-363) and provenance/traceback edges (CO-418) into one
+/// `replace_all` call. Silently skips manifest extraction if no manifest is
+/// given, but always processes body wikilinks + provenance.
 ///
 /// Returns the number of relations upserted (0 = all cleared).
 pub fn sync_entry_relations(
@@ -353,6 +397,7 @@ pub fn sync_entry_relations(
         vec![]
     };
     relations.extend(extract_body_wikilinks(body));
+    relations.extend(extract_provenance_relations(frontmatter));
     let count = relations.len();
     RelationIndex::new(conn).replace_all(universe_key, path, &relations)?;
     Ok(count)
@@ -761,6 +806,59 @@ mod tests {
         let fm = json!({"anything": "value"});
         let rels = extract_relations(&manifest, "unknown_type", &fm);
         assert!(rels.is_empty());
+    }
+
+    // ---- CO-418: provenance / traceback relations ----
+
+    #[test]
+    fn test_extract_provenance_relations_source_and_requested_by() {
+        let fm = json!({
+            "type": "page",
+            "source": "github:yurisugano/SensorySpeech@cafe1234",
+            "source_path": "docs/intro.md",
+            "source_kind": "github",
+            "requested_by": "CO-419",
+        });
+        let rels = extract_provenance_relations(&fm);
+        // origin → source ; requested_by → task
+        let origin = rels
+            .iter()
+            .find(|r| r.0 == "origin")
+            .expect("origin relation present");
+        assert_eq!(origin.1, "github:yurisugano/SensorySpeech@cafe1234");
+        assert_eq!(origin.2, Some("@source".to_string()));
+        let req = rels
+            .iter()
+            .find(|r| r.0 == "requested_by")
+            .expect("requested_by relation present");
+        assert_eq!(req.1, "CO-419");
+        assert_eq!(req.2, Some("@task".to_string()));
+    }
+
+    #[test]
+    fn test_extract_provenance_relations_absent_fields() {
+        let fm = json!({ "type": "note", "title": "no provenance" });
+        let rels = extract_provenance_relations(&fm);
+        assert!(rels.is_empty(), "no source/requested_by ⇒ no edges");
+    }
+
+    #[test]
+    fn test_sync_includes_provenance_edges() {
+        let conn = setup_db();
+        let fm = json!({
+            "type": "page",
+            "source": "github:foo/bar@abc",
+            "requested_by": "CO-418",
+        });
+        // No manifest, empty body ⇒ only provenance edges contribute.
+        let count = sync_entry_relations(&conn, "u1", "docs/x.md", "page", &fm, "", None).unwrap();
+        assert_eq!(count, 2, "origin + requested_by");
+        let rows = RelationIndex::new(&conn)
+            .outbound("u1", "docs/x.md")
+            .unwrap();
+        let types: Vec<&str> = rows.iter().map(|r| r.relation_type.as_str()).collect();
+        assert!(types.contains(&"origin"));
+        assert!(types.contains(&"requested_by"));
     }
 
     // ---- RelationIndex ----

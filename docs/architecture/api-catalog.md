@@ -180,6 +180,7 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | PATCH | `/api/v1/universes/{slug}/review` | owner (in-handler) | Edit a draft before approving |
 | POST | `/api/v1/universes/{slug}/review/approve` | owner (in-handler) | Approve → review_status published |
 | POST | `/api/v1/universes/{slug}/review/reject` | owner (in-handler) | Reject → entry removed |
+| POST | `/api/v1/universes/{slug}/publish` | owner (in-handler) | CO-418: render-review-publish with traceback — conventional commit + semver intent, stamps `requested_by`, preserves `source`; idempotent re-publish; surfaces `origin`/`requested_by` typed relations |
 
 ---
 
