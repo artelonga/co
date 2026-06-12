@@ -767,6 +767,14 @@ enum SourceProvider {
         /// Soft-reflect repo deletions: remove imported entries no longer present
         #[arg(long)]
         delete_missing: bool,
+
+        /// CO-423: set the target universe's parent (hierarchical grouping)
+        #[arg(long)]
+        parent: Option<String>,
+
+        /// CO-423: don't synthesize a landing `index.md` when the repo lacks one
+        #[arg(long)]
+        no_index: bool,
     },
 }
 
@@ -1657,6 +1665,8 @@ fn main() {
                     token,
                     dry_run,
                     delete_missing,
+                    parent,
+                    no_index,
                 } => {
                     commands::source::run(
                         owner_repo,
@@ -1666,6 +1676,8 @@ fn main() {
                         token,
                         dry_run,
                         delete_missing,
+                        parent,
+                        no_index,
                     );
                 }
             },
@@ -1783,6 +1795,69 @@ fn main() {
                 }
             };
             commands::engine::run(engine_action, vault, auto_approve)
+        }
+    }
+}
+
+#[cfg(test)]
+mod cli_parse_tests {
+    use super::*;
+    use clap::Parser;
+
+    /// CO-423: `--parent` and `--no-index` parse onto `source add github`.
+    #[test]
+    fn source_add_github_parses_parent_and_no_index() {
+        let cli = Cli::try_parse_from([
+            "co",
+            "source",
+            "add",
+            "github",
+            "yuri/nlp",
+            "--parent",
+            "yuri",
+            "--no-index",
+        ])
+        .expect("should parse");
+        match cli.command {
+            Commands::Source {
+                action:
+                    SourceSubcommand::Add {
+                        provider:
+                            SourceProvider::Github {
+                                owner_repo,
+                                parent,
+                                no_index,
+                                ..
+                            },
+                    },
+            } => {
+                assert_eq!(owner_repo, "yuri/nlp");
+                assert_eq!(parent.as_deref(), Some("yuri"));
+                assert!(no_index);
+            }
+            _ => panic!("expected source add github"),
+        }
+    }
+
+    /// CO-423: both flags default to absent/false.
+    #[test]
+    fn source_add_github_defaults_no_parent_index_on() {
+        let cli = Cli::try_parse_from(["co", "source", "add", "github", "foo/bar"])
+            .expect("should parse");
+        match cli.command {
+            Commands::Source {
+                action:
+                    SourceSubcommand::Add {
+                        provider:
+                            SourceProvider::Github {
+                                parent, no_index, ..
+                            },
+                    },
+            } => {
+                assert!(parent.is_none());
+                assert!(!no_index);
+            }
+            _ => panic!("expected source add github"),
         }
     }
 }
