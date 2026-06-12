@@ -11,12 +11,55 @@
 //! is full, the least-recently-used connection is closed before a new one is
 //! opened.
 
+use std::collections::HashMap;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use lru::LruCache;
 use rusqlite::Connection;
+
+// ---------------------------------------------------------------------------
+// PoolError — CO-406: a per-universe open failure that MUST NOT crash the
+// process. A single universe whose DB cannot be opened/migrated (disk full,
+// I/O error, corrupt -shm) becomes unavailable; every other universe keeps
+// serving. Callers on the request path translate this into a 503.
+// ---------------------------------------------------------------------------
+
+/// Why a single universe could not be brought online. Carrying the reason
+/// string lets the route layer surface a useful 503 body and lets `atividades`
+/// record the failure.
+#[derive(Debug, Clone)]
+pub struct PoolError {
+    /// The universe key that failed to open.
+    pub universe: String,
+    /// Which step failed (`mkdir` / `open` / `pragmas` / `migrations`).
+    pub stage: &'static str,
+    /// The underlying error rendered as a string (sqlite/io message).
+    pub reason: String,
+}
+
+impl PoolError {
+    fn new(universe: &str, stage: &'static str, reason: impl std::fmt::Display) -> Self {
+        Self {
+            universe: universe.to_string(),
+            stage,
+            reason: reason.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for PoolError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "universe '{}' unavailable ({}): {}",
+            self.universe, self.stage, self.reason
+        )
+    }
+}
+
+impl std::error::Error for PoolError {}
 
 // ---------------------------------------------------------------------------
 // Schema for per-universe data.db
@@ -246,6 +289,11 @@ struct PoolInner {
 pub struct UniversePool {
     data_dir: PathBuf,
     inner: Mutex<PoolInner>,
+    /// CO-406: universes whose last open attempt failed, with the reason.
+    /// Advisory only — entries are cleared on a successful (re)open and a fresh
+    /// attempt is always made on the next access (lazy retry), so a transient
+    /// environment failure (disk full, I/O error) self-heals without a restart.
+    unavailable: Mutex<HashMap<String, PoolError>>,
 }
 
 impl UniversePool {
@@ -260,6 +308,7 @@ impl UniversePool {
             inner: Mutex::new(PoolInner {
                 cache: LruCache::new(cap),
             }),
+            unavailable: Mutex::new(HashMap::new()),
         }
     }
 
@@ -295,31 +344,82 @@ impl UniversePool {
     // Connection management
     // -------------------------------------------------------------------------
 
-    /// Get (or open) the connection for a universe, returning an `Arc<Mutex<Connection>>`.
+    /// CO-406: get (or open) the connection for a universe **without panicking**.
     ///
-    /// Opens and migrates the database on first access. Evicts the LRU connection
-    /// when the cache is full.
-    pub fn get_or_open(&self, key: &str) -> Arc<Mutex<Connection>> {
-        let mut inner = self.inner.lock().expect("pool lock");
-
-        if let Some(arc) = inner.cache.get(key) {
-            return arc.clone();
+    /// Opens and migrates the database on first access, evicting the LRU
+    /// connection when the cache is full. On any environment failure (mkdir,
+    /// open, pragmas, migrations) it records the universe as unavailable and
+    /// returns `Err(PoolError)` instead of panicking — so one bad universe can
+    /// never take the whole process down (2026-06-11 outage).
+    ///
+    /// The failure is *not* cached as a connection: the next call re-attempts
+    /// the open, so the universe recovers automatically once the environment
+    /// failure clears (disk freed, volume extended) — no machine restart.
+    pub fn try_get_or_open(&self, key: &str) -> Result<Arc<Mutex<Connection>>, PoolError> {
+        {
+            let mut inner = self.inner.lock().expect("pool lock");
+            if let Some(arc) = inner.cache.get(key) {
+                return Ok(arc.clone());
+            }
         }
 
-        // Open a new connection
+        match self.build_connection(key) {
+            Ok(conn) => {
+                let arc = Arc::new(Mutex::new(conn));
+                {
+                    let mut inner = self.inner.lock().expect("pool lock");
+                    inner.cache.put(key.to_string(), arc.clone());
+                }
+                // Recovered (or first success): clear any stale unavailable mark.
+                self.unavailable
+                    .lock()
+                    .expect("unavailable lock")
+                    .remove(key);
+                Ok(arc)
+            }
+            Err(e) => {
+                tracing::error!(
+                    universe = %key,
+                    stage = e.stage,
+                    reason = %e.reason,
+                    "CO-406: universe pool open failed — marking unavailable, other universes unaffected"
+                );
+                self.unavailable
+                    .lock()
+                    .expect("unavailable lock")
+                    .insert(key.to_string(), e.clone());
+                Err(e)
+            }
+        }
+    }
+
+    /// Build a fresh connection for `key` (mkdir + open + pragmas + migrations),
+    /// returning a `PoolError` tagged with the failing stage instead of
+    /// panicking. Holds no pool lock.
+    fn build_connection(&self, key: &str) -> Result<Connection, PoolError> {
         let db_path = self.db_path(key);
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).expect("create universe dir");
+            std::fs::create_dir_all(parent).map_err(|e| PoolError::new(key, "mkdir", e))?;
         }
-
-        let conn = Connection::open(&db_path).expect("open universe data.db");
+        let conn = Connection::open(&db_path).map_err(|e| PoolError::new(key, "open", e))?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
-            .expect("universe db pragmas");
-        run_universe_migrations(&conn, key);
+            .map_err(|e| PoolError::new(key, "pragmas", e))?;
+        run_universe_migrations(&conn, key).map_err(|e| PoolError::new(key, "migrations", e))?;
+        Ok(conn)
+    }
 
-        let arc = Arc::new(Mutex::new(conn));
-        inner.cache.put(key.to_string(), arc.clone());
-        arc
+    /// Get (or open) the connection for a universe, returning an `Arc<Mutex<Connection>>`.
+    ///
+    /// Panicking convenience wrapper around [`try_get_or_open`] for internal
+    /// infrastructure call sites (seeding, recompute, clone/import) where a
+    /// failure is a genuine bug rather than an isolatable per-universe outage.
+    /// **Request-path code must use [`try_get_or_open`]** so a single bad
+    /// universe degrades to a 503 instead of aborting the task.
+    ///
+    /// [`try_get_or_open`]: Self::try_get_or_open
+    pub fn get_or_open(&self, key: &str) -> Arc<Mutex<Connection>> {
+        self.try_get_or_open(key)
+            .unwrap_or_else(|e| panic!("universe pool open failed: {e}"))
     }
 
     /// Evict a universe's connection from the pool (closes the connection if no
@@ -327,6 +427,39 @@ impl UniversePool {
     pub fn evict(&self, key: &str) {
         let mut inner = self.inner.lock().expect("pool lock");
         inner.cache.pop(key);
+    }
+
+    /// CO-406: admin reopen — drop any cached connection and forget the
+    /// unavailable mark, then attempt a fresh open. Lets an operator recover a
+    /// universe after fixing the environment without restarting the machine.
+    pub fn reopen(&self, key: &str) -> Result<(), PoolError> {
+        self.evict(key);
+        self.unavailable
+            .lock()
+            .expect("unavailable lock")
+            .remove(key);
+        self.try_get_or_open(key).map(|_| ())
+    }
+
+    /// CO-406: the recorded reason a universe is currently marked unavailable,
+    /// if any. Cleared on the next successful (re)open.
+    pub fn unavailable_reason(&self, key: &str) -> Option<PoolError> {
+        self.unavailable
+            .lock()
+            .expect("unavailable lock")
+            .get(key)
+            .cloned()
+    }
+
+    /// CO-406: snapshot of all universes currently marked unavailable
+    /// (key → reason), for the admin/gestão surface.
+    pub fn unavailable_universes(&self) -> Vec<PoolError> {
+        self.unavailable
+            .lock()
+            .expect("unavailable lock")
+            .values()
+            .cloned()
+            .collect()
     }
 
     /// Number of currently open connections in the pool.
@@ -339,9 +472,14 @@ impl UniversePool {
 // Universe-level migrations
 // ---------------------------------------------------------------------------
 
-fn run_universe_migrations(conn: &Connection, universe_key: &str) {
-    conn.execute_batch(UNIVERSE_SCHEMA)
-        .expect("universe schema migration");
+/// Apply the per-universe schema + incremental migrations.
+///
+/// CO-406: returns `rusqlite::Result` instead of panicking. A migration
+/// failure (e.g. an I/O error mid-`ALTER TABLE` on a full disk) now propagates
+/// to [`UniversePool::try_get_or_open`], which marks that single universe
+/// unavailable rather than aborting the whole process at boot.
+fn run_universe_migrations(conn: &Connection, universe_key: &str) -> rusqlite::Result<()> {
+    conn.execute_batch(UNIVERSE_SCHEMA)?;
 
     let v: i64 = conn
         .query_row(
@@ -352,45 +490,38 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         .unwrap_or(0);
 
     if v < 1 {
-        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])
-            .expect("universe schema_version v1");
+        conn.execute("INSERT INTO schema_version (version) VALUES (1)", [])?;
     }
     if v < 2 {
         // CO-73: entry_dates table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])
-            .expect("universe schema_version v2");
+        conn.execute("INSERT INTO schema_version (version) VALUES (2)", [])?;
     }
     if v < 3 {
         // CO-74: entry_relations table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])
-            .expect("universe schema_version v3");
+        conn.execute("INSERT INTO schema_version (version) VALUES (3)", [])?;
     }
     if v < 4 {
         // CO-146: assets table already created via UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])
-            .expect("universe schema_version v4");
+        conn.execute("INSERT INTO schema_version (version) VALUES (4)", [])?;
     }
     if v < 5 {
         // CO-147: asset_tags + frontmatter_index already created via
         // UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (5)", [])
-            .expect("universe schema_version v5");
+        conn.execute("INSERT INTO schema_version (version) VALUES (5)", [])?;
     }
     if v < 6 {
         // CO-148: encryption envelope columns on assets.
         // `encrypted = 0` rows are Phase 1 plaintext blobs (stay readable).
         // `encrypted = 1` rows are ChaCha20-Poly1305 ciphertext with `nonce`
         // populated and `cipher_size` reflecting the on-disk byte count.
-        ensure_universe_column(conn, "assets", "nonce", "BLOB");
-        ensure_universe_column(conn, "assets", "cipher_size", "INTEGER");
-        ensure_universe_column(conn, "assets", "encrypted", "INTEGER NOT NULL DEFAULT 0");
-        conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])
-            .expect("universe schema_version v6");
+        ensure_universe_column(conn, "assets", "nonce", "BLOB")?;
+        ensure_universe_column(conn, "assets", "cipher_size", "INTEGER")?;
+        ensure_universe_column(conn, "assets", "encrypted", "INTEGER NOT NULL DEFAULT 0")?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (6)", [])?;
     }
     if v < 7 {
         // CO-156: references_meta + references_fts already created via UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])
-            .expect("universe schema_version v7");
+        conn.execute("INSERT INTO schema_version (version) VALUES (7)", [])?;
     }
     if v < 8 {
         // CO-158: add work_id, edition_id, primary_layer; change PK to
@@ -399,25 +530,22 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         // must be recreated. New databases already have the v8 schema from
         // UNIVERSE_SCHEMA, so the check is a no-op for them.
         if !universe_column_exists(conn, "references_meta", "edition_id") {
-            recreate_references_meta_v8(conn);
+            recreate_references_meta_v8(conn)?;
         }
-        conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])
-            .expect("universe schema_version v8");
+        conn.execute("INSERT INTO schema_version (version) VALUES (8)", [])?;
     }
     if v < 9 {
         // Temporal validity on entry_relations: edges valid only within
         // [valid_from, valid_until). NULL on either side means unbounded.
         // Sourced from the *from-entry's* frontmatter `valid_from`/`valid_until`
         // and applied to all of its outbound edges (entry-level lifecycle).
-        ensure_universe_column(conn, "entry_relations", "valid_from", "TEXT");
-        ensure_universe_column(conn, "entry_relations", "valid_until", "TEXT");
-        conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])
-            .expect("universe schema_version v9");
+        ensure_universe_column(conn, "entry_relations", "valid_from", "TEXT")?;
+        ensure_universe_column(conn, "entry_relations", "valid_until", "TEXT")?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (9)", [])?;
     }
     if v < 10 {
         // CO-164: vector embedding store — already created via UNIVERSE_SCHEMA IF NOT EXISTS.
-        conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])
-            .expect("universe schema_version v10");
+        conn.execute("INSERT INTO schema_version (version) VALUES (10)", [])?;
     }
     if v < 11 {
         // 2.7.25: append-only event log per universe. Every PUT/DELETE
@@ -464,18 +592,16 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
              CREATE INDEX IF NOT EXISTS idx_entry_events_unexported
                 ON entry_events(seq)
                 WHERE exported_at IS NULL;",
-        )
-        .expect("universe schema v11: entry_events");
-        conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])
-            .expect("universe schema_version v11");
+        )?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (11)", [])?;
     }
     if v < 12 {
         // CO-241: true content-volume metrics — lines/words/chars separate
         // from content_count (file count). New databases already have these
         // columns from UNIVERSE_SCHEMA; existing DBs get them via ALTER TABLE.
-        ensure_universe_column(conn, "entries", "body_lines", "INTEGER NOT NULL DEFAULT 0");
-        ensure_universe_column(conn, "entries", "body_words", "INTEGER NOT NULL DEFAULT 0");
-        ensure_universe_column(conn, "entries", "body_chars", "INTEGER NOT NULL DEFAULT 0");
+        ensure_universe_column(conn, "entries", "body_lines", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_universe_column(conn, "entries", "body_words", "INTEGER NOT NULL DEFAULT 0")?;
+        ensure_universe_column(conn, "entries", "body_chars", "INTEGER NOT NULL DEFAULT 0")?;
         // Backfill: compute the three metrics for every row that still has the
         // DEFAULT 0 values. SQLite's length() gives char count; lines and words
         // require a Rust-side pass (no built-in). We mark them "needs backfill"
@@ -485,8 +611,7 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (12)",
             [],
-        )
-        .expect("universe schema_version v12");
+        )?;
     }
     if v < 13 {
         // CO-242: backfill entries rows for existing assets so they appear in the
@@ -535,39 +660,35 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
                  FROM assets"
             ),
             rusqlite::params![universe_key],
-        )
-        .expect("CO-242 migration v13: backfill asset entries");
-        conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])
-            .expect("universe schema_version v13");
+        )?;
+        conn.execute("INSERT INTO schema_version (version) VALUES (13)", [])?;
     }
     if v < 14 {
         // CO-267: entry_origin — distinguishes seed-walker writes ('walker')
         // from co-sync push writes ('synced'). Default '' for existing rows
         // (treated as walker-equivalent by the upsert guard).
-        ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''");
+        ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''")?;
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (14)",
             [],
-        )
-        .expect("universe schema_version v14");
+        )?;
     }
     // CO-267 unconditional backfill — same drift-safe guard as CO-241.
-    ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''");
+    ensure_universe_column(conn, "entries", "entry_origin", "TEXT NOT NULL DEFAULT ''")?;
     if v < 15 {
         // CO-330: functional index on frontmatter_json.published for the anon published-only filter.
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_entries_published \
              ON entries(universe_key, json_extract(frontmatter_json, '$.published')); \
              INSERT OR IGNORE INTO schema_version (version) VALUES (15);",
-        )
-        .expect("universe schema_version v15");
+        )?;
     }
     if v < 16 {
         // CO-363: link_text column on entry_relations — stores optional alias label
         // from [[target|label]] wikilinks. Nullable; NULL means no alias was written.
         // New universes already have the column from UNIVERSE_SCHEMA; existing ones
         // get it here.
-        ensure_universe_column(conn, "entry_relations", "link_text", "TEXT");
+        ensure_universe_column(conn, "entry_relations", "link_text", "TEXT")?;
         // Backfill body wikilinks for all existing entries. This is a one-time
         // ~60s run for ~11,500-entry universes. Uses INSERT OR REPLACE scoped to
         // wikilink relation_types so frontmatter FK rows are not touched.
@@ -582,26 +703,24 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (16)",
             [],
-        )
-        .expect("universe schema_version v16");
+        )?;
     }
     // CO-363 unconditional drift guard — ensures link_text exists even if v16
     // was partially applied on an older instance.
-    ensure_universe_column(conn, "entry_relations", "link_text", "TEXT");
+    ensure_universe_column(conn, "entry_relations", "link_text", "TEXT")?;
 
     if v < 17 {
         // CO-389: source_marker — diagnostic column tracking which channel last wrote
         // this entry: 'yggdrasil-live' (live overlay), 'remote-git' (CO-337 poll),
         // 'vault-write' (Vault API write), or NULL (legacy / untracked).
-        ensure_universe_column(conn, "entries", "source_marker", "TEXT");
+        ensure_universe_column(conn, "entries", "source_marker", "TEXT")?;
         conn.execute(
             "INSERT OR IGNORE INTO schema_version (version) VALUES (17)",
             [],
-        )
-        .expect("universe schema_version v17");
+        )?;
     }
     // CO-389 unconditional drift guard.
-    ensure_universe_column(conn, "entries", "source_marker", "TEXT");
+    ensure_universe_column(conn, "entries", "source_marker", "TEXT")?;
 
     if v < 18 {
         // CO-354: suggest/review lifecycle. Every entry gains a review_status
@@ -614,17 +733,16 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
             "entries",
             "review_status",
             "TEXT NOT NULL DEFAULT 'published'",
-        );
-        ensure_universe_column(conn, "entries", "submitted_by", "TEXT");
-        ensure_universe_column(conn, "entries", "submitted_at", "TEXT");
-        ensure_universe_column(conn, "entries", "reviewed_by", "TEXT");
-        ensure_universe_column(conn, "entries", "reviewed_at", "TEXT");
+        )?;
+        ensure_universe_column(conn, "entries", "submitted_by", "TEXT")?;
+        ensure_universe_column(conn, "entries", "submitted_at", "TEXT")?;
+        ensure_universe_column(conn, "entries", "reviewed_by", "TEXT")?;
+        ensure_universe_column(conn, "entries", "reviewed_at", "TEXT")?;
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_entries_review_status \
              ON entries(universe_key, review_status) WHERE review_status != 'published'; \
              INSERT OR IGNORE INTO schema_version (version) VALUES (18);",
-        )
-        .expect("universe schema_version v18");
+        )?;
     }
     if v < 19 {
         // CO-387: canonical Unix-ms columns for the time-rendering primitive.
@@ -634,9 +752,9 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         // scale uses frontmatter_json fields instead, see CO-387 spec).
         // New universes already have the columns from UNIVERSE_SCHEMA;
         // existing ones get them here via ALTER TABLE.
-        ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER");
-        ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER");
-        ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER");
+        ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER")?;
+        ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER")?;
+        ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER")?;
         // Backfill from entry_dates ISO values. julianday() keeps millisecond
         // precision (strftime('%s', …) floors to whole seconds) and handles
         // pre-epoch dates (negative ms).
@@ -663,20 +781,18 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
                       )"
                 ),
                 [],
-            )
-            .expect("CO-387 v19: backfill ms column");
+            )?;
         }
         conn.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_entries_event_ms \
              ON entries(universe_key, event_at_ms) WHERE event_at_ms IS NOT NULL; \
              INSERT OR IGNORE INTO schema_version (version) VALUES (19);",
-        )
-        .expect("universe schema_version v19");
+        )?;
     }
     // CO-387 unconditional drift guard — same partial-apply safety as CO-241/CO-267.
-    ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER");
-    ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER");
-    ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER");
+    ensure_universe_column(conn, "entries", "event_at_ms", "INTEGER")?;
+    ensure_universe_column(conn, "entries", "due_at_ms", "INTEGER")?;
+    ensure_universe_column(conn, "entries", "scheduled_at_ms", "INTEGER")?;
 
     // CO-354 unconditional drift guard — same partial-apply safety as CO-241/CO-267.
     ensure_universe_column(
@@ -684,11 +800,11 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
         "entries",
         "review_status",
         "TEXT NOT NULL DEFAULT 'published'",
-    );
-    ensure_universe_column(conn, "entries", "submitted_by", "TEXT");
-    ensure_universe_column(conn, "entries", "submitted_at", "TEXT");
-    ensure_universe_column(conn, "entries", "reviewed_by", "TEXT");
-    ensure_universe_column(conn, "entries", "reviewed_at", "TEXT");
+    )?;
+    ensure_universe_column(conn, "entries", "submitted_by", "TEXT")?;
+    ensure_universe_column(conn, "entries", "submitted_at", "TEXT")?;
+    ensure_universe_column(conn, "entries", "reviewed_by", "TEXT")?;
+    ensure_universe_column(conn, "entries", "reviewed_at", "TEXT")?;
 
     // CO-241 unconditional backfill: for every entry where body_chars = 0 and
     // body IS NOT '' we cannot distinguish "genuinely empty body" from "not yet
@@ -696,12 +812,10 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
     // Rows with an empty body legitimately have body_chars = 0 and will be
     // re-set to 0, which is a no-op. Idempotent.
     {
-        let mut stmt = conn
-            .prepare("SELECT rowid, body FROM entries WHERE body_chars = 0 AND body != ''")
-            .expect("CO-241 backfill prepare");
+        let mut stmt =
+            conn.prepare("SELECT rowid, body FROM entries WHERE body_chars = 0 AND body != ''")?;
         let rows: Vec<(i64, String)> = stmt
-            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
-            .expect("CO-241 backfill query")
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?
             .filter_map(|r| r.ok())
             .collect();
         drop(stmt);
@@ -713,16 +827,17 @@ fn run_universe_migrations(conn: &Connection, universe_key: &str) {
                 "UPDATE entries SET body_lines = ?1, body_words = ?2, body_chars = ?3 \
                  WHERE rowid = ?4",
                 rusqlite::params![lines, words, chars, rowid],
-            )
-            .expect("CO-241 backfill update");
+            )?;
         }
     }
+
+    Ok(())
 }
 
 /// Exposed for integration tests that need a fully-migrated per-universe DB.
 #[doc(hidden)]
 pub fn run_universe_migrations_for_test(conn: &Connection) {
-    run_universe_migrations(conn, "test-universe");
+    run_universe_migrations(conn, "test-universe").expect("test migrations");
 }
 
 fn universe_column_exists(conn: &Connection, table: &str, column: &str) -> bool {
@@ -738,7 +853,7 @@ fn universe_column_exists(conn: &Connection, table: &str, column: &str) -> bool 
 /// Recreate `references_meta` with the CO-158 schema (3-part PK, work_id, edition_id,
 /// primary_layer), backfilling `work_id` from the entry_path stem and `edition_id =
 /// 'default'` for all existing rows.
-fn recreate_references_meta_v8(conn: &Connection) {
+fn recreate_references_meta_v8(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS references_meta_v8 (
             universe_key  TEXT NOT NULL,
@@ -757,8 +872,7 @@ fn recreate_references_meta_v8(conn: &Connection) {
             indexed_at    TEXT NOT NULL,
             PRIMARY KEY (universe_key, entry_path, edition_id)
         );",
-    )
-    .expect("v8 create temp table");
+    )?;
 
     struct RefRow {
         universe_key: String,
@@ -775,13 +889,11 @@ fn recreate_references_meta_v8(conn: &Connection) {
     }
 
     let rows: Vec<RefRow> = {
-        let mut stmt = conn
-            .prepare(
-                "SELECT universe_key, entry_path, file, blob_sha256, url, \
+        let mut stmt = conn.prepare(
+            "SELECT universe_key, entry_path, file, blob_sha256, url, \
                  medium, mime, size_bytes, language, seed_status, indexed_at \
                  FROM references_meta",
-            )
-            .expect("v8 select");
+        )?;
         stmt.query_map([], |row| {
             Ok(RefRow {
                 universe_key: row.get(0)?,
@@ -796,8 +908,7 @@ fn recreate_references_meta_v8(conn: &Connection) {
                 seed_status: row.get(9)?,
                 indexed_at: row.get(10)?,
             })
-        })
-        .expect("v8 query_map")
+        })?
         .filter_map(|r| r.ok())
         .collect()
     };
@@ -823,8 +934,7 @@ fn recreate_references_meta_v8(conn: &Connection) {
                 row.seed_status,
                 row.indexed_at,
             ],
-        )
-        .expect("v8 insert row");
+        )?;
     }
 
     conn.execute_batch(
@@ -837,8 +947,8 @@ fn recreate_references_meta_v8(conn: &Connection) {
          CREATE INDEX IF NOT EXISTS idx_refs_work_id     ON references_meta(work_id);
          CREATE INDEX IF NOT EXISTS idx_refs_primary_layer
              ON references_meta(primary_layer) WHERE primary_layer IS NOT NULL;",
-    )
-    .expect("v8 finalize");
+    )?;
+    Ok(())
 }
 
 /// Derive a work_id slug from an entry path: take the filename stem.
@@ -853,7 +963,12 @@ fn ref_work_id_from_path(path: &str) -> String {
 
 /// Per-universe DB version of the storage.rs `ensure_column` helper. Mirrors
 /// the CO-137 drift-safe pattern.
-fn ensure_universe_column(conn: &Connection, table: &str, column: &str, def: &str) {
+fn ensure_universe_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    def: &str,
+) -> rusqlite::Result<()> {
     let exists: bool = conn
         .query_row(
             &format!("SELECT 1 FROM pragma_table_info('{table}') WHERE name = ?1"),
@@ -863,9 +978,9 @@ fn ensure_universe_column(conn: &Connection, table: &str, column: &str, def: &st
         .ok()
         .unwrap_or(false);
     if !exists {
-        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))
-            .unwrap_or_else(|e| panic!("ensure_universe_column {table}.{column}: {e}"));
+        conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {def};"))?;
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -908,7 +1023,7 @@ mod time_migration_tests {
         )
         .unwrap();
 
-        run_universe_migrations(&conn, "uni");
+        run_universe_migrations(&conn, "uni").unwrap();
 
         assert!(universe_column_exists(&conn, "entries", "event_at_ms"));
         assert!(universe_column_exists(&conn, "entries", "due_at_ms"));
@@ -947,8 +1062,8 @@ mod time_migration_tests {
     #[test]
     fn v19_is_idempotent_on_fresh_database() {
         let conn = Connection::open_in_memory().unwrap();
-        run_universe_migrations(&conn, "uni");
-        run_universe_migrations(&conn, "uni"); // re-run must not panic
+        run_universe_migrations(&conn, "uni").unwrap();
+        run_universe_migrations(&conn, "uni").unwrap(); // re-run must not panic
         assert!(universe_column_exists(&conn, "entries", "event_at_ms"));
     }
 }
@@ -988,7 +1103,7 @@ mod base_schema_tests {
 
         // Must not panic: base batch is column-agnostic; v17/v18 add columns
         // and only then create the dependent index.
-        run_universe_migrations(&conn, "legacy-universe");
+        run_universe_migrations(&conn, "legacy-universe").unwrap();
 
         assert!(universe_column_exists(&conn, "entries", "review_status"));
         let idx: i64 = conn
@@ -999,5 +1114,78 @@ mod base_schema_tests {
             )
             .unwrap();
         assert_eq!(idx, 1, "v18 must create the review_status partial index");
+    }
+}
+
+#[cfg(test)]
+mod degradation_tests {
+    use super::*;
+
+    /// Plant a regular FILE where universe `key`'s directory should be, so that
+    /// `create_dir_all(parent)` for `data.db` fails — a deterministic stand-in
+    /// for the disk-full / I/O-error / corrupt-`-shm` conditions that took prod
+    /// down on 2026-06-11.
+    fn poison_universe(pool: &UniversePool, key: &str) {
+        let dir = pool.universe_dir(key);
+        std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
+        std::fs::write(&dir, b"not a directory").unwrap();
+    }
+
+    /// CO-406: a single universe whose pool open fails must NOT panic. It is
+    /// marked unavailable and returns `Err`, while every OTHER universe opens
+    /// and serves normally — no crash-loop.
+    #[test]
+    fn one_bad_universe_does_not_take_down_the_pool() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = UniversePool::new(dir.path(), 16);
+
+        poison_universe(&pool, "broken");
+
+        // The bad universe fails gracefully (no panic) and is recorded.
+        let bad = pool.try_get_or_open("broken");
+        assert!(bad.is_err(), "poisoned universe must return Err, not panic");
+        assert!(
+            pool.unavailable_reason("broken").is_some(),
+            "failure must be recorded so routes can 503 + atividades can log it"
+        );
+
+        // A healthy universe opens fine despite the broken neighbour.
+        let good = pool.try_get_or_open("healthy");
+        assert!(good.is_ok(), "other universes must keep serving");
+        assert!(pool.unavailable_reason("healthy").is_none());
+    }
+
+    /// CO-406: once the environment failure clears, the next access (or an
+    /// admin `reopen`) recovers the universe WITHOUT a process restart.
+    #[test]
+    fn unavailable_universe_recovers_on_next_access() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = UniversePool::new(dir.path(), 16);
+
+        poison_universe(&pool, "u");
+        assert!(pool.try_get_or_open("u").is_err());
+        assert!(pool.unavailable_reason("u").is_some());
+
+        // Clear the environment failure (remove the blocking file).
+        std::fs::remove_file(pool.universe_dir("u")).unwrap();
+
+        // Lazy retry: the next access succeeds and clears the unavailable mark.
+        let recovered = pool.try_get_or_open("u");
+        assert!(recovered.is_ok(), "universe must recover on next access");
+        assert!(
+            pool.unavailable_reason("u").is_none(),
+            "successful reopen must clear the unavailable mark"
+        );
+    }
+
+    /// CO-406: the panicking `get_or_open` convenience wrapper still works for
+    /// the healthy internal call sites (seeding/recompute/clone) — it delegates
+    /// to the same non-panicking core.
+    #[test]
+    fn get_or_open_wrapper_opens_healthy_universe() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = UniversePool::new(dir.path(), 16);
+        let _conn = pool.get_or_open("ok");
+        assert_eq!(pool.open_count(), 1);
     }
 }
