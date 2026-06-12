@@ -66,6 +66,17 @@ pub trait Storage: Send + Sync {
 
     // --- Escape hatch for paths that still need the raw connection ---
     fn universe_conn(&self, universe_key: &str) -> Arc<std::sync::Mutex<rusqlite::Connection>>;
+
+    /// CO-406: fallible connection accessor for the request path. Returns
+    /// `Err` (instead of panicking) when a single universe cannot be opened,
+    /// so handlers can answer 503 for that universe while others serve. The
+    /// `Err` carries the [`PoolError`] for surfacing in the response + logs.
+    ///
+    /// [`PoolError`]: crate::universe_pool::PoolError
+    fn try_universe_conn(
+        &self,
+        universe_key: &str,
+    ) -> Result<Arc<std::sync::Mutex<rusqlite::Connection>>, crate::universe_pool::PoolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,6 +225,13 @@ impl Storage for SqliteStorage {
 
     fn universe_conn(&self, universe_key: &str) -> Arc<std::sync::Mutex<rusqlite::Connection>> {
         self.inner.lock().universe_conn(universe_key)
+    }
+
+    fn try_universe_conn(
+        &self,
+        universe_key: &str,
+    ) -> Result<Arc<std::sync::Mutex<rusqlite::Connection>>, crate::universe_pool::PoolError> {
+        self.inner.lock().try_universe_conn(universe_key)
     }
 }
 

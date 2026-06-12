@@ -908,4 +908,79 @@ mod tests {
             resp.status()
         );
     }
+
+    // --- CO-406: graceful per-universe pool degradation ---
+
+    /// Seed a public universe row directly into meta.db so the visibility gate
+    /// lets anonymous reads through.
+    fn seed_public_universe(dir: &std::path::Path, key: &str) {
+        let storage = crate::storage::Storage::new(dir);
+        storage
+            .conn()
+            .execute(
+                "INSERT OR IGNORE INTO universes \
+                 (key, name, description, owner_id, created_at, is_public, visibility) \
+                 VALUES (?1, ?1, '', 'system', '2026-01-01', 1, 'public')",
+                [key],
+            )
+            .unwrap();
+    }
+
+    /// Plant a FILE where universe `key`'s data dir should be, so its pool open
+    /// fails deterministically (stand-in for disk-full / I/O error).
+    fn poison_universe_dir(dir: &std::path::Path, key: &str) {
+        let pool = crate::universe_pool::UniversePool::new(dir, 1);
+        let udir = pool.universe_dir(key);
+        std::fs::create_dir_all(udir.parent().unwrap()).unwrap();
+        std::fs::write(&udir, b"not a directory").unwrap();
+    }
+
+    /// CO-406 (router level): when ONE universe's pool open fails, its content
+    /// routes return 503 — but EVERY OTHER universe still serves 200. The
+    /// process must not panic / crash-loop.
+    #[tokio::test]
+    async fn co406_one_bad_universe_503_others_serve() {
+        let dir = tempdir().unwrap();
+
+        seed_public_universe(dir.path(), "healthy");
+        seed_public_universe(dir.path(), "broken");
+        poison_universe_dir(dir.path(), "broken");
+
+        let app = build_test_router(dir.path());
+
+        // Broken universe → 503 (degraded, isolated).
+        let broken = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/universes/broken/entries")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            broken.status(),
+            AxumStatus::SERVICE_UNAVAILABLE,
+            "broken universe must 503, not panic"
+        );
+
+        // Healthy universe → 200 despite the broken neighbour.
+        let healthy = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/v1/universes/healthy/entries")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            healthy.status(),
+            AxumStatus::OK,
+            "other universes must keep serving while one is degraded"
+        );
+    }
 }

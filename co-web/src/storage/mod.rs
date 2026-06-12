@@ -135,6 +135,25 @@ impl Storage {
     pub fn universe_conn(&self, universe_key: &str) -> Arc<std::sync::Mutex<Connection>> {
         self.universe_pool.get_or_open(universe_key)
     }
+
+    /// CO-406: fallible variant of [`universe_conn`] for the request path. If
+    /// the universe's pool open fails (disk full, I/O error, corrupt `-shm`),
+    /// it returns the [`PoolError`] instead of panicking, so the handler can
+    /// degrade to a 503 while every other universe keeps serving.
+    ///
+    /// [`universe_conn`]: Self::universe_conn
+    /// [`PoolError`]: crate::universe_pool::PoolError
+    pub fn try_universe_conn(
+        &self,
+        universe_key: &str,
+    ) -> Result<Arc<std::sync::Mutex<Connection>>, crate::universe_pool::PoolError> {
+        self.universe_pool.try_get_or_open(universe_key)
+    }
+
+    /// CO-406: shared handle to the universe pool, for admin reopen + status.
+    pub fn universe_pool(&self) -> &Arc<UniversePool> {
+        &self.universe_pool
+    }
 }
 
 pub mod agent_sessions;

@@ -763,6 +763,29 @@ pub async fn universe_visibility_gate(
         }
     };
 
+    // CO-406: probe the per-universe pool before dispatching. If this one
+    // universe's DB cannot be opened/migrated (disk full, I/O error, corrupt
+    // -shm), short-circuit with a 503 so the failure is isolated to this
+    // universe — every other universe keeps serving, no panic, no crash-loop.
+    // The pool records the reason (surfaced in logs + atividades). The lock is
+    // dropped before any `.await`, so we never hold Mutex<Storage> across await.
+    {
+        let probe = {
+            let storage = state.core.storage.lock();
+            storage.try_universe_conn(&slug)
+        };
+        if let Err(pool_err) = probe {
+            return Err(err_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "service_unavailable",
+                &format!(
+                    "universe '{}' temporarily unavailable ({}): {}",
+                    pool_err.universe, pool_err.stage, pool_err.reason
+                ),
+            ));
+        }
+    }
+
     // CO-270: public-subscribable universes are readable by anonymous visitors.
     // Only writes are restricted (universe_writer_gate handles that separately).
     if universe.is_public || universe.is_template || universe.visibility == "public-subscribable" {
