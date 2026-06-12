@@ -258,8 +258,14 @@ jobs:
               co-web/src/security/audit/*) continue ;;
             esac
             if [ -f "$file" ]; then
+              # Scan ONLY the lines this PR ADDED (diff '+' lines), not the whole
+              # file — else any PR that merely touches a file containing
+              # pre-existing SQL string-building is falsely blocked (CWE-89
+              # false positive on unchanged code; CO-406 hit this on
+              # universe_pool.rs pragma_table_info queries it never wrote).
+              ADDED=$(git diff "origin/main...HEAD" -- "$file" 2>/dev/null | grep '^+' | grep -v '^+++')
               # SQL injection: format!("SELECT/INSERT/UPDATE/DELETE with interpolation
-              if grep -nP 'format!\("(SELECT|INSERT|UPDATE|DELETE)' "$file" 2>/dev/null; then
+              if printf '%s\n' "$ADDED" | grep -qP 'format!\("(SELECT|INSERT|UPDATE|DELETE)' 2>/dev/null; then
                 BLOCKERS=$((BLOCKERS + 1))
                 FINDINGS=$((FINDINGS + 1))
                 echo "::error file=${file}::SQL injection risk: string interpolation in SQL query (CWE-89)"
@@ -267,14 +273,14 @@ jobs:
 
               # XSS: innerHTML assignment in TS/JS
               if echo "$file" | grep -qE '\.(ts|tsx|js|jsx)$'; then
-                if grep -n '\.innerHTML\s*=' "$file" 2>/dev/null; then
+                if printf '%s\n' "$ADDED" | grep -qP '\.innerHTML\s*=' 2>/dev/null; then
                   BLOCKERS=$((BLOCKERS + 1))
                   FINDINGS=$((FINDINGS + 1))
                   echo "::error file=${file}::XSS risk: direct innerHTML assignment (CWE-79)"
                 fi
 
                 # eval() — critical
-                if grep -n '\beval(' "$file" 2>/dev/null; then
+                if printf '%s\n' "$ADDED" | grep -qP '\beval\(' 2>/dev/null; then
                   BLOCKERS=$((BLOCKERS + 1))
                   FINDINGS=$((FINDINGS + 1))
                   echo "::error file=${file}::Critical: eval() detected — code injection risk (CWE-95)"

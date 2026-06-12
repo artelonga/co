@@ -127,6 +127,13 @@ pub fn router() -> Router<AppState> {
     Router::new()
         // CO-137: diagnostic endpoint — confirms prod schema state for universes table
         .route("/_schema_check", get(schema_check_handler))
+        // CO-406: list universes the pool currently marks unavailable, and an
+        // admin reopen to recover one after fixing the environment (no restart).
+        .route(
+            "/universos/indisponiveis",
+            get(universes_unavailable_handler),
+        )
+        .route("/universos/{key}/reabrir", post(reopen_universe_handler))
         // Validate & publish
         .route("/validar", post(validar_handler))
         .route("/publicar", post(publicar_handler))
@@ -840,6 +847,49 @@ async fn schema_check_handler(
         universes_columns,
         schema_versions,
     }))
+}
+
+// ---- CO-406: per-universe pool availability ----
+
+#[derive(Debug, Serialize)]
+pub struct UnavailableUniverse {
+    pub universe: String,
+    pub stage: String,
+    pub reason: String,
+}
+
+/// GET /gestao/universos/indisponiveis — list universes the pool currently
+/// marks unavailable (CO-406). Empty list means every universe is healthy.
+async fn universes_unavailable_handler(
+    State(state): State<AppState>,
+    _admin: GitHubAdmin,
+) -> Result<Json<Vec<UnavailableUniverse>>, AppError> {
+    let pool = state.core.storage.lock().universe_pool().clone();
+    let list = pool
+        .unavailable_universes()
+        .into_iter()
+        .map(|e| UnavailableUniverse {
+            universe: e.universe,
+            stage: e.stage.to_string(),
+            reason: e.reason,
+        })
+        .collect();
+    Ok(Json(list))
+}
+
+/// POST /gestao/universos/{key}/reabrir — admin reopen (CO-406). Drops the
+/// cached connection + unavailable mark and re-attempts the open, recovering a
+/// universe after the environment failure is fixed, without a machine restart.
+async fn reopen_universe_handler(
+    State(state): State<AppState>,
+    _admin: GitHubAdmin,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    let pool = state.core.storage.lock().universe_pool().clone();
+    match pool.reopen(&key) {
+        Ok(()) => Ok(Json(serde_json::json!({ "reopened": key, "ok": true }))),
+        Err(e) => Err(AppError::from(e)),
+    }
 }
 
 // ---- CO-361: schema version status ----

@@ -59,7 +59,20 @@ impl Storage {
         // data + the cloning contract). A short-lived 2026-05-04 rename to
         // `TUTORIAL` broke 4 template_tests.rs tests and was reverted here.
         let proj_path = "projects/CO/_project.md";
-        let template_uc = self.universe_pool.get_or_open("template");
+        // CO-406: do NOT panic at boot if the template universe's DB can't be
+        // opened (disk full, I/O error). Skip seeding and let the server come
+        // up degraded — the template recovers on a later access/reopen once the
+        // environment clears, instead of crash-looping the whole site.
+        let template_uc = match self.universe_pool.try_get_or_open("template") {
+            Ok(uc) => uc,
+            Err(e) => {
+                tracing::error!(
+                    error = %e,
+                    "CO-406: template universe unavailable at boot — skipping seed, server will start degraded"
+                );
+                return;
+            }
+        };
         let already_seeded: bool = {
             let uc_guard = template_uc.lock().expect("template universe conn lock");
             uc_guard
