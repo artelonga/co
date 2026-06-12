@@ -11,6 +11,8 @@
 
 pub mod auto;
 pub mod universe;
+pub mod usage;
 
 pub use auto::{AutoConfig, run};
 pub use universe::{ResolvedTask, Subspace, discover_subspaces, resolve_task_id};
+pub use usage::{SessionUsage, parse_stream_json};

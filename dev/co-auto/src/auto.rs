@@ -72,6 +72,10 @@ struct ClaudeOutput {
     stdout: String,
     /// Captured stderr (headless mode only; empty in interactive mode).
     stderr: String,
+    /// CO-425: token usage parsed from the `--output-format stream-json` events
+    /// (headless mode only). `None` in interactive mode or when no usage event
+    /// was emitted. Best-effort — never blocks or fails the task.
+    usage: Option<crate::usage::SessionUsage>,
 }
 
 /// One agent-session record, posted to the CO endpoint after each run.
@@ -465,6 +469,30 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             tracker.tasks_failed.push(task.key.clone());
         }
 
+        // CO-425: stream-json usage is the primary token source (headless mode).
+        // Fall back to the legacy stdout scraping when no usage event was parsed
+        // (interactive mode, or an older claude that lacks stream-json).
+        let stream_usage = claude_out.usage.clone();
+        let tokens_in = stream_usage
+            .as_ref()
+            .map(|u| u.total_input())
+            .filter(|&n| n > 0)
+            .or_else(|| parse_token_count(&claude_out.stdout, "input"));
+        let tokens_out = stream_usage
+            .as_ref()
+            .map(|u| u.output_tokens)
+            .filter(|&n| n > 0)
+            .or_else(|| parse_token_count(&claude_out.stdout, "output"));
+
+        // CO-425: print a one-line usage summary for the operator.
+        if let Some(ref u) = stream_usage {
+            let mut line = u.summary_line();
+            if let Some(d) = u.duration_ms {
+                line.push_str(&format!(" — {}", human_duration(d)));
+            }
+            println!("  {} {}", "◆".dimmed(), line.dimmed());
+        }
+
         // CO-275: emit agent-session record (best-effort — never fails the run)
         let session = AgentSessionRecord {
             task_id: task.key.clone(),
@@ -473,8 +501,8 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             finished_at: finish_time,
             duration_ms,
             exit_code: claude_out.exit_code,
-            tokens_in: parse_token_count(&claude_out.stdout, "input"),
-            tokens_out: parse_token_count(&claude_out.stdout, "output"),
+            tokens_in,
+            tokens_out,
             tool_calls: parse_tool_calls(&claude_out.stderr),
             skills_loaded: Some(skills_for_session(&task, &find_workspace_root(&data_dir))),
             context_chars: Some(context.len() as i64),
@@ -484,6 +512,21 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             co_auto_version: Some(env!("CARGO_PKG_VERSION").to_string()),
         };
         post_session_to_co(&session);
+
+        // CO-425: POST the structured usage summary to the dedicated ingestion
+        // endpoint (CO-426). Best-effort, default OFF — no-op when CO_USAGE_ENDPOINT
+        // is unset. Never fails or blocks the task.
+        if let Some(usage) = stream_usage {
+            let outcome = if success { "success" } else { "error" };
+            post_usage_to_co(
+                &task.key,
+                &space_to_universe(&config.space),
+                spawn_time,
+                finish_time,
+                outcome,
+                &usage,
+            );
+        }
 
         // Restore git-crypt filters after task completes
         if has_git_crypt_wt {
@@ -900,12 +943,19 @@ fn launch_claude(
             exit_code: code,
             stdout: String::new(), // interactive mode — stdout goes to terminal
             stderr: String::new(),
+            usage: None, // interactive mode emits human stdout, not stream-json
         })
     } else {
         println!("  {} Launching Claude Code (headless)...", "◆".cyan());
 
         let mut cmd = Command::new("claude");
         cmd.arg("-p").arg(&user_prompt);
+        // CO-425: request structured streaming output so we can capture per-message
+        // token usage. `--verbose` is required by Claude Code for stream-json in
+        // `-p` mode. The "human" assistant text is re-emitted to the launcher log
+        // below, so task visibility is unchanged.
+        cmd.arg("--output-format").arg("stream-json");
+        cmd.arg("--verbose");
         // `--bare` requires ANTHROPIC_API_KEY (OAuth/keychain are never read in
         // bare mode — see `claude --help`). Only enable it for API-key users;
         // subscription users (keychain-auth via `claude /login`) need claude to
@@ -931,12 +981,26 @@ fn launch_claude(
         // Clean up context file
         let _ = fs::remove_file(&context_file);
 
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+
+        // CO-425: re-emit the human assistant text so the launcher log stays
+        // readable, then parse usage. Both steps are best-effort and infallible.
+        for line in stdout.lines() {
+            if let Some(text) = crate::usage::assistant_text(line) {
+                for tl in text.lines() {
+                    println!("    {}", tl.dimmed());
+                }
+            }
+        }
+        let usage = crate::usage::parse_stream_json(&stdout);
+
         let exit_code = output.status.code().unwrap_or(-1);
         Ok(ClaudeOutput {
             success: output.status.success(),
             exit_code,
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stdout,
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            usage: Some(usage),
         })
     }
 }
@@ -1811,6 +1875,122 @@ fn post_session_to_co(session: &AgentSessionRecord) {
     }
 }
 
+/// Format a millisecond duration compactly: `372000` → `6m12s`, `8000` → `8s`.
+fn human_duration(ms: i64) -> String {
+    let secs = ms / 1000;
+    let m = secs / 60;
+    let s = secs % 60;
+    if m > 0 {
+        format!("{m}m{s:02}s")
+    } else {
+        format!("{s}s")
+    }
+}
+
+/// CO-425: POST a [`SessionUsage`] summary to the CO usage-ingestion endpoint.
+///
+/// Best-effort and **default OFF**: when `CO_USAGE_ENDPOINT` is unset (or empty)
+/// this is a silent no-op. A POST failure, a serialize error, or a missing token
+/// never panics, never returns an error, and never blocks the co-auto task — the
+/// worst case is an `info`-level log line. The auth token reuses the existing
+/// `CO_SESSION_TOKEN` scheme (same as `post_session_to_co`).
+///
+/// Payload shape (CO-426 defines the canonical schema):
+/// ```json
+/// {"task_key","universe_key","machine","model","usage":{...},
+///  "started_at","ended_at","outcome"}
+/// ```
+fn post_usage_to_co(
+    task_key: &str,
+    universe_key: &str,
+    started_at: i64,
+    ended_at: i64,
+    outcome: &str,
+    usage: &crate::usage::SessionUsage,
+) {
+    let endpoint = match std::env::var("CO_USAGE_ENDPOINT") {
+        Ok(v) if !v.is_empty() => v,
+        // Default off: telemetry is opt-in. Log at info so it's discoverable
+        // without being noisy, then return.
+        _ => {
+            println!(
+                "  {} usage report skipped (CO_USAGE_ENDPOINT unset)",
+                "◆".dimmed()
+            );
+            return;
+        }
+    };
+
+    let payload = serde_json::json!({
+        "task_key": task_key,
+        "universe_key": universe_key,
+        "machine": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
+        "model": usage.primary_model_short(),
+        "usage": usage,
+        "started_at": started_at,
+        "ended_at": ended_at,
+        "outcome": outcome,
+        "co_auto_version": env!("CARGO_PKG_VERSION"),
+    });
+
+    let json = match serde_json::to_string(&payload) {
+        Ok(j) => j,
+        Err(e) => {
+            eprintln!("  {} usage serialize error: {}", "⚠".yellow(), e);
+            return;
+        }
+    };
+
+    let url = format!("{}/api/v1/usage/sessions", endpoint.trim_end_matches('/'));
+
+    let mut args: Vec<String> = vec![
+        "-s".into(),
+        "-X".into(),
+        "POST".into(),
+        "-H".into(),
+        "Content-Type: application/json".into(),
+    ];
+    // Auth is optional for the usage endpoint (CO-426 may make it open within
+    // the tailnet); attach the bearer token when configured.
+    if let Ok(token) = std::env::var("CO_SESSION_TOKEN")
+        && !token.is_empty()
+    {
+        args.push("-H".into());
+        args.push(format!("Authorization: Bearer {token}"));
+    }
+    args.extend([
+        "-d".into(),
+        json,
+        "--max-time".into(),
+        "10".into(),
+        "--retry".into(),
+        "1".into(),
+        url,
+    ]);
+
+    match Command::new("curl").args(&args).output() {
+        Ok(o) if o.status.success() => {
+            println!("  {} usage reported", "◆".dimmed());
+        }
+        Ok(o) => {
+            let body = String::from_utf8_lossy(&o.stdout);
+            eprintln!(
+                "  {} usage POST failed ({}): {} — task unaffected",
+                "⚠".yellow(),
+                o.status,
+                body.trim()
+            );
+        }
+        Err(e) => {
+            eprintln!(
+                "  {} usage POST error: {} — task unaffected",
+                "⚠".yellow(),
+                e
+            );
+        }
+    }
+}
+
 fn save_tracker(tracker: &RunTracker) -> Result<()> {
     let runs_dir = dirs::home_dir()
         .unwrap_or_default()
@@ -2294,5 +2474,68 @@ mod tests {
             "context budget exceeded: {} chars (max 30_000)",
             context.len()
         );
+    }
+
+    // -------------------- CO-425: usage capture --------------------
+
+    #[test]
+    fn human_duration_formats_minutes_and_seconds() {
+        assert_eq!(human_duration(372_000), "6m12s");
+        assert_eq!(human_duration(8_000), "8s");
+        assert_eq!(human_duration(60_000), "1m00s");
+        assert_eq!(human_duration(0), "0s");
+    }
+
+    #[test]
+    fn post_usage_is_noop_when_endpoint_unset() {
+        // Best-effort swallow: with CO_USAGE_ENDPOINT unset, the report path must
+        // return without panicking or doing any network work — the task is never
+        // blocked by telemetry. (We assert the absence of a panic / hang.)
+        //
+        // SAFETY: single-threaded test mutating process env; restored immediately.
+        let prev = std::env::var("CO_USAGE_ENDPOINT").ok();
+        unsafe {
+            std::env::remove_var("CO_USAGE_ENDPOINT");
+        }
+
+        let usage = crate::usage::parse_stream_json(
+            r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":5}}}"#,
+        );
+        // Must not panic; returns unit.
+        post_usage_to_co("CO-425", "co", 1, 2, "success", &usage);
+
+        // Restore prior env (other tests may rely on it being unset/set).
+        unsafe {
+            match prev {
+                Some(v) => std::env::set_var("CO_USAGE_ENDPOINT", v),
+                None => std::env::remove_var("CO_USAGE_ENDPOINT"),
+            }
+        }
+    }
+
+    #[test]
+    fn agent_session_record_serializes_with_stream_usage_tokens() {
+        // The payload built from a SessionUsage carries the aggregated tokens.
+        let usage = crate::usage::parse_stream_json(
+            r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":400,"cache_read_input_tokens":8000}}}
+{"type":"result","num_turns":3,"duration_ms":120000}"#,
+        );
+        let payload = serde_json::json!({
+            "task_key": "CO-425",
+            "universe_key": "co",
+            "machine": "test-host",
+            "model": usage.primary_model_short(),
+            "usage": &usage,
+            "started_at": 1i64,
+            "ended_at": 2i64,
+            "outcome": "success",
+        });
+        let s = serde_json::to_string(&payload).unwrap();
+        assert!(s.contains("\"model\":\"sonnet\""), "got: {s}");
+        assert!(s.contains("\"input_tokens\":1000"), "got: {s}");
+        assert!(s.contains("\"cache_read_input_tokens\":8000"), "got: {s}");
+        assert!(s.contains("\"outcome\":\"success\""), "got: {s}");
+        // total_input = 1000 + 0 + 8000 = 9000
+        assert_eq!(usage.total_input(), 9000);
     }
 }
