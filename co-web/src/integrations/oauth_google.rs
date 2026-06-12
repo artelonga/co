@@ -33,6 +33,47 @@ use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use crate::server::AppState;
 
+/// Google OAuth token-exchange error body, e.g.
+/// `{"error":"invalid_grant","error_description":"Bad Request"}`.
+#[derive(Debug, Deserialize)]
+struct GoogleTokenError {
+    #[serde(default)]
+    error: String,
+    #[serde(default)]
+    error_description: String,
+}
+
+/// Render Google's token-error JSON into a compact, log-safe message.
+///
+/// Returns `"<error>: <error_description>"` when both fields are present,
+/// `"<error>"` when only the code is, and falls back to the raw (trimmed,
+/// length-capped) body when it is not the expected JSON shape. CO-408.
+fn format_token_error_body(body: &str) -> String {
+    if let Ok(parsed) = serde_json::from_str::<GoogleTokenError>(body)
+        && !parsed.error.is_empty()
+    {
+        if parsed.error_description.is_empty() {
+            return parsed.error;
+        }
+        return format!("{}: {}", parsed.error, parsed.error_description);
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return "(empty response body)".to_string();
+    }
+    // Cap the raw fallback so a giant/HTML error page can't flood the log.
+    // Truncate on a char boundary to avoid slicing mid-codepoint.
+    if trimmed.len() > 300 {
+        let mut end = 300;
+        while !trimmed.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &trimmed[..end])
+    } else {
+        trimmed.to_string()
+    }
+}
+
 const GOOGLE_AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 const GOOGLE_TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const GOOGLE_USERINFO_URL: &str = "https://openidconnect.googleapis.com/v1/userinfo";
@@ -206,7 +247,7 @@ async fn callback_handler(
 
     // 2. Exchange code → access_token.
     let client = reqwest::Client::new();
-    let token_resp: TokenResponse = client
+    let resp = client
         .post(GOOGLE_TOKEN_URL)
         .form(&[
             ("code", params.code.as_str()),
@@ -217,9 +258,28 @@ async fn callback_handler(
         ])
         .send()
         .await
-        .map_err(|e| AppError::Internal(format!("Google token exchange: {e}")))?
-        .error_for_status()
-        .map_err(|e| AppError::Unauthorized(format!("Google token rejected: {e}")))?
+        .map_err(|e| AppError::Internal(format!("Google token exchange: {e}")))?;
+
+    // On non-2xx, Google returns a JSON body like
+    // `{"error":"invalid_grant","error_description":"..."}`. `error_for_status()`
+    // discards that body, collapsing `invalid_grant` (harmless code reuse) and
+    // `invalid_client` (rotated secret — every login broken) into the same opaque
+    // status. Read the body, surface it in the 401, and WARN-log it (CO-408).
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        let detail = format_token_error_body(&body);
+        tracing::warn!(
+            "CO-177 Google token exchange rejected: HTTP {status} — {detail}",
+            status = status.as_u16(),
+        );
+        return Err(AppError::Unauthorized(format!(
+            "Google token rejected ({status}): {detail}",
+            status = status.as_u16(),
+        )));
+    }
+
+    let token_resp: TokenResponse = resp
         .json()
         .await
         .map_err(|e| AppError::Internal(format!("Google token parse: {e}")))?;
@@ -335,4 +395,60 @@ async fn callback_handler(
         (),
     )
         .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_error_invalid_grant_is_distinguishable() {
+        let body = r#"{"error":"invalid_grant","error_description":"Bad Request"}"#;
+        assert_eq!(format_token_error_body(body), "invalid_grant: Bad Request");
+    }
+
+    #[test]
+    fn token_error_invalid_client_is_distinguishable() {
+        // The rotated-secret case — must NOT look the same as invalid_grant.
+        let body =
+            r#"{"error":"invalid_client","error_description":"The OAuth client was not found."}"#;
+        let msg = format_token_error_body(body);
+        assert_eq!(msg, "invalid_client: The OAuth client was not found.");
+        assert_ne!(
+            msg,
+            format_token_error_body(
+                r#"{"error":"invalid_grant","error_description":"The OAuth client was not found."}"#
+            ),
+        );
+    }
+
+    #[test]
+    fn token_error_code_only() {
+        let body = r#"{"error":"invalid_grant"}"#;
+        assert_eq!(format_token_error_body(body), "invalid_grant");
+    }
+
+    #[test]
+    fn token_error_non_json_falls_back_to_raw() {
+        let body = "  <html>500 Internal Server Error</html>  ";
+        assert_eq!(
+            format_token_error_body(body),
+            "<html>500 Internal Server Error</html>"
+        );
+    }
+
+    #[test]
+    fn token_error_empty_body() {
+        assert_eq!(format_token_error_body("   "), "(empty response body)");
+    }
+
+    #[test]
+    fn token_error_caps_long_body_on_char_boundary() {
+        // Multi-byte chars at the cap point must not panic.
+        let body = "é".repeat(400);
+        let out = format_token_error_body(&body);
+        assert!(out.ends_with('…'));
+        // 300 bytes of "é" (2 bytes each) → 150 chars + ellipsis.
+        assert!(out.chars().count() <= 152);
+    }
 }
