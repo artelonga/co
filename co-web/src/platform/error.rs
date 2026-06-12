@@ -75,6 +75,9 @@ fn translate_error_pt(error: &str) -> &'static str {
         "forbidden" => "Acesso negado",
         "gone" => "Recurso removido",
         "too_many_requests" => "Muitas requisições. Tente novamente em instantes.",
+        "service_unavailable" => {
+            "Serviço temporariamente indisponível. Tente novamente em instantes."
+        }
         _ => "Erro",
     }
 }
@@ -185,5 +188,17 @@ impl From<anyhow::Error> for AppError {
     fn from(err: anyhow::Error) -> Self {
         tracing::error!("Internal error: {err}");
         AppError::Internal("Internal server error".into())
+    }
+}
+
+impl From<crate::universe_pool::PoolError> for AppError {
+    /// CO-406: a single-universe pool failure becomes a 503 (not a 500 / panic).
+    /// The reason is included so the client + atividades see *why* this one
+    /// universe is unavailable while the rest of the site is up.
+    fn from(err: crate::universe_pool::PoolError) -> Self {
+        AppError::ServiceUnavailable(format!(
+            "universe '{}' temporarily unavailable ({}): {}",
+            err.universe, err.stage, err.reason
+        ))
     }
 }

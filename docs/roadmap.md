@@ -1,4 +1,4 @@
-# CO Roadmap — Wave-based; v3.0.0 (public launch) and v3.1.0 (deploy/pipeline + KB) shipped — next: v3.2
+# CO Roadmap — Wave-based; v3.0.0 → v3.4.0 shipped — next: v3.5.0 (security gate + ops hardening + prod-e2e)
 
 Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/docs/intelligence-as-a-service.html`](https://artelonga.com.br/docs/intelligence-as-a-service.html), renamed from BaaS 2026-06-06).
 
@@ -8,9 +8,9 @@ Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/doc
 
 **`yuri`** is the reference brain. **`artelonga`** is the business. **CO** is the bounded service — identity · warehouse · payment · sync · event bus.
 
-## Current state (2026-06-11)
+## Current state (2026-06-12)
 
-- **Version**: v3.1.0 released 2026-06-11 (delivery pipeline + knowledge base); v3.0.0 public launch shipped 2026-06-10. `CHANGELOG-PENDING/` is empty post-release — CO-403 (onboarding/pipeline docs) opens the next cycle
+- **Version**: **prod = v3.4.0** (released 2026-06-12 — source:github adapter + time-grid lens + render-review-publish traceback). Shipped since launch: v3.0.0 (06-10 public launch) → v3.1.0 → v3.2.0 → v3.3.0 → v3.3.1 → v3.4.0. **v3.5.0 is pending on `main`** carrying CO-388 (security gate), CO-406 (graceful degradation), CO-407 (uptime alerting), CO-408 (ops small-batch), CO-420 (Yggdrasil docs) — `CHANGELOG-PENDING/` holds CO-388/407/408/420
 - **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
 - **Staging** (post-CO-379): `https://staging.co.artelonga.com.br` — hand-deployed, auto-stops; PR-level contract probe is advisory for this reason (strict gate lives in release.yml)
 - **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-382 release-gate cron live since #180
@@ -29,12 +29,17 @@ Each wave = one git semver tag = a cohesive set of PRs tested + verified end-to-
 | ⏪ done | **v2.42.0** | Unified gestão + cross-env identity + live timeline (CO-360/377/…) | — |
 | ⏪ done | **v2.43.0** | Federated event bus + sync + privacy (CO-376/378/383/384/385/389/391/394) | 8 |
 | ⏪ done | **v3.0.0 — PUBLIC LAUNCH** (2026-06-10) | Workspace (Sala) + mobile + verification + edge protection — see as-built ledger below | 21 |
-| ⏪ done | **v3.1.0** (2026-06-11) | Deploy/pipeline (CO-395/392/398) + KB/funnel/calendar (CO-367/371/372) + layered-arch spike (CO-390, informs CO-227/228). Time/forma (CO-387/396), conteúdo×forma (CO-393) and monetization (CO-366 — funnel steps 7–8 return 0 until billing_events lands) slipped to the next wave | 7 |
-| ⚪ next | v3.2.0 | Carry-over: time/forma (CO-387/396) + conteúdo×forma (CO-393) + CO-366 monetization (supervised) + CO-388 security gate. Security epic (encrypted assets, .co format, fs-as-web) + docs wave (CO-402 design doc, CO-403 onboarding/pipeline docs) | ~11 |
-| ⚪ planned | v3.3.0 | Sync + offline (op log, conflict UI) | 4 |
-| ⚪ planned | v3.4.0 | Scale (job queue, cache, rate tiers, load tests) | 6 |
-| ⚪ planned | v3.5.0 | Universe types (manifest plugins, git-backed) | 4 |
-| ⚪ planned | v3.6.0 | Native shells (Capacitor) + advanced | 3 |
+| ⏪ done | **v3.1.0** (2026-06-11) | Deploy/pipeline (CO-395/392/398) + KB/funnel/calendar (CO-367/371/372) + layered-arch spike (CO-390, informs CO-227/228) | 7 |
+| ⏪ done | **v3.2.0** (2026-06-11) | Composable universe UI / content lenses (CO-393) + onboarding/pipeline docs (CO-403, WELCOME.md) + `co updates` CLI release notes (CO-404) | 3 |
+| ⏪ done | **v3.3.0** (2026-06-11) | Sala grid landscape — type-on-square + working drag-and-drop + folders (CO-410) | 1 |
+| ⏪ done | **v3.3.1** (2026-06-11) | Backup never blocks the boot — disk guard, debounce, count-based retention (CO-405) | 1 |
+| ⏪ done | **v3.4.0** (2026-06-12) | `source: github` adapter (repo→universe, ipynb→md, CO-417) + `<co-time-grid>` time/calendar lens (CO-387) + render-review-publish traceback (CO-418) + CLI User-Agent fix & docs/CLI.md (CO-411) + tutorial parity (CO-412) | 5 |
+| ⚪ **next** | **v3.5.0** | **Security gate + ops hardening + prod-e2e**: CO-388 security audit pipeline (Glasswing) + CO-406 graceful startup degradation + CO-407 uptime alerting + CO-408 ops small-batch + CO-420 Yggdrasil UX→epics/timeline. CO-421 prod-e2e usability gate is the candidate cap | ~6 |
+| ⚪ planned | **Wave 6 — security epic** | `.co` format + filesystem-as-web + encryption envelope — design pinned in `architecture/wave6-security-epic.md` (CO-402). CO-86/87/110 + CO-145 epic. Encryption-at-rest precondition (CO-104 backup + CO-119 restore drill) now **done** | — |
+| ⚪ planned | Wave 7 — sync + offline | Op-log sync protocol + conflict UI + PWA offline (CO-61/62/128/58) | 4 |
+| ⚪ planned | Wave 8 — scale | Job queue, cache, rate tiers, load tests, Fly cost (CO-76/78/79/80/101/285/286 + CO-111…113) | 6 |
+| ⚪ planned | Wave 9 — universe types | Manifest plugins, git-backed (CO-63/70/89/93 + CO-116) | 4 |
+| ⚪ planned | Wave 10 — native shells | Capacitor + advanced (CO-344/211-v2/264) | 3 |
 
 ## Wave 4 — v3.0 (the big public release push)
 
@@ -139,36 +144,54 @@ release-gate → tag → retrospective.
 
 ## All open todo/in_progress work mapped
 
-**Wave-5 outcome** (v3.1.0, 2026-06-11): CO-395/392/398 + CO-367/371/372 + CO-390
-shipped (7 entries). The time/forma leg (CO-387 → CO-396+YG-123), CO-393, and
-CO-366 monetization (still `todo` — funnel steps 7–8 await billing_events) did not
-make the cut and carry over to v3.2, where CO-388 still gates any new public surface.
+**Reconciled 2026-06-12.** Since launch, v3.1.0 → v3.4.0 all shipped. The
+time/forma leg landed: **CO-387 `<co-time-grid>` shipped in v3.4.0** (CO-396 the
+project-timeline lens over it is still `todo`). **CO-393 composable lenses shipped
+in v3.2.0.** The CO-417/418 source→universe→publish journey (epic CO-414) shipped
+in v3.4.0. CO-388 (security gate) is now done and pending in v3.5.0; the
+encryption-at-rest precondition (CO-104 backup + CO-119 restore drill) is **done**,
+so Wave 6 is unblocked. CO-366 monetization is still `todo` (funnel steps 7–8 await
+`billing_events`).
 
+> ⚠️ **Verify before claiming "shipped".** This table cross-checks each claim
+> against `git tag`, `CHANGELOG.md`, and the `status:` field of `work/co/CO-N.md`.
+> A prior pass wrongly claimed CO-366 shipped; CO-366 is **still `todo`**.
 
-| ID | Title | Wave |
+| ID | Title | Status / Wave |
 |---|---|---|
-| CO-352…360, 365, 374…379, 397 | Workspace + mobile + verification + edge (see as-built ledger) | **v3.0 Wave 4 — merged** |
-| CO-387 | Time-rendering primitive `<co-time-grid>` (high — prerequisite of CO-396/YG-123) | v3.2 carry-over — time/forma |
-| CO-396 | Project timeline lens (gantt over `<co-time-grid>`, shared engine with YG-123) | v3.2 carry-over — time/forma |
-| CO-393 | Composable universe UI — content lenses, schema-driven forms (spec CO-387/396 against this frame: one lens system) | v3.2 carry-over — conteúdo×forma |
-| CO-395 | construir — markdown → Quartz public site (de-facto pattern of grcsamazonia/mse) | ✅ shipped v3.1.0 |
-| CO-392 | co push — CLI → remote universe CRUD via Vault API | ✅ shipped v3.1.0 |
-| CO-398 | Delivery pipeline no quadro — VC/deploy events drive status via CO-380 bus + GitHub webhooks (automation fills, never locks; client deploys keep stakeholder go) | ✅ shipped v3.1.0 |
-| CO-388 | Security audit pipeline (Glasswing) — slot BEFORE any new public surface ships | v3.2 gate |
-| CO-390 | SPIKE layered architecture — feeds implementation style of the rest | ✅ shipped v3.1.0 |
-| Sala fractal scope (all-universes /sala, subset, universe-as-node) | needs CO-N ids — `sala-surface.md` Open work | v3.2 candidate |
-| CO-367, 371, 372 | KB + funnel + calendar (cheap post-CO-382) | ✅ shipped v3.1.0 |
-| CO-366 | Monetization — conversão/pagamento Hostinger (supervised, not headless; funnel steps 7–8 return 0 until its billing_events land) | v3.2 carry-over |
-| CO-403 | Onboarding & pipeline docs — WELCOME.md (history-teller onboarding, two-doors universe in/out) + delivery-pipeline invariant (review localhost → approve → merge, git × jj) | next release — docs |
-| **CO-104, 119** | **S3 backup + restore drill — not started; same S3 dep behind interim git backups and the failing CO-143 backup cron. Highest-leverage ops item on the board.** | **ops, schedule now** |
-| CO-145 | Encrypted assets | v3.2 Wave 6 |
-| CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web | v3.2 Wave 6 |
-| CO-61, 62, 128, 58 | Sync protocol + adapter + conflict UI + PWA offline | v3.3 Wave 7 |
-| CO-76, 78, 79, 80, 101, 285, 286 | Scale infra + job queue + cache + rate tiers + load + Fly cost | v3.4 Wave 8 |
-| CO-63, 70, 89, 93 | Universe types + manifest plugins + git-backed | v3.5 Wave 9 |
-| CO-344, 211 v2, 264 | Native shells + advanced | v3.6 Wave 10 |
-| CO-227, 228, 170, 144, 283, 284, 298 | Ongoing refactors (no wave) | Continuous |
-| CO-94, 143, 146, 162, 277 | Already resolved (status flipped today) | — |
+| CO-352…360, 365, 374…379, 397 | Workspace + mobile + verification + edge (see as-built ledger) | ✅ shipped v3.0.0 |
+| CO-367, 371, 372, 390, 392, 395, 398 | KB/funnel/calendar + layered spike + co push + construir + delivery pipeline | ✅ shipped v3.1.0 |
+| CO-393, 403, 404 | Composable lenses + WELCOME.md onboarding + `co updates` CLI | ✅ shipped v3.2.0 |
+| CO-410 | Sala grid landscape (type-on-square, DnD, folders) | ✅ shipped v3.3.0 |
+| CO-405 | Backup never blocks boot (disk guard, debounce, retention) | ✅ shipped v3.3.1 |
+| CO-387, 411, 412, 417, 418 | `<co-time-grid>` + CLI UA fix + tutorial parity + source:github + traceback | ✅ shipped v3.4.0 |
+| CO-388 | Security audit pipeline (Glasswing) — gate before new public surface | ✅ done — **pending v3.5.0** |
+| CO-406 | Graceful startup degradation — universe-pool pragma failure tolerance | `todo` — **v3.5.0** |
+| CO-407 | Uptime alerting — prod health probe with push notification | ✅ done — **pending v3.5.0** |
+| CO-408 | Ops small-batch — staging DNS, Google OAuth error body, misc | ✅ done — **pending v3.5.0** |
+| CO-420 | Yggdrasil UX → epics/user-stories + timeline + median-TTC report | ✅ done — **pending v3.5.0** |
+| CO-421 | Prod-e2e usability gate — anonymous read-only Playwright smoke | `todo` — v3.5.0 candidate cap |
+| CO-396 | Project timeline lens (gantt over `<co-time-grid>`, shared engine with YG-123) | `todo` — v3.5.0+ |
+| CO-414 | EPIC experiences-as-features (Miguel/Yuri/Yggdrasil) | `in_progress` — 417/418/419/420 shipped; **CO-415/416 pending** |
+| CO-415 | Login com GitHub (OAuth) — Miguel journey | `todo` — v3.5.0+ |
+| CO-416 | Auto pt-br ↔ en translation — Miguel journey | `todo` — v3.5.0+ |
+| CO-413 | Bidirectional bridge universes — event-bus universos | `todo` — Wave 7 (sync-adjacent) |
+| CO-419 | Universo yuri/nlp — SensorySpeech + real telemetry | ✅ shipped v3.4.0 |
+| CO-366 | Monetization — conversão/pagamento (supervised; funnel steps 7–8 await `billing_events`) | `todo` — unscheduled |
+| Sala fractal scope (all-universes /sala, subset, universe-as-node) | needs CO-N ids — `sala-surface.md` Open work | candidate |
+| **CO-104, 119** | **S3 backup + restore drill — now `done`. The encryption-at-rest precondition for Wave 6 is satisfied. CO-143 backup-cron is `superseded` (daily snapshots now in-process).** | ✅ **done — Wave 6 unblocked** |
+| CO-145 (+ CO-146…150) | Encrypted indexable lazy-loaded assets — children done; epic closeable | Wave 6 — close epic |
+| CO-86, 87, 110 | `.co` format + protocol stack + fs-as-web (design: `architecture/wave6-security-epic.md`) | Wave 6 |
+| CO-402 | Wave-6 security-epic design doc | ✅ done — this PR |
+| CO-61, 62, 128, 58 | Sync protocol + adapter + conflict UI + PWA offline | Wave 7 |
+| CO-76, 78, 79, 80, 101, 285, 286 | Scale infra + job queue + cache + rate tiers + load + Fly cost | Wave 8 |
+| CO-63, 70, 89, 93 | Universe types + manifest plugins + git-backed | Wave 9 |
+| CO-344, 211 v2, 264 | Native shells + advanced | Wave 10 |
+| CO-227…231 | Server-decomposition refactor epics — all children done; **closeable at release** | Continuous |
+| CO-170, 144, 283, 284, 298 | Ongoing refactors / infra (no wave) | Continuous |
+| CO-94, 143, 146, 162, 277 | Resolved / superseded | — |
+
+> Full open-epic index with child user-stories: `architecture/epics-backlog.md`.
 
 ## The BaaS invariants (must hold across every wave)
 

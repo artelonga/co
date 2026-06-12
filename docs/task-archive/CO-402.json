@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-402",
+  "title": "Wave-6 design doc — .co format + fs-as-web + encryption envelope (security epic architecture)",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-402.md",
+  "branch": "docs/CO-402-wave6-epics-roadmap-readiness",
+  "merge_sha": "b17f5ecdc952f442e926b0d3ceb12c12fe87b73f",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/208",
+    "number": 208
+  },
+  "started_at": "2026-06-10T00:00:00Z",
+  "merged_at": "2026-06-12T15:49:22Z",
+  "files_changed": 5,
+  "lines_added": 571,
+  "lines_removed": 54,
+  "labels": [
+    "type:docs",
+    "module:platform",
+    "module:security"
+  ],
+  "changelog_entry": "## CO-402 — Wave-6 security-epic design + roadmap reconcile + epics backlog\n\nForward-looking documentation made release-ready for the v3.5.0 cut. Docs only —\nno feature code, no deploy.\n\n- **`docs/architecture/wave6-security-epic.md`** (new) — the design doc for the\n  Wave-6 security epic: `.co` protobuf-wrapped markdown format (CO-86),\n  composable protocol stack (CO-87), filesystem-as-web flow + pairing ceremony\n  (CO-110), and the per-universe encryption envelope (CO-145/148 — Argon2id KEK →\n  per-universe DEK → ChaCha20-Poly1305 blob ciphertext). Includes a threat model\n  (assets × trust boundaries × mitigations), the plaintext-for-search boundary,\n  the migration path for existing universes, and the CO-104/119 restore-drill\n  blocking precondition (\"never encrypt what you cannot restore\"). CO-402 set to\n  `done` — for a design doc, done = the decisions are written and pinned.\n- **`docs/roadmap.md`** (reconciled) — corrected the stale \"Current state\" block\n  to 2026-06-12 / prod = v3.4.0; rebuilt the wave table to mark v3.1.0–v3.4.0\n  done with real contents and v3.5.0 as next (security gate + ops hardening +\n  prod-e2e); remapped open work to what actually shipped vs is pending, verified\n  against `git tag` + `CHANGELOG.md` + each `work/co/CO-N.md` status (e.g. CO-366\n  is **still `todo`**, not shipped; CO-104/119 are now done, unblocking Wave 6).\n- **`docs/architecture/epics-backlog.md`** (new) — single organized index of all\n  open `type: epic` work items grouped by theme (security, scale/data-infra,\n  server-decomposition, sync, platform), each with its child user-stories and the\n  Wave/version it targets. Flags the decomposition epics (CO-227…231) and CO-145\n  as closeable-at-release (children all done).\n\n### Why\nThe v3.5.0 release needs its forward-looking docs to be factually current and the\nsecurity epic to have an agreed architecture before any implementation agent\ntouches `.co` format, fs-as-web, or encryption — these are decisions, not\nfeatures.",
+  "summary": "Wave 6 (the security epic — slotted after v3.5.0 per `docs/roadmap.md`), I need one architecture document — the `sala-surface.md` of the security epic — agreed BEFORE any implementation agent touches ",
+  "co_auto_version": "0.1.0"
+}
