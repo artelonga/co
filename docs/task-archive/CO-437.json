@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-437",
+  "title": "Usage metadata enrichment: tool usage + outputs + PR links, and per-model×per-universe breakdown",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-437.md",
+  "branch": "feat/CO-437-usage-metadata-enrichment-tool-usage-out",
+  "merge_sha": "65dd375d76f734e641e6dbb65e9e65e4ab1474f0",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/218",
+    "number": 218
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T20:17:24Z",
+  "files_changed": 11,
+  "lines_added": 771,
+  "lines_removed": 28,
+  "labels": [
+    "type:feat",
+    "module:collab"
+  ],
+  "changelog_entry": "## CO-437 — Usage metadata enrichment: tool usage + outputs + PR links, and per-model×per-universe breakdown\n\nExtends the CO-425/CO-426 usage pipeline so each captured session carries more\nthan tokens, and the Gestão \"Uso\" dashboard can break consumption down by\n**model × universe** (the cross-tab, not just each dimension alone).\n\n- **Capture (CO-425 extended):** `parse_stream_json` now harvests `tool_uses`\n  (tool name → invocation count) and `output_chars` (total assistant text size)\n  from the stream-json content blocks, and co-auto attaches the opened `pr_url`\n  (parsed from stdout) and `turns` to the reported usage. All best-effort /\n  default-empty — telemetry never fails or blocks a run.\n- **Schema (CO-426 extended):** meta-DB migration **v76** adds\n  `usage_sessions.tool_uses TEXT` (JSON), `pr_url TEXT`, `turns INTEGER DEFAULT 0`\n  via additive `ALTER TABLE` under a version guard. New columns are read with\n  explicit SELECTs (never `.ok()`-swallowed).\n- **Cross model×universe:** `GET /api/v1/usage/summary?cross=universe,model`\n  (also accepts a comma-bearing `by=`) returns the matrix — rows per universe,\n  columns per model, cells with tokens/cost/sessions. Admin-gated like the rest\n  of CO-426.\n- **Per-session listing:** `GET /api/v1/usage/sessions` returns recent sessions\n  with their tool usage + PR link (admin-gated).\n- **Dashboard:** the \"Uso\" panel gains the model×universe matrix and a\n  \"Sessões recentes\" table showing tool usage + PR link per session. Updates in\n  real time over the existing analytics stream (no polling).\n\n### Why\nTo measure the real cost of each wave (e.g. Mythos in Fable) at model×universe\ngranularity — the base for estimating whether a future `mythos` model pays off\nagainst Fable/Opus/Sonnet. Official subscription limits aren't exposed by API,\nso the matrix reports observed consumption.",
+  "summary": "As Yuri avaliando modelos de execução, QUERO que o usage capturado vá além de tokens — tool usage, tamanho de outputs, links de PR — e que o consumo quebre **por modelo POR universo** (a tabela cruzad",
+  "co_auto_version": "0.1.0"
+}
