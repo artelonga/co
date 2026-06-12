@@ -88,6 +88,30 @@ Use `parking_lot::Mutex<Storage>` (not `std::sync::Mutex`). Never hold the lock 
 - Use `tempfile::tempdir()` for test databases
 - Set `JWT_SECRET=test-secret` in test setup
 
+## Model routing (CO-427)
+
+co-auto picks the executor model **per task**. Precedence (first match wins):
+`--model` CLI override → task `model:` frontmatter → priority policy
+(`high→opus`, `medium→sonnet`, `low→haiku`) → quality-first default (`opus`).
+A best-effort window downshift then degrades one tier (`opus→sonnet→haiku`) when
+the rolling 5h usage crosses the configured soft limit; it is fail-open and
+logged. See `dev/co-auto/README.md` for config (`project.yaml` `routing:` block,
+`CO_AUTO_SOFT_LIMIT_5H_TOKENS`, `CO_USAGE_ENDPOINT`).
+
+Override the model for a single task with a `model:` frontmatter field — a CLI
+alias passed through verbatim (`opus`/`sonnet`/`haiku`/…). Absent → routing
+decides; invalid (non-string/empty) → warned and ignored.
+
+```yaml
+---
+id: 123
+title: "A hard refactor that deserves Opus"
+status: todo
+priority: medium     # policy would pick sonnet…
+model: opus          # …but this per-task override wins
+---
+```
+
 ## Hard-won rules (Wave 4/5 launch nights — violations cost rebases)
 
 ### Migration version claim protocol
