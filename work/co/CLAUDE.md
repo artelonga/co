@@ -92,7 +92,9 @@ Use `parking_lot::Mutex<Storage>` (not `std::sync::Mutex`). Never hold the lock 
 
 co-auto picks the executor model **per task**. Precedence (first match wins):
 `--model` CLI override → task `model:` frontmatter → priority policy
-(`high→opus`, `medium→sonnet`, `low→haiku`) → quality-first default (`opus`).
+(`high→opus`, `medium→sonnet`, `low→haiku`, **opt-in via `routing.by_priority`**)
+→ quality-first default (`opus`). Default = opus when no model/frontmatter (the
+priority tiers are off unless opted in — binding owner decision 2026-06-12).
 A best-effort window downshift then degrades one tier (`opus→sonnet→haiku`) when
 the rolling 5h usage crosses the configured soft limit; it is fail-open and
 logged. See `dev/co-auto/README.md` for config (`project.yaml` `routing:` block,
