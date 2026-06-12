@@ -16,14 +16,28 @@ use axum::{
 use super::calendar_loader::{CalendarConfig, load_calendar};
 use crate::server::AppState;
 
+/// Universe keys are lowercase alphanumeric plus `-`/`_` (see seed + clone
+/// ops). Reject anything else BEFORE resolving a filesystem root — the
+/// fallback path joins the raw key, so a traversal slug (`..%2f..`) would
+/// otherwise read an arbitrary `_calendar.yaml` off disk.
+fn is_valid_universe_key(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
+}
+
 async fn get_calendar_handler(
     State(state): State<AppState>,
     AxumPath(universe_slug): AxumPath<String>,
 ) -> impl IntoResponse {
+    if !is_valid_universe_key(&universe_slug) {
+        return (axum::http::StatusCode::BAD_REQUEST, "invalid universe key").into_response();
+    }
     let root =
         crate::workspace_template_routes::resolve_universe_content_root(&state, &universe_slug);
     let cfg: CalendarConfig = load_calendar(&root);
-    Json(cfg)
+    Json(cfg).into_response()
 }
 
 pub fn router() -> Router<AppState> {
@@ -123,5 +137,32 @@ mod tests {
         assert_eq!(json["default_lens"], "gregorian");
         assert_eq!(json["lenses"][0]["id"], "gregorian");
         assert_eq!(json["lenses"][0]["week_length_days"], 7);
+    }
+
+    /// A path-traversal slug is rejected before any filesystem resolution.
+    #[tokio::test]
+    async fn calendar_rejects_traversal_slug() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/..%2f..%2fetc/calendar")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn valid_universe_key_charset() {
+        assert!(super::is_valid_universe_key("template"));
+        assert!(super::is_valid_universe_key("u-abc_123"));
+        assert!(!super::is_valid_universe_key(""));
+        assert!(!super::is_valid_universe_key("../etc"));
+        assert!(!super::is_valid_universe_key("Foo")); // uppercase
+        assert!(!super::is_valid_universe_key("a/b"));
     }
 }
