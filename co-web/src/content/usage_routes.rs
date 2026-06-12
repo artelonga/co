@@ -6,11 +6,17 @@
 //! GET  /api/v1/usage/active      — launchers active right now
 //! GET  /api/v1/usage/projects    — fleet roll-up: usage + board + last deploy per universe
 //!
-//! All five require authentication (vault token or JWT, same scheme as the
-//! vault/sync/agent-session writes) via `require_auth_with_token`, mounted in
-//! `router.rs`. The Gestão *panel* itself is admin-only (the `/gestao` page is
-//! served only to admin emails); these data endpoints additionally back the
-//! CO-427 downshift policy, a token-authenticated launcher-side consumer.
+//! Auth, two tiers (CO-426 review hardening):
+//! - **Writes** (`POST /sessions`, `POST /heartbeat`) require any valid vault
+//!   token or JWT via `require_auth_with_token` (mounted in `router.rs`) — the
+//!   launchers reporting usage authenticate with their token.
+//! - **Reads** (`GET /summary`, `/active`, `/projects`) additionally require the
+//!   `AdminUser` extractor (`tier == "admin"` in the JWT) → **403** otherwise.
+//!   This is fleet-wide cost/inventory data and must be API-gated like every
+//!   other Gestão data router, not merely hidden behind the admin-only page
+//!   (page-gating does not protect the endpoint from a direct token request).
+//!   The CO-427 downshift consumer reads `/summary` with the operator's admin
+//!   session token.
 //!
 //! Real-time: `POST /sessions` publishes a `DomainEvent::UsageReported` (bridged
 //! to `AnalyticsEvent::Usage`) and `POST /heartbeat` pushes an
@@ -51,6 +57,32 @@ const WINDOW_WEEK_SECS: i64 = 7 * 86_400;
 /// aren't exposed by API), shown as the denominator of the consumption bars.
 fn soft_limit(var: &str) -> Option<i64> {
     std::env::var(var).ok().and_then(|v| v.trim().parse().ok())
+}
+
+/// Fleet usage *reads* are admin-only (cost + live launcher inventory). Verifies
+/// the bearer/cookie token through the same `auth_provider` the write-path
+/// middleware uses — so it honours the test `StaticSecretsProvider` and the prod
+/// `JWT_SECRET` alike — then requires `tier == "admin"`. Returns 401 (no/invalid
+/// token) or 403 (authenticated but not admin). API-gating, not page-gating: the
+/// endpoint must refuse a direct token request, not merely be hidden from the UI.
+async fn require_admin(state: &AppState, headers: &axum::http::HeaderMap) -> Result<(), AppError> {
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(|s| s.trim().to_string())
+        .or_else(|| crate::auth::extract_session_cookie(headers))
+        .ok_or_else(|| AppError::Unauthorized("missing or malformed authorization".into()))?;
+    let claims = state
+        .core
+        .auth_provider
+        .verify_token(&crate::infra::auth::Token(token))
+        .await
+        .map_err(|_| AppError::Unauthorized("invalid or expired token".into()))?;
+    if claims.tier != "admin" {
+        return Err(AppError::Forbidden("admin access required".into()));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -284,8 +316,10 @@ pub struct SummaryResponse {
 
 async fn get_summary(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<SummaryQuery>,
 ) -> Result<Json<SummaryResponse>, AppError> {
+    require_admin(&state, &headers).await?;
     let window = q.window.unwrap_or_else(|| "day".to_string());
     let by_str = q.by.unwrap_or_else(|| "universe".to_string());
     let by = UsageDimension::parse(&by_str)
@@ -334,10 +368,14 @@ pub struct ActiveResponse {
     pub total: usize,
 }
 
-async fn get_active(State(state): State<AppState>) -> Json<ActiveResponse> {
+async fn get_active(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+) -> Result<Json<ActiveResponse>, AppError> {
+    require_admin(&state, &headers).await?;
     let launchers = state.core.active_launchers.active();
     let total = launchers.len();
-    Json(ActiveResponse { launchers, total })
+    Ok(Json(ActiveResponse { launchers, total }))
 }
 
 // ---------------------------------------------------------------------------
@@ -358,8 +396,10 @@ pub struct ProjectsResponse {
 
 async fn get_projects(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Query(q): Query<ProjectsQuery>,
 ) -> Result<Json<ProjectsResponse>, AppError> {
+    require_admin(&state, &headers).await?;
     let window = q.window.unwrap_or_else(|| "week".to_string());
     let since = chrono::Utc::now().timestamp() - window_secs(&window);
     let projects = {
@@ -527,6 +567,42 @@ mod tests {
             .unwrap();
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    /// CO-426 review hardening: the read endpoints expose fleet-wide cost +
+    /// live launcher inventory, so a merely-authenticated (non-admin) caller
+    /// must be refused — page-gating the Gestão panel does not protect the API.
+    #[tokio::test]
+    async fn reads_require_admin() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        // A valid JWT but tier=player (not admin).
+        let (token, _) = sign_jwt(
+            "player-user",
+            "player@example.com",
+            "player",
+            "test-jwt-secret",
+        )
+        .unwrap();
+        let bearer = format!("Bearer {token}");
+        for uri in [
+            "/api/v1/usage/summary?window=week&by=model",
+            "/api/v1/usage/active",
+            "/api/v1/usage/projects?window=week",
+        ] {
+            let req = Request::builder()
+                .method("GET")
+                .uri(uri)
+                .header("authorization", &bearer)
+                .body(Body::empty())
+                .unwrap();
+            let status = app.clone().oneshot(req).await.unwrap().status();
+            assert_eq!(
+                status,
+                StatusCode::FORBIDDEN,
+                "non-admin must be 403 on {uri}"
+            );
+        }
     }
 
     #[tokio::test]
