@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-416",
+  "title": "Tradução automática pt-br ↔ en de conteúdo — pedido do Miguel",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-416.md",
+  "branch": "feat/CO-416-content-translation",
+  "merge_sha": "f8430fc53ed3bcb6eb15bb6d7deb4b7a2a015a50",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/212",
+    "number": 212
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T16:15:43Z",
+  "files_changed": 9,
+  "lines_added": 1463,
+  "lines_removed": 3,
+  "labels": [
+    "type:feat",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-416 — automatic pt↔en content translation (structure-preserving)\n\nAdds on-demand translation of **entry content** (the markdown body), distinct\nfrom the existing UI i18n. A `lang: pt` entry can mint a sibling `lang: en` twin\n(and vice-versa) that is traceable to its source and never overwrites it.\n\n### What changed\n\n- New `content::translate` module: a structure-preserving translation engine.\n  Fenced code blocks, inline code, and wikilinks (`[[key::path]]`) are masked\n  with opaque sentinels before any prose reaches the backend, then restored —\n  so code and link targets can never be corrupted regardless of model behavior.\n  Frontmatter machine fields (`type`, `lang`, dates, refs) are carried through\n  untouched; only `title` is translated.\n- Pluggable `TranslateBackend` selected by `CO_TRANSLATE_BACKEND`:\n  - unset / `none` / `manual` → `NoopBackend` (route answers **503**, graceful).\n  - `llm` → `LlmBackend`, which reuses the existing `infra::ai::AiRouter`\n    (provider via `CO_TRANSLATE_PROVIDER`, default `ollama`). No new LLM client.\n- New `content::translate_routes`:\n  - `POST /api/v1/universes/{slug}/translate/{*path}?to=en` — owner-gated. Writes\n    a twin entry at a parallel path (`foo.md` → `foo.en.md`) carrying\n    `translated_from`, `translated_from_hash`, and `translated_at` frontmatter.\n    Re-translation is **idempotent** by source body hash (no-op `unchanged` when\n    the source is unchanged). The `translated_from` field becomes a CO-74 typed\n    relation via `sync_entry_relations`.\n  - `GET /api/v1/universes/{slug}/translation/{*path}` — reports whether a twin\n    exists, its path/lang, and a `stale` flag (source changed since translation).\n    This is the data the UI language toggle needs to switch or offer \"generate\".\n- Routes added to `docs/architecture/api-catalog.md`; `openapi.yaml` regenerated;\n  `openapi:check` clean.\n\n### Why\n\nMiguel asked for his universe's content to appear in both pt-br and en without\nhand-translating. No schema migration was needed — provenance lives in\nfrontmatter + the existing `entry_relations` table.\n\n### Notes\n\n- The catch-all entry path forces the action verb to precede the path\n  (`/translate/{*path}`), since Axum only allows `{*path}` at the end of a route.\n- Twin paths never stack lang suffixes (`foo.en.md` + `pt` → `foo.pt.md`).",
+  "summary": "As Miguel, QUERO que o conteúdo do meu universo apareça em pt-br **e** en automaticamente, PARA alcançar leitores nos dois idiomas sem traduzir à mão.",
+  "co_auto_version": "0.1.0"
+}
