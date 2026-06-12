@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-411",
+  "title": "CLI sends User-Agent (auth client rejected by own abuse gate) + CLI command reference doc",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-411.md",
+  "branch": "fix/CO-411-cli-user-agent-and-docs",
+  "merge_sha": "10cfc5fba926dea2a18dfb611691c27bbc9fa35c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/201",
+    "number": 201
+  },
+  "started_at": "2026-06-11T20:00:00Z",
+  "merged_at": "2026-06-12T09:58:44Z",
+  "files_changed": 6,
+  "lines_added": 206,
+  "lines_removed": 24,
+  "labels": [
+    "type:fix",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-411 — fix: CLI envia User-Agent + referência de comandos (docs/CLI.md)\n\n`co auth` era rejeitado pelo próprio gate anti-abuso do servidor\n(`400 missing_user_agent`) — o client HTTP do auth não enviava User-Agent\n(o do `co push` já enviava). Agora todo request do CLI identifica\n`co-cli/<versão>`, com teste de regressão. Junto: `docs/CLI.md`, referência\nrevisada do binário (cinco verbos do dia a dia + tabelas completas),\nlinkada de `docs/README.md`.",
+  "summary": "GIVEN / WHEN / THEN",
+  "co_auto_version": "0.1.0"
+}
