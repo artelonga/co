@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-420",
+  "title": "Yggdrasil UX → epics/user-stories + timeline no quadro + tempo mediano de conclusão por universo",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-420.md",
+  "branch": "docs/CO-420-yggdrasil-ux-overview",
+  "merge_sha": "d76b73bec7f48bacf2d91c79d1ef82c3657737ba",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/204",
+    "number": 204
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-12T13:44:44Z",
+  "files_changed": 3,
+  "lines_added": 245,
+  "lines_removed": 5,
+  "labels": [
+    "type:docs",
+    "module:scrum"
+  ],
+  "changelog_entry": "## CO-420 — Yggdrasil UX centralizada: epics/user-stories + timeline real + tempo mediano por universo\n\nAdiciona `docs/scrum/yggdrasil-ux-overview.md`: reestrutura a narrativa de UX do\nyggdrasil (`docs/experiencia-usuario-exemplo.md`, persona Marina) numa visão de\nalto nível **epics → user stories** (8 epics, A–H, com princípio de design e\nrelease datado por story), plota uma **timeline de datas reais** de release dos\ntrês universos (co · artelonga · yggdrasil) extraídas dos CHANGELOG.md, e reporta\no **tempo mediano de conclusão por universo** com método auditável.\n\n### Why\nCentralizar a UX como backlog (não narrativa solta) dá critério de aceitação por\nepic; a timeline real e a métrica de cadência tornam visível que o ecossistema\nconverge em 2026-06-11/12. Análise/documentação — sem código nem deploy.\n\n### Achados (médias por universo)\n- Tempo mediano por item (`updated_at − created_at`, itens `done`): co=0d (n=254),\n  artelonga=0d (n=40), yggdrasil=0d (n=107) — ~80% são tarefas de um dia.\n- Cadência de release (gap mediano entre dias de release): co=1d (298 releases),\n  artelonga=2d (25), yggdrasil=3d (48). Fonte: CHANGELOG.md + frontmatter work/.\n- Nenhum dos repos popula `completed_at` consistentemente (co:1, al:0, yg:0); a\n  métrica usa pares de datas reais existentes, sem fabricar conclusões.",
+  "summary": "GIVEN / WHEN / THEN",
+  "co_auto_version": "0.1.0"
+}
