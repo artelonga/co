@@ -977,3 +977,52 @@ fn test_delete_project_not_found() {
     let result = storage.delete_project("NOPE");
     assert!(result.is_err());
 }
+
+// --- CO-415: GitHub OAuth find-or-create ---
+
+#[test]
+fn test_find_or_create_user_by_github_creates_then_relinks() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path());
+
+    // First sign-in: creates a brand-new user keyed on github_login.
+    let u1 = storage
+        .find_or_create_user_by_github("octocat", "octo@example.com", "The Octocat", None)
+        .unwrap();
+    assert_eq!(u1.email, "octo@example.com");
+    assert_eq!(u1.display_name, "The Octocat");
+
+    // Second sign-in with the SAME github_login returns the SAME user (matched
+    // by github_login, not re-created), even if the email differs.
+    let u2 = storage
+        .find_or_create_user_by_github("octocat", "different@example.com", "Octo", None)
+        .unwrap();
+    assert_eq!(u2.id, u1.id, "same github_login must map to same CO user");
+}
+
+#[test]
+fn test_find_or_create_user_by_github_links_existing_email_account() {
+    let dir = tempdir().unwrap();
+    let mut storage = Storage::new(dir.path());
+
+    // Pre-existing user via the Google path (email-bearing account).
+    let existing = storage
+        .find_or_create_user_by_google("gsub-1", "shared@example.com", "Shared", None)
+        .unwrap();
+
+    // GitHub sign-in with the same verified email links onto that account
+    // rather than creating a duplicate.
+    let linked = storage
+        .find_or_create_user_by_github("ghlogin", "shared@example.com", "Shared GH", None)
+        .unwrap();
+    assert_eq!(
+        linked.id, existing.id,
+        "matching email must link GitHub onto the existing CO user"
+    );
+
+    // And a subsequent GitHub sign-in now matches by github_login.
+    let again = storage
+        .find_or_create_user_by_github("ghlogin", "shared@example.com", "Shared GH", None)
+        .unwrap();
+    assert_eq!(again.id, existing.id);
+}

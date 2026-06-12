@@ -4,6 +4,7 @@ pub mod email_smtp;
 pub mod feedback_routes;
 pub mod github_auth;
 pub mod log_drain_routes;
+pub mod oauth_github;
 pub mod oauth_google;
 pub mod oidc_routes;
 pub mod webhook;

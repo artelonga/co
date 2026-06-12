@@ -2702,6 +2702,33 @@ impl Storage {
                 "CO-388: security_findings — pre-release vulnerability scan results (Project Glasswing)"
             );
         }
+
+        if current_version < 74 {
+            // CO-415: GitHub OAuth linkage. `github_login` stores GitHub's
+            // stable login handle (the `login` field from GET /user), and is
+            // what re-login matches on first — email can change but GitHub's
+            // login is the durable identity. Nullable because most users won't
+            // link GitHub. Mirrors the v39 `google_sub` pattern.
+            ensure_column(&self.conn, "users", "github_login", "TEXT")
+                .expect("migration v74: users.github_login");
+            // Partial unique index — one GitHub account links to at most one CO
+            // user. NULL `github_login` rows are excluded (multiple unlinked
+            // users coexist). NOTE: deliberately its own step, NOT folded into
+            // the base UNIVERSE_SCHEMA batch — that batch runs on existing DBs
+            // before migrations and would reference a not-yet-added column
+            // (CO-354 trap).
+            self.conn
+                .execute_batch(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_github_login \
+                     ON users(github_login) WHERE github_login IS NOT NULL;",
+                )
+                .expect("migration v74: idx_users_github_login");
+            crate::record_migration!(
+                self.conn,
+                74,
+                "CO-415: users.github_login + idx_users_github_login (GitHub OAuth login)"
+            );
+        }
     }
 }
 

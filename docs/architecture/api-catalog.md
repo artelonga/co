@@ -37,6 +37,9 @@
 | GET | `/api/v1/auth/google/status` | anon | Whether Google OAuth is configured |
 | GET | `/api/v1/auth/google/start` | anon | Begin Google OAuth (oauth_google.rs) |
 | GET | `/api/v1/auth/google/callback` | anon | Google OAuth callback |
+| GET | `/api/v1/auth/github/status` | anon | Whether GitHub OAuth is configured |
+| GET | `/api/v1/auth/github/start` | anon | CO-415 — begin GitHub OAuth (oauth_github.rs) |
+| GET | `/api/v1/auth/github/callback` | anon | CO-415 — GitHub OAuth callback |
 | POST | `/api/v1/auth/uat-login` | anon | CO-44 — `yuri/uat` on UAT, 404 in prod |
 | GET | `/auth/co-handover` | authed | CO-206 — issue handover token, server-side redirect |
 | POST | `/api/v1/auth/forgot-password` | anon | CO-165 — initiate reset |

@@ -171,6 +171,8 @@
             oauth_divider: 'ou',
             continue_with_google: 'Continuar com Google',
             signup_with_google: 'Cadastrar com Google',
+            continue_with_github: 'Entrar com GitHub',
+            signup_with_github: 'Cadastrar com GitHub',
 
             // CO-175 (G3): public signup
             signup_link: 'Criar conta',
@@ -564,6 +566,8 @@
             oauth_divider: 'or',
             continue_with_google: 'Continue with Google',
             signup_with_google: 'Sign up with Google',
+            continue_with_github: 'Continue with GitHub',
+            signup_with_github: 'Sign up with GitHub',
 
             // CO-175 (G3): public signup
             signup_link: 'Create account',
