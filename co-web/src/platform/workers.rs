@@ -272,12 +272,16 @@ impl Worker for ReleaseNotesWorker {
 // 8. BackupWorker
 //    Runs every CO_BACKUP_INTERVAL_HOURS (default 24h). Creates a snapshot
 //    tarball, calls backend.put(), then prunes old snapshots (CO-365).
+//    CO-405: first tick is deferred CO_BACKUP_BOOT_DELAY_SECS (default 10 min)
+//    so the snapshot never sits in the boot path — on 2026-06-11 it blocked
+//    the HTTP bind >6 min on a 1-vCPU machine while health checks failed.
 // ---------------------------------------------------------------------------
 
 #[derive(Clone)]
 pub struct BackupWorker {
     state: AppState,
     interval: std::time::Duration,
+    boot_delay: std::time::Duration,
 }
 
 impl BackupWorker {
@@ -286,9 +290,14 @@ impl BackupWorker {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(24);
+        let boot_delay_secs = std::env::var("CO_BACKUP_BOOT_DELAY_SECS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(600);
         Self {
             state,
             interval: std::time::Duration::from_secs(interval_hours * 3600),
+            boot_delay: std::time::Duration::from_secs(boot_delay_secs),
         }
     }
 }
@@ -301,6 +310,10 @@ impl Worker for BackupWorker {
 
     fn interval(&self) -> std::time::Duration {
         self.interval
+    }
+
+    fn initial_delay(&self) -> std::time::Duration {
+        self.boot_delay
     }
 
     async fn tick(&mut self) -> anyhow::Result<()> {
