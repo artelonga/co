@@ -920,12 +920,13 @@ impl Storage {
                 "public-subscribable",
                 None,
             ),
+            // CO-429: private initially; parent=co groups it under the platform.
             (
                 "claude-code",
                 "Claude Code",
-                "Anthropic's agentic coding CLI — upstream changelog + docs",
-                "public-subscribable",
-                None,
+                "Anthropic's agentic coding CLI — upstream changelog + examples",
+                "private",
+                Some("co"),
             ),
         ] {
             // 1.54.0: INSERT OR IGNORE only — no boot-reconcile UPDATE. The
@@ -959,6 +960,28 @@ impl Storage {
         let _ = self.conn.execute(
             "UPDATE universes SET visibility = 'public-subscribable', is_public = 1 \
              WHERE key = 'rfq' AND visibility = 'private'",
+            [],
+        );
+
+        // CO-429: claude-code was seeded by CO-364 as public-subscribable with
+        // parent_key=NULL. Fix existing installs so the metadata matches intent
+        // (private, parent=co). Guards fire once and are no-ops thereafter.
+        let _ = self.conn.execute(
+            "UPDATE universes SET parent_key = 'co' \
+             WHERE key = 'claude-code' AND parent_key IS NULL",
+            [],
+        );
+        let _ = self.conn.execute(
+            "UPDATE universes SET visibility = 'private', is_public = 0 \
+             WHERE key = 'claude-code' AND visibility = 'public-subscribable'",
+            [],
+        );
+        // CO-429: fix subdirs — upstream repo has examples/ and plugins/, no docs/.
+        let _ = self.conn.execute(
+            "UPDATE universes \
+             SET content_subdirs = '[\"examples\",\"plugins\",\"README.md\",\"CHANGELOG.md\"]' \
+             WHERE key = 'claude-code' \
+               AND content_subdirs = '[\"docs\",\"README.md\",\"CHANGELOG.md\"]'",
             [],
         );
 
@@ -1002,11 +1025,12 @@ impl Storage {
                 Some("[\"docs\",\"README.md\",\"CHANGELOG.md\"]"),
                 false,
             ),
+            // CO-429: the upstream repo has examples/ and plugins/ (no docs/).
             (
                 "claude-code",
                 "https://github.com/anthropics/claude-code",
                 "main",
-                Some("[\"docs\",\"README.md\",\"CHANGELOG.md\"]"),
+                Some("[\"examples\",\"plugins\",\"README.md\",\"CHANGELOG.md\"]"),
                 false,
             ),
         ] {
@@ -2526,5 +2550,92 @@ mod tests {
         // keep_count=2 → 3 old − 2 kept = 1 deleted.
         let n = storage.sweep_test_namespaces(7, 2);
         assert_eq!(n, 1, "keep_count=2 should leave 2 and delete 1");
+    }
+
+    // CO-429: claude-code universe metadata
+    #[test]
+    fn test_seed_co429_claude_code_metadata() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_admin_content_universes();
+
+        let u = storage
+            .get_universe("claude-code")
+            .expect("claude-code must exist after seed");
+        assert_eq!(u.visibility, "private", "claude-code.visibility must be private initially");
+        assert_eq!(
+            u.parent_key.as_deref(),
+            Some("co"),
+            "claude-code.parent_key must be 'co'"
+        );
+
+        // subdirs must reference examples/plugins, not docs/
+        let subdirs: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT content_subdirs FROM universes WHERE key = 'claude-code'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let subdirs = subdirs.unwrap_or_default();
+        assert!(
+            subdirs.contains("examples"),
+            "claude-code.content_subdirs must include examples, got: {subdirs}"
+        );
+        assert!(
+            !subdirs.contains("\"docs\""),
+            "claude-code.content_subdirs must not reference docs/ (it doesn't exist upstream), got: {subdirs}"
+        );
+    }
+
+    // CO-429: reconcile UPDATE corrects existing installs that were seeded by CO-364
+    // with wrong visibility/parent. Simulates a fresh install with old values.
+    #[test]
+    fn test_seed_co429_claude_code_reconcile_existing() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        // Simulate CO-364 state: claude-code exists with public-subscribable + no parent
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes \
+                 (key, name, owner_id, created_at, visibility, is_public) \
+                 VALUES ('claude-code', 'Claude Code', 'system', '2026-01-01', \
+                         'public-subscribable', 1)",
+                [],
+            )
+            .unwrap();
+        storage.conn().execute(
+            "UPDATE universes SET content_subdirs = '[\"docs\",\"README.md\",\"CHANGELOG.md\"]' \
+             WHERE key = 'claude-code'",
+            [],
+        ).unwrap();
+
+        // Run seed — reconcile UPDATEs must fix the stale row.
+        storage.seed_admin_content_universes();
+
+        let u = storage.get_universe("claude-code").unwrap();
+        assert_eq!(u.visibility, "private", "reconcile must set visibility=private");
+        assert_eq!(
+            u.parent_key.as_deref(),
+            Some("co"),
+            "reconcile must set parent_key=co"
+        );
+
+        let subdirs: Option<String> = storage
+            .conn()
+            .query_row(
+                "SELECT content_subdirs FROM universes WHERE key = 'claude-code'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let subdirs = subdirs.unwrap_or_default();
+        assert!(
+            !subdirs.contains("\"docs\""),
+            "reconcile must fix stale docs/ subdirs, got: {subdirs}"
+        );
     }
 }
