@@ -123,8 +123,8 @@ async fn test_template_has_sample_tasks() {
     let tasks = storage.list_tasks("CO");
     assert_eq!(
         tasks.len(),
-        9,
-        "expected 9 onboarding tasks, got {}",
+        12,
+        "expected 12 onboarding tasks, got {}",
         tasks.len()
     );
 
@@ -139,7 +139,7 @@ async fn test_template_has_sample_tasks() {
 
     // Labels present — all should have tutorial label
     let with_labels = tasks.iter().filter(|t| !t.labels.is_empty()).count();
-    assert_eq!(with_labels, 9, "all tasks should have labels");
+    assert_eq!(with_labels, 12, "all tasks should have labels");
 }
 
 // --- Test 4: template projects visible without auth ---
@@ -298,7 +298,7 @@ async fn test_cloned_project_writable() {
     );
 
     let tasks = storage.list_tasks(proj_key);
-    assert_eq!(tasks.len(), 9, "cloned project should have 9 tasks");
+    assert_eq!(tasks.len(), 12, "cloned project should have 12 tasks");
 }
 
 // --- Test 9: seed_template does not run twice (template_exists check) ---
