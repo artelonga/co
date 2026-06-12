@@ -1,0 +1,125 @@
+{
+  "co_id": "CO-388",
+  "spec_title": "Security audit pipeline integration — Claude Security in CO-382 CI route (Project Glasswing-aligned)",
+  "timestamp": "2026-06-12T16:23:54.155Z",
+  "items": [
+    {
+      "text": "`SecurityAuditBackend` trait + `LocalGrepBackend` default + `ClaudeSecurityBackend` full",
+      "pattern": "securityauditbackend|trait|localgrepbackend|default",
+      "matched_file": "co-web/e2e/changelog-viewer.spec.ts",
+      "matched_test": "versions are sorted newest-first by default",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Migration v68 creates `security_findings` table",
+      "pattern": "migration|creates|security|findings",
+      "matched_file": "co-web/e2e/co-355-workspace-templates.spec.ts",
+      "matched_test": "POST from-template/blank creates workspace state (anon)",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "CO-382's CI route gains step 11 (security audit)",
+      "pattern": "co[- _]382|route|gains|security",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] All 10 route steps implemented + documented in docs/ci-route.md",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Findings publish to event bus with severity-tiered visibility",
+      "pattern": "severity[- _]tiered|findings|publish|event",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] CO-380 event bus captures ci.* and release.gate.* events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`Critical`/`High` findings block merge with `security-finding` PR check",
+      "pattern": "security[- _]finding|critical|findings|block|merge",
+      "matched_file": "co-web/e2e/localhost-trial.spec.ts",
+      "matched_test": "3. subscribe blocked — public-static returns 400, excluded from discoverable",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`Medium` findings create PBI in current sprint",
+      "pattern": "medium|findings|create|current",
+      "matched_file": "co-web/e2e/board-drag.spec.ts",
+      "matched_test": "create project task, drag to In Progress, edit title, then delete",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "`Low`/`Info` logs to atividades only",
+      "pattern": "atividades",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "/agora shows 🚨 for admins on Critical/High events",
+      "pattern": "agora|high|shows|admins|critical",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Cost guardrails: max scans/day env var; skip drafts/docs/reverts",
+      "pattern": "day|docs/reverts|guardrails|scans|drafts|reverts",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Cache hit by file hash short-circuits re-scans",
+      "pattern": "short[- _]circuits|re[- _]scans|cache",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Manual disclosure flow documented in `docs/security-disclosure.md`",
+      "pattern": "security[- _]disclosure|security[- _]disclosure.md|manual|disclosure|documented",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] All 10 route steps implemented + documented in docs/ci-route.md",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "`docs/security-audit-pipeline.md` describes the 11-step CI route extension",
+      "pattern": "security[- _]audit[- _]pipeline|security[- _]audit[- _]pipeline.md|describes|11[- _]step|route",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] All 10 route steps implemented + documented in docs/ci-route.md",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "OpenAPI documents the security findings endpoints",
+      "pattern": "openapi|documents|security|findings",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] OpenAPI documents the new CI events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Override flag `--ignore-security-findings` exists; usage logged + alerted",
+      "pattern": "ignore[- _]security[- _]findings|override|[- _][- _]ignore[- _]security[- _]findings|exists|usage",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L1 — Breadcrumbs element exists in the page",
+      "is_stub": false,
+      "status": "pass"
+    }
+  ],
+  "total": 14,
+  "passed": 6,
+  "pending": 8,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 43
+}

@@ -1,0 +1,37 @@
+{
+  "co_id": "CO-402",
+  "spec_title": "Wave-6 design doc — .co format + fs-as-web + encryption envelope (security epic architecture)",
+  "timestamp": "2026-06-12T16:23:54.245Z",
+  "items": [
+    {
+      "text": "Design doc exists at `docs/architecture/wave6-security-epic.md` with",
+      "pattern": "wave6[- _]security[- _]epic|architecture/wave6[- _]security[- _]epic.md|design|exists|architecture",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L1 — Breadcrumbs element exists in the page",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Threat model section: assets, trust boundaries, threats × mitigations",
+      "pattern": "threat|model|section|assets",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L3 — Tools section is visible and distinct from project nav",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Plaintext-for-search boundary defined (filename/mime/si",
+      "pattern": "plaintext[- _]for[- _]search|mime/si|boundary|defined|filename",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 3,
+  "passed": 2,
+  "pending": 1,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 67
+}

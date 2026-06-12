@@ -1,0 +1,61 @@
+{
+  "co_id": "CO-422",
+  "spec_title": "In-prod degradation alerter — email on degraded-but-alive events via the Fly RESEND_API_KEY (no GH secret)",
+  "timestamp": "2026-06-12T16:23:54.970Z",
+  "items": [
+    {
+      "text": "Um subscriber do event bus (CO-380) que, ao receber eventos de",
+      "pattern": "co[- _]380|subscriber|event|receber",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] CO-380 event bus captures ci.* and release.gate.* events",
+      "is_stub": true,
+      "status": "pending"
+    },
+    {
+      "text": "Eventos cobertos no mínimo: `backup.skipped_low_disk` (CO-405),",
+      "pattern": "co[- _]405|eventos|cobertos|backup|skipped",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Anti-spam: debounce por tipo de evento (no máx. 1 e-mail por evento por",
+      "pattern": "anti[- _]spam|e[- _]mail|debounce|evento",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Cada e-mail diz O QUê, ONDE (universo/recurso) e o número acionável",
+      "pattern": "e[- _]mail|recurso|universo|acion",
+      "matched_file": "co-web/e2e/co-landing.spec.ts",
+      "matched_test": "'Criar universo' opens criar modal",
+      "is_stub": false,
+      "status": "pass"
+    },
+    {
+      "text": "Aparece também em `/agora` / atividades (o evento já está no bus).",
+      "pattern": "agora|aparece|atividades|evento",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    },
+    {
+      "text": "Teste: evento de degradação dispara o MailProvider (mock) uma vez;",
+      "pattern": "teste|evento|degrada|dispara",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "status": "pending"
+    }
+  ],
+  "total": 6,
+  "passed": 1,
+  "pending": 5,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 17
+}
