@@ -554,8 +554,11 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
         // CO-425: POST the structured usage summary to the dedicated ingestion
         // endpoint (CO-426). Best-effort, default OFF — no-op when CO_USAGE_ENDPOINT
         // is unset. Never fails or blocks the task.
-        if let Some(usage) = stream_usage {
+        if let Some(mut usage) = stream_usage {
             let outcome = if success { "success" } else { "error" };
+            // CO-437: attach the PR link co-auto opened (from stdout) — not part
+            // of the stream-json, so the producer enriches it here.
+            usage.pr_url = parse_pr_url(&claude_out.stdout);
             post_usage_to_co(
                 &task.key,
                 &space_to_universe(&config.space),
@@ -1848,6 +1851,29 @@ fn parse_pr_number(stdout: &str) -> Option<i64> {
     None
 }
 
+/// CO-437: extract the full GitHub PR URL from Claude's stdout (the link
+/// co-auto/`gh pr create` printed). Returns the canonical
+/// `https://github.com/<owner>/<repo>/pull/<n>` form, trimmed to the digits so
+/// trailing text on the line doesn't leak in. Best-effort: `None` when no PR
+/// link is present.
+fn parse_pr_url(stdout: &str) -> Option<String> {
+    for line in stdout.lines() {
+        if let Some(start) = line.find("https://github.com/")
+            && let Some(rel) = line[start..].find("/pull/")
+        {
+            let pull_at = start + rel + "/pull/".len();
+            let digits: String = line[pull_at..]
+                .chars()
+                .take_while(|c| c.is_ascii_digit())
+                .collect();
+            if !digits.is_empty() {
+                return Some(format!("{}{}", &line[start..pull_at], digits));
+            }
+        }
+    }
+    None
+}
+
 /// Get the skill names loaded for a given task (mirrors skills_for_task).
 fn skills_for_session(task: &Task, workspace_root: &Path) -> serde_json::Value {
     let names: Vec<String> = {
@@ -2624,6 +2650,21 @@ mod tests {
                 None => std::env::remove_var("CO_USAGE_ENDPOINT"),
             }
         }
+    }
+
+    #[test]
+    fn parse_pr_url_extracts_canonical_link() {
+        let stdout = "Some log line\n\
+                      Created PR: https://github.com/artelonga/co/pull/217 (CO-437)\n\
+                      more output";
+        assert_eq!(
+            parse_pr_url(stdout).as_deref(),
+            Some("https://github.com/artelonga/co/pull/217")
+        );
+        // No PR link → None, never panics.
+        assert_eq!(parse_pr_url("nothing here"), None);
+        // A bare #89 reference (no URL) is not a full URL → None.
+        assert_eq!(parse_pr_url("opened #89"), None);
     }
 
     #[test]

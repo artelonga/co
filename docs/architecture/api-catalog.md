@@ -494,16 +494,20 @@ CO-275 agent session tracking for the co-auto pipeline.
 ## usage — `/api/v1/usage/*` (usage_routes.rs)
 
 CO-426 fleet usage ingestion + active-launcher registry + Gestão dashboard
-queries. All require a vault token or JWT (`require_auth_with_token`). The
-`sessions` producer is CO-425; `summary` also backs the CO-427 downshift policy.
+queries. All require a vault token or JWT (`require_auth_with_token`); the read
+endpoints additionally require `tier == "admin"`. The `sessions` producer is
+CO-425; `summary` also backs the CO-427 downshift policy. CO-437 enriches the
+producer payload (tool usage, output size, PR link) and adds the
+model×universe cross-tab plus a per-session listing.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| POST | `/api/v1/usage/sessions` | token-or-jwt | Ingest a session's token/cost report (CO-425 producer) |
+| POST | `/api/v1/usage/sessions` | token-or-jwt | Ingest a session's token/cost + metadata report (CO-425/CO-437 producer) |
+| GET | `/api/v1/usage/sessions` | admin | Recent per-session listing with tool usage + PR link (CO-437) |
 | POST | `/api/v1/usage/heartbeat` | token-or-jwt | Register/refresh an active launcher (in-memory TTL) |
-| GET | `/api/v1/usage/summary` | token-or-jwt | Aggregates by universe\|model\|machine\|task over a window |
-| GET | `/api/v1/usage/active` | token-or-jwt | Launchers active right now |
-| GET | `/api/v1/usage/projects` | token-or-jwt | Fleet roll-up: usage + board + last deploy per universe |
+| GET | `/api/v1/usage/summary` | admin | Aggregates by universe\|model\|machine\|task; `?cross=universe,model` adds the cross-tab matrix (CO-437) |
+| GET | `/api/v1/usage/active` | admin | Launchers active right now |
+| GET | `/api/v1/usage/projects` | admin | Fleet roll-up: usage + board + last deploy per universe |
 
 ---
 

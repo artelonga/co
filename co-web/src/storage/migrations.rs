@@ -2776,6 +2776,28 @@ impl Storage {
                 "CO-426: usage_sessions (fleet token/cost telemetry for Gestão usage dashboard)"
             );
         }
+
+        if current_version < 76 {
+            // CO-437: enrich usage_sessions with metadata captured from the
+            // stream-json (CO-425 extended) — `tool_uses` (a name→count JSON
+            // map), `pr_url` (the PR co-auto opened) and `turns` (agent turns
+            // from the `result` event). Additive, backwards-compatible columns
+            // on the existing table; the version guard makes the ALTERs run
+            // exactly once. New columns are read via explicit SELECTs (never
+            // `.ok()`-swallowed) so a missing column fails loudly.
+            self.conn
+                .execute_batch(
+                    "ALTER TABLE usage_sessions ADD COLUMN tool_uses TEXT;
+                     ALTER TABLE usage_sessions ADD COLUMN pr_url TEXT;
+                     ALTER TABLE usage_sessions ADD COLUMN turns INTEGER NOT NULL DEFAULT 0;",
+                )
+                .expect("migration v76: usage_sessions metadata columns");
+            crate::record_migration!(
+                self.conn,
+                76,
+                "CO-437: usage_sessions.tool_uses/pr_url/turns (usage metadata enrichment)"
+            );
+        }
     }
 }
 

@@ -4338,9 +4338,17 @@ paths:
         "200":
           description: OK
   /api/v1/usage/sessions:
+    get:
+      tags: ["usage"]
+      summary: "Recent per-session listing with tool usage + PR link (CO-437)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
     post:
       tags: ["usage"]
-      summary: "Ingest a session's token/cost report (CO-425 producer)"
+      summary: "Ingest a session's token/cost + metadata report (CO-425/CO-437 producer)"
       security:
         - sessionCookie: []
       responses:
