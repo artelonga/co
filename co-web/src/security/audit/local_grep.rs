@@ -30,36 +30,13 @@ struct Pattern {
 }
 
 /// Patterns for Rust source files.
+///
+/// CWE-89 (SQL injection) is NOT a simple-substring pattern — it lives in
+/// [`sql_format_finding`] because a bare `format!("DELETE …")` is just as
+/// likely an HTTP-verb error string or a log line as a SQL query. See that
+/// function for the SQL-context heuristic (CO-447).
 fn rust_patterns() -> Vec<Pattern> {
     vec![
-        Pattern {
-            needle: "format!(\"SELECT",
-            severity: Severity::High,
-            category: Category::SqlInjection,
-            description: "Possible SQL injection: string interpolation inside SELECT query",
-            cwe: Some("CWE-89"),
-        },
-        Pattern {
-            needle: "format!(\"INSERT",
-            severity: Severity::High,
-            category: Category::SqlInjection,
-            description: "Possible SQL injection: string interpolation inside INSERT query",
-            cwe: Some("CWE-89"),
-        },
-        Pattern {
-            needle: "format!(\"UPDATE",
-            severity: Severity::High,
-            category: Category::SqlInjection,
-            description: "Possible SQL injection: string interpolation inside UPDATE query",
-            cwe: Some("CWE-89"),
-        },
-        Pattern {
-            needle: "format!(\"DELETE",
-            severity: Severity::High,
-            category: Category::SqlInjection,
-            description: "Possible SQL injection: string interpolation inside DELETE query",
-            cwe: Some("CWE-89"),
-        },
         Pattern {
             needle: "unwrap_or_else(|_| panic!",
             severity: Severity::Low,
@@ -167,6 +144,72 @@ fn universal_patterns() -> Vec<Pattern> {
 }
 
 // ---------------------------------------------------------------------------
+// CWE-89: context-aware SQL-injection heuristic (CO-447)
+// ---------------------------------------------------------------------------
+
+/// SQL statement verbs that open a query.
+const SQL_VERBS: &[&str] = &["SELECT", "INSERT", "UPDATE", "DELETE"];
+
+/// Clause keywords that only appear inside a real SQL statement. A `format!`
+/// string that opens with a SQL verb is only flagged when one of these follows
+/// the verb in the SAME string literal. This is what separates a genuine query
+/// (`format!("SELECT {c} FROM t WHERE x={x}")`) from an inert HTTP-verb error
+/// string (`format!("DELETE vault/{path}")`) or a log line
+/// (`format!("UPDATE failed for {id}")`), which were CWE-89 false positives in
+/// the CO-445 wave.
+const SQL_CONTEXT_TOKENS: &[&str] = &["FROM", "INTO", "SET", "WHERE", "VALUES"];
+
+/// Mirrors the `pr-route.yml` shell regex
+/// `format!\("(SELECT|INSERT|UPDATE|DELETE)[^"]*(FROM|INTO|SET|WHERE|VALUES)`.
+///
+/// Returns the matched SQL verb when `line` contains a `format!` whose string
+/// literal both *begins* with a SQL verb and *also* contains a SQL clause
+/// keyword. Matching is case-sensitive (CO writes SQL keywords uppercase) and
+/// scoped to the format string's contents, so a clause keyword in unrelated
+/// trailing code cannot trigger it.
+fn sql_format_verb(line: &str) -> Option<&'static str> {
+    const OPEN: &str = "format!(\"";
+    let mut rest = line;
+    while let Some(idx) = rest.find(OPEN) {
+        let after = &rest[idx + OPEN.len()..];
+        // The format string's contents end at the next quote.
+        let content = match after.find('"') {
+            Some(end) => &after[..end],
+            None => after,
+        };
+        for verb in SQL_VERBS {
+            if let Some(tail) = content.strip_prefix(verb)
+                && SQL_CONTEXT_TOKENS.iter().any(|t| tail.contains(t))
+            {
+                return Some(verb);
+            }
+        }
+        rest = after;
+    }
+    None
+}
+
+/// Build a CWE-89 finding for `line` if it looks like an interpolated SQL query.
+fn sql_format_finding(file_path: &str, line: &str, line_no: usize) -> Option<Finding> {
+    let verb = sql_format_verb(line)?;
+    let description: &str = match verb {
+        "SELECT" => "Possible SQL injection: string interpolation inside SELECT query",
+        "INSERT" => "Possible SQL injection: string interpolation inside INSERT query",
+        "UPDATE" => "Possible SQL injection: string interpolation inside UPDATE query",
+        _ => "Possible SQL injection: string interpolation inside DELETE query",
+    };
+    let mut f = Finding::new(
+        Severity::High,
+        Category::SqlInjection,
+        file_path,
+        (line_no, line_no),
+        description,
+    );
+    f.cwe = Some("CWE-89".to_string());
+    Some(f)
+}
+
+// ---------------------------------------------------------------------------
 // File hash cache
 // ---------------------------------------------------------------------------
 
@@ -241,6 +284,13 @@ impl LocalGrepBackend {
                     }
                     findings.push(f);
                 }
+            }
+            // CWE-89 requires SQL context, so it is not a plain-substring
+            // pattern (CO-447). Only meaningful for Rust source.
+            if ext == "rs"
+                && let Some(f) = sql_format_finding(file_path, line, line_no)
+            {
+                findings.push(f);
             }
         }
 
@@ -432,6 +482,8 @@ mod tests {
 
     #[test]
     fn no_false_positive_on_safe_sql() {
+        // Const column-list + bound params (?1) is the canonical safe pattern —
+        // it is not a `format!`, so it must never produce a CWE-89 finding.
         let b = backend();
         let findings = b.scan_content(
             "routes.rs",
@@ -439,6 +491,64 @@ mod tests {
             true,
         );
         assert!(findings.is_empty());
+    }
+
+    fn sql_findings(b: &LocalGrepBackend, content: &str) -> usize {
+        b.scan_content("routes.rs", content, true)
+            .into_iter()
+            .filter(|f| f.category.as_str() == "sql_injection")
+            .count()
+    }
+
+    #[test]
+    fn no_false_positive_on_http_verb_string() {
+        // CO-51 / CO-445 false positive: a DELETE *HTTP verb* error string is
+        // not SQL — no FROM/INTO/SET/WHERE/VALUES follows the verb.
+        let b = backend();
+        assert_eq!(
+            sql_findings(&b, r#"return Err(format!("DELETE vault/{path}"));"#),
+            0
+        );
+    }
+
+    #[test]
+    fn no_false_positive_on_log_string() {
+        // A log line that merely starts with a SQL-looking verb has no SQL
+        // clause keyword and must not be flagged.
+        let b = backend();
+        assert_eq!(
+            sql_findings(
+                &b,
+                r#"tracing::warn!("{}", format!("UPDATE failed for {id}"));"#
+            ),
+            0
+        );
+    }
+
+    #[test]
+    fn detects_interpolated_sql_with_context() {
+        // Real interpolated SQL: verb + clause keyword in the same format string.
+        let b = backend();
+        assert_eq!(
+            sql_findings(&b, r#"let q = format!("SELECT {c} FROM t WHERE x = {x}");"#),
+            1
+        );
+    }
+
+    #[test]
+    fn detects_interpolated_insert_and_update() {
+        let b = backend();
+        assert_eq!(
+            sql_findings(&b, r#"let q = format!("INSERT INTO t (a) VALUES ({a})");"#),
+            1
+        );
+        assert_eq!(
+            sql_findings(
+                &b,
+                r#"let q = format!("UPDATE t SET a = {a} WHERE id = {id}");"#
+            ),
+            1
+        );
     }
 
     #[test]
