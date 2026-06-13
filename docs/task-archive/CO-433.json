@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-433",
+  "title": "Mythos: per-universe sharded storage + EntryStore trait; remove raw SQL from handlers",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-433.md",
+  "branch": "refactor/CO-433-mythos-sharded-storage",
+  "merge_sha": "233e755f2abd867cb2924f2f1907763f6eaf4a2c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/223",
+    "number": 223
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T04:24:46Z",
+  "files_changed": 29,
+  "lines_added": 1472,
+  "lines_removed": 654,
+  "labels": [
+    "type:refactor",
+    "module:storage"
+  ],
+  "changelog_entry": "## CO-433 — Mythos: per-universe sharded storage + EntryStore trait; remove raw SQL from handlers\n\nRefactors the storage layer toward per-universe sharding and a backend-swappable\ncontent seam, and removes raw SQL from the request path so handlers no longer\nspeak rusqlite directly.\n\n### Per-universe sharding (criterion 1)\n- `UniversePool::entry_store(key)` + `Storage::entry_store(key)` open a\n  per-universe store backed by that universe's own connection. Content\n  reads/writes routed through it never take the global `Mutex<Storage>` for the\n  actual I/O — only a brief handle fetch — so writes to distinct universes do\n  not serialize. Proven by a new contention test\n  (`writes_to_two_universes_do_not_serialize`): a write held open on universe A\n  does not block a concurrent write to universe B.\n\n### `EntryStore` trait + pool-as-factory (criterion 2)\n- New `repository::EntryStore` trait (get/upsert/delete/list, per universe),\n  with `SqliteEntryStore` as the default implementation (reusing the existing\n  `SqliteEntryRepository`, no duplicated SQL). `UniversePool` is the factory\n  that hands out `Arc<dyn EntryStore>`. The trait is the seam an S3/Postgres\n  backend plugs into later — no S3 implemented here.\n\n### Zero raw SQL in handlers/subscribers (criterion 3)\n- Moved every request-path/subscriber `conn().prepare/execute/query_row` in the\n  audited surfaces into typed `Storage` methods. New impl-blocks:\n  `storage::eda`, `storage::security`, `storage::auth`, `storage::leads`,\n  `storage::graph_views`, `storage::feedback` (plus a `delete_quilombo_user`\n  on `storage::quilombo_bridge`). Migrated handlers/subscribers: `eda/mod.rs`,\n  `eda/bridge/{client,handler}.rs`, `eda/subscribers/{atividades,delivery_pipeline}.rs`,\n  `security/routes.rs`, `security/subscribers/{pbi_backlogger,findings_persistor}.rs`,\n  `auth/{onboarding_routes,recovery_routes,mod}.rs`, `admin/lead_routes.rs`,\n  `content/graph/view_routes.rs`, `integrations/feedback_routes.rs`,\n  `universes/quilombo/quilombo_routes.rs`. `grep 'conn().prepare\\|conn().execute'`\n  over `*_routes.rs`/subscribers is now empty for non-test code (test fixtures\n  legitimately retain direct `conn()` setup).\n- Row projections `LeadRow` and `GraphView` moved to the storage layer (with the\n  typed queries that produce them) and re-exported from their routes for the API.\n\n### No behavior change (criteria 4, 5)\n- No new `Mutex<Storage>` held across `.await`; no new panics under the lock.\n- SQL text and error handling preserved verbatim in the new methods.\n- `cargo test -p co-web` green; `cargo clippy -p co-web --lib -- -D warnings` clean.\n\n### Why\nThe global `Arc<parking_lot::Mutex<Storage>>` serialized unrelated universes and\nhandlers reached past the storage boundary into raw rusqlite, making the backend\nhard to swap and the data access un-auditable. This shards writes per universe\nand routes all content access through typed, backend-agnostic seams.",
+  "summary": "As O operador do co em produção, QUERO que escritas em universos diferentes não serializem num único mutex global e que nenhum handler fale SQL cru, PARA escalar com mais universos/usuários e manter o",
+  "co_auto_version": "0.1.0"
+}
