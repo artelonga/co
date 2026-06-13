@@ -188,15 +188,35 @@ impl TokenBucket {
 // Rate limiter
 // ---------------------------------------------------------------------------
 
-pub struct RateLimiter {
+/// CO-435: pluggable rate-limit seam — the last trait of the CO-284 series.
+///
+/// The default (and only) impl is [`InProcessRateLimiter`], the in-process
+/// token-bucket limiter used since CO-80/CO-297. Extracting the trait lets a
+/// future distributed backend (e.g. Redis) plug in without touching the ~50
+/// route handlers; behaviour is unchanged today. (No Redis impl here.)
+pub trait RateLimiter: Send {
+    /// Try to consume one token for `(key, capacity_per_min)`.
+    ///
+    /// Returns `Ok(remaining_floor)` when allowed, `Err(retry_after_secs)` when
+    /// the bucket is exhausted.
+    fn try_acquire(&mut self, key: &str, capacity_per_min: u64) -> Result<u64, u64>;
+}
+
+pub struct InProcessRateLimiter {
     buckets: HashMap<String, TokenBucket>,
     /// CO-397: abuse heuristics (co-packed to avoid a new IntegrationsState field).
     pub abuse: AbuseTracker,
 }
 
-impl RateLimiter {
+impl RateLimiter for InProcessRateLimiter {
+    fn try_acquire(&mut self, key: &str, capacity_per_min: u64) -> Result<u64, u64> {
+        self.check(key, capacity_per_min)
+    }
+}
+
+impl InProcessRateLimiter {
     pub fn new() -> Self {
-        RateLimiter {
+        InProcessRateLimiter {
             buckets: HashMap::new(),
             abuse: AbuseTracker::new(),
         }
@@ -212,7 +232,7 @@ impl RateLimiter {
     }
 }
 
-impl Default for RateLimiter {
+impl Default for InProcessRateLimiter {
     fn default() -> Self {
         Self::new()
     }
@@ -802,8 +822,21 @@ mod tests {
     }
 
     #[test]
+    fn test_rate_limiter_trait_try_acquire_matches_check() {
+        // CO-435: the trait's `try_acquire` is behaviour-identical to `check`.
+        let mut limiter = InProcessRateLimiter::new();
+        for _ in 0..5 {
+            assert!(RateLimiter::try_acquire(&mut limiter, "trait:k", 5).is_ok());
+        }
+        assert!(
+            RateLimiter::try_acquire(&mut limiter, "trait:k", 5).is_err(),
+            "6th acquire must be limited at capacity 5"
+        );
+    }
+
+    #[test]
     fn test_rate_limiter_anonymous_read_limit() {
-        let mut limiter = RateLimiter::new();
+        let mut limiter = InProcessRateLimiter::new();
         for i in 0..60 {
             assert!(
                 limiter.check("anon:127.0.0.1:r", 60).is_ok(),
@@ -818,7 +851,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_authenticated_has_10x_budget() {
-        let mut limiter = RateLimiter::new();
+        let mut limiter = InProcessRateLimiter::new();
         // Authenticated budget = 600 reads/min (10× anonymous 60)
         for i in 0..600 {
             assert!(
@@ -834,7 +867,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_pro_read_limit() {
-        let mut limiter = RateLimiter::new();
+        let mut limiter = InProcessRateLimiter::new();
         for i in 0..2000 {
             assert!(
                 limiter.check("pro-user-id:r", 2000).is_ok(),
@@ -849,7 +882,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_separate_buckets_per_user() {
-        let mut limiter = RateLimiter::new();
+        let mut limiter = InProcessRateLimiter::new();
         for _ in 0..20 {
             assert!(limiter.check("user-a:r", 20).is_ok());
         }
@@ -862,7 +895,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter_read_write_separate_buckets() {
-        let mut limiter = RateLimiter::new();
+        let mut limiter = InProcessRateLimiter::new();
         for _ in 0..5 {
             assert!(limiter.check("user-x:w", 5).is_ok());
         }

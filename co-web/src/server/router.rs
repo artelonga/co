@@ -124,33 +124,32 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
 
     let quilombo_api = crate::quilombo_routes::router(state.clone());
 
+    // CO-435: admin auth now goes through the `AdminAuthProvider` trait. We
+    // inject a single shared `Arc<dyn AdminAuthProvider>` (the GitHub default)
+    // as an Extension; the `require_github_admin` middleware depends on the
+    // trait, not on GitHub. Swapping in SAML/OIDC = build a different provider
+    // here. The provider owns the verified-token cache, so all admin routers
+    // share it. See `crate::infra::admin_auth`.
     let github_token_cache = crate::github_auth::new_token_cache();
-    let allowed_admins =
-        crate::github_auth::AllowedAdmins(state.core.config.gestao_github_admins.clone());
-    let gestao_api = crate::gestao_routes::router()
-        .layer(axum::Extension(github_token_cache.clone()))
-        .layer(axum::Extension(allowed_admins.clone()));
+    let allowed_admins = state.core.config.gestao_github_admins.clone();
+    let admin_auth: Arc<dyn crate::infra::admin_auth::AdminAuthProvider> = Arc::new(
+        crate::github_auth::GitHubAdminAuthProvider::new(github_token_cache, allowed_admins),
+    );
 
-    let telemetry_admin = crate::telemetry::admin_router()
-        .layer(axum::Extension(github_token_cache.clone()))
-        .layer(axum::Extension(allowed_admins.clone()));
+    let gestao_api = crate::gestao_routes::router().layer(axum::Extension(admin_auth.clone()));
 
-    let gestao_oauth_api = crate::oidc_routes::gestao_oauth_router()
-        .layer(axum::Extension(github_token_cache.clone()))
-        .layer(axum::Extension(allowed_admins.clone()));
+    let telemetry_admin =
+        crate::telemetry::admin_router().layer(axum::Extension(admin_auth.clone()));
 
-    let ab_admin = crate::ab_routes::admin_router()
-        .layer(axum::Extension(github_token_cache.clone()))
-        .layer(axum::Extension(allowed_admins.clone()));
+    let gestao_oauth_api =
+        crate::oidc_routes::gestao_oauth_router().layer(axum::Extension(admin_auth.clone()));
 
-    let webhook_admin = crate::webhook_routes::router()
-        .layer(axum::Extension(github_token_cache.clone()))
-        .layer(axum::Extension(allowed_admins.clone()));
+    let ab_admin = crate::ab_routes::admin_router().layer(axum::Extension(admin_auth.clone()));
+
+    let webhook_admin = crate::webhook_routes::router().layer(axum::Extension(admin_auth.clone()));
 
     // CO-388: Security findings admin API (GitHub admin auth).
-    let security_admin = crate::security::routes::router()
-        .layer(axum::Extension(github_token_cache))
-        .layer(axum::Extension(allowed_admins));
+    let security_admin = crate::security::routes::router().layer(axum::Extension(admin_auth));
 
     let telemetry_public = crate::telemetry::router();
     let universe_api = crate::universe_routes::router(state.clone());

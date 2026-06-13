@@ -141,6 +141,7 @@ pub use platform::plugin_loader;
 pub use platform::pretty_urls;
 pub use platform::rate_limit;
 pub use platform::server_config::CoServerConfig;
+pub use platform::source;
 pub use platform::telemetry;
 pub use platform::theme_engine;
 pub use platform::universe_pool;

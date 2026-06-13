@@ -4,37 +4,39 @@
 //! connections in the same universe room. The actual WebSocket fanout is
 //! handled by the existing `sync_rooms` broadcast channels in `RealtimeState`.
 
-use std::sync::Arc;
+use async_trait::async_trait;
+use tracing::debug;
 
-use tracing::{debug, info};
+use crate::eda::bus::Filter;
+use crate::eda::event::Event;
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 
-use crate::eda::bus::{EdaBus, Filter};
+/// CO-435: filter-owner for `workspace.*` events (CO-353 presence replacement).
+pub struct SalaBroadcaster;
 
-/// Spawn the `SalaBroadcaster` subscriber.
-///
-/// Listens for `workspace.cursor`, `workspace.entry_placed`,
-/// `workspace.entry_linked` events and logs them (full WebSocket fanout
-/// is wired in CO-381 LiveTimeline — `SalaBroadcaster` owns the filter).
-pub fn spawn(bus: Arc<dyn EdaBus>) {
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec![
-            "workspace.cursor".into(),
-            "workspace.entry_placed".into(),
-            "workspace.entry_linked".into(),
-        ]),
-        ..Default::default()
-    });
+#[async_trait]
+impl EdaSubscriber for SalaBroadcaster {
+    fn name(&self) -> &'static str {
+        "SalaBroadcaster"
+    }
 
-    tokio::spawn(async move {
-        info!("EDA: SalaBroadcaster started (CO-353 presence replacement)");
-        while let Some(ev) = sub.recv().await {
-            debug!(
-                event_type = %ev.event_type,
-                universe_key = ?ev.universe_key,
-                "EDA: workspace event — would fan-out to sala room"
-            );
-            // CO-381: feed into LiveTimeline WebSocket fanout here.
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec![
+                "workspace.cursor".into(),
+                "workspace.entry_placed".into(),
+                "workspace.entry_linked".into(),
+            ]),
+            ..Default::default()
         }
-        info!("EDA: SalaBroadcaster stopped");
-    });
+    }
+
+    async fn handle(&self, ev: &Event, _ctx: &SubscriberCtx) {
+        debug!(
+            event_type = %ev.event_type,
+            universe_key = ?ev.universe_key,
+            "EDA: workspace event — would fan-out to sala room"
+        );
+        // CO-381: feed into LiveTimeline WebSocket fanout here.
+    }
 }

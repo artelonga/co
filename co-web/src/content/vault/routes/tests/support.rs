@@ -75,7 +75,7 @@ pub fn build_test_router(dir: &std::path::Path) -> axum::Router {
             game_storage,
             wae: crate::wae::WaeEmitter::new(None, None),
             jwt_key: std::sync::Arc::new(crate::auth::JwtKey::load_or_generate()),
-            rate_limiter: std::sync::Mutex::new(crate::rate_limit::RateLimiter::new()),
+            rate_limiter: std::sync::Mutex::new(crate::rate_limit::InProcessRateLimiter::new()),
             experiment: Mutex::new(experiment),
             worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
         }),
