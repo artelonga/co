@@ -277,8 +277,22 @@ jobs:
               # false positive on unchanged code; CO-406 hit this on
               # universe_pool.rs pragma_table_info queries it never wrote).
               ADDED=$(git diff "origin/main...HEAD" -- "$file" 2>/dev/null | grep '^+' | grep -v '^+++')
-              # SQL injection: format!("SELECT/INSERT/UPDATE/DELETE with interpolation
-              if printf '%s\n' "$ADDED" | grep -qP 'format!\("(SELECT|INSERT|UPDATE|DELETE)' 2>/dev/null; then
+              # CWE-89 (SQL injection) — REQUIRES SQL CONTEXT (CO-447).
+              #
+              # Fires only when a `format!` string opens with a SQL verb
+              # (SELECT/INSERT/UPDATE/DELETE) AND that same string (`[^"]*`, so it
+              # cannot cross the closing quote) also contains a real SQL clause
+              # keyword: FROM / INTO / SET / WHERE / VALUES.
+              #
+              # Why the clause keyword is mandatory: the bare-verb heuristic gave
+              # false positives in the CO-445 wave on strings that are NOT SQL —
+              # `format!("DELETE vault/{path}")` (a DELETE *HTTP-verb* error
+              # string, CO-51) and log lines like `format!("UPDATE failed for
+              # {id}")`. Those have no clause keyword, so they now pass. Genuine
+              # interpolated SQL such as `format!("SELECT {c} FROM t WHERE x=?")`
+              # still matches and blocks. Kept in lock-step with the Rust scanner
+              # in co-web/src/security/audit/local_grep.rs (sql_format_verb).
+              if printf '%s\n' "$ADDED" | grep -qP 'format!\("(SELECT|INSERT|UPDATE|DELETE)[^"]*(FROM|INTO|SET|WHERE|VALUES)' 2>/dev/null; then
                 BLOCKERS=$((BLOCKERS + 1))
                 FINDINGS=$((FINDINGS + 1))
                 echo "::error file=${file}::SQL injection risk: string interpolation in SQL query (CWE-89)"
