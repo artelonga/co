@@ -753,7 +753,8 @@ CO-38 yggdrasil — game plugins.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/plugins/{name}/info` | anon | Plugin manifest info |
+<!-- CO-436 removed the plugin route registration (the loader's router was
+     discarded — build_router(None)); this catalog row is dropped to match. -->
 
 ---
 

@@ -2028,19 +2028,6 @@ paths:
       responses:
         "200":
           description: OK
-  /api/v1/plugins/{name}/info:
-    get:
-      tags: ["game"]
-      summary: "Plugin manifest info"
-      parameters:
-        - name: name
-          in: path
-          required: true
-          schema:
-            type: string
-      responses:
-        "200":
-          description: OK
   /api/v1/profile:
     get:
       tags: ["game"]
