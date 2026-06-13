@@ -348,7 +348,7 @@ fn is_trusted_ip(client_ip: &str) -> bool {
     let Ok(client_addr): Result<IpAddr, _> = client_ip.parse() else {
         return false;
     };
-    let raw = std::env::var("CO_TRUSTED_IPS").unwrap_or_default();
+    let raw = crate::infra::secrets::global().get_or("CO_TRUSTED_IPS", "");
     raw.split(',')
         .filter(|s| !s.trim().is_empty())
         .filter_map(|s| parse_cidr(s.trim()))

@@ -27,9 +27,8 @@ pub async fn run(state: AppState) {
 }
 
 pub async fn tick(state: &AppState, now: DateTime<Utc>) -> anyhow::Result<()> {
-    let vapid_private_key = std::env::var("VAPID_PRIVATE_KEY").unwrap_or_default();
-    let vapid_subject = std::env::var("VAPID_SUBJECT")
-        .unwrap_or_else(|_| "mailto:noreply@co.artelonga.com.br".to_string());
+    let vapid_private_key = state.core.secrets.get_or("VAPID_PRIVATE_KEY", "");
+    let vapid_subject = state.core.server_config.vapid_subject.clone();
 
     let users = {
         let storage = state.core.storage.lock();

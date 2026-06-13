@@ -25,29 +25,15 @@ pub enum TelemetryConfig {
 }
 
 impl TelemetryConfig {
-    /// Resolve config from environment variables.
-    ///
-    /// | Variable                        | Default   | Description                              |
-    /// |---------------------------------|-----------|------------------------------------------|
-    /// | `CO_TELEMETRY_OTLP_ENDPOINT`    | —         | gRPC endpoint; enables OTLP when set    |
-    /// | `CO_TELEMETRY_SERVICE_NAME`     | `co-web`  | Service name shown in the collector UI   |
-    /// | `CO_TELEMETRY_SAMPLING_RATIO`   | `1.0`     | Fraction of traces to sample (0.0–1.0)  |
-    pub fn from_env() -> Self {
-        match std::env::var("CO_TELEMETRY_OTLP_ENDPOINT") {
-            Ok(endpoint) if !endpoint.is_empty() => {
-                let service_name = std::env::var("CO_TELEMETRY_SERVICE_NAME")
-                    .unwrap_or_else(|_| "co-web".to_string());
-                let sampling_ratio = std::env::var("CO_TELEMETRY_SAMPLING_RATIO")
-                    .ok()
-                    .and_then(|s| s.parse::<f64>().ok())
-                    .unwrap_or(1.0)
-                    .clamp(0.0, 1.0);
-                Self::Otlp {
-                    endpoint,
-                    service_name,
-                    sampling_ratio,
-                }
-            }
+    /// Resolve telemetry config from [`CoServerConfig`] (CO-434). OTLP is
+    /// enabled when `telemetry_otlp_endpoint` is set; otherwise stderr.
+    pub fn from_config(config: &crate::CoServerConfig) -> Self {
+        match &config.telemetry_otlp_endpoint {
+            Some(endpoint) if !endpoint.is_empty() => Self::Otlp {
+                endpoint: endpoint.clone(),
+                service_name: config.telemetry_service_name.clone(),
+                sampling_ratio: config.telemetry_sampling_ratio,
+            },
             _ => Self::Stderr,
         }
     }
@@ -196,14 +182,10 @@ fn build_otlp_tracer(
 mod tests {
     use super::*;
 
-    /// Verify `from_env` doesn't panic regardless of env state.
+    /// Verify `from_config` doesn't panic regardless of config state.
     #[test]
-    fn from_env_does_not_panic() {
-        // We intentionally do NOT manipulate env vars here: `set_var`/`remove_var`
-        // are `unsafe` in Rust 2024 (they can cause UB when called concurrently)
-        // and the test runner can run tests in parallel.  We just confirm the
-        // function is callable without panicking.
-        let _config = TelemetryConfig::from_env();
+    fn from_config_does_not_panic() {
+        let _config = TelemetryConfig::from_config(&crate::CoServerConfig::default());
     }
 
     /// Sampling ratio is clamped to [0.0, 1.0] regardless of the input value.

@@ -230,9 +230,9 @@ pub use noop::NoOpBackend;
 /// - `"disabled"`  — NoOpBackend (dev/test only)
 /// - unset or other — LocalGrepBackend (default)
 pub fn build_backend() -> Arc<dyn SecurityAuditBackend> {
-    match std::env::var("CO_SECURITY_BACKEND")
-        .as_deref()
-        .unwrap_or("")
+    match crate::infra::secrets::global()
+        .get_or("CO_SECURITY_BACKEND", "")
+        .as_str()
     {
         "claude" => Arc::new(ClaudeSecurityBackend::from_env()),
         "disabled" => Arc::new(NoOpBackend),

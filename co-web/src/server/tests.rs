@@ -1118,3 +1118,38 @@ async fn test_co361_login_no_sensitive_data_in_atividade() {
         let _ = has_redacted;
     }
 }
+
+// ---------------------------------------------------------------------------
+// CO-434: provider-driven server config
+// ---------------------------------------------------------------------------
+
+/// Injecting a `StaticSecretsProvider` into `CoreState` changes the server
+/// config (e.g. the EDA backend) without touching the global process
+/// environment — proving config/secrets flow by injection, not `env::var`.
+#[test]
+fn corestate_server_config_is_provider_driven() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::new(dir.path().to_str().unwrap());
+    let auth_store = crate::auth::AuthStore::new(dir.path()).unwrap();
+    let core = CoreState::from_storage_with_secrets(
+        storage,
+        test_config(dir.path()),
+        auth_store,
+        crate::infra::secrets::StaticSecretsProvider::new([
+            ("CO_EDA_BACKEND", "tokio"),
+            ("CO_SECURITY_MAX_SCANS_PER_DAY", "7"),
+            ("CO_ALERT_TO", "ops@example.com"),
+        ]),
+    );
+
+    assert_eq!(core.server_config.eda_backend, "tokio");
+    assert_eq!(core.server_config.security_max_scans_per_day, 7);
+    assert_eq!(core.server_config.alert_to, "ops@example.com");
+    // The secret is reachable through the same injected provider.
+    assert_eq!(
+        core.secrets.get("CO_ALERT_TO").as_deref(),
+        Some("ops@example.com")
+    );
+    // Global process env was never mutated.
+    assert!(std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY").is_err());
+}

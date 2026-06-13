@@ -16,10 +16,8 @@ use crate::eda::bus::EdaBus;
 use crate::eda::event::{Event, Visibility};
 
 fn env_u64(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default)
+    use crate::infra::secrets::SecretsProviderExt;
+    crate::infra::secrets::global().get_parsed(name, default)
 }
 
 /// Returns `(available_bytes, total_bytes)` for the filesystem holding `path`.

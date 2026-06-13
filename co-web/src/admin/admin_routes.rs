@@ -86,7 +86,7 @@ pub fn is_admin_email(caller_email: &str, admin_email: &str) -> bool {
 
 /// Reads CO_SEED_ADMIN_EMAIL from env (no caching) and checks the caller.
 pub fn check_admin_email(caller_email: &str) -> bool {
-    let admin_email = std::env::var("CO_SEED_ADMIN_EMAIL").unwrap_or_default();
+    let admin_email = crate::infra::secrets::global().get_or("CO_SEED_ADMIN_EMAIL", "");
     is_admin_email(caller_email, &admin_email)
 }
 

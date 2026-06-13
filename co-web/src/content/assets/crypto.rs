@@ -47,9 +47,12 @@ const DEK_CONTEXT: &[u8] = b"co-asset-dek-v1\0";
 /// source; falls back to `JWT_SECRET` so dev environments don't need extra
 /// setup (the security posture in dev is "no encryption-at-rest claim made").
 fn master_key() -> [u8; 32] {
-    let raw = std::env::var("CO_ASSETS_MASTER_KEY")
-        .or_else(|_| std::env::var("JWT_SECRET"))
-        .unwrap_or_else(|_| "dev-secret-change-me".to_string());
+    // CO-434: read through the process-global SecretsProvider seam.
+    let secrets = crate::infra::secrets::global();
+    let raw = secrets
+        .get("CO_ASSETS_MASTER_KEY")
+        .or_else(|| secrets.get("JWT_SECRET"))
+        .unwrap_or_else(|| "dev-secret-change-me".to_string());
     // Hash whatever we got into a clean 32-byte key — accepts any length input
     // including hex/base64-encoded values without further parsing.
     *blake3::hash(raw.as_bytes()).as_bytes()

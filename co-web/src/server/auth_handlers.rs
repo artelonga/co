@@ -855,8 +855,8 @@ pub(super) async fn uat_login_handler(
 /// `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` env vars aren't set —
 /// avoids a button that lands on 503.
 pub(super) async fn google_status_handler() -> Json<GoogleStatusResponse> {
-    let configured =
-        std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
+    let secrets = crate::infra::secrets::global();
+    let configured = secrets.is_set("GOOGLE_CLIENT_ID") && secrets.is_set("GOOGLE_CLIENT_SECRET");
     Json(GoogleStatusResponse { configured })
 }
 
@@ -865,8 +865,9 @@ pub(super) async fn google_status_handler() -> Json<GoogleStatusResponse> {
 /// `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` env vars aren't set
 /// — avoids a button that lands on 503.
 pub(super) async fn github_status_handler() -> Json<GithubStatusResponse> {
-    let configured = std::env::var("GITHUB_OAUTH_CLIENT_ID").is_ok()
-        && std::env::var("GITHUB_OAUTH_CLIENT_SECRET").is_ok();
+    let secrets = crate::infra::secrets::global();
+    let configured =
+        secrets.is_set("GITHUB_OAUTH_CLIENT_ID") && secrets.is_set("GITHUB_OAUTH_CLIENT_SECRET");
     Json(GithubStatusResponse { configured })
 }
 
@@ -880,10 +881,10 @@ pub(super) async fn github_status_handler() -> Json<GithubStatusResponse> {
 pub(super) async fn login_options_handler(
     State(state): State<AppState>,
 ) -> Json<LoginOptionsResponse> {
-    let google =
-        std::env::var("GOOGLE_CLIENT_ID").is_ok() && std::env::var("GOOGLE_CLIENT_SECRET").is_ok();
-    let github = std::env::var("GITHUB_OAUTH_CLIENT_ID").is_ok()
-        && std::env::var("GITHUB_OAUTH_CLIENT_SECRET").is_ok();
+    let secrets = &*state.core.secrets;
+    let google = secrets.is_set("GOOGLE_CLIENT_ID") && secrets.is_set("GOOGLE_CLIENT_SECRET");
+    let github =
+        secrets.is_set("GITHUB_OAUTH_CLIENT_ID") && secrets.is_set("GITHUB_OAUTH_CLIENT_SECRET");
     Json(LoginOptionsResponse {
         magic_code: true,
         password: state.core.config.allows_uat_login(),

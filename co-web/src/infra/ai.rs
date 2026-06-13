@@ -564,22 +564,30 @@ impl ChatProvider for MockChatProvider {
 /// Selection:
 /// - `CO_CHAT_FALLBACK=openai` + `OPENAI_API_KEY` → OpenAI
 /// - anything else → Ollama at `CO_OLLAMA_URL` (default: `http://localhost:11434`)
-pub fn build_chat_provider() -> Arc<dyn ChatProvider> {
-    let provider: Arc<dyn ChatProvider> =
-        match std::env::var("CO_CHAT_FALLBACK").as_deref().unwrap_or("") {
-            "openai" => {
-                let key = std::env::var("OPENAI_API_KEY").unwrap_or_default();
-                let model = std::env::var("CO_CHAT_MODEL").unwrap_or_else(|_| "gpt-4o-mini".into());
-                Arc::new(OpenAiCompatChatProvider::openai(key, model))
-            }
-            _ => {
-                let base_url = std::env::var("CO_OLLAMA_URL")
-                    .unwrap_or_else(|_| "http://localhost:11434".into());
-                let model =
-                    std::env::var("CO_CHAT_MODEL").unwrap_or_else(|_| "qwen2.5-coder:7b".into());
-                Arc::new(OpenAiCompatChatProvider::ollama(base_url, model))
-            }
-        };
+pub fn build_chat_provider(
+    config: &crate::CoServerConfig,
+    secrets: &dyn crate::infra::secrets::SecretsProvider,
+) -> Arc<dyn ChatProvider> {
+    let provider: Arc<dyn ChatProvider> = match config.chat_fallback.as_str() {
+        "openai" => {
+            let key = secrets.get("OPENAI_API_KEY").unwrap_or_default();
+            let model = config
+                .chat_model
+                .clone()
+                .unwrap_or_else(|| "gpt-4o-mini".into());
+            Arc::new(OpenAiCompatChatProvider::openai(key, model))
+        }
+        _ => {
+            let model = config
+                .chat_model
+                .clone()
+                .unwrap_or_else(|| "qwen2.5-coder:7b".into());
+            Arc::new(OpenAiCompatChatProvider::ollama(
+                config.ollama_url.clone(),
+                model,
+            ))
+        }
+    };
     debug_assert_ne!(
         provider.kind(),
         "claude",
@@ -680,7 +688,10 @@ mod tests {
 
     #[test]
     fn build_chat_provider_is_never_claude() {
-        let p = build_chat_provider();
+        let p = build_chat_provider(
+            &crate::CoServerConfig::default(),
+            &crate::infra::secrets::StaticEmpty,
+        );
         assert_ne!(
             p.kind(),
             "claude",

@@ -81,8 +81,8 @@ where
             "CO_CACHE_{}_MAX_ENTRIES",
             name.to_uppercase().replace('-', "_")
         );
-        let capacity = std::env::var(&env_key)
-            .ok()
+        let capacity = crate::infra::secrets::global()
+            .get(&env_key)
             .and_then(|v| v.parse::<usize>().ok())
             .filter(|&n| n > 0)
             .unwrap_or(default_capacity);

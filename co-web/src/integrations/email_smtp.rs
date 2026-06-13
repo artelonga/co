@@ -11,8 +11,6 @@
 //! to stderr so a developer / operator can still recover. We *never* leak the
 //! code to the client.
 
-use std::env;
-
 use lettre::{
     AsyncTransport, Message, Tokio1Executor,
     message::header::ContentType,
@@ -31,14 +29,13 @@ struct SmtpConfig {
 
 impl SmtpConfig {
     fn from_env() -> Option<Self> {
-        let host = env::var("CO_SMTP_HOST").ok()?;
-        let username = env::var("CO_SMTP_USER").ok()?;
-        let password = env::var("CO_SMTP_PASS").ok()?;
-        let from = env::var("CO_SMTP_FROM").ok()?;
-        let port = env::var("CO_SMTP_PORT")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(587);
+        use crate::infra::secrets::SecretsProviderExt;
+        let secrets = crate::infra::secrets::global();
+        let host = secrets.get("CO_SMTP_HOST")?;
+        let username = secrets.get("CO_SMTP_USER")?;
+        let password = secrets.get("CO_SMTP_PASS")?;
+        let from = secrets.get("CO_SMTP_FROM")?;
+        let port = secrets.get_parsed("CO_SMTP_PORT", 587);
         Some(Self {
             host,
             port,

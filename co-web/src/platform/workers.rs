@@ -286,14 +286,8 @@ pub struct BackupWorker {
 
 impl BackupWorker {
     pub fn new(state: AppState) -> Self {
-        let interval_hours = std::env::var("CO_BACKUP_INTERVAL_HOURS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(24);
-        let boot_delay_secs = std::env::var("CO_BACKUP_BOOT_DELAY_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(600);
+        let interval_hours = state.core.server_config.backup_interval_hours;
+        let boot_delay_secs = state.core.server_config.backup_boot_delay_secs;
         Self {
             state,
             interval: std::time::Duration::from_secs(interval_hours * 3600),
@@ -335,10 +329,9 @@ pub struct RemoteSisterRepoWorker {
 
 impl RemoteSisterRepoWorker {
     pub fn new(config: crate::config::WebConfig) -> Self {
-        let interval_secs = std::env::var("CO_REMOTE_SYNC_INTERVAL_SECS")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(900); // 15 minutes
+        use crate::infra::secrets::SecretsProviderExt;
+        let interval_secs =
+            crate::infra::secrets::global().get_parsed("CO_REMOTE_SYNC_INTERVAL_SECS", 900); // 15 minutes
         Self {
             config,
             interval_secs,

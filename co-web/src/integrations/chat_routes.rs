@@ -770,8 +770,9 @@ pub async fn deployment_status_handler(
 // Router
 // ---------------------------------------------------------------------------
 
-pub fn router(_state: AppState) -> Router<AppState> {
-    let provider: Arc<dyn ChatProvider> = crate::infra::ai::build_chat_provider();
+pub fn router(state: AppState) -> Router<AppState> {
+    let provider: Arc<dyn ChatProvider> =
+        crate::infra::ai::build_chat_provider(&state.core.server_config, &*state.core.secrets);
 
     // CO-332: assert non-Claude at startup so misconfiguration fails fast.
     assert_ne!(
@@ -868,7 +869,10 @@ mod tests {
         // Verify the router factory never installs Claude as the chat backend.
         // We can't call `router()` directly in a unit test without full AppState,
         // but we can assert the factory produces a non-Claude kind.
-        let p = crate::infra::ai::build_chat_provider();
+        let p = crate::infra::ai::build_chat_provider(
+            &crate::CoServerConfig::default(),
+            &crate::infra::secrets::StaticEmpty,
+        );
         assert_ne!(p.kind(), "claude");
     }
 

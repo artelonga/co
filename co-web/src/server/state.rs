@@ -14,6 +14,10 @@ pub struct CoreState {
     pub storage: Arc<parking_lot::Mutex<Storage>>,
     pub storage_trait: Arc<dyn crate::infra::storage::Storage>,
     pub config: crate::config::WebConfig,
+    /// CO-434: non-secret server config, populated once at boot from `secrets`.
+    /// Subsystems read tunables here instead of calling `std::env::var` at the
+    /// point of use.
+    pub server_config: Arc<crate::CoServerConfig>,
     pub auth_store: Mutex<AuthStore>,
     pub event_bus: crate::events::Bus,
     /// CO-295: runtime secrets provider (env-var in prod, static in tests).
@@ -73,7 +77,7 @@ impl CoreState {
 
     /// Full constructor — injects both a `SecretsProvider` and a `BlobBackend`.
     ///
-    /// Used at boot time (via `blob_backend_from_env`) when a non-local
+    /// Used at boot time (via `blob_backend_from_config`) when a non-local
     /// backend is configured. Tests and other call-sites that do not care
     /// about blob backend can use [`from_storage_with_secrets`] which
     /// defaults to `BlobBackend::local()`.
@@ -91,8 +95,10 @@ impl CoreState {
         let auth_provider: Arc<dyn crate::infra::auth::AuthProvider> = Arc::new(
             crate::infra::auth::LocalJwtProvider::new(Arc::clone(&secrets)),
         );
+        // CO-434: build the server config once from the injected provider.
+        let server_config = Arc::new(crate::CoServerConfig::from_secrets(&*secrets));
         let ai_router = Arc::new(crate::infra::ai::AiRouter::from_env());
-        let eda_bus: Arc<dyn crate::eda::EdaBus> = crate::eda::build_bus();
+        let eda_bus: Arc<dyn crate::eda::EdaBus> = crate::eda::build_bus(&server_config);
         // Phase 1: create the timeline channel without spawning (safe in non-async contexts).
         // Phase 2 (start) is called from start_server_inner after the runtime is up.
         let timeline_tx = crate::eda::subscribers::timeline::new_channel();
@@ -100,6 +106,7 @@ impl CoreState {
             storage,
             storage_trait,
             config,
+            server_config,
             auth_store: Mutex::new(auth_store),
             event_bus: crate::events::Bus::new(),
             secrets,

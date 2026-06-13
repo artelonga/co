@@ -41,11 +41,11 @@ fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, Storage> {
 }
 
 fn relatos_dir() -> String {
-    std::env::var("QUILOMBO_RELATOS_DIR").unwrap_or_else(|_| "relatos".to_string())
+    crate::infra::secrets::global().get_or("QUILOMBO_RELATOS_DIR", "relatos")
 }
 
 fn paginas_dir() -> String {
-    std::env::var("QUILOMBO_PAGINAS_DIR").unwrap_or_else(|_| "jardim".to_string())
+    crate::infra::secrets::global().get_or("QUILOMBO_PAGINAS_DIR", "jardim")
 }
 
 /// Look up a quilombo user from their co-web user ID.
@@ -351,7 +351,7 @@ async fn cadastro_handler(
 
 // FREEFORM: publications are parsed from markdown frontmatter with arbitrary user-defined fields
 async fn listar_publicacoes() -> Result<Json<Vec<serde_json::Value>>, AppError> {
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let posts_dir = std::path::Path::new(&quilombo_dir).join(relatos_dir());
 
     let mut posts = Vec::new();
@@ -395,7 +395,7 @@ async fn listar_publicacoes() -> Result<Json<Vec<serde_json::Value>>, AppError> 
 
 // FREEFORM: single publication frontmatter parsed from markdown — structure defined by content authors
 async fn obter_publicacao(Path(slug): Path<String>) -> Result<Json<serde_json::Value>, AppError> {
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let path = std::path::Path::new(&quilombo_dir)
         .join(relatos_dir())
         .join(format!("{slug}.md"));
@@ -418,7 +418,7 @@ async fn obter_publicacao(Path(slug): Path<String>) -> Result<Json<serde_json::V
 
 // FREEFORM: garden page frontmatter parsed from YAML — structure defined by content authors
 async fn obter_pagina(Path(slug): Path<String>) -> Result<Json<serde_json::Value>, AppError> {
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let path = std::path::Path::new(&quilombo_dir)
         .join(paginas_dir())
         .join(format!("{slug}.md"));
@@ -475,7 +475,7 @@ fn find_body_start(content: &str) -> Option<usize> {
 // --- Tags ---
 
 async fn listar_tags_handler() -> Result<Json<Vec<String>>, AppError> {
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let posts_dir = std::path::Path::new(&quilombo_dir).join(relatos_dir());
 
     let mut tags = std::collections::BTreeSet::new();
@@ -508,7 +508,7 @@ async fn listar_tags_handler() -> Result<Json<Vec<String>>, AppError> {
 async fn publicacoes_por_tag_handler(
     Path(tag): Path<String>,
 ) -> Result<Json<Vec<serde_json::Value>>, AppError> {
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let posts_dir = std::path::Path::new(&quilombo_dir).join(relatos_dir());
 
     let mut posts = Vec::new();
@@ -1021,7 +1021,7 @@ struct AtualizarPapelBody {
 // --- File Serving Handlers ---
 
 fn uploads_dir() -> std::path::PathBuf {
-    let data_dir = std::env::var("CO_WEB_DATA").unwrap_or_else(|_| "data".to_string());
+    let data_dir = crate::infra::secrets::global().get_or("CO_WEB_DATA", "data");
     std::path::Path::new(&data_dir).join("uploads")
 }
 
@@ -1080,7 +1080,7 @@ async fn serve_upload_handler(Path(filename): Path<String>) -> Result<Response, 
 async fn serve_foto_handler(Path(filename): Path<String>) -> Result<Response, AppError> {
     validate_filename(&filename)?;
 
-    let quilombo_dir = std::env::var("QUILOMBO_DIR").unwrap_or_else(|_| "quilombo".to_string());
+    let quilombo_dir = crate::infra::secrets::global().get_or("QUILOMBO_DIR", "quilombo");
     let filepath = std::path::Path::new(&quilombo_dir)
         .join("fotos")
         .join(&filename);

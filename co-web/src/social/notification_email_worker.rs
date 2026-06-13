@@ -426,13 +426,16 @@ async fn send_digest_email(
     lang: &str,
 ) -> anyhow::Result<()> {
     let base_url = "https://co.artelonga.com.br";
-    let from = std::env::var("NOTIF_FROM_EMAIL")
-        .unwrap_or_else(|_| "notificacoes@seguranca.artelonga.com.br".to_string());
+    let secrets = crate::infra::secrets::global();
+    let from = secrets.get_or(
+        "NOTIF_FROM_EMAIL",
+        "notificacoes@seguranca.artelonga.com.br",
+    );
     let subject = build_subject(notifs, lang);
     let body_html = build_body_html(notifs, display_name, lang, base_url);
 
     // 1. Try Resend (HTML)
-    if let Ok(api_key) = std::env::var("RESEND_API_KEY") {
+    if let Some(api_key) = secrets.get("RESEND_API_KEY") {
         let client = reqwest::Client::new();
         let payload = serde_json::json!({
             "from": from,

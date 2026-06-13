@@ -91,15 +91,13 @@ pub trait BackupBackend: Send + Sync {
 /// Returns `None` when `CO_BACKUP_BACKEND=disabled`.
 /// Returns `Some(Box<dyn BackupBackend>)` for every other value (default: `local`).
 pub fn backend_from_env(data_dir: &Path) -> Option<Box<dyn BackupBackend>> {
-    let kind = std::env::var("CO_BACKUP_BACKEND")
-        .unwrap_or_else(|_| "local".to_string())
-        .to_lowercase();
+    let secrets = crate::infra::secrets::global();
+    let kind = secrets.get_or("CO_BACKUP_BACKEND", "local").to_lowercase();
 
     match kind.as_str() {
         "disabled" | "off" | "none" => None,
         "local" | "" => {
-            let backup_dir =
-                std::env::var("CO_BACKUP_DIR").unwrap_or_else(|_| "/data/backups/".to_string());
+            let backup_dir = secrets.get_or("CO_BACKUP_DIR", "/data/backups/");
             let backup_dir = if backup_dir.starts_with('/') {
                 PathBuf::from(backup_dir)
             } else {

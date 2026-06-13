@@ -15,9 +15,10 @@ pub const MODEL_NAME: &str = "all-MiniLM-L6-v2";
 
 /// Default model cache directory.
 pub fn default_model_dir() -> PathBuf {
-    std::env::var("CO_MODELS_DIR")
+    crate::infra::secrets::global()
+        .get("CO_MODELS_DIR")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| {
+        .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".co")

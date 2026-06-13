@@ -77,7 +77,7 @@ async fn health_check() -> Json<HealthResponse> {
     Json(HealthResponse {
         status: "ok".into(),
         version: env!("CARGO_PKG_VERSION").into(),
-        env: std::env::var("CO_ENV").unwrap_or_else(|_| "production".into()),
+        env: crate::infra::secrets::global().get_or("CO_ENV", "production"),
     })
 }
 
@@ -274,10 +274,19 @@ pub async fn start_server(config: WebConfig) {
 }
 
 async fn start_server_inner(config: WebConfig, bind_host: &str) {
+    // CO-434: build the runtime secrets provider and server config ONCE at boot,
+    // then drive every subsystem from it. `init_global` publishes the same
+    // provider to the process-global seam used by stateless free functions /
+    // middlewares that have no `AppState` to thread a provider through.
+    let secrets: Arc<dyn crate::infra::secrets::SecretsProvider> =
+        Arc::new(crate::infra::secrets::EnvSecretsProvider);
+    crate::infra::secrets::init_global(Arc::clone(&secrets));
+    let server_config = Arc::new(crate::CoServerConfig::from_secrets(&*secrets));
+
     // Initialise tracing — guard must be held until the server exits so that
     // any pending OTLP spans are flushed before the process terminates.
     let _telemetry = crate::infra::telemetry::init_subscriber(
-        crate::infra::telemetry::TelemetryConfig::from_env(),
+        crate::infra::telemetry::TelemetryConfig::from_config(&server_config),
     );
 
     let storage = Storage::new(&config.data_dir);
@@ -391,18 +400,15 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     let embeddings = Arc::new(crate::embedding::EmbeddingService::disabled());
     let (embedding_tx, embedding_rx) = crate::embedding_worker::channel();
 
-    let geo = {
-        let path = std::env::var("GEOIP_DB_PATH")
-            .unwrap_or_else(|_| "/data/GeoLite2-City.mmdb".to_string());
-        std::sync::Arc::new(crate::geo::GeoDb::open(&path))
-    };
+    let geo = std::sync::Arc::new(crate::geo::GeoDb::open(&server_config.geoip_db_path));
 
-    let blob_backend = crate::infra::blob::blob_backend_from_env().await;
+    let blob_backend =
+        crate::infra::blob::blob_backend_from_config(&server_config, &*secrets).await;
     let core = Arc::new(CoreState::from_storage_full(
         storage,
         config.clone(),
         auth_store,
-        Arc::new(crate::infra::secrets::EnvSecretsProvider),
+        Arc::clone(&secrets),
         blob_backend,
     ));
     let realtime = Arc::new(RealtimeState {
@@ -583,11 +589,7 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // CO-327: desktop notification listener — macOS only, opt-out via env var.
     // CO_DESKTOP_NOTIFY=off disables; default is on when running on macOS.
     {
-        let desktop_notify_enabled = std::env::var("CO_DESKTOP_NOTIFY")
-            .map(|v| v.to_lowercase() != "off")
-            .unwrap_or(cfg!(target_os = "macos"));
-
-        if desktop_notify_enabled {
+        if server_config.desktop_notify_enabled {
             let s = state.clone();
             let notifications_url = format!("http://127.0.0.1:{}/notifications", config.port);
             tokio::spawn(async move {
@@ -643,10 +645,7 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // file writes via entry_routes::enqueue_*, so this is a backfill safety
     // net. Default OFF; opt in with CO_EMBEDDING_BOOT_SCAN=1 when you actually
     // need to repair stale state after a long downtime.
-    if std::env::var("CO_EMBEDDING_BOOT_SCAN")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
-    {
+    if server_config.embedding_boot_scan {
         crate::embedding_worker::boot_scan(state.clone());
     } else {
         tracing::info!(
@@ -738,18 +737,15 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
 
         // CO-422: in-prod degradation alerter — email on disk/backup/universe events.
         {
-            let alert_to = std::env::var("CO_ALERT_TO")
-                .unwrap_or_else(|_| "yuri@artelonga.com.br".to_string());
-            let debounce_hours = std::env::var("CO_ALERT_DEBOUNCE_HOURS")
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .unwrap_or(2);
-            let mailer = crate::eda::subscribers::degradation_alerter::mailer_from_env();
+            let mailer = crate::eda::subscribers::degradation_alerter::mailer_from_secrets(
+                &server_config,
+                &*secrets,
+            );
             crate::eda::subscribers::degradation_alerter::spawn(
                 Arc::clone(&bus),
                 mailer,
-                alert_to,
-                debounce_hours,
+                server_config.alert_to.clone(),
+                server_config.alert_debounce_hours,
             );
         }
     }

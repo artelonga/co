@@ -158,11 +158,13 @@ struct GithubConfig {
 
 impl GithubConfig {
     fn from_env() -> Option<Self> {
-        let client_id = std::env::var("GITHUB_OAUTH_CLIENT_ID").ok()?;
-        let client_secret = std::env::var("GITHUB_OAUTH_CLIENT_SECRET").ok()?;
-        let redirect_uri = std::env::var("GITHUB_OAUTH_REDIRECT_URI").unwrap_or_else(|_| {
-            "https://co.artelonga.com.br/api/v1/auth/github/callback".to_string()
-        });
+        let secrets = crate::infra::secrets::global();
+        let client_id = secrets.get("GITHUB_OAUTH_CLIENT_ID")?;
+        let client_secret = secrets.get("GITHUB_OAUTH_CLIENT_SECRET")?;
+        let redirect_uri = secrets.get_or(
+            "GITHUB_OAUTH_REDIRECT_URI",
+            "https://co.artelonga.com.br/api/v1/auth/github/callback",
+        );
         Some(Self {
             client_id,
             client_secret,

@@ -352,9 +352,12 @@ pub fn gestao_oauth_router() -> Router<AppState> {
 
 /// GET /.well-known/openid-configuration — OIDC discovery document
 pub async fn openid_configuration(State(core): State<Arc<CoreState>>) -> impl IntoResponse {
-    // Derive the issuer URL from environment or fall back to localhost.
-    let base = std::env::var("CO_PUBLIC_URL")
-        .unwrap_or_else(|_| format!("http://localhost:{}", core.config.port));
+    // Derive the issuer URL from config or fall back to localhost.
+    let base = core
+        .server_config
+        .public_url
+        .clone()
+        .unwrap_or_else(|| format!("http://localhost:{}", core.config.port));
 
     axum::Json(serde_json::json!({
         "issuer": base,

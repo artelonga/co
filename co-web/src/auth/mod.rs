@@ -91,11 +91,14 @@ struct ErrorResponse {
     error: String,
 }
 
-/// Reads `JWT_SECRET` from the environment, falling back to a development default.
+/// Reads `JWT_SECRET` through the process-global [`SecretsProvider`], falling
+/// back to a development default.
 ///
-/// Prefer `jwt_secret_from` when a `SecretsProvider` is available (e.g., in handlers).
+/// Prefer `jwt_secret_from` when a `SecretsProvider` is available (e.g., in
+/// handlers via `state.core.secrets`). CO-434: this convenience reads the
+/// global provider seam rather than `std::env::var` directly.
 pub fn jwt_secret() -> String {
-    std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
+    jwt_secret_from(&*crate::infra::secrets::global())
 }
 
 /// Reads `JWT_SECRET` from the given provider, falling back to a development default.
@@ -125,9 +128,10 @@ pub struct JwtKey {
 }
 
 impl JwtKey {
-    /// Load from `CO_JWT_PRIVATE_KEY` env var (PKCS8 PEM) or generate a new key.
+    /// Load from `CO_JWT_PRIVATE_KEY` (PKCS8 PEM) or generate a new key.
+    /// CO-434: read through the process-global `SecretsProvider`.
     pub fn load_or_generate() -> Self {
-        if let Ok(pem) = std::env::var("CO_JWT_PRIVATE_KEY") {
+        if let Some(pem) = crate::infra::secrets::global().get("CO_JWT_PRIVATE_KEY") {
             if let Ok(key) = Self::from_pem(&pem) {
                 tracing::info!("CO-166: loaded EC key from CO_JWT_PRIVATE_KEY");
                 return key;

@@ -157,6 +157,12 @@ mod tests {
 
 impl From<Args> for WebConfig {
     fn from(args: Args) -> Self {
+        // CO-434: read the remaining env-backed fields through a `SecretsProvider`
+        // (the production `EnvSecretsProvider`) at CLI-parse/boot time, instead of
+        // calling `std::env::var` directly. Keeps the literal env read confined to
+        // `EnvSecretsProvider`.
+        use crate::infra::secrets::SecretsProvider;
+        let secrets = crate::infra::secrets::EnvSecretsProvider;
         let universo_dir = format!("{}/universes", args.data);
         Self {
             port: args.port,
@@ -167,23 +173,22 @@ impl From<Args> for WebConfig {
             plugins_dir: args.plugins_dir,
             game_db_path: args.game_db_path,
             universo_dir,
-            gestao_github_admins: std::env::var("GESTAO_GITHUB_ADMINS")
-                .unwrap_or_default()
+            gestao_github_admins: secrets
+                .get_or("GESTAO_GITHUB_ADMINS", "")
                 .split(',')
                 .filter(|s| !s.is_empty())
                 .map(|s| s.trim().to_string())
                 .collect(),
-            universe_key: std::env::var("UNIVERSE_KEY").ok(),
-            co_env: std::env::var("CO_ENV").unwrap_or_else(|_| "prod".into()),
-            wae_endpoint: std::env::var("WAE_ENDPOINT").ok(),
-            wae_api_key: std::env::var("WAE_API_KEY").ok(),
-            cookie_domain: std::env::var("CO_COOKIE_DOMAIN").ok(),
-            quilombo_legacy_login: std::env::var("CO_QUILOMBO_LEGACY_LOGIN")
+            universe_key: secrets.get("UNIVERSE_KEY"),
+            co_env: secrets.get_or("CO_ENV", "prod"),
+            wae_endpoint: secrets.get("WAE_ENDPOINT"),
+            wae_api_key: secrets.get("WAE_API_KEY"),
+            cookie_domain: secrets.get("CO_COOKIE_DOMAIN"),
+            quilombo_legacy_login: secrets
+                .get("CO_QUILOMBO_LEGACY_LOGIN")
                 .map(|v| v != "false")
                 .unwrap_or(true),
-            bypass_rate_limit: std::env::var("CO_BYPASS_RATE_LIMIT")
-                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                .unwrap_or(false),
+            bypass_rate_limit: secrets.get_bool("CO_BYPASS_RATE_LIMIT", false),
         }
     }
 }

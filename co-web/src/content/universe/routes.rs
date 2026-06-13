@@ -779,8 +779,7 @@ pub async fn clone_universe(
     let mut response_headers = axum::http::HeaderMap::new();
     if is_anon {
         // Issue an anon JWT as session cookie so the browser can make write requests.
-        let secret =
-            std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".to_string());
+        let secret = crate::auth::jwt_secret();
         if let Ok((token, _)) = crate::auth::sign_jwt(&anon_id, "", "anon", &secret) {
             let cookie = crate::auth::build_session_cookie(
                 &token,

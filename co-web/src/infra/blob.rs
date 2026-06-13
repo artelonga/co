@@ -253,10 +253,11 @@ impl BlobBackend {
 }
 
 // ---------------------------------------------------------------------------
-// Factory: blob_backend_from_env
+// Factory: blob_backend_from_config
 // ---------------------------------------------------------------------------
 
-/// Construct a `BlobBackend` by reading `CO_BLOB_BACKEND` (default: `"local"`).
+/// Construct a `BlobBackend` from [`CoServerConfig::blob_backend`] (default:
+/// `"local"`), reading R2 credentials through `secrets` (CO-434).
 ///
 /// | Value                      | Behaviour                                  |
 /// |----------------------------|--------------------------------------------|
@@ -264,20 +265,28 @@ impl BlobBackend {
 /// | `"local_then_r2_fallback"` | `BlobBackend::local()` (fallback not yet)  |
 /// | `"r2"`                     | `BlobBackend::r2(…)` if feature enabled    |
 /// | anything else              | `BlobBackend::local()`                     |
-pub async fn blob_backend_from_env() -> BlobBackend {
-    let backend = std::env::var("CO_BLOB_BACKEND").unwrap_or_else(|_| "local".to_string());
-    match backend.as_str() {
+pub async fn blob_backend_from_config(
+    config: &crate::CoServerConfig,
+    #[cfg_attr(not(feature = "blob-r2"), allow(unused_variables))]
+    secrets: &dyn crate::infra::secrets::SecretsProvider,
+) -> BlobBackend {
+    match config.blob_backend.as_str() {
         "r2" => {
             #[cfg(feature = "blob-r2")]
             {
-                let account_id = std::env::var("R2_ACCOUNT_ID")
+                let account_id = secrets
+                    .get("R2_ACCOUNT_ID")
                     .expect("CO_BLOB_BACKEND=r2 requires R2_ACCOUNT_ID");
-                let access_key_id = std::env::var("R2_ACCESS_KEY_ID")
+                let access_key_id = secrets
+                    .get("R2_ACCESS_KEY_ID")
                     .expect("CO_BLOB_BACKEND=r2 requires R2_ACCESS_KEY_ID");
-                let secret_access_key = std::env::var("R2_SECRET_ACCESS_KEY")
+                let secret_access_key = secrets
+                    .get("R2_SECRET_ACCESS_KEY")
                     .expect("CO_BLOB_BACKEND=r2 requires R2_SECRET_ACCESS_KEY");
-                let bucket =
-                    std::env::var("R2_BUCKET").expect("CO_BLOB_BACKEND=r2 requires R2_BUCKET");
+                let bucket = config
+                    .r2_bucket
+                    .clone()
+                    .expect("CO_BLOB_BACKEND=r2 requires R2_BUCKET");
                 let s3: Arc<dyn co::deploy::S3Backend> = Arc::new(
                     co::deploy::AwsS3Backend::from_r2_credentials(
                         &account_id,

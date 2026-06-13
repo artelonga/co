@@ -37,7 +37,12 @@ fn extract_subdomain_universe(req: &Request<Body>) -> Option<String> {
     }
     // Skip slugs served by a dedicated static site (DNS points to Fly static app,
     // not co-web). Configure via CO_STATIC_SITES=grcsamazonia,retro-umarizal.
-    if is_static_site_slug_in(slug, std::env::var("CO_STATIC_SITES").ok().as_deref()) {
+    if is_static_site_slug_in(
+        slug,
+        crate::infra::secrets::global()
+            .get("CO_STATIC_SITES")
+            .as_deref(),
+    ) {
         return None;
     }
     // Validate: lowercase alphanumeric + hyphens, no leading/trailing hyphens

@@ -75,7 +75,7 @@ pub fn render_template(template: &str, payload: &Value) -> String {
 pub fn get_template(event_type: &str, slot: &str) -> Option<String> {
     let prefix = event_type_to_prefix(event_type);
     let var_name = format!("CO_TPL_{prefix}_{slot}");
-    if let Ok(val) = std::env::var(&var_name) {
+    if let Some(val) = crate::infra::secrets::global().get(&var_name) {
         return Some(val);
     }
     // Built-in defaults for known events
@@ -107,9 +107,9 @@ pub struct ResendProvider {
 impl ResendProvider {
     /// Construct from env vars. Returns `None` if `RESEND_API_KEY` is absent.
     pub fn from_env() -> Option<Self> {
-        let api_key = std::env::var("RESEND_API_KEY").ok()?;
-        let from = std::env::var("RESEND_FROM")
-            .unwrap_or_else(|_| "CO <noreply@quilomboaraucaria.com.br>".to_string());
+        let secrets = crate::infra::secrets::global();
+        let api_key = secrets.get("RESEND_API_KEY")?;
+        let from = secrets.get_or("RESEND_FROM", "CO <noreply@quilomboaraucaria.com.br>");
         Some(Self { api_key, from })
     }
 }
@@ -176,11 +176,10 @@ pub struct EvolutionApiProvider {
 impl EvolutionApiProvider {
     /// Construct from env vars. Returns `None` if `EVOLUTION_API_KEY` is absent.
     pub fn from_env() -> Option<Self> {
-        let api_key = std::env::var("EVOLUTION_API_KEY").ok()?;
-        let api_url = std::env::var("EVOLUTION_API_URL")
-            .unwrap_or_else(|_| "https://api.evolution-api.com".to_string());
-        let instance =
-            std::env::var("EVOLUTION_INSTANCE").unwrap_or_else(|_| "default".to_string());
+        let secrets = crate::infra::secrets::global();
+        let api_key = secrets.get("EVOLUTION_API_KEY")?;
+        let api_url = secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com");
+        let instance = secrets.get_or("EVOLUTION_INSTANCE", "default");
         Some(Self {
             api_url,
             api_key,
