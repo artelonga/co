@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-366",
+  "title": "Conversion + payment wiring — register → paid via Hostinger checkout (provider-agnostic trait)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-366.md",
+  "branch": "feat/CO-366-conversion-payment-wiring-register-paid-",
+  "merge_sha": "c60de70b975fd0ca6b91691e8c3f94c5f74de59a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/229",
+    "number": 229
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-13T11:50:22Z",
+  "files_changed": 19,
+  "lines_added": 2041,
+  "lines_removed": 23,
+  "labels": [
+    "type:feat",
+    "module:billing",
+    "module:auth",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-366 — Conversion + payment wiring — register → paid via Hostinger checkout (provider-agnostic trait)\n\nEnd-to-end billing wiring so a registered brain owner can convert from free to\npaid, behind a provider-agnostic `BillingProvider` trait (Hostinger today,\nPix/Stripe tomorrow — no lock-in).\n\n- **`BillingProvider` trait** (`co-web/src/billing/`) with `create_checkout`,\n  `verify_webhook`, and `name`. Implementations:\n  - `ManualInvoiceProvider` — default, no external dependency; admin marks a\n    user paid via `POST /api/v1/gestao/users/{id}/mark-paid`.\n  - `HostingerProvider` — full first-ship: deterministic checkout URL +\n    HMAC-SHA256 webhook signature verification (forged payloads rejected).\n  - `PixProvider` / `StripeProvider` — stubs gated behind the `billing-pix` /\n    `billing-stripe` cargo features (v3.1).\n- **Endpoints**: `POST /api/v1/me/billing/checkout`, `GET /api/v1/me/billing/status`,\n  `POST /api/v1/billing/webhook/{provider}` (flips `users.tier` to `paid` on\n  payment success), and `POST /api/v1/gestao/users/{id}/mark-paid`. All four are\n  documented in the OpenAPI catalog (CO-211).\n- **Schema (migration v77)**: adds `tier_paid_at`, `tier_plan`,\n  `billing_provider`, `billing_external_id` to `users`, and a `billing_events`\n  audit table (the table CO-360's funnel step 7 was already waiting on).\n- **Conversion KPI** in `/gestao/resumo`: registered users (7/30/90d), paid\n  users, conversion rate, and mean `t_register → t_payment` seconds.\n- **Activity (CO-361)**: all four billing events (`checkout_created`,\n  `payment_succeeded`, `payment_failed`, `subscription_canceled`) are mirrored\n  to the `atividades` log + EDA bus under `entidade = \"billing\"`.\n- **Register-success CTA**: `static/variants/a/modules/auth/post-register.js`\n  opens the checkout flow.\n\nProvider selection and plan prices are config (`CO_BILLING_PROVIDER`,\n`CO_BILLING_HOSTINGER_API_KEY`, `CO_BILLING_HOSTINGER_WEBHOOK_SECRET`,\n`CO_BILLING_PLAN_PRICES_JSON`) read through the `SecretsProvider` seam — no\nredeploy to switch providers or reprice.\n\n### Why\n\n§5 + §8 of `brain-as-a-service.md` flagged conversion/payment as the explicit\nopen gap: the `t_register → t_payment` KPI was designed but had no\nimplementation. This ships the billing-only tier enforcement (per CO-90, tier\nis billing-only — no global admin tier) so public launch can charge the first\nbrain owner without an infra rebuild, while keeping the integration choice\nswappable behind a trait.",
+  "summary": "As A brain owner who has registered on CO and wants to upgrade from anonymous/free to paid (own domain, unlimited storage, priority sync)",
+  "co_auto_version": "0.1.0"
+}
