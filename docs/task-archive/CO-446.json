@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-446",
+  "title": "Disk-full hardening — migrations + pool degrade instead of crash-loop; pre-deploy free-space gate",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-446.md",
+  "branch": "feat/CO-446-disk-full-hardening-migrations-pool-degr",
+  "merge_sha": "2621f79eee6ea22885144f6cc9ff515ac7ffcd0a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/242",
+    "number": 242
+  },
+  "started_at": "2026-06-13T00:00:00Z",
+  "merged_at": "2026-06-13T22:18:46Z",
+  "files_changed": 9,
+  "lines_added": 439,
+  "lines_removed": 24,
+  "labels": [
+    "type:fix",
+    "ops",
+    "reliability",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-446 — Disk-full hardening — migrations + pool degrade instead of crash-loop; pre-deploy free-space gate\n\nA full `/data` volume no longer turns a routine migration deploy into an outage.\nTwo production incidents (2026-06-11, 2026-06-13) showed the same failure class:\nthe boot ran a new migration, the `schema_version` insert hit `SQLITE_FULL`, the\nprocess panicked (`exit 101`) and crash-looped until max-restart — site dark.\n\n- **Migrations degrade, never crash-loop.** `Storage::run_migrations` now returns\n  a readable `MigrationError` instead of panicking. The migration chain runs\n  under a catch boundary, so a write that fails mid-migration (disk fills after\n  the pre-flight) becomes a controlled `FATAL (CO-446)` log + clean exit, not a\n  cryptic SQLite backtrace. `record_migration!` logs a clear disk-full ERROR\n  before aborting.\n- **Boot pre-flight for disk headroom.** Before running migrations the boot path\n  checks free bytes on `/data`; below `CO_MIGRATION_MIN_FREE_BYTES` (default\n  200 MiB) it logs `insufficient disk for migrations: X free < Y min` and aborts\n  with a message instead of failing deep inside SQLite. The guard is disabled\n  when statvfs is unavailable (non-Linux dev / CI) so it never blocks local runs.\n- **Pool I/O degrades, not panics.** Confirms the CO-405/CO-406 guarantee on the\n  disk path: a corrupt/unreadable per-universe `data.db` degrades to a\n  `PoolError` (503 for that universe) while every other universe keeps serving —\n  regression test added.\n- **Pre-deploy free-space gate.** `scripts/pipeline-deploy-gate.sh` checks\n  `df -P /data` on prod and blocks a deploy when `/data` is > 85% full\n  (`DISK_MAX_PCT`), since such a deploy can hit `SQLITE_FULL` at boot. `--no-disk`\n  skips it; `ALLOW_FULL_DISK=1` downgrades to a warning.\n- **Runbook.** `docs/OPERATIONS.md` gains a \"Disk-full recovery\" section\n  documenting `volumes extend` + machine **stop/start** (a plain `restart` does\n  NOT resize the filesystem — the trap that prolonged the 2026-06-13 incident).\n  The deploy CLAUDE.md links it and wires the gate into the deploy steps.\n\n### Why\nDisk-full is a silent bomb: v3.8.0 ran fine because it writes no migration row at\nboot; v3.9.0 added migrations and detonated on the already-full volume. This task\nis the safety net — the next time `/data` fills, it is a clear error and a\none-command extend, not an outage. The real endgame remains S3 cold-tier offload\n(CO-81).",
+  "summary": "As The operator of `co-artelonga`, QUERO que um `/data` cheio degrade com erro claro em vez de derrubar o site, PARA que um deploy com migração nova não vire outage.",
+  "co_auto_version": "0.1.0"
+}
