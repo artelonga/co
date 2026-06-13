@@ -71,6 +71,28 @@ ORIGIN=$(git remote get-url origin)
 GH_REPO=$(echo "$ORIGIN" | sed -E 's|^git@github.com:([^/]+/[^/]+)\.git$|\1|; s|^https://github.com/([^/]+/[^/]+)\.git$|\1|; s|^https://github.com/([^/]+/[^/]+)$|\1|')
 echo "GH repo:  $GH_REPO"
 
+# CO-440 safety net: if the agent did the work but left it UNCOMMITTED (staged
+# or unstaged — Fable sometimes `git add`s without committing), commit it here so
+# a stage-but-don't-commit run still ships instead of dying "nothing to ship".
+# The work is already isolated in this worktree, so `git add -A` is scoped to it.
+if [[ -n "$(git status --porcelain)" ]]; then
+  CC="chore(co-auto):"; TITLE="$TASK_ID"
+  for space_dir in work/*/; do
+    sp="${space_dir}${TASK_ID}.md"
+    if [[ -f "$sp" ]]; then
+      cc_raw=$(grep -m1 '^conventional_commit:' "$sp" | sed 's/^conventional_commit: *//; s/"//g')
+      [[ -n "$cc_raw" ]] && CC="$cc_raw"
+      t_raw=$(grep -m1 '^title:' "$sp" | sed 's/^title: *//; s/"//g')
+      [[ -n "$t_raw" ]] && TITLE="$t_raw"
+      break
+    fi
+  done
+  echo "  ⚠ CO-440 safety net: agent left uncommitted work — committing it ($CC)"
+  git add -A
+  git commit --no-verify -m "${CC} ${TASK_ID} — ${TITLE} (auto-committed by co-auto)" >/dev/null 2>&1 \
+    || echo "  ⚠ auto-commit produced nothing"
+fi
+
 # Verify HEAD is ahead of origin/main
 git fetch origin main --quiet
 AHEAD=$(git rev-list --count origin/main..HEAD)

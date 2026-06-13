@@ -1040,6 +1040,15 @@ fn launch_claude(
             cmd.env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1");
         }
 
+        // CO-440: pipe stdout/stderr so `wait_with_output()` actually captures
+        // the stream-json. Without this, `spawn()` inherits the parent's stdio,
+        // `output.stdout` comes back EMPTY, and CO-425 usage capture +
+        // assistant-text re-emit silently get nothing on every headless run.
+        // `wait_with_output` drains both pipes concurrently, so no deadlock on
+        // long runs.
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+
         let output = cmd
             .spawn()
             .context("Failed to spawn claude. Is claude CLI installed?")?
