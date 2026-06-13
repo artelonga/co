@@ -30,33 +30,9 @@ pub struct LeadSubmit {
     pub parceiro_handle: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
-pub struct LeadRow {
-    pub id: i64,
-    pub created_at: String,
-    pub updated_at: String,
-    pub nome: Option<String>,
-    pub email: Option<String>,
-    pub telefone: Option<String>,
-    pub mensagem: String,
-    pub servico_titulo: Option<String>,
-    pub parceiro_handle: Option<String>,
-    pub status: String,
-    pub priority: Option<String>,
-    pub assignee_handle: Option<String>,
-    pub notes: Option<String>,
-    pub closed_reason: Option<String>,
-    pub promoted_to_al: Option<i64>,
-    /// CO-370: linked user id (NULL if no user was matched/created yet).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_id: Option<String>,
-    /// CO-370: status of the linked user ('active' | 'pre-registered').
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub user_status: Option<String>,
-    /// CO-370: when the linked user completed email verification.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub verified_at: Option<String>,
-}
+// CO-433: `LeadRow` moved to the storage layer (the row projection lives with
+// the typed `Storage::list_leads` query); re-exported here for the API types.
+pub use crate::storage::leads::LeadRow;
 
 /// Typed response for `POST /api/v1/leads`.
 #[derive(Debug, Serialize, Deserialize)]
@@ -178,14 +154,7 @@ fn link_lead_to_user(state: &crate::server::AppState, lead_id: i64, email: &str)
             let storage = state.core.storage.lock();
 
             // Look for an existing user with this email.
-            let existing_user_id: Option<String> = storage
-                .conn()
-                .query_row(
-                    "SELECT id FROM users WHERE lower(email) = lower(?1) LIMIT 1",
-                    rusqlite::params![email],
-                    |r| r.get(0),
-                )
-                .ok();
+            let existing_user_id = storage.find_user_id_by_email(&email);
 
             if let Some(uid) = existing_user_id {
                 uid
@@ -195,26 +164,13 @@ fn link_lead_to_user(state: &crate::server::AppState, lead_id: i64, email: &str)
                 let now_str = chrono::Utc::now().to_rfc3339();
                 let display = email.split('@').next().unwrap_or("anon").to_string();
                 let inserted = storage
-                    .conn()
-                    .execute(
-                        "INSERT OR IGNORE INTO users \
-                         (id, email, display_name, tier, created_at, status) \
-                         VALUES (?1, ?2, ?3, 'player', ?4, 'pre-registered')",
-                        rusqlite::params![shell_id, email, display, now_str],
-                    )
+                    .insert_shell_user(&shell_id, &email, &display, &now_str)
                     .unwrap_or(0);
                 if inserted > 0 {
                     shell_id
                 } else {
                     // Race: another request inserted the user between our SELECT and INSERT.
-                    storage
-                        .conn()
-                        .query_row(
-                            "SELECT id FROM users WHERE lower(email) = lower(?1) LIMIT 1",
-                            rusqlite::params![email],
-                            |r| r.get::<_, String>(0),
-                        )
-                        .unwrap_or_default()
+                    storage.find_user_id_by_email(&email).unwrap_or_default()
                 }
             }
         };
@@ -227,14 +183,8 @@ fn link_lead_to_user(state: &crate::server::AppState, lead_id: i64, email: &str)
         // Stitch the bidirectional FKs.
         {
             let storage = state.core.storage.lock();
-            let _ = storage.conn().execute(
-                "UPDATE leads SET user_id = ?1 WHERE id = ?2 AND user_id IS NULL",
-                rusqlite::params![linked_user_id, lead_id],
-            );
-            let _ = storage.conn().execute(
-                "UPDATE users SET lead_id = ?1 WHERE id = ?2 AND lead_id IS NULL",
-                rusqlite::params![lead_id, linked_user_id],
-            );
+            let _ = storage.link_lead_to_user(lead_id, &linked_user_id);
+            let _ = storage.link_user_to_lead(&linked_user_id, lead_id);
         }
 
         // Telemetry: lead.captured + lead.user_linked
@@ -368,15 +318,7 @@ pub async fn submit_lead(
     // 5. Rate limit — 5 leads per IP-hash per 24 h
     let rate_exceeded = {
         let storage = state.core.storage.lock();
-        let count: i64 = storage
-            .conn()
-            .query_row(
-                "SELECT COUNT(*) FROM leads WHERE ip_hash = ? \
-                 AND created_at > datetime('now', '-1 day')",
-                rusqlite::params![ip_hash],
-                |r| r.get(0),
-            )
-            .unwrap_or(0);
+        let count: i64 = storage.count_leads_by_ip_hash_last_day(&ip_hash);
         count >= 5
     };
     if rate_exceeded {
@@ -423,26 +365,19 @@ pub async fn submit_lead(
     let now = chrono::Utc::now().to_rfc3339();
     let (id, insert_ok) = {
         let storage = state.core.storage.lock();
-        let res = storage.conn().execute(
-            "INSERT INTO leads
-             (created_at, updated_at, nome, email, telefone, mensagem,
-              servico_titulo, parceiro_handle, status, priority, ip_hash, user_agent)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', 'normal', ?, ?)",
-            rusqlite::params![
-                now,
-                now,
-                nome,
-                email,
-                telefone,
-                mensagem,
-                servico_titulo,
-                parceiro_handle,
-                ip_hash,
-                user_agent,
-            ],
+        let res = storage.insert_contact_lead(
+            &now,
+            nome.as_deref(),
+            email.as_deref(),
+            telefone.as_deref(),
+            &mensagem,
+            servico_titulo.as_deref(),
+            parceiro_handle.as_deref(),
+            &ip_hash,
+            user_agent.as_deref(),
         );
         match res {
-            Ok(_) => (storage.conn().last_insert_rowid(), true),
+            Ok(rowid) => (rowid, true),
             Err(e) => {
                 tracing::error!("Failed to insert lead: {e}");
                 (0, false)
@@ -511,56 +446,10 @@ pub async fn list_leads(
     };
 
     // Total count (without LIMIT)
-    let count_sql = format!("SELECT COUNT(*) FROM leads {}", where_clause);
-    let total: i64 = storage
-        .conn()
-        .prepare(&count_sql)
-        .and_then(|mut stmt| stmt.query_row(rusqlite::params_from_iter(binds.iter()), |r| r.get(0)))
-        .unwrap_or(0);
+    let total: i64 = storage.count_leads(&where_clause, &binds);
 
     // Data query — LEFT JOIN users for CO-370 user_id / user_status / verified_at.
-    binds.push(limit.to_string());
-    let data_sql = format!(
-        "SELECT l.id, l.created_at, l.updated_at, l.nome, l.email, l.telefone, l.mensagem,
-                l.servico_titulo, l.parceiro_handle, l.status, l.priority, l.assignee_handle,
-                l.notes, l.closed_reason, l.promoted_to_al,
-                l.user_id,
-                u.status  AS user_status,
-                CASE WHEN u.status = 'active' THEN u.activated_at ELSE NULL END AS verified_at
-         FROM leads l
-         LEFT JOIN users u ON u.id = l.user_id
-         {where_clause} ORDER BY l.created_at DESC LIMIT ?"
-    );
-
-    let leads: Vec<LeadRow> = storage
-        .conn()
-        .prepare(&data_sql)
-        .and_then(|mut stmt| {
-            stmt.query_map(rusqlite::params_from_iter(binds.iter()), |r| {
-                Ok(LeadRow {
-                    id: r.get(0)?,
-                    created_at: r.get(1)?,
-                    updated_at: r.get(2)?,
-                    nome: r.get(3)?,
-                    email: r.get(4)?,
-                    telefone: r.get(5)?,
-                    mensagem: r.get(6)?,
-                    servico_titulo: r.get(7)?,
-                    parceiro_handle: r.get(8)?,
-                    status: r.get(9)?,
-                    priority: r.get(10)?,
-                    assignee_handle: r.get(11)?,
-                    notes: r.get(12)?,
-                    closed_reason: r.get(13)?,
-                    promoted_to_al: r.get(14)?,
-                    user_id: r.get(15)?,
-                    user_status: r.get(16)?,
-                    verified_at: r.get(17)?,
-                })
-            })
-            .map(|rows| rows.filter_map(|r| r.ok()).collect())
-        })
-        .unwrap_or_default();
+    let leads: Vec<LeadRow> = storage.list_leads(&where_clause, &binds, limit);
 
     Json(LeadsListResponse { leads, total }).into_response()
 }
@@ -578,14 +467,7 @@ pub async fn patch_lead(
     let storage = state.core.storage.lock();
 
     // Read current status
-    let current_status: Option<String> = storage
-        .conn()
-        .query_row(
-            "SELECT status FROM leads WHERE id = ?",
-            rusqlite::params![id],
-            |r| r.get(0),
-        )
-        .ok();
+    let current_status: Option<String> = storage.get_lead_status(id);
     let current_status = match current_status {
         Some(s) => s,
         None => {
@@ -638,26 +520,15 @@ pub async fn patch_lead(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    let result = storage.conn().execute(
-        "UPDATE leads SET
-             updated_at      = ?,
-             status          = COALESCE(?, status),
-             priority        = COALESCE(?, priority),
-             assignee_handle = COALESCE(?, assignee_handle),
-             notes           = COALESCE(?, notes),
-             closed_reason   = COALESCE(?, closed_reason),
-             promoted_to_al  = COALESCE(?, promoted_to_al)
-         WHERE id = ?",
-        rusqlite::params![
-            now,
-            body.status,
-            body.priority,
-            body.assignee_handle,
-            body.notes,
-            body.closed_reason,
-            body.promoted_to_al,
-            id,
-        ],
+    let result = storage.update_lead(
+        &now,
+        body.status.as_deref(),
+        body.priority.as_deref(),
+        body.assignee_handle.as_deref(),
+        body.notes.as_deref(),
+        body.closed_reason.as_deref(),
+        body.promoted_to_al,
+        id,
     );
 
     match result {
@@ -709,12 +580,7 @@ pub async fn retention_task(state: crate::server::AppState) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 3600)).await;
         let storage = state.core.storage.lock();
-        match storage.conn().execute(
-            "DELETE FROM leads \
-             WHERE created_at < datetime('now', '-24 months') \
-             AND status = 'closed'",
-            [],
-        ) {
+        match storage.purge_closed_leads_older_than_24_months() {
             Ok(n) if n > 0 => {
                 tracing::info!("Leads retention: purged {n} closed lead(s) older than 24 months")
             }

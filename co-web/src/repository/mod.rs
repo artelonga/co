@@ -6,10 +6,12 @@
 //! type), so handlers never construct an index on a raw connection guard.
 
 pub mod entry_repository;
+pub mod entry_store;
 pub mod reference_repository;
 pub mod relation_repository;
 
 pub use entry_repository::{EntryRepository, SqliteEntryRepository};
+pub use entry_store::{EntryStore, SqliteEntryStore};
 pub use reference_repository::{
     CardFilter, OrphanBlobRecord, ReferenceRepository, SqliteReferenceRepository,
 };

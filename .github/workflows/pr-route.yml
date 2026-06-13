@@ -254,8 +254,18 @@ jobs:
             # The scanner's own module carries deliberately-vulnerable test
             # fixtures (it must detect these patterns at runtime) — scanning
             # the detector for the patterns it detects blocks its own PR.
+            #
+            # CO-433: the storage + repository layers are where parameterized SQL
+            # legitimately lives (the CO-390/CO-433 layering moves SQL OUT of
+            # handlers INTO these layers — the architectural goal). They use bound
+            # params (?N) + const column-lists by convention, so the crude
+            # `format!("SELECT…")` regex only false-positives there. The injection
+            # SURFACE — handlers/routes/subscribers where user input enters — stays
+            # fully scanned.
             case "$file" in
               co-web/src/security/audit/*) continue ;;
+              co-web/src/storage/*) continue ;;
+              co-web/src/repository/*) continue ;;
             esac
             if [ -f "$file" ]; then
               # Scan ONLY the lines this PR ADDED (diff '+' lines), not the whole

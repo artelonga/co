@@ -447,20 +447,7 @@ fn update_bridge_state(
     last_event_id: Option<&str>,
 ) {
     let st = storage.lock();
-    let id = format!("{source}:{target}");
-    let now = Utc::now().to_rfc3339();
-    if let Err(e) = st.conn().execute(
-        "INSERT INTO bridge_state (id, source_deployment, target_deployment,
-            last_delivered_event_id, last_connected_at, last_disconnected_at, state)
-         VALUES (?1, ?2, ?3, ?4, CASE WHEN ?5 = 'connected' THEN ?6 ELSE NULL END,
-                 CASE WHEN ?5 = 'disconnected' THEN ?6 ELSE NULL END, ?5)
-         ON CONFLICT(id) DO UPDATE SET
-             state = excluded.state,
-             last_connected_at = CASE WHEN ?5 = 'connected' THEN ?6 ELSE last_connected_at END,
-             last_disconnected_at = CASE WHEN ?5 = 'disconnected' THEN ?6 ELSE last_disconnected_at END,
-             last_delivered_event_id = COALESCE(?4, last_delivered_event_id)",
-        rusqlite::params![id, source, target, last_event_id, state, now],
-    ) {
+    if let Err(e) = st.upsert_bridge_state(source, target, state, last_event_id) {
         warn!("EDA bridge: bridge_state upsert failed: {e}");
     }
 }
@@ -471,59 +458,40 @@ fn update_bridge_state(
 fn load_events_since(storage: &Arc<Mutex<Storage>>, since_id: Option<&str>) -> Vec<Event> {
     let st = storage.lock();
     let since = since_id.unwrap_or("");
-    let mut stmt = match st.conn().prepare(
-        "SELECT id, event_type, universe_key, user_id, payload_json, visibility, created_at
-         FROM event_log
-         WHERE id > ?1
-         ORDER BY id ASC
-         LIMIT 1000",
-    ) {
-        Ok(s) => s,
+    let rows = match st.load_event_log_since(since) {
+        Ok(rows) => rows,
         Err(e) => {
-            warn!("EDA bridge: event_log query prepare failed: {e}");
+            warn!("EDA bridge: event_log query failed: {e}");
             return vec![];
         }
     };
 
-    let rows = stmt.query_map(rusqlite::params![since], |row| {
-        let id: String = row.get(0)?;
-        let event_type: String = row.get(1)?;
-        let universe_key: Option<String> = row.get(2)?;
-        let user_id: Option<String> = row.get(3)?;
-        let payload_json: String = row.get(4)?;
-        let visibility_str: String = row.get(5)?;
-        let created_at_str: String = row.get(6)?;
+    rows.into_iter()
+        .map(|r| {
+            let payload = serde_json::from_str(&r.payload_json).unwrap_or(serde_json::Value::Null);
+            let visibility = match r.visibility.as_str() {
+                "UniverseMembers" => Visibility::UniverseMembers,
+                "UniverseOwner" => Visibility::UniverseOwner,
+                "UserOnly" => Visibility::UserOnly,
+                "System" => Visibility::System,
+                _ => Visibility::Public,
+            };
+            let created_at = r
+                .created_at
+                .parse::<chrono::DateTime<Utc>>()
+                .unwrap_or_else(|_| Utc::now());
 
-        let payload = serde_json::from_str(&payload_json).unwrap_or(serde_json::Value::Null);
-        let visibility = match visibility_str.as_str() {
-            "UniverseMembers" => Visibility::UniverseMembers,
-            "UniverseOwner" => Visibility::UniverseOwner,
-            "UserOnly" => Visibility::UserOnly,
-            "System" => Visibility::System,
-            _ => Visibility::Public,
-        };
-        let created_at = created_at_str
-            .parse::<chrono::DateTime<Utc>>()
-            .unwrap_or_else(|_| Utc::now());
-
-        Ok(Event {
-            id,
-            event_type,
-            universe_key,
-            user_id,
-            payload,
-            visibility,
-            created_at,
+            Event {
+                id: r.id,
+                event_type: r.event_type,
+                universe_key: r.universe_key,
+                user_id: r.user_id,
+                payload,
+                visibility,
+                created_at,
+            }
         })
-    });
-
-    match rows {
-        Ok(iter) => iter.filter_map(|r| r.ok()).collect(),
-        Err(e) => {
-            warn!("EDA bridge: event_log query failed: {e}");
-            vec![]
-        }
-    }
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

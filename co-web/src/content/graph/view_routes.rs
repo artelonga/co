@@ -19,8 +19,9 @@ use axum::{
     routing::{get, post},
 };
 use chrono::Utc;
+#[cfg(test)]
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::auth::extractors::AuthedUser;
 use crate::error::AppError;
@@ -30,25 +31,9 @@ use crate::server::AppState;
 // Types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GraphView {
-    pub slug: String,
-    pub owner_id: String,
-    pub name: String,
-    /// JSON array of universe slugs.
-    pub universe_filter: String,
-    /// JSON array of entry types, or null.
-    pub type_filter: Option<String>,
-    pub relation_filter: Option<String>,
-    pub depth: Option<i64>,
-    /// "key::path" or null.
-    pub root: Option<String>,
-    pub layout_seed: Option<i64>,
-    /// "public" | "unlisted" | "private"
-    pub visibility: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
+// CO-433: `GraphView` + its row mapper moved to the storage layer (it lives
+// with the typed `graph_views` queries); re-exported here for the API types.
+pub use crate::storage::graph_views::GraphView;
 
 #[derive(Debug, Deserialize)]
 pub struct CreateGraphViewBody {
@@ -146,24 +131,18 @@ async fn create_graph_view(
 
     {
         let storage = state.core.storage.lock();
-        let result = storage.conn().execute(
-            "INSERT INTO graph_views \
-             (slug, owner_id, name, universe_filter, type_filter, relation_filter, \
-              depth, root, layout_seed, visibility, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
-            params![
-                slug,
-                user.user_id,
-                body.name.trim(),
-                universe_filter,
-                type_filter,
-                body.relation_filter,
-                body.depth,
-                body.root,
-                body.layout_seed,
-                body.visibility,
-                now,
-            ],
+        let result = storage.insert_graph_view(
+            &slug,
+            &user.user_id,
+            body.name.trim(),
+            &universe_filter,
+            type_filter.as_deref(),
+            body.relation_filter.as_deref(),
+            body.depth,
+            body.root.as_deref(),
+            body.layout_seed,
+            &body.visibility,
+            &now,
         );
         match result {
             Ok(_) => {}
@@ -187,14 +166,7 @@ async fn list_my_graph_views(
 ) -> Result<Json<Vec<GraphView>>, AppError> {
     let views = {
         let storage = state.core.storage.lock();
-        let mut stmt = storage.conn().prepare(
-            "SELECT slug, owner_id, name, universe_filter, type_filter, relation_filter, \
-              depth, root, layout_seed, visibility, created_at, updated_at \
-             FROM graph_views WHERE owner_id = ?1 ORDER BY updated_at DESC",
-        )?;
-        stmt.query_map(params![user.user_id], row_to_view)?
-            .filter_map(|r| r.ok())
-            .collect::<Vec<_>>()
+        storage.list_graph_views_by_owner(&user.user_id)
     };
     Ok(Json(views))
 }
@@ -242,14 +214,7 @@ async fn update_graph_view(
         let storage = state.core.storage.lock();
 
         // Verify owner.
-        let owner: Option<String> = storage
-            .conn()
-            .query_row(
-                "SELECT owner_id FROM graph_views WHERE slug = ?1",
-                params![slug],
-                |row| row.get(0),
-            )
-            .ok();
+        let owner: Option<String> = storage.graph_view_owner(&slug);
         match owner {
             None => return Ok(err_json(StatusCode::NOT_FOUND, "graph view not found")),
             Some(ref owner_id) if owner_id != &user.user_id => {
@@ -267,30 +232,17 @@ async fn update_graph_view(
             .as_ref()
             .map(|v| serde_json::to_string(v).unwrap_or_else(|_| "[]".to_string()));
 
-        storage.conn().execute(
-            "UPDATE graph_views SET
-               name             = COALESCE(?2, name),
-               universe_filter  = COALESCE(?3, universe_filter),
-               type_filter      = COALESCE(?4, type_filter),
-               relation_filter  = COALESCE(?5, relation_filter),
-               depth            = COALESCE(?6, depth),
-               root             = COALESCE(?7, root),
-               layout_seed      = COALESCE(?8, layout_seed),
-               visibility       = COALESCE(?9, visibility),
-               updated_at       = ?10
-             WHERE slug = ?1",
-            params![
-                slug,
-                body.name.as_deref(),
-                universe_filter,
-                type_filter,
-                body.relation_filter,
-                body.depth,
-                body.root,
-                body.layout_seed,
-                body.visibility,
-                now,
-            ],
+        storage.update_graph_view(
+            &slug,
+            body.name.as_deref(),
+            universe_filter.as_deref(),
+            type_filter.as_deref(),
+            body.relation_filter.as_deref(),
+            body.depth,
+            body.root.as_deref(),
+            body.layout_seed,
+            body.visibility.as_deref(),
+            &now,
         )?
     };
 
@@ -311,14 +263,7 @@ async fn delete_graph_view(
 ) -> Result<Response, AppError> {
     let storage = state.core.storage.lock();
 
-    let owner: Option<String> = storage
-        .conn()
-        .query_row(
-            "SELECT owner_id FROM graph_views WHERE slug = ?1",
-            params![slug],
-            |row| row.get(0),
-        )
-        .ok();
+    let owner: Option<String> = storage.graph_view_owner(&slug);
 
     match owner {
         None => Ok(err_json(StatusCode::NOT_FOUND, "graph view not found")),
@@ -326,9 +271,7 @@ async fn delete_graph_view(
             Ok(err_json(StatusCode::FORBIDDEN, "not your graph view"))
         }
         _ => {
-            storage
-                .conn()
-                .execute("DELETE FROM graph_views WHERE slug = ?1", params![slug])?;
+            storage.delete_graph_view(&slug)?;
             Ok(StatusCode::NO_CONTENT.into_response())
         }
     }
@@ -344,18 +287,10 @@ fn fetch_view_by_slug(
     caller_id: Option<&str>,
 ) -> Result<Option<GraphView>, AppError> {
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT slug, owner_id, name, universe_filter, type_filter, relation_filter, \
-          depth, root, layout_seed, visibility, created_at, updated_at \
-         FROM graph_views WHERE slug = ?1",
-        params![slug],
-        row_to_view,
-    );
-
-    match result {
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+    match storage.fetch_graph_view_by_slug(slug) {
         Err(e) => Err(AppError::from(e)),
-        Ok(view) => {
+        Ok(None) => Ok(None),
+        Ok(Some(view)) => {
             let visible = match view.visibility.as_str() {
                 "public" | "unlisted" => true,
                 "private" => caller_id == Some(view.owner_id.as_str()),
@@ -364,23 +299,6 @@ fn fetch_view_by_slug(
             if visible { Ok(Some(view)) } else { Ok(None) }
         }
     }
-}
-
-fn row_to_view(row: &rusqlite::Row<'_>) -> rusqlite::Result<GraphView> {
-    Ok(GraphView {
-        slug: row.get(0)?,
-        owner_id: row.get(1)?,
-        name: row.get(2)?,
-        universe_filter: row.get(3)?,
-        type_filter: row.get(4)?,
-        relation_filter: row.get(5)?,
-        depth: row.get(6)?,
-        root: row.get(7)?,
-        layout_seed: row.get(8)?,
-        visibility: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +330,7 @@ pub fn public_router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::graph_views::row_to_view;
     use rusqlite::Connection;
 
     fn setup_db() -> Connection {

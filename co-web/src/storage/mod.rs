@@ -154,17 +154,35 @@ impl Storage {
     pub fn universe_pool(&self) -> &Arc<UniversePool> {
         &self.universe_pool
     }
+
+    /// CO-433: open a per-universe [`EntryStore`] via the pool factory. Content
+    /// reads/writes routed through this never take the global `Mutex<Storage>`
+    /// lock for the actual I/O — only this brief handle fetch does — so distinct
+    /// universes do not serialize against one another.
+    ///
+    /// [`EntryStore`]: crate::repository::EntryStore
+    pub fn entry_store(
+        &self,
+        universe_key: &str,
+    ) -> Result<Arc<dyn crate::repository::EntryStore>, crate::universe_pool::PoolError> {
+        self.universe_pool.entry_store(universe_key)
+    }
 }
 
 pub mod agent_sessions;
 pub(crate) mod api_tokens;
+pub(crate) mod auth;
 pub mod backup;
 pub(crate) mod changelog;
 pub(crate) mod chat;
 pub(crate) mod clone_ops;
 pub(crate) mod dashboard;
 pub(crate) mod data_migrate;
+pub(crate) mod eda;
+pub(crate) mod feedback;
+pub mod graph_views;
 pub(crate) mod invitations;
+pub(crate) mod leads;
 pub(crate) mod log_drain;
 pub mod migrations;
 pub mod notifications;
@@ -175,6 +193,7 @@ pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
 pub(crate) mod release_notes;
 pub(crate) mod schema;
+pub mod security;
 pub(crate) mod seed;
 pub mod snapshot;
 pub(crate) mod subscriptions;

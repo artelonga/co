@@ -298,10 +298,7 @@ async fn cadastro_handler(
             "CO-176 bridge failure on cadastro for quilombo user {}: {e}; rolling back",
             user.id
         );
-        let _ = storage.conn().execute(
-            "DELETE FROM quilombo_usuarios WHERE id = ?1",
-            rusqlite::params![user.id],
-        );
+        let _ = storage.delete_quilombo_user(&user.id);
         return Err(AppError::Internal(format!(
             "Falha ao vincular sua conta ao CO. Tente novamente. ({e})"
         )));

@@ -289,4 +289,13 @@ impl Storage {
         }
         count
     }
+
+    /// CO-176 rollback: delete a quilombo user row by id (used when the CO
+    /// bridge fails mid-cadastro so the user can retry). Returns rows deleted.
+    pub fn delete_quilombo_user(&self, quilombo_user_id: &str) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "DELETE FROM quilombo_usuarios WHERE id = ?1",
+            params![quilombo_user_id],
+        )
+    }
 }

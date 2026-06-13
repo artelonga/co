@@ -56,10 +56,7 @@ pub async fn event_log_retention_task(state: crate::server::AppState) {
     loop {
         tokio::time::sleep(tokio::time::Duration::from_secs(24 * 3600)).await;
         let storage = state.core.storage.lock();
-        match storage.conn().execute(
-            "DELETE FROM event_log WHERE created_at < datetime('now', '-30 days')",
-            [],
-        ) {
+        match storage.prune_event_log_older_than_30_days() {
             Ok(n) if n > 0 => {
                 tracing::info!("EDA: event_log retention: pruned {n} row(s) older than 30 days")
             }

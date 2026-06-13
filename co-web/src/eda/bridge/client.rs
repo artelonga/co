@@ -338,15 +338,7 @@ fn load_last_received_id(
     target: &str,
 ) -> Option<String> {
     let st = storage.lock();
-    let id = format!("{source}:{target}");
-    st.conn()
-        .query_row(
-            "SELECT last_delivered_event_id FROM bridge_state WHERE id = ?1",
-            rusqlite::params![id],
-            |row| row.get::<_, Option<String>>(0),
-        )
-        .ok()
-        .flatten()
+    st.bridge_last_delivered_event_id(source, target)
 }
 
 fn update_outbound_state(
@@ -357,22 +349,7 @@ fn update_outbound_state(
     last_event_id: Option<&str>,
 ) {
     let st = storage.lock();
-    let id = format!("{source}:{target}");
-    let now = Utc::now().to_rfc3339();
-    if let Err(e) = st.conn().execute(
-        "INSERT INTO bridge_state (id, source_deployment, target_deployment,
-            last_delivered_event_id, last_connected_at, last_disconnected_at, state)
-         VALUES (?1, ?2, ?3, ?4,
-                 CASE WHEN ?5 = 'connected' THEN ?6 ELSE NULL END,
-                 CASE WHEN ?5 = 'disconnected' THEN ?6 ELSE NULL END,
-                 ?5)
-         ON CONFLICT(id) DO UPDATE SET
-             state = excluded.state,
-             last_connected_at = CASE WHEN ?5 = 'connected' THEN ?6 ELSE last_connected_at END,
-             last_disconnected_at = CASE WHEN ?5 = 'disconnected' THEN ?6 ELSE last_disconnected_at END,
-             last_delivered_event_id = COALESCE(?4, last_delivered_event_id)",
-        rusqlite::params![id, source, target, last_event_id, state, now],
-    ) {
+    if let Err(e) = st.upsert_bridge_state(source, target, state, last_event_id) {
         warn!("EDA bridge: bridge_state upsert failed: {e}");
     }
 }

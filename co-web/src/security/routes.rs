@@ -14,7 +14,6 @@ use axum::middleware;
 use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::info;
@@ -46,6 +45,29 @@ pub struct FindingResponse {
     pub resolution_kind: Option<String>,
     pub resolution_pr: Option<i64>,
     pub resolved_by: Option<String>,
+}
+
+impl From<crate::storage::security::SecurityFindingRow> for FindingResponse {
+    fn from(r: crate::storage::security::SecurityFindingRow) -> Self {
+        Self {
+            id: r.id,
+            pr_number: r.pr_number,
+            severity: r.severity,
+            category: r.category,
+            file_path: r.file_path,
+            line_start: r.line_start,
+            line_end: r.line_end,
+            description: r.description,
+            cwe: r.cwe,
+            cve_match: r.cve_match,
+            suggested_patch: r.suggested_patch,
+            detected_at: r.detected_at,
+            resolved_at: r.resolved_at,
+            resolution_kind: r.resolution_kind,
+            resolution_pr: r.resolution_pr,
+            resolved_by: r.resolved_by,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,56 +112,18 @@ async fn list_findings(
     let limit = q.limit.unwrap_or(50).clamp(1, 200);
     let offset = q.offset.unwrap_or(0).max(0);
 
-    // CO-388 (security hardening): all variable inputs are bound params — no
-    // string interpolation into SQL. The `severity` filter is applied via an
-    // optional bound parameter so the query text is static.
-    let sql = "SELECT id, pr_number, severity, category, file_path, \
-               line_start, line_end, description, cwe, cve_match, \
-               suggested_patch, detected_at, resolved_at, resolution_kind, \
-               resolution_pr, resolved_by \
-               FROM security_findings \
-               WHERE (?1 IS NULL OR severity = ?1) \
-                 AND (?2 IS NULL \
-                      OR (?2 = 1 AND resolved_at IS NOT NULL) \
-                      OR (?2 = 0 AND resolved_at IS NULL)) \
-               ORDER BY detected_at DESC LIMIT ?3 OFFSET ?4";
-
     let resolved_flag: Option<i64> = q.resolved.map(|b| if b { 1 } else { 0 });
 
-    let mut stmt = match storage.conn().prepare(sql) {
-        Ok(s) => s,
-        Err(e) => {
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response();
-        }
-    };
-
     let findings: Vec<FindingResponse> =
-        match stmt.query_map(params![q.severity, resolved_flag, limit, offset], |row| {
-            Ok(FindingResponse {
-                id: row.get(0)?,
-                pr_number: row.get(1)?,
-                severity: row.get(2)?,
-                category: row.get(3)?,
-                file_path: row.get(4)?,
-                line_start: row.get(5)?,
-                line_end: row.get(6)?,
-                description: row.get(7)?,
-                cwe: row.get(8)?,
-                cve_match: row.get(9)?,
-                suggested_patch: row.get(10)?,
-                detected_at: row.get(11)?,
-                resolved_at: row.get(12)?,
-                resolution_kind: row.get(13)?,
-                resolution_pr: row.get(14)?,
-                resolved_by: row.get(15)?,
-            })
-        }) {
-            Ok(rows) => rows.flatten().collect(),
-            Err(_) => vec![],
+        match storage.list_security_findings(q.severity.as_deref(), resolved_flag, limit, offset) {
+            Ok(rows) => rows.into_iter().map(FindingResponse::from).collect(),
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
         };
 
     Json(json!({"findings": findings, "limit": limit, "offset": offset})).into_response()
@@ -147,38 +131,9 @@ async fn list_findings(
 
 async fn get_finding(State(state): State<AppState>, Path(id): Path<String>) -> impl IntoResponse {
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT id, pr_number, severity, category, file_path, \
-         line_start, line_end, description, cwe, cve_match, \
-         suggested_patch, detected_at, resolved_at, resolution_kind, resolution_pr, \
-         resolved_by \
-         FROM security_findings WHERE id = ?1",
-        params![id],
-        |row| {
-            Ok(FindingResponse {
-                id: row.get(0)?,
-                pr_number: row.get(1)?,
-                severity: row.get(2)?,
-                category: row.get(3)?,
-                file_path: row.get(4)?,
-                line_start: row.get(5)?,
-                line_end: row.get(6)?,
-                description: row.get(7)?,
-                cwe: row.get(8)?,
-                cve_match: row.get(9)?,
-                suggested_patch: row.get(10)?,
-                detected_at: row.get(11)?,
-                resolved_at: row.get(12)?,
-                resolution_kind: row.get(13)?,
-                resolution_pr: row.get(14)?,
-                resolved_by: row.get(15)?,
-            })
-        },
-    );
-
-    match result {
-        Ok(f) => Json(f).into_response(),
-        Err(rusqlite::Error::QueryReturnedNoRows) => (
+    match storage.get_security_finding(&id) {
+        Ok(Some(f)) => Json(FindingResponse::from(f)).into_response(),
+        Ok(None) => (
             axum::http::StatusCode::NOT_FOUND,
             Json(json!({"error": "finding not found"})),
         )
@@ -214,17 +169,12 @@ async fn resolve_finding(
     let actor_login = actor.0;
     let now = chrono::Utc::now().to_rfc3339();
     let storage = state.core.storage.lock();
-    let result = storage.conn().execute(
-        "UPDATE security_findings \
-         SET resolved_at = ?1, resolution_kind = ?2, resolution_pr = ?3, resolved_by = ?4 \
-         WHERE id = ?5 AND resolved_at IS NULL",
-        params![
-            now,
-            body.resolution_kind,
-            body.resolution_pr,
-            actor_login,
-            id
-        ],
+    let result = storage.resolve_security_finding(
+        &id,
+        &now,
+        &body.resolution_kind,
+        body.resolution_pr,
+        &actor_login,
     );
 
     match result {
@@ -264,24 +214,8 @@ async fn resolve_finding(
 
 async fn scan_status(State(state): State<AppState>) -> impl IntoResponse {
     let storage = state.core.storage.lock();
-    let unresolved_count: i64 = storage
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM security_findings WHERE resolved_at IS NULL",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
-
-    let high_critical_count: i64 = storage
-        .conn()
-        .query_row(
-            "SELECT COUNT(*) FROM security_findings \
-             WHERE resolved_at IS NULL AND severity IN ('high','critical')",
-            [],
-            |r| r.get(0),
-        )
-        .unwrap_or(0);
+    let unresolved_count: i64 = storage.count_unresolved_findings();
+    let high_critical_count: i64 = storage.count_unresolved_high_critical_findings();
 
     let backend = std::env::var("CO_SECURITY_BACKEND").unwrap_or_else(|_| "local-grep".into());
     let max_scans = std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY")
@@ -337,15 +271,8 @@ async fn trigger_scan(
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     {
         let storage = state.core.storage.lock();
-        let conn = storage.conn();
         // Atomic upsert-then-read: increment today's count and read it back.
-        let new_count: i64 = match conn.query_row(
-            "INSERT INTO security_scan_counts (scan_day, count) VALUES (?1, 1) \
-                 ON CONFLICT(scan_day) DO UPDATE SET count = count + 1 \
-                 RETURNING count",
-            params![today],
-            |r| r.get(0),
-        ) {
+        let new_count: i64 = match storage.increment_security_scan_count(&today) {
             Ok(c) => c,
             Err(e) => {
                 return (
