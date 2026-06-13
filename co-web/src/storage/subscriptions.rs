@@ -227,6 +227,21 @@ impl Storage {
             .unwrap_or(0)
     }
 
+    /// CO-441: set `content_count` for a universe to an exact value (typically a
+    /// fresh `SELECT COUNT(*)` from the per-universe entry index). Returns rows
+    /// updated. Takes `&self` so request-path handlers holding an immutable
+    /// `Storage` lock can call it directly.
+    pub fn set_universe_content_count(
+        &self,
+        universe_key: &str,
+        count: i64,
+    ) -> rusqlite::Result<usize> {
+        self.conn().execute(
+            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
+            params![count, universe_key],
+        )
+    }
+
     /// Decrement content_count for a universe by `by`, flooring at 0.
     pub fn decrement_universe_content_count(&mut self, universe_key: &str, by: i64) {
         self.conn

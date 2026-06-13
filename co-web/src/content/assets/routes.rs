@@ -372,10 +372,7 @@ pub async fn upload_asset(
             .ok();
         if let Some(n) = actual_count {
             let meta = state.core.storage.lock();
-            let _ = meta.conn().execute(
-                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-                rusqlite::params![n, &universe_key],
-            );
+            let _ = meta.set_universe_content_count(&universe_key, n);
         }
     }
 

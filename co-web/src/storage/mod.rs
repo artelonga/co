@@ -213,6 +213,7 @@ pub mod tool;
 pub(crate) mod universe;
 pub mod usage_sessions;
 pub(crate) mod users;
+pub(crate) mod workspace_states;
 
 pub use agent_sessions::{AgentSession, NewAgentSession};
 pub use onboarding::derive_usuario_from_email;
@@ -223,6 +224,7 @@ pub use usage_sessions::{
 };
 
 pub use invitations::Invitation;
+pub use workspace_states::WorkspaceState;
 
 pub use schema::parse_datetime;
 pub use schema::seed_data;

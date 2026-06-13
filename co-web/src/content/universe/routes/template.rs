@@ -694,10 +694,7 @@ pub async fn reindex(
     // Sync content_count to on-disk reality.
     {
         let storage = state.core.storage.lock();
-        let _ = storage.conn().execute(
-            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-            rusqlite::params![disk_entries.len() as i64, &slug],
-        );
+        let _ = storage.set_universe_content_count(&slug, disk_entries.len() as i64);
     }
 
     state.index.cache.invalidate_universe(&slug);
