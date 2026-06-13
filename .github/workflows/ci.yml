@@ -13,6 +13,12 @@ env:
   # CI builds are one-shot — incremental compilation only bloats target/ and
   # has caused repeated runner disk-full failures on cold builds.
   CARGO_INCREMENTAL: "0"
+  # CO-442: full debuginfo (debug=2) on the large co-web/co-cli binaries makes
+  # `ld`/`lld` intermittently OOM the standard runner (signal 7 Bus error during
+  # link). `line-tables-only` keeps usable backtraces while cutting most of the
+  # link memory, so the `test` job stops flaking post-Mythos growth.
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
   test:

@@ -20,6 +20,9 @@ on:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # CO-442: cut link debuginfo so large-binary links stop OOMing the runner.
+  CARGO_PROFILE_TEST_DEBUG: line-tables-only
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
 
 jobs:
 
