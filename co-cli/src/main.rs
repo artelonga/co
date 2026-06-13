@@ -689,6 +689,46 @@ enum Commands {
         profile: Option<String>,
     },
 
+    /// Authenticate and store an API token (alias for `auth login --save-token`)
+    ///
+    /// Examples:
+    ///   co login --email you@example.com
+    Login {
+        /// Email address
+        #[arg(long)]
+        email: Option<String>,
+
+        /// Profile name in ~/.config/co/credentials (default: "default")
+        #[arg(long)]
+        profile: Option<String>,
+    },
+
+    /// Sync a universe between the server and a local folder (CO-51)
+    ///
+    /// Mirrors a universe's Vault into ~/Co/<universe>/ with Google-Drive-like
+    /// local editing and conflict resolution. Strategy is read from
+    /// ~/.config/co/sync.yaml (default: last-write-wins) or --strategy.
+    ///
+    /// Examples:
+    ///   co sync pull yuri
+    ///   co sync push yuri
+    ///   co sync status yuri
+    ///   co sync watch yuri --interval 5
+    ///   co sync resolve content/sobre.md --universe yuri
+    Sync {
+        #[command(subcommand)]
+        action: SyncSubcommand,
+
+        /// Profile name in ~/.config/co/credentials (default: "default")
+        #[arg(long, global = true)]
+        profile: Option<String>,
+
+        /// Conflict strategy override (last-write-wins, local-wins,
+        /// remote-wins, manual, merge)
+        #[arg(long, global = true)]
+        strategy: Option<String>,
+    },
+
     /// Deploy a universe to a target platform
     ///
     /// Publishes the built output directory to the specified target.
@@ -997,6 +1037,43 @@ enum AuthSubcommand {
         /// Also DELETE the API token from the server
         #[arg(long)]
         revoke_token: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncSubcommand {
+    /// Download all entries to ~/Co/<universe>/
+    Pull {
+        /// Universe slug
+        universe: String,
+    },
+    /// Upload changed local files
+    Push {
+        /// Universe slug
+        universe: String,
+    },
+    /// Watch for local changes and auto-push (debounced)
+    Watch {
+        /// Universe slug
+        universe: String,
+
+        /// Debounce interval in seconds (default: 2)
+        #[arg(long)]
+        interval: Option<u64>,
+    },
+    /// Show the diff between local and remote
+    Status {
+        /// Universe slug
+        universe: String,
+    },
+    /// Finalize a manual conflict and push the resolved file
+    Resolve {
+        /// Conflicted file path (relative to the universe, or absolute)
+        file: String,
+
+        /// Universe slug (inferred from the path if omitted)
+        #[arg(long)]
+        universe: Option<String>,
     },
 }
 
@@ -1789,6 +1866,29 @@ fn main() {
                 commands::deploy::run(&target, &dist, &manifest, &uid);
             }
         },
+        Commands::Login { email, profile } => {
+            commands::sync::login(email, profile);
+        }
+        Commands::Sync {
+            action,
+            profile,
+            strategy,
+        } => {
+            let sync_action = match action {
+                SyncSubcommand::Pull { universe } => commands::sync::SyncAction::Pull { universe },
+                SyncSubcommand::Push { universe } => commands::sync::SyncAction::Push { universe },
+                SyncSubcommand::Watch { universe, interval } => {
+                    commands::sync::SyncAction::Watch { universe, interval }
+                }
+                SyncSubcommand::Status { universe } => {
+                    commands::sync::SyncAction::Status { universe }
+                }
+                SyncSubcommand::Resolve { file, universe } => {
+                    commands::sync::SyncAction::Resolve { file, universe }
+                }
+            };
+            commands::sync::run(sync_action, profile, strategy);
+        }
         Commands::Auth { action, profile } => {
             let auth_action = match action {
                 AuthSubcommand::Login { email, save_token } => {

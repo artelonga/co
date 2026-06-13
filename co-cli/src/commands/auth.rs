@@ -191,6 +191,27 @@ fn base_url_for(creds: &Credentials, profile_name: &str) -> String {
         .unwrap_or_else(|| DEFAULT_BASE_URL.to_string())
 }
 
+/// Resolve `(base_url, bearer)` for a profile, preferring a valid API token and
+/// falling back to a still-valid session JWT. Used by `co sync` (CO-51) to
+/// authenticate Vault API calls. Errors when neither credential is usable.
+pub fn resolve_auth(profile_name: &str) -> Result<(String, String)> {
+    let creds = load_credentials();
+    let base_url = base_url_for(&creds, profile_name);
+    let profile = creds.get(profile_name);
+    let bearer = profile
+        .and_then(|p| {
+            if !is_token_expired(p) {
+                p.token.clone()
+            } else if p.session.is_some() && !is_session_expired(p) {
+                p.session.clone()
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run 'co login' first."))?;
+    Ok((base_url, bearer))
+}
+
 // ─── Token name ───────────────────────────────────────────────────────────────
 
 pub fn default_token_name() -> String {

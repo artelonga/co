@@ -35,6 +35,7 @@ pub mod show;
 pub mod source;
 pub mod space;
 pub mod status;
+pub mod sync;
 pub mod teaser;
 pub mod tool;
 pub mod tools;
