@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-99",
+  "title": "Onboarding banner — three-step coach mark for first-time anonymous visitors",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-99.md",
+  "branch": "feat/CO-99-onboarding-banner-three-step-coach-mark-",
+  "merge_sha": "080219b5cad94993bd13734e819bdbd0a55db281",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/227",
+    "number": 227
+  },
+  "started_at": "2026-04-29T00:00:00Z",
+  "merged_at": "2026-06-13T11:51:07Z",
+  "files_changed": 4,
+  "lines_added": 32,
+  "lines_removed": 7,
+  "labels": [
+    "frontend",
+    "spa",
+    "onboarding",
+    "ux"
+  ],
+  "changelog_entry": "## CO-99 — Onboarding banner — three-step coach mark for first-time anonymous visitors\n\nAdds a non-blocking floating coach-mark card (bottom-right, 320×120px) for\nfirst-time anonymous visitors on the template universe. The banner walks through\nthree steps — Visões, Linha do tempo, and Crie seu universo — with a step\nindicator, a \"Próximo\"/\"Concluir\" button, and a \"Pular\" dismiss link.\n\nDismissal (skip or complete) sets `co_onboarded=1` (1-year cookie) so the\nbanner never re-appears. Suppressed on viewports < 720px and for logged-in\nusers. Step 2's timeline link opens in a new tab; Step 3's \"Criar conta\"\ntriggers the existing login/signup modal via event delegation.\n\n### Why\n\nFirst-time visitors landed on a kanban with no orientation. The coach mark\nsurfaces the platform's three key narratives (multi-view, timeline, own\nuniverse) in the first 30 seconds without blocking any interaction.",
+  "summary": "GIVEN a stranger landing on `co.artelonga.com.br` for the first time sees a kanban with cryptic tasks and no clear \"what is this for / what do I do\" signal, AND the timeline trio + multi-overlay is th",
+  "co_auto_version": "0.1.0"
+}
