@@ -128,7 +128,22 @@ impl Storage {
             universe_pool,
             data_dir: data_dir.as_ref().to_path_buf(),
         };
-        storage.run_migrations();
+        // CO-446: migrations now degrade to a readable error instead of panicking
+        // the boot into an `exit 101` crash-loop on a full `/data`. A failure here
+        // is fatal for this boot (we cannot serve an un-migrated schema), but it
+        // surfaces as a loud, actionable operator message — not a cryptic SQLite
+        // backtrace — and a *clean* exit. Recovery is documented in
+        // `docs/OPERATIONS.md` (extend the volume + machine **stop/start**).
+        if let Err(e) = storage.run_migrations() {
+            tracing::error!(error = %e, "CO-446: FATAL — database migrations could not complete");
+            eprintln!("FATAL (CO-446): {e}");
+            eprintln!("  → inspect free space:   flyctl ssh console -a <app> -C 'df -h /data'");
+            eprintln!(
+                "  → recover (NOT restart): flyctl volumes extend <vol> -s <GB> \
+                 && flyctl machine stop/start <id>"
+            );
+            std::process::exit(1);
+        }
         storage.maybe_migrate_entries_to_universe_dbs();
         storage
     }

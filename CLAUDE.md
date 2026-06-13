@@ -326,11 +326,25 @@ flyctl deploy --config fly.uat.toml
 # 3. Verify UAT (see UAT Verification below)
 curl -s https://co-artelonga-uat.fly.dev/api/health
 
-# 4. Only after UAT passes — deploy to production
+# 4. Pre-deploy disk gate — blocks if prod /data is too full for a safe migration (CO-446)
+bash scripts/pipeline-deploy-gate.sh
+
+# 5. Only after UAT passes — deploy to production
 flyctl deploy
 ```
 
 **Never** run `flyctl deploy` (prod) without first verifying on UAT.
+
+> **CO-446 — disk-full hardening.** A deploy that adds a migration writes a
+> `schema_version` row at boot; on a near-full `/data` that write fails with
+> `SQLITE_FULL` and the machine crash-loops (2026-06-11 + 2026-06-13 outages).
+> `scripts/pipeline-deploy-gate.sh` checks `df -P /data` on prod and **blocks at
+> > 85% full**. If it blocks, **extend the volume before deploying**:
+> `flyctl volumes extend <vol> -s <GB>` then `flyctl machine stop`/`start`
+> (a plain **restart does NOT resize the filesystem**). Full runbook:
+> [`docs/OPERATIONS.md` → "Disk-full recovery"](docs/OPERATIONS.md). The boot
+> path also pre-flights free space (`CO_MIGRATION_MIN_FREE_BYTES`, default 200 MiB)
+> and now degrades to a clear `FATAL (CO-446)` log instead of a SQLite panic.
 
 ### Fly.io Configuration Files
 
