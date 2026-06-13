@@ -485,7 +485,9 @@ impl UniversePool {
         key: &str,
     ) -> Result<Arc<dyn crate::repository::EntryStore>, PoolError> {
         let conn = self.try_get_or_open(key)?;
-        Ok(Arc::new(crate::repository::SqliteEntryStore::new(key, conn)))
+        Ok(Arc::new(crate::repository::SqliteEntryStore::new(
+            key, conn,
+        )))
     }
 }
 

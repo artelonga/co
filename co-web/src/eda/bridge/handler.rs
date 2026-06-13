@@ -468,8 +468,7 @@ fn load_events_since(storage: &Arc<Mutex<Storage>>, since_id: Option<&str>) -> V
 
     rows.into_iter()
         .map(|r| {
-            let payload =
-                serde_json::from_str(&r.payload_json).unwrap_or(serde_json::Value::Null);
+            let payload = serde_json::from_str(&r.payload_json).unwrap_or(serde_json::Value::Null);
             let visibility = match r.visibility.as_str() {
                 "UniverseMembers" => Visibility::UniverseMembers,
                 "UniverseOwner" => Visibility::UniverseOwner,

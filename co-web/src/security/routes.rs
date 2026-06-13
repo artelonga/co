@@ -114,21 +114,17 @@ async fn list_findings(
 
     let resolved_flag: Option<i64> = q.resolved.map(|b| if b { 1 } else { 0 });
 
-    let findings: Vec<FindingResponse> = match storage.list_security_findings(
-        q.severity.as_deref(),
-        resolved_flag,
-        limit,
-        offset,
-    ) {
-        Ok(rows) => rows.into_iter().map(FindingResponse::from).collect(),
-        Err(e) => {
-            return (
-                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                Json(json!({"error": e.to_string()})),
-            )
-                .into_response();
-        }
-    };
+    let findings: Vec<FindingResponse> =
+        match storage.list_security_findings(q.severity.as_deref(), resolved_flag, limit, offset) {
+            Ok(rows) => rows.into_iter().map(FindingResponse::from).collect(),
+            Err(e) => {
+                return (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(json!({"error": e.to_string()})),
+                )
+                    .into_response();
+            }
+        };
 
     Json(json!({"findings": findings, "limit": limit, "offset": offset})).into_response()
 }

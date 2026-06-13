@@ -96,7 +96,8 @@ impl EntryStore for SqliteEntryStore {
         filter: &serde_json::Value,
         limit: Option<usize>,
     ) -> Result<Vec<EntryDomain>> {
-        self.repo.list(&self.universe_key, entry_type, filter, limit)
+        self.repo
+            .list(&self.universe_key, entry_type, filter, limit)
     }
 }
 
