@@ -42,7 +42,7 @@ describe('conflict-diff: lineDiff', () => {
 
 describe('conflict-modal: buildConflictModal', () => {
   afterEach(() => {
-    document.body.innerHTML = ''
+    document.body.replaceChildren()
   })
 
   it('renders both versions side by side from the ConflictPayload', () => {

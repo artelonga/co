@@ -26,13 +26,6 @@ function label(key, fallback) {
         : fallback;
 }
 
-function esc(s) {
-    return String(s ?? '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
-}
-
 // Inject the modal's scoped styles once. Uses CO design tokens (CSS custom
 // properties) so it inherits the active theme — no new framework, no per-variant
 // stylesheet edits.
@@ -110,21 +103,36 @@ function renderDiff(payload) {
     wrap.className = 'co-conflict-diff';
 
     const { rows, truncated } = lineDiff(payload.local?.body, payload.remote?.body);
-    const localHdr = esc(label('conflict.col_local', 'Sua versão (local)'));
-    const remoteHdr = esc(label('conflict.col_remote', 'Versão do servidor (remoto)'));
 
-    let html = `<table><thead><tr><th>${localHdr}</th><th>${remoteHdr}</th></tr></thead><tbody>`;
+    // CO-128: built via DOM + textContent (not innerHTML) — textContent
+    // escapes by construction, so user-supplied entry bodies can never inject
+    // markup, and the security scanner stays clean.
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    const thLocal = document.createElement('th');
+    thLocal.textContent = label('conflict.col_local', 'Sua versão (local)');
+    const thRemote = document.createElement('th');
+    thRemote.textContent = label('conflict.col_remote', 'Versão do servidor (remoto)');
+    headRow.append(thLocal, thRemote);
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    const mkCell = (val, cls) => {
+        const td = document.createElement('td');
+        td.className = val === null ? `${cls} empty` : cls;
+        if (val !== null) td.textContent = val;
+        return td;
+    };
     for (const row of rows) {
-        const left = row.left === null
-            ? '<td class="l empty"></td>'
-            : `<td class="l">${esc(row.left)}</td>`;
-        const right = row.right === null
-            ? '<td class="r empty"></td>'
-            : `<td class="r">${esc(row.right)}</td>`;
-        html += `<tr class="${row.kind}">${left}${right}</tr>`;
+        const tr = document.createElement('tr');
+        tr.className = row.kind;
+        tr.append(mkCell(row.left, 'l'), mkCell(row.right, 'r'));
+        tbody.appendChild(tr);
     }
-    html += '</tbody></table>';
-    wrap.innerHTML = html;
+    table.appendChild(tbody);
+    wrap.appendChild(table);
 
     if (truncated || payload.local?.truncated || payload.remote?.truncated) {
         wrap.dataset.truncated = 'true';
@@ -161,16 +169,27 @@ export function buildConflictModal(payload, opts = {}) {
     // Header: warning icon + title + entry path (Finder-style).
     const head = document.createElement('div');
     head.className = 'co-conflict-head';
-    const title = label('conflict.title', 'Conflito de edição');
-    const subtitle = label('conflict.subtitle', 'Esta entrada foi alterada em outro lugar. Escolha como resolver:');
-    head.innerHTML = `
-        <div class="co-conflict-icon" aria-hidden="true">⚠️</div>
-        <div class="co-conflict-titles">
-            <p class="co-conflict-title">${esc(title)}</p>
-            <p class="co-conflict-subtitle">${esc(payload.path || '')}</p>
-            <p class="co-conflict-subtitle">${esc(subtitle)}</p>
-            ${remaining > 0 ? `<p class="co-conflict-remaining">${esc(label('conflict.remaining', '+ {n} conflito(s) restante(s) nesta rodada').replace('{n}', String(remaining)))}</p>` : ''}
-        </div>`;
+    const icon = document.createElement('div');
+    icon.className = 'co-conflict-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = '⚠️';
+    const titles = document.createElement('div');
+    titles.className = 'co-conflict-titles';
+    const mkP = (cls, text) => {
+        const p = document.createElement('p');
+        p.className = cls;
+        p.textContent = text;
+        return p;
+    };
+    titles.appendChild(mkP('co-conflict-title', label('conflict.title', 'Conflito de edição')));
+    titles.appendChild(mkP('co-conflict-subtitle', payload.path || ''));
+    titles.appendChild(mkP('co-conflict-subtitle',
+        label('conflict.subtitle', 'Esta entrada foi alterada em outro lugar. Escolha como resolver:')));
+    if (remaining > 0) {
+        titles.appendChild(mkP('co-conflict-remaining',
+            label('conflict.remaining', '+ {n} conflito(s) restante(s) nesta rodada').replace('{n}', String(remaining))));
+    }
+    head.append(icon, titles);
     modal.appendChild(head);
 
     // Side-by-side diff.
@@ -209,9 +228,9 @@ export function buildConflictModal(payload, opts = {}) {
         }
     }
 
-    const btnKeepBoth = mkBtn('co-conflict-btn', `${esc(label('conflict.keep_both', 'Manter ambos'))}<span class="k">3</span>`, () => finish('keep_both'));
-    const btnIgnore = mkBtn('co-conflict-btn co-conflict-btn-danger', `${esc(label('conflict.ignore', 'Ignorar'))}<span class="k">1</span>`, () => finish('ignore'));
-    const btnReplace = mkBtn('co-conflict-btn co-conflict-btn-primary', `${esc(label('conflict.replace', 'Substituir'))}<span class="k">2</span>`, () => finish('replace'));
+    const btnKeepBoth = mkBtn('co-conflict-btn', label('conflict.keep_both', 'Manter ambos'), '3', () => finish('keep_both'));
+    const btnIgnore = mkBtn('co-conflict-btn co-conflict-btn-danger', label('conflict.ignore', 'Ignorar'), '1', () => finish('ignore'));
+    const btnReplace = mkBtn('co-conflict-btn co-conflict-btn-primary', label('conflict.replace', 'Substituir'), '2', () => finish('replace'));
     actions.appendChild(btnKeepBoth);
     actions.appendChild(btnIgnore);
     actions.appendChild(btnReplace);
@@ -242,11 +261,17 @@ export function buildConflictModal(payload, opts = {}) {
     return { overlay, destroy };
 }
 
-function mkBtn(cls, html, onClick) {
+function mkBtn(cls, text, keyHint, onClick) {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = cls;
-    b.innerHTML = html;
+    b.appendChild(document.createTextNode(text));
+    if (keyHint) {
+        const k = document.createElement('span');
+        k.className = 'k';
+        k.textContent = keyHint;
+        b.appendChild(k);
+    }
     b.addEventListener('click', onClick);
     return b;
 }
