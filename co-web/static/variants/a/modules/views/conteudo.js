@@ -2,6 +2,7 @@
 import { state, canEditCurrentUniverse } from '../state.js';
 import { api, apiFetch } from '../api.js';
 import { esc, relativeDate, todayDate } from '../helpers.js';
+import { ConflictRound } from '../sync/conflict-round.js';
 
 let _openZoomModal = () => {};
 let _showLoginModal = () => {};
@@ -368,17 +369,27 @@ function createDetailController(container, initialEntry, deps) {
 
             if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '...'; }
             try {
+                // CO-128: send the body_hash this edit was based on so the
+                // server can detect a divergent concurrent edit and answer 409.
+                const putBody = { body: newBody };
+                if (current.body_hash) putBody.base_hash = current.body_hash;
                 const putRes = await window.fetch(
                     `/api/v1/universes/${encodeURIComponent(universeSlug)}/entries/${(current.path || '').split('/').map(encodeURIComponent).join('/')}`,
                     {
                         method: 'PUT',
                         credentials: 'same-origin',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ body: newBody }),
+                        body: JSON.stringify(putBody),
                     }
                 );
                 if (putRes.ok) {
-                    current = { ...current, body: newBody };
+                    // Refresh body_hash so the next edit bases on the new revision.
+                    const saved = await putRes.json().catch(() => null);
+                    current = {
+                        ...current,
+                        body: newBody,
+                        body_hash: (saved && saved.body_hash) || current.body_hash,
+                    };
                     try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
                     // Fire-and-forget delete of the server-side draft.
                     if (!isTemplate) {
@@ -393,6 +404,56 @@ function createDetailController(container, initialEntry, deps) {
                     unbindEscape();
                     editing = false;
                     renderRead();
+                    return;
+                }
+
+                // CO-128: 409 means a concurrent edit diverged from our base.
+                // Open the Apple-style conflict modal with both versions and let
+                // the user pick Ignore / Replace / Keep both (Esc cancels).
+                if (putRes.status === 409) {
+                    const payload = await putRes.json().catch(() => null);
+                    const conflict = payload && payload.conflict;
+                    if (conflict) {
+                        const round = new ConflictRound({
+                            onResolved: (c, action, result) => {
+                                if (action === 'ignore') {
+                                    // Remote wins — revert the editor to the server copy.
+                                    current = {
+                                        ...current,
+                                        body: conflict.remote.body,
+                                        body_hash: conflict.remote.body_hash,
+                                    };
+                                } else if (action === 'replace') {
+                                    current = {
+                                        ...current,
+                                        body: conflict.local.body,
+                                        body_hash: (result && result.body_hash) || current.body_hash,
+                                    };
+                                }
+                                // keep_both: server copy stays as `current`; the
+                                // local edit was persisted as a `.local.md` sibling.
+                            },
+                        });
+                        round.enqueue(conflict);
+                        const { cancelled } = await round.run();
+                        if (!cancelled) {
+                            try { localStorage.removeItem(draftKeyFor(current)); } catch (_) {}
+                            showToast(
+                                window.t ? window.t('conflict.resolved') : 'Conflito resolvido',
+                                'success',
+                            );
+                            teardownEditor();
+                            unbindEscape();
+                            editing = false;
+                            renderRead();
+                        } else if (saveBtn) {
+                            saveBtn.disabled = false;
+                            saveBtn.textContent = 'Salvar';
+                        }
+                        return;
+                    }
+                    showToast('Erro ao salvar', 'error');
+                    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Salvar'; }
                     return;
                 }
 
