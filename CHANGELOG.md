@@ -5,6 +5,332 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] — 2026-06-13 — Mythos — composable, extensible architecture [--ignore-dod override]
+
+## CO-431 — Mythos: promote the Universo domain to core + UniversoFactory seam
+
+The `Universo` trait and its domain types (`Tarefa`, `Nota`, `Evento`,
+`Membro`, `Relato`, `Conteudo`, `Entrada`, `UniversoInfo`, `UniversoConfig`)
+moved from `co-web/src/content/universo.rs` to `core/src/universo.rs` — pure
+serde + std, no server-framework/database/async-runtime dependencies — so
+external services (universe runtimes, Yggdrasil, CLI) can depend on `core`
+alone. `co-web` re-exports everything (`pub use co::universo::*`) for full
+compatibility.
+
+A new `UniversoFactory` trait (`abrir(key, root) -> Box<dyn Universo>`) is the
+backend seam: it is injected into `CoreState` (AppState), defaulting to the
+filesystem implementation (`UniversoLocalFactory` → `UniversoLocal`, which
+stays in co-web). `CoreState::with_universo_factory` swaps the backend without
+touching handlers or routes. A swap test proves it: the same axum handler,
+mounted on the same route over the real AppState, serves a disk universo with
+the default factory and an in-memory universo with a fake factory — no route
+or handler edits between scenarios.
+
+Zero behavior change: no production HTTP route consumes the trait yet (the
+2026-06-12 audit's "instanciado direto nos handlers" overstated — the trait
+was dormant), so HTTP contracts and openapi/api-catalog are untouched.
+Includes a mechanical `Cargo.lock` version sync (3.5.0 → 3.6.0) left stale by
+the release commit.
+
+### Why
+
+Keystone of the Mythos epic (CO-430): unblocks external consumption of the
+universo domain model and prepares alternative universe backends (CO-433)
+behind a factory seam instead of a hardcoded filesystem implementation.
+
+## CO-432 — Mythos: decompose the content/ god-folder + propagate the CO-390 layering
+
+`co-web/src/content/` reorganized from 37 flat files into one folder per
+entity — `entries/`, `vault/`, `references/`, `relations/`, `graph/`,
+`workspace/`, `universe/`, `assets/`, `proposals/`, `reviews/`,
+`versioning/` (states + branches + op-log), `search/`, `translate/`,
+`delivery/`, `usage/`, `openapi/`, `agent_sessions/`. No loose `*_routes.rs`
+remain; pre-432 module paths (`crate::entry_routes`, `crate::vault_routes`, …)
+are preserved via `pub use … as …` aliases in `content/mod.rs`, so no call
+site changed.
+
+The CO-390 layering template (domain / dto / repository / service / mapper)
+was propagated from `entries` to **references** and **relations**:
+
+- `domain/entity/{reference,relation}.rs` — pure business types.
+- `dto/{references,relations}/` — wire types moved out of the route files
+  (names and serialization unchanged).
+- `repository/{reference,relation}_repository.rs` — traits + SQLite impls
+  wrapping `ReferenceIndex`/`references_meta` and `RelationIndex`; in-memory
+  impls for unit tests.
+- `service/{reference,relation}_service.rs` — pure rules extracted from
+  handlers (type forcing, partial-update merge, work_id derivation,
+  seed-status stub rule, deterministic inbound ordering), each unit-tested.
+- `mapper/{reference,relation}_mapper.rs` — row ↔ domain ↔ DTO conversions.
+
+`entry_index.rs` and `reference_index.rs` moved behind their repositories:
+`SqliteEntryRepository` (now built on the real `Arc<std::sync::Mutex<Connection>>`
+universe-connection type) gained 1:1 mirrors of the index surface plus
+combined write operations (`index_entry_create/update`, `index_vault_write`,
+`unindex_entry`, `unindex_vault_entry`) that keep every multi-projection
+write in a single lock scope — including the CO-95 `BEGIN IMMEDIATE`
+transaction semantics of the vault path. All content route handlers (plus
+`static_files` deep links and `sync_ws`) now access the indexes exclusively
+through the repository layer; the only remaining direct uses are two
+conn-taking semantic-search helpers that interleave `EmbeddingIndex` on the
+same connection (documented escape hatch).
+
+Oversized test files split per the CO-215 `tests/` pattern (every group
+< 500 LoC): `universe/routes/tests/` (7 files), `vault/routes/tests/`
+(6 files), `relations/index/tests/` (4 files), `reviews/routes/tests/`
+(3 files), `references/meta/tests.rs`. `relations/index.rs` itself split
+into `index.rs` (storage) + `extract.rs` (extraction + backfill).
+
+Zero behavior change: routes, wire formats, status codes, and lock-scope
+semantics preserved; full `cargo test -p co-web` green and clippy clean.
+
+### Why
+`content/` mixed 10+ entities in one flat namespace and the CO-390 layering
+covered only `entries` (~10% adoption). Each entity now owns its folder and
+the two highest-value entities besides entries follow the proven template,
+making them unit-testable without HTTP or SQLite setup and giving the next
+extractions a mechanical recipe to follow.
+
+## CO-433 — Mythos: per-universe sharded storage + EntryStore trait; remove raw SQL from handlers
+
+Refactors the storage layer toward per-universe sharding and a backend-swappable
+content seam, and removes raw SQL from the request path so handlers no longer
+speak rusqlite directly.
+
+### Per-universe sharding (criterion 1)
+- `UniversePool::entry_store(key)` + `Storage::entry_store(key)` open a
+  per-universe store backed by that universe's own connection. Content
+  reads/writes routed through it never take the global `Mutex<Storage>` for the
+  actual I/O — only a brief handle fetch — so writes to distinct universes do
+  not serialize. Proven by a new contention test
+  (`writes_to_two_universes_do_not_serialize`): a write held open on universe A
+  does not block a concurrent write to universe B.
+
+### `EntryStore` trait + pool-as-factory (criterion 2)
+- New `repository::EntryStore` trait (get/upsert/delete/list, per universe),
+  with `SqliteEntryStore` as the default implementation (reusing the existing
+  `SqliteEntryRepository`, no duplicated SQL). `UniversePool` is the factory
+  that hands out `Arc<dyn EntryStore>`. The trait is the seam an S3/Postgres
+  backend plugs into later — no S3 implemented here.
+
+### Zero raw SQL in handlers/subscribers (criterion 3)
+- Moved every request-path/subscriber `conn().prepare/execute/query_row` in the
+  audited surfaces into typed `Storage` methods. New impl-blocks:
+  `storage::eda`, `storage::security`, `storage::auth`, `storage::leads`,
+  `storage::graph_views`, `storage::feedback` (plus a `delete_quilombo_user`
+  on `storage::quilombo_bridge`). Migrated handlers/subscribers: `eda/mod.rs`,
+  `eda/bridge/{client,handler}.rs`, `eda/subscribers/{atividades,delivery_pipeline}.rs`,
+  `security/routes.rs`, `security/subscribers/{pbi_backlogger,findings_persistor}.rs`,
+  `auth/{onboarding_routes,recovery_routes,mod}.rs`, `admin/lead_routes.rs`,
+  `content/graph/view_routes.rs`, `integrations/feedback_routes.rs`,
+  `universes/quilombo/quilombo_routes.rs`. `grep 'conn().prepare\|conn().execute'`
+  over `*_routes.rs`/subscribers is now empty for non-test code (test fixtures
+  legitimately retain direct `conn()` setup).
+- Row projections `LeadRow` and `GraphView` moved to the storage layer (with the
+  typed queries that produce them) and re-exported from their routes for the API.
+
+### No behavior change (criteria 4, 5)
+- No new `Mutex<Storage>` held across `.await`; no new panics under the lock.
+- SQL text and error handling preserved verbatim in the new methods.
+- `cargo test -p co-web` green; `cargo clippy -p co-web --lib -- -D warnings` clean.
+
+### Why
+The global `Arc<parking_lot::Mutex<Storage>>` serialized unrelated universes and
+handlers reached past the storage boundary into raw rusqlite, making the backend
+hard to swap and the data access un-auditable. This shards writes per universe
+and routes all content access through typed, backend-agnostic seams.
+
+## CO-434 — Mythos: enforce SecretsProvider + CoServerConfig (kill 124 direct std::env reads)
+
+All runtime configuration and secrets now flow through the `SecretsProvider`
+abstraction and a new boot-time `CoServerConfig`, instead of ~124 scattered
+`std::env::var` reads in 52 files. The secrets backend (env, static, future
+Vault/AWS SM/S3) is now swappable, and the server is embeddable with injected
+config. **Zero behaviour change in production** — the same env vars, same
+defaults.
+
+### What changed
+
+- **`SecretsProvider` helpers** (`infra/secrets.rs`): added `is_set`, `get_or`,
+  `get_nonempty`, `get_bool`, and (via `SecretsProviderExt`) `get_parsed<T>` —
+  object-safe split so `dyn SecretsProvider` still works.
+- **`CoServerConfig`** (`platform/server_config.rs`): one struct holding every
+  non-secret tunable, populated **once at boot** from a `SecretsProvider`
+  (`CoServerConfig::from_secrets`). Stored on `CoreState.server_config`;
+  handlers read `state.core.server_config.<field>` instead of `env::var`.
+- **Named subsystems take config/secrets by parameter**: `eda::build_bus`,
+  `infra::blob::blob_backend_from_config`, `infra::ai::build_chat_provider`,
+  `infra::telemetry::TelemetryConfig::from_config`, and the degradation
+  `mailer_from_secrets` now receive their config/secret rather than reading env.
+- **Process-global provider seam** (`infra::secrets::{init_global, global}`):
+  installed once at boot from the same provider that builds `CoServerConfig`.
+  Stateless free functions / middlewares that have no `AppState` to thread a
+  provider through (e.g. `auth::jwt_secret`, EDA bridge config, `vcs` git creds,
+  quilombo dirs, canonical-host middleware) read through it. Defaults to
+  `EnvSecretsProvider` when uninitialised, so unit tests keep working.
+- **Single boot seam for `std::env::var`**: the only non-test runtime read left
+  is `EnvSecretsProvider::get` in `infra/secrets.rs`. `WebConfig::from` (CLI
+  parse) now reads its fields through `EnvSecretsProvider` too.
+- **Tests** prove the swap without global env: `CoServerConfig::from_secrets`
+  with a `StaticSecretsProvider` flips the EDA backend / blob backend / sampling
+  ratio; `CoreState::from_storage_with_secrets` propagates injected config end to
+  end (`server::tests::corestate_server_config_is_provider_driven`).
+
+### Inventory (classified)
+
+**Secrets — via `SecretsProvider::get` (not copied into `CoServerConfig`):**
+`JWT_SECRET`, `CO_JWT_PRIVATE_KEY`, `R2_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/
+`R2_SECRET_ACCESS_KEY`, `RESEND_API_KEY`, `OPENAI_API_KEY`, `CO_SECURITY_API_KEY`,
+`CO_KB_TOKEN`, `CO_ROLLUP_TOKEN`, `CO_FLY_API_TOKEN`, `CO_GIT_TOKEN`,
+`CO_GIT_SSH_KEY_PATH`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`,
+`GITHUB_OAUTH_CLIENT_ID`/`GITHUB_OAUTH_CLIENT_SECRET`, `CO_GITHUB_WEBHOOK_SECRET`,
+`CO_ASSETS_MASTER_KEY`, `VAPID_PRIVATE_KEY`, `EVOLUTION_API_KEY`,
+`CO_SMTP_USER`/`CO_SMTP_PASS`, `CO_SEED_ADMIN_PASSWORD_HASH`,
+`CO_BRIDGE_OUTBOUND_TOKENS_JSON`, `WAE_API_KEY`.
+
+**Config — via `CoServerConfig` (or the global provider for stateless fns):**
+`CO_EDA_BACKEND`, `CO_DEPLOYMENT_ID`/`FLY_APP_NAME`, `CO_BRIDGE_*`,
+`CO_BLOB_BACKEND`/`R2_BUCKET`, `CO_CHAT_FALLBACK`/`CO_CHAT_MODEL`/`CO_OLLAMA_URL`,
+`CO_TRANSLATE_BACKEND`/`CO_TRANSLATE_PROVIDER`, `CO_TELEMETRY_*`, `CO_ALERT_*`,
+`CO_SECURITY_BACKEND`/`CO_SECURITY_MAX_SCANS_PER_DAY`, `CO_BACKUP_*`/
+`CO_REMOTE_SYNC_INTERVAL_SECS`, `CO_SEED_ADMIN_EMAIL`, `CO_DEV_OWNER`,
+`LEADS_NOTIFY_TO`, `CO_LOCAL_REPOS_DIR`, `CO_SEED_CO_DIR`, `CO_MODELS_DIR`,
+`GEOIP_DB_PATH`, `CO_TRUSTED_IPS`, `CO_STATIC_SITES`, `CO_PUBLIC_URL`,
+`CO_BASE_URL`, `CANONICAL_HOST`/`ALLOWED_ORIGINS`, `CO_FEEDBACK_FORWARD_URL`,
+`NOTIF_FROM_EMAIL`, `RESEND_FROM`, `VAPID_SUBJECT`, `EVOLUTION_API_URL`/
+`EVOLUTION_INSTANCE`, `CO_SMTP_HOST`/`CO_SMTP_FROM`/`CO_SMTP_PORT`,
+`CO_DESKTOP_NOTIFY`, `CO_EMBEDDING_BOOT_SCAN`, `QUILOMBO_*`, `CO_CACHE_*`,
+`CO_TPL_*`, plus the existing `WebConfig` fields (`CO_ENV`, `GESTAO_GITHUB_ADMINS`,
+`UNIVERSE_KEY`, `WAE_ENDPOINT`, `CO_COOKIE_DOMAIN`, `CO_QUILOMBO_LEGACY_LOGIN`,
+`CO_BYPASS_RATE_LIMIT`, `GAME_DB_PATH`, `PLUGINS_DIR`, …).
+
+After this change, `grep -rn "std::env::var" co-web/src | grep -v test` returns
+only `EnvSecretsProvider::get` — the single documented boot seam.
+
+### Why
+
+The `SecretsProvider` abstraction existed but was ignored by 124 direct reads,
+so the secrets backend was not actually swappable and the server was not
+embeddable. Centralising at boot unblocks the S3 roadmap (swappable backend
+config) and lets tests flip behaviour by injection instead of mutating the
+global process environment.
+
+## CO-435 — Mythos: extension registries — EDA subscriber registry + SourceAdapter + AdminAuthProvider
+
+Turned four hardcoded extension points into `registry + trait + impl-default` seams.
+No behavior change: the same subscribers, sources, admins and rate limits run by
+default — only *how you add the next one* changed.
+
+### What changed
+
+- **EDA subscriber registry** (`eda::subscriber_registry`): new `EdaSubscriber`
+  trait (`name` / `filter` / async `handle`) + `SubscriberRegistry` + `SubscriberCtx`.
+  Boot now iterates `default_registry(...).spawn_all(ctx)` instead of ~13 inline
+  `spawn()` calls in `server/mod.rs`. Every existing subscriber (atividades,
+  analytics, billing, sala, kb, comunicação term+sala, yggdrasil_notes,
+  delivery_pipeline, timeline, findings_persistor, pbi_backlogger, release_blocker,
+  degradation_alerter) migrated to the trait. A test subscriber can now register
+  without touching the boot.
+
+- **SourceAdapter seam** (`platform::source`): new `SourceAdapter` trait
+  (`kind` + async `sync`) + `SourceRegistry`. `GitSourceAdapter` (`remote-git`)
+  consolidates the CO-417/CO-423/CO-337 git sync (wrapping `crate::vcs`);
+  `EventBusSourceAdapter` (`event-bus`) expresses the push-driven Yggdrasil sync.
+  `run_remote_sister_repo_seeds` routes the git step through the adapter. Adding a
+  source (gitlab/notion) = new `impl` + `register`.
+
+- **AdminAuthProvider seam** (`infra::admin_auth`): new `AdminAuthProvider` trait
+  (`async verify_admin -> AdminIdentity`). `github_auth` becomes the default impl
+  (`GitHubAdminAuthProvider`); the `require_github_admin` middleware now depends on
+  an injected `Arc<dyn AdminAuthProvider>`, shared across all six admin routers.
+  Swapping in SAML/OIDC = a new provider injected in `router.rs`.
+
+- **RateLimiter trait** (`platform::rate_limit`, absorbs CO-297 / CO-284-H): new
+  `RateLimiter` trait (`try_acquire`); the existing in-process token-bucket limiter
+  is renamed `InProcessRateLimiter` and becomes the default impl. Completes the
+  CO-284 trait series. (No Redis impl here.)
+
+### Why
+
+Three points (EDA subscribers, source sync, admin auth) plus the rate limiter were
+hardcoded — extending any of them meant editing the boot or rewriting call-sites.
+Each is now a composition seam: register an `impl`, no fork. Pure composition —
+the default set is unchanged.
+
+## CO-436 — Mythos: framework-agnostic game-core Plugin + split migrations.rs/seed.rs
+
+Three mechanical, behavior-preserving refactors that unblock reusing `game-core`
+outside `co-web` and make the storage layer navigable.
+
+### `game-core` is now axum-free
+
+`Plugin::routes()` no longer returns an `axum::Router`. It returns a portable
+`Vec<RouteDescriptor { path, method, handler_id }>` that the **host** translates
+into concrete routes. The `axum` dependency is gone from `game-core/Cargo.toml`
+(`cargo tree -p game-core | grep axum` is empty), so a CLI, mobile, or embedded
+consumer (Yggdrasil) can implement `Plugin` without dragging in an HTTP stack.
+`co-web` owns the translation: `plugin_loader::descriptors_to_router` maps each
+descriptor's `handler_id` to its handler (the existing `GET /info` route is
+preserved exactly), and forward-compatible unknown handler ids are logged and
+skipped rather than crashing the loader.
+
+### `storage/migrations.rs` sliced into a module
+
+The 2.7k-LoC monolith became `storage/migrations/` with one module per version
+range (`v001_018` … `v073_076`), each under 500 LoC, aggregated by
+`Storage::run_migrations`. `current_version` is read once and threaded into every
+range, so a fresh DB and an already-migrated DB converge on the identical final
+`schema_version` (new tests assert version 76 on fresh + idempotent re-open). No
+existing migration was renumbered — the version-claim protocol is intact (the
+two pre-existing `< 44` blocks and all 76 versions are preserved verbatim). Two
+dead trailing `current_version` re-reads that landed at slice boundaries were
+dropped (their value was never read).
+
+### `storage/seed.rs` moved to the boot path
+
+The 2.6k-LoC seed orchestration moved from `storage/seed.rs` to `server/seed.rs`,
+separating boot-time universe seeding from the storage data-access layer. Seed
+methods stay on `Storage` (call sites unchanged); `Storage.conn` and the shared
+`SEED_*` template constants are now `pub(crate)` so the boot module can drive
+them.
+
+### Why
+
+Decouples the game engine from the web framework — the "external services" half
+of the Mythos epic (real reuse of `game-core` outside `co-web`) — and turns two
+of the largest files in `co-web` into navigable modules, all with zero schema or
+seed behavior change.
+
+## CO-440 — co-auto: capture headless stdout + commit-uncommitted safety net
+
+Two co-auto reliability fixes surfaced by the Mythos wave (Fable runs reporting
+to the prod `/usage` dashboard).
+
+### Fixed
+
+- **Headless stdout was never captured.** The headless `claude` invocation
+  `spawn()`-ed with inherited stdio, so `wait_with_output()` returned an **empty**
+  `output.stdout`. CO-425 usage capture (`parse_stream_json`) and the
+  assistant-text re-emit therefore got nothing on *every* headless run — the
+  `/usage` dashboard stayed empty even with `CO_USAGE_ENDPOINT` set. Now the cmd
+  sets `stdout(piped())` + `stderr(piped())` (drained concurrently — no deadlock
+  on long runs), so token/cost/tool-usage telemetry actually reaches CO-426.
+
+- **"Nothing to ship" when the agent staged but didn't commit.** `ship-task.sh`
+  only checked `git rev-list origin/main..HEAD`, so a run where the agent ran
+  `git add` without `git commit` (observed with Fable) died with "Nothing to
+  ship" and lost the PR. Added a safety net: if the worktree has uncommitted work,
+  ship-task commits it first with a conventional message derived from the spec's
+  `conventional_commit` + `title` (`<type> <TASK-ID> — <title> (auto-committed by
+  co-auto)`), then proceeds.
+
+### Why
+
+These two bugs share a theme — co-auto silently dropping the agent's output/work
+on real runs. Together they blocked the CO-424 payoff (per-model×per-universe
+usage) and forced manual salvage of completed refactors (CO-432).
+
+
 ## [3.6.0] — 2026-06-12 — fleet observability & model routing
 
 ## CO-423 — source-deploy toolchain: re-parent API + adapter existence-check + auto-index
