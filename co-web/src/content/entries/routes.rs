@@ -636,6 +636,9 @@ pub async fn entry_tree(
 #[derive(Debug, Deserialize)]
 pub struct GetEntryQuery {
     pub excerpt: Option<bool>,
+    /// CO-75: reconstruct the entry as it was at this RFC3339 instant, replaying
+    /// the CO-54 version history. Returns a [`ReconstructedEntry`] view.
+    pub as_of: Option<String>,
 }
 
 /// Frontmatter + first-200-char excerpt — returned when `?excerpt=true`.
@@ -699,6 +702,44 @@ pub async fn get_entry(
         .unwrap_or(false);
     if !is_review_visible(&entry.frontmatter, is_owner, &viewer_key) {
         return Err(AppError::NotFound(format!("Entry '{}' not found", path)));
+    }
+
+    // CO-75: ?as_of=<RFC3339> — reconstruct the entry as it was at a past
+    // instant by replaying the CO-54 version history. Visibility is already
+    // enforced above, so historical reads honour the same access rules.
+    if let Some(ref as_of_raw) = q.as_of {
+        let as_of = chrono::DateTime::parse_from_rfc3339(as_of_raw)
+            .map_err(|_| {
+                AppError::BadRequest(format!("Invalid 'as_of' RFC3339 timestamp: '{as_of_raw}'"))
+            })?
+            .with_timezone(&chrono::Utc);
+        let versions = {
+            let storage = lock_storage(&state);
+            storage
+                .list_entry_versions(&slug, &path, 1000)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+        };
+        let state_at = crate::content::versioning::reconstruct::reconstruct_at(
+            &versions,
+            &entry.frontmatter,
+            &entry.body,
+            as_of,
+        );
+        let mut resp = Json(serde_json::json!({
+            "path": path,
+            "as_of": as_of_raw,
+            "version": state_at.version,
+            "source_timestamp": state_at.source_timestamp,
+            "is_current": state_at.is_current,
+            "frontmatter": state_at.frontmatter,
+            "body": state_at.body,
+        }))
+        .into_response();
+        resp.headers_mut().insert(
+            axum::http::header::CACHE_CONTROL,
+            axum::http::HeaderValue::from_static("no-store"),
+        );
+        return Ok(resp);
     }
 
     // CO-150: ?excerpt=true — fast path for board cards; returns frontmatter + 200-char excerpt only.
@@ -1668,6 +1709,149 @@ pub async fn entry_versions_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-75: version reconstruction — per-entry diff + universe auto-changelog
+// ---------------------------------------------------------------------------
+
+/// Query params for the per-entry diff endpoint. `path` is a query arg (not a
+/// path segment) to avoid the greedy `entries/{*path}` wildcard, matching the
+/// `history`/`versions` convention.
+#[derive(Debug, serde::Deserialize)]
+pub struct EntryDiffQuery {
+    pub path: String,
+    /// RFC3339 lower bound of the interval.
+    pub from: String,
+    /// RFC3339 upper bound of the interval.
+    pub to: String,
+}
+
+/// GET /api/v1/universes/:slug/entries/diff?path=…&from=<T1>&to=<T2>
+///
+/// Reconstructs the entry at `from` and at `to` from the CO-54 version history
+/// and returns the op-level diff (changed frontmatter fields + body change)
+/// over that interval.
+pub async fn entry_diff_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EntryDiffQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let from = parse_rfc3339(&q.from, "from")?;
+    let to = parse_rfc3339(&q.to, "to")?;
+
+    // Current live state (may be absent if the entry was deleted/never existed).
+    let current = state
+        .core
+        .storage_trait
+        .get_entry(&slug, &q.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    let (cur_fm, cur_body) = match &current {
+        Some(e) => (e.frontmatter.clone(), e.body.clone()),
+        None => (serde_json::json!({}), String::new()),
+    };
+
+    let versions = {
+        let storage = lock_storage(&state);
+        storage
+            .list_entry_versions(&slug, &q.path, 1000)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    };
+
+    use crate::content::versioning::reconstruct;
+    let before = reconstruct::reconstruct_at(&versions, &cur_fm, &cur_body, from);
+    let after = reconstruct::reconstruct_at(&versions, &cur_fm, &cur_body, to);
+    let diff = reconstruct::diff_states(&q.path, &q.from, &q.to, &before, &after);
+    Ok(Json(diff))
+}
+
+/// Query params for the universe changelog endpoint.
+#[derive(Debug, serde::Deserialize)]
+pub struct ChangelogQuery {
+    /// RFC3339 lower bound (inclusive). Defaults to the beginning of time.
+    pub since: Option<String>,
+    /// RFC3339 upper bound (inclusive). Defaults to now.
+    pub until: Option<String>,
+    /// Max ops to aggregate. Defaults to 10000; capped at 100000.
+    pub limit: Option<usize>,
+}
+
+/// GET /api/v1/universes/:slug/changelog?since=<T>&until=<T>
+///
+/// Aggregates the `entry_events` op log over `[since, until]` into a
+/// Keep-a-Changelog document, classifying each op (Added/Changed/Removed) and
+/// rendering its line via the content type's manifest `changelog_summary`
+/// template. Reconstructs without any manual maintenance.
+pub async fn changelog_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ChangelogQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let since_micros = match &q.since {
+        Some(s) => parse_rfc3339(s, "since")?.timestamp_micros(),
+        None => i64::MIN,
+    };
+    let until_micros = match &q.until {
+        Some(s) => parse_rfc3339(s, "until")?.timestamp_micros(),
+        None => i64::MAX,
+    };
+    let limit = q.limit.unwrap_or(10_000).min(100_000) as i64;
+
+    // Resolve the universe (404 if missing) + its connection + root for the manifest.
+    let (conn, universe_root) = {
+        let storage = lock_storage(&state);
+        if storage.get_universe(&slug).is_none() {
+            return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+        }
+        (storage.universe_conn(&slug), storage.universe_root(&slug))
+    };
+
+    use crate::content::versioning::reconstruct::ChangeEvent;
+    let events: Vec<ChangeEvent> = {
+        let guard = conn
+            .lock()
+            .map_err(|_| AppError::Internal("universe conn lock".into()))?;
+        let mut stmt = guard
+            .prepare(
+                "SELECT path, op, ts_micros, prev_body_hash, frontmatter_json \
+                 FROM entry_events \
+                 WHERE ts_micros >= ?1 AND ts_micros <= ?2 \
+                 ORDER BY ts_micros ASC, seq ASC \
+                 LIMIT ?3",
+            )
+            .map_err(|e| AppError::Internal(format!("changelog prepare: {e}")))?;
+        stmt.query_map(
+            rusqlite::params![since_micros, until_micros, limit],
+            |row| {
+                Ok(ChangeEvent {
+                    path: row.get(0)?,
+                    op: row.get(1)?,
+                    ts_micros: row.get(2)?,
+                    prev_body_hash: row.get(3)?,
+                    frontmatter_json: row.get(4)?,
+                })
+            },
+        )
+        .map_err(|e| AppError::Internal(format!("changelog query: {e}")))?
+        .filter_map(|r| r.ok())
+        .collect()
+    };
+
+    let manifest = load_manifest_cached(&state, &slug, &universe_root).await;
+    let changelog = crate::content::versioning::reconstruct::build_changelog(
+        &events,
+        manifest.as_deref(),
+        q.since.clone(),
+        q.until.clone(),
+    );
+    Ok(Json(changelog))
+}
+
+/// Parse an RFC3339 timestamp query param, mapping failure to a 400.
+fn parse_rfc3339(raw: &str, field: &str) -> Result<chrono::DateTime<chrono::Utc>, AppError> {
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&chrono::Utc))
+        .map_err(|_| AppError::BadRequest(format!("Invalid '{field}' RFC3339 timestamp: '{raw}'")))
+}
+
+// ---------------------------------------------------------------------------
 // CO-272: dev-tasks — entries-as-tasks for the kanban view
 // ---------------------------------------------------------------------------
 
@@ -1806,6 +1990,11 @@ pub fn router() -> Router<AppState> {
         // CO-54: entry version history (pre-overwrite snapshots). Uses ?path= to
         // avoid catching the `/entries/{*path}` wildcard, same as /history.
         .route("/{slug}/entries/versions", get(entry_versions_handler))
+        // CO-75: per-entry op-level diff between two instants. ?path= for the
+        // same wildcard-avoidance reason as /history and /versions.
+        .route("/{slug}/entries/diff", get(entry_diff_handler))
+        // CO-75: auto-generated Keep-a-Changelog for the whole universe.
+        .route("/{slug}/changelog", get(changelog_handler))
         .route(
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),

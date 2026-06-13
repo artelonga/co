@@ -899,6 +899,7 @@ impl<'a> EntryIndex<'a> {
                     schema: std::collections::BTreeMap::new(),
                     presentation: co::manifest::Presentation::default(),
                     indexes: vec![],
+                    changelog_summary: None,
                 };
                 co::payload::typed_entry(
                     &row.path,
@@ -1047,6 +1048,7 @@ mod tests {
                 schema,
                 presentation: Presentation::default(),
                 indexes: vec![],
+                changelog_summary: None,
             }],
             doc_generators: vec![],
             relationships: vec![],

@@ -143,6 +143,7 @@ fn test_backfill_no_affected_types_is_noop() {
             schema: BTreeMap::new(),
             presentation: Presentation::default(),
             indexes: vec![],
+            changelog_summary: None,
         }],
         doc_generators: vec![],
         relationships: vec![],

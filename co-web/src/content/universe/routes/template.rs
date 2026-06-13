@@ -184,6 +184,7 @@ pub async fn apply_template(
             schema: Default::default(),
             presentation: Default::default(),
             indexes: vec![],
+            changelog_summary: None,
         });
         if let Ok(yaml) = m.to_yaml() {
             let _ = std::fs::write(universe_root.join(MANIFEST_FILENAME), yaml.as_bytes());
@@ -470,6 +471,7 @@ pub async fn apply_template_all(
                 schema: Default::default(),
                 presentation: Default::default(),
                 indexes: vec![],
+                changelog_summary: None,
             });
             if let Ok(yaml) = m.to_yaml() {
                 let _ = std::fs::write(universe_root.join(MANIFEST_FILENAME), yaml.as_bytes());

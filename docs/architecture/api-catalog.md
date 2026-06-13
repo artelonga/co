@@ -205,8 +205,10 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | GET | `/{slug}/entries/similar` | visibility | CO-164 — semantic similar |
 | GET | `/{slug}/entries/history` | visibility | Entry change history |
 | GET | `/{slug}/entries/versions` | visibility | CO-54 — pre-overwrite version snapshots (audit trail) |
+| GET | `/{slug}/entries/diff` | visibility | CO-75 — op-level diff of an entry between two instants (`?path=&from=&to=` RFC3339) |
+| GET | `/{slug}/changelog` | visibility | CO-75 — auto-generated Keep-a-Changelog from the op log (`?since=&until=` RFC3339) |
 | GET | `/{slug}/entries/popular` | visibility | Popular entries by view count |
-| GET | `/{slug}/entries/{*path}` | visibility | Get entry by path |
+| GET | `/{slug}/entries/{*path}` | visibility | Get entry by path (CO-75: `?as_of=<RFC3339>` reconstructs a past state) |
 | PUT | `/{slug}/entries/{*path}` | owner | Update entry |
 | DELETE | `/{slug}/entries/{*path}` | owner | Delete entry |
 | POST | `/{slug}/translate/{*path}` | owner | CO-416 — generate pt↔en content twin (`?to=en`); 503 if backend unconfigured |

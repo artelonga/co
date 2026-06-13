@@ -306,6 +306,7 @@ mod tests {
             schema,
             presentation: Presentation::default(),
             indexes: vec![],
+            changelog_summary: None,
         }
     }
 
