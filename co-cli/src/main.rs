@@ -703,18 +703,30 @@ enum Commands {
         profile: Option<String>,
     },
 
-    /// Sync a universe between the server and a local folder (CO-51)
+    /// Sync content between a local folder and a deployment
     ///
-    /// Mirrors a universe's Vault into ~/Co/<universe>/ with Google-Drive-like
-    /// local editing and conflict resolution. Strategy is read from
-    /// ~/.config/co/sync.yaml (default: last-write-wins) or --strategy.
+    /// Two workflows share this namespace:
     ///
-    /// Examples:
-    ///   co sync pull yuri
-    ///   co sync push yuri
-    ///   co sync status yuri
-    ///   co sync watch yuri --interval 5
-    ///   co sync resolve content/sobre.md --universe yuri
+    /// • CO-91 canonical author push (default). Edit markdown in a source repo,
+    ///   then `co sync push` to upload only what changed since the last run.
+    ///   Delta is tracked with jujutsu (jj), auth is a per-deployment API token
+    ///   in the OS keychain, and each run leaves a changelog under
+    ///   ~/.co/sync-runs/. The universe comes from `.co/sync.toml` (or
+    ///   --universe); the deployment from ~/.co/deployments.toml (or --to).
+    ///
+    ///     co sync push --bootstrap            # one-time: login, create, token
+    ///     co sync push                        # delta upload to default deployment
+    ///     co sync push --to uat               # …to another deployment
+    ///     co sync push --dry-run              # list files, upload nothing
+    ///     co sync status                      # what would be pushed
+    ///     co sync watch                       # auto-push on save (debounced)
+    ///     co sync changelog                   # print accumulated snippets
+    ///
+    /// • CO-51 bidirectional mirror (legacy). Pass a positional <universe> to
+    ///   mirror its Vault into ~/Co/<universe>/ with conflict resolution.
+    ///
+    ///     co sync pull yuri
+    ///     co sync resolve content/sobre.md --universe yuri
     Sync {
         #[command(subcommand)]
         action: SyncSubcommand,
@@ -1042,31 +1054,102 @@ enum AuthSubcommand {
 
 #[derive(Subcommand)]
 enum SyncSubcommand {
-    /// Download all entries to ~/Co/<universe>/
+    /// (CO-51) Download all entries to ~/Co/<universe>/
     Pull {
         /// Universe slug
         universe: String,
     },
-    /// Upload changed local files
+    /// Upload changed content to a deployment
+    ///
+    /// Without a positional <universe>, runs the CO-91 jj-delta push of the
+    /// current repo to a deployment. With one, runs the CO-51 mirror push.
     Push {
-        /// Universe slug
-        universe: String,
+        /// (CO-51) Universe slug; omit for the CO-91 delta push
+        universe: Option<String>,
+
+        /// (CO-91) Target deployment from ~/.co/deployments.toml (default: the
+        /// `default = true` entry)
+        #[arg(long)]
+        to: Option<String>,
+
+        /// (CO-91) Universe slug, overriding .co/sync.toml
+        #[arg(long = "universe")]
+        universe_key: Option<String>,
+
+        /// (CO-91) Source repo root (default: current directory)
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+
+        /// (CO-91) Force a full upload, ignoring the jj baseline
+        #[arg(long)]
+        full: bool,
+
+        /// (CO-91) List the files that would upload without sending them
+        #[arg(long)]
+        dry_run: bool,
+
+        /// (CO-91) Skip changelog generation for this run
+        #[arg(long)]
+        no_changelog: bool,
+
+        /// (CO-91) First-time setup: login, create the universe, full upload,
+        /// generate an API token and store it in the OS keychain
+        #[arg(long)]
+        bootstrap: bool,
+
+        /// (CO-91) After upload, POST the changelog as an `event` entry (CO-89)
+        #[arg(long)]
+        push_changelog: bool,
     },
     /// Watch for local changes and auto-push (debounced)
     Watch {
-        /// Universe slug
-        universe: String,
+        /// (CO-51) Universe slug; omit for the CO-91 delta watch
+        universe: Option<String>,
 
-        /// Debounce interval in seconds (default: 2)
+        /// Debounce interval in seconds (CO-51 default: 2, CO-91 default: 1)
         #[arg(long)]
         interval: Option<u64>,
+
+        /// (CO-91) Target deployment from ~/.co/deployments.toml
+        #[arg(long)]
+        to: Option<String>,
+
+        /// (CO-91) Universe slug, overriding .co/sync.toml
+        #[arg(long = "universe")]
+        universe_key: Option<String>,
+
+        /// (CO-91) Source repo root (default: current directory)
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
     },
-    /// Show the diff between local and remote
+    /// Show what a push would upload (no changes are sent)
     Status {
-        /// Universe slug
-        universe: String,
+        /// (CO-51) Universe slug; omit for the CO-91 delta status
+        universe: Option<String>,
+
+        /// (CO-91) Target deployment from ~/.co/deployments.toml
+        #[arg(long)]
+        to: Option<String>,
+
+        /// (CO-91) Universe slug, overriding .co/sync.toml
+        #[arg(long = "universe")]
+        universe_key: Option<String>,
+
+        /// (CO-91) Source repo root (default: current directory)
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
     },
-    /// Finalize a manual conflict and push the resolved file
+    /// (CO-91) Print accumulated changelog snippets for a deployment
+    Changelog {
+        /// Target deployment from ~/.co/deployments.toml
+        #[arg(long)]
+        to: Option<String>,
+
+        /// Filter to a single universe
+        #[arg(long = "for")]
+        universe: Option<String>,
+    },
+    /// (CO-51) Finalize a manual conflict and push the resolved file
     Resolve {
         /// Conflicted file path (relative to the universe, or absolute)
         file: String,
@@ -1874,17 +1957,104 @@ fn main() {
             profile,
             strategy,
         } => {
+            use commands::sync::SyncAction;
+            use commands::sync::delta;
             let sync_action = match action {
-                SyncSubcommand::Pull { universe } => commands::sync::SyncAction::Pull { universe },
-                SyncSubcommand::Push { universe } => commands::sync::SyncAction::Push { universe },
-                SyncSubcommand::Watch { universe, interval } => {
-                    commands::sync::SyncAction::Watch { universe, interval }
+                SyncSubcommand::Pull { universe } => SyncAction::Pull { universe },
+                SyncSubcommand::Push {
+                    universe,
+                    to,
+                    universe_key,
+                    root,
+                    full,
+                    dry_run,
+                    no_changelog,
+                    bootstrap,
+                    push_changelog,
+                } => {
+                    // CO-91 delta push unless a positional <universe> is given
+                    // with no CO-91 flag (then it is the CO-51 mirror push).
+                    let co91 = to.is_some()
+                        || universe_key.is_some()
+                        || root.is_some()
+                        || full
+                        || dry_run
+                        || no_changelog
+                        || bootstrap
+                        || push_changelog
+                        || universe.is_none();
+                    if co91 {
+                        SyncAction::DeltaPush(delta::PushOpts {
+                            deployment: to,
+                            universe: universe_key.or(universe),
+                            root,
+                            full,
+                            dry_run,
+                            no_changelog,
+                            bootstrap,
+                            push_changelog,
+                        })
+                    } else {
+                        SyncAction::Push {
+                            universe: universe.expect("positional universe present"),
+                        }
+                    }
                 }
-                SyncSubcommand::Status { universe } => {
-                    commands::sync::SyncAction::Status { universe }
+                SyncSubcommand::Watch {
+                    universe,
+                    interval,
+                    to,
+                    universe_key,
+                    root,
+                } => {
+                    let co91 = to.is_some()
+                        || universe_key.is_some()
+                        || root.is_some()
+                        || universe.is_none();
+                    if co91 {
+                        SyncAction::DeltaWatch(delta::WatchOpts {
+                            deployment: to,
+                            universe: universe_key.or(universe),
+                            root,
+                            interval,
+                        })
+                    } else {
+                        SyncAction::Watch {
+                            universe: universe.expect("positional universe present"),
+                            interval,
+                        }
+                    }
+                }
+                SyncSubcommand::Status {
+                    universe,
+                    to,
+                    universe_key,
+                    root,
+                } => {
+                    let co91 = to.is_some()
+                        || universe_key.is_some()
+                        || root.is_some()
+                        || universe.is_none();
+                    if co91 {
+                        SyncAction::DeltaStatus {
+                            deployment: to,
+                            universe: universe_key.or(universe),
+                            root,
+                        }
+                    } else {
+                        SyncAction::Status {
+                            universe: universe.expect("positional universe present"),
+                        }
+                    }
+                }
+                SyncSubcommand::Changelog { to, universe } => {
+                    SyncAction::Changelog(delta::ChangelogOpts {
+                        deployment: to,
+                        universe,
+                    })
                 }
                 SyncSubcommand::Resolve { file, universe } => {
-                    commands::sync::SyncAction::Resolve { file, universe }
+                    SyncAction::Resolve { file, universe }
                 }
             };
             commands::sync::run(sync_action, profile, strategy);

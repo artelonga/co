@@ -30,12 +30,16 @@ use serde::{Deserialize, Serialize};
 
 use super::auth;
 
+/// CO-91 — jj-tracked delta push / changelog / multi-deployment workflow.
+pub mod delta;
+
 const USER_AGENT: &str = concat!("co-cli/", env!("CARGO_PKG_VERSION"));
 const WATCH_DEBOUNCE_SECS: u64 = 2;
 
 // ─── Public CLI surface ────────────────────────────────────────────────────
 
 pub enum SyncAction {
+    // ── CO-51 bidirectional mirror (positional `<universe>`) ──
     Pull {
         universe: String,
     },
@@ -53,6 +57,15 @@ pub enum SyncAction {
         file: String,
         universe: Option<String>,
     },
+    // ── CO-91 canonical content-author push (deployment-scoped, jj delta) ──
+    DeltaPush(delta::PushOpts),
+    DeltaStatus {
+        deployment: Option<String>,
+        universe: Option<String>,
+        root: Option<std::path::PathBuf>,
+    },
+    DeltaWatch(delta::WatchOpts),
+    Changelog(delta::ChangelogOpts),
 }
 
 /// `co login` — authenticate and store an API token (thin alias over `co auth
@@ -78,6 +91,14 @@ pub fn run(action: SyncAction, profile: Option<String>, strategy_override: Optio
         }
         SyncAction::Status { universe } => cmd_status(&universe, &profile),
         SyncAction::Resolve { file, universe } => cmd_resolve(&file, universe, &profile),
+        SyncAction::DeltaPush(opts) => delta::run_push(opts),
+        SyncAction::DeltaStatus {
+            deployment,
+            universe,
+            root,
+        } => delta::run_status(deployment, universe, root),
+        SyncAction::DeltaWatch(opts) => delta::run_watch(opts),
+        SyncAction::Changelog(opts) => delta::run_changelog(opts),
     };
     if let Err(e) = result {
         eprintln!("{} {e:#}", "error:".red().bold());

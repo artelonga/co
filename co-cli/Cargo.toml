@@ -33,6 +33,11 @@ reqwest = { version = "0.12", features = ["json", "blocking", "rustls-tls"], def
 rpassword = "7"
 toml = { workspace = true }
 tempfile = { workspace = true }
+# CO-91 `co sync`: per-deployment API tokens read from the OS keychain (same
+# backend as dev/co-token), and fsnotify-backed `co sync watch`.
+keyring = { version = "3", default-features = false, features = ["apple-native", "linux-native-sync-persistent", "windows-native"] }
+notify = "6"
+notify-debouncer-mini = "0.4"
 
 [dev-dependencies]
 assert_cmd = "2.0"
