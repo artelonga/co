@@ -15,8 +15,8 @@ fn test_co330_migration_columns_and_source_update() {
         storage
             .conn()
             .query_row(
-                &format!("SELECT 1 FROM pragma_table_info('universes') WHERE name = '{col}'"),
-                [],
+                "SELECT 1 FROM pragma_table_info('universes') WHERE name = ?1",
+                [col],
                 |_| Ok(true),
             )
             .optional()
