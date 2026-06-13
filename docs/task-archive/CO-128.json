@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-128",
+  "title": "Apple-style 4-way conflict UI (Ignore / Replace / Keep both / Apply to all)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-128.md",
+  "branch": "feat/CO-128-apple-style-4-way-conflict-ui-ignore-rep",
+  "merge_sha": "7b5afd895dcd8f8be5c863a5146dc70840292540",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/234",
+    "number": 234
+  },
+  "started_at": "2026-04-30T00:00:00Z",
+  "merged_at": "2026-06-13T14:25:30Z",
+  "files_changed": 11,
+  "lines_added": 1355,
+  "lines_removed": 5,
+  "labels": [
+    "ux",
+    "phase-3",
+    "conflict-resolution",
+    "sync"
+  ],
+  "changelog_entry": "## CO-128 — Apple-style 4-way conflict UI (Ignore / Replace / Keep both / Apply to all)\n\nWhen two devices (or an Obsidian sync overlapping the web) edit the same entry,\nthe SPA now surfaces a macOS-Finder-style modal with a side-by-side diff and the\nfour conflict actions the user named as a v1 requirement, instead of silently\nlast-write-wins.\n\n### Added / changed\n\n- **Optimistic concurrency on entry update.** `PUT /api/v1/universes/:slug/entries/:path`\n  accepts an optional `base_hash` — the `body_hash` the client last observed.\n  When present and the stored entry has since diverged, the write is rejected\n  with `409 Conflict` and a `ConflictPayload { local, remote, base }` carrying\n  **both** full bodies (capped at 100 KB/side with a `truncated` flag) so the\n  modal can render a diff. Absent `base_hash` ⇒ unchanged last-write-wins, so\n  draft autosave and legacy callers never trigger a conflict.\n- **Conflict-resolution modal** (`modules/sync/conflict-modal.js`). Pure UI that\n  consumes a `ConflictPayload`, renders a monospace side-by-side line diff\n  (`modules/sync/conflict-diff.js`, dependency-free LCS), and offers\n  `Ignore` / `Replace` / `Keep both` plus an `Apply to all` checkbox. Styled with\n  existing CO design tokens (theme-aware), no new framework. Keyboard:\n  `1`=Ignore, `2`=Replace, `3`=Keep both, `Esc`=cancel the round.\n- **Round controller** (`modules/sync/conflict-round.js`). Walks the queued\n  conflicts of one sync round and wires each choice to the real entry API:\n  *Ignore* keeps remote (no write); *Replace* re-PUTs the local body with the\n  remote hash as base; *Keep both* creates a `<name>.local.md` sibling.\n  `Apply to all` makes the choice sticky for the rest of the round — held in\n  component state only, so it never survives a reload.\n- **Editor integration.** The content editor save path now sends `base_hash` and,\n  on `409`, opens the modal and applies the resolution (revert / overwrite /\n  keep-both) before closing the editor.\n- **i18n.** Conflict-modal strings added in PT-BR (primary) and EN.\n\n### Why\n\n§C.3 of the platform roadmap review flagged this conflict-resolution UX as a\nnamed v1 requirement the SR plan omitted. It handles the divergence cases the\nCRDT layer (CO-61) cannot, building on sync-protocol v1 + idempotency (CO-54).\n\n### Notes\n\n- No migration. 3-way *Merge* UI, CRDT collaboration, and mobile-specific layout\n  remain out of scope (separate tickets).\n- Tests: Rust integration (`tests/conflict_409_tests.rs`) for the 409 trigger +\n  backward-compat; vitest component suite (`components/__tests__/conflict-modal.test.ts`)\n  for diff/keyboard/apply-to-all/round behaviour; Playwright e2e\n  (`e2e/conflict.spec.ts`) for the two-session 409 flow and live modal render.\n- The spec named \"SvelteKit\"; the CO web client is a plain TypeScript/ESM SPA\n  (no SvelteKit in-tree), so the component ships in that framework.",
+  "summary": "a CO user editing the same entry from two devices (or with an Obsidian sync overlapping the web)",
+  "co_auto_version": "0.1.0"
+}
