@@ -35,7 +35,10 @@ pub use handler::bridge_ws_handler;
 ///  2. `FLY_APP_NAME` (Fly.io machines)
 ///  3. Falls back to `"co-local"`
 pub fn our_deployment_id() -> String {
-    std::env::var("CO_DEPLOYMENT_ID")
-        .or_else(|_| std::env::var("FLY_APP_NAME"))
-        .unwrap_or_else(|_| "co-local".into())
+    // CO-434: routed through the process-global SecretsProvider seam.
+    let secrets = crate::infra::secrets::global();
+    secrets
+        .get("CO_DEPLOYMENT_ID")
+        .or_else(|| secrets.get("FLY_APP_NAME"))
+        .unwrap_or_else(|| "co-local".into())
 }

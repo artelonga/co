@@ -38,9 +38,10 @@ use crate::storage::Storage;
 // ---------------------------------------------------------------------------
 
 /// Parse `CO_BRIDGE_TRUSTED_SOURCES` (comma-separated deployment hosts).
+/// CO-434: routed through the process-global SecretsProvider seam.
 pub fn trusted_sources_from_env() -> Vec<String> {
-    std::env::var("CO_BRIDGE_TRUSTED_SOURCES")
-        .unwrap_or_default()
+    crate::infra::secrets::global()
+        .get_or("CO_BRIDGE_TRUSTED_SOURCES", "")
         .split(',')
         .map(|s| s.trim().to_owned())
         .filter(|s| !s.is_empty())
@@ -58,10 +59,8 @@ pub fn is_trusted(source: &str) -> bool {
 }
 
 fn env_heartbeat_secs() -> u64 {
-    std::env::var("CO_BRIDGE_HEARTBEAT_S")
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(30)
+    use crate::infra::secrets::SecretsProviderExt;
+    crate::infra::secrets::global().get_parsed("CO_BRIDGE_HEARTBEAT_S", 30)
 }
 
 // ---------------------------------------------------------------------------

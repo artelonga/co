@@ -86,8 +86,8 @@ pub struct KbRecentResponse {
 
 /// Returns `Some(rejection_response)` when auth fails, `None` on success.
 fn check_kb_token(headers: &HeaderMap) -> Option<Response> {
-    let expected = match std::env::var("CO_KB_TOKEN") {
-        Ok(t) if !t.is_empty() => t,
+    let expected = match crate::infra::secrets::global().get("CO_KB_TOKEN") {
+        Some(t) if !t.is_empty() => t,
         _ => {
             return Some(
                 (

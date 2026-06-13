@@ -125,7 +125,7 @@ fn check_admin_gate(headers: &HeaderMap) -> Option<Response> {
         }
     };
 
-    let admin_email = std::env::var("CO_SEED_ADMIN_EMAIL").unwrap_or_default();
+    let admin_email = crate::infra::secrets::global().get_or("CO_SEED_ADMIN_EMAIL", "");
     if admin_email.is_empty() || claims.email != admin_email {
         return Some(
             (
@@ -228,7 +228,7 @@ async fn send_lead_notification(
     use crate::notification_providers::{ChannelProvider, ResendProvider};
 
     let notify_to =
-        std::env::var("LEADS_NOTIFY_TO").unwrap_or_else(|_| "rede@artelonga.com.br".to_string());
+        crate::infra::secrets::global().get_or("LEADS_NOTIFY_TO", "rede@artelonga.com.br");
 
     let display_name = nome.as_deref().unwrap_or("Anônimo");
     let display_servico = servico.as_deref().unwrap_or("form geral");
@@ -550,7 +550,7 @@ pub async fn serve_leads_page(headers: HeaderMap) -> Response {
         Ok(c) => c,
         Err(_) => return Redirect::to("/").into_response(),
     };
-    let admin_email = std::env::var("CO_SEED_ADMIN_EMAIL").unwrap_or_default();
+    let admin_email = crate::infra::secrets::global().get_or("CO_SEED_ADMIN_EMAIL", "");
     if admin_email.is_empty() || claims.email != admin_email {
         return (
             StatusCode::FORBIDDEN,

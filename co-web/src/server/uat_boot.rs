@@ -10,7 +10,7 @@ use crate::storage::Storage;
 ///
 /// Returns `None` if none of the above resolve to an existing directory.
 pub(crate) fn resolve_seed_co_dir() -> Option<std::path::PathBuf> {
-    if let Ok(env_path) = std::env::var("CO_SEED_CO_DIR") {
+    if let Some(env_path) = crate::infra::secrets::global().get("CO_SEED_CO_DIR") {
         let p = std::path::PathBuf::from(env_path);
         if p.exists() {
             return Some(p);

@@ -147,13 +147,10 @@ fn lang_name(lang: &str) -> &'static str {
 ///   (provider from `CO_TRANSLATE_PROVIDER`, default `ollama`).
 /// - anything else (unset / `none` / `manual`) → [`NoopBackend`].
 pub fn backend_from_env(router: Arc<crate::infra::ai::AiRouter>) -> Arc<dyn TranslateBackend> {
-    match std::env::var("CO_TRANSLATE_BACKEND")
-        .unwrap_or_default()
-        .as_str()
-    {
+    let secrets = crate::infra::secrets::global();
+    match secrets.get_or("CO_TRANSLATE_BACKEND", "").as_str() {
         "llm" => {
-            let provider =
-                std::env::var("CO_TRANSLATE_PROVIDER").unwrap_or_else(|_| "ollama".into());
+            let provider = secrets.get_or("CO_TRANSLATE_PROVIDER", "ollama");
             Arc::new(LlmBackend::new(router, provider))
         }
         _ => Arc::new(NoopBackend),

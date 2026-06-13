@@ -46,12 +46,17 @@ pub struct ResendAlertMailer {
 }
 
 impl ResendAlertMailer {
-    /// Construct from env vars. Returns `None` if `RESEND_API_KEY` is absent.
-    pub fn from_env() -> Option<Self> {
-        let api_key = std::env::var("RESEND_API_KEY").ok()?;
-        let from = std::env::var("CO_ALERT_FROM")
-            .unwrap_or_else(|_| "CO Alertas <alertas@artelonga.com.br>".to_string());
-        Some(Self { api_key, from })
+    /// Construct from config + secrets (CO-434). Returns `None` if
+    /// `RESEND_API_KEY` is absent.
+    pub fn from_secrets(
+        config: &crate::CoServerConfig,
+        secrets: &dyn crate::infra::secrets::SecretsProvider,
+    ) -> Option<Self> {
+        let api_key = secrets.get("RESEND_API_KEY")?;
+        Some(Self {
+            api_key,
+            from: config.alert_from.clone(),
+        })
     }
 }
 
@@ -265,12 +270,15 @@ pub fn spawn(
     });
 }
 
-/// Build the production mailer from environment variables.
+/// Build the production mailer from config + secrets (CO-434).
 ///
 /// Returns a `ResendAlertMailer` when `RESEND_API_KEY` is set, or a `NoopAlertMailer`
 /// with a one-time WARN when the key is absent.
-pub fn mailer_from_env() -> Arc<dyn AlertMailer> {
-    match ResendAlertMailer::from_env() {
+pub fn mailer_from_secrets(
+    config: &crate::CoServerConfig,
+    secrets: &dyn crate::infra::secrets::SecretsProvider,
+) -> Arc<dyn AlertMailer> {
+    match ResendAlertMailer::from_secrets(config, secrets) {
         Some(m) => {
             info!("CO-422: DegradationAlerter using Resend (RESEND_API_KEY present)");
             Arc::new(m)

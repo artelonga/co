@@ -46,8 +46,8 @@ impl OutboundConfig {
     /// Expected format: `{"yggdrasil.artelonga.com.br": "<jwt>"}`.
     /// Returns an empty `Vec` when the env var is absent or empty.
     pub fn from_env() -> Vec<Self> {
-        let raw = match std::env::var("CO_BRIDGE_OUTBOUND_TOKENS_JSON") {
-            Ok(v) if !v.trim().is_empty() => v,
+        let raw = match crate::infra::secrets::global().get("CO_BRIDGE_OUTBOUND_TOKENS_JSON") {
+            Some(v) if !v.trim().is_empty() => v,
             _ => return vec![],
         };
         let map: HashMap<String, String> = match serde_json::from_str(&raw) {
@@ -228,10 +228,10 @@ async fn try_connect_and_run(
     // Subscribe to local bus (Public + UniverseMembers only).
     let mut local_sub = bus.subscribe(Filter::default());
 
-    let heartbeat_secs = std::env::var("CO_BRIDGE_HEARTBEAT_S")
-        .ok()
-        .and_then(|s| s.parse::<u64>().ok())
-        .unwrap_or(30);
+    let heartbeat_secs = {
+        use crate::infra::secrets::SecretsProviderExt;
+        crate::infra::secrets::global().get_parsed::<u64>("CO_BRIDGE_HEARTBEAT_S", 30)
+    };
     let mut heartbeat = tokio::time::interval(Duration::from_secs(heartbeat_secs));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     heartbeat.tick().await; // skip immediate first tick

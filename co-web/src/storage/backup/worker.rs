@@ -21,10 +21,8 @@ const DEFAULT_RETAIN_COUNT: u64 = 3;
 const DEFAULT_RETENTION_DAYS: u64 = 30;
 
 fn env_u64(name: &str, default: u64) -> u64 {
-    std::env::var(name)
-        .ok()
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(default)
+    use crate::infra::secrets::SecretsProviderExt;
+    crate::infra::secrets::global().get_parsed(name, default)
 }
 
 /// Executes one backup cycle:

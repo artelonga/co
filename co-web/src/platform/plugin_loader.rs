@@ -170,9 +170,7 @@ fn load_single_plugin(
 
 /// Returns the configured plugins directory path.
 pub fn plugins_dir() -> PathBuf {
-    std::env::var("PLUGINS_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("plugins"))
+    PathBuf::from(crate::infra::secrets::global().get_or("PLUGINS_DIR", "plugins"))
 }
 
 #[cfg(test)]

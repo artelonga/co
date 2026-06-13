@@ -260,8 +260,8 @@ pub async fn telemetry_middleware(
 /// Redirects `*.fly.dev` and `www.quilomboaraucaria.org` to the canonical host.
 /// Configured via `CANONICAL_HOST` env var.
 pub async fn canonical_host_middleware(req: Request<Body>, next: Next) -> Response<Body> {
-    let canonical = match std::env::var("CANONICAL_HOST") {
-        Ok(host) if !host.is_empty() => host,
+    let canonical = match crate::infra::secrets::global().get("CANONICAL_HOST") {
+        Some(host) if !host.is_empty() => host,
         _ => return next.run(req).await, // no canonical host set, skip
     };
 
@@ -308,12 +308,13 @@ pub async fn csrf_middleware(req: Request<Body>, next: Next) -> Response<Body> {
         return next.run(req).await;
     }
 
-    // Get allowed origins from env (comma-separated)
-    let allowed = std::env::var("ALLOWED_ORIGINS").unwrap_or_default();
+    // Get allowed origins from config (comma-separated)
+    let secrets = crate::infra::secrets::global();
+    let allowed = secrets.get_or("ALLOWED_ORIGINS", "");
     let allowed_origins: Vec<&str> = allowed.split(',').map(|s| s.trim()).collect();
 
     // Also always allow the canonical host
-    let canonical = std::env::var("CANONICAL_HOST").unwrap_or_default();
+    let canonical = secrets.get_or("CANONICAL_HOST", "");
 
     let origin = req
         .headers()

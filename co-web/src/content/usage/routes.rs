@@ -59,7 +59,9 @@ const WINDOW_WEEK_SECS: i64 = 7 * 86_400;
 /// configurable consumption milestones (not official Anthropic limits, which
 /// aren't exposed by API), shown as the denominator of the consumption bars.
 fn soft_limit(var: &str) -> Option<i64> {
-    std::env::var(var).ok().and_then(|v| v.trim().parse().ok())
+    crate::infra::secrets::global()
+        .get(var)
+        .and_then(|v| v.trim().parse().ok())
 }
 
 /// Fleet usage *reads* are admin-only (cost + live launcher inventory). Verifies

@@ -38,7 +38,7 @@ fn is_co_dev_authorized_with(claims: &auth::Claims, owner_id: &str) -> bool {
 ///
 /// Authorized when: `tier = "admin"` OR `sub == CO_DEV_OWNER` env var.
 fn is_co_dev_authorized(claims: &auth::Claims) -> bool {
-    let owner_id = std::env::var("CO_DEV_OWNER").unwrap_or_default();
+    let owner_id = crate::infra::secrets::global().get_or("CO_DEV_OWNER", "");
     is_co_dev_authorized_with(claims, &owner_id)
 }
 

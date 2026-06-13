@@ -131,11 +131,13 @@ struct GoogleConfig {
 
 impl GoogleConfig {
     fn from_env() -> Option<Self> {
-        let client_id = std::env::var("GOOGLE_CLIENT_ID").ok()?;
-        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok()?;
-        let redirect_uri = std::env::var("GOOGLE_REDIRECT_URI").unwrap_or_else(|_| {
-            "https://co.artelonga.com.br/api/v1/auth/google/callback".to_string()
-        });
+        let secrets = crate::infra::secrets::global();
+        let client_id = secrets.get("GOOGLE_CLIENT_ID")?;
+        let client_secret = secrets.get("GOOGLE_CLIENT_SECRET")?;
+        let redirect_uri = secrets.get_or(
+            "GOOGLE_REDIRECT_URI",
+            "https://co.artelonga.com.br/api/v1/auth/google/callback",
+        );
         Some(Self {
             client_id,
             client_secret,

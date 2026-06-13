@@ -189,7 +189,7 @@ pub fn run_sister_repo_seeds(config: &WebConfig) {
     //
     // Universes with NULL local_repo_path also get a chance: try
     // <env>/<universe_key>.
-    if let Ok(env_dir) = std::env::var("CO_LOCAL_REPOS_DIR") {
+    if let Some(env_dir) = crate::infra::secrets::global().get("CO_LOCAL_REPOS_DIR") {
         let env_root = std::path::PathBuf::from(&env_dir);
         if env_root.exists() {
             // Rewrite paths of universes already in `rows` to point at <env>/<basename>.
@@ -424,8 +424,9 @@ pub fn seed_staging_fixtures(config: &WebConfig) {
 /// CO-90 (preview): also ensure the seeded admin is a member of every
 /// existing system universe so the SPA shows them post-login.
 pub fn run_admin_seeding(config: &WebConfig) {
-    let email = std::env::var("CO_SEED_ADMIN_EMAIL").ok();
-    let hash = std::env::var("CO_SEED_ADMIN_PASSWORD_HASH").ok();
+    let secrets = crate::infra::secrets::global();
+    let email = secrets.get("CO_SEED_ADMIN_EMAIL");
+    let hash = secrets.get("CO_SEED_ADMIN_PASSWORD_HASH");
     if let (Some(email), Some(hash)) = (email, hash) {
         let mut storage = Storage::new(&config.data_dir);
         if let Err(e) = storage.seed_admin_user_from_env(&email, &hash) {

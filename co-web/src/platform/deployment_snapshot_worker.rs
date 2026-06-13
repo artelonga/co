@@ -250,7 +250,7 @@ async fn probe_unit(client: &reqwest::Client, fly_token: &str, unit: &UnitConfig
 // ---------------------------------------------------------------------------
 
 pub async fn tick(state: &AppState) -> Result<()> {
-    let fly_token = std::env::var("CO_FLY_API_TOKEN").unwrap_or_default();
+    let fly_token = state.core.secrets.get_or("CO_FLY_API_TOKEN", "");
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))

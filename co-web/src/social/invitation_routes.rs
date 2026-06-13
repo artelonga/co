@@ -160,7 +160,7 @@ async fn deliver_invitation_email(
     use crate::notification_providers::{ChannelProvider, ResendProvider};
 
     let base_url =
-        std::env::var("CO_BASE_URL").unwrap_or_else(|_| "https://co.artelonga.com.br".into());
+        crate::infra::secrets::global().get_or("CO_BASE_URL", "https://co.artelonga.com.br");
     let accept_link = format!("{base_url}/invitations/{raw_token}");
 
     let subject = format!("Convite para {universe_name} no CO");

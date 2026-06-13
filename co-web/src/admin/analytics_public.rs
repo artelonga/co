@@ -708,7 +708,7 @@ pub fn upsert_rollup(
 
 /// True when the request carries a valid CO_ROLLUP_TOKEN bearer.
 fn is_admin_authed(headers: &HeaderMap) -> bool {
-    let Ok(expected) = std::env::var("CO_ROLLUP_TOKEN") else {
+    let Some(expected) = crate::infra::secrets::global().get("CO_ROLLUP_TOKEN") else {
         return false;
     };
     let auth = headers
@@ -726,7 +726,7 @@ pub async fn rollups_ingest_handler(
     headers: HeaderMap,
     Json(body): Json<DailyRollupIn>,
 ) -> Response {
-    let Ok(expected) = std::env::var("CO_ROLLUP_TOKEN") else {
+    let Some(expected) = state.core.secrets.get("CO_ROLLUP_TOKEN") else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
             Json(serde_json::json!({"error": "rollup ingest disabled"})),

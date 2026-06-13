@@ -217,11 +217,8 @@ async fn scan_status(State(state): State<AppState>) -> impl IntoResponse {
     let unresolved_count: i64 = storage.count_unresolved_findings();
     let high_critical_count: i64 = storage.count_unresolved_high_critical_findings();
 
-    let backend = std::env::var("CO_SECURITY_BACKEND").unwrap_or_else(|_| "local-grep".into());
-    let max_scans = std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY")
-        .ok()
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(50);
+    let backend = state.core.server_config.security_backend.clone();
+    let max_scans = state.core.server_config.security_max_scans_per_day;
 
     Json(json!({
         "backend": backend,
@@ -264,10 +261,7 @@ async fn trigger_scan(
     // counter. `build_backend()` constructs a fresh backend per request, so the
     // backend's own in-memory counter never tripped — the limit must live in
     // shared, persistent state.
-    let max_scans = std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY")
-        .ok()
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(50);
+    let max_scans = state.core.server_config.security_max_scans_per_day;
     let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
     {
         let storage = state.core.storage.lock();

@@ -82,7 +82,8 @@ pub fn sync_repo(remote_url: &str, ref_name: &str, dest: &Path) -> anyhow::Resul
 /// True when either `CO_GIT_TOKEN` (HTTPS) or `CO_GIT_SSH_KEY_PATH` (SSH) is
 /// set and non-empty. CO-408.
 pub fn has_git_credentials() -> bool {
-    let nonempty = |k: &str| std::env::var(k).map(|v| !v.is_empty()).unwrap_or(false);
+    let secrets = crate::infra::secrets::global();
+    let nonempty = |k: &str| secrets.get(k).map(|v| !v.is_empty()).unwrap_or(false);
     nonempty("CO_GIT_TOKEN") || nonempty("CO_GIT_SSH_KEY_PATH")
 }
 
@@ -119,13 +120,14 @@ pub fn remote_needs_credentials(remote_url: &str) -> bool {
 /// - `CO_GIT_SSH_KEY_PATH` — path to an SSH private key (e.g. a Fly secret file mount)
 /// - `CO_GIT_TOKEN` — GitHub personal access token for HTTPS clones
 fn apply_auth_env(cmd: &mut Command) {
-    if let Ok(key_path) = std::env::var("CO_GIT_SSH_KEY_PATH") {
+    let secrets = crate::infra::secrets::global();
+    if let Some(key_path) = secrets.get("CO_GIT_SSH_KEY_PATH") {
         cmd.env(
             "GIT_SSH_COMMAND",
             format!("ssh -i {key_path} -o StrictHostKeyChecking=no -o BatchMode=yes"),
         );
     }
-    if let Ok(token) = std::env::var("CO_GIT_TOKEN") {
+    if let Some(token) = secrets.get("CO_GIT_TOKEN") {
         // Suppress interactive prompts and inject token via HTTP extra header.
         cmd.env("GIT_TERMINAL_PROMPT", "0");
         cmd.env("GIT_ASKPASS", "true");

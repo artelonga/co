@@ -66,13 +66,14 @@ pub async fn event_log_retention_task(state: crate::server::AppState) {
     }
 }
 
-/// Build the configured `EdaBus` from the `CO_EDA_BACKEND` env var.
+/// Build the configured `EdaBus` from [`CoServerConfig::eda_backend`].
 ///
 /// Returns `Arc<dyn EdaBus>` backed by `TokioBroadcastBus` for CO-380.
 /// The Redis/NATS stubs panic at construction time until implemented.
-pub fn build_bus() -> std::sync::Arc<dyn EdaBus> {
-    let backend = std::env::var("CO_EDA_BACKEND").unwrap_or_else(|_| "tokio".into());
-    match backend.as_str() {
+/// CO-434: backend selection now comes from the boot-time config (injectable
+/// in tests) instead of a `std::env::var` read at construction time.
+pub fn build_bus(config: &crate::CoServerConfig) -> std::sync::Arc<dyn EdaBus> {
+    match config.eda_backend.as_str() {
         "tokio" | "" => {
             tracing::info!("EDA: backend = tokio-broadcast");
             std::sync::Arc::new(TokioBroadcastBus::new())

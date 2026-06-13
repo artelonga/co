@@ -90,11 +90,11 @@ pub struct ClaudeSecurityBackend {
 
 impl ClaudeSecurityBackend {
     pub fn from_env() -> Self {
-        let api_key = std::env::var("CO_SECURITY_API_KEY").unwrap_or_default();
-        let max_scans = std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(DEFAULT_MAX_SCANS_PER_DAY);
+        use crate::infra::secrets::SecretsProviderExt;
+        let secrets = crate::infra::secrets::global();
+        let api_key = secrets.get_or("CO_SECURITY_API_KEY", "");
+        let max_scans =
+            secrets.get_parsed("CO_SECURITY_MAX_SCANS_PER_DAY", DEFAULT_MAX_SCANS_PER_DAY);
 
         if api_key.is_empty() {
             warn!(

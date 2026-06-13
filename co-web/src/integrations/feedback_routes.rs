@@ -271,7 +271,7 @@ fn maybe_forward(
     name: Option<String>,
     email: Option<String>,
 ) {
-    let Ok(url) = std::env::var("CO_FEEDBACK_FORWARD_URL") else {
+    let Some(url) = crate::infra::secrets::global().get("CO_FEEDBACK_FORWARD_URL") else {
         return;
     };
     tokio::spawn(async move {

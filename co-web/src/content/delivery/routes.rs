@@ -206,7 +206,7 @@ pub async fn github_webhook(
     body: Bytes,
 ) -> Result<(StatusCode, Json<serde_json::Value>), AppError> {
     // Signature validation.
-    let secret = std::env::var("CO_GITHUB_WEBHOOK_SECRET").unwrap_or_default();
+    let secret = state.core.secrets.get_or("CO_GITHUB_WEBHOOK_SECRET", "");
     if !secret.is_empty() {
         let sig_header = headers
             .get("x-hub-signature-256")

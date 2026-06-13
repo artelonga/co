@@ -64,7 +64,7 @@ fn is_valid_username(username: &str) -> bool {
 }
 
 fn jwt_secret() -> String {
-    std::env::var("JWT_SECRET").unwrap_or_else(|_| "dev-secret-change-me".into())
+    crate::auth::jwt_secret()
 }
 
 // ---- Health (unauthenticated) ----
