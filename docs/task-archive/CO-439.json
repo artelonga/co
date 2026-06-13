@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-439",
+  "title": "Surfaces allowlist-on-serve — serve only published/indexed entries, never raw disk files (.dockerignore is not a security boundary)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-439.md",
+  "branch": "feat/CO-439-surfaces-allowlist-on-serve-serve-only-p",
+  "merge_sha": "2fbfdd93f2cab803c821728ba7bf58cd72c44f5a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/228",
+    "number": 228
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T11:50:38Z",
+  "files_changed": 13,
+  "lines_added": 699,
+  "lines_removed": 63,
+  "labels": [
+    "type:fix",
+    "module:content",
+    "ops"
+  ],
+  "changelog_entry": "## CO-439 — Surfaces allowlist-on-serve — serve only published/indexed entries, never raw disk files\n\nThe surfaces server now serves **only** content present in a universe's\npublished index — it serves the index, never a raw file that happens to exist on\ndisk. A deep-link request for a path that is not indexed (or, for an anonymous\ncaller on a `anon_published_only` universe, not `published: true`) resolves to\n**404**, not 200.\n\n- **Allowlist-on-serve (the real fix):** new `co-web/src/server/allowlist.rs` is\n  the single chokepoint. `serve_deep_link` now consults `is_servable()`, which\n  requires an index entry for one of the candidate paths *and* visibility to the\n  caller (published gate for anon, mirroring the API-layer filter). An unindexed\n  `draft.md` in a served directory is never served. The previous\n  `entry_exists_for_subpath` existence check is superseded by this module.\n- **Defense in depth — `.dockerignore`:** added a root `.dockerignore` with\n  draft/scratch conventions (`WhatsApp*`, `_*`, `shot-*`, `*.mov`, `**/IMG_*`).\n  This is a denylist that fails open — a cheap complementary layer, **not** the\n  security boundary.\n- **Flow rule documented:** `docs/serve-allowlist.md` (new) plus pointers in\n  `docs/universe-public-site.md` and `docs/use-cases.md` — a draft is born in the\n  vault, never inside a served directory, and only crosses into a served universe\n  via the drafts→published flow (which creates an index entry).\n- **Audit:** new `audit_serve` binary (`cargo run -p co-web --bin audit_serve --\n  <data-dir>`) walks each universe's served on-disk root and reports files\n  present on disk but absent from the index — the \"servable but not published\"\n  leak surface. Exit 1 when any remain, so it can gate a pre-deploy check.\n\n### Why\n\nPost-mortem of the 2026-06 `ArteLonga/yuri` `thrive market.md` draft leak: a\nprivate draft went public because it sat in a served directory, missed every\n`.dockerignore` pattern, and existed on disk at deploy time. The structural gap\nwas the absence of an allowlist — the `.dockerignore` denylist was the only\nbarrier, and a denylist fails open. `.dockerignore` is not a security boundary;\nserving only the published index is. Same family as the visibility gate\n(CO-161); feeds the content-addressed encrypted-asset storage plan (CO-145).",
+  "summary": "Contexto — post-mortem do vazamento de rascunho (ArteLonga/yuri, 2026-06) Um rascunho pessoal (`thrive market.md`) ficou público porque cruzou **quatro** condições ao mesmo tempo: ① estava num diretór",
+  "co_auto_version": "0.1.0"
+}
