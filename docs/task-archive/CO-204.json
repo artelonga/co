@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-204",
+  "title": "Chat message origin telemetry — track which universe context each message was sent from",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-204.md",
+  "branch": "feat/CO-204-chat-message-origin-telemetry-track-whic",
+  "merge_sha": "79a0f1ba198c0988dce17470d28a2ee23bfadf44",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/244",
+    "number": 244
+  },
+  "started_at": "2026-05-12T00:00:00Z",
+  "merged_at": "2026-06-13T23:53:54Z",
+  "files_changed": 20,
+  "lines_added": 607,
+  "lines_removed": 32,
+  "labels": [
+    "type:feat",
+    "module:chat",
+    "module:telemetry",
+    "co-auto"
+  ],
+  "changelog_entry": "## CO-204 — Chat message origin telemetry — track which universe context each message was sent from\n\nEvery `chat_messages` row is now stamped with an optional `origin_universe_key`\n— the universe context the sender was browsing when they hit Send. This is\ndistinct from `chat_rooms.universe_key` (where the *room* lives): for DM rooms,\nwhich have no universe of their own, the origin is the only \"where did this come\nfrom\" breadcrumb.\n\n- **Migration v80** adds the nullable `origin_universe_key` column to\n  `chat_messages` plus an index (`idx_chat_messages_origin`). Existing rows stay\n  `NULL` (no backfill — the at-the-time context can't be reconstructed).\n- **POST `…/chat/rooms/{room_slug}/messages`** gains an optional\n  `origin_universe_key` field. It is validated against the caller's\n  membership/subscription and **silently dropped** (persisted `NULL`) if they\n  don't belong to the claimed universe — privacy-respecting, so \"I'm in private\n  universe X\" isn't leakable just by sending. Omitted ⇒ defaults to the room's\n  universe for universe rooms, `NULL` for DM rooms.\n- **GET messages** returns `origin_universe_key` on each row.\n- **DM UI** (`modules/chat.js`) renders a small italic \"via {universe}\" subtext\n  when a message's origin differs from the universe the viewer is currently in;\n  suppressed for universe-room messages where origin == the room's universe.\n- **Admin telemetry**: `GET /api/v1/admin/chat/origin-breakdown` (admin-gated)\n  returns per-origin message counts + total, backing a future admin chart.\n\n### Why\n\nLets operators answer \"which universes drive the most chat\" and \"are people\nDMing across universe boundaries\", and gives a DM recipient context for where a\nmessage originated — without cross-linking to any private content.",
+  "summary": "an operator who wants to understand how the chat surface is actually used, plus a user receiving a DM who wants context for \"where did this message come from\"",
+  "co_auto_version": "0.1.0"
+}
