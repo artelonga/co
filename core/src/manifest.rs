@@ -124,6 +124,12 @@ pub struct ContentType {
     pub presentation: Presentation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub indexes: Vec<String>,
+    /// CO-75: template for an auto-generated changelog line when an entry of
+    /// this type is created/changed. `{field}` tokens are substituted from the
+    /// entry's frontmatter (e.g. `"{title} marcado como {status}"`); `{path}`
+    /// and `{title}` are always available. `None` → a default line (title/path).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changelog_summary: Option<String>,
 }
 
 /// A field definition inside a content type schema.
@@ -392,6 +398,7 @@ fn merge_properties_per_type(manifest: &mut Manifest) {
                 schema: BTreeMap::new(),
                 presentation: Presentation::default(),
                 indexes: vec![],
+                changelog_summary: None,
             });
             manifest.content_types.last_mut().unwrap()
         };
@@ -554,6 +561,7 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
                 calendar: None,
             },
             indexes: vec!["status".to_string()],
+            changelog_summary: None,
         }],
         doc_generators: vec![],
         relationships: vec![],
@@ -664,6 +672,23 @@ views:
         assert_eq!(result.manifest.schema_version, 1);
         assert_eq!(result.manifest.name, "MyUniverse");
         assert!(result.manifest.content_types.is_empty());
+    }
+
+    #[test]
+    fn test_parse_changelog_summary_template() {
+        // CO-75: a content type may declare a changelog_summary template that
+        // round-trips through parse and serialize.
+        let yaml = "schema_version: 1\nname: U\ncontent_types:\n  - name: tarefa\n    changelog_summary: \"{title} marcado como {status}\"\n";
+        let m = parse_str(yaml).expect("should parse").manifest;
+        assert_eq!(
+            m.content_types[0].changelog_summary.as_deref(),
+            Some("{title} marcado como {status}")
+        );
+        // Absent → None (backward compatible with manifests written before CO-75).
+        let bare = parse_str("schema_version: 1\nname: U\ncontent_types:\n  - name: nota\n")
+            .unwrap()
+            .manifest;
+        assert_eq!(bare.content_types[0].changelog_summary, None);
     }
 
     #[test]

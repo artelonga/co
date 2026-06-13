@@ -241,6 +241,7 @@ mod tests {
             schema: BTreeMap::new(),
             presentation: Presentation::default(),
             indexes: indexes.iter().map(|s| s.to_string()).collect(),
+            changelog_summary: None,
         }
     }
 
@@ -275,6 +276,7 @@ mod tests {
             schema,
             presentation: Presentation::default(),
             indexes: indexes.iter().map(|s| s.to_string()).collect(),
+            changelog_summary: None,
         }
     }
 

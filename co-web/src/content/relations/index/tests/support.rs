@@ -71,6 +71,7 @@ pub fn evento_manifest() -> Manifest {
             schema,
             presentation: Presentation::default(),
             indexes: vec![],
+            changelog_summary: None,
         }],
         doc_generators: vec![],
         relationships: vec![Relationship {
@@ -113,6 +114,7 @@ pub fn term_manifest() -> Manifest {
             schema,
             presentation: Presentation::default(),
             indexes: vec![],
+            changelog_summary: None,
         }],
         properties_per_type: Default::default(),
         doc_generators: vec![],
