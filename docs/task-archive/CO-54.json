@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-54",
+  "title": "Idempotency + conflict resolution — safe concurrent editing across sync, web, and co-auto",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-54.md",
+  "branch": "feat/CO-54-idempotency-conflict-resolution-safe-con",
+  "merge_sha": "3a9e898d11eb00ff0b6f081363a99369160b0144",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/235",
+    "number": 235
+  },
+  "started_at": "2026-04-13T00:00:00Z",
+  "merged_at": "2026-06-13T15:17:03Z",
+  "files_changed": 15,
+  "lines_added": 1356,
+  "lines_removed": 12,
+  "labels": [
+    "sync",
+    "safety",
+    "conflict-resolution"
+  ],
+  "changelog_entry": "## CO-54 — Idempotency + conflict resolution — safe concurrent editing across sync, web, and co-auto\n\nFormalized idempotency guarantees and conflict-resolution fallbacks so the web\nUI, CLI sync, co-auto, and the Obsidian plugin can edit the same universe\nconcurrently without losing data.\n\n### Web (entry PUT)\n- **Field-level merge** (Scenario 1): `PUT …/entries/{path}` is now a true\n  partial patch — a frontmatter field is overwritten only when the caller sends\n  it, so two clients editing *different* fields merge instead of clobbering.\n  Explicit JSON `null` deletes a field; same-field edits resolve last-write-wins.\n- **Idempotency** (Scenario 3): re-applying identical content (e.g. co-auto\n  setting `status: done` when already done) is a no-op — no version bump, no disk\n  write, no event storm.\n- **Version history / audit trail**: every overwrite first snapshots the\n  *previous* content into the new `entry_versions` table (migration **v78**) with\n  `actor`, `timestamp`, and a full-content `hash`. This is the data-loss-prevention\n  guarantee — a crash mid-write can never lose committed data. History is exposed\n  at `GET /api/v1/universes/:slug/entries/versions?path=…`. Retention: the newest\n  50 versions per entry **or** 90 days, whichever is more generous.\n\n### co-auto (task locking)\n- **Per-task lockfile** (Scenario 4): co-auto now acquires an atomic lock under\n  `<data_dir>/.co-auto/locks/<TASK-KEY>.lock` before executing a task. A second\n  agent (e.g. another worktree) finds the lock and skips to the next candidate,\n  so two agents never double-execute the same task. Stale locks (crashed/hung\n  agent) are reclaimed after a 30-minute TTL.\n\n### Sync (conflict strategy)\n- **Configurable resolution strategy**: added `ConflictStrategy` (default\n  **last-write-wins by timestamp**) that maps a detected conflict to a concrete\n  resolution action. Layers on top of the existing CO-385 `detect_conflicts`\n  (both sides differ from base → `BothModified`) so a non-interactive client can\n  auto-resolve (Scenario 2). Delete-vs-modify defaults to \"modification beats\n  deletion\" to avoid silent data loss.\n\n### Why\nMultiple clients can edit the same universe simultaneously. Without these\nguarantees, a naive last-write-wins PUT silently discarded concurrent field\nedits, repeated writes churned versions, and two co-auto worktrees could race\nthe same task. The `entry_versions` audit trail makes every overwrite recoverable.",
+  "summary": "GIVEN multiple clients can edit the same universe (web UI, CLI sync, co auto, Obsidian plugin), and two users might edit the same file simultaneously, WHEN I formalize idempotency guarantees and confl",
+  "co_auto_version": "0.1.0"
+}
