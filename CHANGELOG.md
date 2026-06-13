@@ -5,6 +5,175 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] — 2026-06-13 — Money & Activation — payment, onboarding, security hardening
+
+## CO-366 — Conversion + payment wiring — register → paid via Hostinger checkout (provider-agnostic trait)
+
+End-to-end billing wiring so a registered brain owner can convert from free to
+paid, behind a provider-agnostic `BillingProvider` trait (Hostinger today,
+Pix/Stripe tomorrow — no lock-in).
+
+- **`BillingProvider` trait** (`co-web/src/billing/`) with `create_checkout`,
+  `verify_webhook`, and `name`. Implementations:
+  - `ManualInvoiceProvider` — default, no external dependency; admin marks a
+    user paid via `POST /api/v1/gestao/users/{id}/mark-paid`.
+  - `HostingerProvider` — full first-ship: deterministic checkout URL +
+    HMAC-SHA256 webhook signature verification (forged payloads rejected).
+  - `PixProvider` / `StripeProvider` — stubs gated behind the `billing-pix` /
+    `billing-stripe` cargo features (v3.1).
+- **Endpoints**: `POST /api/v1/me/billing/checkout`, `GET /api/v1/me/billing/status`,
+  `POST /api/v1/billing/webhook/{provider}` (flips `users.tier` to `paid` on
+  payment success), and `POST /api/v1/gestao/users/{id}/mark-paid`. All four are
+  documented in the OpenAPI catalog (CO-211).
+- **Schema (migration v77)**: adds `tier_paid_at`, `tier_plan`,
+  `billing_provider`, `billing_external_id` to `users`, and a `billing_events`
+  audit table (the table CO-360's funnel step 7 was already waiting on).
+- **Conversion KPI** in `/gestao/resumo`: registered users (7/30/90d), paid
+  users, conversion rate, and mean `t_register → t_payment` seconds.
+- **Activity (CO-361)**: all four billing events (`checkout_created`,
+  `payment_succeeded`, `payment_failed`, `subscription_canceled`) are mirrored
+  to the `atividades` log + EDA bus under `entidade = "billing"`.
+- **Register-success CTA**: `static/variants/a/modules/auth/post-register.js`
+  opens the checkout flow.
+
+Provider selection and plan prices are config (`CO_BILLING_PROVIDER`,
+`CO_BILLING_HOSTINGER_API_KEY`, `CO_BILLING_HOSTINGER_WEBHOOK_SECRET`,
+`CO_BILLING_PLAN_PRICES_JSON`) read through the `SecretsProvider` seam — no
+redeploy to switch providers or reprice.
+
+### Why
+
+§5 + §8 of `brain-as-a-service.md` flagged conversion/payment as the explicit
+open gap: the `t_register → t_payment` KPI was designed but had no
+implementation. This ships the billing-only tier enforcement (per CO-90, tier
+is billing-only — no global admin tier) so public launch can charge the first
+brain owner without an infra rebuild, while keeping the integration choice
+swappable behind a trait.
+
+## CO-438 — source:github import — 3 prod bugs surfaced by the live claude-code import (seed orphan, token-vs-session private visibility, rate-limit/no-resume)
+
+Fixes the three independent bugs the live `claude-code` import (CO-429) hit at
+114/164 entries, which together blocked a clean `source:github` import of a
+private universe.
+
+- **Bug 1 — seed orphan.** The admin-content seed INSERTed a `universes` row for
+  the importable private universe `claude-code` owned by the sentinel `system`.
+  Since access is granted by `owner_id` match, a `system`-owned private row was
+  unreachable by any real user: `POST /universes` → 409 "key taken" while
+  `GET /universes/{key}` → 404. The CO-429 reconcile that flipped the row to
+  `private` is what tipped a (GET-able) public-subscribable row into the orphan
+  state. Fix: importable private universes are no longer seeded — `co source
+  add` creates them as the importing user (fully provisioned: owner + membership
+  + pool) — and the private-flip reconcile is guarded with `owner_id != 'system'`
+  so a legacy system-owned row stays public-subscribable instead of orphaning.
+  After a seed, the universe is GET-able or absent, never "taken but 404".
+
+- **Bug 2 — token-vs-session private visibility.** `GET /api/v1/universes/{key}`
+  decoded session JWTs only, so an API-token request — even by a private
+  universe's own owner — resolved to anonymous and 404'd. `co source add`'s
+  `universe_exists` probe (api-token) therefore thought the universe was missing
+  and tried to create it (401). Fix: the handler now resolves the caller via
+  `resolve_user_id` (JWT *or* API token), matching the visibility-gate
+  middleware. Owner reads their own private universe by api-token (200);
+  non-owner still 404.
+
+- **Bug 3 — rate-limit blocks bulk import; no skip/resume; admin not exempt.**
+  (a) The global rate-limit middleware capped admin writes at 60/min *before*
+  the vault handler's own admin exemption ran, so a >60-file `co source add` as
+  admin hit 429 mid-import. Admin-tier requests to the Vault API now bypass the
+  global limiter (mirroring `vault_auth`), scoped to vault paths.
+  (b) `co source add` re-PUT every entry from the start each run. It now fetches
+  the server's per-entry `body_hash` (newly exposed in the vault listing) and
+  pushes only entries whose body differs — so a rate-limited import resumes and
+  a re-sync touches only what changed. Added a `--throttle-ms` flag and
+  Retry-After-aware backoff on 429 for non-admin pushes.
+
+### Why
+These three bugs are why the import stalled at 114/164 and why any
+`source:github` import of a private universe failed at scale. Each is fixed
+independently with regression tests (seed provisioning, owner api-token
+visibility, admin bulk-write exemption, and hash-based skip/resume).
+
+## CO-439 — Surfaces allowlist-on-serve — serve only published/indexed entries, never raw disk files
+
+The surfaces server now serves **only** content present in a universe's
+published index — it serves the index, never a raw file that happens to exist on
+disk. A deep-link request for a path that is not indexed (or, for an anonymous
+caller on a `anon_published_only` universe, not `published: true`) resolves to
+**404**, not 200.
+
+- **Allowlist-on-serve (the real fix):** new `co-web/src/server/allowlist.rs` is
+  the single chokepoint. `serve_deep_link` now consults `is_servable()`, which
+  requires an index entry for one of the candidate paths *and* visibility to the
+  caller (published gate for anon, mirroring the API-layer filter). An unindexed
+  `draft.md` in a served directory is never served. The previous
+  `entry_exists_for_subpath` existence check is superseded by this module.
+- **Defense in depth — `.dockerignore`:** added a root `.dockerignore` with
+  draft/scratch conventions (`WhatsApp*`, `_*`, `shot-*`, `*.mov`, `**/IMG_*`).
+  This is a denylist that fails open — a cheap complementary layer, **not** the
+  security boundary.
+- **Flow rule documented:** `docs/serve-allowlist.md` (new) plus pointers in
+  `docs/universe-public-site.md` and `docs/use-cases.md` — a draft is born in the
+  vault, never inside a served directory, and only crosses into a served universe
+  via the drafts→published flow (which creates an index entry).
+- **Audit:** new `audit_serve` binary (`cargo run -p co-web --bin audit_serve --
+  <data-dir>`) walks each universe's served on-disk root and reports files
+  present on disk but absent from the index — the "servable but not published"
+  leak surface. Exit 1 when any remain, so it can gate a pre-deploy check.
+
+### Why
+
+Post-mortem of the 2026-06 `ArteLonga/yuri` `thrive market.md` draft leak: a
+private draft went public because it sat in a served directory, missed every
+`.dockerignore` pattern, and existed on disk at deploy time. The structural gap
+was the absence of an allowlist — the `.dockerignore` denylist was the only
+barrier, and a denylist fails open. `.dockerignore` is not a security boundary;
+serving only the published index is. Same family as the visibility gate
+(CO-161); feeds the content-addressed encrypted-asset storage plan (CO-145).
+
+## CO-441 — Finish AC3: move residual raw SQL out of content handlers into storage methods (workspace/assets/vault/op_log/template)
+
+Moved the last single-line `conn().query_row/execute` calls out of the content
+HTTP handlers into typed `Storage` methods, closing the literal AC3 grep from
+CO-433 ("zero raw SQL em todos os *_routes.rs").
+
+- New `storage/workspace_states.rs`: typed accessors for the "Sala" canvas state
+  (`workspace_state_for_user`, `public_workspace_state`,
+  `workspace_state_by_share_token`, `upsert_workspace_state`,
+  `set_workspace_share_token`). The `WorkspaceState` row struct and its
+  row-mapper now live in the storage layer (re-exported as
+  `crate::storage::WorkspaceState`), so `content/workspace/routes.rs` carries no
+  SQL.
+- New `Storage::set_universe_content_count`, replacing the four identical
+  `UPDATE universes SET content_count = ?1` statements scattered across the
+  asset upload handler, both vault write paths, the op-log
+  `refresh_content_count`, and the template `reindex` handler.
+
+### Why
+Pure mechanical refactor — zero behavior change. Removing the inline SQL keeps
+content handlers free of database string literals (also clearing the CWE-89
+scanner debt on those lines) and routes every meta-DB mutation through a tested,
+typed method on `Storage`.
+
+## CO-99 — Onboarding banner — three-step coach mark for first-time anonymous visitors
+
+Adds a non-blocking floating coach-mark card (bottom-right, 320×120px) for
+first-time anonymous visitors on the template universe. The banner walks through
+three steps — Visões, Linha do tempo, and Crie seu universo — with a step
+indicator, a "Próximo"/"Concluir" button, and a "Pular" dismiss link.
+
+Dismissal (skip or complete) sets `co_onboarded=1` (1-year cookie) so the
+banner never re-appears. Suppressed on viewports < 720px and for logged-in
+users. Step 2's timeline link opens in a new tab; Step 3's "Criar conta"
+triggers the existing login/signup modal via event delegation.
+
+### Why
+
+First-time visitors landed on a kanban with no orientation. The coach mark
+surfaces the platform's three key narratives (multi-view, timeline, own
+universe) in the first 30 seconds without blocking any interaction.
+
+
 ## [3.7.0] — 2026-06-13 — Mythos — composable, extensible architecture [--ignore-dod override]
 
 ## CO-431 — Mythos: promote the Universo domain to core + UniversoFactory seam
