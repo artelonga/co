@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-75",
+  "title": "Version reconstruction — replay op log to any timestamp, auto-changelog",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-75.md",
+  "branch": "feat/CO-75-version-reconstruction-replay-op-log-to-",
+  "merge_sha": "17ae0c26d28a78ce521fe9a43eba732393b86d2b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/236",
+    "number": 236
+  },
+  "started_at": "2026-04-26T00:00:00Z",
+  "merged_at": "2026-06-13T15:57:30Z",
+  "files_changed": 14,
+  "lines_added": 880,
+  "lines_removed": 3,
+  "labels": [
+    "version",
+    "history",
+    "changelog"
+  ],
+  "changelog_entry": "## CO-75 — Version reconstruction: replay to any timestamp + auto-changelog\n\nAny past state of any entry is now queryable by timestamp, and a universe-wide\nchangelog reconstructs itself from the op log with no manual maintenance — built\n**entirely on the pieces that already shipped** (CO-54 `entry_versions` and the\nCO-95 `entry_events` op log), with **no new table and no migration**.\n\n### Added\n\n- **`GET /api/v1/universes/:slug/entries/{*path}?as_of=<RFC3339>`** — reconstructs\n  an entry as it was at a past instant by replaying the CO-54 version history.\n  Returns `{ path, as_of, version, source_timestamp, is_current, frontmatter,\n  body }`. Reconstruction rule: each `entry_versions` row holds the content that\n  was *live until* its overwrite timestamp, so the state at `T` is the content\n  of the earliest version whose `timestamp > T`, falling back to the current\n  live entry when nothing changed after `T`. Visibility gates apply to historical\n  reads exactly as to live ones.\n- **`GET /api/v1/universes/:slug/entries/diff?path=…&from=<T1>&to=<T2>`** — the\n  op-level diff of one entry across an interval: changed frontmatter fields\n  (`before`/`after` per field, including adds/removes) plus a body-change flag\n  with both bodies. Reconstructs both endpoints, so it shows *only* the net\n  change in `[from, to]`. (Uses `?path=` like the sibling `/history` and\n  `/versions` routes, to avoid the greedy `entries/{*path}` wildcard.)\n- **`GET /api/v1/universes/:slug/changelog?since=<T>&until=<T>`** — an\n  auto-generated Keep-a-Changelog document for the whole universe. Aggregates the\n  `entry_events` op log over the window, classifying each op (`put` with no prior\n  body → **Added**, `put` with a prior body → **Changed**, `delete` → **Removed**)\n  and rendering its line via the content type's manifest template. Returns the\n  grouped lines plus rendered `markdown`.\n- **Manifest hook `changelog_summary`** on `ContentType` — a per-type template\n  for the changelog line, e.g. `changelog_summary: \"{title} marcado como {status}\"`.\n  `{field}` tokens substitute from the entry's frontmatter; `{path}`/`{title}`\n  are always available; absent → a default line (title or path). Backward\n  compatible (optional, defaults to `None`).\n\n### Notes\n\n- **No `entry_snapshots` table.** The CO-75 spec predated CO-54; per its\n  pre-flight reuse note, the snapshot store *is* `entry_versions` and the op\n  source *is* `entry_events`. Replay/diff/changelog are a thin, pure,\n  exhaustively unit-tested layer (`co-web/src/content/versioning/reconstruct.rs`)\n  over those, plus glue in `content::entries::routes`. Snapshot-per-write already\n  bounds replay cost; deep history beyond the CO-54 retention window (50 versions\n  / 90 days) is necessarily best-effort.\n\n### Why\n\nCloses the manifest-epic requirement to \"show entry as of T\" and to generate\nchangelogs from the durable op log instead of hand-maintaining them.",
+  "summary": "GIVEN CO-61 (sync protocol v1) defines an op log of all entry mutations, and the manifest epic must support \"show entry as of T\" and auto-generated changelogs, WHEN we add op replay infrastructure on ",
+  "co_auto_version": "0.1.0"
+}
