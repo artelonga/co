@@ -176,7 +176,7 @@ async fn test_list_messages_pagination() {
         for i in 0..5 {
             let body = format!("message {i}");
             storage
-                .post_chat_message(&room.id, &owner_id, &body, None)
+                .post_chat_message(&room.id, &owner_id, &body, None, None)
                 .unwrap();
         }
     }
@@ -237,7 +237,7 @@ async fn test_soft_deleted_message_tombstone() {
             .get_chat_room_by_slug("uni13", "general")
             .expect("general room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "original text", None)
+            .post_chat_message(&room.id, &owner_id, "original text", None, None)
             .unwrap();
         // Soft-delete it
         let now = chrono::Utc::now().to_rfc3339();

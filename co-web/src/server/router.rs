@@ -171,6 +171,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         crate::auth::require_auth,
     ));
 
+    // CO-204: admin-only chat origin telemetry. Auth is enforced by the
+    // `AdminUser` extractor in-handler (JWT `tier == "admin"`), so no
+    // middleware layer is needed here.
+    let chat_admin_api = crate::chat::chat_admin_router();
+
     let dm_api = crate::dm_routes::dm_router().layer(axum::middleware::from_fn_with_state(
         state.clone(),
         crate::auth::require_auth,
@@ -434,6 +439,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/gestao/security", security_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
             .nest("/api/v1/admin", dev_board_api)
+            // CO-204: chat origin telemetry (admin-gated via AdminUser extractor).
+            .nest("/api/v1/admin", chat_admin_api)
             .nest("/api/v1/universes", universe_api)
             .nest("/api/v1/universes", universe_invitation_api)
             .nest("/api/v1/universes", universe_invites_api)

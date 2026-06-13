@@ -61,7 +61,7 @@ async fn test_edit_within_window_by_author_200() {
             .get_chat_room_by_slug("uni18", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "original", None)
+            .post_chat_message(&room.id, &owner_id, "original", None, None)
             .unwrap()
     };
 
@@ -104,7 +104,7 @@ async fn test_edit_outside_window_403() {
             .get_chat_room_by_slug("uni19", "general")
             .expect("room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "old msg", None)
+            .post_chat_message(&room.id, &owner_id, "old msg", None, None)
             .unwrap();
         let old_ts = (chrono::Utc::now() - chrono::Duration::minutes(16)).to_rfc3339();
         storage
@@ -155,7 +155,7 @@ async fn test_edit_by_non_author_403() {
             .get_chat_room_by_slug("uni20", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "owner msg", None)
+            .post_chat_message(&room.id, &owner_id, "owner msg", None, None)
             .unwrap()
     };
 
@@ -195,7 +195,7 @@ async fn test_edit_deleted_message_410() {
             .get_chat_room_by_slug("uni21", "general")
             .expect("room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "msg", None)
+            .post_chat_message(&room.id, &owner_id, "msg", None, None)
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         storage
@@ -244,7 +244,7 @@ async fn test_edit_empty_body_400() {
             .get_chat_room_by_slug("uni22", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "msg", None)
+            .post_chat_message(&room.id, &owner_id, "msg", None, None)
             .unwrap()
     };
 

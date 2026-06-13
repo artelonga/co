@@ -86,6 +86,9 @@ pub struct ChatMessageWithAuthor {
     pub edited_at: Option<String>,
     pub deleted_at: Option<String>,
     pub reply_to_id: Option<String>,
+    /// CO-204: universe context the sender was browsing when posting.
+    /// `None` for DM rows with no origin and for pre-CO-204 messages.
+    pub origin_universe_key: Option<String>,
 }
 
 #[derive(Debug)]
@@ -447,12 +450,13 @@ impl Storage {
                 edited_at: row.get(6)?,
                 deleted_at,
                 reply_to_id: row.get(8)?,
+                origin_universe_key: row.get(9)?,
             })
         };
 
         let cols = "m.id, m.author_id, COALESCE(u.display_name, m.author_id), \
                     COALESCE(u.usuario, ''), m.body, m.created_at, m.edited_at, \
-                    m.deleted_at, m.reply_to_id \
+                    m.deleted_at, m.reply_to_id, m.origin_universe_key \
                     FROM chat_messages m LEFT JOIN users u ON m.author_id = u.id";
 
         if let Some(cat) = cursor_ts {
@@ -489,13 +493,23 @@ impl Storage {
         author_id: &str,
         body: &str,
         reply_to_id: Option<&str>,
+        origin_universe_key: Option<&str>,
     ) -> anyhow::Result<String> {
         let id = format!("msg_{}", nanoid::nanoid!(10));
         let now = Utc::now().to_rfc3339();
         self.conn.execute(
-            "INSERT INTO chat_messages (id, room_id, author_id, body, created_at, reply_to_id) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![id, room_id, author_id, body, now, reply_to_id],
+            "INSERT INTO chat_messages \
+             (id, room_id, author_id, body, created_at, reply_to_id, origin_universe_key) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                id,
+                room_id,
+                author_id,
+                body,
+                now,
+                reply_to_id,
+                origin_universe_key
+            ],
         )?;
         Ok(id)
     }
@@ -504,7 +518,7 @@ impl Storage {
     pub fn get_chat_message_by_id(&self, msg_id: &str) -> Option<ChatMessageWithAuthor> {
         let cols = "m.id, m.author_id, COALESCE(u.display_name, m.author_id), \
                     COALESCE(u.usuario, ''), m.body, m.created_at, m.edited_at, \
-                    m.deleted_at, m.reply_to_id \
+                    m.deleted_at, m.reply_to_id, m.origin_universe_key \
                     FROM chat_messages m LEFT JOIN users u ON m.author_id = u.id";
         let sql = format!("SELECT {cols} WHERE m.id = ?1");
         self.conn
@@ -533,9 +547,31 @@ impl Storage {
                     edited_at: row.get(6)?,
                     deleted_at,
                     reply_to_id: row.get(8)?,
+                    origin_universe_key: row.get(9)?,
                 })
             })
             .ok()
+    }
+
+    /// CO-204: aggregate message counts grouped by `origin_universe_key`.
+    ///
+    /// Returns `(origin, count)` pairs ordered by descending count. The `None`
+    /// origin (NULL — DM rows with no origin or pre-CO-204 messages) is folded
+    /// into a single bucket. Backs the admin origin-breakdown telemetry view.
+    pub fn chat_origin_breakdown(&self) -> Vec<(Option<String>, i64)> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT origin_universe_key, COUNT(*) AS n \
+                 FROM chat_messages \
+                 GROUP BY origin_universe_key \
+                 ORDER BY n DESC",
+            )
+            .expect("prepare chat_origin_breakdown");
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .expect("chat_origin_breakdown query")
+            .filter_map(|r| r.ok())
+            .collect()
     }
 
     /// Return `(display_name, usuario)` for a user, used for WS presence events.

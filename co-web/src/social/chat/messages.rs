@@ -28,6 +28,12 @@ pub struct ListMessagesQuery {
 pub struct PostMessageRequest {
     pub body: String,
     pub reply_to_id: Option<String>,
+    /// CO-204: universe context the sender was browsing when posting.
+    /// Optional — validated against the caller's membership/subscription and
+    /// silently dropped if the caller doesn't belong to it. Omitted ⇒ the
+    /// server defaults to the room's universe (NULL for DM rooms).
+    #[serde(default)]
+    pub origin_universe_key: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -186,8 +192,30 @@ pub async fn post_message_handler(
                 .ok_or_else(|| AppError::NotFound(format!("Room '{room_slug}' not found")))?
         };
 
+        // CO-204: resolve the origin universe (where the sender was browsing).
+        //   - explicit field → kept only if the caller is a member/subscriber
+        //     of that universe; otherwise silently dropped (privacy-respecting:
+        //     "I'm in private universe X" must not be leakable just by sending).
+        //   - omitted → default to the room's universe for universe rooms,
+        //     NULL for DM rooms (which have no universe context).
+        let is_dm_room = slug == "dm";
+        let origin_universe_key: Option<String> = match body.origin_universe_key.as_deref() {
+            Some(claimed) if resolve_role(&storage, claimed, &user_id.0).is_some() => {
+                Some(claimed.to_string())
+            }
+            Some(_) => None,
+            None if is_dm_room => None,
+            None => Some(slug.clone()),
+        };
+
         let msg_id = storage
-            .post_chat_message(&room.id, &user_id.0, &trimmed, body.reply_to_id.as_deref())
+            .post_chat_message(
+                &room.id,
+                &user_id.0,
+                &trimmed,
+                body.reply_to_id.as_deref(),
+                origin_universe_key.as_deref(),
+            )
             .map_err(|e| AppError::Internal(e.to_string()))?;
 
         // CO-199: create notifications for room members
