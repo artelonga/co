@@ -239,6 +239,29 @@ This doc captures concrete scenarios the platform supports — what the user see
 | 8. Multi-device local-first | CO-385 (v3.1), CO-386 (v3.1+), CO-384 |
 | 9. Add anything → KB | CO-367, CO-340, CO-146, CO-380 |
 | 10. Launch readiness | All of Wave 4 + DoD verification (CO-382) |
+| 11. A draft never leaks | CO-439 (allowlist-on-serve), CO-324, CO-161 |
+
+## Use case 11 — A draft never leaks (serve only the published)
+
+**Scenario:** Yuri keeps a private draft, `thrive market.md`, while working. It
+must be impossible for that draft to appear on the public site — even by
+accident, even if it lands in a served directory at deploy time.
+
+**The flow rule:** a draft is **born in the vault** (`~/projects/yuri`), never
+inside a served directory (e.g. `ArteLonga/yuri/`). It only crosses into a
+served universe through the drafts→published flow, which creates an **index
+entry**.
+
+**What's bounded service:** the surfaces server serves **only** content present
+in the published index — it serves the index, not the disk (CO-439). An
+unindexed file in a served directory resolves to **404**, never 200. The
+`.dockerignore` is a cheap second layer (defense in depth), but it is a denylist
+that fails open and is **not** the boundary — the allowlist is. The `audit_serve`
+tool reports any "servable but not published" file still on disk.
+
+**What's free brain:** the decision of *what* to publish and *when* — privacy is
+the user's choice; the service just makes "unpublished ⇒ unserved" structural.
+See [`serve-allowlist.md`](serve-allowlist.md).
 
 ## What stays out of the bounded service
 

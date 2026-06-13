@@ -45,6 +45,7 @@ fn resolve_asset(embed_path: &str, fs_path: Option<&std::path::Path>) -> Option<
 
 // --- Submodules ---
 
+pub mod allowlist;
 pub(crate) mod auth_handlers;
 pub mod crawl_routes;
 pub(crate) mod legacy;

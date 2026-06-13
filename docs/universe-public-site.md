@@ -143,6 +143,18 @@ The board remains at `co.artelonga.com.br/<slug>` (gated, unchanged).
   (Quartz static garden of founding docs + operacional + cultural)
 - `co.artelonga.com.br/grcsamazonia` → CO board for diretoria / subscribers
 
+## What reaches the surface — allowlist-on-serve (CO-439)
+
+Whichever surface a universe uses (board, subdomain SPA, or a static garden),
+only **published/indexed** content may reach it. The surfaces server serves the
+index, never a raw file on disk: an unindexed `draft.md` in a served directory
+is a **404**, not a 200. A draft is **born in the vault** (`~/projects/yuri`),
+never inside a served directory, and only crosses into a served universe via the
+drafts→published flow (which creates an index entry). See
+[`serve-allowlist.md`](serve-allowlist.md) for the boundary, the
+`.dockerignore` defense-in-depth layer, the flow rule, and the `audit_serve`
+leak-surface report.
+
 ## Alternative considered (lighter, not chosen)
 
 A server-side **reader mode** in co-web (SSR clean HTML at the subdomain, no board chrome)

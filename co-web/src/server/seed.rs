@@ -384,7 +384,7 @@ impl Storage {
             // (serve_deep_link checks for CHANGELOG.md in the entry index).
             ("CHANGELOG.md", SEED_CO_CHANGELOG_MD),
             // CO-305: public/index.md — lets /co/public/ (trailing slash) resolve
-            // to 200 HTML via the folder-level index.md candidate in entry_exists_for_subpath.
+            // to 200 HTML via the folder-level index.md candidate in the serve allowlist.
             ("public/index.md", SEED_CO_PUBLIC_INDEX_MD),
             ("public/seguranca.md", SEED_SEGURANCA_MD),
             ("public/seguranca-dependencias.md", SEED_SEGURANCA_DEPS_MD),
