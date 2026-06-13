@@ -224,6 +224,7 @@ impl Storage {
                  COALESCE(u.requires_login, 0), COALESCE(u.visibility, 'private') \
                  FROM universes u \
                  WHERE COALESCE(u.hidden, 0) = 0 \
+                   AND u.deleted_at IS NULL AND u.archived_at IS NULL \
                    AND ( \
                        u.owner_id = ?1 \
                        OR u.key IN ( \
@@ -468,6 +469,7 @@ impl Storage {
              'owner' AS role \
              FROM universes u \
              WHERE u.owner_id = ?1 AND COALESCE(u.hidden, 0) = 0 \
+               AND u.deleted_at IS NULL AND u.archived_at IS NULL \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
         ) {
@@ -498,6 +500,7 @@ impl Storage {
              JOIN universes u ON u.key = um.universe_key \
              WHERE um.user_id = ?1 AND um.role != 'owner' \
                AND COALESCE(u.hidden, 0) = 0 \
+               AND u.deleted_at IS NULL AND u.archived_at IS NULL \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
         ) {
@@ -530,6 +533,7 @@ impl Storage {
                AND u.owner_id != ?1 \
                AND u.key NOT IN (SELECT universe_key FROM universe_members WHERE user_id = ?1) \
                AND COALESCE(u.hidden, 0) = 0 \
+               AND u.deleted_at IS NULL AND u.archived_at IS NULL \
                AND u.is_template = 0 \
              ORDER BY u.name ASC",
         ) {
@@ -578,6 +582,7 @@ impl Storage {
              WHERE u.visibility = 'public-subscribable' \
                AND u.is_template = 0 \
                AND COALESCE(u.hidden, 0) = 0 \
+               AND u.deleted_at IS NULL AND u.archived_at IS NULL \
              ORDER BY u.content_count DESC, u.name ASC",
         ) {
             Ok(s) => s,
@@ -598,6 +603,80 @@ impl Storage {
             }
         };
         self.attach_parent_key(rows)
+    }
+
+    // --- CO-96: soft-delete + archive lifecycle ---
+
+    /// CO-96: send a universe to the trash (soft-delete). The row and all its
+    /// data survive — restorable within the 30-day window via the trash view —
+    /// but every listing query filters `deleted_at IS NULL`, so it vanishes
+    /// from the sidebar, public listings, search and discovery.
+    pub fn soft_delete_universe(&self, key: &str) -> rusqlite::Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE universes SET deleted_at = ?1 WHERE key = ?2 AND deleted_at IS NULL",
+            params![now, key],
+        )
+    }
+
+    /// CO-96: archive a universe (soft-hide). Like delete it disappears from
+    /// every listing, but it's framed as a reversible "put away" rather than a
+    /// trash action. Cleared by [`Storage::restore_universe`].
+    pub fn archive_universe(&self, key: &str) -> rusqlite::Result<usize> {
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "UPDATE universes SET archived_at = ?1 WHERE key = ?2 AND archived_at IS NULL",
+            params![now, key],
+        )
+    }
+
+    /// CO-96: restore a trashed or archived universe — clears both timestamps so
+    /// it reappears in the sidebar. Returns the number of rows affected (0 if the
+    /// universe wasn't actually deleted/archived).
+    pub fn restore_universe(&self, key: &str) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE universes SET deleted_at = NULL, archived_at = NULL WHERE key = ?1",
+            params![key],
+        )
+    }
+
+    /// CO-96: list the caller's trashed + archived universes for the recovery
+    /// ("trash") view. Returns `(key, name, description, deleted_at, archived_at)`
+    /// for every universe the user owns that is currently soft-deleted or
+    /// archived, newest action first.
+    #[allow(clippy::type_complexity)]
+    pub fn list_trashed_universes_for_owner(
+        &self,
+        user_id: &str,
+    ) -> Vec<(String, String, String, Option<String>, Option<String>)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, name, description, deleted_at, archived_at \
+             FROM universes \
+             WHERE owner_id = ?1 \
+               AND (deleted_at IS NOT NULL OR archived_at IS NOT NULL) \
+             ORDER BY COALESCE(deleted_at, archived_at) DESC",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_trashed_universes_for_owner prepare: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map(params![user_id], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2).unwrap_or_default(),
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+            ))
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_trashed_universes_for_owner query: {e}");
+                Vec::new()
+            }
+        }
     }
 
     // --- Universe Members ---

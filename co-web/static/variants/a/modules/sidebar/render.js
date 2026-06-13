@@ -9,6 +9,8 @@ import {
 // CO-311: Platforms section removed (was hardcoded cross-deployment links,
 // not actual universes — confused users). Tools section remains.
 import { renderTools } from './tools.js';
+// CO-96: right-click context menu (rename / visibility / duplicate / archive / delete).
+import { showUniverseContextMenu } from './universe-actions.js';
 
 // Callbacks injected by app.js to break circular deps
 let _bootAppForUniverse = () => {};
@@ -143,6 +145,13 @@ export function renderSidebar() {
             state.isTemplate = (slug === 'template');
             if (state.isTemplate) _showTemplateBanner(); else _hideTemplateBanner();
             await _bootAppForUniverse(slug);
+        });
+        // CO-96: right-click → per-universe context menu.
+        el.addEventListener('contextmenu', (e) => {
+            const slug = el.dataset.universe;
+            if (!slug) return;
+            e.preventDefault();
+            showUniverseContextMenu(slug, e.clientX, e.clientY);
         });
         el.addEventListener('dblclick', (e) => {
             e.stopPropagation();

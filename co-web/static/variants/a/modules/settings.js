@@ -2,6 +2,8 @@
 import { state } from './state.js';
 import { api } from './api.js';
 import { THEME_PALETTE_MAP, THEME_COMPANION, DARK_THEMES } from './constants.js';
+// CO-96: danger-zone delete reuses the type-the-key confirmation modal.
+import { openDeleteUniverseModal } from './sidebar/universe-actions.js';
 
 // ===== Toast system =====
 export function showToast(message, type) {
@@ -201,6 +203,19 @@ export function openSettingsPanel() {
 
     const config = state.universeConfig || {};
 
+    // CO-96: editable universe identity (name / description / visibility).
+    const info = state.universeInfo || {};
+    const nameInput = document.getElementById('settings-name');
+    const descInput = document.getElementById('settings-description');
+    const visSelect = document.getElementById('settings-visibility');
+    if (nameInput) nameInput.value = info.name || '';
+    if (descInput) descInput.value = info.description || '';
+    if (visSelect) {
+        // Map canonical stored visibility to the three user-facing options.
+        const v = info.visibility === 'public-subscribable' ? 'public' : (info.visibility || 'private');
+        visSelect.value = (v === 'public' || v === 'unlisted') ? v : 'private';
+    }
+
     const themeSelect = document.getElementById('settings-theme');
     const layoutSelect = document.getElementById('settings-layout');
     const fontHeadlineInput = document.getElementById('settings-font-headline');
@@ -248,6 +263,29 @@ export function setupSettingsPanel() {
     closeBtn && closeBtn.addEventListener('click', close);
     cancelBtn && cancelBtn.addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    // CO-96: danger zone — archive / delete.
+    const archiveBtn = document.getElementById('settings-archive');
+    if (archiveBtn) {
+        archiveBtn.addEventListener('click', async () => {
+            const slug = state.currentUniverseSlug;
+            if (!slug || slug === 'template') return;
+            const r = await api.archiveUniverse(slug);
+            if (r) {
+                showToast('Universo arquivado', 'success');
+                close();
+            }
+        });
+    }
+    const deleteBtn = document.getElementById('settings-delete');
+    if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+            const slug = state.currentUniverseSlug;
+            if (!slug || slug === 'template') return;
+            close();
+            openDeleteUniverseModal(slug, (state.universeInfo && state.universeInfo.name) || slug);
+        });
+    }
 
     const darkToggleBtn = document.getElementById('settings-dark-toggle');
     if (darkToggleBtn) {
@@ -303,6 +341,30 @@ export function setupSettingsPanel() {
 
         const saveBtn = document.getElementById('settings-save');
         if (saveBtn) saveBtn.disabled = true;
+
+        // CO-96: persist editable identity (name / description / visibility) via
+        // PUT, alongside the presentation config.
+        const nameInput = document.getElementById('settings-name');
+        const descInput = document.getElementById('settings-description');
+        const visSelect = document.getElementById('settings-visibility');
+        const info = state.universeInfo || {};
+        const patch = {};
+        if (nameInput && nameInput.value.trim() && nameInput.value.trim() !== (info.name || '')) {
+            patch.name = nameInput.value.trim();
+        }
+        if (descInput && descInput.value !== (info.description || '')) {
+            patch.description = descInput.value;
+        }
+        if (visSelect) {
+            const currentVis = info.visibility === 'public-subscribable' ? 'public' : (info.visibility || 'private');
+            if (visSelect.value !== currentVis) patch.visibility = visSelect.value;
+        }
+        if (Object.keys(patch).length && slug) {
+            const updated = await api.updateUniverse(slug, patch);
+            if (updated) {
+                state.universeInfo = { ...info, name: updated.name, description: updated.description, visibility: updated.visibility };
+            }
+        }
 
         const result = await api.updateUniverseConfig(slug, update);
         if (saveBtn) saveBtn.disabled = false;

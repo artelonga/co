@@ -6768,3 +6768,71 @@ body.co-single-universe-mode .hamburger-btn {
     .header-overflow-menu { display: none; }
 }
 .header-overflow-menu:not(.hidden) { display: flex; }
+
+/* ===== CO-96: Universe CRUD — context menu + trash view ===== */
+.context-menu {
+    position: fixed;
+    z-index: 1000;
+    min-width: 180px;
+    padding: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    display: flex;
+    flex-direction: column;
+    font-size: 13px;
+}
+.context-menu.hidden { display: none; }
+.context-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 7px 10px;
+    border: none;
+    background: none;
+    color: var(--text, #1f2937);
+    cursor: pointer;
+    border-radius: 5px;
+    font-size: 13px;
+}
+.context-menu-item:hover { background: var(--hover-bg, rgba(0, 0, 0, 0.06)); }
+.context-menu-item.context-menu-sub { padding-left: 22px; opacity: 0.92; }
+.context-menu-item.context-menu-danger { color: var(--danger); }
+.context-menu-item.context-menu-danger:hover { background: var(--danger); color: #fff; }
+.context-menu-sep {
+    height: 1px;
+    margin: 4px 6px;
+    background: var(--border);
+}
+.context-menu-group-label {
+    padding: 6px 10px 2px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted, #9ca3af);
+}
+
+.trash-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.trash-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+.trash-row-info { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.trash-row-name { font-weight: 500; }
+.trash-row-badge {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #9ca3af);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 7px;
+}
+.sidebar-trash { opacity: 0.65; }
+.sidebar-trash:hover { opacity: 1; }

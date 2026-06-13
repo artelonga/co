@@ -4,6 +4,7 @@ mod access;
 mod config;
 mod crud;
 mod federation;
+mod lifecycle;
 mod rate_limit_vault;
 mod reparent;
 mod source;

@@ -87,9 +87,12 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | POST | `/api/v1/universes` | authed | Create universe (CO-444: API-token or session; body may set `visibility` ∈ private/public/unlisted and `parent_key`) |
 | GET | `/api/v1/universes/search` | anon | Search public universes |
 | GET | `/api/v1/universes/public` | anon | Public universe directory |
+| GET | `/api/v1/universes/trash` | authed | List caller's trashed + archived universes (CO-96) |
 | GET | `/api/v1/universes/{slug}` | visibility | Universe info |
 | PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility/parent_key (CO-423; CO-444 visibility ∈ private/public/unlisted, API-token accepted) |
-| DELETE | `/api/v1/universes/{slug}` | owner | Delete universe |
+| DELETE | `/api/v1/universes/{slug}` | owner | Soft-delete universe — sets `deleted_at`, recoverable via trash (CO-96) |
+| POST | `/api/v1/universes/{slug}/archive` | owner | Archive (soft-hide) universe (CO-96) |
+| POST | `/api/v1/universes/{slug}/restore` | owner | Restore a trashed/archived universe (CO-96) |
 | GET | `/api/v1/universes/{slug}/config` | visibility | Universe config |
 | PUT | `/api/v1/universes/{slug}/config` | owner | Update config |
 | PATCH | `/api/v1/universes/{slug}/source` | owner | Patch universe source config |
