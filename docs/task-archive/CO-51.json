@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-51",
+  "title": "CLI sync — co sync pull/push/watch with conflict resolution",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-51.md",
+  "branch": "feat/CO-51-cli-sync-co-sync-pull-push-watch-with-co",
+  "merge_sha": "8cc0b8669942e3e8f348f2df09fe9843fc4a4c51",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/237",
+    "number": 237
+  },
+  "started_at": "2026-04-13T00:00:00Z",
+  "merged_at": "2026-06-13T16:32:15Z",
+  "files_changed": 7,
+  "lines_added": 1867,
+  "lines_removed": 1,
+  "labels": [
+    "sync",
+    "cli",
+    "conflict-resolution"
+  ],
+  "changelog_entry": "## CO-51 — CLI sync — co sync pull/push/watch with conflict resolution\n\nAdded `co login` and the `co sync` command family for Google-Drive-like local\nediting of a universe's Vault.\n\n- `co login` — authenticate and store a 90-day API token (alias for\n  `co auth login --save-token`).\n- `co sync pull <universe>` — download all entries to `~/Co/<universe>/`.\n- `co sync push <universe>` — upload changed local files (no-op when clean).\n- `co sync status <universe>` — show the new/modified/deleted/conflict diff\n  between local and remote.\n- `co sync watch <universe>` — poll for local changes and auto-push (debounced,\n  default 2s, `--interval` override).\n- `co sync resolve <file>` — finalize a manual conflict and push the result.\n\nSync state lives in `<universe>/.co/sync.json` (`{ files: { path: { hash,\nmtime, remote_hash } } }`) with base snapshots under `.co/base/` for 3-way\nmerges. The diff classifies each path against the last-synced base\n(local-only → push, remote-only → pull, both → conflict).\n\nConflict strategies (configurable in `~/.config/co/sync.yaml` or `--strategy`):\n`last-write-wins` (default), `local-wins`, `remote-wins`, `manual`\n(writes `.local`/`.remote`/`.base`), and `merge` (line-level 3-way merge,\nfalling back to `manual` on overlapping hunks).\n\nSafety: an `O_EXCL` lockfile (`.co/sync.lock`) blocks concurrent syncs;\n`sync.json` is written atomically (temp + rename) and only after each successful\nfile op, so a crash mid-sync never corrupts state and the next run recovers.\n\n### Why\n\nCO-35's Vault REST API gives file CRUD; this layers a stateful, conflict-aware\nsync client on top so a user can edit a universe locally in any editor and\nreconcile with the server, the way Google Drive's desktop client does.",
+  "summary": "GIVEN the Vault REST API (CO-35) provides file CRUD and the user wants Google Drive-like local editing, WHEN I implement `co sync` commands with proper conflict resolution, THEN:",
+  "co_auto_version": "0.1.0"
+}
