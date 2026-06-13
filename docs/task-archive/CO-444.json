@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-444",
+  "title": "Federation API: token-auth universe creation + visibility + invites + public-subscribe (CO side of YG-138)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-444.md",
+  "branch": "feat/CO-444-federation-api-token-auth-universe-creat",
+  "merge_sha": "3ce8951b8aada0843b1f9fd079703ea12782f185",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/232",
+    "number": 232
+  },
+  "started_at": "2026-06-13T00:00:00Z",
+  "merged_at": "2026-06-13T13:24:54Z",
+  "files_changed": 12,
+  "lines_added": 981,
+  "lines_removed": 33,
+  "labels": [
+    "type:feat",
+    "module:collab",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-444 — Federation API: token-auth universe creation + visibility + invites + public-subscribe (CO side of YG-138)\n\nA federated-creation surface so an external service (Yggdrasil, YG-138) — or any\nclient holding a user's API token — can stand up a universe in CO without internal\nseed/clone code.\n\n### Added / changed\n\n- **Create accepts API tokens.** `POST /api/v1/universes` is now behind\n  `require_auth_with_token` (was session-only, the 401 that blocked the\n  claude-code import in CO-438). The body gained `visibility` and `parent_key`:\n  `{ key, name, description?, visibility?, parent_key? }`. All validation runs\n  before the row is inserted, so a bad `visibility`/`parent_key` never leaves an\n  orphan universe; a taken key still 409s.\n- **Visibility vocabulary.** `visibility` ∈ `private | public | unlisted`\n  (`public` stored canonically as `public-subscribable`, still accepted as an\n  alias). `unlisted` is a new value: readable by anyone with the link, excluded\n  from discovery/search, not subscribable, writable only by owner/members. The\n  `universe_visibility_gate` and `check_universe_access` honour it consistently.\n  `PUT /api/v1/universes/{key}` accepts the same vocabulary (and an API token).\n- **Token↔session parity.** The whole universe management router accepts an API\n  token or a session JWT, resolving to the same owner. `extract_optional_user_id`\n  now resolves both credentials (it was JWT-only, which 401'd token callers on\n  `PUT`/`DELETE`).\n- **Invites (`/invites`).** `POST/GET /api/v1/universes/{key}/invites`\n  (owner/admin), `DELETE …/invites/{token}` to revoke, and\n  `POST …/invites/{token}/accept` to accept (universe-scoped). Reuses the CO-188\n  invitation storage; `handle` is accepted as an alias for `usuario`. These\n  routes accept an API token.\n- **Public subscribe.** `POST/DELETE /api/v1/universes/{key}/subscribe` already\n  existed; it now also accepts an API token via the same parity change.\n\n### Why\n\nYG-138 left the Yggdrasil side waiting on these routes so \"criar universo\"\n(YG-126) becomes a federated universe in CO — with invite/visibility UI — instead\nof half-implementing the CO side blind. Additive, non-breaking: new routes and a\nnew `unlisted` value, nothing removed. No MCP; no hardcoded universe→repo\nmapping (everything comes from the request payload / DB).\n\n### Notes\n\n- No migration: the `universes.visibility` column, `subscriptions`,\n  `universe_members` and `universe_invitations` (CO-188) tables all already exist.\n- Routes added to `docs/architecture/api-catalog.md` + `openapi.yaml` regenerated\n  (no drift). Integration tests cover token-auth create + correct owner,\n  visibility, parent_key, 409, invites create/list/revoke/accept, and subscribe.",
+  "summary": "As Um serviço externo (Yggdrasil, e qualquer cliente com API token de um usuário), QUERO criar um universo no CO, definir visibilidade, convidar membros e abrir assinatura pública — **via API com toke",
+  "co_auto_version": "0.1.0"
+}
