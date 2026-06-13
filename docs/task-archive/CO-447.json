@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-447",
+  "title": "Security scanner CWE-89 refinement — require SQL context, stop flagging HTTP verbs / log strings",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-447.md",
+  "branch": "feat/CO-447-security-scanner-cwe-89-refinement-requi",
+  "merge_sha": "f4a7ea158c2f720df3d2b1e1209ca7bfbf05d59b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/241",
+    "number": 241
+  },
+  "started_at": "2026-06-13T00:00:00Z",
+  "merged_at": "2026-06-13T22:12:52Z",
+  "files_changed": 5,
+  "lines_added": 183,
+  "lines_removed": 36,
+  "labels": [
+    "type:fix",
+    "ci",
+    "security",
+    "dx"
+  ],
+  "changelog_entry": "## CO-447 — Security scanner CWE-89 refinement — require SQL context, stop flagging HTTP verbs / log strings\n\nThe CWE-89 (SQL injection) heuristic now requires real SQL context before it\nfires. A `format!` string is only flagged when it opens with a SQL verb\n(`SELECT`/`INSERT`/`UPDATE`/`DELETE`) **and** the same string literal also\ncontains a SQL clause keyword (`FROM`/`INTO`/`SET`/`WHERE`/`VALUES`).\n\n- Refined the `security-audit` grep in `.github/workflows/pr-route.yml` to\n  `format!\\(\"(SELECT|INSERT|UPDATE|DELETE)[^\"]*(FROM|INTO|SET|WHERE|VALUES)`,\n  with a comment documenting what triggers it and why.\n- Refined the Rust scanner in `co-web/src/security/audit/local_grep.rs`: the\n  four bare-substring SQL patterns are replaced by a context-aware\n  `sql_format_verb` helper kept in lock-step with the workflow regex.\n- Added scanner tests covering an HTTP-verb error string and a log string (now\n  pass), genuine interpolated SQL (still blocks), and the safe const-columns +\n  bind-params pattern (never flagged).\n\n### Why\nIn the CO-445 wave the bare-verb heuristic gave false positives on strings that\nare not SQL — `format!(\"DELETE vault/{path}\")` (a DELETE *HTTP-verb* error\nstring, CO-51) and log lines like `format!(\"UPDATE failed for {id}\")` — costing\nCI cycles to reword harmless strings. This is the \"A\" half of the owner's CO-433\ndecision (refine the scanner). CWE-79/innerHTML is intentionally out of scope.",
+  "summary": "As Um dev que abre PRs, QUERO que o gate `security-audit` (pr-route.yml) só acuse SQL de verdade, PARA não gastar ciclos de CI reescrevendo strings inofensivas.",
+  "co_auto_version": "0.1.0"
+}
