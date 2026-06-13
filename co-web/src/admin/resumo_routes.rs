@@ -18,6 +18,7 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::admin::admin_routes::{check_admin_email, extract_claims};
+use crate::billing::storage::{ConversionKpi, query_conversion_kpi};
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -94,6 +95,8 @@ pub struct ResumoResponse {
     pub app_versao: &'static str,
     /// CO-389: diagnostic — counts from event_log for comunicacao overlay vs repo sync.
     pub comunicacao_overlay: ComunicacaoOverlayStats,
+    /// CO-366: BaaS `t_register → t_payment` conversion KPI.
+    pub conversion: ConversionKpi,
 }
 
 #[derive(Debug, Serialize)]
@@ -314,6 +317,22 @@ fn query_resumo_from_db(
     // CO-389: count overlay-driven vs poll-driven comunicacao upserts from event_log.
     let comunicacao_overlay = query_comunicacao_overlay_stats(conn);
 
+    // CO-366: conversion KPI. The billing columns exist in prod (migration v77);
+    // a query error here means a genuinely broken schema, so log it loudly and
+    // fall back to zeros rather than failing the whole dashboard.
+    let conversion = query_conversion_kpi(conn).unwrap_or_else(|e| {
+        tracing::warn!("resumo: conversion KPI query failed: {e}");
+        ConversionKpi {
+            registered_7d: 0,
+            registered_30d: 0,
+            registered_90d: 0,
+            total_users: 0,
+            paid_users: 0,
+            conversion_rate: 0.0,
+            mean_conversion_seconds: None,
+        }
+    });
+
     ResumoResponse {
         totals: ResumoTotals {
             users,
@@ -332,6 +351,7 @@ fn query_resumo_from_db(
         schema_versao,
         app_versao: env!("CARGO_PKG_VERSION"),
         comunicacao_overlay,
+        conversion,
     }
 }
 
@@ -534,7 +554,9 @@ mod tests {
         conn.execute_batch(
             "CREATE TABLE users (
                 id TEXT PRIMARY KEY, email TEXT, display_name TEXT,
-                tier TEXT, created_at TEXT, password_hash TEXT
+                tier TEXT, created_at TEXT, password_hash TEXT,
+                tier_paid_at TEXT, tier_plan TEXT,
+                billing_provider TEXT, billing_external_id TEXT
             );
             CREATE TABLE universes (
                 key TEXT PRIMARY KEY, name TEXT, owner_id TEXT,
@@ -594,7 +616,8 @@ mod tests {
     fn test_resumo_counts_users_universes_entries() {
         let conn = create_test_db();
         conn.execute_batch(
-            "INSERT INTO users VALUES ('u1','a@b.com','A','player',datetime('now'),NULL);
+            "INSERT INTO users (id,email,display_name,tier,created_at)
+                VALUES ('u1','a@b.com','A','player',datetime('now'));
              INSERT INTO universes VALUES ('uni1','Uni 1','u1',1,0,0,datetime('now'));
              INSERT INTO entries VALUES (NULL,'uni1','t.md','task','T',datetime('now'));
              INSERT INTO entries VALUES (NULL,'uni1','t2.md','task','T2',datetime('now'));",
@@ -604,6 +627,22 @@ mod tests {
         assert_eq!(r.totals.users, 1);
         assert_eq!(r.totals.universes, 1);
         assert_eq!(r.totals.entries, 2);
+    }
+
+    #[test]
+    fn test_resumo_includes_conversion_kpi() {
+        let conn = create_test_db();
+        conn.execute_batch(
+            "INSERT INTO users (id,email,display_name,tier,created_at)
+                VALUES ('u1','a@b.com','A','player',datetime('now'));
+             INSERT INTO users (id,email,display_name,tier,created_at,tier_paid_at,tier_plan)
+                VALUES ('u2','c@d.com','C','paid',datetime('now'),datetime('now'),'pro');",
+        )
+        .unwrap();
+        let r = query_resumo_from_db(&conn, 0, 0);
+        assert_eq!(r.conversion.total_users, 2);
+        assert_eq!(r.conversion.paid_users, 1);
+        assert!((r.conversion.conversion_rate - 0.5).abs() < 1e-9);
     }
 
     #[test]

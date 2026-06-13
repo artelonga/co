@@ -61,6 +61,8 @@ tags:
     description: "admin endpoints"
   - name: "gestao"
     description: "gestao endpoints"
+  - name: "billing"
+    description: "billing endpoints"
   - name: "storage"
     description: "storage endpoints"
   - name: "invitations"
@@ -927,6 +929,21 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/billing/webhook/{provider}:
+    post:
+      tags: ["billing"]
+      summary: "Provider webhook — verifies signature, flips tier on success"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/blobs:
     post:
       tags: ["assets"]
@@ -1559,6 +1576,21 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/gestao/users/{id}/mark-paid:
+    post:
+      tags: ["billing"]
+      summary: "Manual provider — mark a user paid"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/gestao/validar:
     post:
       tags: ["gestao"]
@@ -1794,6 +1826,24 @@ paths:
     post:
       tags: ["leads"]
       summary: "Submit interest (public)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/billing/checkout:
+    post:
+      tags: ["billing"]
+      summary: "Start checkout for `{ plan }`, returns `{ url, session_id, expires_at, provider }`"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/me/billing/status:
+    get:
+      tags: ["billing"]
+      summary: "Current `{ tier, plan, paid_at, billing_provider }`"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK
