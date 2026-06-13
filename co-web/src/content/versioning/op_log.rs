@@ -1178,10 +1178,7 @@ fn refresh_content_count(state: &AppState, universe_key: &str) {
             .ok();
         if let Some(n) = actual_count {
             let storage = state.core.storage.lock();
-            if let Err(e) = storage.conn().execute(
-                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-                params![n, universe_key],
-            ) {
+            if let Err(e) = storage.set_universe_content_count(universe_key, n) {
                 tracing::warn!("refresh_content_count failed for {universe_key}: {e}");
             }
         }

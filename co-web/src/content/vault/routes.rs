@@ -557,10 +557,7 @@ async fn put_vault_binary(
             .ok();
         if let Some(n) = actual_count {
             let meta = lock_storage(state);
-            let _ = meta.conn().execute(
-                "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-                rusqlite::params![n, universe_key],
-            );
+            let _ = meta.set_universe_content_count(universe_key, n);
         }
     }
 
@@ -710,10 +707,7 @@ pub(crate) fn write_vault_entry(
     // per-universe SQLite (indexed by universe_key) and idempotent.
     if let Some(n) = actual_count {
         let meta = state.core.storage.lock();
-        let _ = meta.conn().execute(
-            "UPDATE universes SET content_count = ?1 WHERE key = ?2",
-            rusqlite::params![n, universe_key],
-        );
+        let _ = meta.set_universe_content_count(universe_key, n);
     }
 
     // CO-380: publish vault.write to EDA bus for observability.

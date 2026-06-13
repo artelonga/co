@@ -17,29 +17,16 @@ use axum::{
     routing::{get, post, put},
 };
 use chrono::Utc;
-use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::auth::extractors::AuthedUser;
 use crate::error::AppError;
 use crate::server::AppState;
+use crate::storage::WorkspaceState;
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct WorkspaceState {
-    pub id: String,
-    pub universe_key: String,
-    pub workspace_slug: String,
-    pub user_id: String,
-    pub layout_json: String,
-    pub is_public: bool,
-    pub share_token: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct UpsertStateBody {
@@ -78,21 +65,9 @@ async fn get_workspace_state(
     };
 
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                is_public, share_token, created_at, updated_at \
-         FROM workspace_states \
-         WHERE universe_key = ?1 AND workspace_slug = ?2 AND user_id = ?3",
-        params![universe_key, workspace_slug, user_id],
-        row_to_state,
-    );
-
-    match result {
-        Ok(ws) => Ok(Json(ws).into_response()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            Ok(Json(empty_state(&universe_key, &workspace_slug)).into_response())
-        }
-        Err(e) => Err(AppError::from(e)),
+    match storage.workspace_state_for_user(&universe_key, &workspace_slug, &user_id)? {
+        Some(ws) => Ok(Json(ws).into_response()),
+        None => Ok(Json(empty_state(&universe_key, &workspace_slug)).into_response()),
     }
 }
 
@@ -105,23 +80,12 @@ async fn get_public_workspace_state(
     Path((universe_key, workspace_slug)): Path<(String, String)>,
 ) -> Result<Response, AppError> {
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                is_public, share_token, created_at, updated_at \
-         FROM workspace_states \
-         WHERE universe_key = ?1 AND workspace_slug = ?2 AND is_public = 1 \
-         ORDER BY updated_at DESC LIMIT 1",
-        params![universe_key, workspace_slug],
-        row_to_state,
-    );
-
-    match result {
-        Ok(ws) => Ok(Json(ws).into_response()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(err_json(
+    match storage.public_workspace_state(&universe_key, &workspace_slug)? {
+        Some(ws) => Ok(Json(ws).into_response()),
+        None => Ok(err_json(
             StatusCode::NOT_FOUND,
             "no public workspace state found",
         )),
-        Err(e) => Err(AppError::from(e)),
     }
 }
 
@@ -145,28 +109,17 @@ async fn upsert_workspace_state(
 
     let now = Utc::now().to_rfc3339();
     let id = uuid::Uuid::new_v4().to_string();
-    let is_public_int: i64 = if body.is_public { 1 } else { 0 };
 
     {
         let storage = state.core.storage.lock();
-        storage.conn().execute(
-            "INSERT INTO workspace_states \
-             (id, universe_key, workspace_slug, user_id, layout_json, is_public, \
-              created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7) \
-             ON CONFLICT (universe_key, workspace_slug, user_id) DO UPDATE SET \
-               layout_json = excluded.layout_json, \
-               is_public   = excluded.is_public, \
-               updated_at  = excluded.updated_at",
-            params![
-                id,
-                universe_key,
-                workspace_slug,
-                user.user_id,
-                body.layout_json,
-                is_public_int,
-                now,
-            ],
+        storage.upsert_workspace_state(
+            &id,
+            &universe_key,
+            &workspace_slug,
+            &user.user_id,
+            &body.layout_json,
+            body.is_public,
+            &now,
         )?;
     }
 
@@ -190,11 +143,12 @@ async fn share_workspace_state(
 
     let rows = {
         let storage = state.core.storage.lock();
-        storage.conn().execute(
-            "UPDATE workspace_states \
-             SET share_token = ?1, updated_at = ?2 \
-             WHERE universe_key = ?3 AND workspace_slug = ?4 AND user_id = ?5",
-            params![token, now, universe_key, workspace_slug, user.user_id],
+        storage.set_workspace_share_token(
+            &token,
+            &now,
+            &universe_key,
+            &workspace_slug,
+            &user.user_id,
         )?
     };
 
@@ -216,20 +170,9 @@ async fn get_by_share_token(
     Path(token): Path<String>,
 ) -> Result<Response, AppError> {
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                is_public, share_token, created_at, updated_at \
-         FROM workspace_states WHERE share_token = ?1",
-        params![token],
-        row_to_state,
-    );
-
-    match result {
-        Ok(ws) => Ok(Json(ws).into_response()),
-        Err(rusqlite::Error::QueryReturnedNoRows) => {
-            Ok(err_json(StatusCode::NOT_FOUND, "share token not found"))
-        }
-        Err(e) => Err(AppError::from(e)),
+    match storage.workspace_state_by_share_token(&token)? {
+        Some(ws) => Ok(Json(ws).into_response()),
+        None => Ok(err_json(StatusCode::NOT_FOUND, "share token not found")),
     }
 }
 
@@ -255,33 +198,7 @@ fn fetch_state_by_user(
     user_id: &str,
 ) -> Result<Option<WorkspaceState>, AppError> {
     let storage = state.core.storage.lock();
-    let result = storage.conn().query_row(
-        "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                is_public, share_token, created_at, updated_at \
-         FROM workspace_states \
-         WHERE universe_key = ?1 AND workspace_slug = ?2 AND user_id = ?3",
-        params![universe_key, workspace_slug, user_id],
-        row_to_state,
-    );
-    match result {
-        Ok(ws) => Ok(Some(ws)),
-        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
-        Err(e) => Err(AppError::from(e)),
-    }
-}
-
-fn row_to_state(row: &rusqlite::Row<'_>) -> rusqlite::Result<WorkspaceState> {
-    Ok(WorkspaceState {
-        id: row.get(0)?,
-        universe_key: row.get(1)?,
-        workspace_slug: row.get(2)?,
-        user_id: row.get(3)?,
-        layout_json: row.get(4)?,
-        is_public: row.get::<_, i64>(5)? != 0,
-        share_token: row.get(6)?,
-        created_at: row.get(7)?,
-        updated_at: row.get(8)?,
-    })
+    Ok(storage.workspace_state_for_user(universe_key, workspace_slug, user_id)?)
 }
 
 fn empty_state(universe_key: &str, workspace_slug: &str) -> serde_json::Value {
@@ -338,7 +255,8 @@ pub fn share_router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
+    use crate::storage::workspace_states::row_to_state;
+    use rusqlite::{Connection, params};
 
     fn setup_db() -> Connection {
         let conn = Connection::open_in_memory().unwrap();
