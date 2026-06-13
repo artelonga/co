@@ -10,6 +10,7 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+#[cfg(test)]
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
@@ -136,20 +137,14 @@ fn insert_pbi(storage: &Mutex<Storage>, fields: &PbiFields) -> rusqlite::Result<
     let body_hash = format!("{:x}", Sha256::digest(pbi_body.as_bytes()));
 
     let storage = storage.lock();
-    storage.conn().execute(
-        "INSERT OR IGNORE INTO entries \
-         (path, universe_key, entry_type, title, frontmatter_json, body, body_hash, \
-          created_at, updated_at) \
-         VALUES (?1, ?2, 'pbi', ?3, ?4, ?5, ?6, ?7, ?7)",
-        params![
-            fields.pbi_path(),
-            PBI_UNIVERSE_KEY,
-            fields.title(),
-            fields.frontmatter_json(),
-            pbi_body,
-            body_hash,
-            now,
-        ],
+    storage.insert_security_pbi(
+        &fields.pbi_path(),
+        PBI_UNIVERSE_KEY,
+        &fields.title(),
+        &fields.frontmatter_json(),
+        &pbi_body,
+        &body_hash,
+        &now,
     )
 }
 

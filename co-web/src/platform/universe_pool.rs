@@ -466,6 +466,27 @@ impl UniversePool {
     pub fn open_count(&self) -> usize {
         self.inner.lock().expect("pool lock").cache.len()
     }
+
+    /// CO-433: open a per-universe [`EntryStore`] — the pool is the factory over
+    /// the storage backend. SQLite ([`SqliteEntryStore`]) is the default impl
+    /// behind the trait; a future S3/Postgres backend plugs in here without
+    /// touching handlers. Returns `Err(PoolError)` on a per-universe open
+    /// failure (never panics), mirroring [`try_get_or_open`].
+    ///
+    /// Because each universe's store wraps that universe's own
+    /// `Arc<Mutex<Connection>>`, content writes to distinct universes never
+    /// serialize against each other or against the global `Mutex<Storage>`.
+    ///
+    /// [`EntryStore`]: crate::repository::EntryStore
+    /// [`SqliteEntryStore`]: crate::repository::SqliteEntryStore
+    /// [`try_get_or_open`]: Self::try_get_or_open
+    pub fn entry_store(
+        &self,
+        key: &str,
+    ) -> Result<Arc<dyn crate::repository::EntryStore>, PoolError> {
+        let conn = self.try_get_or_open(key)?;
+        Ok(Arc::new(crate::repository::SqliteEntryStore::new(key, conn)))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1187,5 +1208,60 @@ mod degradation_tests {
         let pool = UniversePool::new(dir.path(), 16);
         let _conn = pool.get_or_open("ok");
         assert_eq!(pool.open_count(), 1);
+    }
+
+    /// CO-433 (per-universe sharding): a write held open on universe A must NOT
+    /// block a concurrent write to universe B. Each universe owns its own
+    /// `Arc<Mutex<Connection>>`, so they shard rather than serialize behind one
+    /// global lock.
+    ///
+    /// Proof: the main thread holds universe A's connection lock for the whole
+    /// test, then a spawned thread performs a full write against universe B and
+    /// signals completion. If B's write were serialized behind A's lock, the
+    /// `recv_timeout` would elapse (deadlock); it returns promptly instead.
+    #[test]
+    fn writes_to_two_universes_do_not_serialize() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let pool = Arc::new(UniversePool::new(dir.path(), 16));
+
+        // Hold universe A's connection lock for the entire test.
+        let conn_a = pool.try_get_or_open("uni-a").unwrap();
+        let guard_a = conn_a.lock().expect("lock A");
+
+        // Spawn a thread that writes to universe B via its own EntryStore.
+        let (tx, rx) = mpsc::channel();
+        let pool_b = Arc::clone(&pool);
+        let handle = std::thread::spawn(move || {
+            let store_b = pool_b.entry_store("uni-b").expect("open B store");
+            let entry = crate::domain::EntryDomain {
+                path: "n.md".into(),
+                universe_key: "uni-b".into(),
+                entry_type: "note".into(),
+                title: Some("n".into()),
+                frontmatter: serde_json::json!({"title": "n"}),
+                body: "b".into(),
+                body_hash: String::new(),
+                created_at: None,
+                updated_at: None,
+            };
+            store_b.upsert(&entry).expect("write B");
+            tx.send(()).expect("signal");
+        });
+
+        // B's write must complete while A's lock is still held.
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("universe B write blocked on universe A's lock — universes are serializing");
+
+        handle.join().unwrap();
+        drop(guard_a);
+
+        // B's write actually landed in B (and never touched A).
+        let store_b = pool.entry_store("uni-b").unwrap();
+        assert!(store_b.get("n.md").unwrap().is_some());
+        let store_a = pool.entry_store("uni-a").unwrap();
+        assert!(store_a.get("n.md").unwrap().is_none());
     }
 }

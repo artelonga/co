@@ -41,19 +41,14 @@ pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
 
             {
                 let storage = storage.lock();
-                if let Err(e) = storage.conn().execute(
-                    "INSERT OR IGNORE INTO task_status_log \
-                     (id, universe_key, entry_path, status_from, status_to, trigger, triggered_at) \
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    rusqlite::params![
-                        log_id,
-                        universe_key,
-                        path,
-                        status_from,
-                        status_to,
-                        trigger,
-                        triggered_at,
-                    ],
+                if let Err(e) = storage.insert_task_status_log(
+                    &log_id,
+                    &universe_key,
+                    &path,
+                    status_from.as_deref(),
+                    &status_to,
+                    &trigger,
+                    &triggered_at,
                 ) {
                     warn!("EDA: DeliveryPipelinePersistor INSERT failed: {e}");
                 }

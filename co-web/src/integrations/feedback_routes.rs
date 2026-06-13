@@ -305,10 +305,7 @@ fn maybe_fetch_github_title(
     tokio::spawn(async move {
         if let Some(title) = fetch_github_title(&linked_ref).await {
             let storage = state.core.storage.lock();
-            let _ = storage.conn().execute(
-                "UPDATE feedback SET linked_summary = ?1 WHERE id = ?2 AND linked_summary IS NULL",
-                rusqlite::params![title, id],
-            );
+            let _ = storage.set_feedback_linked_summary(&id, &title);
         }
     });
 }

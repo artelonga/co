@@ -1075,13 +1075,7 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
     // them. The lookup walks `quilombo_usuarios.usuario` and resolves
     // through `linked_co_user_id` to the canonical CO user id.
     let normalized = trimmed.to_lowercase();
-    if let Ok(linked) = storage.conn().query_row(
-        "SELECT linked_co_user_id FROM quilombo_usuarios \
-         WHERE usuario = ?1 AND linked_co_user_id IS NOT NULL",
-        rusqlite::params![normalized],
-        |row| row.get::<_, Option<String>>(0),
-    ) && let Some(co_id) = linked
-    {
+    if let Some(co_id) = storage.find_linked_co_user_by_quilombo_usuario(&normalized) {
         tracing::info!("find_user_for_recovery: matched linked quilombo usuario → {co_id}");
         return Some(co_id);
     }
@@ -1091,12 +1085,7 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
     // signup — has a `quilombo_usuarios` row with no `linked_co_user_id`,
     // so the linked-only query above misses them. Provision the CO side on
     // demand using the same chain CO-172 Phase 1 runs at signup.
-    if let Ok(q_id) = storage.conn().query_row(
-        "SELECT id FROM quilombo_usuarios \
-         WHERE usuario = ?1 AND (linked_co_user_id IS NULL OR linked_co_user_id = '')",
-        rusqlite::params![normalized],
-        |row| row.get::<_, String>(0),
-    ) {
+    if let Some(q_id) = storage.find_unlinked_quilombo_id_by_usuario(&normalized) {
         tracing::info!(
             "find_user_for_recovery: matched unlinked quilombo usuario → q_id={q_id}, bridging"
         );
@@ -1130,14 +1119,7 @@ async fn find_user_for_recovery(state: &AppState, identifier: &str) -> Option<St
     // Idempotent: if the bridge already happened, the lookup above caught
     // it and we never reach here.
     if !email_normalized.is_empty() && email_normalized.contains('@') {
-        let q_user_id: Option<String> = storage
-            .conn()
-            .query_row(
-                "SELECT id FROM quilombo_usuarios WHERE email = ?1",
-                rusqlite::params![email_normalized],
-                |row| row.get(0),
-            )
-            .ok();
+        let q_user_id = storage.find_quilombo_id_by_email(&email_normalized);
         if let Some(q_id) = q_user_id {
             tracing::info!(
                 "find_user_for_recovery: matched quilombo email → q_id={q_id}, bridging"

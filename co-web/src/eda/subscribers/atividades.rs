@@ -26,19 +26,14 @@ pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
             let payload_str = ev.payload.to_string();
             let vis = format!("{:?}", ev.visibility);
             let created_at = ev.created_at.to_rfc3339();
-            if let Err(e) = storage.conn().execute(
-                "INSERT OR IGNORE INTO event_log \
-                 (id, event_type, universe_key, user_id, payload_json, visibility, created_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                rusqlite::params![
-                    ev.id,
-                    ev.event_type,
-                    ev.universe_key,
-                    ev.user_id,
-                    payload_str,
-                    vis,
-                    created_at,
-                ],
+            if let Err(e) = storage.insert_event_log(
+                &ev.id,
+                &ev.event_type,
+                ev.universe_key.as_deref(),
+                ev.user_id.as_deref(),
+                &payload_str,
+                &vis,
+                &created_at,
             ) {
                 warn!("EDA: AtividadesPersistor INSERT failed: {e}");
             }

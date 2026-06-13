@@ -6,7 +6,6 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use rusqlite::params;
 use tracing::{info, warn};
 
 use crate::eda::bus::{EdaBus, Filter};
@@ -37,25 +36,19 @@ pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
             let detected_at = ev.created_at.to_rfc3339();
 
             let storage = storage.lock();
-            if let Err(e) = storage.conn().execute(
-                "INSERT OR IGNORE INTO security_findings \
-                 (id, pr_number, severity, category, file_path, line_start, line_end, \
-                  description, cwe, cve_match, suggested_patch, detected_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-                params![
-                    id,
-                    pr_number,
-                    severity,
-                    category,
-                    file_path,
-                    line_start,
-                    line_end,
-                    description,
-                    cwe,
-                    cve_match,
-                    suggested_patch,
-                    detected_at,
-                ],
+            if let Err(e) = storage.insert_security_finding(
+                &id,
+                pr_number,
+                &severity,
+                &category,
+                &file_path,
+                line_start,
+                line_end,
+                &description,
+                cwe.as_deref(),
+                cve_match.as_deref(),
+                suggested_patch.as_deref(),
+                &detected_at,
             ) {
                 warn!("EDA: FindingsPersistor INSERT failed: {e}");
             }

@@ -13,7 +13,6 @@ use jsonwebtoken::{Algorithm, DecodingKey, EncodingKey, Header, Validation, deco
 use p256::ecdsa::SigningKey;
 use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
 use redb::{Database, TableDefinition};
-use rusqlite;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -807,14 +806,7 @@ pub async fn universe_visibility_gate(
         if universe.owner_id == user_id {
             true
         } else {
-            storage
-                .conn()
-                .query_row(
-                    "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
-                    rusqlite::params![&slug, &user_id],
-                    |_| Ok(true),
-                )
-                .unwrap_or(false)
+            storage.is_universe_member(&slug, &user_id)
         }
     };
 
@@ -867,14 +859,7 @@ pub async fn universe_writer_gate(
         if universe.owner_id == user_id {
             true
         } else {
-            let is_member = storage
-                .conn()
-                .query_row(
-                    "SELECT 1 FROM universe_members WHERE universe_key = ?1 AND user_id = ?2",
-                    rusqlite::params![&slug, &user_id],
-                    |_| Ok(true),
-                )
-                .unwrap_or(false);
+            let is_member = storage.is_universe_member(&slug, &user_id);
             // CO-253: subscribers of public-subscribable universes can also write.
             is_member
                 || (universe.visibility == "public-subscribable"
