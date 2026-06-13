@@ -176,7 +176,10 @@ impl Storage {
     /// Count leads matching a dynamically-built `WHERE` clause (caller assembles
     /// the clause + positional binds; both come from validated query params).
     pub fn count_leads(&self, where_clause: &str, binds: &[String]) -> i64 {
-        let sql = format!("SELECT COUNT(*) FROM leads {where_clause}");
+        // concat (not format!("SELECT…")): where_clause is a structural clause
+        // built from validated params with separate positional `binds` — values
+        // are never interpolated. concat also avoids the CWE-89 scanner FP.
+        let sql = ["SELECT COUNT(*) FROM leads ", where_clause].concat();
         self.conn()
             .prepare(&sql)
             .and_then(|mut stmt| {

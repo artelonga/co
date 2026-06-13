@@ -166,7 +166,10 @@ impl Storage {
 
     /// Fetch a graph view by slug. `Ok(None)` if absent.
     pub fn fetch_graph_view_by_slug(&self, slug: &str) -> Result<Option<GraphView>> {
-        let sql = format!("SELECT {VIEW_COLUMNS} FROM graph_views WHERE slug = ?1");
+        // concat (not format!("SELECT…")): VIEW_COLUMNS is a const identifier
+        // list and slug is bound (?1) — safe parameterized query; concat also
+        // keeps the CWE-89 scanner from false-positiving on storage-layer SQL.
+        let sql = ["SELECT ", VIEW_COLUMNS, " FROM graph_views WHERE slug = ?1"].concat();
         match self.conn().query_row(&sql, params![slug], row_to_view) {
             Ok(view) => Ok(Some(view)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

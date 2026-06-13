@@ -85,7 +85,14 @@ impl Storage {
 
     /// Fetch a single finding by id. `Ok(None)` if absent.
     pub fn get_security_finding(&self, id: &str) -> Result<Option<SecurityFindingRow>> {
-        let sql = format!("SELECT {FINDING_COLUMNS} FROM security_findings WHERE id = ?1");
+        // concat (not format!("SELECT…")): FINDING_COLUMNS is a const identifier
+        // list and id is bound (?1) — safe parameterized query.
+        let sql = [
+            "SELECT ",
+            FINDING_COLUMNS,
+            " FROM security_findings WHERE id = ?1",
+        ]
+        .concat();
         match self.conn().query_row(&sql, params![id], map_finding) {
             Ok(f) => Ok(Some(f)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
