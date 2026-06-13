@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-432",
+  "title": "Mythos: decompose the content/ god-folder + propagate the CO-390 layering",
+  "type": "user-story",
+  "status": "in_progress",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-432.md",
+  "branch": "feat/CO-432-mythos-decompose-the-content-god-folder-",
+  "merge_sha": "cdf27a929a1f3f7d49b966ed4c62c0fcfa0a5b77",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/221",
+    "number": 221
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T00:33:52Z",
+  "files_changed": 110,
+  "lines_added": 7763,
+  "lines_removed": 6414,
+  "labels": [
+    "type:refactor",
+    "module:content"
+  ],
+  "changelog_entry": "## CO-432 — Mythos: decompose the content/ god-folder + propagate the CO-390 layering\n\n`co-web/src/content/` reorganized from 37 flat files into one folder per\nentity — `entries/`, `vault/`, `references/`, `relations/`, `graph/`,\n`workspace/`, `universe/`, `assets/`, `proposals/`, `reviews/`,\n`versioning/` (states + branches + op-log), `search/`, `translate/`,\n`delivery/`, `usage/`, `openapi/`, `agent_sessions/`. No loose `*_routes.rs`\nremain; pre-432 module paths (`crate::entry_routes`, `crate::vault_routes`, …)\nare preserved via `pub use … as …` aliases in `content/mod.rs`, so no call\nsite changed.\n\nThe CO-390 layering template (domain / dto / repository / service / mapper)\nwas propagated from `entries` to **references** and **relations**:\n\n- `domain/entity/{reference,relation}.rs` — pure business types.\n- `dto/{references,relations}/` — wire types moved out of the route files\n  (names and serialization unchanged).\n- `repository/{reference,relation}_repository.rs` — traits + SQLite impls\n  wrapping `ReferenceIndex`/`references_meta` and `RelationIndex`; in-memory\n  impls for unit tests.\n- `service/{reference,relation}_service.rs` — pure rules extracted from\n  handlers (type forcing, partial-update merge, work_id derivation,\n  seed-status stub rule, deterministic inbound ordering), each unit-tested.\n- `mapper/{reference,relation}_mapper.rs` — row ↔ domain ↔ DTO conversions.\n\n`entry_index.rs` and `reference_index.rs` moved behind their repositories:\n`SqliteEntryRepository` (now built on the real `Arc<std::sync::Mutex<Connection>>`\nuniverse-connection type) gained 1:1 mirrors of the index surface plus\ncombined write operations (`index_entry_create/update`, `index_vault_write`,\n`unindex_entry`, `unindex_vault_entry`) that keep every multi-projection\nwrite in a single lock scope — including the CO-95 `BEGIN IMMEDIATE`\ntransaction semantics of the vault path. All content route handlers (plus\n`static_files` deep links and `sync_ws`) now access the indexes exclusively\nthrough the repository layer; the only remaining direct uses are two\nconn-taking semantic-search helpers that interleave `EmbeddingIndex` on the\nsame connection (documented escape hatch).\n\nOversized test files split per the CO-215 `tests/` pattern (every group\n< 500 LoC): `universe/routes/tests/` (7 files), `vault/routes/tests/`\n(6 files), `relations/index/tests/` (4 files), `reviews/routes/tests/`\n(3 files), `references/meta/tests.rs`. `relations/index.rs` itself split\ninto `index.rs` (storage) + `extract.rs` (extraction + backfill).\n\nZero behavior change: routes, wire formats, status codes, and lock-scope\nsemantics preserved; full `cargo test -p co-web` green and clippy clean.\n\n### Why\n`content/` mixed 10+ entities in one flat namespace and the CO-390 layering\ncovered only `entries` (~10% adoption). Each entity now owns its folder and\nthe two highest-value entities besides entries follow the proven template,\nmaking them unit-testable without HTTP or SQLite setup and giving the next\nextractions a mechanical recipe to follow.",
+  "summary": "As Um desenvolvedor do co-web, QUERO que `content/` deixe de ser uma god-folder e que o template de camadas (domain/dto/repository/service/mapper) — provado em `entries` no CO-390 — cubra as entidades",
+  "co_auto_version": "0.1.0"
+}
