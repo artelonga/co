@@ -1,0 +1,30 @@
+{
+  "task_id": "CO-91",
+  "title": "co sync — canonical content-author UX (jj-tracked delta + automated changelog + co-token auth)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-91.md",
+  "branch": "feat/CO-91-co-sync-canonical-content-author-ux-jj-t",
+  "merge_sha": "ea30aa9e0c37c737b0ff0e0a9fd5b84219200f84",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/239",
+    "number": 239
+  },
+  "started_at": "2026-04-28T00:00:00Z",
+  "merged_at": "2026-06-13T17:12:23Z",
+  "files_changed": 8,
+  "lines_added": 1872,
+  "lines_removed": 31,
+  "labels": [
+    "cli",
+    "sync",
+    "jj",
+    "changelog",
+    "workflow",
+    "content-author-ux"
+  ],
+  "changelog_entry": "## CO-91 — co sync — canonical content-author UX (jj delta + automated changelog + co-token auth)\n\nPromoted `scripts/seed-prod-universes.sh` (the 250-line content-author loop)\ninto a first-class `co sync` workflow. Authors edit markdown locally and run\n`co sync push`; only what changed since the last push flows to the configured\ndeployment's Vault REST API, with a changelog paper trail — no curl, scripts or\nraw API.\n\nThis folds CO-51 forward: the existing CO-51 bidirectional mirror (`co sync\npush <universe>` against `~/Co/`) is preserved when a positional `<universe>` is\ngiven. With no positional, `co sync` runs the new CO-91 jj-delta push.\n\n- `co sync push [--to <deployment>] [--full] [--dry-run] [--no-changelog]\n  [--push-changelog]` — jj-delta upload of the current repo to a deployment.\n- `co sync push --bootstrap` — one-time setup: password login, create the\n  universe (idempotent), full upload, generate a 90-day API token and store it\n  in the OS keychain (service `co`, account = the deployment's `token_name`).\n- `co sync status` — non-mutating diff of what a push would upload.\n- `co sync watch` — `notify`-backed, debounced auto-push on save (default 1s).\n- `co sync changelog [--for <universe>]` — print accumulated run snippets.\n\n### Primitives (1:1 with the script it replaces)\n\n- **Auth** — per-deployment API token read on demand from the OS keychain (the\n  same store `dev/co-token` writes); never persisted to disk by `co sync`.\n- **Delta** — the source repo is wrapped with `jj git init --colocate`\n  (non-destructive). The last-pushed commit id is the baseline at\n  `~/.co/sync-state/<deployment>/<universe>.commit`; only files differing\n  between that baseline and `@` are uploaded. First run / `--full` / a lost\n  baseline → full upload.\n- **Changelog** — `jj log -r '<baseline>..@'` is rendered to\n  `~/.co/sync-runs/<deployment>/<universe>-<ts>.md` per run.\n- **Per-deployment isolation** — tokens, baselines and changelog snippets are\n  namespaced by deployment key, so `--to prod` and `--to uat` are independent\n  operations against independent baselines.\n\n### Config\n\n- `~/.co/deployments.toml` — `[prod]`/`[uat]` tables (`url`, `token_name`,\n  `default`). Absent → a built-in `prod` entry (zero-config, as the script was).\n- `<root>/.co/sync.toml` — `universe`, glob `include`/`exclude` (default\n  `**/*.md` minus the usual build/tooling dirs). Or pass `--universe --root`.\n\n### Content negotiation (CO-86) and changelog events (CO-89)\n\n`co sync push` probes `OPTIONS /…/vault/`; if the server advertises\n`co/protobuf`, files are sent as a `.co` protobuf batch (CO-151 `CoFile` +\nzstd), else as `text/markdown` (the v1 wire format). `--push-changelog` PUTs a\nsynthesized `event` entry (`type: event`, `kind: sync`, `summary: <count>`) via\nthe Vault fast-path, indexed on CO-89's calendar view.\n\n### Bench (throughput vs the script)\n\nThe script forks one `curl` per file with `sleep 0.1` between PUTs (≈10\nfiles/s ceiling, plus per-request connection setup). `co sync` reuses a single\nkeep-alive `reqwest` client with no artificial delay, so throughput is bounded\nby server RTT rather than a fixed sleep — a >10× headroom improvement on the\nsmall-file uploads the script was used for, before counting the jj delta that\nshrinks the upload set to only changed files.\n\n### Why\n\nThe content-author loop was decided to be canonical, not a one-off script. A\nfirst-class CLI surface — composable auth (keychain), delta (jj) and changelog\nprimitives behind a clean argument shape with real error handling — lets any\nauthor (not just yuri) adopt it against any deployment (UAT, prod, self-hosted).",
+  "summary": "GIVEN today's content-author workflow is a 250-line `scripts/seed-prod-universes.sh` that handles login, universe creation, jj-based delta detection, changelog generation, and bulk upload — and the pl",
+  "co_auto_version": "0.1.0"
+}
