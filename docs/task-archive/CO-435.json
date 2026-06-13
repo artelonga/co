@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-435",
+  "title": "Mythos: extension registries — EDA subscriber registry + SourceAdapter + AdminAuthProvider",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-435.md",
+  "branch": "feat/CO-435-mythos-extension-registries-eda-subscrib",
+  "merge_sha": "56f8b0553855205f15c5e3ff52528bf54974ed6c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/225",
+    "number": 225
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T06:07:35Z",
+  "files_changed": 78,
+  "lines_added": 1423,
+  "lines_removed": 717,
+  "labels": [
+    "type:feat",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-435 — Mythos: extension registries — EDA subscriber registry + SourceAdapter + AdminAuthProvider\n\nTurned four hardcoded extension points into `registry + trait + impl-default` seams.\nNo behavior change: the same subscribers, sources, admins and rate limits run by\ndefault — only *how you add the next one* changed.\n\n### What changed\n\n- **EDA subscriber registry** (`eda::subscriber_registry`): new `EdaSubscriber`\n  trait (`name` / `filter` / async `handle`) + `SubscriberRegistry` + `SubscriberCtx`.\n  Boot now iterates `default_registry(...).spawn_all(ctx)` instead of ~13 inline\n  `spawn()` calls in `server/mod.rs`. Every existing subscriber (atividades,\n  analytics, billing, sala, kb, comunicação term+sala, yggdrasil_notes,\n  delivery_pipeline, timeline, findings_persistor, pbi_backlogger, release_blocker,\n  degradation_alerter) migrated to the trait. A test subscriber can now register\n  without touching the boot.\n\n- **SourceAdapter seam** (`platform::source`): new `SourceAdapter` trait\n  (`kind` + async `sync`) + `SourceRegistry`. `GitSourceAdapter` (`remote-git`)\n  consolidates the CO-417/CO-423/CO-337 git sync (wrapping `crate::vcs`);\n  `EventBusSourceAdapter` (`event-bus`) expresses the push-driven Yggdrasil sync.\n  `run_remote_sister_repo_seeds` routes the git step through the adapter. Adding a\n  source (gitlab/notion) = new `impl` + `register`.\n\n- **AdminAuthProvider seam** (`infra::admin_auth`): new `AdminAuthProvider` trait\n  (`async verify_admin -> AdminIdentity`). `github_auth` becomes the default impl\n  (`GitHubAdminAuthProvider`); the `require_github_admin` middleware now depends on\n  an injected `Arc<dyn AdminAuthProvider>`, shared across all six admin routers.\n  Swapping in SAML/OIDC = a new provider injected in `router.rs`.\n\n- **RateLimiter trait** (`platform::rate_limit`, absorbs CO-297 / CO-284-H): new\n  `RateLimiter` trait (`try_acquire`); the existing in-process token-bucket limiter\n  is renamed `InProcessRateLimiter` and becomes the default impl. Completes the\n  CO-284 trait series. (No Redis impl here.)\n\n### Why\n\nThree points (EDA subscribers, source sync, admin auth) plus the rate limiter were\nhardcoded — extending any of them meant editing the boot or rewriting call-sites.\nEach is now a composition seam: register an `impl`, no fork. Pure composition —\nthe default set is unchanged.",
+  "summary": "As Um desenvolvedor estendendo o co, QUERO adicionar um subscriber de evento, um source novo (gitlab/notion) ou um backend de admin-auth (SAML/OIDC) plugando um `impl` num registry — não editando os s",
+  "co_auto_version": "0.1.0"
+}
