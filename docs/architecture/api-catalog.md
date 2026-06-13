@@ -434,6 +434,22 @@ Content management via GitHub PAT. Routes under `/api/v1/gestao/` gated by `GEST
 
 ---
 
+## billing — `/api/v1/me/billing/*` + webhook (billing/routes.rs)
+
+CO-366 — conversion + payment wiring (register → paid). Provider chosen via
+`CO_BILLING_PROVIDER` (default `manual`; `hostinger` for the live integration)
+behind the `BillingProvider` trait. The `mark-paid` admin route uses the same
+email-admin auth as `/gestao/resumo` (CO-360).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/me/billing/checkout` | authed | Start checkout for `{ plan }`, returns `{ url, session_id, expires_at, provider }` |
+| GET | `/api/v1/me/billing/status` | authed | Current `{ tier, plan, paid_at, billing_provider }` |
+| POST | `/api/v1/billing/webhook/{provider}` | anon (HMAC) | Provider webhook — verifies signature, flips tier on success |
+| POST | `/api/v1/gestao/users/{id}/mark-paid` | admin (email) | Manual provider — mark a user paid |
+
+---
+
 ## storage — storage_dashboard.rs
 
 | Method | Path | Auth | Purpose |
@@ -737,7 +753,8 @@ CO-38 yggdrasil — game plugins.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/plugins/{name}/info` | anon | Plugin manifest info |
+<!-- CO-436 removed the plugin route registration (the loader's router was
+     discarded — build_router(None)); this catalog row is dropped to match. -->
 
 ---
 

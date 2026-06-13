@@ -1,6 +1,8 @@
 // Context modules
 pub mod admin;
 pub mod auth;
+// CO-366: billing / payment wiring (register → paid), provider-agnostic trait.
+pub mod billing;
 pub mod content;
 pub mod eda;
 pub mod infra;

@@ -91,6 +91,9 @@ eda-persistence = []
 security-claude = []
 security-semgrep = []
 security-sonar = []
+# CO-366: future billing providers (stubs — fill in v3.1)
+billing-pix = []
+billing-stripe = []
 
 [dev-dependencies]
 tempfile = { workspace = true }

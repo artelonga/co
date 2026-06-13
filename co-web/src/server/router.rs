@@ -414,6 +414,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/gestao", crate::resumo_routes::api_router())
             .nest("/api/v1/gestao", gestao_api)
             .nest("/api/v1/gestao", webhook_admin)
+            // CO-366: admin "mark paid" (email admin auth, enforced in-handler).
+            .nest("/api/v1/gestao", crate::billing::routes::admin_router())
+            // CO-366: billing webhook (HMAC-verified in-handler, no auth gate).
+            .nest("/api/v1", crate::billing::routes::webhook_router())
             // CO-388: Security findings API (admin-gated).
             .nest("/api/v1/gestao/security", security_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
@@ -431,6 +435,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                 "/api/v1/me",
                 crate::notification_routes::me_notifications_router(state.clone()),
             )
+            // CO-366: billing checkout + status (AuthedUser extractor in-handler).
+            .nest("/api/v1/me", crate::billing::routes::me_router())
             .merge(crate::push_routes::vapid_router())
             .nest(
                 "/api/v1/me",
