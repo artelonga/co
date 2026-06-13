@@ -398,6 +398,18 @@
             'not_found.subtitle': 'Este conteúdo não existe neste universo.',
             'not_found.back_universe': '← Voltar ao universo',
             'not_found.back_home': 'Ir para o início',
+            // CO-128: conflict-resolution modal (Apple-Finder style)
+            'conflict.title': 'Conflito de edição',
+            'conflict.subtitle': 'Esta entrada foi alterada em outro lugar. Escolha como resolver:',
+            'conflict.col_local': 'Sua versão (local)',
+            'conflict.col_remote': 'Versão do servidor (remoto)',
+            'conflict.ignore': 'Ignorar',
+            'conflict.replace': 'Substituir',
+            'conflict.keep_both': 'Manter ambos',
+            'conflict.apply_to_all': 'Aplicar a todos os conflitos desta rodada',
+            'conflict.remaining': '+ {n} conflito(s) restante(s) nesta rodada',
+            'conflict.truncated': 'Conteúdo muito grande — pré-visualização truncada.',
+            'conflict.resolved': 'Conflito resolvido',
         },
         en: {
             // Spec-defined dot-notation keys
@@ -782,6 +794,18 @@
             'not_found.subtitle': 'This content does not exist in this universe.',
             'not_found.back_universe': '← Back to universe',
             'not_found.back_home': 'Go to home',
+            // CO-128: conflict-resolution modal (Apple-Finder style)
+            'conflict.title': 'Editing conflict',
+            'conflict.subtitle': 'This entry was changed elsewhere. Choose how to resolve:',
+            'conflict.col_local': 'Your version (local)',
+            'conflict.col_remote': 'Server version (remote)',
+            'conflict.ignore': 'Ignore',
+            'conflict.replace': 'Replace',
+            'conflict.keep_both': 'Keep both',
+            'conflict.apply_to_all': 'Apply to all conflicts in this round',
+            'conflict.remaining': '+ {n} more conflict(s) in this round',
+            'conflict.truncated': 'Content too large — preview truncated.',
+            'conflict.resolved': 'Conflict resolved',
         },
     };
 

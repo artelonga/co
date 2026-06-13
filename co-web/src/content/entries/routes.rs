@@ -120,6 +120,13 @@ pub struct CreateEntryBody {
 pub struct UpdateEntryBody {
     pub frontmatter: Option<JsonValue>, // FREEFORM: partial patch on open per-type schema
     pub body: Option<String>,
+    /// CO-128: optimistic-concurrency token. The `body_hash` the client last
+    /// observed for this entry. When present and the stored entry has since
+    /// diverged, the write is rejected with `409 Conflict` and a
+    /// `ConflictPayload { local, remote, base }` so the SPA can open the
+    /// Apple-style conflict-resolution modal. Absent → last-write-wins
+    /// (backward compatible: draft autosave and other callers are unaffected).
+    pub base_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -907,7 +914,7 @@ pub async fn update_entry(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
     Json(body): Json<UpdateEntryBody>,
-) -> Result<Json<EntryRow>, AppError> {
+) -> Result<axum::response::Response, AppError> {
     let universe_root = {
         let storage = lock_storage(&state);
         let universe = storage
@@ -930,6 +937,24 @@ pub async fn update_entry(
 
     let new_fm = body.frontmatter.unwrap_or(existing.frontmatter.clone());
     let new_body = body.body.unwrap_or(existing.body.clone());
+
+    // CO-128: optimistic-concurrency check. When the client sent the
+    // `base_hash` its edit was based on and the stored entry has since
+    // diverged, reject with `409 Conflict` carrying both versions so the SPA
+    // can render the conflict-resolution modal (Ignore / Replace / Keep both).
+    if let Some(ref base) = body.base_hash
+        && base != &existing.body_hash
+    {
+        let local_entry = make_entry(&path, new_fm.clone(), &new_body);
+        return Ok(conflict_response(
+            &slug,
+            &path,
+            &new_body,
+            &local_entry.body_hash,
+            &existing,
+            base,
+        ));
+    }
 
     // CO-79: load manifest once from L1 cache (singleflight stampede protection).
     let manifest_arc = load_manifest_cached(&state, &slug, &universe_root).await;
@@ -1081,7 +1106,65 @@ pub async fn update_entry(
         created_at: existing.created_at,
         updated_at: Some(entry.stat.modified.to_rfc3339()),
         _score: None,
-    }))
+    })
+    .into_response())
+}
+
+/// CO-128: maximum body size (per side) embedded in a conflict payload.
+/// Larger bodies are truncated with a `truncated` flag so the modal shows a
+/// summary instead of choking the diff renderer (spec risk: diff perf).
+const CONFLICT_BODY_CAP: usize = 100 * 1024;
+
+/// Truncate a body to [`CONFLICT_BODY_CAP`], returning `(text, was_truncated)`.
+fn cap_conflict_body(body: &str) -> (String, bool) {
+    if body.len() <= CONFLICT_BODY_CAP {
+        (body.to_string(), false)
+    } else {
+        // Truncate on a char boundary at or below the cap.
+        let mut end = CONFLICT_BODY_CAP;
+        while end > 0 && !body.is_char_boundary(end) {
+            end -= 1;
+        }
+        (body[..end].to_string(), true)
+    }
+}
+
+/// CO-128: build the `409 Conflict` response carrying both divergent versions.
+///
+/// Shape (`ConflictPayload`):
+/// ```json
+/// {
+///   "error": "conflict",
+///   "conflict": {
+///     "universe_key": "...", "path": "...", "kind": "both_modified",
+///     "local":  { "body": "...", "body_hash": "...", "truncated": false },
+///     "remote": { "body": "...", "body_hash": "...", "truncated": false },
+///     "base":   { "body_hash": "..." }
+///   }
+/// }
+/// ```
+fn conflict_response(
+    universe_key: &str,
+    path: &str,
+    local_body: &str,
+    local_hash: &str,
+    remote: &EntryRow,
+    base_hash: &str,
+) -> axum::response::Response {
+    let (local_text, local_trunc) = cap_conflict_body(local_body);
+    let (remote_text, remote_trunc) = cap_conflict_body(&remote.body);
+    let payload = serde_json::json!({
+        "error": "conflict",
+        "conflict": {
+            "universe_key": universe_key,
+            "path": path,
+            "kind": "both_modified",
+            "local":  { "body": local_text,  "body_hash": local_hash,        "truncated": local_trunc },
+            "remote": { "body": remote_text, "body_hash": remote.body_hash,  "truncated": remote_trunc },
+            "base":   { "body_hash": base_hash },
+        }
+    });
+    (StatusCode::CONFLICT, Json(payload)).into_response()
 }
 
 /// GET /api/v1/universes/:slug/manifest — return the universe manifest
