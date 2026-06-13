@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-441",
+  "title": "Finish AC3: move residual raw SQL out of content handlers into storage methods (workspace/assets/vault/op_log/template)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-441.md",
+  "branch": "feat/CO-441-finish-ac3-move-residual-raw-sql-out-of-",
+  "merge_sha": "42c3eb5ff578eae0eb309ce59d0c681e65fa3fc7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/231",
+    "number": 231
+  },
+  "started_at": "2026-06-13T00:00:00Z",
+  "merged_at": "2026-06-13T12:19:23Z",
+  "files_changed": 10,
+  "lines_added": 225,
+  "lines_removed": 131,
+  "labels": [
+    "type:refactor",
+    "module:storage"
+  ],
+  "changelog_entry": "## CO-441 — Finish AC3: move residual raw SQL out of content handlers into storage methods (workspace/assets/vault/op_log/template)\n\nMoved the last single-line `conn().query_row/execute` calls out of the content\nHTTP handlers into typed `Storage` methods, closing the literal AC3 grep from\nCO-433 (\"zero raw SQL em todos os *_routes.rs\").\n\n- New `storage/workspace_states.rs`: typed accessors for the \"Sala\" canvas state\n  (`workspace_state_for_user`, `public_workspace_state`,\n  `workspace_state_by_share_token`, `upsert_workspace_state`,\n  `set_workspace_share_token`). The `WorkspaceState` row struct and its\n  row-mapper now live in the storage layer (re-exported as\n  `crate::storage::WorkspaceState`), so `content/workspace/routes.rs` carries no\n  SQL.\n- New `Storage::set_universe_content_count`, replacing the four identical\n  `UPDATE universes SET content_count = ?1` statements scattered across the\n  asset upload handler, both vault write paths, the op-log\n  `refresh_content_count`, and the template `reindex` handler.\n\n### Why\nPure mechanical refactor — zero behavior change. Removing the inline SQL keeps\ncontent handlers free of database string literals (also clearing the CWE-89\nscanner debt on those lines) and routes every meta-DB mutation through a tested,\ntyped method on `Storage`.",
+  "summary": "Contexto CO-433 removeu o SQL cru de **security/auth/eda** (movido para métodos tipados de Storage). A verificação de AC pós-CO-433 achou SQL cru **pré-existente** ainda em handlers de conteúdo — fora",
+  "co_auto_version": "0.1.0"
+}
