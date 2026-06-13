@@ -140,12 +140,71 @@ flyctl deploy --config fly.uat.toml
 # 3. Smoke-test UAT — gate on exit 0
 bash scripts/smoke-uat.sh || { echo "UAT smoke FAILED — abort"; exit 1; }
 
-# 4. Deploy to production
+# 4. Pre-deploy gate — blocks if prod /data is too full for a safe migration (CO-446)
+bash scripts/pipeline-deploy-gate.sh || { echo "deploy gate FAILED — abort"; exit 1; }
+
+# 5. Deploy to production
 flyctl deploy
 
-# 5. Smoke-test production
+# 6. Smoke-test production
 bash scripts/smoke-prod.sh
 ```
+
+> **CO-446 — always gate disk before a migration deploy.** A release that adds a
+> migration writes a `schema_version` row at boot. On a near-full `/data` that
+> write fails with `SQLITE_FULL` and the server crash-loops (2026-06-11 +
+> 2026-06-13 outages). `pipeline-deploy-gate.sh` checks `df -P /data` on prod and
+> **blocks at > 85% full** (`DISK_MAX_PCT`). Extend *before* deploying — see
+> "Disk-full recovery" below. To skip the check (no flyctl, or already verified):
+> `--no-disk`.
+
+---
+
+## Disk-full recovery (CO-446)
+
+`/data` is a fixed-size Fly volume. When it fills, the **next boot that runs a
+migration panics** (`record_migration … database or disk is full`) and the
+machine crash-loops until it hits max-restart — the site goes dark. As of CO-446
+the boot now degrades to a clear `FATAL (CO-446): migrations failed …` log line
+and a clean exit instead of a cryptic SQLite backtrace, but it still cannot
+serve until the volume has headroom. The fix is to **extend the volume**.
+
+```bash
+# 1. Inspect current usage (which volume, how full)
+flyctl volumes list -a co-artelonga
+flyctl ssh console -a co-artelonga -C "df -h /data"
+
+# 2. Extend the volume (volumes only ever grow). Pick the next size up.
+flyctl volumes extend <vol-id> -s <new-GB> -a co-artelonga
+
+# 3. CRITICAL: stop/start the machine — a plain `restart` does NOT resize the fs.
+flyctl machine list -a co-artelonga
+flyctl machine stop  <machine-id> -a co-artelonga
+flyctl machine start <machine-id> -a co-artelonga
+
+# 4. Confirm the filesystem grew and the boot is clean
+flyctl ssh console -a co-artelonga -C "df -h /data"
+flyctl logs -a co-artelonga --no-tail | grep -iE "CO-446|migration|disk"
+bash scripts/smoke-prod.sh
+```
+
+**Why stop/start, not restart:** Fly only re-reads the volume size and grows the
+ext4 filesystem on a fresh machine start. `flyctl machine restart` re-runs the
+process against the *old* filesystem size, so the disk stays full and the
+crash-loop continues. This bit us on 2026-06-13 — the live fix was
+`volumes extend 10→20GB` + **stop/start**.
+
+**Tuning knobs:**
+
+| Variable | Default | Effect |
+|----------|---------|--------|
+| `CO_MIGRATION_MIN_FREE_BYTES` | 200 MiB | Boot pre-flight: abort migrations with a clear ERROR if free `/data` is below this (vs. panicking mid-migration). |
+| `DISK_MAX_PCT` (deploy gate) | 85 | `pipeline-deploy-gate.sh` blocks a prod deploy when `/data` is fuller than this. |
+| `ALLOW_FULL_DISK=1` (deploy gate) | unset | Downgrade the gate block to a warning (use only alongside a planned extend). |
+
+> The real endgame is **S3 cold-tier offload (CO-81)** — without it `/data` grows
+> without bound and this recurs. CO-446 is the safety net so the next time is a
+> clear error + a one-command extend, not an outage.
 
 ---
 

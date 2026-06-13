@@ -1212,6 +1212,35 @@ mod degradation_tests {
         assert_eq!(pool.open_count(), 1);
     }
 
+    /// CO-446: a per-universe `data.db` that cannot be read as SQLite (corrupt
+    /// header, truncated file, or a disk that fails on the first pragma/migration
+    /// write) must degrade to a `PoolError` at the pragmas/migrations stage — NOT
+    /// panic the process (the `universe_pool.rs:312` class of crash). Confirms the
+    /// CO-405/CO-406 no-panic guarantee still holds on the I/O path.
+    #[test]
+    fn corrupt_data_db_degrades_to_pool_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = UniversePool::new(dir.path(), 16);
+
+        // Plant a non-SQLite file where the universe's data.db is expected.
+        let db = pool.db_path("corrupt");
+        std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+        std::fs::write(&db, b"this is not a sqlite database, just garbage bytes").unwrap();
+
+        let r = pool.try_get_or_open("corrupt");
+        assert!(
+            r.is_err(),
+            "corrupt data.db must degrade to PoolError, not panic"
+        );
+        assert!(
+            pool.unavailable_reason("corrupt").is_some(),
+            "failure must be recorded so routes can 503 instead of crash-looping"
+        );
+
+        // A healthy neighbour still opens.
+        assert!(pool.try_get_or_open("healthy").is_ok());
+    }
+
     /// CO-433 (per-universe sharding): a write held open on universe A must NOT
     /// block a concurrent write to universe B. Each universe owns its own
     /// `Arc<Mutex<Connection>>`, so they shard rather than serialize behind one
