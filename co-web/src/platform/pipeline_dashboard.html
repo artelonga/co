@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CO · Pipeline (CO-88)</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 2rem; background: #0f1115; color: #e6e6e6; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  .sub { color: #8a93a2; margin: 0 0 1.5rem; font-size: .9rem; }
+  .bar { display: flex; gap: .5rem; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; }
+  input, button, select { background: #1a1e26; color: #e6e6e6; border: 1px solid #2c333f; border-radius: 6px; padding: .45rem .6rem; font-size: .85rem; }
+  button { cursor: pointer; }
+  button:hover { background: #232a35; }
+  .cards { display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem; }
+  .card { background: #161a21; border: 1px solid #232a35; border-radius: 10px; padding: 1rem 1.25rem; min-width: 9rem; }
+  .card .n { font-size: 1.6rem; font-weight: 700; }
+  .card .l { color: #8a93a2; font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 2rem; font-size: .85rem; }
+  th, td { text-align: right; padding: .5rem .6rem; border-bottom: 1px solid #232a35; }
+  th:first-child, td:first-child { text-align: left; }
+  th { cursor: pointer; user-select: none; color: #b9c2d0; position: sticky; top: 0; background: #0f1115; }
+  th:hover { color: #fff; }
+  th.sorted::after { content: " ▾"; color: #5b8def; }
+  th.sorted.asc::after { content: " ▴"; }
+  tbody tr:hover { background: #161a21; }
+  .uni { font-weight: 600; color: #7fb0ff; }
+  .err { color: #ff7b72; }
+  .muted { color: #8a93a2; }
+  code { background: #1a1e26; padding: .1rem .3rem; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>Content Pipeline — per-universe stats</h1>
+  <p class="sub">CO-88 · file size · transfer · telemetry. Pivots <code>pipeline.transfer</code> events by universe and layer combo.</p>
+
+  <div class="bar">
+    <input id="token" type="password" placeholder="GitHub PAT (admin)" size="34" />
+    <input id="universe" type="text" placeholder="universe (optional)" size="18" />
+    <select id="since">
+      <option value="24">Last 24h</option>
+      <option value="168">Last 7d</option>
+      <option value="720">Last 30d</option>
+      <option value="0">All time</option>
+    </select>
+    <button id="load">Load</button>
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="cards" id="cards"></div>
+
+  <div id="universes"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const fmt = (n) => (n ?? 0).toLocaleString();
+const fmtRatio = (n) => (n ?? 1).toFixed(2) + "×";
+const fmtUs = (ns) => ((ns ?? 0) / 1000).toFixed(1) + " µs";
+
+let sortKey = "files", sortAsc = false;
+
+async function load() {
+  const token = $("#token").value.trim();
+  const universe = $("#universe").value.trim();
+  const hours = parseInt($("#since").value, 10);
+  $("#status").textContent = "loading…";
+  const params = new URLSearchParams();
+  if (universe) params.set("universe", universe);
+  if (hours > 0) params.set("since", new Date(Date.now() - hours * 3600 * 1000).toISOString());
+  try {
+    const resp = await fetch("/api/v1/admin/pipeline/summary?" + params.toString(), {
+      headers: token ? { Authorization: "Bearer " + token } : {},
+    });
+    if (!resp.ok) { $("#status").innerHTML = '<span class="err">HTTP ' + resp.status + '</span>'; return; }
+    const data = await resp.json();
+    render(data);
+    $("#status").textContent = data.total_events + " events";
+  } catch (e) {
+    $("#status").innerHTML = '<span class="err">' + e + '</span>';
+  }
+}
+
+function render(data) {
+  const universes = data.per_universe || [];
+  const totFiles = universes.reduce((a, u) => a + u.files, 0);
+  const totRaw = universes.reduce((a, u) => a + u.raw_bytes, 0);
+  const totEnc = universes.reduce((a, u) => a + u.encoded_bytes, 0);
+  $("#cards").innerHTML = [
+    card(fmt(universes.length), "universes"),
+    card(fmt(totFiles), "transfers"),
+    card(fmt(totRaw), "raw bytes"),
+    card(fmt(totEnc), "encoded bytes"),
+    card(totEnc ? (totRaw / totEnc).toFixed(2) + "×" : "—", "ratio"),
+  ].join("");
+
+  const sorted = [...universes].sort(cmp);
+  $("#universes").innerHTML = sorted.map(universeBlock).join("") ||
+    '<p class="muted">No pipeline events yet. Run <code>co-pipeline run --paths uat …</code>.</p>';
+  document.querySelectorAll("th[data-k]").forEach((th) => {
+    th.classList.toggle("sorted", th.dataset.k === sortKey);
+    th.classList.toggle("asc", th.dataset.k === sortKey && sortAsc);
+    th.onclick = () => {
+      if (sortKey === th.dataset.k) sortAsc = !sortAsc; else { sortKey = th.dataset.k; sortAsc = false; }
+      render(data);
+    };
+  });
+}
+
+function cmp(a, b) {
+  const av = a[sortKey], bv = b[sortKey];
+  const r = typeof av === "string" ? av.localeCompare(bv) : (av - bv);
+  return sortAsc ? r : -r;
+}
+
+function card(n, l) { return '<div class="card"><div class="n">' + n + '</div><div class="l">' + l + '</div></div>'; }
+
+function universeBlock(u) {
+  const combos = (u.by_combo || []).map((c) =>
+    '<tr><td>' + esc(c.combo) + '</td><td>' + esc(c.compression) + '</td><td>' + esc(c.encryption) +
+    '</td><td>' + fmt(c.count) + '</td><td>' + fmt(c.raw_bytes) + '</td><td>' + fmt(c.encoded_bytes) +
+    '</td><td>' + fmtRatio(c.compression_ratio) + '</td><td>' + fmtUs(c.avg_encode_ns) +
+    '</td><td>' + fmtUs(c.avg_decode_ns) + '</td></tr>').join("");
+  return '<h2 class="uni">' + esc(u.universe_key) + ' · ' + fmt(u.files) + ' transfers · ' +
+    fmtRatio(u.compression_ratio) + '</h2>' +
+    '<table><thead><tr>' +
+      '<th data-k="combo">combo</th><th>compression</th><th>encryption</th>' +
+      '<th data-k="files">count</th><th data-k="raw_bytes">raw</th><th data-k="encoded_bytes">encoded</th>' +
+      '<th data-k="compression_ratio">ratio</th><th data-k="avg_encode_ns">encode</th><th data-k="avg_decode_ns">decode</th>' +
+    '</tr></thead><tbody>' + combos + '</tbody></table>';
+}
+
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+$("#load").onclick = load;
+$("#token").addEventListener("keydown", (e) => { if (e.key === "Enter") load(); });
+</script>
+</body>
+</html>

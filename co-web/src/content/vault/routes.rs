@@ -794,6 +794,12 @@ pub async fn get_vault_file(
 ) -> Result<Json<VaultFile>, AppError> {
     vault_auth(&state, &headers)?;
 
+    // CO-88b: record content-pipeline telemetry when the caller announces a
+    // layer combo via X-Co-* headers (the co-pipeline UAT runner does).
+    if let Some(metrics) = crate::pipeline::PipelineMetrics::from_headers(&headers, 0) {
+        crate::pipeline::emit_pipeline_event(&state, &slug, &path, "get", &metrics, &headers);
+    }
+
     let uc = {
         let storage = lock_storage(&state);
         storage
@@ -860,6 +866,12 @@ pub async fn put_vault_file(
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+
+    // CO-88b: record content-pipeline telemetry when the caller announces a
+    // layer combo via X-Co-* headers (the co-pipeline UAT runner does).
+    if let Some(metrics) = crate::pipeline::PipelineMetrics::from_headers(&headers, body.len()) {
+        crate::pipeline::emit_pipeline_event(&state, &slug, &path, "put", &metrics, &headers);
+    }
 
     // CO-242: route binary uploads through the asset + entries writer.
     let ct = headers
