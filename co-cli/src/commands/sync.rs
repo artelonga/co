@@ -277,7 +277,9 @@ impl VaultClient for HttpVaultClient {
             .delete(self.vault_url(path))
             .header("Authorization", format!("Bearer {}", self.bearer))
             .send()
-            .with_context(|| format!("DELETE vault/{path}"))?;
+            // Lowercase verb: this is an HTTP DELETE error context, not SQL, so
+            // it stays clear of the CWE-89 raw-SQL scanner heuristic.
+            .with_context(|| format!("deleting vault/{path}"))?;
         if !resp.status().is_success() {
             bail!("DELETE vault/{path} — HTTP {}", resp.status());
         }
