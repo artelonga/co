@@ -49,6 +49,9 @@ pub(crate) mod auth_handlers;
 pub mod crawl_routes;
 pub(crate) mod legacy;
 pub mod router;
+// CO-436: boot-time universe seeding (`impl Storage` seed methods), relocated
+// from `storage/seed.rs` so the storage layer no longer carries seed logic.
+pub(crate) mod seed;
 pub mod seed_orchestrator;
 pub mod state;
 pub(crate) mod static_files;

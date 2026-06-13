@@ -37,7 +37,6 @@ argon2 = "0.5"
 sha2 = "0.10"
 hostname = "0.4"
 toml = "0.8"
-axum = "0.8"
 
 [build-dependencies]
 prost-build = "0.13"

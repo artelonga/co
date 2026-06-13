@@ -1,4 +1,3 @@
-use axum::Router;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -60,6 +59,23 @@ pub struct EntityConfig {
     pub properties: HashMap<String, serde_json::Value>,
 }
 
+/// A framework-agnostic description of an HTTP route a plugin exposes.
+///
+/// CO-436: `game-core` no longer depends on `axum`, so a plugin cannot hand
+/// back an `axum::Router` directly. Instead it returns portable descriptors
+/// that the **host** (e.g. `co-web`) translates into whatever web framework it
+/// uses. A CLI, mobile, or embedded consumer can ignore the descriptors (or map
+/// them to its own transport) without paying for an HTTP stack.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RouteDescriptor {
+    /// Route path relative to the plugin's mount point (e.g. `"/info"`).
+    pub path: String,
+    /// HTTP method as an uppercase string (e.g. `"GET"`, `"POST"`).
+    pub method: String,
+    /// Stable identifier the host maps to a concrete handler implementation.
+    pub handler_id: String,
+}
+
 /// Trait that all game plugins must implement.
 ///
 /// Each plugin represents a self-contained game universe that can be loaded
@@ -75,8 +91,10 @@ pub trait Plugin: Send + Sync {
     /// Return the parsed plugin manifest.
     fn manifest(&self) -> &PluginManifest;
 
-    /// Return an Axum router with plugin-specific API routes.
-    fn routes(&self) -> Router;
+    /// Describe the plugin's HTTP routes in a framework-agnostic form.
+    ///
+    /// The host translates each [`RouteDescriptor`] into a concrete route.
+    fn routes(&self) -> Vec<RouteDescriptor>;
 
     /// Called when the plugin is loaded into the platform.
     fn on_load(&mut self) {}
@@ -183,8 +201,8 @@ mod tests {
             &self.manifest
         }
 
-        fn routes(&self) -> Router {
-            Router::new()
+        fn routes(&self) -> Vec<RouteDescriptor> {
+            vec![]
         }
 
         fn on_load(&mut self) {

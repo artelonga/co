@@ -23,5 +23,6 @@ pub use games::{
 };
 
 pub use plugin::{
-    EntityConfig, Plugin, PluginManifest, PluginRegistry, PortalConfig, UniverseConfig,
+    EntityConfig, Plugin, PluginManifest, PluginRegistry, PortalConfig, RouteDescriptor,
+    UniverseConfig,
 };
