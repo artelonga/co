@@ -1,0 +1,29 @@
+{
+  "task_id": "CO-88",
+  "title": "End-to-end pipeline UAT — localhost ↔ API ↔ web with per-universe stats (file size, transfer, telemetry)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-88.md",
+  "branch": "feat/CO-88-end-to-end-pipeline-uat-localhost-api-we",
+  "merge_sha": "0745fd3ac7424494e18064f7a44a78e27dcf37dd",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/240",
+    "number": 240
+  },
+  "started_at": "2026-04-27T00:00:00Z",
+  "merged_at": "2026-06-13T18:08:28Z",
+  "files_changed": 28,
+  "lines_added": 3131,
+  "lines_removed": 2,
+  "labels": [
+    "testing",
+    "pipeline",
+    "telemetry",
+    "uat",
+    "observability"
+  ],
+  "changelog_entry": "## CO-88 — End-to-end pipeline UAT — localhost ↔ API ↔ web with per-universe stats\n\nAdded a content-pipeline UAT harness that proves a file authored on localhost\narrives byte-equivalent through every layer combination, plus server-side\ntelemetry, an admin dashboard, and CI/deploy gating.\n\n### What changed\n\n- **`dev/co-pipeline` (new workspace binary, CO-88a)** — drives the\n  path × universe × combo matrix (4 paths × 5 combos × 3 universes = 60 cells).\n  Reuses the real `CoFile` protobuf envelope, zstd-3, ChaCha20-Poly1305, and\n  Ed25519 signing so the bytes that travel are production's bytes. Encodes →\n  transports → decodes → compares each corpus file, timing encode/decode, and\n  writes a deterministic `co-pipeline-report-<date>.yaml` to `dev/reports/`.\n  Subcommands: `run`, `delta` (CO-88c diff), `gate` (CO-88d deploy gate).\n- **`co-web` pipeline telemetry (CO-88b)** — vault PUT/GET now record\n  `pipeline.transfer` / `pipeline.encode` / `pipeline.decode` events (carrying\n  `co_format`, `compression`, `encryption`, sizes, encode/decode ns) when the\n  caller announces a combo via `X-Co-*` headers. New `pipeline_summary()`\n  aggregation, admin endpoint `GET /api/v1/admin/pipeline/summary` (yuri tier),\n  and a sortable admin dashboard at `/co/co-dev/pipeline`.\n- **CI + deploy gate (CO-88c/CO-88d)** — `.github/workflows/pipeline-uat.yml`\n  runs the matrix, uploads the report, comments per-universe deltas on PRs, and\n  fails the build if any cell fails to round-trip. `scripts/pipeline-deploy-gate.sh`\n  blocks a prod deploy unless the UAT report is green, < 24h old, and free of\n  regressions beyond 20%, then optionally runs the read-only prod smoke.\n\n### Why\n\nThe `.co` format (CO-86) and composable layers (CO-87) introduce a non-trivial\nencode/decode pipeline. Without a round-trip gate, every release risks shipping\na subtle encoder/decoder bug that silently corrupts content. The matrix run is\ncheap (~3s over the local corpora) and catches drift before users see it, while\ngiving the team hard size/perf numbers per universe.",
+  "summary": "GIVEN the new `.co` format (CO-86) and composable layers (CO-87) introduce a non-trivial pipeline (markdown ↔ CoFile ↔ optionally compressed/encrypted/signed bytes ↔ filesystem/API/sync), and we need ",
+  "co_auto_version": "0.1.0"
+}
