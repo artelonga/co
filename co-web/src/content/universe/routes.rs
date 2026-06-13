@@ -1133,6 +1133,14 @@ pub async fn get_universe_info(
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
 
+    // CO-96: a soft-deleted / archived universe is in the trash — present it as
+    // gone to every caller. `get_universe` still returns the row (so the restore
+    // flow can find it by key), so guard the public read explicitly. Recovery
+    // happens through the trash view + restore endpoint, not this GET.
+    if storage.is_universe_trashed(&slug) {
+        return Err(AppError::NotFound(format!("Universe '{}' not found", slug)));
+    }
+
     if universe.owner_id.starts_with("anon-") {
         let cookie_owner = extract_cookie(&headers, "co_universe_owner");
         if cookie_owner.as_deref() != Some(universe.owner_id.as_str()) {

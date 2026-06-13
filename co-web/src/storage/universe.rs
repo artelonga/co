@@ -156,6 +156,21 @@ impl Storage {
         Some(universe)
     }
 
+    /// CO-96: true when the universe is soft-deleted or archived (i.e. in the
+    /// trash). `get_universe` deliberately keeps returning these rows so the
+    /// restore flow can find them by key, so public read handlers call this to
+    /// present a trashed universe as gone (404) rather than leaking its info.
+    pub fn is_universe_trashed(&self, key: &str) -> bool {
+        self.conn
+            .query_row(
+                "SELECT 1 FROM universes \
+                 WHERE key = ?1 AND (deleted_at IS NOT NULL OR archived_at IS NOT NULL)",
+                params![key],
+                |_| Ok(()),
+            )
+            .is_ok()
+    }
+
     /// CO-383: stamp the last-received event timestamp for an event-bus universe.
     pub fn touch_universe_last_event_at(&self, key: &str, ts: &str) {
         if let Err(e) = self.conn.execute(
