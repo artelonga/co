@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-443",
+  "title": "DoD matcher can't score refactor/structural tasks — recognize Rust tests + structural assertions",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-443.md",
+  "branch": "feat/CO-443-dod-matcher-can-t-score-refactor-structu",
+  "merge_sha": "13c9936484ac35c363ec780ff738701a6c3612b6",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/243",
+    "number": 243
+  },
+  "started_at": "2026-06-13T00:00:00Z",
+  "merged_at": "2026-06-13T22:21:21Z",
+  "files_changed": 18,
+  "lines_added": 1185,
+  "lines_removed": 77,
+  "labels": [
+    "type:fix",
+    "ops"
+  ],
+  "changelog_entry": "## CO-443 — DoD matcher can't score refactor/structural tasks — recognize Rust tests + structural assertions\n\nThe DoD verifier (`co-web/scripts/dod/verify.ts`) previously matched acceptance\nitems only against Playwright e2e test names. That works for `feat` tasks (HTTP\nroute → e2e) but failed for `refactor` tasks whose acceptance is structural\n(\"promote `Universo` to core\", \"split `migrations.rs`\", \"game-core is\naxum-free\") — the Mythos children CO-431..436 scored 0–25% despite being\ncomplete, forcing `--ignore-dod` and manual verification every wave.\n\nThe matcher now scores those tasks two ways:\n\n- **Rust test recognition** — `#[test]` / `#[tokio::test]` functions are matched\n  by name, not just e2e specs.\n- **Structural proofs** (`dod_checks` frontmatter map) — an acceptance item can\n  carry deterministic, build/grep-style evidence: `grep:<regex>` (assertion\n  exists), `grep-absent:<regex>` (e.g. axum-free), `rust-test:<fn>`,\n  `e2e-test:<regex>`, `file:<path>`, each optionally scoped with `@<path>`.\n  All proofs are pure filesystem reads — no build, no network — so they stay\n  deterministic and remain advisory (an unmet proof never blocks a merge).\n\nAlso fixed a latent acceptance-section parser bug: a `\\z` in the section regex\n(a literal `z` in JS) truncated multi-line `## Acceptance` blocks, undercounting\nitems; parsing is now line-based and joins wrapped continuation lines so the\nfull criterion text is available to the matcher.\n\nRe-running the verifier on CO-431..436 now reports **100%** for each with no\noverride. Docs: `docs/scrum/dod-proof-checks.md`.\n\n### Why\n\nThe override existed, but every refactor release needed manual structural\nverification (contention test, raw-SQL greps, `cargo tree | grep axum`). This\nlets the gate give honest credit to structural work instead of punting it.",
+  "summary": "Sintoma O verificador de DoD (`co-web/scripts/dod/verify.ts`) casa o texto dos critérios de aceite com nomes de testes **e2e/spec**. Funciona para tasks `feat` (rotas HTTP → e2e), mas **falha em tasks",
+  "co_auto_version": "0.1.0"
+}
