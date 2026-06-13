@@ -60,14 +60,29 @@ export function showPostRegisterModal(opts = {}) {
     const overlay = document.createElement('div');
     overlay.id = OVERLAY_ID;
     overlay.className = 'modal-overlay';
-    overlay.innerHTML = `
-        <div class="modal post-register-modal" role="dialog" aria-modal="true">
-            <h2>${title}</h2>
-            <p>${blurb}</p>
-            <button type="button" id="post-register-cta" class="btn btn-primary">${ctaLabel}</button>
-            <button type="button" id="post-register-later" class="btn btn-link">${laterLabel}</button>
-        </div>
-    `;
+    // Built via DOM + textContent (not innerHTML): title/blurb/labels are i18n
+    // strings, but textContent escapes them regardless — XSS-safe by construction
+    // (CWE-79), and avoids the innerHTML-assignment scanner flag.
+    const modal = document.createElement('div');
+    modal.className = 'modal post-register-modal';
+    modal.setAttribute('role', 'dialog');
+    modal.setAttribute('aria-modal', 'true');
+    const h2 = document.createElement('h2');
+    h2.textContent = title;
+    const p = document.createElement('p');
+    p.textContent = blurb;
+    const ctaBtn = document.createElement('button');
+    ctaBtn.type = 'button';
+    ctaBtn.id = 'post-register-cta';
+    ctaBtn.className = 'btn btn-primary';
+    ctaBtn.textContent = ctaLabel;
+    const laterBtn = document.createElement('button');
+    laterBtn.type = 'button';
+    laterBtn.id = 'post-register-later';
+    laterBtn.className = 'btn btn-link';
+    laterBtn.textContent = laterLabel;
+    modal.append(h2, p, ctaBtn, laterBtn);
+    overlay.append(modal);
     document.body.appendChild(overlay);
 
     const cta = overlay.querySelector('#post-register-cta');
