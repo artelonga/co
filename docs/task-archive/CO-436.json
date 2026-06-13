@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-436",
+  "title": "Mythos: framework-agnostic game-core Plugin + split migrations.rs/seed.rs",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-436.md",
+  "branch": "feat/CO-436-mythos-framework-agnostic-game-core-plug",
+  "merge_sha": "3a0e7d65242dd78841d1caf24885ff49f5c612bf",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/226",
+    "number": 226
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T06:48:47Z",
+  "files_changed": 19,
+  "lines_added": 3157,
+  "lines_removed": 2900,
+  "labels": [
+    "type:refactor",
+    "module:tools"
+  ],
+  "changelog_entry": "## CO-436 — Mythos: framework-agnostic game-core Plugin + split migrations.rs/seed.rs\n\nThree mechanical, behavior-preserving refactors that unblock reusing `game-core`\noutside `co-web` and make the storage layer navigable.\n\n### `game-core` is now axum-free\n\n`Plugin::routes()` no longer returns an `axum::Router`. It returns a portable\n`Vec<RouteDescriptor { path, method, handler_id }>` that the **host** translates\ninto concrete routes. The `axum` dependency is gone from `game-core/Cargo.toml`\n(`cargo tree -p game-core | grep axum` is empty), so a CLI, mobile, or embedded\nconsumer (Yggdrasil) can implement `Plugin` without dragging in an HTTP stack.\n`co-web` owns the translation: `plugin_loader::descriptors_to_router` maps each\ndescriptor's `handler_id` to its handler (the existing `GET /info` route is\npreserved exactly), and forward-compatible unknown handler ids are logged and\nskipped rather than crashing the loader.\n\n### `storage/migrations.rs` sliced into a module\n\nThe 2.7k-LoC monolith became `storage/migrations/` with one module per version\nrange (`v001_018` … `v073_076`), each under 500 LoC, aggregated by\n`Storage::run_migrations`. `current_version` is read once and threaded into every\nrange, so a fresh DB and an already-migrated DB converge on the identical final\n`schema_version` (new tests assert version 76 on fresh + idempotent re-open). No\nexisting migration was renumbered — the version-claim protocol is intact (the\ntwo pre-existing `< 44` blocks and all 76 versions are preserved verbatim). Two\ndead trailing `current_version` re-reads that landed at slice boundaries were\ndropped (their value was never read).\n\n### `storage/seed.rs` moved to the boot path\n\nThe 2.6k-LoC seed orchestration moved from `storage/seed.rs` to `server/seed.rs`,\nseparating boot-time universe seeding from the storage data-access layer. Seed\nmethods stay on `Storage` (call sites unchanged); `Storage.conn` and the shared\n`SEED_*` template constants are now `pub(crate)` so the boot module can drive\nthem.\n\n### Why\n\nDecouples the game engine from the web framework — the \"external services\" half\nof the Mythos epic (real reuse of `game-core` outside `co-web`) — and turns two\nof the largest files in `co-web` into navigable modules, all with zero schema or\nseed behavior change.",
+  "summary": "As Yggdrasil (e qualquer consumidor: CLI, mobile, runtime embarcado), QUERO implementar o `Plugin` do `game-core` sem arrastar `axum`, PARA reusar o engine de jogo em contextos sem HTTP. E o dev do co",
+  "co_auto_version": "0.1.0"
+}
