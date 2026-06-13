@@ -1895,6 +1895,33 @@ fn key_from_path(path: &str) -> String {
         .to_string()
 }
 
+/// Query for `GET /{slug}/timeline` — the CO-396 project-timeline lens.
+#[derive(Debug, Deserialize)]
+pub struct ProjectTimelineQuery {
+    /// Lane grouping: `epic` | `module` | `status` (default `status`).
+    pub group_by: Option<String>,
+}
+
+/// `GET /api/v1/universes/{slug}/timeline?group_by=epic` — the project-timeline
+/// lens (CO-396). Returns the same entries as the kanban board, laid out by the
+/// shared engine (`game_core::time_layout`) into lanes + release/milestone
+/// markers + a backlog of undated entries. Inherits the universe visibility
+/// gate from the content router (private universes require auth).
+pub async fn list_project_timeline(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<ProjectTimelineQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let group_by = crate::time::project_timeline::parse_lane_field(q.group_by.as_deref());
+    let entries = state
+        .core
+        .storage_trait
+        .list_entries(&slug, "", &serde_json::json!({}), None)
+        .unwrap_or_default();
+    let timeline = crate::time::project_timeline::build_project_timeline(&entries, group_by);
+    Ok(Json(timeline))
+}
+
 /// GET /api/v1/universes/:slug/dev-tasks
 ///
 /// Returns entries from `work/` that have entry_type in ('user-story', 'task',
@@ -1981,6 +2008,8 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/entries/tree", get(entry_tree))
         // CO-272: entries-as-tasks for the kanban dogfooding loop
         .route("/{slug}/dev-tasks", get(list_dev_tasks))
+        // CO-396: project-timeline lens — same entries, laid out on a time axis
+        .route("/{slug}/timeline", get(list_project_timeline))
         .route("/{slug}/entries", get(list_entries).post(create_entry))
         // CO-164: similar entries — uses ?path= query param to avoid catch-all conflict
         .route("/{slug}/entries/similar", get(similar_entries))

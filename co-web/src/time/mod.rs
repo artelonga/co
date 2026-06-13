@@ -8,7 +8,11 @@
 //!   ([`calendar_loader`]).
 //! - Pure per-lens conversion math lives in [`conversion`] and is mirrored in
 //!   `static/shared/lib/co-time.js` for the `<co-time-grid>` SPA component.
+//! - CO-396: the project-timeline layout (lanes/markers/backlog) lives in the
+//!   shared engine `game_core::time_layout`; [`project_timeline`] is co-web's
+//!   mapper + route that feeds entries through it.
 
 pub mod calendar_loader;
 pub mod conversion;
+pub mod project_timeline;
 pub mod routes;

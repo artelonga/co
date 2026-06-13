@@ -156,6 +156,30 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 
+    /// CO-396: the project-timeline route is mounted under the content
+    /// visibility gate (private universes require auth). An unknown universe
+    /// returns the gate's JSON `not_found` error — proving the route is wired
+    /// and gated, not an unmatched path (which would 404 with an empty body).
+    /// The lane/marker/backlog layout itself is covered by the
+    /// `time::project_timeline` mapper tests and the `game_core` engine tests.
+    #[tokio::test]
+    async fn project_timeline_route_is_wired_and_visibility_gated() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/v1/universes/some-universe/timeline?group_by=epic")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let json = body_json(resp).await;
+        assert_eq!(json["error"], "not_found");
+    }
+
     #[test]
     fn valid_universe_key_charset() {
         assert!(super::is_valid_universe_key("template"));

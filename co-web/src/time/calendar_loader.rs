@@ -10,140 +10,20 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use tracing::warn;
 
+// CO-396: the lens types + Gregorian default live once in the shared layout
+// engine (`game_core::time_layout`), consumed by both co-web and
+// yggdrasil-core. Re-export them so the rest of co-web keeps importing
+// `crate::time::calendar_loader::{LensDef, …}` unchanged.
+pub use game_core::time_layout::{
+    CanonicalType, LabelPeriod, LaneField, LensDef, Scale, gregorian_lens,
+};
+
 /// Whole `_calendar.yaml` document.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CalendarConfig {
     /// Lens id selected when the user has no stored preference.
     pub default_lens: String,
     pub lenses: Vec<LensDef>,
-}
-
-/// Scale of a lens' axis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub enum Scale {
-    #[default]
-    Linear,
-    Log,
-}
-
-/// Type of the canonical field a lens reads.
-///
-/// `I64Ms` (the default) reads Unix milliseconds — covers ±292 Myr from
-/// epoch. `F64Years` reads fractional years-before-present (cosmic scale —
-/// 13.8 Gyr overflows i64 ms by ~47×). `I64Units` reads a raw linear unit
-/// (e.g. a fictional calendar's year number).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum CanonicalType {
-    I64Ms,
-    F64Years,
-    I64Units,
-}
-
-/// A named label on the lens axis (e.g. "Big Bang" at 13.8e9 years bp).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LabelPeriod {
-    pub name: String,
-    pub at: f64,
-}
-
-/// One calendar lens definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LensDef {
-    pub id: String,
-    pub name: String,
-    /// Epoch in Unix ms for i64-ms lenses. `None` = Unix epoch (0).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub epoch_ms: Option<i64>,
-    #[serde(default)]
-    pub scale: Scale,
-    /// Canonical field this lens reads. Defaults to `event_at_ms`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub canonical_field: Option<String>,
-    /// Explicit canonical type; see [`LensDef::resolved_canonical_type`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub canonical_type: Option<CanonicalType>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub week_length_days: Option<u32>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub weekday_names: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub month_length: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub timezone: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_format: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub display_unit: Option<String>,
-    /// Named epoch for non-ms lenses (e.g. `present` for cosmic).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub epoch: Option<String>,
-    /// Frontmatter field that drives position for custom-unit lenses
-    /// (e.g. `shandara_year`). Implies `CanonicalType::I64Units` unless
-    /// `canonical_type` says otherwise.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub custom_event_field: Option<String>,
-    /// Pomodoro-style work cell duration. Presence switches the lens to
-    /// cell math (25-min cells + breaks).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cell_duration_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub break_duration_ms: Option<i64>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub label_periods: Vec<LabelPeriod>,
-}
-
-impl LensDef {
-    /// The entry field this lens reads its canonical value from.
-    ///
-    /// Resolution: `custom_event_field` → `canonical_field` → `event_at_ms`.
-    pub fn resolved_canonical_field(&self) -> &str {
-        self.custom_event_field
-            .as_deref()
-            .or(self.canonical_field.as_deref())
-            .unwrap_or("event_at_ms")
-    }
-
-    /// The canonical type driving this lens' math.
-    ///
-    /// Explicit `canonical_type` wins; a `custom_event_field` without an
-    /// explicit type implies raw linear units; otherwise Unix ms.
-    pub fn resolved_canonical_type(&self) -> CanonicalType {
-        if let Some(t) = self.canonical_type {
-            return t;
-        }
-        if self.custom_event_field.is_some() {
-            return CanonicalType::I64Units;
-        }
-        CanonicalType::I64Ms
-    }
-}
-
-/// Built-in Gregorian lens — the canonical default.
-pub fn gregorian_lens() -> LensDef {
-    LensDef {
-        id: "gregorian".into(),
-        name: "Gregorian (canonical)".into(),
-        epoch_ms: Some(0),
-        scale: Scale::Linear,
-        canonical_field: Some("event_at_ms".into()),
-        canonical_type: Some(CanonicalType::I64Ms),
-        week_length_days: Some(7),
-        weekday_names: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-        month_length: Some("gregorian".into()),
-        timezone: None,
-        display_format: None,
-        display_unit: None,
-        epoch: None,
-        custom_event_field: None,
-        cell_duration_ms: None,
-        break_duration_ms: None,
-        label_periods: Vec::new(),
-    }
 }
 
 impl CalendarConfig {
@@ -285,6 +165,34 @@ lenses:
 
         let pomodoro = cfg.lens_by_id("pomodoro").unwrap();
         assert_eq!(pomodoro.cell_duration_ms, Some(1_500_000));
+    }
+
+    /// CO-396: a `_calendar.yaml` lens may declare itself a project-timeline
+    /// lens via `lane_by: epic|module|status`.
+    #[test]
+    fn parses_project_timeline_lane_by() {
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("_calendar.yaml"),
+            r#"
+default_lens: roadmap
+lenses:
+  - id: roadmap
+    name: Project roadmap
+    epoch_ms: 0
+    scale: linear
+    lane_by: epic
+"#,
+        )
+        .unwrap();
+        let cfg = load_calendar(dir.path());
+        let roadmap = cfg.lens_by_id("roadmap").unwrap();
+        assert_eq!(roadmap.lane_by, Some(LaneField::Epic));
+        // Non-project-timeline lenses leave it unset (round-trips as absent).
+        let gregorian = gregorian_lens();
+        assert_eq!(gregorian.lane_by, None);
+        let json = serde_json::to_value(&gregorian).unwrap();
+        assert!(json.get("lane_by").is_none());
     }
 
     #[test]

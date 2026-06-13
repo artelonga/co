@@ -54,6 +54,7 @@ import './modules/lenses/timeline.js';
 import './modules/lenses/calendar.js';
 import './modules/lenses/dashboard.js';
 import './modules/lenses/time-grid.js'; // CO-387: <co-time-grid> lens
+import './modules/lenses/project-timeline.js'; // CO-396: roadmap/gantt lens
 import { graphLens } from './modules/lenses/graph.js';
 import { renderConteudo, openZoomModal, injectConteudoCallbacks } from './modules/lenses/document.js';
 import { setupDom } from './modules/dom-setup.js';
