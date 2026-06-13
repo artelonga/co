@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-438",
+  "title": "source:github import — 3 prod bugs surfaced by the live claude-code import (seed orphan, token-vs-session private visibility, rate-limit/no-resume)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-438.md",
+  "branch": "feat/CO-438-source-github-import-3-prod-bugs-surface",
+  "merge_sha": "56da012afc7455347d599e05c4cc08c3a79e50d8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/230",
+    "number": 230
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-13T11:51:37Z",
+  "files_changed": 14,
+  "lines_added": 724,
+  "lines_removed": 67,
+  "labels": [
+    "type:fix",
+    "module:content",
+    "module:collab"
+  ],
+  "changelog_entry": "## CO-438 — source:github import — 3 prod bugs surfaced by the live claude-code import (seed orphan, token-vs-session private visibility, rate-limit/no-resume)\n\nFixes the three independent bugs the live `claude-code` import (CO-429) hit at\n114/164 entries, which together blocked a clean `source:github` import of a\nprivate universe.\n\n- **Bug 1 — seed orphan.** The admin-content seed INSERTed a `universes` row for\n  the importable private universe `claude-code` owned by the sentinel `system`.\n  Since access is granted by `owner_id` match, a `system`-owned private row was\n  unreachable by any real user: `POST /universes` → 409 \"key taken\" while\n  `GET /universes/{key}` → 404. The CO-429 reconcile that flipped the row to\n  `private` is what tipped a (GET-able) public-subscribable row into the orphan\n  state. Fix: importable private universes are no longer seeded — `co source\n  add` creates them as the importing user (fully provisioned: owner + membership\n  + pool) — and the private-flip reconcile is guarded with `owner_id != 'system'`\n  so a legacy system-owned row stays public-subscribable instead of orphaning.\n  After a seed, the universe is GET-able or absent, never \"taken but 404\".\n\n- **Bug 2 — token-vs-session private visibility.** `GET /api/v1/universes/{key}`\n  decoded session JWTs only, so an API-token request — even by a private\n  universe's own owner — resolved to anonymous and 404'd. `co source add`'s\n  `universe_exists` probe (api-token) therefore thought the universe was missing\n  and tried to create it (401). Fix: the handler now resolves the caller via\n  `resolve_user_id` (JWT *or* API token), matching the visibility-gate\n  middleware. Owner reads their own private universe by api-token (200);\n  non-owner still 404.\n\n- **Bug 3 — rate-limit blocks bulk import; no skip/resume; admin not exempt.**\n  (a) The global rate-limit middleware capped admin writes at 60/min *before*\n  the vault handler's own admin exemption ran, so a >60-file `co source add` as\n  admin hit 429 mid-import. Admin-tier requests to the Vault API now bypass the\n  global limiter (mirroring `vault_auth`), scoped to vault paths.\n  (b) `co source add` re-PUT every entry from the start each run. It now fetches\n  the server's per-entry `body_hash` (newly exposed in the vault listing) and\n  pushes only entries whose body differs — so a rate-limited import resumes and\n  a re-sync touches only what changed. Added a `--throttle-ms` flag and\n  Retry-After-aware backoff on 429 for non-admin pushes.\n\n### Why\nThese three bugs are why the import stalled at 114/164 and why any\n`source:github` import of a private universe failed at scale. Each is fixed\nindependently with regression tests (seed provisioning, owner api-token\nvisibility, admin bulk-write exemption, and hash-based skip/resume).",
+  "summary": "Contexto A importação ao vivo do `claude-code` em prod (CO-429 Parte 1, pós-deploy v3.6.0, 2026-06-12) chegou a **114/164 entradas** e expôs três bugs reais. Cada um é independente e corrigível; junto",
+  "co_auto_version": "0.1.0"
+}
