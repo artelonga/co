@@ -104,6 +104,18 @@ impl Storage {
         Ok(())
     }
 
+    /// CO-444: revoke a pending invitation by its `token_hash`. Returns the
+    /// number of rows affected (0 = no such invitation). Idempotent — revoking
+    /// an already-revoked invitation simply re-stamps `revoked_at`.
+    pub fn revoke_invitation(&self, token_hash: &str) -> anyhow::Result<usize> {
+        let now_str = Utc::now().to_rfc3339();
+        let affected = self.conn.execute(
+            "UPDATE universe_invitations SET revoked_at = ?1 WHERE token_hash = ?2",
+            params![now_str, token_hash],
+        )?;
+        Ok(affected)
+    }
+
     pub fn list_invitations_for_universe(&self, universe_key: &str) -> Vec<Invitation> {
         let mut stmt = self
             .conn

@@ -84,11 +84,11 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/api/v1/universes` | visibility | List universes (public + caller's owned/member) |
-| POST | `/api/v1/universes` | authed | Create universe |
+| POST | `/api/v1/universes` | authed | Create universe (CO-444: API-token or session; body may set `visibility` ∈ private/public/unlisted and `parent_key`) |
 | GET | `/api/v1/universes/search` | anon | Search public universes |
 | GET | `/api/v1/universes/public` | anon | Public universe directory |
 | GET | `/api/v1/universes/{slug}` | visibility | Universe info |
-| PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility/parent_key (CO-423) |
+| PUT | `/api/v1/universes/{slug}` | owner | Update name/visibility/parent_key (CO-423; CO-444 visibility ∈ private/public/unlisted, API-token accepted) |
 | DELETE | `/api/v1/universes/{slug}` | owner | Delete universe |
 | GET | `/api/v1/universes/{slug}/config` | visibility | Universe config |
 | PUT | `/api/v1/universes/{slug}/config` | owner | Update config |
@@ -115,6 +115,10 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | POST | `/api/v1/universes/apply-template-all` | admin | Apply template across all universes |
 | GET | `/api/v1/universes/quilomboaraucaria/stats` | anon | Special-cased stats (CO-41) |
 | POST | `/api/v1/universes/{slug}/invitations` | authed | Create invitation (CO-188) |
+| POST | `/api/v1/universes/{slug}/invites` | owner | Create invite — `{email\|handle, role}` (CO-444; API-token accepted) |
+| GET | `/api/v1/universes/{slug}/invites` | owner | List pending invites (CO-444) |
+| DELETE | `/api/v1/universes/{slug}/invites/{token}` | owner | Revoke an invite by token_hash (CO-444) |
+| POST | `/api/v1/universes/{slug}/invites/{token}/accept` | authed | Accept an invite (universe-scoped, CO-444) |
 | GET | `/api/v1/me/universes` | authed | Bucketed: owned/member/subscribed (CO-191) |
 | GET | `/api/v1/themes/available` | anon | List available themes per tier |
 | GET | `/api/v1/themes/{preset}` | anon | Compiled CSS for a specific theme preset |
