@@ -16,12 +16,16 @@ import { test, expect } from "./fixtures";
 
 test.describe("CO-96: Universe CRUD UI", () => {
   test("sidebar exposes the new-universe and trash buttons", async ({ page }) => {
+    const vp = page.viewportSize();
+    test.skip(!!(vp && vp.width <= 640), "Sidebar hidden on mobile");
     await page.goto("/", { waitUntil: "networkidle" });
     await expect(page.locator("#btn-sidebar-new-universe")).toBeVisible();
     await expect(page.locator("#btn-sidebar-trash")).toBeVisible();
   });
 
   test("sidebar '+ New universe' button opens the create modal", async ({ page }) => {
+    const vp = page.viewportSize();
+    test.skip(!!(vp && vp.width <= 640), "Sidebar hidden on mobile");
     await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-sidebar-new-universe").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
@@ -29,6 +33,8 @@ test.describe("CO-96: Universe CRUD UI", () => {
   });
 
   test("inline validation: an invalid key disables submit and shows an error", async ({ page }) => {
+    const vp = page.viewportSize();
+    test.skip(!!(vp && vp.width <= 640), "Sidebar hidden on mobile");
     await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-sidebar-new-universe").click();
     await expect(page.locator("#criar-modal-overlay")).not.toHaveClass(/hidden/);
@@ -79,6 +85,8 @@ test.describe("CO-96: Universe CRUD UI", () => {
   });
 
   test("trash view opens from the sidebar", async ({ page }) => {
+    const vp = page.viewportSize();
+    test.skip(!!(vp && vp.width <= 640), "Sidebar hidden on mobile");
     await page.goto("/", { waitUntil: "networkidle" });
     await page.locator("#btn-sidebar-trash").click();
     await expect(page.locator("#trash-overlay")).not.toHaveClass(/hidden/);
