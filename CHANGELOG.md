@@ -5,6 +5,374 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] — 2026-06-13 — Post-git Sync engine [--ignore-dod override]
+
+## CO-128 — Apple-style 4-way conflict UI (Ignore / Replace / Keep both / Apply to all)
+
+When two devices (or an Obsidian sync overlapping the web) edit the same entry,
+the SPA now surfaces a macOS-Finder-style modal with a side-by-side diff and the
+four conflict actions the user named as a v1 requirement, instead of silently
+last-write-wins.
+
+### Added / changed
+
+- **Optimistic concurrency on entry update.** `PUT /api/v1/universes/:slug/entries/:path`
+  accepts an optional `base_hash` — the `body_hash` the client last observed.
+  When present and the stored entry has since diverged, the write is rejected
+  with `409 Conflict` and a `ConflictPayload { local, remote, base }` carrying
+  **both** full bodies (capped at 100 KB/side with a `truncated` flag) so the
+  modal can render a diff. Absent `base_hash` ⇒ unchanged last-write-wins, so
+  draft autosave and legacy callers never trigger a conflict.
+- **Conflict-resolution modal** (`modules/sync/conflict-modal.js`). Pure UI that
+  consumes a `ConflictPayload`, renders a monospace side-by-side line diff
+  (`modules/sync/conflict-diff.js`, dependency-free LCS), and offers
+  `Ignore` / `Replace` / `Keep both` plus an `Apply to all` checkbox. Styled with
+  existing CO design tokens (theme-aware), no new framework. Keyboard:
+  `1`=Ignore, `2`=Replace, `3`=Keep both, `Esc`=cancel the round.
+- **Round controller** (`modules/sync/conflict-round.js`). Walks the queued
+  conflicts of one sync round and wires each choice to the real entry API:
+  *Ignore* keeps remote (no write); *Replace* re-PUTs the local body with the
+  remote hash as base; *Keep both* creates a `<name>.local.md` sibling.
+  `Apply to all` makes the choice sticky for the rest of the round — held in
+  component state only, so it never survives a reload.
+- **Editor integration.** The content editor save path now sends `base_hash` and,
+  on `409`, opens the modal and applies the resolution (revert / overwrite /
+  keep-both) before closing the editor.
+- **i18n.** Conflict-modal strings added in PT-BR (primary) and EN.
+
+### Why
+
+§C.3 of the platform roadmap review flagged this conflict-resolution UX as a
+named v1 requirement the SR plan omitted. It handles the divergence cases the
+CRDT layer (CO-61) cannot, building on sync-protocol v1 + idempotency (CO-54).
+
+### Notes
+
+- No migration. 3-way *Merge* UI, CRDT collaboration, and mobile-specific layout
+  remain out of scope (separate tickets).
+- Tests: Rust integration (`tests/conflict_409_tests.rs`) for the 409 trigger +
+  backward-compat; vitest component suite (`components/__tests__/conflict-modal.test.ts`)
+  for diff/keyboard/apply-to-all/round behaviour; Playwright e2e
+  (`e2e/conflict.spec.ts`) for the two-session 409 flow and live modal render.
+- The spec named "SvelteKit"; the CO web client is a plain TypeScript/ESM SPA
+  (no SvelteKit in-tree), so the component ships in that framework.
+
+## CO-444 — Federation API: token-auth universe creation + visibility + invites + public-subscribe (CO side of YG-138)
+
+A federated-creation surface so an external service (Yggdrasil, YG-138) — or any
+client holding a user's API token — can stand up a universe in CO without internal
+seed/clone code.
+
+### Added / changed
+
+- **Create accepts API tokens.** `POST /api/v1/universes` is now behind
+  `require_auth_with_token` (was session-only, the 401 that blocked the
+  claude-code import in CO-438). The body gained `visibility` and `parent_key`:
+  `{ key, name, description?, visibility?, parent_key? }`. All validation runs
+  before the row is inserted, so a bad `visibility`/`parent_key` never leaves an
+  orphan universe; a taken key still 409s.
+- **Visibility vocabulary.** `visibility` ∈ `private | public | unlisted`
+  (`public` stored canonically as `public-subscribable`, still accepted as an
+  alias). `unlisted` is a new value: readable by anyone with the link, excluded
+  from discovery/search, not subscribable, writable only by owner/members. The
+  `universe_visibility_gate` and `check_universe_access` honour it consistently.
+  `PUT /api/v1/universes/{key}` accepts the same vocabulary (and an API token).
+- **Token↔session parity.** The whole universe management router accepts an API
+  token or a session JWT, resolving to the same owner. `extract_optional_user_id`
+  now resolves both credentials (it was JWT-only, which 401'd token callers on
+  `PUT`/`DELETE`).
+- **Invites (`/invites`).** `POST/GET /api/v1/universes/{key}/invites`
+  (owner/admin), `DELETE …/invites/{token}` to revoke, and
+  `POST …/invites/{token}/accept` to accept (universe-scoped). Reuses the CO-188
+  invitation storage; `handle` is accepted as an alias for `usuario`. These
+  routes accept an API token.
+- **Public subscribe.** `POST/DELETE /api/v1/universes/{key}/subscribe` already
+  existed; it now also accepts an API token via the same parity change.
+
+### Why
+
+YG-138 left the Yggdrasil side waiting on these routes so "criar universo"
+(YG-126) becomes a federated universe in CO — with invite/visibility UI — instead
+of half-implementing the CO side blind. Additive, non-breaking: new routes and a
+new `unlisted` value, nothing removed. No MCP; no hardcoded universe→repo
+mapping (everything comes from the request payload / DB).
+
+### Notes
+
+- No migration: the `universes.visibility` column, `subscriptions`,
+  `universe_members` and `universe_invitations` (CO-188) tables all already exist.
+- Routes added to `docs/architecture/api-catalog.md` + `openapi.yaml` regenerated
+  (no drift). Integration tests cover token-auth create + correct owner,
+  visibility, parent_key, 409, invites create/list/revoke/accept, and subscribe.
+
+## CO-51 — CLI sync — co sync pull/push/watch with conflict resolution
+
+Added `co login` and the `co sync` command family for Google-Drive-like local
+editing of a universe's Vault.
+
+- `co login` — authenticate and store a 90-day API token (alias for
+  `co auth login --save-token`).
+- `co sync pull <universe>` — download all entries to `~/Co/<universe>/`.
+- `co sync push <universe>` — upload changed local files (no-op when clean).
+- `co sync status <universe>` — show the new/modified/deleted/conflict diff
+  between local and remote.
+- `co sync watch <universe>` — poll for local changes and auto-push (debounced,
+  default 2s, `--interval` override).
+- `co sync resolve <file>` — finalize a manual conflict and push the result.
+
+Sync state lives in `<universe>/.co/sync.json` (`{ files: { path: { hash,
+mtime, remote_hash } } }`) with base snapshots under `.co/base/` for 3-way
+merges. The diff classifies each path against the last-synced base
+(local-only → push, remote-only → pull, both → conflict).
+
+Conflict strategies (configurable in `~/.config/co/sync.yaml` or `--strategy`):
+`last-write-wins` (default), `local-wins`, `remote-wins`, `manual`
+(writes `.local`/`.remote`/`.base`), and `merge` (line-level 3-way merge,
+falling back to `manual` on overlapping hunks).
+
+Safety: an `O_EXCL` lockfile (`.co/sync.lock`) blocks concurrent syncs;
+`sync.json` is written atomically (temp + rename) and only after each successful
+file op, so a crash mid-sync never corrupts state and the next run recovers.
+
+### Why
+
+CO-35's Vault REST API gives file CRUD; this layers a stateful, conflict-aware
+sync client on top so a user can edit a universe locally in any editor and
+reconcile with the server, the way Google Drive's desktop client does.
+
+## CO-54 — Idempotency + conflict resolution — safe concurrent editing across sync, web, and co-auto
+
+Formalized idempotency guarantees and conflict-resolution fallbacks so the web
+UI, CLI sync, co-auto, and the Obsidian plugin can edit the same universe
+concurrently without losing data.
+
+### Web (entry PUT)
+- **Field-level merge** (Scenario 1): `PUT …/entries/{path}` is now a true
+  partial patch — a frontmatter field is overwritten only when the caller sends
+  it, so two clients editing *different* fields merge instead of clobbering.
+  Explicit JSON `null` deletes a field; same-field edits resolve last-write-wins.
+- **Idempotency** (Scenario 3): re-applying identical content (e.g. co-auto
+  setting `status: done` when already done) is a no-op — no version bump, no disk
+  write, no event storm.
+- **Version history / audit trail**: every overwrite first snapshots the
+  *previous* content into the new `entry_versions` table (migration **v78**) with
+  `actor`, `timestamp`, and a full-content `hash`. This is the data-loss-prevention
+  guarantee — a crash mid-write can never lose committed data. History is exposed
+  at `GET /api/v1/universes/:slug/entries/versions?path=…`. Retention: the newest
+  50 versions per entry **or** 90 days, whichever is more generous.
+
+### co-auto (task locking)
+- **Per-task lockfile** (Scenario 4): co-auto now acquires an atomic lock under
+  `<data_dir>/.co-auto/locks/<TASK-KEY>.lock` before executing a task. A second
+  agent (e.g. another worktree) finds the lock and skips to the next candidate,
+  so two agents never double-execute the same task. Stale locks (crashed/hung
+  agent) are reclaimed after a 30-minute TTL.
+
+### Sync (conflict strategy)
+- **Configurable resolution strategy**: added `ConflictStrategy` (default
+  **last-write-wins by timestamp**) that maps a detected conflict to a concrete
+  resolution action. Layers on top of the existing CO-385 `detect_conflicts`
+  (both sides differ from base → `BothModified`) so a non-interactive client can
+  auto-resolve (Scenario 2). Delete-vs-modify defaults to "modification beats
+  deletion" to avoid silent data loss.
+
+### Why
+Multiple clients can edit the same universe simultaneously. Without these
+guarantees, a naive last-write-wins PUT silently discarded concurrent field
+edits, repeated writes churned versions, and two co-auto worktrees could race
+the same task. The `entry_versions` audit trail makes every overwrite recoverable.
+
+## CO-75 — Version reconstruction: replay to any timestamp + auto-changelog
+
+Any past state of any entry is now queryable by timestamp, and a universe-wide
+changelog reconstructs itself from the op log with no manual maintenance — built
+**entirely on the pieces that already shipped** (CO-54 `entry_versions` and the
+CO-95 `entry_events` op log), with **no new table and no migration**.
+
+### Added
+
+- **`GET /api/v1/universes/:slug/entries/{*path}?as_of=<RFC3339>`** — reconstructs
+  an entry as it was at a past instant by replaying the CO-54 version history.
+  Returns `{ path, as_of, version, source_timestamp, is_current, frontmatter,
+  body }`. Reconstruction rule: each `entry_versions` row holds the content that
+  was *live until* its overwrite timestamp, so the state at `T` is the content
+  of the earliest version whose `timestamp > T`, falling back to the current
+  live entry when nothing changed after `T`. Visibility gates apply to historical
+  reads exactly as to live ones.
+- **`GET /api/v1/universes/:slug/entries/diff?path=…&from=<T1>&to=<T2>`** — the
+  op-level diff of one entry across an interval: changed frontmatter fields
+  (`before`/`after` per field, including adds/removes) plus a body-change flag
+  with both bodies. Reconstructs both endpoints, so it shows *only* the net
+  change in `[from, to]`. (Uses `?path=` like the sibling `/history` and
+  `/versions` routes, to avoid the greedy `entries/{*path}` wildcard.)
+- **`GET /api/v1/universes/:slug/changelog?since=<T>&until=<T>`** — an
+  auto-generated Keep-a-Changelog document for the whole universe. Aggregates the
+  `entry_events` op log over the window, classifying each op (`put` with no prior
+  body → **Added**, `put` with a prior body → **Changed**, `delete` → **Removed**)
+  and rendering its line via the content type's manifest template. Returns the
+  grouped lines plus rendered `markdown`.
+- **Manifest hook `changelog_summary`** on `ContentType` — a per-type template
+  for the changelog line, e.g. `changelog_summary: "{title} marcado como {status}"`.
+  `{field}` tokens substitute from the entry's frontmatter; `{path}`/`{title}`
+  are always available; absent → a default line (title or path). Backward
+  compatible (optional, defaults to `None`).
+
+### Notes
+
+- **No `entry_snapshots` table.** The CO-75 spec predated CO-54; per its
+  pre-flight reuse note, the snapshot store *is* `entry_versions` and the op
+  source *is* `entry_events`. Replay/diff/changelog are a thin, pure,
+  exhaustively unit-tested layer (`co-web/src/content/versioning/reconstruct.rs`)
+  over those, plus glue in `content::entries::routes`. Snapshot-per-write already
+  bounds replay cost; deep history beyond the CO-54 retention window (50 versions
+  / 90 days) is necessarily best-effort.
+
+### Why
+
+Closes the manifest-epic requirement to "show entry as of T" and to generate
+changelogs from the durable op log instead of hand-maintaining them.
+
+## CO-88 — End-to-end pipeline UAT — localhost ↔ API ↔ web with per-universe stats
+
+Added a content-pipeline UAT harness that proves a file authored on localhost
+arrives byte-equivalent through every layer combination, plus server-side
+telemetry, an admin dashboard, and CI/deploy gating.
+
+### What changed
+
+- **`dev/co-pipeline` (new workspace binary, CO-88a)** — drives the
+  path × universe × combo matrix (4 paths × 5 combos × 3 universes = 60 cells).
+  Reuses the real `CoFile` protobuf envelope, zstd-3, ChaCha20-Poly1305, and
+  Ed25519 signing so the bytes that travel are production's bytes. Encodes →
+  transports → decodes → compares each corpus file, timing encode/decode, and
+  writes a deterministic `co-pipeline-report-<date>.yaml` to `dev/reports/`.
+  Subcommands: `run`, `delta` (CO-88c diff), `gate` (CO-88d deploy gate).
+- **`co-web` pipeline telemetry (CO-88b)** — vault PUT/GET now record
+  `pipeline.transfer` / `pipeline.encode` / `pipeline.decode` events (carrying
+  `co_format`, `compression`, `encryption`, sizes, encode/decode ns) when the
+  caller announces a combo via `X-Co-*` headers. New `pipeline_summary()`
+  aggregation, admin endpoint `GET /api/v1/admin/pipeline/summary` (yuri tier),
+  and a sortable admin dashboard at `/co/co-dev/pipeline`.
+- **CI + deploy gate (CO-88c/CO-88d)** — `.github/workflows/pipeline-uat.yml`
+  runs the matrix, uploads the report, comments per-universe deltas on PRs, and
+  fails the build if any cell fails to round-trip. `scripts/pipeline-deploy-gate.sh`
+  blocks a prod deploy unless the UAT report is green, < 24h old, and free of
+  regressions beyond 20%, then optionally runs the read-only prod smoke.
+
+### Why
+
+The `.co` format (CO-86) and composable layers (CO-87) introduce a non-trivial
+encode/decode pipeline. Without a round-trip gate, every release risks shipping
+a subtle encoder/decoder bug that silently corrupts content. The matrix run is
+cheap (~3s over the local corpora) and catches drift before users see it, while
+giving the team hard size/perf numbers per universe.
+
+## CO-91 — co sync — canonical content-author UX (jj delta + automated changelog + co-token auth)
+
+Promoted `scripts/seed-prod-universes.sh` (the 250-line content-author loop)
+into a first-class `co sync` workflow. Authors edit markdown locally and run
+`co sync push`; only what changed since the last push flows to the configured
+deployment's Vault REST API, with a changelog paper trail — no curl, scripts or
+raw API.
+
+This folds CO-51 forward: the existing CO-51 bidirectional mirror (`co sync
+push <universe>` against `~/Co/`) is preserved when a positional `<universe>` is
+given. With no positional, `co sync` runs the new CO-91 jj-delta push.
+
+- `co sync push [--to <deployment>] [--full] [--dry-run] [--no-changelog]
+  [--push-changelog]` — jj-delta upload of the current repo to a deployment.
+- `co sync push --bootstrap` — one-time setup: password login, create the
+  universe (idempotent), full upload, generate a 90-day API token and store it
+  in the OS keychain (service `co`, account = the deployment's `token_name`).
+- `co sync status` — non-mutating diff of what a push would upload.
+- `co sync watch` — `notify`-backed, debounced auto-push on save (default 1s).
+- `co sync changelog [--for <universe>]` — print accumulated run snippets.
+
+### Primitives (1:1 with the script it replaces)
+
+- **Auth** — per-deployment API token read on demand from the OS keychain (the
+  same store `dev/co-token` writes); never persisted to disk by `co sync`.
+- **Delta** — the source repo is wrapped with `jj git init --colocate`
+  (non-destructive). The last-pushed commit id is the baseline at
+  `~/.co/sync-state/<deployment>/<universe>.commit`; only files differing
+  between that baseline and `@` are uploaded. First run / `--full` / a lost
+  baseline → full upload.
+- **Changelog** — `jj log -r '<baseline>..@'` is rendered to
+  `~/.co/sync-runs/<deployment>/<universe>-<ts>.md` per run.
+- **Per-deployment isolation** — tokens, baselines and changelog snippets are
+  namespaced by deployment key, so `--to prod` and `--to uat` are independent
+  operations against independent baselines.
+
+### Config
+
+- `~/.co/deployments.toml` — `[prod]`/`[uat]` tables (`url`, `token_name`,
+  `default`). Absent → a built-in `prod` entry (zero-config, as the script was).
+- `<root>/.co/sync.toml` — `universe`, glob `include`/`exclude` (default
+  `**/*.md` minus the usual build/tooling dirs). Or pass `--universe --root`.
+
+### Content negotiation (CO-86) and changelog events (CO-89)
+
+`co sync push` probes `OPTIONS /…/vault/`; if the server advertises
+`co/protobuf`, files are sent as a `.co` protobuf batch (CO-151 `CoFile` +
+zstd), else as `text/markdown` (the v1 wire format). `--push-changelog` PUTs a
+synthesized `event` entry (`type: event`, `kind: sync`, `summary: <count>`) via
+the Vault fast-path, indexed on CO-89's calendar view.
+
+### Bench (throughput vs the script)
+
+The script forks one `curl` per file with `sleep 0.1` between PUTs (≈10
+files/s ceiling, plus per-request connection setup). `co sync` reuses a single
+keep-alive `reqwest` client with no artificial delay, so throughput is bounded
+by server RTT rather than a fixed sleep — a >10× headroom improvement on the
+small-file uploads the script was used for, before counting the jj delta that
+shrinks the upload set to only changed files.
+
+### Why
+
+The content-author loop was decided to be canonical, not a one-off script. A
+first-class CLI surface — composable auth (keychain), delta (jj) and changelog
+primitives behind a clean argument shape with real error handling — lets any
+author (not just yuri) adopt it against any deployment (UAT, prod, self-hosted).
+
+## CO-96 — Universe CRUD UI — intuitive create / rename / duplicate / delete in the SPA
+
+Adds a full universe-lifecycle CRUD surface to the SPA so any user can manage
+their universe collection from the browser without scripting.
+
+### Create (Phase 1)
+- The sidebar `+ New universe` modal now does **inline key validation**:
+  synchronous format checking plus a debounced uniqueness check against the API
+  (404 = available). Submit is disabled while the key is invalid or taken.
+- "Copy from existing universe" now routes correctly: the template uses the
+  anonymous-friendly `/clone`, while copying any other (e.g. the user's own
+  private) universe uses `/duplicate` (CO-95).
+
+### Context menu + settings (Phase 2)
+- Right-click any universe in the sidebar for a context menu: Open, Rename…,
+  Change visibility (Private / Public / Unlisted), Duplicate…, Settings…,
+  Archive, Delete…. Rename and visibility changes update the sidebar without a
+  page reload.
+- The universe Settings panel is now fully editable for owners — name,
+  description and visibility, plus a danger zone with Archive / Delete.
+
+### Soft-delete + archive + trash (Phase 3)
+- New migration **v79** adds nullable `deleted_at` + `archived_at` columns to
+  `universes`. Every universe-listing query (sidebar buckets, public listing,
+  search, discovery) now filters them out.
+- `DELETE /api/v1/universes/:slug` is now a **soft-delete** (sets `deleted_at`)
+  instead of a hard cascade — the row, entries and on-disk data survive so the
+  universe is recoverable. Delete is gated behind a type-the-key confirmation
+  dialog.
+- New endpoints: `POST /:slug/archive`, `POST /:slug/restore`, and
+  `GET /api/v1/universes/trash`. The sidebar trash view lists deleted +
+  archived universes and restores them within the retention window.
+
+### Why
+Universes could previously only be created/renamed/deleted via API or CLI. This
+makes the platform feel like a productized content workspace, and soft-delete
+removes the accidental-data-loss risk of the old hard-delete.
+
+
 ## [3.8.0] — 2026-06-13 — Money & Activation — payment, onboarding, security hardening
 
 ## CO-366 — Conversion + payment wiring — register → paid via Hostinger checkout (provider-agnostic trait)
