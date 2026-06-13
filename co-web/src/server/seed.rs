@@ -922,14 +922,17 @@ impl Storage {
                 "public-subscribable",
                 None,
             ),
-            // CO-429: private initially; parent=co groups it under the platform.
-            (
-                "claude-code",
-                "Claude Code",
-                "Anthropic's agentic coding CLI — upstream changelog + examples",
-                "private",
-                Some("co"),
-            ),
+            // CO-438 (Bug 1): claude-code is intentionally NOT seeded here.
+            // It is a *private* importable universe; seeding a private row owned
+            // by the sentinel 'system' (with no real owner) made it an orphan —
+            // `POST /universes` → 409 "key taken", but `GET /universes/{key}` →
+            // 404 because `check_universe_access` admits only the owner_id, and
+            // 'system' is no real user. Per the fix, importable private
+            // universes are created by `co source add` as the importing user
+            // (fully provisioned via `create_universe`: owner + membership +
+            // pool). A fresh DB therefore has no claude-code until imported —
+            // never "taken but 404". The remote-sync backfill + metadata
+            // reconcile below still tidy an *existing* (real-owner) row.
         ] {
             // 1.54.0: INSERT OR IGNORE only — no boot-reconcile UPDATE. The
             // pre-1.54 reconcile stomped user-set name/description/visibility
@@ -973,9 +976,16 @@ impl Storage {
              WHERE key = 'claude-code' AND parent_key IS NULL",
             [],
         );
+        // CO-438 (Bug 1): only privatize a claude-code row that has a *real*
+        // owner. Flipping a sentinel 'system'-owned public-subscribable row to
+        // private is exactly what created the orphan (private + no real owner →
+        // GET 404, POST 409). A system-owned legacy row stays public-subscribable
+        // (still GET-able) rather than being orphaned; a real-owner import is
+        // correctly privatized and remains accessible to its owner.
         let _ = self.conn.execute(
             "UPDATE universes SET visibility = 'private', is_public = 0 \
-             WHERE key = 'claude-code' AND visibility = 'public-subscribable'",
+             WHERE key = 'claude-code' AND visibility = 'public-subscribable' \
+               AND owner_id != 'system'",
             [],
         );
         // CO-429: fix subdirs — upstream repo has examples/ and plugins/, no docs/.
@@ -2561,36 +2571,14 @@ mod tests {
         let mut storage = Storage::new(data_dir.path().to_str().unwrap());
         storage.seed_admin_content_universes();
 
-        let u = storage
-            .get_universe("claude-code")
-            .expect("claude-code must exist after seed");
-        assert_eq!(
-            u.visibility, "private",
-            "claude-code.visibility must be private initially"
-        );
-        assert_eq!(
-            u.parent_key.as_deref(),
-            Some("co"),
-            "claude-code.parent_key must be 'co'"
-        );
-
-        // subdirs must reference examples/plugins, not docs/
-        let subdirs: Option<String> = storage
-            .conn()
-            .query_row(
-                "SELECT content_subdirs FROM universes WHERE key = 'claude-code'",
-                [],
-                |r| r.get(0),
-            )
-            .unwrap();
-        let subdirs = subdirs.unwrap_or_default();
+        // CO-438 (Bug 1): claude-code is NO LONGER seeded. Seeding a private row
+        // owned by the sentinel 'system' (no real owner) made it an orphan —
+        // POST 409 "key taken" but GET 404. Importable private universes are now
+        // created by `co source add` as the importing user. A fresh DB has no
+        // claude-code row until then.
         assert!(
-            subdirs.contains("examples"),
-            "claude-code.content_subdirs must include examples, got: {subdirs}"
-        );
-        assert!(
-            !subdirs.contains("\"docs\""),
-            "claude-code.content_subdirs must not reference docs/ (it doesn't exist upstream), got: {subdirs}"
+            storage.get_universe("claude-code").is_none(),
+            "claude-code must not be seeded (would orphan: private + owner=system)"
         );
     }
 
@@ -2618,20 +2606,24 @@ mod tests {
             [],
         ).unwrap();
 
-        // Run seed — reconcile UPDATEs must fix the stale row.
+        // Run seed — reconcile UPDATEs must tidy the stale row.
         storage.seed_admin_content_universes();
 
         let u = storage.get_universe("claude-code").unwrap();
+        // CO-438 (Bug 1): a *system*-owned row must NOT be flipped to private —
+        // that flip (private + no real owner) is exactly what orphaned it. It
+        // stays public-subscribable, i.e. still GET-able, never "taken but 404".
         assert_eq!(
-            u.visibility, "private",
-            "reconcile must set visibility=private"
+            u.visibility, "public-subscribable",
+            "system-owned row must stay public-subscribable, not be orphaned to private"
         );
+        // Owner-agnostic reconciles still apply: parent grouping …
         assert_eq!(
             u.parent_key.as_deref(),
             Some("co"),
             "reconcile must set parent_key=co"
         );
-
+        // … and the stale-subdirs fix.
         let subdirs: Option<String> = storage
             .conn()
             .query_row(
@@ -2644,6 +2636,33 @@ mod tests {
         assert!(
             !subdirs.contains("\"docs\""),
             "reconcile must fix stale docs/ subdirs, got: {subdirs}"
+        );
+    }
+
+    /// CO-438 (Bug 1): a claude-code row with a *real* owner IS privatized by
+    /// the reconcile (the owner keeps access), confirming the guard targets only
+    /// the system sentinel rather than disabling the flip entirely.
+    #[test]
+    fn test_seed_co438_real_owner_row_is_privatized() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes \
+                 (key, name, owner_id, created_at, visibility, is_public) \
+                 VALUES ('claude-code', 'Claude Code', 'usr_yuri', '2026-01-01', \
+                         'public-subscribable', 1)",
+                [],
+            )
+            .unwrap();
+
+        storage.seed_admin_content_universes();
+
+        assert_eq!(
+            storage.get_universe("claude-code").unwrap().visibility,
+            "private",
+            "a real-owner row must still be privatized by the reconcile"
         );
     }
 }

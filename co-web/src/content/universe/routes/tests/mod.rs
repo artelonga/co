@@ -3,7 +3,9 @@
 mod access;
 mod config;
 mod crud;
+mod rate_limit_vault;
 mod reparent;
 mod source;
 pub(crate) mod support;
 mod themes;
+mod token_visibility;

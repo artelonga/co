@@ -503,13 +503,20 @@ components:
 
     VaultFileInfo:
       type: object
-      required: [path, stat]
+      required: [path, stat, body_hash]
       properties:
         path:
           type: string
           example: notes/ideas.md
         stat:
           $ref: "#/components/schemas/VaultStat"
+        body_hash:
+          type: string
+          description: >-
+            CO-438: SHA-256 of the entry body (frontmatter excluded). Lets
+            bulk-sync clients (`co source add`) skip re-PUTting unchanged
+            entries so a re-sync touches only what changed.
+          example: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
 
     VaultFile:
       type: object

@@ -78,11 +78,16 @@ pub struct VaultStat {
     pub size: i64,
 }
 
-/// Listing entry (path + stat only).
+/// Listing entry (path + stat + body hash).
 #[derive(Debug, Serialize)]
 pub struct VaultFileInfo {
     pub path: String,
     pub stat: VaultStat,
+    /// CO-438: SHA-256 of the entry body (frontmatter excluded), the same value
+    /// stored in the `body_hash` column. Lets bulk-sync clients (`co source
+    /// add`) skip re-PUTting entries whose body is byte-identical, so a re-sync
+    /// only touches what changed and a rate-limited import can resume.
+    pub body_hash: String,
 }
 
 /// Full file content response.
@@ -761,7 +766,7 @@ pub async fn list_vault_files(
         .lock()
         .map_err(|_| AppError::Internal("universe conn lock".into()))?;
     let mut stmt = uc_guard.prepare(
-        "SELECT path, created_at, updated_at, LENGTH(body) \
+        "SELECT path, created_at, updated_at, LENGTH(body), body_hash \
          FROM entries WHERE universe_key = ?1 ORDER BY path",
     )?;
     let files: Vec<VaultFileInfo> = stmt
@@ -771,13 +776,15 @@ pub async fn list_vault_files(
                 row.get::<_, Option<String>>(1)?,
                 row.get::<_, Option<String>>(2)?,
                 row.get::<_, i64>(3)?,
+                row.get::<_, String>(4)?,
             ))
         })
         .map_err(|e| AppError::Internal(e.to_string()))?
         .filter_map(|r| r.ok())
-        .map(|(path, created, updated, size)| VaultFileInfo {
+        .map(|(path, created, updated, size, body_hash)| VaultFileInfo {
             stat: make_stat(created.as_deref(), updated.as_deref(), size as usize),
             path,
+            body_hash,
         })
         .collect();
 

@@ -459,6 +459,12 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
 // Admin override
 // ---------------------------------------------------------------------------
 
+/// CO-438: true for Vault API paths (`/api/v1/universes/{slug}/vault[/...]`),
+/// the bulk-sync surface used by `co source add` and `co push`.
+fn is_vault_path(path: &str) -> bool {
+    path.contains("/vault/") || path.ends_with("/vault")
+}
+
 fn has_admin_override(headers: &HeaderMap) -> bool {
     headers
         .get("x-admin-override-quota")
@@ -599,6 +605,17 @@ pub async fn rate_limit_middleware(
 
     // CO-145: admin override header bypasses rate limits for authenticated users.
     if tier == Tier::Admin && has_admin_override(&headers) {
+        return next.run(req).await;
+    }
+
+    // CO-438 (Bug 3): admin-tier requests to the Vault API bypass the global
+    // limiter, matching the vault-layer exemption in `vault_auth` and the
+    // documented "admin-tier skips the vault rate limit" promise. Without this,
+    // the middleware capped admin writes at 60/min (CO-397) *before* the vault
+    // handler's exemption ran, so a bulk `co source add` of >60 files as admin
+    // hit 429 mid-import with no way to reach the unsynced tail. Scoped to the
+    // vault path so other admin write endpoints keep their CO-397 budget.
+    if tier == Tier::Admin && is_vault_path(path) {
         return next.run(req).await;
     }
 
@@ -790,6 +807,18 @@ mod tests {
         // Storage quota stays unlimited; rate limits are applied in middleware separately.
         assert!(lim.storage_entries.is_none());
         assert!(lim.max_universes.is_none());
+    }
+
+    #[test]
+    fn test_is_vault_path() {
+        // CO-438: admin exemption is scoped to these paths.
+        assert!(is_vault_path("/api/v1/universes/co/vault/content/a.md"));
+        assert!(is_vault_path("/api/v1/universes/co/vault/")); // listing
+        assert!(is_vault_path("/api/v1/universes/co/vault")); // no trailing slash
+        // Non-vault routes keep their CO-397 budget.
+        assert!(!is_vault_path("/api/v1/universes/co"));
+        assert!(!is_vault_path("/api/projects/CO/tasks"));
+        assert!(!is_vault_path("/api/v1/universes/co/entries"));
     }
 
     #[test]

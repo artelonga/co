@@ -948,7 +948,16 @@ pub async fn get_universe_info(
     Path(slug): Path<String>,
     headers: HeaderMap,
 ) -> Result<Json<UniverseInfo>, AppError> {
-    let caller_id = extract_optional_user_id(&headers, &state);
+    // CO-438 (Bug 2): resolve the caller from either a session JWT *or* a
+    // long-lived API token. `extract_optional_user_id` decodes JWTs only, so an
+    // API-token request — even by a private universe's own owner — resolved to
+    // anonymous and `check_universe_access` returned `Denied` → 404. The
+    // `universe_visibility_gate` middleware already treats both credentials
+    // identically via `resolve_user_id`; mirror it here so `co source add`'s
+    // `universe_exists` probe (api-token) sees the owner's private universe just
+    // as a session does. Resolved before the storage lock below (resolve_user_id
+    // takes the lock internally; parking_lot::Mutex is not reentrant).
+    let caller_id = crate::auth::resolve_user_id(&state, &headers);
 
     // For anonymous universes (owned by anon-*), we still use the cookie gate
     // because those don't have a visibility flag yet — they're always private.

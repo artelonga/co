@@ -24,6 +24,7 @@
 //! units so the transform can be tested without a live fetch — see the tests
 //! at the bottom, which use a tiny in-memory fixture tree.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
@@ -56,6 +57,11 @@ pub struct MaterializedEntry {
 #[derive(Debug, Deserialize)]
 struct VaultEntry {
     path: String,
+    /// CO-438: SHA-256 of the entry body (frontmatter excluded). Absent on
+    /// older servers that predate the listing field — treated as "unknown",
+    /// so those entries are always re-PUT (never wrongly skipped).
+    #[serde(default)]
+    body_hash: Option<String>,
 }
 
 /// CO-423: minimal shape of `GET /api/v1/universes/{key}` used to confirm the
@@ -80,6 +86,7 @@ pub fn run(
     delete_missing: bool,
     parent: Option<String>,
     no_index: bool,
+    throttle_ms: u64,
 ) {
     if let Err(e) = do_add_github(
         owner_repo,
@@ -91,6 +98,7 @@ pub fn run(
         delete_missing,
         parent,
         no_index,
+        throttle_ms,
     ) {
         eprintln!("{} {:#}", "error:".red().bold(), e);
         std::process::exit(1);
@@ -108,6 +116,7 @@ fn do_add_github(
     delete_missing: bool,
     parent: Option<String>,
     no_index: bool,
+    throttle_ms: u64,
 ) -> Result<()> {
     let (owner, repo) = parse_owner_repo(&owner_repo)?;
     let universe_key = universe.unwrap_or_else(|| sanitize_key(&repo));
@@ -157,13 +166,30 @@ fn do_add_github(
         dry_run,
     )?;
 
-    // 4. Push entries via Vault PUT (idempotent).
+    // 4. Push entries via Vault PUT — skipping entries already byte-identical
+    //    on the server (CO-438 Bug 3). The vault returns 429 after a burst of
+    //    PUTs; re-running used to re-PUT every entry from the start, burning the
+    //    budget on already-synced files and never reaching the tail. We now
+    //    fetch the server's per-entry body hashes once and push only what
+    //    changed, so a rate-limited import resumes and a re-sync is near-free.
+    let server_hashes = if dry_run {
+        HashMap::new()
+    } else {
+        fetch_server_hashes(&client, &base_url, &api_token, &universe_key)?
+    };
+    let to_push = select_changed(&entries, &server_hashes);
+    let skipped = entries.len() - to_push.len();
     eprintln!(
-        "Importing {} entries into '{}'...",
-        entries.len(),
-        universe_key
+        "Importing {} entries into '{}'{}...",
+        to_push.len(),
+        universe_key,
+        if skipped > 0 {
+            format!(" ({skipped} unchanged, skipped)")
+        } else {
+            String::new()
+        }
     );
-    for e in &entries {
+    for e in &to_push {
         if dry_run {
             eprintln!("  import  {}", e.vault_path);
         } else {
@@ -175,6 +201,9 @@ fn do_add_github(
                 &e.vault_path,
                 &e.markdown,
             )?;
+            if throttle_ms > 0 {
+                std::thread::sleep(std::time::Duration::from_millis(throttle_ms));
+            }
         }
     }
 
@@ -743,16 +772,38 @@ fn put_entry(
     markdown: &str,
 ) -> Result<()> {
     let url = format!("{base_url}/api/v1/universes/{universe_key}/vault/{vault_path}");
-    let resp = client
-        .put(&url)
-        .bearer_auth(token)
-        .body(markdown.to_string())
-        .send()
-        .with_context(|| format!("PUT vault/{vault_path}"))?;
-    if !resp.status().is_success() {
-        bail!("PUT vault/{vault_path} — HTTP {}", resp.status());
+    // CO-438: back off and retry on 429 instead of aborting the whole import.
+    // Admin tokens are exempt server-side, but non-admin bulk pushes can still
+    // hit the limit; honour Retry-After (capped) so the import drains rather
+    // than failing partway through.
+    const MAX_RETRIES: u32 = 5;
+    for attempt in 0..=MAX_RETRIES {
+        let resp = client
+            .put(&url)
+            .bearer_auth(token)
+            .body(markdown.to_string())
+            .send()
+            .with_context(|| format!("PUT vault/{vault_path}"))?;
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS && attempt < MAX_RETRIES {
+            let wait = retry_after_secs(&resp).unwrap_or(1 << attempt).min(30);
+            eprintln!("  rate-limited on {vault_path} — retrying in {wait}s");
+            std::thread::sleep(std::time::Duration::from_secs(wait));
+            continue;
+        }
+        if !resp.status().is_success() {
+            bail!("PUT vault/{vault_path} — HTTP {}", resp.status());
+        }
+        return Ok(());
     }
-    Ok(())
+    bail!("PUT vault/{vault_path} — still rate-limited after {MAX_RETRIES} retries")
+}
+
+/// CO-438: read the `Retry-After` header (seconds) from a 429 response.
+fn retry_after_secs(resp: &reqwest::blocking::Response) -> Option<u64> {
+    resp.headers()
+        .get(reqwest::header::RETRY_AFTER)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
 }
 
 fn reconcile_deletions(
@@ -804,6 +855,61 @@ fn list_vault(
     }
     let entries: Vec<VaultEntry> = resp.json().context("parse vault list")?;
     Ok(entries.into_iter().map(|e| e.path).collect())
+}
+
+/// CO-438: fetch the server's `path → body_hash` map for a universe so the
+/// importer can skip entries whose body is already identical. Entries whose
+/// hash the server omits (older server) are left out of the map and therefore
+/// always pushed.
+fn fetch_server_hashes(
+    client: &reqwest::blocking::Client,
+    base_url: &str,
+    token: &str,
+    universe_key: &str,
+) -> Result<HashMap<String, String>> {
+    let url = format!("{base_url}/api/v1/universes/{universe_key}/vault/");
+    let resp = client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .context("GET vault list (hashes)")?;
+    // A brand-new universe (just created above) may legitimately 404 here;
+    // treat any non-success as "no known hashes" so every entry is pushed.
+    if !resp.status().is_success() {
+        return Ok(HashMap::new());
+    }
+    let entries: Vec<VaultEntry> = resp.json().context("parse vault list (hashes)")?;
+    Ok(entries
+        .into_iter()
+        .filter_map(|e| e.body_hash.map(|h| (e.path, h)))
+        .collect())
+}
+
+/// CO-438: compute the body hash of a materialized entry the way the server
+/// does — strip the YAML frontmatter, then SHA-256 the body. The provenance
+/// frontmatter embeds the repo HEAD sha (which advances on every commit), so
+/// hashing the sha-independent *body* is what makes "only re-PUT what changed"
+/// correct: an unchanged file keeps the same body hash across imports.
+fn entry_body_hash(markdown: &str) -> String {
+    let body = co::entry::split_frontmatter(markdown)
+        .map(|(_, body)| body)
+        .unwrap_or_else(|_| markdown.to_string());
+    co::entry::Entry::hash_body(&body)
+}
+
+/// CO-438: select the entries that actually need pushing. An entry is skipped
+/// only when the server reports a byte-identical body hash for its path; a
+/// missing path or any difference is pushed. This direction is deliberate — a
+/// false "changed" merely re-PUTs (harmless), while a false "unchanged" would
+/// silently drop a real update, so we never skip on uncertainty.
+fn select_changed<'a>(
+    entries: &'a [MaterializedEntry],
+    server_hashes: &HashMap<String, String>,
+) -> Vec<&'a MaterializedEntry> {
+    entries
+        .iter()
+        .filter(|e| server_hashes.get(&e.vault_path) != Some(&entry_body_hash(&e.markdown)))
+        .collect()
 }
 
 fn delete_entry(
@@ -1183,5 +1289,104 @@ mod tests {
         let entries = materialize(&files, "o/r", "sha");
         assert!(has_index_entry(&entries));
         assert!(entries[0].markdown.contains("# Home"));
+    }
+
+    // ── CO-438: skip-if-identical (resume) ──────────────────────────────────
+
+    /// entry_body_hash matches the server's `body_hash` (hash of the body with
+    /// frontmatter stripped), so an unchanged entry hashes identically.
+    #[test]
+    fn entry_body_hash_strips_frontmatter() {
+        let md = "---\ntitle: T\nsource: github:o/r@abc\n---\n\n# Body\n\ntext";
+        // Equivalent to the server: split_frontmatter then hash_body.
+        let expected = co::entry::Entry::hash_body("# Body\n\ntext");
+        assert_eq!(entry_body_hash(md), expected);
+    }
+
+    /// The provenance frontmatter carries the repo HEAD sha, which advances on
+    /// every commit. The body hash must ignore it so an unchanged file is still
+    /// recognised as unchanged after the sha bumps.
+    #[test]
+    fn entry_body_hash_ignores_provenance_sha() {
+        let files = vec![SourceFile {
+            rel_path: "docs/a.md".into(),
+            text: Some("# A\n\nsame body".into()),
+        }];
+        let v1 = materialize(&files, "o/r", "sha_one");
+        let v2 = materialize(&files, "o/r", "sha_two");
+        assert_ne!(v1[0].markdown, v2[0].markdown, "frontmatter sha differs");
+        assert_eq!(
+            entry_body_hash(&v1[0].markdown),
+            entry_body_hash(&v2[0].markdown),
+            "body hash must be sha-independent"
+        );
+    }
+
+    #[test]
+    fn select_changed_skips_identical_and_pushes_new_or_modified() {
+        let files = vec![
+            SourceFile {
+                rel_path: "a.md".into(),
+                text: Some("# A\n\nunchanged".into()),
+            },
+            SourceFile {
+                rel_path: "b.md".into(),
+                text: Some("# B\n\nmodified".into()),
+            },
+            SourceFile {
+                rel_path: "c.md".into(),
+                text: Some("# C\n\nbrand new".into()),
+            },
+        ];
+        let entries = materialize(&files, "o/r", "sha");
+
+        // Server has `a` identical, `b` with an old (different) body, no `c`.
+        let mut server = HashMap::new();
+        server.insert(
+            "content/a.md".to_string(),
+            entry_body_hash(&entries[0].markdown),
+        );
+        server.insert(
+            "content/b.md".to_string(),
+            co::entry::Entry::hash_body("# B\n\nOLD body"),
+        );
+
+        let to_push = select_changed(&entries, &server);
+        let paths: Vec<&str> = to_push.iter().map(|e| e.vault_path.as_str()).collect();
+        assert_eq!(paths, vec!["content/b.md", "content/c.md"]);
+    }
+
+    /// Re-syncing an unchanged repo pushes nothing.
+    #[test]
+    fn select_changed_resync_unchanged_pushes_nothing() {
+        let files = vec![
+            SourceFile {
+                rel_path: "a.md".into(),
+                text: Some("# A".into()),
+            },
+            SourceFile {
+                rel_path: "b.md".into(),
+                text: Some("# B".into()),
+            },
+        ];
+        let entries = materialize(&files, "o/r", "sha");
+        let server: HashMap<String, String> = entries
+            .iter()
+            .map(|e| (e.vault_path.clone(), entry_body_hash(&e.markdown)))
+            .collect();
+        assert!(select_changed(&entries, &server).is_empty());
+    }
+
+    /// An entry the server lacks a hash for (older server) is always pushed —
+    /// never wrongly skipped.
+    #[test]
+    fn select_changed_pushes_when_server_hash_unknown() {
+        let files = vec![SourceFile {
+            rel_path: "a.md".into(),
+            text: Some("# A".into()),
+        }];
+        let entries = materialize(&files, "o/r", "sha");
+        let server = HashMap::new();
+        assert_eq!(select_changed(&entries, &server).len(), 1);
     }
 }
