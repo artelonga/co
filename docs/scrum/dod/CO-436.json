@@ -1,0 +1,75 @@
+{
+  "co_id": "CO-436",
+  "spec_title": "Mythos: framework-agnostic game-core Plugin + split migrations.rs/seed.rs",
+  "timestamp": "2026-06-13T22:09:30.870Z",
+  "items": [
+    {
+      "text": "`Plugin` deixa de retornar `axum::Router`. Trocar por um descritor portável (`Vec<RouteDescriptor { path, method, handler-id }>` ou similar) que o co-web traduz para axum no seu lado. `game-core` compila **sem axum na árvore de deps** (`cargo tree -p game-core | grep axum` vazio).",
+      "pattern": "grep-absent:axum@game-core/Cargo.toml && grep:Vec<RouteDescriptor>@game-core/src/plugin.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep-absent:axum@game-core/Cargo.toml",
+        "grep:Vec<RouteDescriptor>@game-core/src/plugin.rs"
+      ],
+      "evidence": "✓ grep-absent \"axum\" @game-core/Cargo.toml → 0; ✓ grep \"Vec<RouteDescriptor>\" @game-core/src/plugin.rs → 2",
+      "status": "pass"
+    },
+    {
+      "text": "Os jogos atuais (snake/tetris/invaders/poker) e o registro de plugin continuam funcionando via a tradução no co-web; `cargo test -p game-core -p co-web` verde.",
+      "pattern": "rust-test:register_mock_plugin_and_verify_in_registry",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:register_mock_plugin_and_verify_in_registry"
+      ],
+      "evidence": "✓ rust-test register_mock_plugin_and_verify_in_registry → game-core/src/plugin.rs",
+      "status": "pass"
+    },
+    {
+      "text": "`migrations.rs` fatiado: versões em `storage/migrations/` (um módulo por faixa de versão, ou um por versão a partir do v75), com o runner agregando. Nenhum arquivo de migração > 500 LoC. **Protocolo de claim de versão intacto** (não renumerar nada existente).",
+      "pattern": "file:co-web/src/storage/migrations/mod.rs && rust-test:fresh_db_reaches_latest_version",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "file:co-web/src/storage/migrations/mod.rs",
+        "rust-test:fresh_db_reaches_latest_version"
+      ],
+      "evidence": "✓ file co-web/src/storage/migrations/mod.rs → exists; ✓ rust-test fresh_db_reaches_latest_version → co-web/src/storage/migrations/mod.rs",
+      "status": "pass"
+    },
+    {
+      "text": "`seed.rs` movido para o caminho de boot (`server/`), separado da camada de storage; storage não depende mais de dados de seed.",
+      "pattern": "file:co-web/src/server/seed.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "file:co-web/src/server/seed.rs"
+      ],
+      "evidence": "✓ file co-web/src/server/seed.rs → exists",
+      "status": "pass"
+    },
+    {
+      "text": "**Zero mudança de comportamento**: schema final idêntico (mesma sequência de migrações aplicada), seed idêntico; `cargo test` verde; clippy limpo.",
+      "pattern": "rust-test:fresh_db_reaches_latest_version",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:fresh_db_reaches_latest_version"
+      ],
+      "evidence": "✓ rust-test fresh_db_reaches_latest_version → co-web/src/storage/migrations/mod.rs",
+      "status": "pass"
+    }
+  ],
+  "total": 5,
+  "passed": 5,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

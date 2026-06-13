@@ -1,0 +1,86 @@
+{
+  "co_id": "CO-431",
+  "spec_title": "Mythos: promote the Universo domain to core + UniversoFactory seam",
+  "timestamp": "2026-06-13T22:09:30.364Z",
+  "items": [
+    {
+      "text": "`Universo` trait + tipos de domínio movidos para `core` (`core/src/universo.rs` ou submódulo), **sem** nenhuma dependência axum/rusqlite/tokio. co-web re-exporta para compatibilidade (`pub use core::universo::*`).",
+      "pattern": "grep:pub trait Universo@core/src/universo.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:pub trait Universo@core/src/universo.rs"
+      ],
+      "evidence": "✓ grep \"pub trait Universo\" @core/src/universo.rs → 2",
+      "status": "pass"
+    },
+    {
+      "text": "`UniversoLocal` (impl de filesystem) permanece em co-web (lê disco), agora implementando o trait vindo de `core`.",
+      "pattern": "grep:struct UniversoLocal@co-web/src/content/universo.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:struct UniversoLocal@co-web/src/content/universo.rs"
+      ],
+      "evidence": "✓ grep \"struct UniversoLocal\" @co-web/src/content/universo.rs → 2",
+      "status": "pass"
+    },
+    {
+      "text": "Novo `trait UniversoFactory: Send + Sync { fn abrir(&self, key: &str, root: &Path) -> Result<Box<dyn Universo>, ...> }` injetado no AppState; os handlers obtêm o universo via factory, não por `UniversoLocal::abrir` hardcoded. A factory default é a de filesystem.",
+      "pattern": "grep:trait UniversoFactory@core/src && grep:universo_factory@co-web/src/server/state.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait UniversoFactory@core/src",
+        "grep:universo_factory@co-web/src/server/state.rs"
+      ],
+      "evidence": "✓ grep \"trait UniversoFactory\" @core/src → 1; ✓ grep \"universo_factory\" @co-web/src/server/state.rs → 5",
+      "status": "pass"
+    },
+    {
+      "text": "Um teste prova a troca: um `UniversoFactory` fake/in-memory plugado no AppState faz os mesmos handlers servirem um universo não-filesystem, sem tocar nas rotas.",
+      "pattern": "rust-test:fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers"
+      ],
+      "evidence": "✓ rust-test fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers → co-web/src/content/universo.rs",
+      "status": "pass"
+    },
+    {
+      "text": "Zero mudança de comportamento: contratos HTTP idênticos; `cargo test -p co-web -p core` verde; clippy limpo; sem drift de openapi/api-catalog.",
+      "pattern": "rust-test:factory_is_object_safe_and_boxable",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:factory_is_object_safe_and_boxable"
+      ],
+      "evidence": "✓ rust-test factory_is_object_safe_and_boxable → core/src/universo.rs",
+      "status": "pass"
+    },
+    {
+      "text": "`core` continua sem vazar concerns de servidor (checagem: `grep -r axum core/src` vazio).",
+      "pattern": "grep-absent:axum@core/src",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep-absent:axum@core/src"
+      ],
+      "evidence": "✓ grep-absent \"axum\" @core/src → 0",
+      "status": "pass"
+    }
+  ],
+  "total": 6,
+  "passed": 6,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

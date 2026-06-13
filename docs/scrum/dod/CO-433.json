@@ -1,0 +1,75 @@
+{
+  "co_id": "CO-433",
+  "spec_title": "Mythos: per-universe sharded storage + EntryStore trait; remove raw SQL from handlers",
+  "timestamp": "2026-06-13T22:09:30.567Z",
+  "items": [
+    {
+      "text": "Estado por-universo: trabalho de escrita/leitura de conteúdo de um universo passa a usar o lock do `UniversePool` (por-universo) em vez do `Mutex<Storage>` global. O mutex global fica restrito ao meta-DB (users, universes, tokens). Provar com um teste de contenção: escritas em dois universos não bloqueiam uma à outra.",
+      "pattern": "rust-test:writes_to_two_universes_do_not_serialize",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:writes_to_two_universes_do_not_serialize"
+      ],
+      "evidence": "✓ rust-test writes_to_two_universes_do_not_serialize → co-web/src/platform/universe_pool.rs",
+      "status": "pass"
+    },
+    {
+      "text": "`trait EntryStore` (get/upsert/delete/list por universo) extraído; o `UniversePool` vira fábrica sobre o backend — SQLite é a impl default atrás do trait. (Não implementar S3 aqui; só deixar o seam.)",
+      "pattern": "grep:trait EntryStore@co-web/src/repository/entry_store.rs && grep:impl EntryStore for SqliteEntryStore@co-web/src/repository/entry_store.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait EntryStore@co-web/src/repository/entry_store.rs",
+        "grep:impl EntryStore for SqliteEntryStore@co-web/src/repository/entry_store.rs"
+      ],
+      "evidence": "✓ grep \"trait EntryStore\" @co-web/src/repository/entry_store.rs → 1; ✓ grep \"impl EntryStore for SqliteEntryStore\" @co-web/src/repository/entry_store.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "**Zero SQL cru em handlers**: os acessos diretos em security/auth/eda movidos para métodos tipados de Storage (impl-blocks dedicados: `storage::security`, `storage::auth`). `grep` de `conn().prepare\\| conn().execute` em `*_routes.rs`/subscribers = vazio.",
+      "pattern": "grep-absent:conn\\\\(\\\\)\\\\.(prepare|execute|query_row)@co-web/src/security/routes.rs && grep:impl Storage@co-web/src/storage/security.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep-absent:conn\\\\(\\\\)\\\\.(prepare|execute|query_row)@co-web/src/security/routes.rs",
+        "grep:impl Storage@co-web/src/storage/security.rs"
+      ],
+      "evidence": "✓ grep-absent \"conn\\\\(\\\\)\\\\.(prepare|execute|query_row)\" @co-web/src/security/routes.rs → 0; ✓ grep \"impl Storage\" @co-web/src/storage/security.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "Nenhum `Mutex<Storage>` mantido através de `.await`; nenhum panic sob o lock (regra do incidente 2026-05-12).",
+      "pattern": "rust-test:writes_to_two_universes_do_not_serialize",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:writes_to_two_universes_do_not_serialize"
+      ],
+      "evidence": "✓ rust-test writes_to_two_universes_do_not_serialize → co-web/src/platform/universe_pool.rs",
+      "status": "pass"
+    },
+    {
+      "text": "**Zero mudança de comportamento**: `cargo test -p co-web` verde; clippy limpo; rotas idênticas.",
+      "pattern": "rust-test:test_concurrent_read_write",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:test_concurrent_read_write"
+      ],
+      "evidence": "✓ rust-test test_concurrent_read_write → co-web/tests/concurrency_tests.rs",
+      "status": "pass"
+    }
+  ],
+  "total": 5,
+  "passed": 5,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
