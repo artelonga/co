@@ -1,0 +1,74 @@
+{
+  "co_id": "CO-434",
+  "spec_title": "Mythos: enforce SecretsProvider + CoServerConfig (kill 124 direct std::env reads)",
+  "timestamp": "2026-06-13T22:09:30.668Z",
+  "items": [
+    {
+      "text": "Inventário das 124 leituras (lista no PR) classificado em: **segredo** (via `SecretsProvider`) vs **config** (via `CoServerConfig`).",
+      "pattern": "grep:trait SecretsProvider@co-web/src/infra/secrets.rs && grep:struct CoServerConfig@co-web/src/platform/server_config.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait SecretsProvider@co-web/src/infra/secrets.rs",
+        "grep:struct CoServerConfig@co-web/src/platform/server_config.rs"
+      ],
+      "evidence": "✓ grep \"trait SecretsProvider\" @co-web/src/infra/secrets.rs → 2; ✓ grep \"struct CoServerConfig\" @co-web/src/platform/server_config.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "Novo `CoServerConfig` (struct com defaults sensatos) populado uma vez no boot a partir do provider; subsistemas recebem a config/segredo por parâmetro/estado, não por `env::var` no ponto de uso.",
+      "pattern": "grep:fn from_secrets@co-web/src/platform/server_config.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:fn from_secrets@co-web/src/platform/server_config.rs"
+      ],
+      "evidence": "✓ grep \"fn from_secrets\" @co-web/src/platform/server_config.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "Leituras diretas de `std::env::var` eliminadas do código de runtime (permitido só no boot/CLI parse e em testes). `grep -rn \"std::env::var\" co-web/src | grep -v test` ≤ um punhado justificado e documentado.",
+      "pattern": "rust-test:provider_swaps_behaviour_without_global_env",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:provider_swaps_behaviour_without_global_env"
+      ],
+      "evidence": "✓ rust-test provider_swaps_behaviour_without_global_env → co-web/src/platform/server_config.rs",
+      "status": "pass"
+    },
+    {
+      "text": "Um teste prova a troca: um `StaticSecretsProvider`/config de teste muda o comportamento (ex.: `CO_EDA_BACKEND`) sem env global — já é o padrão dos testes; estender para os pontos hoje hardcoded.",
+      "pattern": "rust-test:provider_swaps_behaviour_without_global_env",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:provider_swaps_behaviour_without_global_env"
+      ],
+      "evidence": "✓ rust-test provider_swaps_behaviour_without_global_env → co-web/src/platform/server_config.rs",
+      "status": "pass"
+    },
+    {
+      "text": "**Zero mudança de comportamento** em produção (mesmos defaults); `cargo test -p co-web` verde; clippy limpo.",
+      "pattern": "grep:fn from_secrets@co-web/src/platform/server_config.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:fn from_secrets@co-web/src/platform/server_config.rs"
+      ],
+      "evidence": "✓ grep \"fn from_secrets\" @co-web/src/platform/server_config.rs → 1",
+      "status": "pass"
+    }
+  ],
+  "total": 5,
+  "passed": 5,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

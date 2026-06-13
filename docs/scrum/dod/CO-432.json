@@ -1,0 +1,78 @@
+{
+  "co_id": "CO-432",
+  "spec_title": "Mythos: decompose the content/ god-folder + propagate the CO-390 layering",
+  "timestamp": "2026-06-13T22:09:30.467Z",
+  "items": [
+    {
+      "text": "`content/` reorganizado em subpastas por entidade: ao menos `entries/`, `vault/`, `references/`, `relations/`, `graph/`, `workspace/` (rotas + index movidos para dentro de cada uma). Sem `*_routes.rs` soltos.",
+      "pattern": "file:co-web/src/content/references && file:co-web/src/content/relations && file:co-web/src/content/workspace",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "file:co-web/src/content/references",
+        "file:co-web/src/content/relations",
+        "file:co-web/src/content/workspace"
+      ],
+      "evidence": "✓ file co-web/src/content/references → exists; ✓ file co-web/src/content/relations → exists; ✓ file co-web/src/content/workspace → exists",
+      "status": "pass"
+    },
+    {
+      "text": "O template de camadas (CO-390) propagado para **pelo menos 2 entidades novas além de entries** — alvo: `references` e `relations` (ou `vault`): `domain/` (tipo puro), `dto/`, `repository/` (trait + impl SQLite), `service/` (regras de negócio fora dos handlers), `mapper/`.",
+      "pattern": "file:co-web/src/repository/reference_repository.rs && file:co-web/src/service/relation_service.rs && file:co-web/src/mapper/reference_mapper.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "file:co-web/src/repository/reference_repository.rs",
+        "file:co-web/src/service/relation_service.rs",
+        "file:co-web/src/mapper/reference_mapper.rs"
+      ],
+      "evidence": "✓ file co-web/src/repository/reference_repository.rs → exists; ✓ file co-web/src/service/relation_service.rs → exists; ✓ file co-web/src/mapper/reference_mapper.rs → exists",
+      "status": "pass"
+    },
+    {
+      "text": "`entry_index.rs` / `reference_index.rs` passam para trás dos respectivos repositories (não mais acessados direto pelos handlers).",
+      "pattern": "grep:trait EntryStore@co-web/src/repository/entry_store.rs && file:co-web/src/repository/reference_repository.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait EntryStore@co-web/src/repository/entry_store.rs",
+        "file:co-web/src/repository/reference_repository.rs"
+      ],
+      "evidence": "✓ grep \"trait EntryStore\" @co-web/src/repository/entry_store.rs → 1; ✓ file co-web/src/repository/reference_repository.rs → exists",
+      "status": "pass"
+    },
+    {
+      "text": "Nenhum arquivo de produção novo > 500 LoC; arquivos de teste grandes divididos por grupo (padrão CO-215 `tests/`).",
+      "pattern": "file:co-web/src/content/references/meta/tests.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "file:co-web/src/content/references/meta/tests.rs"
+      ],
+      "evidence": "✓ file co-web/src/content/references/meta/tests.rs → exists",
+      "status": "pass"
+    },
+    {
+      "text": "**Zero mudança de comportamento**: testes de caracterização antes de extrair; `cargo test -p co-web` verde; clippy limpo; sem drift de rotas.",
+      "pattern": "rust-test:test_round_trip_three_references",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:test_round_trip_three_references"
+      ],
+      "evidence": "✓ rust-test test_round_trip_three_references → co-web/src/content/references/index.rs",
+      "status": "pass"
+    }
+  ],
+  "total": 5,
+  "passed": 5,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}

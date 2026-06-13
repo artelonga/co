@@ -1,0 +1,86 @@
+{
+  "co_id": "CO-435",
+  "spec_title": "Mythos: extension registries — EDA subscriber registry + SourceAdapter + AdminAuthProvider",
+  "timestamp": "2026-06-13T22:09:30.767Z",
+  "items": [
+    {
+      "text": "`trait EdaSubscriber { fn name(&self); fn filter(&self) -> Filter; async fn handle(&self, ev: &Event, ctx: &SubscriberCtx); }` + um registry; o boot itera o registry em vez de `spawn()` inline. Os subscribers atuais migram para o trait sem mudar comportamento. Um subscriber de teste registra-se sem tocar `server/mod.rs`.",
+      "pattern": "grep:trait EdaSubscriber@co-web/src/eda/subscriber_registry.rs && rust-test:extra_subscriber_registers_without_touching_boot",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait EdaSubscriber@co-web/src/eda/subscriber_registry.rs",
+        "rust-test:extra_subscriber_registers_without_touching_boot"
+      ],
+      "evidence": "✓ grep \"trait EdaSubscriber\" @co-web/src/eda/subscriber_registry.rs → 1; ✓ rust-test extra_subscriber_registers_without_touching_boot → co-web/src/eda/subscriber_registry.rs",
+      "status": "pass"
+    },
+    {
+      "text": "`trait SourceAdapter { fn kind(&self); async fn fetch/sync(...); }` com a impl `github` (consolidando CO-417/423); o sync do Yggdrasil expresso como adapter/registry. Adicionar um source novo = novo `impl` + registro.",
+      "pattern": "grep:trait SourceAdapter@co-web/src/platform/source.rs && grep:impl SourceAdapter for GitSourceAdapter@co-web/src/platform/source.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait SourceAdapter@co-web/src/platform/source.rs",
+        "grep:impl SourceAdapter for GitSourceAdapter@co-web/src/platform/source.rs"
+      ],
+      "evidence": "✓ grep \"trait SourceAdapter\" @co-web/src/platform/source.rs → 1; ✓ grep \"impl SourceAdapter for GitSourceAdapter\" @co-web/src/platform/source.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "`trait AdminAuthProvider { async fn verify_admin(&self, token) -> Result<AdminIdentity>; }` extraído; `github_auth` vira a impl default; os ≥4 call-sites passam a depender do trait (injeção via Extension/estado).",
+      "pattern": "grep:trait AdminAuthProvider@co-web/src/infra/admin_auth.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait AdminAuthProvider@co-web/src/infra/admin_auth.rs"
+      ],
+      "evidence": "✓ grep \"trait AdminAuthProvider\" @co-web/src/infra/admin_auth.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "**Rate-limit trait (absorve CO-297 / CO-284-H):** `trait RateLimiter { fn try_acquire(...) }` extraído com a impl in-process (governor) atual como default; comportamento de rate-limit inalterado. É o último trait da série CO-284 ainda não extraído — completa o conjunto. (Sem impl Redis aqui.)",
+      "pattern": "grep:trait RateLimiter@co-web/src/platform/rate_limit.rs && grep:impl RateLimiter for InProcessRateLimiter@co-web/src/platform/rate_limit.rs",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "grep:trait RateLimiter@co-web/src/platform/rate_limit.rs",
+        "grep:impl RateLimiter for InProcessRateLimiter@co-web/src/platform/rate_limit.rs"
+      ],
+      "evidence": "✓ grep \"trait RateLimiter\" @co-web/src/platform/rate_limit.rs → 1; ✓ grep \"impl RateLimiter for InProcessRateLimiter\" @co-web/src/platform/rate_limit.rs → 1",
+      "status": "pass"
+    },
+    {
+      "text": "**Sem mudança de comportamento**: mesmos subscribers/admins/limites ativos por default; `cargo test -p co-web` verde; clippy limpo; sem drift de rotas.",
+      "pattern": "rust-test:default_registry_has_all_subscribers",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [
+        "rust-test:default_registry_has_all_subscribers"
+      ],
+      "evidence": "✓ rust-test default_registry_has_all_subscribers → co-web/src/eda/subscriber_registry.rs",
+      "status": "pass"
+    },
+    {
+      "text": "Nada de MCP — superfícies CLI/arquivo/API/trait apenas (decisão 2026-05-04).",
+      "pattern": "arquivo/api/trait|superf|arquivo|trait|apenas",
+      "matched_file": "co-web/src/infra/cache.rs",
+      "matched_test": "trait_object_works",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "trait_object_works",
+      "status": "pass"
+    }
+  ],
+  "total": 6,
+  "passed": 6,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
