@@ -211,6 +211,36 @@ fn caller_is_anon(state: &AppState, headers: &HeaderMap) -> bool {
     crate::auth::resolve_user_id(state, headers).is_none()
 }
 
+/// CO-54: field-level merge for a `PUT` frontmatter patch (Scenario 1).
+///
+/// Shallow-merges `patch` over `existing` so a client only overwrites the
+/// fields it actually sends — two clients editing *different* fields therefore
+/// merge instead of clobbering each other. Semantics:
+///
+/// * a key present in `patch` overwrites the same key in `existing`
+///   (same-field edits resolve last-write-wins — the later PUT lands second);
+/// * a key set to explicit JSON `null` in `patch` is *removed* from the result;
+/// * keys absent from `patch` are preserved unchanged.
+///
+/// If either side isn't a JSON object the patch wins wholesale (nothing
+/// meaningful to merge).
+fn merge_frontmatter(existing: &JsonValue, patch: &JsonValue) -> JsonValue {
+    match (existing, patch) {
+        (JsonValue::Object(base), JsonValue::Object(over)) => {
+            let mut merged = base.clone();
+            for (k, v) in over {
+                if v.is_null() {
+                    merged.remove(k);
+                } else {
+                    merged.insert(k.clone(), v.clone());
+                }
+            }
+            JsonValue::Object(merged)
+        }
+        _ => patch.clone(),
+    }
+}
+
 fn is_public_path(path: &str) -> bool {
     path.starts_with("public/") || path == "public"
 }
@@ -913,6 +943,7 @@ pub async fn create_entry(
 pub async fn update_entry(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
+    headers: HeaderMap,
     Json(body): Json<UpdateEntryBody>,
 ) -> Result<axum::response::Response, AppError> {
     let universe_root = {
@@ -935,8 +966,21 @@ pub async fn update_entry(
         .map_err(|e| AppError::Internal(e.to_string()))?
         .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", path)))?;
 
-    let new_fm = body.frontmatter.unwrap_or(existing.frontmatter.clone());
-    let new_body = body.body.unwrap_or(existing.body.clone());
+    // CO-54: field-level merge — PUT is a partial patch. A frontmatter field is
+    // only overwritten when the caller actually sends it, so two clients editing
+    // *different* fields merge instead of clobbering each other (Scenario 1).
+    let new_fm = match body.frontmatter {
+        Some(patch) => merge_frontmatter(&existing.frontmatter, &patch),
+        None => existing.frontmatter.clone(),
+    };
+    let new_body = body.body.unwrap_or_else(|| existing.body.clone());
+
+    // CO-54: idempotency — re-applying identical content is a no-op. No version
+    // bump, no disk write, no event storm (Scenario 3: co auto setting
+    // status:done when already done converges silently).
+    if new_body == existing.body && new_fm == existing.frontmatter {
+        return Ok(Json(existing).into_response());
+    }
 
     // CO-128: optimistic-concurrency check. When the client sent the
     // `base_hash` its edit was based on and the stored entry has since
@@ -965,6 +1009,24 @@ pub async fn update_entry(
         .and_then(|v| v.as_str())
         .unwrap_or("unknown");
     validate_against_manifest(manifest_arc.as_deref(), entry_type_for_validation, &new_fm)?;
+
+    // CO-54: snapshot the *previous* version before overwriting it on disk.
+    // Storing prior content durably first means a crash mid-write can never lose
+    // committed data, and backs GET …/entries/versions for manual recovery.
+    {
+        let actor = crate::auth::resolve_user_id(&state, &headers);
+        let prev_fm_json = serde_json::to_string(&existing.frontmatter).unwrap_or_default();
+        let storage = lock_storage(&state);
+        if let Err(e) = storage.save_entry_version(
+            &slug,
+            &path,
+            &existing.body,
+            &prev_fm_json,
+            actor.as_deref(),
+        ) {
+            tracing::warn!("entry_versions snapshot failed for {slug}/{path}: {e}");
+        }
+    }
 
     let entry = make_entry(&path, new_fm.clone(), &new_body);
     co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1560,6 +1622,52 @@ pub async fn entry_history_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-54: entry version history (audit trail / manual recovery)
+// ---------------------------------------------------------------------------
+
+/// Typed response for `GET /:slug/entries/versions`.
+#[derive(Debug, Serialize)]
+pub struct EntryVersionsResponse {
+    pub path: String,
+    pub versions: Vec<crate::storage::entry_versions::EntryVersionRow>,
+    pub total: usize,
+}
+
+/// Query params for the versions endpoint. Mirrors `EntryHistoryQuery` — the
+/// entry path is a query arg (not a path segment) so it doesn't collide with
+/// the greedy `entries/{*path}` wildcard route.
+#[derive(Debug, serde::Deserialize)]
+pub struct EntryVersionsQuery {
+    pub path: String,
+    pub limit: Option<usize>,
+}
+
+/// GET /api/v1/universes/:slug/entries/versions?path=…
+///
+/// Returns the pre-overwrite snapshot history for an entry, newest first. Each
+/// version carries `actor`, `timestamp`, `hash`, and the full prior content so a
+/// caller can manually recover any earlier revision.
+pub async fn entry_versions_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EntryVersionsQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let limit = q.limit.unwrap_or(50).min(1000);
+    let versions = {
+        let storage = lock_storage(&state);
+        storage
+            .list_entry_versions(&slug, &q.path, limit)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    };
+    let total = versions.len();
+    Ok(Json(EntryVersionsResponse {
+        path: q.path,
+        versions,
+        total,
+    }))
+}
+
+// ---------------------------------------------------------------------------
 // CO-272: dev-tasks — entries-as-tasks for the kanban view
 // ---------------------------------------------------------------------------
 
@@ -1695,6 +1803,9 @@ pub fn router() -> Router<AppState> {
         // 2.7.25: per-entry transaction log — newest first. Uses ?path= to
         // avoid catching the `/entries/{*path}` wildcard.
         .route("/{slug}/entries/history", get(entry_history_handler))
+        // CO-54: entry version history (pre-overwrite snapshots). Uses ?path= to
+        // avoid catching the `/entries/{*path}` wildcard, same as /history.
+        .route("/{slug}/entries/versions", get(entry_versions_handler))
         .route(
             "/{slug}/entries/{*path}",
             get(get_entry).put(update_entry).delete(delete_entry),
@@ -1772,6 +1883,28 @@ fn json_value_to_proto(val: &JsonValue) -> co::proto::entry::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// CO-54: field-level merge — different fields combine; explicit null
+    /// deletes; absent keys are preserved; same key overwrites.
+    #[test]
+    fn test_merge_frontmatter() {
+        let existing = serde_json::json!({"type": "task", "title": "Orig", "desc": "d"});
+
+        // Editing only `title` preserves `type` and `desc`.
+        let merged = merge_frontmatter(&existing, &serde_json::json!({"title": "New"}));
+        assert_eq!(merged["title"], "New");
+        assert_eq!(merged["type"], "task");
+        assert_eq!(merged["desc"], "d");
+
+        // Explicit null removes the key.
+        let merged = merge_frontmatter(&existing, &serde_json::json!({"desc": null}));
+        assert!(merged.get("desc").is_none());
+        assert_eq!(merged["title"], "Orig");
+
+        // Non-object patch wins wholesale.
+        let merged = merge_frontmatter(&existing, &serde_json::json!("scalar"));
+        assert_eq!(merged, serde_json::json!("scalar"));
+    }
 
     /// key_from_path strips directory prefix and .md extension.
     #[test]

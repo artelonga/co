@@ -191,6 +191,7 @@ pub(crate) mod clone_ops;
 pub(crate) mod dashboard;
 pub(crate) mod data_migrate;
 pub(crate) mod eda;
+pub mod entry_versions;
 pub(crate) mod feedback;
 pub mod graph_views;
 pub(crate) mod invitations;

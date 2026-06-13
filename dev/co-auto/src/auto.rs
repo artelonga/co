@@ -186,16 +186,37 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             break;
         }
 
-        // 1. SELECT next task
+        // 1. SELECT next task — and acquire its per-task lock so a second agent
+        // (e.g. another worktree) skips it instead of double-executing (CO-54
+        // Scenario 4). The lock is held for the whole iteration and released
+        // when `_task_lock` drops at the end of the loop body.
         let tasks = load_tasks(&data_dir, &project_key)?;
-        let next = if let Some(ref tid) = config.task_id {
-            tasks.iter().find(|t| t.key == *tid).cloned()
+        let lock_dir = data_dir.join(".co-auto").join("locks");
+        let selected = if let Some(ref tid) = config.task_id {
+            match tasks.iter().find(|t| t.key == *tid).cloned() {
+                Some(t) => match crate::lock::TaskLock::try_acquire(&lock_dir, &t.key) {
+                    Ok(Some(lock)) => Some((t, lock)),
+                    Ok(None) => {
+                        println!(
+                            "{} {} is locked by another agent — skipping",
+                            "⊘".yellow(),
+                            t.key
+                        );
+                        None
+                    }
+                    Err(e) => {
+                        eprintln!("{} lock error for {}: {}", "⚠".yellow(), t.key, e);
+                        None
+                    }
+                },
+                None => None,
+            }
         } else {
-            select_next_task(&tasks)
+            select_and_lock_next_task(&tasks, &lock_dir)
         };
 
-        let task = match next {
-            Some(t) => t,
+        let (task, _task_lock) = match selected {
+            Some(pair) => pair,
             None => {
                 println!("{} No unblocked tasks remaining", "✓".green().bold());
                 break;
@@ -717,7 +738,9 @@ fn parse_task_model(map: &serde_yaml::Mapping, path: &Path) -> Option<String> {
     }
 }
 
-fn select_next_task(tasks: &[Task]) -> Option<Task> {
+/// The executable, unblocked tasks in execution order (highest priority first;
+/// `in_progress` retries ahead of fresh `todo`s; ties broken by id).
+fn ordered_candidates(tasks: &[Task]) -> Vec<Task> {
     // Filter to todo and in_progress (in_progress = retry after error)
     let mut candidates: Vec<&Task> = tasks
         .iter()
@@ -759,7 +782,42 @@ fn select_next_task(tasks: &[Task]) -> Option<Task> {
             .then_with(|| a.id.cmp(&b.id))
     });
 
-    candidates.first().cloned().cloned()
+    candidates.into_iter().cloned().collect()
+}
+
+fn select_next_task(tasks: &[Task]) -> Option<Task> {
+    ordered_candidates(tasks).into_iter().next()
+}
+
+/// CO-54: lock-aware selection. Walk the candidates in execution order and
+/// return the first one whose per-task lock we can acquire, holding that lock.
+/// Tasks already locked by another live agent are skipped (Scenario 4), so two
+/// agents working the same backlog never pick the same task.
+fn select_and_lock_next_task(
+    tasks: &[Task],
+    lock_dir: &Path,
+) -> Option<(Task, crate::lock::TaskLock)> {
+    for cand in ordered_candidates(tasks) {
+        match crate::lock::TaskLock::try_acquire(lock_dir, &cand.key) {
+            Ok(Some(lock)) => return Some((cand, lock)),
+            Ok(None) => {
+                println!(
+                    "  {} {} locked by another agent — skipping",
+                    "⊘".dimmed(),
+                    cand.key.dimmed()
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "  {} lock error for {} ({}) — skipping",
+                    "⚠".yellow(),
+                    cand.key,
+                    e
+                );
+            }
+        }
+    }
+    None
 }
 
 // ==================== CONTEXT BUILDER ====================

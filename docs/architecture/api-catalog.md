@@ -204,6 +204,7 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | GET | `/{slug}/entries/tree` | visibility | Hierarchical tree |
 | GET | `/{slug}/entries/similar` | visibility | CO-164 — semantic similar |
 | GET | `/{slug}/entries/history` | visibility | Entry change history |
+| GET | `/{slug}/entries/versions` | visibility | CO-54 — pre-overwrite version snapshots (audit trail) |
 | GET | `/{slug}/entries/popular` | visibility | Popular entries by view count |
 | GET | `/{slug}/entries/{*path}` | visibility | Get entry by path |
 | PUT | `/{slug}/entries/{*path}` | owner | Update entry |

@@ -10,11 +10,13 @@
 //! so the procedural pipeline can be swapped piece-by-piece.
 
 pub mod auto;
+pub mod lock;
 pub mod routing;
 pub mod universe;
 pub mod usage;
 
 pub use auto::{AutoConfig, run};
+pub use lock::{LOCK_TTL_SECS, TaskLock};
 pub use routing::{Downshift, ModelSource, RoutingConfig, resolve_model};
 pub use universe::{ResolvedTask, Subspace, discover_subspaces, resolve_task_id};
 pub use usage::{SessionUsage, parse_stream_json};
