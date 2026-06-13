@@ -33,7 +33,7 @@ export const projectTimelineLens = {
         const content = document.querySelector('#content');
         if (!content) return;
         content.className = 'content';
-        content.innerHTML = '';
+        content.replaceChildren();
         const el = document.createElement('co-time-grid');
         el.setAttribute('universe', state.currentUniverseSlug || 'template');
         el.setAttribute('view-mode', viewDef?.view_mode || 'roadmap');
