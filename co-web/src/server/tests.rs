@@ -735,6 +735,128 @@ async fn test_deep_link_known_slug_returns_200() {
     assert_eq!(resp.status(), StatusCode::OK, "known slug must return 200");
 }
 
+// --- CO-439: allowlist-on-serve ---
+
+/// CO-439: a draft file that exists in a served directory but is **absent from
+/// the index** must resolve to 404, never 200. The index is the allowlist; the
+/// disk is not. (Regression guard for the ArteLonga/yuri draft leak.)
+#[tokio::test]
+async fn test_allowlist_unindexed_draft_returns_404() {
+    let dir = tempdir().unwrap();
+    // Universe has ONE indexed entry; `drafts/thrive-market` is not indexed.
+    setup_universe_with_entry(dir.path(), "leakuniv", "content/published-page.md");
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/leakuniv/drafts/thrive-market")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "an unindexed draft on disk must 404, not serve"
+    );
+}
+
+/// Helper: create a universe with `anon_published_only = true` and index one
+/// entry with the given `published` frontmatter flag.
+fn setup_gated_universe(
+    dir: &std::path::Path,
+    universe_slug: &str,
+    entry_path: &str,
+    published: bool,
+) {
+    let mut storage = Storage::new(dir.to_str().unwrap());
+    let owner_id = "usr_gated_owner";
+    let now = chrono::Utc::now().to_rfc3339();
+    let _ = storage.conn().execute(
+        "INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at) \
+         VALUES (?1, ?2, 'Owner', 'player', ?3)",
+        rusqlite::params![owner_id, "gated@test.local", now],
+    );
+    let _ = storage.create_universe(
+        crate::models::CreateUniverse {
+            key: universe_slug.to_string(),
+            name: universe_slug.to_string(),
+            description: String::new(),
+        },
+        owner_id,
+    );
+    storage
+        .conn()
+        .execute(
+            "UPDATE universes SET anon_published_only = 1 WHERE key = ?1",
+            rusqlite::params![universe_slug],
+        )
+        .unwrap();
+
+    let uc = storage.universe_conn(universe_slug);
+    let guard = uc.lock().unwrap();
+    let index = crate::entry_index::EntryIndex::new(&guard);
+    let entry = crate::entry_index::make_entry(
+        entry_path,
+        serde_json::json!({"type": "note", "title": "Gated entry", "published": published}),
+        "Body",
+    );
+    index.upsert(universe_slug, &entry).unwrap();
+}
+
+/// CO-439: on a `anon_published_only` universe, an anonymous deep-link to an
+/// indexed-but-unpublished entry must 404 (published gate, defense in depth
+/// alongside the API-layer filter).
+#[tokio::test]
+async fn test_allowlist_anon_blocked_on_unpublished_gated_entry() {
+    let dir = tempdir().unwrap();
+    setup_gated_universe(dir.path(), "gateduniv", "content/secret.md", false);
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/gateduniv/content/secret")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::NOT_FOUND,
+        "anon must not serve an unpublished entry on a gated universe"
+    );
+}
+
+/// CO-439: the same gated universe serves an indexed `published: true` entry.
+#[tokio::test]
+async fn test_allowlist_anon_allowed_on_published_gated_entry() {
+    let dir = tempdir().unwrap();
+    setup_gated_universe(dir.path(), "gateduniv2", "content/open.md", true);
+    let app = build_test_router(dir.path());
+
+    let resp = app
+        .oneshot(
+            Request::builder()
+                .uri("/gateduniv2/content/open")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "a published entry on a gated universe must serve to anon"
+    );
+}
+
 // --- CO-270: public-subscribable visibility gate fix ---
 
 /// CO-270: anonymous GET on a public-subscribable universe must return

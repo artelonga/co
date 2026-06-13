@@ -169,61 +169,6 @@ fn universe_exists(state: &AppState, universe_slug: &str) -> bool {
     storage.get_universe(universe_slug).is_some()
 }
 
-/// Check whether any of the SPA's candidate entry paths exist for a given subpath.
-///
-/// Mirrors `maybeOpenEntryFromUrl` candidates in `app.js`. Returns `false` when
-/// the universe does not exist, when the per-universe connection cannot be acquired,
-/// or when none of the candidate paths are present in the entry index.
-///
-/// CO-264: also checks well-known file aliases (CHANGELOG.md for `changelog`,
-/// README.md for `readme`, LICENSE.md for `license`) and folder-level index.md
-/// when the subpath ends with a trailing slash.
-fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str) -> bool {
-    let uc = {
-        let storage = state.core.storage.lock();
-        if storage.get_universe(universe_slug).is_none() {
-            return false;
-        }
-        storage.universe_conn(universe_slug)
-    };
-    let repo = crate::repository::SqliteEntryRepository::new(uc);
-
-    let mut candidates: Vec<String> = vec![
-        format!("{subpath}.md"),
-        subpath.to_string(),
-        format!("content/{subpath}.md"),
-        format!("content/{subpath}"),
-    ];
-
-    // CO-264: folder-level index.md for trailing-slash paths (e.g. `public/`).
-    if subpath.ends_with('/') {
-        candidates.push(format!("{subpath}index.md"));
-        candidates.push(format!("{subpath}index"));
-    }
-
-    // CO-264: well-known file aliases (case-insensitive subpath match).
-    let lower = subpath.to_lowercase();
-    match lower.as_str() {
-        "changelog" => {
-            candidates.push("CHANGELOG.md".to_string());
-            candidates.push("changelog.md".to_string());
-        }
-        "readme" => {
-            candidates.push("README.md".to_string());
-            candidates.push("readme.md".to_string());
-        }
-        "license" => {
-            candidates.push("LICENSE.md".to_string());
-            candidates.push("LICENSE".to_string());
-        }
-        _ => {}
-    }
-
-    candidates
-        .iter()
-        .any(|p| repo.get(universe_slug, p).ok().flatten().is_some())
-}
-
 /// GET `/{universe}/{*subpath}` — SPA deep-link handler (CO-232).
 ///
 /// Returns HTTP 200 when the entry exists (or is indeterminate) and HTTP 404
@@ -267,8 +212,14 @@ pub(super) async fn serve_deep_link(
     // pure SPA route (e.g. `/entrar/`, `/sobre/`, `/termos/`) and serve 200 so
     // the client-side router renders the page. Only return 404 when the
     // universe exists but the entry within it does not.
+    //
+    // CO-439: allowlist-on-serve — a path that is not in the published index
+    // (or, for an anonymous caller on a gated universe, not published) is NOT
+    // servable and resolves to 404. A draft on disk that is absent from the
+    // index is never served.
+    let is_anon = crate::auth::resolve_user_id(&state, &headers).is_none();
     let status = if !universe_exists(&state, &universe_slug)
-        || entry_exists_for_subpath(&state, &universe_slug, &subpath)
+        || crate::server::allowlist::is_servable(&state, &universe_slug, &subpath, is_anon)
     {
         StatusCode::OK
     } else {

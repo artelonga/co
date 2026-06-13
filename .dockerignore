@@ -1,0 +1,29 @@
+# CO-439 — defense in depth (NOT a security boundary).
+#
+# The real boundary is the serve allowlist (co-web/src/server/allowlist.rs):
+# the surfaces server serves only indexed/published entries, never raw disk
+# files. This denylist is a cheap, complementary second layer that keeps known
+# draft/scratch categories out of the build context entirely. A denylist FAILS
+# OPEN — anything it does not list still ships — so never rely on it alone.
+#
+# Patterns below match the draft categories that appeared in the 2026-06
+# ArteLonga/yuri "thrive market.md" leak post-mortem.
+
+# Build artifacts / deps
+target/
+**/target/
+node_modules/
+**/node_modules/
+.git/
+
+# Draft / scratch naming conventions (one line each)
+WhatsApp*
+_*
+shot-*
+*.mov
+**/IMG_*
+
+# Local env / editor noise
+.env
+.env.*
+.DS_Store
