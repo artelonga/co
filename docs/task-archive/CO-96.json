@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-96",
+  "title": "Universe CRUD UI — intuitive create / rename / duplicate / delete in the SPA",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-96.md",
+  "branch": "feat/CO-96-universe-crud-ui-intuitive-create-rename",
+  "merge_sha": "a4dd160f0f1232a075638ca2271785bcfd3b6588",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/238",
+    "number": 238
+  },
+  "started_at": "2026-04-29T00:00:00Z",
+  "merged_at": "2026-06-13T17:22:35Z",
+  "files_changed": 20,
+  "lines_added": 1389,
+  "lines_removed": 69,
+  "labels": [
+    "frontend",
+    "ux",
+    "universe-crud",
+    "spa"
+  ],
+  "changelog_entry": "## CO-96 — Universe CRUD UI — intuitive create / rename / duplicate / delete in the SPA\n\nAdds a full universe-lifecycle CRUD surface to the SPA so any user can manage\ntheir universe collection from the browser without scripting.\n\n### Create (Phase 1)\n- The sidebar `+ New universe` modal now does **inline key validation**:\n  synchronous format checking plus a debounced uniqueness check against the API\n  (404 = available). Submit is disabled while the key is invalid or taken.\n- \"Copy from existing universe\" now routes correctly: the template uses the\n  anonymous-friendly `/clone`, while copying any other (e.g. the user's own\n  private) universe uses `/duplicate` (CO-95).\n\n### Context menu + settings (Phase 2)\n- Right-click any universe in the sidebar for a context menu: Open, Rename…,\n  Change visibility (Private / Public / Unlisted), Duplicate…, Settings…,\n  Archive, Delete…. Rename and visibility changes update the sidebar without a\n  page reload.\n- The universe Settings panel is now fully editable for owners — name,\n  description and visibility, plus a danger zone with Archive / Delete.\n\n### Soft-delete + archive + trash (Phase 3)\n- New migration **v79** adds nullable `deleted_at` + `archived_at` columns to\n  `universes`. Every universe-listing query (sidebar buckets, public listing,\n  search, discovery) now filters them out.\n- `DELETE /api/v1/universes/:slug` is now a **soft-delete** (sets `deleted_at`)\n  instead of a hard cascade — the row, entries and on-disk data survive so the\n  universe is recoverable. Delete is gated behind a type-the-key confirmation\n  dialog.\n- New endpoints: `POST /:slug/archive`, `POST /:slug/restore`, and\n  `GET /api/v1/universes/trash`. The sidebar trash view lists deleted +\n  archived universes and restores them within the retention window.\n\n### Why\nUniverses could previously only be created/renamed/deleted via API or CLI. This\nmakes the platform feel like a productized content workspace, and soft-delete\nremoves the accidental-data-loss risk of the old hard-delete.",
+  "summary": "GIVEN universes today can only be created via API call (`POST /api/v1/universes`) — no SPA UI surface — and renaming, duplicating, or deleting are similarly CLI-only, AND the user wants the create flo",
+  "co_auto_version": "0.1.0"
+}
