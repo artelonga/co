@@ -53,7 +53,7 @@ export function setupOnboarding() {
         },
         {
             title: 'Crie seu universo',
-            bodyHtml: 'Quando quiser organizar suas próprias coisas, faça login e clique em <strong>+ Novo universo</strong> na barra lateral.',
+            bodyHtml: 'Quando quiser organizar suas próprias coisas, faça login e clique em <strong>+ Novo universo</strong> na barra lateral.<br><a href="#login" class="onboarding-criar-link" style="color:var(--accent,#6366f1);text-decoration:underline;cursor:pointer">Criar conta</a>',
             cta: 'Concluir',
         },
     ];
@@ -67,6 +67,14 @@ export function setupOnboarding() {
         stepEl.textContent = `${current + 1} / 3`;
         nextBtn.textContent = s.cta;
     }
+
+    bodyEl.addEventListener('click', e => {
+        const link = e.target.closest('.onboarding-criar-link');
+        if (link) {
+            e.preventDefault();
+            _showLoginModal();
+        }
+    });
 
     function dismiss() {
         document.cookie = 'co_onboarded=1; Path=/; Max-Age=31536000; SameSite=Lax';
