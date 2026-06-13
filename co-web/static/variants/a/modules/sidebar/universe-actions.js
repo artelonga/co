@@ -7,7 +7,6 @@
 
 import { state } from '../state.js';
 import { api } from '../api.js';
-import { esc } from '../helpers.js';
 import { openCriarModal } from '../onboarding.js';
 import { openSettingsPanel } from '../settings.js';
 
@@ -50,7 +49,7 @@ function closeContextMenu() {
     const menu = document.getElementById('universe-context-menu');
     if (menu) {
         menu.classList.add('hidden');
-        menu.innerHTML = '';
+        menu.replaceChildren();
     }
 }
 
@@ -66,26 +65,39 @@ export function showUniverseContextMenu(slug, x, y) {
     const u = findUniverse(slug);
     const isTemplate = slug === 'template';
 
-    const item = (id, label, extraClass = '') =>
-        `<button class="context-menu-item ${extraClass}" data-action="${id}" role="menuitem">${esc(label)}</button>`;
-    const sep = '<div class="context-menu-sep"></div>';
+    // CO-96: built with DOM nodes + textContent (not innerHTML) so labels can
+    // never inject markup and the security scanner stays clean.
+    menu.replaceChildren();
+    const item = (id, label, extraClass = '') => {
+        const b = document.createElement('button');
+        b.className = `context-menu-item ${extraClass}`.trim();
+        b.dataset.action = id;
+        b.setAttribute('role', 'menuitem');
+        b.textContent = label;
+        return b;
+    };
+    const sep = () => {
+        const d = document.createElement('div');
+        d.className = 'context-menu-sep';
+        return d;
+    };
+    const groupLabel = (text) => {
+        const d = document.createElement('div');
+        d.className = 'context-menu-group-label';
+        d.textContent = text;
+        return d;
+    };
 
-    const visOptions = VISIBILITIES
-        .map(v => `<button class="context-menu-item context-menu-sub" data-action="visibility" data-value="${v.value}" role="menuitem">${esc(v.label)}</button>`)
-        .join('');
-
-    menu.innerHTML =
-        item('open', 'Abrir') +
-        sep +
-        item('rename', 'Renomear…') +
-        `<div class="context-menu-group-label">Visibilidade</div>` +
-        visOptions +
-        item('duplicate', 'Duplicar…') +
-        sep +
-        item('settings', 'Configurações…') +
-        sep +
-        (isTemplate ? '' : item('archive', 'Arquivar')) +
-        (isTemplate ? '' : item('delete', 'Excluir…', 'context-menu-danger'));
+    menu.append(item('open', 'Abrir'), sep(), item('rename', 'Renomear…'), groupLabel('Visibilidade'));
+    for (const v of VISIBILITIES) {
+        const b = item('visibility', v.label, 'context-menu-sub');
+        b.dataset.value = v.value;
+        menu.appendChild(b);
+    }
+    menu.append(item('duplicate', 'Duplicar…'), sep(), item('settings', 'Configurações…'), sep());
+    if (!isTemplate) {
+        menu.append(item('archive', 'Arquivar'), item('delete', 'Excluir…', 'context-menu-danger'));
+    }
 
     // Position, keeping the menu on-screen.
     menu.classList.remove('hidden');
@@ -190,27 +202,48 @@ async function openTrashModal() {
     if (!overlay) return;
     const list = document.getElementById('trash-list');
     const empty = document.getElementById('trash-empty');
-    if (list) list.innerHTML = '<p class="form-hint">Carregando…</p>';
+    if (list) {
+        const loading = document.createElement('p');
+        loading.className = 'form-hint';
+        loading.textContent = 'Carregando…';
+        list.replaceChildren(loading);
+    }
     overlay.classList.remove('hidden');
 
     const items = await api.getTrash();
     if (!list) return;
     if (!items.length) {
-        list.innerHTML = '';
+        list.replaceChildren();
         if (empty) empty.classList.remove('hidden');
         return;
     }
     if (empty) empty.classList.add('hidden');
-    list.innerHTML = items.map(it => {
-        const badge = it.state === 'deleted' ? 'Excluído' : 'Arquivado';
-        return `<div class="trash-row" data-slug="${esc(it.key)}">
-            <div class="trash-row-info">
-                <span class="trash-row-name">${esc(it.name || it.key)}</span>
-                <span class="trash-row-badge">${badge}</span>
-            </div>
-            <button class="btn btn-sm btn-secondary trash-restore-btn" data-slug="${esc(it.key)}">Restaurar</button>
-        </div>`;
-    }).join('');
+    // CO-96: DOM + textContent (not innerHTML) — universe names are user data,
+    // so building with textContent escapes them by construction.
+    list.replaceChildren();
+    for (const it of items) {
+        const row = document.createElement('div');
+        row.className = 'trash-row';
+        row.dataset.slug = it.key;
+
+        const info = document.createElement('div');
+        info.className = 'trash-row-info';
+        const name = document.createElement('span');
+        name.className = 'trash-row-name';
+        name.textContent = it.name || it.key;
+        const badge = document.createElement('span');
+        badge.className = 'trash-row-badge';
+        badge.textContent = it.state === 'deleted' ? 'Excluído' : 'Arquivado';
+        info.append(name, badge);
+
+        const restore = document.createElement('button');
+        restore.className = 'btn btn-sm btn-secondary trash-restore-btn';
+        restore.dataset.slug = it.key;
+        restore.textContent = 'Restaurar';
+
+        row.append(info, restore);
+        list.appendChild(row);
+    }
 
     list.querySelectorAll('.trash-restore-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
