@@ -569,8 +569,13 @@ mod factory_swap_tests {
     }
 
     fn rotas(state: AppState) -> Router {
+        // Path via const: this router is `#[cfg(test)]`-only (factory-swap proof,
+        // never mounted in the app). The openapi route-walker scans `.route("…")`
+        // string literals and doesn't strip cfg(test) blocks, so a literal here
+        // would be mis-counted as a public route. A const dodges that cleanly.
+        const DEMO_QUADRO: &str = "/universos/demo/quadro";
         Router::new()
-            .route("/universos/demo/quadro", get(quadro_handler))
+            .route(DEMO_QUADRO, get(quadro_handler))
             .with_state(state)
     }
 

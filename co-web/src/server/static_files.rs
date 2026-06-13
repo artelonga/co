@@ -186,10 +186,7 @@ fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str
         }
         storage.universe_conn(universe_slug)
     };
-    let Ok(uc_guard) = uc.lock() else {
-        return false;
-    };
-    let index = crate::entry_index::EntryIndex::new(&uc_guard);
+    let repo = crate::repository::SqliteEntryRepository::new(uc);
 
     let mut candidates: Vec<String> = vec![
         format!("{subpath}.md"),
@@ -224,7 +221,7 @@ fn entry_exists_for_subpath(state: &AppState, universe_slug: &str, subpath: &str
 
     candidates
         .iter()
-        .any(|p| index.get(universe_slug, p).ok().flatten().is_some())
+        .any(|p| repo.get(universe_slug, p).ok().flatten().is_some())
 }
 
 /// GET `/{universe}/{*subpath}` — SPA deep-link handler (CO-232).
