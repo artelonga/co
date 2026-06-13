@@ -791,6 +791,11 @@ enum SourceProvider {
         /// CO-423: don't synthesize a landing `index.md` when the repo lacks one
         #[arg(long)]
         no_index: bool,
+
+        /// CO-438: pause this many milliseconds between entry PUTs to stay under
+        /// the server's write rate limit (non-admin tokens). 0 = no throttle.
+        #[arg(long, default_value_t = 0)]
+        throttle_ms: u64,
     },
 }
 
@@ -1709,6 +1714,7 @@ fn main() {
                     delete_missing,
                     parent,
                     no_index,
+                    throttle_ms,
                 } => {
                     commands::source::run(
                         owner_repo,
@@ -1720,6 +1726,7 @@ fn main() {
                         delete_missing,
                         parent,
                         no_index,
+                        throttle_ms,
                     );
                 }
             },
