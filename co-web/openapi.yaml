@@ -3358,6 +3358,21 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/entries/versions:
+    get:
+      tags: ["entries"]
+      summary: "CO-54 — pre-overwrite version snapshots (audit trail)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/entries/{*path}:
     get:
       tags: ["entries"]
