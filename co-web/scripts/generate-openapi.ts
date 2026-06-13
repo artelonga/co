@@ -145,7 +145,7 @@ const SPA_PATHS = new Set([
   '/', '/{slug}', '/{slug}/', '/{slug}/{*subpath}',
   '/admin', '/admin/deployments', '/admin/leads.html',
   '/repl', '/storage', '/analytics', '/changelog',
-  '/co/telemetria', '/settings/sync',
+  '/co/telemetria', '/co/co-dev/pipeline', '/settings/sync',
   '/yggdrasil/{game}', '/notifications', '/recover',
   '/invitations/{token}', '/{slug}/assets', '/{slug}/graph',
   '/linhadotempo', '/timeline',

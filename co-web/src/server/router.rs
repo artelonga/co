@@ -141,6 +141,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let telemetry_admin =
         crate::telemetry::admin_router().layer(axum::Extension(admin_auth.clone()));
 
+    // CO-88b: content-pipeline per-universe stats (yuri tier).
+    let pipeline_admin = crate::pipeline::admin_router().layer(axum::Extension(admin_auth.clone()));
+
     let gestao_oauth_api =
         crate::oidc_routes::gestao_oauth_router().layer(axum::Extension(admin_auth.clone()));
 
@@ -299,6 +302,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .route(
             "/co/telemetria",
             get(crate::telemetry::serve_admin_dashboard),
+        )
+        // CO-88b: content-pipeline dashboard (sister to /co/telemetria).
+        .route(
+            "/co/co-dev/pipeline",
+            get(crate::pipeline::serve_pipeline_dashboard),
         )
         .route("/settings/sync", get(serve_sync_settings))
         .route("/yggdrasil/{game}", get(serve_co_index))
@@ -509,6 +517,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/uat", uat_api)
             .nest("/api/v1/telemetry", telemetry_public)
             .nest("/api/v1/admin", telemetry_admin)
+            .nest("/api/v1/admin", pipeline_admin)
             .nest("/api/v1/ab", ab_admin)
             .nest("/api/v1/cache", cache_api)
             .nest("/api/v1/admin", admin_dashboard_api)

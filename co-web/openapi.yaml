@@ -557,6 +557,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/admin/pipeline/summary:
+    get:
+      tags: ["admin"]
+      summary: "CO-88 content-pipeline per-universe stats"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/admin/storage:
     get:
       tags: ["storage"]

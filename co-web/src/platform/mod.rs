@@ -20,6 +20,7 @@ pub mod job_queue;
 pub mod kb_routes;
 pub mod live_routes;
 pub mod observability;
+pub mod pipeline;
 pub mod plugin_loader;
 pub mod pretty_urls;
 pub mod rate_limit;

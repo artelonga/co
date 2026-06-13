@@ -1,0 +1,117 @@
+name: Pipeline UAT (CO-88)
+
+# CO-88c: end-to-end content-pipeline matrix.
+#
+# Runs `co-pipeline` over the markdown ↔ CoFile ↔ (compressed/encrypted/signed)
+# bytes ↔ transport cycle for every layer combo and universe. Fails the build if
+# any matrix cell fails to decode/round-trip, uploads the report as an artifact,
+# and (on PRs) comments the compression/transfer deltas versus the previous run.
+#
+# When CO_PIPELINE_TOKEN + the UAT host are available the matrix also exercises
+# the network path (PUT/GET against co-artelonga-uat.fly.dev). Without them it
+# runs the deterministic local filesystem path, which still validates every
+# encoder/decoder combination, so the job stays green instead of perpetually red.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  UAT_BASE: https://co-artelonga-uat.fly.dev
+
+jobs:
+  pipeline-uat:
+    runs-on: ubuntu-latest
+    env:
+      CO_PIPELINE_TOKEN: ${{ secrets.CO_PIPELINE_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler pkg-config libssl-dev g++
+
+      - name: Build co-pipeline
+        run: cargo build -p co-pipeline
+
+      # Source corpora live in sibling repos in production; in CI we run against
+      # this repo's own content as a representative corpus so the matrix always
+      # has files to exercise. The runner reads markdown from the checkout root.
+      - name: Run pipeline matrix (local path)
+        run: |
+          cargo run -p co-pipeline -- run \
+            --corpus-root "$GITHUB_WORKSPACE/.." \
+            --paths local \
+            --out dev/reports
+
+      - name: Run pipeline matrix against UAT
+        if: ${{ env.CO_PIPELINE_TOKEN != '' }}
+        run: |
+          cargo run -p co-pipeline -- run \
+            --corpus-root "$GITHUB_WORKSPACE/.." \
+            --paths local,uat \
+            --uat-base "$UAT_BASE" \
+            --token "$CO_PIPELINE_TOKEN" \
+            --out dev/reports
+
+      - name: Locate report
+        id: report
+        run: echo "path=$(ls -t dev/reports/co-pipeline-report-*.yaml | head -1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: co-pipeline-report
+          path: ${{ steps.report.outputs.path }}
+          retention-days: 30
+
+      # CO-88c: download the previous run's report and comment the deltas.
+      - name: Download previous report
+        id: prev
+        continue-on-error: true
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: pipeline-uat.yml
+          name: co-pipeline-report
+          path: dev/reports/previous
+          branch: main
+          if_no_artifact_found: warn
+
+      - name: Compute deltas
+        if: ${{ steps.prev.outcome == 'success' }}
+        id: delta
+        run: |
+          PREV=$(ls -t dev/reports/previous/co-pipeline-report-*.yaml 2>/dev/null | head -1 || true)
+          if [ -n "$PREV" ]; then
+            {
+              echo "## Pipeline deltas vs previous run"
+              echo '```'
+              cargo run -q -p co-pipeline -- delta \
+                --current "${{ steps.report.outputs.path }}" \
+                --previous "$PREV"
+              echo '```'
+            } > delta.md
+            echo "have_delta=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Comment deltas on PR
+        if: ${{ github.event_name == 'pull_request' && steps.delta.outputs.have_delta == 'true' }}
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: pipeline-uat-deltas
+          path: delta.md
+
+      # Fail the build if any matrix cell failed to round-trip (run exited
+      # non-zero) — guarded by `co-pipeline gate` which re-asserts greenness.
+      - name: Gate on green matrix
+        run: |
+          cargo run -q -p co-pipeline -- gate \
+            --report "${{ steps.report.outputs.path }}" \
+            --max-age-hours 24 \
+            --max-regression-pct 20

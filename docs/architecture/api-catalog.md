@@ -391,6 +391,7 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 | GET | `/api/v1/admin/telemetry/summary` | admin | Telemetry summary (CO-46) |
 | GET | `/api/v1/admin/telemetry/export` | admin | CSV export |
 | GET | `/api/v1/admin/telemetry/crud-summary` | admin | CRUD events summary |
+| GET | `/api/v1/admin/pipeline/summary` | admin | CO-88 content-pipeline per-universe stats |
 | GET | `/api/v1/admin/workers/status` | admin | Worker/job status |
 | GET | `/api/v1/admin/deployments` | admin | Deployment history |
 | POST | `/api/v1/admin/deployments/refresh` | admin | Refresh deployment data |
@@ -847,6 +848,7 @@ CO-372: Sprint calendar with Definition of Done + ICS export. Public endpoints, 
 | `/storage` | Storage dashboard page |
 | `/admin/leads.html` | Leads admin page |
 | `/co/telemetria` | Telemetry dashboard for `co` universe |
+| `/co/co-dev/pipeline` | CO-88 content-pipeline dashboard (per-universe stats) |
 | `/settings/sync` | Sync settings (API token) |
 | `/yggdrasil/{game}` | Yggdrasil game view (SPA) |
 | `/notifications` | Notifications full page (CO-202) |

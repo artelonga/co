@@ -139,6 +139,7 @@ pub use platform::job_queue;
 pub use platform::kb_routes;
 pub use platform::live_routes;
 pub use platform::observability;
+pub use platform::pipeline;
 pub use platform::plugin_loader;
 pub use platform::pretty_urls;
 pub use platform::rate_limit;

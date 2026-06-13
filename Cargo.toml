@@ -12,6 +12,7 @@ members = [
     "dev/co-auto",
     "dev/co-pwhash",
     "dev/co-token",
+    "dev/co-pipeline",
 ]
 default-members = [
     "core",

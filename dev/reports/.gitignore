@@ -1,0 +1,3 @@
+# Generated pipeline reports carry wall-clock timestamps — keep them out of git.
+# CI uploads them as build artifacts and diffs run-over-run (CO-88c).
+co-pipeline-report-*.yaml
