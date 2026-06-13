@@ -176,15 +176,41 @@ function _msgHtml(msg) {
         ? ` <span class="chat-edited-tag">${esc(t('chat.edited_tag'))}</span>`
         : '';
     const ago = _timeAgo(msg.created_at);
+    const originBadge = _originBadgeHtml(msg);
 
     return `<div class="chat-message" data-msg-id="${esc(msg.id)}">
   <div class="chat-message-header">
     <span class="chat-author">${esc(msg.author.display_name)}</span>
     <span class="chat-ts">${esc(ago)}</span>${editedTag}
     <span class="chat-actions">${editBtn}${deleteBtn}</span>
-  </div>
+  </div>${originBadge}
   <div class="chat-message-body" id="chat-body-${esc(msg.id)}">${esc(msg.body)}</div>
 </div>`;
+}
+
+// CO-204: "via {universe}" breadcrumb. Rendered when a message carries an
+// origin universe that differs from the universe the viewer is currently in.
+// For DM rooms (no universe context of their own) this is the only signal of
+// "where did this come from"; for universe rooms it's suppressed when origin
+// matches the room (the common, redundant case).
+function _originBadgeHtml(msg) {
+    const origin = msg.origin_universe_key;
+    if (!origin) return '';
+    const viewing = _state?.universeSlug;
+    // In a universe room the room's own universe == the viewer's slug, so this
+    // also satisfies "don't show when origin === room.universe_key".
+    if (viewing && origin === viewing) return '';
+    const label = _universeLabel(origin);
+    return `\n  <div class="chat-message-origin"><em>${esc(t('chat.via', { universe: label }))}</em></div>`;
+}
+
+// Humanize a universe key for display when no friendlier name is available.
+function _universeLabel(key) {
+    return String(key)
+        .split(/[-_]/)
+        .filter(Boolean)
+        .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
 }
 
 function _tombstoneHtml(msg) {
@@ -464,13 +490,24 @@ async function _sendMessage() {
 
     const universeSlug = _state.mode === 'dm' ? 'dm' : _state.universeSlug;
     const { currentRoom } = _state;
+
+    // CO-204: stamp the universe context the sender is browsing. The server
+    // validates membership and silently drops it if we don't belong, so this
+    // is safe to send optimistically. Skip the `template` placeholder and the
+    // `dm` sentinel — neither is a real universe origin.
+    const payload = { body };
+    const origin = _state.universeSlug;
+    if (origin && origin !== 'template' && origin !== 'dm') {
+        payload.origin_universe_key = origin;
+    }
+
     const resp = await fetch(
         `/api/v1/universes/${encodeURIComponent(universeSlug)}/chat/rooms/${encodeURIComponent(currentRoom.slug)}/messages`,
         {
             method: 'POST',
             credentials: 'include',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ body }),
+            body: JSON.stringify(payload),
         }
     ).catch(() => null);
 

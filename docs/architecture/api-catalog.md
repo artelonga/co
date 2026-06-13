@@ -380,6 +380,7 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 |---|---|---|---|
 | GET | `/api/v1/admin/dashboard` | admin | Cross-system dashboard |
 | GET | `/api/v1/admin/users/origin-breakdown` | admin | User signup origin breakdown |
+| GET | `/api/v1/admin/chat/origin-breakdown` | admin | CO-204 — chat message origin-universe breakdown |
 | GET | `/api/v1/admin/co-dev` | admin | CO-43 dev board info |
 | GET | `/api/v1/admin/co-dev/entries` | admin | Dev board entries |
 | GET | `/api/v1/admin/co-dev/entries/tags` | admin | Dev board tags |

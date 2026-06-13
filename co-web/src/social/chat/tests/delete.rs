@@ -29,7 +29,7 @@ async fn test_delete_by_author_200() {
             .get_chat_room_by_slug("uni23", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "my msg", None)
+            .post_chat_message(&room.id, &owner_id, "my msg", None, None)
             .unwrap()
     };
 
@@ -72,7 +72,7 @@ async fn test_delete_by_owner_of_other_msg_200() {
             .get_chat_room_by_slug("uni24", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &member_id, "member msg", None)
+            .post_chat_message(&room.id, &member_id, "member msg", None, None)
             .unwrap()
     };
 
@@ -115,7 +115,7 @@ async fn test_delete_by_admin_of_other_msg_200() {
             .get_chat_room_by_slug("uni25", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &member_id, "member msg", None)
+            .post_chat_message(&room.id, &member_id, "member msg", None, None)
             .unwrap()
     };
 
@@ -156,7 +156,7 @@ async fn test_delete_by_member_of_other_msg_403() {
             .get_chat_room_by_slug("uni26", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "owner msg", None)
+            .post_chat_message(&room.id, &owner_id, "owner msg", None, None)
             .unwrap()
     };
 
@@ -197,7 +197,7 @@ async fn test_delete_by_viewer_of_other_msg_403() {
             .get_chat_room_by_slug("uni27", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "owner msg", None)
+            .post_chat_message(&room.id, &owner_id, "owner msg", None, None)
             .unwrap()
     };
 
@@ -236,7 +236,7 @@ async fn test_delete_already_deleted_410() {
             .get_chat_room_by_slug("uni28", "general")
             .expect("room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "msg", None)
+            .post_chat_message(&room.id, &owner_id, "msg", None, None)
             .unwrap();
         let now = chrono::Utc::now().to_rfc3339();
         storage
@@ -286,7 +286,7 @@ async fn test_edit_broadcasts_message_edited_event() {
             .get_chat_room_by_slug("uni29", "general")
             .expect("room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "original", None)
+            .post_chat_message(&room.id, &owner_id, "original", None, None)
             .unwrap();
         (mid, room.id.clone())
     };
@@ -345,7 +345,7 @@ async fn test_delete_broadcasts_message_deleted_event() {
             .get_chat_room_by_slug("uni30", "general")
             .expect("room");
         let mid = storage
-            .post_chat_message(&room.id, &owner_id, "to delete", None)
+            .post_chat_message(&room.id, &owner_id, "to delete", None, None)
             .unwrap();
         (mid, room.id.clone())
     };
@@ -401,7 +401,7 @@ async fn test_get_messages_returns_tombstone_for_deleted() {
             .get_chat_room_by_slug("uni31", "general")
             .expect("room");
         storage
-            .post_chat_message(&room.id, &owner_id, "secret msg", None)
+            .post_chat_message(&room.id, &owner_id, "secret msg", None, None)
             .unwrap()
     };
 

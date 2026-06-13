@@ -462,6 +462,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/admin/chat/origin-breakdown:
+    get:
+      tags: ["admin"]
+      summary: "CO-204 — chat message origin-universe breakdown"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/admin/co-dev:
     get:
       tags: ["admin"]

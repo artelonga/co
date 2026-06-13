@@ -188,6 +188,14 @@ pub fn make_jwt(user_id: &str) -> String {
     token
 }
 
+/// CO-204: JWT with `tier == "admin"` for admin-gated endpoints.
+pub fn make_admin_jwt(user_id: &str) -> String {
+    unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
+    let (token, _) =
+        crate::auth::sign_jwt(user_id, "admin@example.com", "admin", "test-jwt-secret").unwrap();
+    token
+}
+
 pub async fn body_json(body: Body) -> serde_json::Value {
     use http_body_util::BodyExt;
     let bytes = body.collect().await.unwrap().to_bytes();

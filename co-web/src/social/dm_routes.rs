@@ -852,10 +852,10 @@ mod tests {
             let dm_ac = storage.open_dm(&a, &c).unwrap();
             // Post to ab first, then ac (ac should come first in the list)
             storage
-                .post_chat_message(&dm_ab.room_id, &a, "hi b", None)
+                .post_chat_message(&dm_ab.room_id, &a, "hi b", None, None)
                 .unwrap();
             storage
-                .post_chat_message(&dm_ac.room_id, &a, "hi c", None)
+                .post_chat_message(&dm_ac.room_id, &a, "hi c", None, None)
                 .unwrap();
         }
 
@@ -904,13 +904,13 @@ mod tests {
             let dm = storage.open_dm(&a, &b).unwrap();
             // b sends 3 messages to a
             storage
-                .post_chat_message(&dm.room_id, &b, "msg 1", None)
+                .post_chat_message(&dm.room_id, &b, "msg 1", None, None)
                 .unwrap();
             storage
-                .post_chat_message(&dm.room_id, &b, "msg 2", None)
+                .post_chat_message(&dm.room_id, &b, "msg 2", None, None)
                 .unwrap();
             storage
-                .post_chat_message(&dm.room_id, &b, "msg 3", None)
+                .post_chat_message(&dm.room_id, &b, "msg 3", None, None)
                 .unwrap();
         }
 
@@ -954,7 +954,7 @@ mod tests {
             let storage = Storage::new(dir.path().to_str().unwrap());
             let dm = storage.open_dm(&a, &b).unwrap();
             storage
-                .post_chat_message(&dm.room_id, &b, "hello", None)
+                .post_chat_message(&dm.room_id, &b, "hello", None, None)
                 .unwrap();
             dm.room_id
         };
