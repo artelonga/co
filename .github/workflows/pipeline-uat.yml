@@ -27,6 +27,12 @@ env:
 jobs:
   pipeline-uat:
     runs-on: ubuntu-latest
+    # CO-88c posts a deltas comment; without write perms the action fails with
+    # "Resource not accessible by integration" and takes the whole gate down on
+    # every PR. The actual gate is the `Gate on green matrix` step below.
+    permissions:
+      contents: read
+      pull-requests: write
     env:
       CO_PIPELINE_TOKEN: ${{ secrets.CO_PIPELINE_TOKEN }}
     steps:
@@ -101,6 +107,9 @@ jobs:
           fi
 
       - name: Comment deltas on PR
+        # Cosmetic — a comment failure (e.g. fork PR with read-only token) must
+        # never fail the gate; the green-matrix gate below is the real check.
+        continue-on-error: true
         if: ${{ github.event_name == 'pull_request' && steps.delta.outputs.have_delta == 'true' }}
         uses: marocchino/sticky-pull-request-comment@v2
         with:
