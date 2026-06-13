@@ -1,5 +1,5 @@
 use axum::{Json, Router, routing::get};
-use game_core::plugin::{Plugin, PluginManifest, PluginRegistry};
+use game_core::plugin::{Plugin, PluginManifest, PluginRegistry, RouteDescriptor};
 use game_core::storage::Storage;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -22,22 +22,56 @@ impl Plugin for ManifestPlugin {
         &self.manifest
     }
 
-    fn routes(&self) -> Router {
-        let manifest = self.manifest.clone();
-        Router::new().route(
-            "/info",
-            get(move || {
-                let m = manifest.clone();
-                async move {
-                    Json(serde_json::json!({
-                        "name": m.name,
-                        "version": m.version,
-                        "description": m.description
-                    }))
-                }
-            }),
-        )
+    fn routes(&self) -> Vec<RouteDescriptor> {
+        // CO-436: game-core is now axum-free, so plugins describe their routes
+        // portably. The host (this module) translates each descriptor into a
+        // concrete axum route — see `descriptors_to_router`.
+        vec![RouteDescriptor {
+            path: "/info".to_string(),
+            method: "GET".to_string(),
+            handler_id: "info".to_string(),
+        }]
     }
+}
+
+/// Translate a plugin's framework-agnostic [`RouteDescriptor`]s into an axum
+/// [`Router`], wiring each `handler_id` to its concrete handler.
+///
+/// CO-436: this is the co-web side of the portable-plugin boundary. `game-core`
+/// no longer returns an `axum::Router`; the host owns the HTTP translation.
+/// Unknown handler ids are logged and skipped so a forward-compatible plugin
+/// can't crash the loader.
+fn descriptors_to_router(manifest: &PluginManifest, descriptors: &[RouteDescriptor]) -> Router {
+    let mut router = Router::new();
+    for desc in descriptors {
+        match (desc.method.as_str(), desc.handler_id.as_str()) {
+            ("GET", "info") => {
+                let manifest = manifest.clone();
+                router = router.route(
+                    &desc.path,
+                    get(move || {
+                        let m = manifest.clone();
+                        async move {
+                            Json(serde_json::json!({
+                                "name": m.name,
+                                "version": m.version,
+                                "description": m.description
+                            }))
+                        }
+                    }),
+                );
+            }
+            _ => {
+                warn!(
+                    method = %desc.method,
+                    handler_id = %desc.handler_id,
+                    path = %desc.path,
+                    "unknown plugin route descriptor, skipping"
+                );
+            }
+        }
+    }
+    router
 }
 
 /// Scan `plugins_dir` for subdirectories containing `plugin.toml`,
@@ -95,7 +129,9 @@ pub fn load_plugins(plugins_dir: &Path, storage: &Storage) -> (PluginRegistry, R
             Ok(plugin) => {
                 let name = plugin.manifest.name.clone();
                 let version = plugin.manifest.version.clone();
-                let routes = plugin.routes();
+                let descriptors = plugin.routes();
+                let route_count = descriptors.len();
+                let routes = descriptors_to_router(&plugin.manifest, &descriptors);
                 let route_prefix = format!("/{}", name);
 
                 plugin_router = plugin_router.nest(&route_prefix, routes);
@@ -103,7 +139,7 @@ pub fn load_plugins(plugins_dir: &Path, storage: &Storage) -> (PluginRegistry, R
                 info!(
                     name = %name,
                     version = %version,
-                    routes = 1,
+                    routes = route_count,
                     "loaded plugin"
                 );
 
@@ -313,5 +349,51 @@ entities = []
         assert_eq!(registry.len(), 2);
         assert!(registry.get("alpha").is_some());
         assert!(registry.get("beta").is_some());
+    }
+
+    /// CO-436: game-core now hands back framework-agnostic `RouteDescriptor`s;
+    /// the host translates them into a working axum route. This locks the
+    /// translation: the descriptor `GET /info` → a route that serves the
+    /// manifest JSON, identical to the pre-refactor behavior.
+    #[tokio::test]
+    async fn descriptor_info_route_serves_manifest_json() {
+        use axum::body::Body;
+        use axum::http::{Request, StatusCode};
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+
+        let manifest: PluginManifest = toml::from_str(VALID_PLUGIN_TOML).unwrap();
+        let descriptors = ManifestPlugin {
+            manifest: manifest.clone(),
+        }
+        .routes();
+        assert_eq!(descriptors.len(), 1);
+        assert_eq!(descriptors[0].handler_id, "info");
+
+        let router = descriptors_to_router(&manifest, &descriptors);
+        let resp = router
+            .oneshot(Request::builder().uri("/info").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json["name"], "test-game");
+        assert_eq!(json["version"], "0.1.0");
+        assert_eq!(json["description"], "A test plugin");
+    }
+
+    /// Unknown handler ids are skipped (forward-compatibility), not panicked on.
+    #[test]
+    fn unknown_descriptor_is_skipped() {
+        let manifest: PluginManifest = toml::from_str(VALID_PLUGIN_TOML).unwrap();
+        let descriptors = vec![RouteDescriptor {
+            path: "/future".to_string(),
+            method: "POST".to_string(),
+            handler_id: "not-yet-implemented".to_string(),
+        }];
+        // Should build without panicking even though the handler is unknown.
+        let _router = descriptors_to_router(&manifest, &descriptors);
     }
 }
