@@ -791,7 +791,13 @@ pub async fn universe_visibility_gate(
 
     // CO-270: public-subscribable universes are readable by anonymous visitors.
     // Only writes are restricted (universe_writer_gate handles that separately).
-    if universe.is_public || universe.is_template || universe.visibility == "public-subscribable" {
+    // CO-444: `unlisted` universes are likewise readable by anyone with the
+    // link (excluded from discovery/search, not subscribable).
+    if universe.is_public
+        || universe.is_template
+        || universe.visibility == "public-subscribable"
+        || universe.visibility == "unlisted"
+    {
         return Ok(next.run(req).await);
     }
 

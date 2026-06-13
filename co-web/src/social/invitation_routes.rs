@@ -41,6 +41,28 @@ pub fn universe_invitation_router() -> Router<AppState> {
         )
 }
 
+/// CO-444: federation-facing `/invites` routes nested under
+/// `/api/v1/universes/:slug`. Same semantics as the `/invitations` routes but
+/// (a) accept an **API token** as well as a session JWT and (b) add revoke +
+/// universe-scoped accept — the surface YG-138 needs. The
+/// `require_auth_with_token` layer is applied where this router is mounted
+/// (router.rs).
+pub fn universe_invites_router() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/{slug}/invites",
+            post(create_invitation_handler).get(list_universe_invitations_handler),
+        )
+        .route(
+            "/{slug}/invites/{token}",
+            axum::routing::delete(revoke_invitation_handler),
+        )
+        .route(
+            "/{slug}/invites/{token}/accept",
+            post(accept_universe_invitation_handler),
+        )
+}
+
 /// Standalone invitation routes (public preview + auth-per-route accept).
 pub fn invitation_router(state: AppState) -> Router<AppState> {
     Router::new()
@@ -73,7 +95,9 @@ pub fn me_invitations_router(state: AppState) -> Router<AppState> {
 pub struct CreateInvitationRequest {
     /// Invite by email address.
     pub email: Option<String>,
-    /// Invite by usuario (username).
+    /// Invite by usuario (username). CO-444 accepts `handle` as an alias so
+    /// federation clients (YG-138) can use the cross-platform term.
+    #[serde(alias = "handle")]
     pub usuario: Option<String>,
     /// Invite by CO user_id directly.
     pub user_id: Option<String>,
@@ -546,6 +570,129 @@ pub async fn list_universe_invitations_handler(
         .collect();
 
     Ok(axum::Json(items))
+}
+
+// ---------------------------------------------------------------------------
+// CO-444: revoke + universe-scoped accept (the `/invites` surface)
+// ---------------------------------------------------------------------------
+
+/// Resolve a `{token}` path param to a stored `token_hash`. The owner-facing
+/// list/create responses return the `token_hash`, but a caller may also pass
+/// the raw token (which we hash). Returns the candidate hashes to try.
+fn invite_token_candidates(token: &str) -> [String; 2] {
+    [token.to_string(), Storage::hash_invitation_token(token)]
+}
+
+/// DELETE /api/v1/universes/:slug/invites/:token — revoke a pending invitation.
+///
+/// Owner/admin only. `:token` is the `token_hash` from the create/list response
+/// (a raw token is also accepted and hashed). Idempotent: revoking an unknown
+/// invitation for this universe is a 404; re-revoking is a no-op 204.
+pub async fn revoke_invitation_handler(
+    State(state): State<AppState>,
+    Path((slug, token)): Path<(String, String)>,
+    user_id: UserId,
+) -> Result<impl IntoResponse, AppError> {
+    let storage = lock_storage(&state);
+
+    let universe = storage
+        .get_universe(&slug)
+        .ok_or_else(|| AppError::NotFound(format!("Universe '{slug}' not found")))?;
+    let caller_role = storage.universe_member_role(&slug, &user_id.0);
+    let authorized = universe.owner_id == user_id.0
+        || matches!(caller_role.as_deref(), Some("owner") | Some("admin"));
+    if !authorized {
+        return Err(AppError::Forbidden(
+            "Only the universe owner or admin members can revoke invitations".into(),
+        ));
+    }
+
+    // Find the invitation by either the raw token or its hash, and make sure it
+    // belongs to this universe (never let one universe revoke another's invite).
+    let target_hash = invite_token_candidates(&token).into_iter().find(|cand| {
+        storage
+            .get_invitation_by_token(cand)
+            .map(|inv| inv.universe_key == slug)
+            .unwrap_or(false)
+    });
+    let Some(target_hash) = target_hash else {
+        return Err(AppError::NotFound("Invitation not found".into()));
+    };
+
+    storage
+        .revoke_invitation(&target_hash)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+/// POST /api/v1/universes/:slug/invites/:token/accept — accept an invitation
+/// scoped to a specific universe. `:token` is the raw token from the invite
+/// link. Mirrors `accept_invitation_handler` but verifies the invite belongs to
+/// `:slug`. Accepts a session JWT or an API token.
+pub async fn accept_universe_invitation_handler(
+    State(state): State<AppState>,
+    Path((slug, raw_token)): Path<(String, String)>,
+    user_id: UserId,
+) -> Result<impl IntoResponse, AppError> {
+    let token_hash = Storage::hash_invitation_token(&raw_token);
+    let storage = lock_storage(&state);
+
+    let inv = storage
+        .get_invitation_by_token(&token_hash)
+        .filter(|inv| inv.universe_key == slug)
+        .ok_or_else(|| AppError::NotFound("Invitation not found".into()))?;
+
+    if inv.revoked_at.is_some() {
+        return Err(AppError::Gone("Invitation has been revoked".into()));
+    }
+    if inv.consumed_at.is_some() {
+        return Err(AppError::Gone(
+            "Invitation has already been accepted".into(),
+        ));
+    }
+    if Utc::now() > inv.expires_at {
+        return Err(AppError::Gone("Invitation has expired".into()));
+    }
+
+    // Verify caller identity matches the invitee.
+    if let Some(ref target_uid) = inv.invited_user_id {
+        if *target_uid != user_id.0 {
+            return Err(AppError::Forbidden(
+                "This invitation was issued for a different user".into(),
+            ));
+        }
+    } else if let Some(ref target_email) = inv.invited_email {
+        let caller = storage
+            .get_user_by_id(&user_id.0)
+            .ok_or_else(|| AppError::Unauthorized("User not found".into()))?;
+        if caller.email.to_lowercase() != target_email.to_lowercase() {
+            return Err(AppError::Forbidden(
+                "This invitation was issued for a different email address".into(),
+            ));
+        }
+    } else {
+        return Err(AppError::Internal("Invitation has no recipient".into()));
+    }
+
+    let now_str = Utc::now().to_rfc3339();
+    storage
+        .conn()
+        .execute(
+            "INSERT OR IGNORE INTO universe_members (universe_key, user_id, role, joined_at) \
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![inv.universe_key, user_id.0, inv.role, now_str],
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    storage
+        .consume_invitation(&token_hash)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    Ok(axum::Json(AcceptInvitationResponse {
+        universe_key: inv.universe_key,
+        role: inv.role,
+    }))
 }
 
 // ---------------------------------------------------------------------------

@@ -2543,7 +2543,7 @@ paths:
           description: OK
     post:
       tags: ["universes"]
-      summary: "Create universe"
+      summary: "Create universe (CO-444: API-token or session; body may set `visibility` ∈ private/public/unlisted and `parent_key`)"
       security:
         - sessionCookie: []
       responses:
@@ -2708,7 +2708,7 @@ paths:
           description: OK
     put:
       tags: ["universes"]
-      summary: "Update name/visibility/parent_key (CO-423)"
+      summary: "Update name/visibility/parent_key (CO-423; CO-444 visibility ∈ private/public/unlisted, API-token accepted)"
       security:
         - sessionCookie: []
       parameters:
@@ -3438,6 +3438,75 @@ paths:
         - sessionCookie: []
       parameters:
         - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/invites:
+    get:
+      tags: ["universes"]
+      summary: "List pending invites (CO-444)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["universes"]
+      summary: "Create invite — `{email\"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/invites/{token}:
+    delete:
+      tags: ["universes"]
+      summary: "Revoke an invite by token_hash (CO-444)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/invites/{token}/accept:
+    post:
+      tags: ["universes"]
+      summary: "Accept an invite (universe-scoped, CO-444)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: token
           in: path
           required: true
           schema:

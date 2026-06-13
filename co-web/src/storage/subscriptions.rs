@@ -177,6 +177,13 @@ impl Storage {
             return UniverseAccess::MetadataOnly;
         }
 
+        // CO-444: `unlisted` — readable by anyone with the link. An authenticated
+        // non-member who reached here still gets read access (anonymous callers
+        // were already handled above).
+        if universe.visibility == "unlisted" {
+            return UniverseAccess::ReadOnly;
+        }
+
         // 7. Everything else is denied.
         UniverseAccess::Denied
     }

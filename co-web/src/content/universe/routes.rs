@@ -87,6 +87,40 @@ pub struct DeleteUniverseResponse {
     pub deleted: String,
 }
 
+/// CO-444: typed body for `POST /api/v1/universes`. Extends the bare
+/// `CreateUniverse` (key/name/description) with the federation fields a
+/// service (Yggdrasil, YG-138) needs to create a universe in one call:
+/// `visibility` and an optional `parent_key`.
+#[derive(Debug, Deserialize)]
+pub struct CreateUniverseRequest {
+    pub key: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    /// `private` | `public` | `unlisted`. `public` is stored canonically as
+    /// `public-subscribable`. Omitted → `private`.
+    pub visibility: Option<String>,
+    /// CO-98/CO-423: optional parent universe key for hierarchical grouping.
+    /// Must reference an existing universe.
+    pub parent_key: Option<String>,
+}
+
+/// CO-444: map the user-facing visibility vocabulary (`private`/`public`/
+/// `unlisted`) to the canonical stored value and its `is_public` flag.
+///
+/// `public-subscribable` is also accepted as an alias for `public` so existing
+/// clients keep working. Returns `(stored_visibility, is_public)`.
+fn resolve_visibility(input: &str) -> Result<(&'static str, i64), AppError> {
+    match input.trim() {
+        "private" => Ok(("private", 0)),
+        "public" | "public-subscribable" => Ok(("public-subscribable", 1)),
+        "unlisted" => Ok(("unlisted", 0)),
+        other => Err(AppError::BadRequest(format!(
+            "Invalid visibility '{other}'. Must be: private, public, unlisted"
+        ))),
+    }
+}
+
 /// Query params for universe search.
 #[derive(Debug, serde::Deserialize)]
 pub struct SearchQuery {
@@ -252,12 +286,19 @@ pub async fn list_public_universes(
     Ok(Json(universes))
 }
 
-// POST /api/v1/universes — create a universe (caller becomes owner)
+// POST /api/v1/universes — create a universe (caller becomes owner).
+//
+// CO-444: accepts an **API token** as well as a session JWT (the route is now
+// behind `require_auth_with_token`), so an external service can create a
+// federated universe on a user's behalf. The body may set `visibility` and
+// `parent_key` in the same call. All validation runs *before* the row is
+// inserted so a bad `visibility`/`parent_key` never leaves an orphan universe
+// (the CO-438 no-orphan rule).
 pub async fn create_universe(
     State(state): State<AppState>,
     user_id: UserId,
     headers: HeaderMap,
-    Json(body): Json<CreateUniverse>,
+    Json(body): Json<CreateUniverseRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     validate_universe_key(&body.key)?;
     if body.name.trim().is_empty() {
@@ -268,11 +309,32 @@ pub async fn create_universe(
             "Universe name must be 100 characters or fewer".into(),
         ));
     }
+
+    // Validate the federation fields up front (before any insert).
+    let visibility = body
+        .visibility
+        .as_deref()
+        .map(resolve_visibility)
+        .transpose()?;
+    let parent_key = body
+        .parent_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     let storage = lock_storage(&state);
     if storage.get_universe(&body.key).is_some() {
         return Err(AppError::Conflict(format!(
             "Universe key '{}' is already taken",
             body.key
+        )));
+    }
+    if let Some(ref parent) = parent_key
+        && storage.get_universe(parent).is_none()
+    {
+        return Err(AppError::BadRequest(format!(
+            "Parent universe '{parent}' not found"
         )));
     }
 
@@ -285,8 +347,39 @@ pub async fn create_universe(
     drop(storage);
 
     let mut storage = lock_storage(&state);
-    let universe = storage.create_universe(body, &user_id.0)?;
+    let mut universe = storage.create_universe(
+        CreateUniverse {
+            key: body.key,
+            name: body.name,
+            description: body.description,
+        },
+        &user_id.0,
+    )?;
     let ukey = universe.key.clone();
+
+    // Apply visibility + parent_key (validated above) in the same transaction
+    // scope. create_universe seeds `visibility = 'private'`.
+    if let Some((vis, is_public)) = visibility {
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET visibility = ?1, is_public = ?2 WHERE key = ?3",
+                rusqlite::params![vis, is_public, ukey],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        universe.visibility = vis.to_string();
+        universe.is_public = is_public != 0;
+    }
+    if let Some(ref parent) = parent_key {
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET parent_key = ?1 WHERE key = ?2",
+                rusqlite::params![parent, ukey],
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+        universe.parent_key = Some(parent.clone());
+    }
     drop(storage);
     crate::atividade::log_atividade(
         state,
@@ -488,27 +581,18 @@ pub async fn update_universe(
     }
 
     if let Some(vis) = body.visibility.as_deref() {
-        // 1.46.0: only `private` and `public-subscribable` are user-settable.
-        // `template` is system-only; `requires_login` was collapsed into
-        // `public-subscribable` (paired with `default_for_new_users` for
-        // universes that should auto-attach to every new user).
-        let is_public = match vis {
-            "private" => 0,
-            "public-subscribable" => 1,
-            _ => {
-                return Err(AppError::BadRequest(format!(
-                    "Invalid visibility '{}'. Must be: private, public-subscribable",
-                    vis
-                )));
-            }
-        };
+        // CO-444: user-settable visibility is `private` | `public` | `unlisted`
+        // (`public` stored canonically as `public-subscribable`; the latter is
+        // still accepted as an alias). `template`/`public-static` remain
+        // system-only. `requires_login` was collapsed into `public-subscribable`.
+        let (canonical, is_public) = resolve_visibility(vis)?;
         let storage = lock_storage(&state);
         storage
             .conn()
             .execute(
                 "UPDATE universes SET visibility = ?1, is_public = ?2, requires_login = 0 \
                  WHERE key = ?3",
-                rusqlite::params![vis, is_public, slug],
+                rusqlite::params![canonical, is_public, slug],
             )
             .map_err(|e| AppError::Internal(e.to_string()))?;
     }
@@ -1078,9 +1162,15 @@ fn extract_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
-/// Try to extract a user ID from the Authorization header or session cookie without hard-failing.
-fn extract_optional_user_id(headers: &HeaderMap, _state: &AppState) -> Option<String> {
-    extract_optional_claims(headers).map(|c| c.sub)
+/// Try to extract a user ID from the Authorization header or session cookie
+/// without hard-failing.
+///
+/// CO-444: resolves a session JWT **or** a long-lived API token, mirroring the
+/// `universe_visibility_gate`/`universe_writer_gate` middleware. Previously this
+/// decoded JWTs only, so token-authenticated callers (e.g. a federation service
+/// hitting `PUT /api/v1/universes/{key}`) resolved to anonymous → 401.
+fn extract_optional_user_id(headers: &HeaderMap, state: &AppState) -> Option<String> {
+    crate::auth::resolve_user_id(state, headers)
 }
 
 /// Try to decode full JWT claims from Authorization header or session cookie without hard-failing.
@@ -1507,9 +1597,13 @@ pub fn router(state: AppState) -> Router<AppState> {
         .route("/{slug}/jobs/doc-gen", post(submit_doc_gen_job))
         // Bulk template apply + hub generation (owner-scoped, auth via require_auth)
         .route("/apply-template-all", post(apply_template_all))
+        // CO-444: accept an API token *or* a session JWT on every universe
+        // management route, so an external service (Yggdrasil, YG-138) can
+        // create universes, set visibility and subscribe with a token —
+        // resolving to the same owner as a session would (CO-161/CO-438 parity).
         .layer(axum::middleware::from_fn_with_state(
             state,
-            crate::auth::require_auth,
+            crate::auth::require_auth_with_token,
         ));
 
     Router::new().merge(public_routes).merge(protected_routes)

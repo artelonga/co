@@ -157,6 +157,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let universe_invitation_api = crate::invitation_routes::universe_invitation_router().layer(
         axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
     );
+    // CO-444: the `/invites` federation surface accepts API tokens too.
+    let universe_invites_api = crate::invitation_routes::universe_invites_router().layer(
+        axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth_with_token),
+    );
     let invitation_api = crate::invitation_routes::invitation_router(state.clone());
 
     let chat_api = crate::chat::chat_router().layer(axum::middleware::from_fn_with_state(
@@ -424,6 +428,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/admin", dev_board_api)
             .nest("/api/v1/universes", universe_api)
             .nest("/api/v1/universes", universe_invitation_api)
+            .nest("/api/v1/universes", universe_invites_api)
             .nest("/api/v1/invitations", invitation_api)
             .nest("/api/v1/universes", chat_api)
             .nest("/api/v1", dm_api)
