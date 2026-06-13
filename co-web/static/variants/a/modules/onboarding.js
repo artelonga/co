@@ -12,6 +12,12 @@ let _hideTemplateBanner = () => {};
 let _renderUsageCount = () => {};
 let _loadMeUniverses = async () => {};
 
+// CO-96: set inside setupCriarModal so other modules (sidebar context menu) can
+// open the create/duplicate modal. `openCriarModal({copyFrom})` pre-fills the
+// duplicate source.
+let _openCriarModal = () => {};
+export function openCriarModal(defaults) { _openCriarModal(defaults); }
+
 export function injectOnboardingCallbacks(callbacks) {
     _render = callbacks.render;
     _showLoginModal = callbacks.showLoginModal;
@@ -128,14 +134,24 @@ export function setupCriarModal() {
         if (descInput) descInput.value = '';
         const privacyRadio = form.querySelector('input[name="criar-visibility"][value="private"]');
         if (privacyRadio) privacyRadio.checked = true;
+        // CO-96: when invoked as "Duplicate…" from the context menu, the source
+        // is pre-filled and the copy-from toggle is forced on.
+        const titleEl = document.getElementById('criar-modal-title');
         if (copyToggle) {
-            copyToggle.checked = !!d.copyFromTemplate;
+            const preCopy = d.copyFrom || (d.copyFromTemplate ? 'template' : null);
+            copyToggle.checked = !!preCopy;
             if (copySource) {
                 copySource.classList.toggle('hidden', !copyToggle.checked);
-                if (d.copyFromTemplate) copySource.value = 'template';
+                if (preCopy) copySource.value = preCopy;
             }
         }
+        if (titleEl) {
+            titleEl.textContent = d.copyFrom ? 'Duplicar universo' : 'Criar universo';
+        }
         if (errorEl) errorEl.classList.add('hidden');
+        // CO-96: reset inline-validation state so a reopened modal starts clean.
+        const sb = document.getElementById('criar-submit');
+        if (sb) sb.disabled = false;
         nameInput.focus();
     }
 
@@ -151,6 +167,7 @@ export function setupCriarModal() {
 
     const slugPreview = document.getElementById('criar-slug-preview');
     const slugValEl = document.getElementById('criar-slug-val');
+    const submitBtn = document.getElementById('criar-submit');
 
     function updateSlugPreview() {
         const slug = slugInput.value.trim();
@@ -164,6 +181,60 @@ export function setupCriarModal() {
         }
     }
 
+    // CO-96: inline key validation. Format is checked synchronously; uniqueness
+    // is checked against the API on a debounce so each keystroke doesn't fire a
+    // request. `keyOk` gates the submit button.
+    let keyOk = false;
+    let keyCheckTimer = null;
+    let keyCheckSeq = 0;
+
+    function showKeyError(msg) {
+        keyOk = false;
+        if (errorEl) {
+            errorEl.textContent = msg;
+            errorEl.classList.remove('hidden');
+        }
+        if (submitBtn) submitBtn.disabled = true;
+    }
+
+    function clearKeyError() {
+        if (errorEl) errorEl.classList.add('hidden');
+        if (submitBtn) submitBtn.disabled = false;
+    }
+
+    function validateKeyFormat(key) {
+        if (!key) return 'Informe um slug.';
+        if (key.length < 2 || key.length > 40) return 'O slug precisa ter de 2 a 40 caracteres.';
+        if (!/^[a-z0-9-]+$/.test(key)) return 'Use apenas letras minúsculas, números e hífens.';
+        return null;
+    }
+
+    function validateKey() {
+        const key = slugInput.value.trim();
+        const formatErr = validateKeyFormat(key);
+        if (formatErr) {
+            showKeyError(formatErr);
+            return;
+        }
+        // Format is fine; provisionally allow while we debounce the uniqueness check.
+        keyOk = true;
+        clearKeyError();
+        if (keyCheckTimer) clearTimeout(keyCheckTimer);
+        const seq = ++keyCheckSeq;
+        keyCheckTimer = setTimeout(async () => {
+            const available = await api.isUniverseKeyAvailable(key);
+            // Ignore stale responses if the user kept typing.
+            if (seq !== keyCheckSeq) return;
+            if (slugInput.value.trim() !== key) return;
+            if (!available) {
+                showKeyError(`O slug "${key}" já está em uso. Escolha outro.`);
+            } else {
+                keyOk = true;
+                clearKeyError();
+            }
+        }, 350);
+    }
+
     nameInput.addEventListener('input', () => {
         const slug = nameInput.value
             .toLowerCase()
@@ -172,9 +243,13 @@ export function setupCriarModal() {
             .slice(0, 40);
         slugInput.value = slug;
         updateSlugPreview();
+        validateKey();
     });
 
-    slugInput.addEventListener('input', updateSlugPreview);
+    slugInput.addEventListener('input', () => {
+        updateSlugPreview();
+        validateKey();
+    });
 
     closeBtn && closeBtn.addEventListener('click', close);
     cancelBtn && cancelBtn.addEventListener('click', close);
@@ -185,6 +260,12 @@ export function setupCriarModal() {
         const name = nameInput.value.trim();
         const key = slugInput.value.trim();
         if (!name || !key) return;
+        // CO-96: block submission on an invalid key format.
+        const formatErr = validateKeyFormat(key);
+        if (formatErr) {
+            showKeyError(formatErr);
+            return;
+        }
         const description = descInput ? descInput.value.trim() : '';
         const visibilityEl = form.querySelector('input[name="criar-visibility"]:checked');
         const visibility = visibilityEl ? visibilityEl.value : 'private';
@@ -198,7 +279,14 @@ export function setupCriarModal() {
 
         let result;
         if (copyFrom) {
-            result = await api.cloneUniverse(copyFrom, { name, key, description });
+            // CO-96: `/clone` is anonymous-friendly but only works on public /
+            // template sources; `/duplicate` (CO-95) copies ANY universe the
+            // caller can read but requires auth. Use clone for the template
+            // (so anonymous visitors keep working) and duplicate for everything
+            // else (a user copying their own private universe).
+            result = copyFrom === 'template'
+                ? await api.cloneUniverse(copyFrom, { name, key, description })
+                : await api.duplicateUniverse(copyFrom, { name, key, description });
         } else {
             result = await apiFetch('/api/v1/universes', {
                 method: 'POST',
@@ -235,6 +323,10 @@ export function setupCriarModal() {
         await _loadMeUniverses();
         await _bootAppForUniverse(result.key);
     });
+
+    // CO-96: expose the modal opener so the sidebar context menu can launch the
+    // "Duplicate…" flow with the source pre-filled.
+    _openCriarModal = open;
 
     const btnSidebarNew = document.getElementById('btn-sidebar-new-universe');
     if (btnSidebarNew) btnSidebarNew.addEventListener('click', () => open());

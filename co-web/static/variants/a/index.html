@@ -44,6 +44,12 @@
                         <path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
                     </svg>
                 </button>
+                <!-- CO-96: open the trash / recovery view -->
+                <button class="btn-icon sidebar-trash" id="btn-sidebar-trash" title="Lixeira" aria-label="Lixeira">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                        <path d="M2 4h12M5.5 4V2.5h5V4M6.5 7v4M9.5 7v4M3.5 4l.5 9h8l.5-9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </button>
             </div>
             <!-- CO-311: Platforms section removed — the hardcoded list of sister deployments
                  (co, artelonga, quilombo, yggdrasil, rfq) confused users who expected to see
@@ -363,6 +369,52 @@
         </div>
     </div>
 
+    <!-- CO-96: Delete Universe confirmation modal (type-the-key to confirm) -->
+    <div id="delete-universe-overlay" class="modal-overlay hidden">
+        <div class="modal" id="delete-universe-modal" style="max-width:420px">
+            <div class="modal-header">
+                <h2>Excluir universo</h2>
+                <button class="modal-close" id="delete-universe-close">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:0 4px">
+                <p>Esta ação envia <strong id="delete-universe-name"></strong> para a lixeira. Você pode restaurá-lo em até 30 dias.</p>
+                <div class="form-group">
+                    <label for="delete-universe-input">Digite a chave <code id="delete-universe-keyhint"></code> para confirmar:</label>
+                    <input type="text" id="delete-universe-input" autocomplete="off" placeholder="chave-do-universo">
+                </div>
+            </div>
+            <div class="form-actions">
+                <div class="form-actions-right">
+                    <button type="button" class="btn btn-secondary" id="delete-universe-cancel" data-i18n="action.cancel">Cancelar</button>
+                    <button type="button" class="btn btn-danger" id="delete-universe-confirm" disabled>Excluir</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CO-96: Trash / recovery modal — restore soft-deleted or archived universes -->
+    <div id="trash-overlay" class="modal-overlay hidden">
+        <div class="modal" id="trash-modal" style="max-width:520px">
+            <div class="modal-header">
+                <h2>Lixeira e arquivados</h2>
+                <button class="modal-close" id="trash-close">&times;</button>
+            </div>
+            <div class="modal-body" style="padding:0 4px">
+                <p class="form-hint">Universos excluídos podem ser restaurados em até 30 dias.</p>
+                <div id="trash-list" class="trash-list"></div>
+                <p id="trash-empty" class="form-hint hidden">Nada na lixeira.</p>
+            </div>
+            <div class="form-actions">
+                <div class="form-actions-right">
+                    <button type="button" class="btn btn-secondary" id="trash-done" data-i18n="action.close">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CO-96: Universe context menu (right-click on a sidebar universe item) -->
+    <div id="universe-context-menu" class="context-menu hidden" role="menu"></div>
+
     <!-- Subscribe Prompt Modal (CO-253: shown when unsubscribed user attempts a CRUD action) -->
     <div id="subscribe-prompt-overlay" class="login-screen hidden">
         <div class="login-card">
@@ -590,6 +642,23 @@
                 <button class="modal-close" id="settings-modal-close">&times;</button>
             </div>
             <form id="settings-form">
+                <!-- CO-96: editable universe identity (owner only) -->
+                <div class="form-group">
+                    <label for="settings-name" data-i18n="form.name">Nome</label>
+                    <input type="text" id="settings-name" autocomplete="off" placeholder="Nome do universo">
+                </div>
+                <div class="form-group">
+                    <label for="settings-description">Descrição</label>
+                    <textarea id="settings-description" autocomplete="off" rows="2" placeholder="(opcional)"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="settings-visibility" data-i18n="criar.visibility">Visibilidade</label>
+                    <select id="settings-visibility">
+                        <option value="private" data-i18n="criar.visibility.private">Privado</option>
+                        <option value="public" data-i18n="criar.visibility.public">Público</option>
+                        <option value="unlisted">Não listado</option>
+                    </select>
+                </div>
                 <div class="form-group">
                     <label for="settings-theme" data-i18n="form.theme">Tema</label>
                     <select id="settings-theme">
@@ -622,6 +691,14 @@
                     </div>
                 </div>
             </form>
+            <!-- CO-96: danger zone — archive / delete (owner only) -->
+            <div id="settings-danger-zone" class="settings-danger-zone" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border,#e5e7eb)">
+                <h3 style="font-size:13px;color:var(--danger,#dc2626);margin:0 0 8px">Zona de perigo</h3>
+                <div style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button type="button" class="btn btn-secondary btn-sm" id="settings-archive">Arquivar</button>
+                    <button type="button" class="btn btn-danger btn-sm" id="settings-delete">Excluir universo…</button>
+                </div>
+            </div>
             <!-- CO-189: Invite section (owner/admin only, shown by JS) -->
             <div id="invite-section" class="hidden settings-invite-section">
                 <header class="settings-section-header">

@@ -17,6 +17,8 @@ import {
     injectSidebarCallbacks, injectSetUniverseSlugInUrl, injectScrollToDate,
     injectShowLoginModal as injectSidebarShowLogin,
 } from './modules/sidebar.js';
+// CO-96: universe CRUD context menu + delete/trash modals.
+import { setupUniverseActions, injectUniverseActionsCallbacks } from './modules/sidebar/universe-actions.js';
 import { renderKanban, injectKanbanCallbacks } from './modules/views/kanban.js';
 import { renderCalendar, renderGantt, renderEventsTimeline, injectCalendarCallbacks } from './modules/views/calendar.js';
 import { renderTable, closeStatusDropdown, injectTableCallbacks } from './modules/views/table.js';
@@ -684,6 +686,7 @@ function wireModules() {
         loadMeUniverses,
     });
     injectOnboardingCallbacks({ render, showLoginModal, showToast, setUniverseSlugInUrl, bootAppForUniverse, hideTemplateBanner, renderUsageCount, loadMeUniverses });
+    injectUniverseActionsCallbacks({ loadMeUniverses, renderSidebar, bootAppForUniverse, setUniverseSlugInUrl, showToast });
     injectYggdrasilCallbacks({ hideLoading, hideLoginModal, renderUserBadge });
 }
 
@@ -894,6 +897,7 @@ async function init() {
         renderNotificationSettings(document.getElementById('notif-settings-content'));
     });
     setupCriarModal();
+    setupUniverseActions();
     setupUsageLimitModal();
     setupSubscribePromptModal();
     setupSettingsPanel();

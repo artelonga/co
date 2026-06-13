@@ -22,6 +22,7 @@ mod v057_072;
 mod v073_076;
 mod v077;
 mod v078;
+mod v079;
 
 impl Storage {
     pub(super) fn run_migrations(&mut self) {
@@ -51,6 +52,7 @@ impl Storage {
         self.migrate_v073_076(current_version);
         self.migrate_v077(current_version);
         self.migrate_v078(current_version);
+        self.migrate_v079(current_version);
     }
 }
 
@@ -97,7 +99,7 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 78;
+    const LATEST_VERSION: i64 = 79;
 
     fn max_version(storage: &Storage) -> i64 {
         storage

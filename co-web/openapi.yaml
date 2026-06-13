@@ -2579,6 +2579,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/trash:
+    get:
+      tags: ["universes"]
+      summary: "List caller's trashed + archived universes (CO-96)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{key}/members:
     post:
       tags: ["universes"]
@@ -2722,7 +2731,7 @@ paths:
           description: OK
     delete:
       tags: ["universes"]
-      summary: "Delete universe"
+      summary: "Soft-delete universe — sets `deleted_at`, recoverable via trash (CO-96)"
       security:
         - sessionCookie: []
       parameters:
@@ -2738,6 +2747,21 @@ paths:
     post:
       tags: ["universes"]
       summary: "Apply template universe"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/archive:
+    post:
+      tags: ["universes"]
+      summary: "Archive (soft-hide) universe (CO-96)"
       security:
         - sessionCookie: []
       parameters:
@@ -3847,6 +3871,21 @@ paths:
     get:
       tags: ["entries"]
       summary: "Replay op-log to a point"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/restore:
+    post:
+      tags: ["universes"]
+      summary: "Restore a trashed/archived universe (CO-96)"
       security:
         - sessionCookie: []
       parameters:

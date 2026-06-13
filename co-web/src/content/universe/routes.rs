@@ -87,6 +87,28 @@ pub struct DeleteUniverseResponse {
     pub deleted: String,
 }
 
+/// CO-96: typed response for the archive/restore lifecycle endpoints. `state`
+/// is the universe's post-operation lifecycle state (`archived` | `active`).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LifecycleResponse {
+    pub key: String,
+    pub state: String,
+}
+
+/// CO-96: a row in the trash/recovery view. `state` is `deleted` or `archived`;
+/// exactly one of the timestamps is set accordingly.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TrashedUniverse {
+    pub key: String,
+    pub name: String,
+    pub description: String,
+    pub state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub archived_at: Option<String>,
+}
+
 /// CO-444: typed body for `POST /api/v1/universes`. Extends the bare
 /// `CreateUniverse` (key/name/description) with the federation fields a
 /// service (Yggdrasil, YG-138) needs to create a universe in one call:
@@ -242,6 +264,7 @@ pub async fn list_public_universes(
                 COALESCE(parent_key, '') \
          FROM universes \
          WHERE COALESCE(hidden, 0) = 0 \
+           AND deleted_at IS NULL AND archived_at IS NULL \
            AND ( \
                 visibility = 'public-subscribable' \
              OR visibility = 'public-static' \
@@ -614,14 +637,19 @@ pub async fn update_universe(
     }))
 }
 
-/// DELETE /api/v1/universes/:slug — delete a universe entirely (1.50.0).
+/// DELETE /api/v1/universes/:slug — soft-delete a universe (CO-96).
 ///
-/// Removes the `universes` row, all `entries`/`entries_fts` rows for the
-/// universe, all `universe_members`, and the on-disk universe directory.
-/// 1.45.0 model: any authenticated user can delete any universe they can
-/// see; the visibility middleware already gates discovery, and the
-/// platform's single-tier permission model makes finer-grained checks
-/// redundant. Refuses to delete `template` (the seed) for safety.
+/// Sets `deleted_at` instead of hard-deleting: the row, its entries, members
+/// and on-disk directory all survive so the universe can be recovered from the
+/// trash view within a 30-day window (`POST /:slug/restore`). Every listing
+/// query filters `deleted_at IS NULL`, so the universe immediately disappears
+/// from the sidebar, public listings, search and discovery. A future admin tool
+/// hard-purges rows whose `deleted_at` is older than the retention window.
+///
+/// 1.45.0 model: any authenticated user can delete any universe they can see;
+/// the visibility middleware already gates discovery and the platform's
+/// single-tier permission model makes finer-grained checks redundant. Refuses
+/// to delete `template` (the seed) for safety.
 pub async fn delete_universe(
     State(state): State<AppState>,
     Path(slug): Path<String>,
@@ -636,64 +664,18 @@ pub async fn delete_universe(
         ));
     }
 
-    let storage = lock_storage(&state);
-    if storage.get_universe(&slug).is_none() {
-        return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
-    }
-    let universe_dir = storage.universe_root(&slug);
-
-    // Cascade in the meta DB. Per-universe SQLite files in `universes/<slug>/`
-    // are removed when we delete the directory below.
-    // Cascade order matters: delete child rows before the parent
-    // `universes` row to satisfy FK constraints. Two child tables
-    // (`universe_invitations` from CO-188 and its 1391-backfill twin)
-    // were declared with FKs but without ON DELETE CASCADE, so they
-    // must be deleted explicitly here. Anything declared with
-    // ON DELETE CASCADE (entries, universe_members, subscriptions)
-    // gets implicitly cleaned by the final DELETE on `universes`,
-    // but we still issue the explicit DELETEs for predictability.
-    // Cascade: enumerate every non-universes table that has a
-    // `universe_key` column and DELETE the matching rows before the
-    // parent row. Several FKs in the schema were declared without
-    // ON DELETE CASCADE; introspecting sqlite_master keeps the cascade
-    // honest as new tables get added without remembering to extend a
-    // hardcoded list here.
     {
-        let conn = storage.conn();
-        let mut tables: Vec<String> = {
-            let mut stmt = conn
-                .prepare(
-                    "SELECT m.name
-                     FROM sqlite_master m
-                     JOIN pragma_table_info(m.name) p
-                     WHERE m.type = 'table'
-                       AND m.name != 'universes'
-                       AND m.name NOT LIKE 'sqlite_%'
-                       AND p.name = 'universe_key'",
-                )
-                .map_err(|e| AppError::Internal(format!("delete cascade prepare: {e}")))?;
-            let rows = stmt
-                .query_map([], |r| r.get::<_, String>(0))
-                .map_err(|e| AppError::Internal(format!("delete cascade query: {e}")))?;
-            rows.filter_map(|r| r.ok()).collect()
-        };
-        // Deterministic order helps debugging.
-        tables.sort();
-        for table in &tables {
-            let sql = format!("DELETE FROM \"{table}\" WHERE universe_key = ?1");
-            conn.execute(&sql, [&slug])
-                .map_err(|e| AppError::Internal(format!("delete cascade ({table}): {e}")))?;
+        let storage = lock_storage(&state);
+        if storage.get_universe(&slug).is_none() {
+            return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
         }
-        conn.execute("DELETE FROM universes WHERE key = ?1", [&slug])
-            .map_err(|e| AppError::Internal(format!("delete cascade (universes): {e}")))?;
-    }
-    drop(storage);
-
-    if universe_dir.exists() {
-        let _ = std::fs::remove_dir_all(&universe_dir);
+        storage
+            .soft_delete_universe(&slug)
+            .map_err(|e| AppError::Internal(format!("soft-delete: {e}")))?;
     }
 
-    // Invalidate all caches keyed by this slug.
+    // Invalidate all caches keyed by this slug so the now-hidden universe stops
+    // serving cached manifests/queries.
     state.index.cache.invalidate_universe(&slug);
     state
         .index
@@ -721,6 +703,107 @@ pub async fn delete_universe(
         axum::http::StatusCode::OK,
         Json(DeleteUniverseResponse { deleted: slug }),
     ))
+}
+
+/// POST /api/v1/universes/:slug/archive — archive a universe (CO-96).
+///
+/// Soft-hides the universe from the sidebar and all listings (like delete) but
+/// framed as a reversible "put away" rather than a trash action. Cleared via
+/// `POST /:slug/restore`. Refuses to archive `template`.
+pub async fn archive_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let _caller_id = extract_optional_user_id(&headers, &state)
+        .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
+
+    if slug == "template" {
+        return Err(AppError::BadRequest(
+            "Cannot archive the template universe".into(),
+        ));
+    }
+
+    {
+        let storage = lock_storage(&state);
+        if storage.get_universe(&slug).is_none() {
+            return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+        }
+        storage
+            .archive_universe(&slug)
+            .map_err(|e| AppError::Internal(format!("archive: {e}")))?;
+    }
+
+    state.index.cache.invalidate_universe(&slug);
+    Ok((
+        axum::http::StatusCode::OK,
+        Json(LifecycleResponse {
+            key: slug,
+            state: "archived".into(),
+        }),
+    ))
+}
+
+/// POST /api/v1/universes/:slug/restore — restore a trashed or archived
+/// universe (CO-96). Clears both `deleted_at` and `archived_at` so it reappears
+/// in the sidebar. 404 if the universe row no longer exists at all.
+pub async fn restore_universe(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let _caller_id = extract_optional_user_id(&headers, &state)
+        .ok_or_else(|| AppError::Unauthorized("Not authenticated".into()))?;
+
+    {
+        let storage = lock_storage(&state);
+        // get_universe still finds soft-deleted rows (it's a by-key fetch with
+        // no deleted_at filter), so this 404s only when the row is truly gone.
+        if storage.get_universe(&slug).is_none() {
+            return Err(AppError::NotFound(format!("Universe '{slug}' not found")));
+        }
+        storage
+            .restore_universe(&slug)
+            .map_err(|e| AppError::Internal(format!("restore: {e}")))?;
+    }
+
+    state.index.cache.invalidate_universe(&slug);
+    Ok((
+        axum::http::StatusCode::OK,
+        Json(LifecycleResponse {
+            key: slug,
+            state: "active".into(),
+        }),
+    ))
+}
+
+/// GET /api/v1/universes/trash — list the caller's trashed + archived universes
+/// for the recovery view (CO-96). Owner-scoped.
+pub async fn list_trash(
+    State(state): State<AppState>,
+    user_id: UserId,
+) -> Result<Json<Vec<TrashedUniverse>>, AppError> {
+    let storage = lock_storage(&state);
+    let rows = storage.list_trashed_universes_for_owner(&user_id.0);
+    let items = rows
+        .into_iter()
+        .map(|(key, name, description, deleted_at, archived_at)| {
+            let state = if deleted_at.is_some() {
+                "deleted"
+            } else {
+                "archived"
+            };
+            TrashedUniverse {
+                key,
+                name,
+                description,
+                state: state.into(),
+                deleted_at,
+                archived_at,
+            }
+        })
+        .collect();
+    Ok(Json(items))
 }
 
 /// POST /api/v1/universes/:slug/duplicate — create an owner-controlled copy of
@@ -1049,6 +1132,14 @@ pub async fn get_universe_info(
     let universe = storage
         .get_universe(&slug)
         .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+
+    // CO-96: a soft-deleted / archived universe is in the trash — present it as
+    // gone to every caller. `get_universe` still returns the row (so the restore
+    // flow can find it by key), so guard the public read explicitly. Recovery
+    // happens through the trash view + restore endpoint, not this GET.
+    if storage.is_universe_trashed(&slug) {
+        return Err(AppError::NotFound(format!("Universe '{}' not found", slug)));
+    }
 
     if universe.owner_id.starts_with("anon-") {
         let cookie_owner = extract_cookie(&headers, "co_universe_owner");
@@ -1573,9 +1664,14 @@ pub fn router(state: AppState) -> Router<AppState> {
     // Protected routes (auth required)
     let protected_routes = Router::new()
         .route("/", get(list_universes).post(create_universe))
+        // CO-96: recovery view — literal route before the /{slug} wildcard.
+        .route("/trash", get(list_trash))
         .route("/{key}/members", get(list_members).post(add_member))
         .route("/{key}/members/{user_id}", delete(remove_member))
         .route("/{slug}", put(update_universe).delete(delete_universe))
+        // CO-96: soft-delete lifecycle — archive (soft-hide) + restore (un-trash).
+        .route("/{slug}/archive", post(archive_universe))
+        .route("/{slug}/restore", post(restore_universe))
         .route("/{slug}/claim", post(claim_universe))
         .route("/{slug}/config", put(update_universe_config))
         // CO-330: runtime repo binding (owner only)

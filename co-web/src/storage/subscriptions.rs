@@ -78,6 +78,7 @@ impl Storage {
              COALESCE(requires_login, 0), COALESCE(visibility, 'private') \
              FROM universes \
              WHERE visibility = 'public-subscribable' \
+             AND deleted_at IS NULL AND archived_at IS NULL \
              AND (LOWER(name) LIKE ?1 OR LOWER(description) LIKE ?1 OR LOWER(key) LIKE ?1) \
              ORDER BY content_count DESC LIMIT 50",
         ) {
