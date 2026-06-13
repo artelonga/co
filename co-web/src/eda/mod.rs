@@ -38,11 +38,13 @@ pub mod event;
 pub mod events_ws;
 pub mod nats_bus;
 pub mod redis_bus;
+pub mod subscriber_registry;
 pub mod subscribers;
 pub mod tokio_bus;
 
 pub use bus::{EdaBus, Filter, Subscription};
 pub use event::{Event, Visibility, new_ulid};
+pub use subscriber_registry::{EdaSubscriber, SubscriberCtx, SubscriberRegistry, default_registry};
 pub use tokio_bus::TokioBroadcastBus;
 
 // ---------------------------------------------------------------------------

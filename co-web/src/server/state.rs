@@ -164,7 +164,7 @@ pub struct IntegrationsState {
     /// CO-166: EC P-256 key pair for ES256 JWT signing and JWKS endpoint.
     pub jwt_key: Arc<crate::auth::JwtKey>,
     /// CO-80: token-bucket rate limiter shared across request handlers.
-    pub rate_limiter: Mutex<crate::rate_limit::RateLimiter>,
+    pub rate_limiter: Mutex<crate::rate_limit::InProcessRateLimiter>,
     pub experiment: Mutex<ExperimentStore>,
     /// CO-292: pluggable worker executor — wraps CO-223's WorkerSupervisor for
     /// periodic workers and adds one-off enqueue/cancel/status operations.

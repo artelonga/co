@@ -14,62 +14,66 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use parking_lot::Mutex;
 use rusqlite::OptionalExtension;
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::eda::bus::{EdaBus, Filter};
 use crate::eda::event::{Event, Visibility};
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 use crate::storage::Storage;
 
 const UNIVERSE_KEY: &str = "comunicacao";
 const USERS_PATH_SEGMENT: &str = "_users/";
 
-/// Spawn both subscribers as background Tokio tasks.
-pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
-    spawn_term_subscriber(Arc::clone(&bus), Arc::clone(&storage));
-    spawn_sala_subscriber(bus);
-}
+/// CO-435: subscribes to `entry.*` events for the `comunicacao` universe and
+/// upserts sala-published terms from Yggdrasil into the local entries table.
+pub struct ComunicacaoTermSubscriber;
 
-/// Subscribe to `entry.*` events for the `comunicacao` universe and upsert
-/// sala-published terms from Yggdrasil into the local entries table.
-fn spawn_term_subscriber(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
-    let publish_bus = Arc::clone(&bus);
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec![
-            "entry.created".into(),
-            "entry.updated".into(),
-            "entry.deleted".into(),
-        ]),
-        universe_keys: Some(vec![UNIVERSE_KEY.into()]),
-        ..Default::default()
-    });
+#[async_trait]
+impl EdaSubscriber for ComunicacaoTermSubscriber {
+    fn name(&self) -> &'static str {
+        "ComunicacaoLive(term)"
+    }
 
-    tokio::spawn(async move {
-        info!("EDA: ComunicacaoLive term subscriber started");
-        while let Some(ev) = sub.recv().await {
-            handle_term_event(&ev, &publish_bus, &storage);
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec![
+                "entry.created".into(),
+                "entry.updated".into(),
+                "entry.deleted".into(),
+            ]),
+            universe_keys: Some(vec![UNIVERSE_KEY.into()]),
+            ..Default::default()
         }
-        info!("EDA: ComunicacaoLive term subscriber stopped (bus closed)");
-    });
+    }
+
+    async fn handle(&self, ev: &Event, ctx: &SubscriberCtx) {
+        handle_term_event(ev, &ctx.bus, &ctx.storage);
+    }
 }
 
-/// Subscribe to `yggdrasil.sala.*` activity events and republish them as
+/// CO-435: re-publishes `yggdrasil.sala.*` activity events as
 /// `sync.yggdrasil.sala.*` for `/agora` display (no content mutation).
-fn spawn_sala_subscriber(bus: Arc<dyn EdaBus>) {
-    let publish_bus = Arc::clone(&bus);
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec!["yggdrasil.sala".into()]),
-        ..Default::default()
-    });
+pub struct ComunicacaoSalaSubscriber;
 
-    tokio::spawn(async move {
-        info!("EDA: ComunicacaoLive sala subscriber started");
-        while let Some(ev) = sub.recv().await {
-            handle_sala_activity_event(&ev, &publish_bus);
+#[async_trait]
+impl EdaSubscriber for ComunicacaoSalaSubscriber {
+    fn name(&self) -> &'static str {
+        "ComunicacaoLive(sala)"
+    }
+
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec!["yggdrasil.sala".into()]),
+            ..Default::default()
         }
-        info!("EDA: ComunicacaoLive sala subscriber stopped (bus closed)");
-    });
+    }
+
+    async fn handle(&self, ev: &Event, ctx: &SubscriberCtx) {
+        handle_sala_activity_event(ev, &ctx.bus);
+    }
 }
 
 // ---------------------------------------------------------------------------

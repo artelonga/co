@@ -7,16 +7,16 @@
 //! PBI path: `work/co/security/SEC-<finding_id>.md`
 //! PBI type: `pbi` with frontmatter derived from the finding.
 
-use std::sync::Arc;
-
+use async_trait::async_trait;
 use parking_lot::Mutex;
 #[cfg(test)]
 use rusqlite::params;
 use sha2::{Digest, Sha256};
 use tracing::{info, warn};
 
-use crate::eda::bus::{EdaBus, Filter};
+use crate::eda::bus::Filter;
 use crate::eda::event::{Event, Visibility};
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 use crate::security::audit::Severity;
 use crate::storage::Storage;
 
@@ -148,54 +148,59 @@ fn insert_pbi(storage: &Mutex<Storage>, fields: &PbiFields) -> rusqlite::Result<
     )
 }
 
-pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
-    let eda_bus = bus.clone();
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec!["security.finding_detected".into()]),
-        ..Default::default()
-    });
+/// CO-435: creates sprint PBIs from Medium+ `security.finding_detected` events.
+pub struct PbiBacklogger;
 
-    tokio::spawn(async move {
-        info!("EDA: PBIBacklogger started");
-        while let Some(ev) = sub.recv().await {
-            let fields = PbiFields::from_payload(&ev.payload);
+#[async_trait]
+impl EdaSubscriber for PbiBacklogger {
+    fn name(&self) -> &'static str {
+        "PBIBacklogger"
+    }
 
-            if !fields.severity.creates_pbi() {
-                continue;
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec!["security.finding_detected".into()]),
+            ..Default::default()
+        }
+    }
+
+    async fn handle(&self, ev: &Event, ctx: &SubscriberCtx) {
+        let fields = PbiFields::from_payload(&ev.payload);
+
+        if !fields.severity.creates_pbi() {
+            return;
+        }
+
+        match insert_pbi(&ctx.storage, &fields) {
+            Ok(rows) if rows > 0 => {
+                info!(
+                    "security: created PBI {} for {} finding {}",
+                    fields.pbi_path(),
+                    fields.severity_str,
+                    fields.finding_id
+                );
+                // Publish a creation event so the sprint board picks it up.
+                ctx.bus.publish(Event::new(
+                    "entry.created",
+                    Some(PBI_UNIVERSE_KEY.to_string()),
+                    None,
+                    serde_json::json!({
+                        "path": fields.pbi_path(),
+                        "entry_type": "pbi",
+                        "source": "security-audit",
+                        "finding_id": fields.finding_id,
+                    }),
+                    Visibility::System,
+                ));
             }
-
-            match insert_pbi(&storage, &fields) {
-                Ok(rows) if rows > 0 => {
-                    info!(
-                        "security: created PBI {} for {} finding {}",
-                        fields.pbi_path(),
-                        fields.severity_str,
-                        fields.finding_id
-                    );
-                    // Publish a creation event so the sprint board picks it up.
-                    eda_bus.publish(Event::new(
-                        "entry.created",
-                        Some(PBI_UNIVERSE_KEY.to_string()),
-                        None,
-                        serde_json::json!({
-                            "path": fields.pbi_path(),
-                            "entry_type": "pbi",
-                            "source": "security-audit",
-                            "finding_id": fields.finding_id,
-                        }),
-                        Visibility::System,
-                    ));
-                }
-                Ok(_) => {
-                    // INSERT OR IGNORE — already exists; skip.
-                }
-                Err(e) => {
-                    warn!("security: PBIBacklogger INSERT failed (entries table may differ): {e}");
-                }
+            Ok(_) => {
+                // INSERT OR IGNORE — already exists; skip.
+            }
+            Err(e) => {
+                warn!("security: PBIBacklogger INSERT failed (entries table may differ): {e}");
             }
         }
-        info!("EDA: PBIBacklogger stopped (bus closed)");
-    });
+    }
 }
 
 #[cfg(test)]

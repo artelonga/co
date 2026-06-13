@@ -13,36 +13,42 @@
 
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::Utc;
 use parking_lot::Mutex;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::eda::bus::{EdaBus, Filter};
 use crate::eda::event::{Event, Visibility};
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 use crate::storage::Storage;
 
 const UNIVERSE_KEY: &str = "yggdrasil";
 
-/// Spawn the Yggdrasil notes subscriber as a background Tokio task.
-pub fn spawn(bus: Arc<dyn EdaBus>, storage: Arc<Mutex<Storage>>) {
-    let publish_bus = Arc::clone(&bus);
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec![
-            "entry.created".into(),
-            "entry.updated".into(),
-            "entry.deleted".into(),
-        ]),
-        universe_keys: Some(vec![UNIVERSE_KEY.into()]),
-        ..Default::default()
-    });
+/// CO-435: event-driven ingestion of Yggdrasil notes into CO.
+pub struct YggdrasilNotes;
 
-    tokio::spawn(async move {
-        info!("EDA: YggdrasilNotes subscriber started");
-        while let Some(ev) = sub.recv().await {
-            handle_note_event(&ev, &publish_bus, &storage);
+#[async_trait]
+impl EdaSubscriber for YggdrasilNotes {
+    fn name(&self) -> &'static str {
+        "YggdrasilNotes"
+    }
+
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec![
+                "entry.created".into(),
+                "entry.updated".into(),
+                "entry.deleted".into(),
+            ]),
+            universe_keys: Some(vec![UNIVERSE_KEY.into()]),
+            ..Default::default()
         }
-        info!("EDA: YggdrasilNotes subscriber stopped (bus closed)");
-    });
+    }
+
+    async fn handle(&self, ev: &Event, ctx: &SubscriberCtx) {
+        handle_note_event(ev, &ctx.bus, &ctx.storage);
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -5,31 +5,34 @@
 //! future hook for in-process aggregation when rollups are computed
 //! server-side (v3.x).
 
-use std::sync::Arc;
+use async_trait::async_trait;
+use tracing::debug;
 
-use tracing::{debug, info};
+use crate::eda::bus::Filter;
+use crate::eda::event::Event;
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 
-use crate::eda::bus::{EdaBus, Filter};
+/// CO-435: no-op aggregator for `analytics.*` events (CO-340 rollup hook).
+pub struct AnalyticsAggregator;
 
-/// Spawn the `AnalyticsAggregator` subscriber.
-///
-/// Currently a no-op aggregator — logs `analytics.*` events at debug level.
-/// CO-340 rollup path is unchanged; this subscriber is wired for v3.x.
-pub fn spawn(bus: Arc<dyn EdaBus>) {
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(vec!["analytics".into()]),
-        ..Default::default()
-    });
+#[async_trait]
+impl EdaSubscriber for AnalyticsAggregator {
+    fn name(&self) -> &'static str {
+        "AnalyticsAggregator"
+    }
 
-    tokio::spawn(async move {
-        info!("EDA: AnalyticsAggregator started");
-        while let Some(ev) = sub.recv().await {
-            debug!(
-                event_type = %ev.event_type,
-                universe_key = ?ev.universe_key,
-                "EDA: analytics event received"
-            );
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(vec!["analytics".into()]),
+            ..Default::default()
         }
-        info!("EDA: AnalyticsAggregator stopped");
-    });
+    }
+
+    async fn handle(&self, ev: &Event, _ctx: &SubscriberCtx) {
+        debug!(
+            event_type = %ev.event_type,
+            universe_key = ?ev.universe_key,
+            "EDA: analytics event received"
+        );
+    }
 }

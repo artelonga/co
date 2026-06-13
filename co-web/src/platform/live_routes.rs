@@ -118,7 +118,7 @@ mod tests {
                 game_storage,
                 wae: crate::wae::WaeEmitter::new(None, None),
                 jwt_key: Arc::new(crate::auth::JwtKey::load_or_generate()),
-                rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+                rate_limiter: Mutex::new(crate::rate_limit::InProcessRateLimiter::new()),
                 experiment: Mutex::new(experiment),
                 worker_supervisor: crate::infra::workers::InProcessExecutor::new_arc(),
             }),

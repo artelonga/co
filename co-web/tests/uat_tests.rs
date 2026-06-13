@@ -89,7 +89,7 @@ fn build_app(dir: &std::path::Path, is_uat: bool) -> axum::Router {
             game_storage,
             wae: co_web::wae::WaeEmitter::new(None, None),
             jwt_key: Arc::new(co_web::auth::JwtKey::load_or_generate()),
-            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::RateLimiter::new()),
+            rate_limiter: std::sync::Mutex::new(co_web::rate_limit::InProcessRateLimiter::new()),
             experiment: Mutex::new(experiment),
             worker_supervisor: co_web::infra::workers::InProcessExecutor::new_arc(),
         }),

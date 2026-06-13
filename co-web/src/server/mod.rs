@@ -433,7 +433,7 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         game_storage,
         wae,
         jwt_key,
-        rate_limiter: Mutex::new(crate::rate_limit::RateLimiter::new()),
+        rate_limiter: Mutex::new(crate::rate_limit::InProcessRateLimiter::new()),
         experiment: Mutex::new(experiment),
         worker_supervisor: Arc::clone(&worker_executor)
             as Arc<dyn crate::infra::workers::WorkerExecutor>,
@@ -695,59 +695,25 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         });
     }
 
-    // CO-380: spawn EDA subscribers (Phase 2 — runtime is live).
+    // CO-380/CO-435: spawn EDA subscribers from the registry (Phase 2 — runtime
+    // is live). Adding a subscriber is now `impl EdaSubscriber` + `register(...)`
+    // in `default_registry` — no edit to this boot block. See
+    // `crate::eda::subscriber_registry`.
     {
-        let bus = Arc::clone(&state.core.eda_bus);
-        crate::eda::subscribers::atividades::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
+        let mailer = crate::eda::subscribers::degradation_alerter::mailer_from_secrets(
+            &server_config,
+            &*secrets,
         );
-        crate::eda::subscribers::analytics::spawn(Arc::clone(&bus));
-        crate::eda::subscribers::billing::spawn(Arc::clone(&bus));
-        crate::eda::subscribers::sala::spawn(Arc::clone(&bus));
-        crate::eda::subscribers::kb::spawn(Arc::clone(&bus));
-        // CO-389: live overlay for Yggdrasil lexicon sala events → comunicacao universe.
-        crate::eda::subscribers::comunicacao_live::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
+        let registry = crate::eda::default_registry(
+            mailer,
+            server_config.alert_to.clone(),
+            server_config.alert_debounce_hours,
         );
-        // CO-383: ingest Yggdrasil notes via event bus (no polling).
-        crate::eda::subscribers::yggdrasil_notes::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
-        );
-        // CO-398: persist task status transitions + emit deploy.triggered on done.
-        crate::eda::subscribers::delivery_pipeline::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
-        );
-        // Phase 2: start the LiveTimeline forward task (channel was created in from_storage_full).
-        crate::eda::subscribers::timeline::start(Arc::clone(&bus), state.core.timeline_tx.clone());
-
-        // CO-388: security audit subscribers.
-        crate::security::subscribers::findings_persistor::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
-        );
-        crate::security::subscribers::pbi_backlogger::spawn(
-            Arc::clone(&bus),
-            Arc::clone(&state.core.storage),
-        );
-        crate::security::subscribers::release_blocker::spawn(Arc::clone(&bus));
-
-        // CO-422: in-prod degradation alerter — email on disk/backup/universe events.
-        {
-            let mailer = crate::eda::subscribers::degradation_alerter::mailer_from_secrets(
-                &server_config,
-                &*secrets,
-            );
-            crate::eda::subscribers::degradation_alerter::spawn(
-                Arc::clone(&bus),
-                mailer,
-                server_config.alert_to.clone(),
-                server_config.alert_debounce_hours,
-            );
-        }
+        registry.spawn_all(crate::eda::SubscriberCtx {
+            bus: Arc::clone(&state.core.eda_bus),
+            storage: Arc::clone(&state.core.storage),
+            timeline_tx: state.core.timeline_tx.clone(),
+        });
     }
 
     // CO-384: spawn outbound bridge clients (no-op when CO_BRIDGE_OUTBOUND_TOKENS_JSON not set).

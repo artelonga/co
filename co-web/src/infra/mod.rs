@@ -1,3 +1,4 @@
+pub mod admin_auth;
 pub mod ai;
 pub mod auth;
 pub mod blob;

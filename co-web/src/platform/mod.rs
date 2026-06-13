@@ -24,6 +24,7 @@ pub mod plugin_loader;
 pub mod pretty_urls;
 pub mod rate_limit;
 pub mod server_config;
+pub mod source;
 pub mod telemetry;
 pub mod theme_engine;
 pub mod universe_pool;

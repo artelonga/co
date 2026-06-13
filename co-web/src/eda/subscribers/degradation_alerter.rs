@@ -16,11 +16,14 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use parking_lot::Mutex;
 use tracing::{debug, info, warn};
 
-use crate::eda::bus::{EdaBus, Filter};
+use crate::eda::bus::Filter;
 use crate::eda::event::Event;
+use crate::eda::subscriber_registry::{EdaSubscriber, SubscriberCtx};
 
 // ---------------------------------------------------------------------------
 // AlertMailer trait
@@ -220,54 +223,63 @@ pub const DEGRADATION_EVENT_TYPES: &[&str] = &[
 ];
 
 // ---------------------------------------------------------------------------
-// spawn
+// DegradationAlerter subscriber (CO-435)
 // ---------------------------------------------------------------------------
 
-/// Spawn the degradation alerter subscriber.
+/// Emails the operator on degraded-but-alive events, debounced per event type.
 ///
 /// - `mailer`: injectable email sender (production or mock).
 /// - `alert_to`: recipient address (`CO_ALERT_TO`, default `yuri@artelonga.com.br`).
 /// - `debounce_hours`: max 1 email per event type per this many hours.
-pub fn spawn(
-    bus: Arc<dyn EdaBus>,
+pub struct DegradationAlerter {
     mailer: Arc<dyn AlertMailer>,
     alert_to: String,
-    debounce_hours: u64,
-) {
-    let mut sub = bus.subscribe(Filter {
-        event_types: Some(
-            DEGRADATION_EVENT_TYPES
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect(),
-        ),
-        ..Default::default()
-    });
+    debounce: Mutex<Debounce>,
+}
 
-    tokio::spawn(async move {
-        info!(
-            "EDA: DegradationAlerter started (alert_to={alert_to}, \
-             debounce={debounce_hours}h)"
-        );
-        let mut debounce = Debounce::new(debounce_hours as i64);
+impl DegradationAlerter {
+    pub fn new(mailer: Arc<dyn AlertMailer>, alert_to: String, debounce_hours: u64) -> Self {
+        Self {
+            mailer,
+            alert_to,
+            debounce: Mutex::new(Debounce::new(debounce_hours as i64)),
+        }
+    }
+}
 
-        while let Some(ev) = sub.recv().await {
-            if !debounce.should_send(&ev.event_type) {
-                debug!(
-                    "DegradationAlerter: debounce suppressed {} alert",
-                    ev.event_type
-                );
-                continue;
-            }
-            let (subject, body) = format_email(&ev);
-            mailer.send_alert(&alert_to, &subject, &body);
-            info!(
-                "DegradationAlerter: alert dispatched for {} → {alert_to}",
+#[async_trait]
+impl EdaSubscriber for DegradationAlerter {
+    fn name(&self) -> &'static str {
+        "DegradationAlerter"
+    }
+
+    fn filter(&self) -> Filter {
+        Filter {
+            event_types: Some(
+                DEGRADATION_EVENT_TYPES
+                    .iter()
+                    .map(|s| (*s).to_string())
+                    .collect(),
+            ),
+            ..Default::default()
+        }
+    }
+
+    async fn handle(&self, ev: &Event, _ctx: &SubscriberCtx) {
+        if !self.debounce.lock().should_send(&ev.event_type) {
+            debug!(
+                "DegradationAlerter: debounce suppressed {} alert",
                 ev.event_type
             );
+            return;
         }
-        info!("EDA: DegradationAlerter stopped (bus closed)");
-    });
+        let (subject, body) = format_email(ev);
+        self.mailer.send_alert(&self.alert_to, &subject, &body);
+        info!(
+            "DegradationAlerter: alert dispatched for {} → {}",
+            ev.event_type, self.alert_to
+        );
+    }
 }
 
 /// Build the production mailer from config + secrets (CO-434).
@@ -343,8 +355,19 @@ pub mod tests {
 
     // --- helpers ---------------------------------------------------------------
 
-    fn make_bus() -> Arc<TokioBroadcastBus> {
-        Arc::new(TokioBroadcastBus::new())
+    /// Build a minimal [`SubscriberCtx`]. The alerter ignores everything but its
+    /// own state, so storage/timeline are throwaways. Returns the `TempDir` so it
+    /// outlives the storage handle.
+    fn make_ctx() -> (tempfile::TempDir, SubscriberCtx) {
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = SubscriberCtx {
+            bus: Arc::new(TokioBroadcastBus::new()),
+            storage: Arc::new(parking_lot::Mutex::new(crate::storage::Storage::new(
+                dir.path(),
+            ))),
+            timeline_tx: crate::eda::subscribers::timeline::new_channel(),
+        };
+        (dir, ctx)
     }
 
     fn backup_event() -> Event {
@@ -380,20 +403,21 @@ pub mod tests {
 
     // --- tests -----------------------------------------------------------------
 
-    #[tokio::test]
-    async fn degradation_event_triggers_alert_once() {
-        let bus = make_bus();
-        let mock = Arc::new(MockAlertMailer::new());
-
-        spawn(
-            Arc::clone(&bus) as Arc<dyn EdaBus>,
-            Arc::clone(&mock) as Arc<dyn AlertMailer>,
+    fn alerter(mock: &Arc<MockAlertMailer>) -> DegradationAlerter {
+        DegradationAlerter::new(
+            Arc::clone(mock) as Arc<dyn AlertMailer>,
             "ops@example.com".to_string(),
             2,
-        );
+        )
+    }
 
-        bus.publish(backup_event());
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    #[tokio::test]
+    async fn degradation_event_triggers_alert_once() {
+        let (_dir, ctx) = make_ctx();
+        let mock = Arc::new(MockAlertMailer::new());
+        let sub = alerter(&mock);
+
+        sub.handle(&backup_event(), &ctx).await;
 
         assert_eq!(mock.call_count(), 1);
         assert!(mock.subjects()[0].contains("Backup pulado"));
@@ -401,39 +425,25 @@ pub mod tests {
 
     #[tokio::test]
     async fn debounce_suppresses_second_alert_within_window() {
-        let bus = make_bus();
+        let (_dir, ctx) = make_ctx();
         let mock = Arc::new(MockAlertMailer::new());
+        let sub = alerter(&mock);
 
         // debounce_hours=2: two events within milliseconds → only 1 email.
-        spawn(
-            Arc::clone(&bus) as Arc<dyn EdaBus>,
-            Arc::clone(&mock) as Arc<dyn AlertMailer>,
-            "ops@example.com".to_string(),
-            2,
-        );
-
-        bus.publish(backup_event());
-        bus.publish(backup_event());
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sub.handle(&backup_event(), &ctx).await;
+        sub.handle(&backup_event(), &ctx).await;
 
         assert_eq!(mock.call_count(), 1, "debounce must suppress second alert");
     }
 
     #[tokio::test]
     async fn different_event_types_each_get_one_alert() {
-        let bus = make_bus();
+        let (_dir, ctx) = make_ctx();
         let mock = Arc::new(MockAlertMailer::new());
+        let sub = alerter(&mock);
 
-        spawn(
-            Arc::clone(&bus) as Arc<dyn EdaBus>,
-            Arc::clone(&mock) as Arc<dyn AlertMailer>,
-            "ops@example.com".to_string(),
-            2,
-        );
-
-        bus.publish(backup_event());
-        bus.publish(disk_event());
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        sub.handle(&backup_event(), &ctx).await;
+        sub.handle(&disk_event(), &ctx).await;
 
         assert_eq!(
             mock.call_count(),
@@ -442,28 +452,21 @@ pub mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn non_degradation_events_are_ignored() {
-        let bus = make_bus();
+    #[test]
+    fn non_degradation_events_are_filtered_out() {
         let mock = Arc::new(MockAlertMailer::new());
+        let sub = alerter(&mock);
 
-        spawn(
-            Arc::clone(&bus) as Arc<dyn EdaBus>,
-            Arc::clone(&mock) as Arc<dyn AlertMailer>,
-            "ops@example.com".to_string(),
-            2,
-        );
-
-        // Publish an unrelated event — should not trigger the alerter.
-        bus.publish(Event::new(
+        // The filter — not the handler — excludes unrelated events.
+        let unrelated = Event::new(
             "entry.created",
             Some("u1".into()),
             None,
             serde_json::json!({"path": "note.md"}),
             Visibility::UniverseMembers,
-        ));
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        assert_eq!(mock.call_count(), 0);
+        );
+        assert!(!sub.filter().matches(&unrelated));
+        // And degradation events do match.
+        assert!(sub.filter().matches(&backup_event()));
     }
 }
