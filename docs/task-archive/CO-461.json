@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-461",
+  "title": "co-auto usage: prefer authoritative result-event tokens over 3-8x-overcounted per-message sum (June-15 credit-pool readiness)",
+  "type": "fix",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-461.md",
+  "branch": "fix/CO-461-usage-final-result-overcount",
+  "merge_sha": "fce16cc312d8528a77c87a87443ed706630ff917",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/271",
+    "number": 271
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T20:21:57Z",
+  "files_changed": 2,
+  "lines_added": 101,
+  "lines_removed": 6,
+  "labels": [],
+  "changelog_entry": null,
+  "summary": "Contexto A partir de **15 jun 2026**, runs headless `claude -p` deixam de usar a quota da assinatura e passam a consumir o **pool de créditos do Agent SDK** (API rates). O `usage.rs` somava `usage` po",
+  "co_auto_version": "0.1.0"
+}
