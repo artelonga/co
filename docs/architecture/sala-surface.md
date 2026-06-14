@@ -37,6 +37,28 @@ PUT. v1 graph layouts (nodes with world x/y) migrate to notas on load with
 `id = entry_path`, so saved edges keep resolving. `co-graph.js` is no longer
 used by sala.html (graph.html still uses it).
 
+## Universe-as-node — descend / ascend (CO-400, 2026-06-14)
+
+A node on the canvas may be a **universe** (`layout.universes:
+[{kind:"universe", key, name, count, x, y}]`), rendered distinctly (teal
+world-ring + globe glyph + entry-count badge). Add one from the entry picker's
+**Universos** tab (lists the caller's visible universes via `GET
+/api/v1/universes`). Activating it **descends** into that universe's own sala —
+the same surface at `/u/{key}/sala`, a narrower scope (double-tap the node, or
+its panel's *Descer* button).
+
+Descend/ascend is **navigation, not embedding** (the one-surface rule). A
+breadcrumb stack in `sessionStorage` (`sala_stack`) remembers each ancestor
+sala's camera; the header back-link (`#sala-back`) **ascends** and restores the
+originating camera instantly (`sala_restore_cam`), independent of server
+persistence — so read-only viewers ascend with camera intact too. Layout JSON
+round-trips universe nodes through the unchanged `workspace_states` PUT (the
+server stores `layout_json` opaquely).
+
+**Cycles are inert.** Because descend navigates rather than embeds, a sala that
+holds its own universe node renders once and never recurses; activating a node
+that points at the current universe is a no-op (a toast, no reload).
+
 ## What this means for implementations
 
 - `co-web/static/shared/sala.html` (CO-352) **is the surface.** All canvas
@@ -60,5 +82,5 @@ used by sala.html (graph.html still uses it).
 ## Open work
 
 - All-universes and subset scopes (URL shapes above) — needs a CO-N task.
-- Universe-as-node + descend/ascend navigation — needs a CO-N task.
+- ~~Universe-as-node + descend/ascend navigation~~ — done (CO-400).
 - CO-354 (suggest/review) operates on the one surface's state, scope-agnostic.
