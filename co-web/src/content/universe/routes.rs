@@ -378,7 +378,7 @@ pub async fn create_universe(
         .get_user_by_id(&user_id.0)
         .map(|u| crate::rate_limit::Tier::parse(&u.tier))
         .unwrap_or(crate::rate_limit::Tier::User);
-    crate::rate_limit::check_universe_quota(&storage, &user_id.0, tier, &headers)?;
+    crate::rate_limit::check_universe_quota(&state, &storage, &user_id.0, tier, &headers)?;
     drop(storage);
 
     let mut storage = lock_storage(&state);

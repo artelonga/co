@@ -845,7 +845,7 @@ pub async fn create_entry(
         // CO-80: quota check — anonymous usage gate or tier-based storage quota.
         // CO-390 spike: anon quota rule delegated to EntryService::check_anon_quota.
         if let Some((uid, tier)) = crate::rate_limit::extract_auth_identity(&headers) {
-            crate::rate_limit::check_storage_quota(&storage, &uid, tier, &headers)?;
+            crate::rate_limit::check_storage_quota(&state, &storage, &uid, tier, &headers)?;
         } else if universe.owner_id.starts_with("anon-") {
             EntryService::check_anon_quota(universe.content_count)?;
         }
