@@ -328,6 +328,16 @@ impl Capability for EntriesWrite {
     const ADMIN_SURFACE: bool = false;
 }
 
+/// `telemetry:read` — read the public telemetry/analytics surface (CO-453:
+/// agent sessions, deployments, throughput/budget/release-cadence metrics).
+/// A least-privilege token carrying this capability reads telemetry without
+/// being admin-pleno, so this is **not** an admin surface.
+pub struct TelemetryRead;
+impl Capability for TelemetryRead {
+    const REQUIRED: &'static str = "telemetry:read";
+    const ADMIN_SURFACE: bool = false;
+}
+
 /// Authenticated caller authorized for capability `C`.
 ///
 /// The capability gate (CO-448) resolves the caller and **denies with 403**

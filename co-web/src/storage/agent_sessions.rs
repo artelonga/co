@@ -111,6 +111,56 @@ impl Storage {
         Ok(rows.filter_map(|r| r.ok()).collect())
     }
 
+    /// CO-453: paginated, filtered listing across **all** tasks for the public
+    /// telemetry API. Optional `model` / `since` (epoch seconds, inclusive on
+    /// `started_at`) filters; newest first. `limit`/`offset` drive pagination.
+    /// Read-only — reuses the CO-275 `agent_sessions` table, no new schema.
+    pub fn list_agent_sessions_filtered(
+        &self,
+        model: Option<&str>,
+        since: Option<i64>,
+        limit: i64,
+        offset: i64,
+    ) -> anyhow::Result<Vec<AgentSession>> {
+        // Sentinel filters: a NULL parameter disables the corresponding clause,
+        // so every named binding is always present in the statement and the
+        // filters are passed as parameters (never interpolated) — injection-safe.
+        let mut stmt = self.conn.prepare(
+            "SELECT id, task_id, universe_key, started_at, finished_at, duration_ms, exit_code, \
+             tokens_in, tokens_out, tool_calls, skills_loaded, context_chars, final_commit_sha, \
+             pr_number, model, co_auto_version, raw_log_blob_sha \
+             FROM agent_sessions \
+             WHERE (:model IS NULL OR model = :model) \
+               AND (:since IS NULL OR started_at >= :since) \
+             ORDER BY started_at DESC, id DESC LIMIT :limit OFFSET :offset",
+        )?;
+        let rows = stmt.query_map(
+            rusqlite::named_params! {
+                ":model": model,
+                ":since": since,
+                ":limit": limit,
+                ":offset": offset,
+            },
+            row_to_session,
+        )?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    /// CO-453: fetch one agent session by primary key (public telemetry API).
+    pub fn get_agent_session(&self, id: i64) -> anyhow::Result<Option<AgentSession>> {
+        self.conn
+            .query_row(
+                "SELECT id, task_id, universe_key, started_at, finished_at, duration_ms, exit_code, \
+                 tokens_in, tokens_out, tool_calls, skills_loaded, context_chars, final_commit_sha, \
+                 pr_number, model, co_auto_version, raw_log_blob_sha \
+                 FROM agent_sessions WHERE id = ?1",
+                params![id],
+                row_to_session,
+            )
+            .optional()
+            .map_err(Into::into)
+    }
+
     pub fn latest_agent_session(&self, task_id: &str) -> anyhow::Result<Option<AgentSession>> {
         self.conn
             .query_row(
