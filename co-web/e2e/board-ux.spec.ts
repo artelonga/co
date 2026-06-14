@@ -24,7 +24,10 @@ test.describe("View tabs", () => {
     await navigateTo(page, "/");
     await selectProject(page, seedProject.key);
     await waitForBoard(page);
-    const tabs = page.locator("#view-tabs .view-tab");
+    // Count only the tabs actually shown — the CO-368 Scrum tab is present in
+    // the DOM but `hidden` until a universe's `_scrum.yaml` enables it, so it
+    // must not count toward the "visible tabs" assertion.
+    const tabs = page.locator("#view-tabs .view-tab:not(.hidden)");
     // 8 tabs: conteudo, kanban, table, calendar, timeline, dashboard, changelog, workspace (CO-352)
     await expect(tabs).toHaveCount(8);
   });
