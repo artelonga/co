@@ -600,7 +600,7 @@ reference into a live deployment URL by walking the universe registry (`key`,
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| GET | `/api/v1/resolve?ref=<key>::<path>` | anon | Resolve a surface ref → `{ url, universe, deployable_ancestor }`; unknown key → 404, ambiguous/malformed → 400 |
+| GET | `/api/v1/resolve` | anon | Resolve a surface ref (query `?ref=<key>::<path>`) → `{ url, universe, deployable_ancestor }`; unknown key → 404, ambiguous/malformed → 400 |
 
 ---
 
