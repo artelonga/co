@@ -94,12 +94,17 @@ jobs:
         working-directory: co-web
         run: npx playwright install --with-deps chromium
 
-      # Step 9: E2E staging suite
-      - name: Run Playwright E2E against staging
+      # Step 9: E2E staging suite (CO-374 deep suite).
+      # CO-401: pass the capability-scoped CO_STAGING_ADMIN_TOKEN so the
+      # authenticated scenarios (universe recursion, lead/funnel, sub-universe
+      # promotion) run against the seeded fixtures instead of skipping.
+      - name: Run Playwright staging suite
         working-directory: co-web
-        run: npx playwright test --project=chromium-desktop
+        run: npx playwright test --config=e2e-staging/playwright.staging.config.ts
         env:
+          STAGING_URL: ${{ env.STAGING_URL }}
           BASE_URL: ${{ env.STAGING_URL }}
+          CO_STAGING_ADMIN_TOKEN: ${{ secrets.CO_STAGING_ADMIN_TOKEN }}
           CI: "true"
         continue-on-error: true  # results captured in artifact; release-gate evaluates
 

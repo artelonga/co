@@ -90,6 +90,71 @@ impl Storage {
         self.create_api_token_inner(user_id, name, Some(ordered))
     }
 
+    /// CO-401: idempotently register a **known-value**, capability-scoped API
+    /// token (least-privilege, CO-448 scopes).
+    ///
+    /// Unlike [`create_api_token_with_scopes`](Self::create_api_token_with_scopes)
+    /// — which mints a fresh random secret — the raw token value is supplied by
+    /// the caller. This materializes the `CO_STAGING_ADMIN_TOKEN` secret (shared
+    /// with CI) as a least-privilege `api_tokens` row at staging boot, so the
+    /// staging suite authenticates with exactly the capabilities CO-374
+    /// exercises and a leaked secret grants only that scope set — never
+    /// owner-tier admin.
+    ///
+    /// Idempotent + rotation-safe: any prior token for this `user_id`/`name`
+    /// whose hash differs (a rotated secret) is purged first, then the current
+    /// secret is upserted (`token_hash` carries a partial UNIQUE index, so a
+    /// re-run with the same secret is a no-op while a scope change is applied).
+    pub fn seed_scoped_api_token(
+        &self,
+        user_id: &str,
+        name: &str,
+        raw_token: &str,
+        scopes: &std::collections::BTreeSet<String>,
+    ) -> anyhow::Result<()> {
+        let token_hash = hash_token(raw_token);
+        let token_prefix: String = raw_token.chars().take(11).collect();
+        let now = Utc::now();
+        let created = now.to_rfc3339();
+        // Long-lived (1 year) — rotated via the documented runbook, not expiry.
+        let expires = (now + chrono::Duration::days(365)).to_rfc3339();
+        let ordered: Vec<String> = scopes.iter().cloned().collect();
+        let scopes_json = serde_json::to_string(&ordered)?;
+        let id = format!("seed-{}", &token_hash[..16.min(token_hash.len())]);
+        let token_placeholder = format!("hashed:{id}");
+
+        // Rotation: drop a previous seeded token for this owner+name when the
+        // secret value changed (different hash), so only the live secret remains.
+        self.conn.execute(
+            "DELETE FROM api_tokens WHERE user_id = ?1 AND name = ?2 AND token_hash <> ?3",
+            params![user_id, name, token_hash],
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO api_tokens \
+             (id, user_id, name, token, token_hash, token_prefix, created_at, expires_at, scopes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                id,
+                user_id,
+                name,
+                token_placeholder,
+                token_hash,
+                token_prefix,
+                created,
+                expires,
+                scopes_json
+            ],
+        )?;
+        // Keep scopes/expiry current across redeploys (the suite's scope set may
+        // widen as more surfaces adopt `Scoped<C>`).
+        self.conn.execute(
+            "UPDATE api_tokens SET user_id = ?1, name = ?2, scopes = ?3, expires_at = ?4 \
+             WHERE token_hash = ?5",
+            params![user_id, name, scopes_json, expires, token_hash],
+        )?;
+        Ok(())
+    }
+
     fn create_api_token_inner(
         &self,
         user_id: &str,
@@ -607,5 +672,121 @@ impl Storage {
             params![now, token_hash],
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod seed_scoped_token_tests {
+    use super::Storage;
+    use crate::auth::capabilities::{grants, resolve_scopes};
+
+    /// CO-401: a seeded scoped token round-trips by its raw value, carries its
+    /// least-privilege scope set, reaches admin surfaces it was granted (via the
+    /// capability), and does NOT reach capabilities outside the scope.
+    #[test]
+    fn seeded_scoped_token_grants_only_its_scope() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        let uid = storage.ensure_staging_admin_user().unwrap();
+
+        // The exact least-privilege set the staging suite uses: admin *reads*
+        // the suite exercises, but NOT chat:write / agent:dispatch / deployments.
+        let scopes = resolve_scopes(&[
+            "entries:read".into(),
+            "entries:write".into(),
+            "universes:read".into(),
+            "universes:write".into(),
+            "gestao:read".into(),
+            "funnel:read".into(),
+            "chat:read".into(),
+            "telemetry:read".into(),
+        ])
+        .unwrap();
+
+        let raw = "co_staging_suite_fixture_secret_value_123456";
+        storage
+            .seed_scoped_api_token(&uid, "staging-suite", raw, &scopes)
+            .unwrap();
+
+        let fetched = storage.get_api_token_by_value(raw).unwrap().expect("token");
+        assert_eq!(fetched.user_id, uid);
+        let resolved: std::collections::BTreeSet<String> = fetched
+            .scopes
+            .expect("scoped, not NULL")
+            .into_iter()
+            .collect();
+
+        // In-scope admin surface reached via capability (chat:read is admin-surface).
+        assert!(grants(&resolved, "chat:read"), "must reach chat:read");
+        assert!(grants(&resolved, "funnel:read"), "must reach funnel:read");
+        assert!(
+            grants(&resolved, "entries:write"),
+            "must reach entries:write"
+        );
+
+        // Out-of-scope: never granted, even though the owner is admin-tier.
+        assert!(!grants(&resolved, "chat:write"), "chat:write out of scope");
+        assert!(
+            !grants(&resolved, "agent:dispatch"),
+            "agent:dispatch out of scope"
+        );
+        assert!(
+            !grants(&resolved, "deployments:read"),
+            "deployments:read out of scope"
+        );
+    }
+
+    /// CO-401: re-seeding the same secret is a no-op (one row); rotating to a new
+    /// secret retires the old token and leaves exactly the new one.
+    #[test]
+    fn seed_scoped_token_is_idempotent_and_rotation_safe() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        let uid = storage.ensure_staging_admin_user().unwrap();
+        let scopes = resolve_scopes(&["chat:read".into()]).unwrap();
+
+        storage
+            .seed_scoped_api_token(&uid, "staging-suite", "co_secret_one", &scopes)
+            .unwrap();
+        storage
+            .seed_scoped_api_token(&uid, "staging-suite", "co_secret_one", &scopes)
+            .unwrap();
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM api_tokens WHERE name = 'staging-suite'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "idempotent: same secret → single row");
+
+        // Rotate the secret.
+        storage
+            .seed_scoped_api_token(&uid, "staging-suite", "co_secret_two", &scopes)
+            .unwrap();
+        let count_after: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM api_tokens WHERE name = 'staging-suite'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after, 1, "rotation retires the old secret");
+        assert!(
+            storage
+                .get_api_token_by_value("co_secret_one")
+                .unwrap()
+                .is_none(),
+            "old secret no longer valid after rotation"
+        );
+        assert!(
+            storage
+                .get_api_token_by_value("co_secret_two")
+                .unwrap()
+                .is_some(),
+            "new secret valid after rotation"
+        );
     }
 }

@@ -222,3 +222,65 @@ Tokens issued before CO-448 have `scopes = NULL` and are **unchanged** — they
 keep inheriting the owner's tier (vault sync, co-auto reporting, …). Only tokens
 issued *with* a `scopes` value are capability-restricted. A leaked scoped secret
 grants only that token's set, never owner-tier admin.
+
+## `CO_STAGING_ADMIN_TOKEN` — the staging-suite token (CO-401)
+
+The CO-374 deep staging suite authenticates with a single secret,
+`CO_STAGING_ADMIN_TOKEN`. Per CO-401 it is a **CO-448 capability-scoped** token
+(NOT an admin-tier NULL-scope token): a leaked CI secret grants only the suite's
+capabilities, never full admin.
+
+### How it works (seed-on-boot, no manual minting)
+
+The secret is **self-contained**: its raw value is the token. On every staging
+boot (`CO_ENV=staging`), `seed_orchestrator::seed_staging_fixtures` →
+`seed_staging_admin_token`:
+
+1. ensures the admin-tier `staging-admin` user exists,
+2. registers an `api_tokens` row whose `token_hash = SHA-256(CO_STAGING_ADMIN_TOKEN)`
+   with the least-privilege scope set below.
+
+So the **same value** lives in two places — the Fly secret on
+`co-artelonga-staging` (so the token validates) and the GitHub Actions secret
+(so the suite sends it). Nothing is minted via the API; rotation is just
+"set a new value in both places".
+
+Scope set (`STAGING_SUITE_CAPABILITIES`, least-privilege — the admin *reads* the
+suite touches plus entry/universe read+write, but **not** `chat:write`,
+`deployments:read`, or `agent:dispatch`):
+
+```
+entries:read  entries:write  universes:read  universes:write
+gestao:read   funnel:read    chat:read       telemetry:read
+```
+
+### Setup / rotation runbook
+
+```bash
+# 1. Generate a fresh opaque secret (the `co_` prefix matches issued tokens).
+TOKEN="co_$(openssl rand -hex 32)"
+
+# 2. Push it to the staging app — the boot seeder registers it (scoped) on
+#    restart, retiring any previous staging-suite token automatically.
+flyctl secrets set CO_STAGING_ADMIN_TOKEN="$TOKEN" -a co-artelonga-staging
+
+# 3. Mirror it into GitHub Actions so the suite sends the same value.
+gh secret set CO_STAGING_ADMIN_TOKEN --body "$TOKEN" --repo institutional-pointset/co
+
+# 4. Verify — a scoped read succeeds, an out-of-scope write is 403.
+curl -fs -H "Authorization: Bearer $TOKEN" \
+  https://staging.co.artelonga.com.br/api/v1/universes/recursion-a | python3 -m json.tool
+```
+
+Seeding is idempotent and rotation-safe: re-setting the same value is a no-op;
+setting a **new** value purges the old `staging-admin` token so only the live
+secret remains.
+
+| Secret | Frequency | Runbook |
+|---|---|---|
+| `CO_STAGING_ADMIN_TOKEN` | Quarterly or on suspected compromise | Steps 1–4 above (Fly + GitHub, then restart staging) |
+
+> **Why a scoped token and not the admin password?** The earlier draft (held)
+> shared the admin password / an admin-tier NULL-scope token with CI — a leak
+> meant full admin. The scoped token is least-privilege: a leak grants only the
+> capabilities above, and the staging app only ever holds fixture data.

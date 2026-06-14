@@ -417,15 +417,90 @@ pub fn run_co142_refresh(config: &WebConfig) {
     }
 }
 
-/// CO-379: seed stable fixture universes for the staging environment.
+/// CO-401: least-privilege capability set the staging suite (CO-374) exercises.
+///
+/// Passed verbatim to [`crate::auth::capabilities::resolve_scopes`] — admin
+/// *reads* the suite touches (`gestao`/`funnel`/`chat`/`telemetry`) plus
+/// entry/universe read+write, but deliberately NOT `chat:write`,
+/// `deployments:read`, or `agent:dispatch`. A leaked token grants only this.
+const STAGING_SUITE_CAPABILITIES: &[&str] = &[
+    "entries:read",
+    "entries:write",
+    "universes:read",
+    "universes:write",
+    "gestao:read",
+    "funnel:read",
+    "chat:read",
+    "telemetry:read",
+];
+
+/// CO-379 / CO-401: seed stable fixtures for the staging environment.
 ///
 /// Only runs when `CO_ENV=staging`. Idempotent — safe to call on every boot.
+/// Seeds: the recursion-a → recursion-a-b → recursion-a-b-c universe chain,
+/// synthetic funnel/lead fixtures (excluded from analytics rollups), and the
+/// capability-scoped `CO_STAGING_ADMIN_TOKEN` the CI suite authenticates with.
 pub fn seed_staging_fixtures(config: &WebConfig) {
     if !config.is_staging() {
         return;
     }
     let mut storage = Storage::new(&config.data_dir);
     storage.seed_staging_fixture_universes();
+    storage.seed_staging_funnel_fixtures();
+    seed_staging_admin_token(&storage);
+}
+
+/// CO-401: materialize `CO_STAGING_ADMIN_TOKEN` as a least-privilege, CO-448
+/// capability-scoped `api_tokens` row owned by the admin-tier `staging-admin`
+/// user. The same secret value lives in CI (passed to the Playwright suite) and
+/// in the staging app env; seeding it here makes the token validate on staging
+/// with exactly [`STAGING_SUITE_CAPABILITIES`] — never owner-tier admin.
+///
+/// No-op (with a warning) when the secret is unset, so a staging boot without
+/// the secret degrades to a skipped suite rather than a crash.
+fn seed_staging_admin_token(storage: &Storage) {
+    let secrets = crate::infra::secrets::global();
+    let Some(raw) = secrets.get("CO_STAGING_ADMIN_TOKEN") else {
+        tracing::warn!(
+            "CO-401: CO_STAGING_ADMIN_TOKEN unset — staging suite token not seeded \
+             (the deep suite will skip its authenticated scenarios)"
+        );
+        return;
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        tracing::warn!("CO-401: CO_STAGING_ADMIN_TOKEN is empty — staging suite token not seeded");
+        return;
+    }
+
+    let caps: Vec<String> = STAGING_SUITE_CAPABILITIES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let scopes = match crate::auth::capabilities::resolve_scopes(&caps) {
+        Ok(s) => s,
+        Err(invalid) => {
+            tracing::error!(
+                "CO-401: invalid staging-suite capabilities {invalid:?} — token not seeded"
+            );
+            return;
+        }
+    };
+
+    let uid = match storage.ensure_staging_admin_user() {
+        Ok(uid) => uid,
+        Err(e) => {
+            tracing::error!("CO-401: failed to ensure staging-admin user: {e}");
+            return;
+        }
+    };
+    match storage.seed_scoped_api_token(&uid, "staging-suite", raw, &scopes) {
+        Ok(()) => tracing::info!(
+            "CO-401: seeded capability-scoped CO_STAGING_ADMIN_TOKEN ({} scopes) for staging suite",
+            scopes.len()
+        ),
+        Err(e) => tracing::error!("CO-401: failed to seed staging-suite token: {e}"),
+    }
 }
 
 /// CO-85: seed admin user from env (idempotent, runs in any env).
@@ -579,4 +654,80 @@ pub fn backfill_chat_push(config: &WebConfig) {
     }
     // CO-201: create push_subscriptions table if not yet present.
     chat_storage.ensure_push_subscriptions_table();
+}
+
+#[cfg(test)]
+mod staging_gate_tests {
+    use super::*;
+
+    fn config(env: &str, data_dir: &str) -> WebConfig {
+        WebConfig {
+            port: 0,
+            data_dir: data_dir.to_string(),
+            static_dir: String::new(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: String::new(),
+            game_db_path: None,
+            universo_dir: String::new(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: env.to_string(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        }
+    }
+
+    fn fixture_count(data_dir: &str) -> i64 {
+        Storage::new(data_dir)
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM universes WHERE key LIKE 'recursion-a%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0)
+    }
+
+    /// CO-401 acceptance: fixtures NEVER seed outside staging. The env gate is
+    /// the only thing standing between fixture/synthetic data and production.
+    #[test]
+    fn fixtures_never_seed_in_production() {
+        for env in ["prod", "production", "uat", "dev", "test", ""] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap();
+            seed_staging_fixtures(&config(env, path));
+            assert_eq!(
+                fixture_count(path),
+                0,
+                "CO_ENV={env:?} must not seed staging fixtures"
+            );
+        }
+    }
+
+    /// Counterpart: under `CO_ENV=staging` the fixtures DO seed.
+    #[test]
+    fn fixtures_seed_under_staging() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        seed_staging_fixtures(&config("staging", path));
+        assert_eq!(
+            fixture_count(path),
+            3,
+            "staging seeds the recursion-a → -a-b → -a-b-c chain"
+        );
+
+        let synthetic: i64 = Storage::new(path)
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM leads WHERE is_synthetic = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(synthetic, 5, "staging seeds synthetic funnel fixtures");
+    }
 }

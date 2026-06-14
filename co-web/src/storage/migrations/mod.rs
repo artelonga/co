@@ -25,6 +25,7 @@ mod v078;
 mod v079;
 mod v080;
 mod v081;
+mod v082;
 
 /// CO-446: minimum free bytes required on the data volume before the boot path
 /// runs migrations. Default 200 MiB. Override with `CO_MIGRATION_MIN_FREE_BYTES`.
@@ -158,6 +159,7 @@ impl Storage {
             self.migrate_v079(current_version);
             self.migrate_v080(current_version);
             self.migrate_v081(current_version);
+            self.migrate_v082(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(
@@ -307,7 +309,7 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 81;
+    const LATEST_VERSION: i64 = 82;
 
     fn max_version(storage: &Storage) -> i64 {
         storage
