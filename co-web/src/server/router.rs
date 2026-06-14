@@ -372,6 +372,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // CO-345: saved graph view viewer — must be before the {*subpath} wildcard.
         .route("/graph-views/{slug}", get(serve_graph_page))
         // CO-352: sala (workspace canvas) routes — literal paths before wildcard.
+        // CO-399: bare `/sala` (every visible universe) + `/sala?u=a,b` (subset)
+        // render the SAME surface; scope is parsed client-side from path + query.
+        .route("/sala", get(serve_sala_page))
         .route("/u/{universe}/sala", get(serve_sala_page))
         .route("/u/{universe}/sala/{workspace_slug}", get(serve_sala_page))
         .route("/sala/{share_token}", get(serve_sala_page))
@@ -524,6 +527,17 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                 ),
             )
             .nest("/api/v1", crate::workspace_routes::share_router())
+            // CO-399: multi-universe sala scope (resolve + state), personal per-user.
+            .nest(
+                "/api/v1/sala",
+                crate::workspace_routes::scope_public_router(),
+            )
+            .nest(
+                "/api/v1/sala",
+                crate::workspace_routes::scope_authed_router().layer(
+                    axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
+                ),
+            )
             // CO-345: graph views — my views (auth-gated) + public/unlisted access
             .nest("/api/v1/me", graph_view_me_api)
             .nest("/api/v1", graph_view_public_api)

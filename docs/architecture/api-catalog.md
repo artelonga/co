@@ -146,6 +146,7 @@ CO-345: publishable saved graph views (universe + type filter + depth + root + l
 ## workspace — `/api/v1/universes/{key}/workspaces/*` + `/u/{universe}/sala` (workspace_routes.rs)
 
 CO-352: Sala primitive — spatial canvas anchored to a universe, with per-user state and shareable public state.
+CO-399: scope expansion — `/sala` (every visible universe) and `/sala?u=a,b` (subset) render the same surface; state keys on `workspace_states.scope` (`*` or a normalized `a,b`), nodes/edges use `key::path` cross-universe notation.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
@@ -153,9 +154,14 @@ CO-352: Sala primitive — spatial canvas anchored to a universe, with per-user 
 | GET | `/api/v1/universes/{key}/workspaces/{slug}/state/public` | anon | Get public/shared workspace state |
 | PUT | `/api/v1/universes/{key}/workspaces/{slug}/state` | authed | Persist workspace state (positions, custom edges) |
 | POST | `/api/v1/universes/{key}/workspaces/{slug}/state/share` | authed | Publish workspace state as shareable |
-| GET | `/api/v1/workspace-states/{token}` | anon | Fetch a shared workspace state by token |
+| GET | `/api/v1/workspace-states/{token}` | anon | Fetch a shared workspace state by token (carries `scope` for multi-universe shares) |
+| GET | `/api/v1/sala/scope` | anon | CO-399: resolve a scope (`?u=a,b`, or all if absent) → visibility-filtered universes |
+| GET | `/api/v1/sala/state` | anon | CO-399: caller's saved state for a multi-universe scope (`?scope=a,b`) |
+| PUT | `/api/v1/sala/state` | authed | CO-399: persist state for a multi-universe scope (`?scope=a,b`) |
+| POST | `/api/v1/sala/state/share` | authed | CO-399: publish a multi-universe scope state as shareable |
 | GET | `/u/{universe}/sala` | anon | Sala SPA shell (default workspace for universe) |
 | GET | `/u/{universe}/sala/{workspace_slug}` | anon | Sala SPA shell (specific workspace) |
+| GET | `/sala` | anon | CO-399: Sala SPA shell — every caller-visible universe (`/sala?u=a,b` for a subset) |
 
 ## workspace-templates — `/api/v1/universes/{slug}/workspace-templates/*` (workspace_template_routes.rs)
 
