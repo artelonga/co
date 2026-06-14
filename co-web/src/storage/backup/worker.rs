@@ -220,7 +220,7 @@ fn low_disk_skip(avail: Option<u64>, last_snapshot_bytes: u64, floor: u64) -> Op
 /// snapshot is pruned when it exceeds `retain_count`, pushes the cumulative
 /// size past `retain_max_bytes` (0 = unlimited), or is older than
 /// `retention_days`.
-fn select_prunable(
+pub(crate) fn select_prunable(
     metas: &[SnapshotMeta],
     retain_count: usize,
     retain_max_bytes: u64,

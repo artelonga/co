@@ -225,6 +225,7 @@ pub(crate) mod schema;
 pub mod security;
 pub mod snapshot;
 pub(crate) mod subscriptions;
+pub mod sweep;
 pub(crate) mod tasks;
 pub mod tool;
 pub(crate) mod universe;
