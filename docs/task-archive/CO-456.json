@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-456",
+  "title": "CO-278-A — API response envelope {data,meta,errors} + version headers (opt-in, backward-compat via single response layer)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-456.md",
+  "branch": "feat/CO-456-co-278-a-api-response-envelope-data-meta",
+  "merge_sha": "c5f93a16de82bb863ad86cfc85a3b401ce119809",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/261",
+    "number": 261
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T17:38:55Z",
+  "files_changed": 10,
+  "lines_added": 551,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:platform",
+    "api"
+  ],
+  "changelog_entry": "## CO-456 (CO-278-A) — API response envelope `{data,meta,errors}` + version headers\n\nAdded an **opt-in** unified response envelope to the public API, implemented as a\n**single response layer** over every `/api/v1/*` route (no per-handler edits).\n\n- Send `X-API-Envelope: 1` (or `Accept: application/vnd.co.v1+json`) and success\n  bodies are wrapped as `{ data, meta, errors: null }`; errors (4xx/5xx) become\n  `{ data: null, meta, errors: [{ code, message, field?, hint? }] }` with the\n  same HTTP status.\n- `meta` carries `request_id` (uuid, reusing `x-request-id`) and\n  `api_version: \"1.0\"`, plus best-effort pagination (`page`/`page_size`/`total`)\n  when the handler already exposes it.\n- `X-API-Version: 1.0` and `X-Co-Server-Version: <workspace version>` are now on\n  **every** `/api/v1/*` response, with or without opt-in.\n- Without the opt-in marker, response bodies are **byte-identical** to before —\n  the SPA's 55 raw `fetch()` call sites and existing external consumers are\n  unaffected. Non-JSON responses (HTML, CSS, streams, blobs) are never wrapped.\n\n### Why\nCO-278 needs a single, predictable shape for the public API. Doing it\nunconditionally would break the SPA and external consumers on deploy, so the\nenvelope is opt-in via header and lives in one place — flipping it to the\ndefault is a later one-line change once consumers adopt the header. No migration,\nno new tables.",
+  "summary": "Contexto CO-278-A: dar à API pública **uma forma única** — `{ data, meta, errors }` — em **todas** as rotas `/api/v1/*`, + headers de versão. Restrição dura medida em 2026-06-14: o SPA tem **55 chamad",
+  "co_auto_version": "0.1.0"
+}
