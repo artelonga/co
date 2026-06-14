@@ -115,6 +115,13 @@ export function setupCriarModal() {
     const copySource = document.getElementById('criar-copy-from-source');
     const errorEl = document.getElementById('criar-error');
 
+    // CO-450: provenance carried by the Yggdrasil "Criar no CO" deep-link
+    // (?source=yggdrasil&instance=…). Stashed when the modal opens prefilled so
+    // the universe_created telemetry event can measure YG→CO federation
+    // conversion. Reset on every open() so a non-deep-link create stays clean.
+    let _criarSource = null;
+    let _criarInstance = null;
+
     function populateCopyFromSources() {
         if (!copySource) return;
         const universes = (state.userUniverses || [])
@@ -127,10 +134,14 @@ export function setupCriarModal() {
 
     function open(defaults) {
         const d = defaults || {};
+        // CO-450: `prefill` carries the deep-link `name`/`key` (and provenance).
+        const prefill = d.prefill || {};
+        _criarSource = prefill.source || null;
+        _criarInstance = prefill.instance || null;
         populateCopyFromSources();
         overlay.classList.remove('hidden');
-        nameInput.value = '';
-        slugInput.value = '';
+        nameInput.value = prefill.name || '';
+        slugInput.value = prefill.key || '';
         if (descInput) descInput.value = '';
         const privacyRadio = form.querySelector('input[name="criar-visibility"][value="private"]');
         if (privacyRadio) privacyRadio.checked = true;
@@ -152,6 +163,11 @@ export function setupCriarModal() {
         // CO-96: reset inline-validation state so a reopened modal starts clean.
         const sb = document.getElementById('criar-submit');
         if (sb) sb.disabled = false;
+        // CO-450: when prefilled (deep-link), refresh the slug preview and run
+        // the CO-96 inline validation so an invalid `key`/`name` surfaces its
+        // error immediately instead of creating blindly on submit.
+        updateSlugPreview();
+        if (slugInput.value.trim()) validateKey();
         nameInput.focus();
     }
 
@@ -304,6 +320,15 @@ export function setupCriarModal() {
         if (submitBtn) submitBtn.disabled = false;
 
         if (!result) return;
+
+        // CO-450: measure federation conversion. Emit on every create; carry
+        // `source`/`instance` only when they came from the Yggdrasil deep-link.
+        if (typeof window.coTrack === 'function') {
+            const props = { copy_from: copyFrom ? 'yes' : 'no' };
+            if (_criarSource) props.source = _criarSource;
+            if (_criarInstance) props.instance = _criarInstance;
+            window.coTrack('universe_created', props);
+        }
 
         close();
         _showToast('Universo criado! Redirecionando...', 'success');
