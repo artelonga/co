@@ -376,23 +376,42 @@
   //   /u/{universe}/sala                — default workspace
   //   /u/{universe}/sala/{slug}         — named workspace
   //   /sala/{share_token}               — shared workspace (read-only)
+  //   /sala                             — CO-399: every caller-visible universe
+  //   /sala?u=a,b                       — CO-399: explicit universe subset
   var pathParts = window.location.pathname.replace(/^\//, '').split('/');
-  var mode = 'universe';   // 'universe' | 'named' | 'share-token'
+  var mode = 'universe';   // 'universe' | 'named' | 'share-token' | 'scope'
   var universeKey = '';
   var workspaceSlug = 'default';
   var shareToken = '';
   var isReadOnly = false;
+  // CO-399: a multi-universe scope ('*' = all visible, 'a,b' = subset). Empty in
+  // single-universe modes. `scopeUniverses` is resolved from the server (the
+  // visibility authority) before the entry picker can offer cross-universe entries.
+  var scope = '';
+  var scopeUniverses = [];
 
   if (pathParts[0] === 'sala' && pathParts[1]) {
     mode = 'share-token';
     shareToken = pathParts[1];
     isReadOnly = true;
+  } else if (pathParts[0] === 'sala') {
+    // Bare /sala (all visible) or /sala?u=a,b (subset) — the multi-universe view.
+    mode = 'scope';
+    var uParam = new URLSearchParams(window.location.search).get('u');
+    scope = (uParam && uParam.trim()) ? uParam.trim() : '*';
   } else if (pathParts[0] === 'u' && pathParts[1]) {
     universeKey = pathParts[1];
     if (pathParts[3]) {
       mode = 'named';
       workspaceSlug = pathParts[3];
     }
+  }
+
+  // CO-399: a node id / entry_path is universe-qualified (`key::path`, the
+  // canonical cross-universe link syntax) only in scope mode; single-universe
+  // salas keep bare paths so existing rows and realtime ops are unchanged.
+  function qualifyPath(uKey, path) {
+    return (mode === 'scope') ? (uKey + '::' + path) : path;
   }
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
@@ -1459,11 +1478,20 @@
     saveDebounce = setTimeout(saveState, 500);
   }
 
+  // CO-399: persistence endpoint — scoped state for the multi-universe view,
+  // per-universe state otherwise. Both round-trip an opaque `layout_json`.
+  function stateUrl() {
+    return (mode === 'scope')
+      ? '/api/v1/sala/state?scope=' + encodeURIComponent(scope)
+      : '/api/v1/universes/' + encodeURIComponent(universeKey) +
+        '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state';
+  }
+
   function saveState() {
     if (isReadOnly || !isLoggedIn) return;
     layout.view = { tx: cam.x, ty: cam.y, scale: cam.s };
     var body = JSON.stringify({ layout_json: JSON.stringify(layout), is_public: false });
-    fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+    fetch(stateUrl(), {
       method: 'PUT',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -1494,7 +1522,7 @@
     if (mode === 'share-token') {
       return loadByShareToken(shareToken);
     }
-    fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+    fetch(stateUrl(), {
       credentials: 'include',
     })
       .then(function (r) { return r.json(); })
@@ -1509,6 +1537,22 @@
       });
   }
 
+  // CO-399: resolve the scope to its visibility-filtered universes (the server
+  // is the visibility authority). Anonymous / cross-account callers get only the
+  // public slice — this is the visibility re-check that gates the entry picker
+  // and every share-token read. `cb` runs once `scopeUniverses` is populated.
+  function resolveScopeUniverses(cb) {
+    var u = (scope && scope !== '*') ? ('?u=' + encodeURIComponent(scope)) : '';
+    fetch('/api/v1/sala/scope' + u, { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : { universes: [] }; })
+      .then(function (data) {
+        scopeUniverses = (data && data.universes) || [];
+        if (data && data.scope) scope = data.scope;
+        if (cb) cb();
+      })
+      .catch(function () { scopeUniverses = []; if (cb) cb(); });
+  }
+
   function loadByShareToken(token) {
     fetch('/api/v1/workspace-states/' + encodeURIComponent(token), { credentials: 'include' })
       .then(function (r) {
@@ -1516,6 +1560,18 @@
         return r.json();
       })
       .then(function (data) {
+        // CO-399: a multi-universe share carries a `scope`; switch into scope
+        // mode and re-check visibility (anon viewers see only the public slice).
+        if (data.scope) {
+          mode = 'scope';
+          scope = data.scope;
+          var parsedScope;
+          try { parsedScope = JSON.parse(data.layout_json); }
+          catch (_) { parsedScope = null; }
+          salaName.textContent = 'Sala compartilhada — universos';
+          document.title = 'Sala compartilhada — CO';
+          return resolveScopeUniverses(function () { applyLoadedLayout(parsedScope); });
+        }
         universeKey = data.universe_key || universeKey;
         workspaceSlug = data.workspace_slug || workspaceSlug;
         salaName.textContent = 'Sala — ' + universeKey;
@@ -1554,15 +1610,20 @@
       }).slice(0, 50);
       list.innerHTML = items.length
         ? items.map(function (e) {
-            return '<div class="entry-item" data-path="' + esc(e.path) + '">' +
+            // CO-399: in scope mode each entry is labeled by its universe, and
+            // carries it in data-universe so it lands on the canvas as `key::path`.
+            var uni = e.universe || '';
+            var label = uni ? ('<span class="ei-badge">' + esc(uni) + '</span>') : '';
+            return '<div class="entry-item" data-path="' + esc(e.path) + '"' +
+              (uni ? ' data-universe="' + esc(uni) + '"' : '') + '>' + label +
               '<div class="ei-title">' + esc(e.title || e.path) + '</div>' +
-              '<div class="ei-meta">' + esc(e.path) + ' · ' + esc(e.entry_type || '') + '</div>' +
+              '<div class="ei-meta">' + (uni ? esc(uni) + ' · ' : '') + esc(e.path) + ' · ' + esc(e.entry_type || '') + '</div>' +
               '</div>';
           }).join('')
         : '<div style="padding:12px;color:var(--muted);font-size:.82rem">Nenhuma entrada encontrada</div>';
       list.querySelectorAll('.entry-item').forEach(function (el) {
         el.addEventListener('click', function () {
-          addEntryToCanvas(el.dataset.path);
+          addEntryToCanvas(el.dataset.path, el.dataset.universe);
           backdrop.classList.remove('show');
         });
       });
@@ -1603,6 +1664,26 @@
     function loadEntries() {
       if (allEntries.length) { render(search.value); return; }
       list.innerHTML = '<div style="padding:12px;color:var(--muted)">Carregando…</div>';
+      // CO-399: scope mode pulls entries from every universe in scope and tags
+      // each with its universe so they can be placed (and linked) cross-universe.
+      if (mode === 'scope') {
+        var keys = scopeUniverses.map(function (u) { return u.key; });
+        if (!keys.length) { allEntries = []; render(search.value); return; }
+        Promise.all(keys.map(function (k) {
+          return fetch('/api/v1/universes/' + encodeURIComponent(k) + '/entries?limit=200', { credentials: 'include' })
+            .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
+            .then(function (data) {
+              return (data.entries || data || []).map(function (e) {
+                return { path: e.path, title: e.title, entry_type: e.entry_type, universe: k };
+              });
+            })
+            .catch(function () { return []; });
+        })).then(function (lists) {
+          allEntries = lists.reduce(function (a, b) { return a.concat(b); }, []);
+          render(search.value);
+        });
+        return;
+      }
       fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/entries?limit=200', { credentials: 'include' })
         .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
         .then(function (data) { allEntries = data.entries || data || []; render(search.value); })
@@ -1636,16 +1717,24 @@
     activateTab(pickerTab);
   }
 
-  function addEntryToCanvas(path) {
-    var exists = layout.notes.some(function (n) { return n.entry_path === path; });
+  function addEntryToCanvas(path, universe) {
+    // CO-399: in scope mode the canvas-side identity is universe-qualified
+    // (`key::path`), so a note id, its entry_path, and any edge to it all carry
+    // the canonical cross-universe link syntax.
+    var uKey = universe || universeKey;
+    var qualified = qualifyPath(uKey, path);
+    var exists = layout.notes.some(function (n) { return n.entry_path === qualified; });
     if (exists) { showToast('Já está no canvas'); return; }
-    var entry = allEntries.find(function (e) { return e.path === path; });
+    var entry = allEntries.find(function (e) {
+      return e.path === path && (!universe || e.universe === universe);
+    });
     var center = cellAt(W / 2, H / 2);
     var spot = findFreeCell(center[0], center[1]);
     layout.notes.push({
-      id: path,
+      id: qualified,
       text: entry ? (entry.title || path.split('/').pop().replace(/\.md$/i, '')) : path,
-      entry_path: path,
+      entry_path: qualified,
+      universe: (mode === 'scope') ? uKey : undefined,
       x: spot[0], y: spot[1],
       folder: null,
     });
@@ -1676,10 +1765,11 @@
   // later fresh load of this sala still finds the right camera. keepalive lets
   // the request outlive the navigation. No-op for read-only / anon callers.
   function flushSave() {
-    if (isReadOnly || !isLoggedIn || !universeKey) return;
+    if (isReadOnly || !isLoggedIn) return;
+    if (mode !== 'scope' && !universeKey) return;
     layout.view = { tx: cam.x, ty: cam.y, scale: cam.s };
     try {
-      fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+      fetch(stateUrl(), {
         method: 'PUT', credentials: 'include', keepalive: true,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ layout_json: JSON.stringify(layout), is_public: false }),
@@ -1886,6 +1976,22 @@
       document.title = 'Sala compartilhada — CO';
       statusEl.textContent = 'carregando…';
       loadState();
+      return;
+    }
+
+    // CO-399: the multi-universe view — `/sala` (every visible universe) or
+    // `/sala?u=a,b`. Resolve the scope (visibility-gated) before loading state,
+    // so the entry picker and labels reflect exactly what the caller may see.
+    if (mode === 'scope') {
+      var allView = (scope === '*');
+      salaName.textContent = allView ? 'Sala · todos os universos' : 'Sala · ' + scope;
+      document.title = 'Sala — universos — CO';
+      universeLink.href = '/';
+      universeLink.textContent = allView ? 'universos' : scope;
+      checkAuth(function (loggedIn) {
+        if (!loggedIn) applyReadOnly();
+        resolveScopeUniverses(function () { loadState(); });
+      });
       return;
     }
 

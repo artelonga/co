@@ -11,7 +11,7 @@
 
 use axum::{
     Json, Router,
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post, put},
@@ -23,6 +23,7 @@ use crate::auth::extractors::AuthedUser;
 use crate::error::AppError;
 use crate::server::AppState;
 use crate::storage::WorkspaceState;
+use crate::storage::sala_scope::normalize_scope;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -180,6 +181,153 @@ async fn get_by_share_token(
 }
 
 // ---------------------------------------------------------------------------
+// CO-399: multi-universe scope handlers
+//
+// `/sala` (every caller-visible universe) and `/sala?u=a,b` (a subset) render
+// the SAME canvas as the per-universe sala. State persists per (scope, user) via
+// the `workspace_states.scope` column — no new table, no page fork.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize)]
+pub struct ScopeQuery {
+    /// Comma-separated universe keys (`a,b`). Absent/empty = every visible
+    /// universe (the `*` scope).
+    #[serde(default)]
+    pub u: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StateScopeQuery {
+    /// Canonical scope identifier (`*` or `a,b`). Normalized server-side.
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// GET /api/v1/sala/scope?u=a,b
+///
+/// Resolve a scope to its visibility-filtered universes for the caller. This is
+/// the authority the entry picker and share-token read path use, so anonymous
+/// and cross-account callers only ever see the public slice.
+async fn resolve_scope(
+    State(state): State<AppState>,
+    Query(q): Query<ScopeQuery>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let caller_id = extract_optional_user_id(&headers);
+    let raw = q.u.unwrap_or_default();
+    let scope = normalize_scope(&raw);
+
+    let storage = state.core.storage.lock();
+    let universes = storage.resolve_scope_universes(&scope, caller_id.as_deref());
+    Ok(Json(serde_json::json!({
+        "scope": scope,
+        "universes": universes,
+    }))
+    .into_response())
+}
+
+/// GET /api/v1/sala/state?scope=a,b
+///
+/// The caller's saved layout for a multi-universe scope, or an empty canvas.
+async fn get_scoped_state(
+    State(state): State<AppState>,
+    Query(q): Query<StateScopeQuery>,
+    headers: HeaderMap,
+) -> Result<Response, AppError> {
+    let scope = normalize_scope(&q.scope.unwrap_or_default());
+
+    let Some(user_id) = extract_optional_user_id(&headers) else {
+        return Ok(Json(empty_scope_state(&scope)).into_response());
+    };
+
+    let storage = state.core.storage.lock();
+    match storage.scoped_workspace_state(&scope, "default", &user_id)? {
+        Some(ws) => Ok(Json(ws).into_response()),
+        None => Ok(Json(empty_scope_state(&scope)).into_response()),
+    }
+}
+
+/// PUT /api/v1/sala/state?scope=a,b
+///
+/// Upsert the caller's layout for a multi-universe scope (auth required).
+async fn upsert_scoped_state(
+    State(state): State<AppState>,
+    Query(q): Query<StateScopeQuery>,
+    user: AuthedUser,
+    Json(body): Json<UpsertStateBody>,
+) -> Result<Response, AppError> {
+    if serde_json::from_str::<serde_json::Value>(&body.layout_json).is_err() {
+        return Ok(err_json(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "layout_json must be valid JSON",
+        ));
+    }
+    let scope = normalize_scope(&q.scope.unwrap_or_default());
+    let now = Utc::now().to_rfc3339();
+    let id = uuid::Uuid::new_v4().to_string();
+
+    let ws = {
+        let storage = state.core.storage.lock();
+        storage.upsert_scoped_workspace_state(
+            &id,
+            &scope,
+            "default",
+            &user.user_id,
+            &body.layout_json,
+            body.is_public,
+            &now,
+        )?;
+        storage.scoped_workspace_state(&scope, "default", &user.user_id)?
+    };
+    let ws = ws.ok_or_else(|| AppError::Internal("scope state missing after upsert".into()))?;
+    Ok((StatusCode::OK, Json(ws)).into_response())
+}
+
+/// POST /api/v1/sala/state/share?scope=a,b
+///
+/// Generate a share token for the caller's existing scope state (auth required).
+/// The resulting `/sala/{token}` view is read-only and re-checks visibility at
+/// read time (anonymous viewers only see the public universes in the scope).
+async fn share_scoped_state(
+    State(state): State<AppState>,
+    Query(q): Query<StateScopeQuery>,
+    user: AuthedUser,
+) -> Result<Response, AppError> {
+    let scope = normalize_scope(&q.scope.unwrap_or_default());
+    let token = uuid::Uuid::new_v4().as_simple().to_string();
+    let now = Utc::now().to_rfc3339();
+
+    let rows = {
+        let storage = state.core.storage.lock();
+        storage.set_scoped_share_token(&token, &now, &scope, "default", &user.user_id)?
+    };
+
+    if rows == 0 {
+        return Ok(err_json(
+            StatusCode::NOT_FOUND,
+            "scope state not found — PUT your layout first",
+        ));
+    }
+
+    Ok(Json(serde_json::json!({ "share_token": token })).into_response())
+}
+
+fn empty_scope_state(scope: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": null,
+        "universe_key": null,
+        "workspace_slug": "default",
+        "user_id": null,
+        "layout_json": empty_layout_json(),
+        "is_public": false,
+        "share_token": null,
+        "created_at": null,
+        "updated_at": null,
+        "scope": scope,
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -215,6 +363,7 @@ fn empty_state(universe_key: &str, workspace_slug: &str) -> serde_json::Value {
         "share_token": null,
         "created_at": null,
         "updated_at": null,
+        "scope": "",
     })
 }
 
@@ -251,6 +400,21 @@ pub fn share_router() -> Router<AppState> {
     Router::new().route("/workspace-states/{token}", get(get_by_share_token))
 }
 
+/// CO-399: scope routes mounted at `/api/v1/sala` — no auth middleware; the
+/// GET handlers resolve the caller's identity (and visibility) themselves.
+pub fn scope_public_router() -> Router<AppState> {
+    Router::new()
+        .route("/scope", get(resolve_scope))
+        .route("/state", get(get_scoped_state))
+}
+
+/// CO-399: scope routes mounted at `/api/v1/sala` — `require_auth` at the call site.
+pub fn scope_authed_router() -> Router<AppState> {
+    Router::new()
+        .route("/state", put(upsert_scoped_state))
+        .route("/state/share", post(share_scoped_state))
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -274,6 +438,7 @@ mod tests {
                share_token   TEXT,
                created_at    TEXT NOT NULL,
                updated_at    TEXT NOT NULL,
+               scope         TEXT NOT NULL DEFAULT '',
                UNIQUE (universe_key, workspace_slug, user_id)
              );
              CREATE INDEX IF NOT EXISTS idx_workspace_states_user
@@ -319,7 +484,7 @@ mod tests {
         let ws: WorkspaceState = conn
             .query_row(
                 "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                        is_public, share_token, created_at, updated_at \
+                        is_public, share_token, created_at, updated_at, scope \
                  FROM workspace_states WHERE id = 'id-1'",
                 [],
                 row_to_state,
@@ -342,7 +507,7 @@ mod tests {
         let ws: WorkspaceState = conn
             .query_row(
                 "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                        is_public, share_token, created_at, updated_at \
+                        is_public, share_token, created_at, updated_at, scope \
                  FROM workspace_states \
                  WHERE universe_key = 'mbya' AND workspace_slug = 'default' AND is_public = 1 \
                  ORDER BY updated_at DESC LIMIT 1",
@@ -371,7 +536,7 @@ mod tests {
         let ws: WorkspaceState = conn
             .query_row(
                 "SELECT id, universe_key, workspace_slug, user_id, layout_json, \
-                        is_public, share_token, created_at, updated_at \
+                        is_public, share_token, created_at, updated_at, scope \
                  FROM workspace_states WHERE share_token = 'abc123'",
                 [],
                 row_to_state,

@@ -220,6 +220,7 @@ pub mod push_subscriptions;
 pub(crate) mod quilombo_bridge;
 pub(crate) mod recompute;
 pub(crate) mod release_notes;
+pub(crate) mod sala_scope;
 pub(crate) mod schema;
 pub mod security;
 pub mod snapshot;

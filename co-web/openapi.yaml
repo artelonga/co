@@ -2471,6 +2471,37 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/sala/scope:
+    get:
+      tags: ["workspace"]
+      summary: "CO-399: resolve a scope (`?u=a,b`, or all if absent) → visibility-filtered universes"
+      responses:
+        "200":
+          description: OK
+  /api/v1/sala/state:
+    get:
+      tags: ["workspace"]
+      summary: "CO-399: caller's saved state for a multi-universe scope (`?scope=a,b`)"
+      responses:
+        "200":
+          description: OK
+    put:
+      tags: ["workspace"]
+      summary: "CO-399: persist state for a multi-universe scope (`?scope=a,b`)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/sala/state/share:
+    post:
+      tags: ["workspace"]
+      summary: "CO-399: publish a multi-universe scope state as shareable"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/scrum/calendar:
     get:
       tags: ["scrum"]
@@ -4781,7 +4812,7 @@ paths:
   /api/v1/workspace-states/{token}:
     get:
       tags: ["workspace"]
-      summary: "Fetch a shared workspace state by token"
+      summary: "Fetch a shared workspace state by token (carries `scope` for multi-universe shares)"
       parameters:
         - name: token
           in: path
@@ -4845,6 +4876,13 @@ paths:
     get:
       tags: ["crawl"]
       summary: "Crawl policy (private paths disallowed)"
+      responses:
+        "200":
+          description: OK
+  /sala:
+    get:
+      tags: ["workspace"]
+      summary: "CO-399: Sala SPA shell — every caller-visible universe (`/sala?u=a,b` for a subset)"
       responses:
         "200":
           description: OK
