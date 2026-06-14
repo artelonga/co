@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-80",
+  "title": "Per-tier rate limiting + quota — token bucket per user/tier/operation",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-80.md",
+  "branch": "feat/CO-80-per-tier-rate-limiting-quota-token-bucke",
+  "merge_sha": "135d94e16b88ec6505457c268b46bf31ed0957fa",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/264",
+    "number": 264
+  },
+  "started_at": "2026-04-26T00:00:00Z",
+  "merged_at": "2026-06-14T19:53:01Z",
+  "files_changed": 5,
+  "lines_added": 115,
+  "lines_removed": 8,
+  "labels": [
+    "rate-limit",
+    "quota",
+    "billing"
+  ],
+  "changelog_entry": "## CO-80 — Per-tier rate limiting + quota — token bucket per user/tier/operation\n\nDurably audit-log admin quota overrides. When an admin bypasses a storage or\nuniverse-count quota check via the `X-Admin-Override-Quota` header, the bypass is\nnow persisted as an `atividade` audit entry (`entidade = \"quota_override\"`,\n`entidade_id = \"storage\" | \"universe\"`, with the acting `user_id`, client IP, and\nuser-agent) instead of only emitting a transient `tracing::warn!`. This closes the\n\"(audit logged)\" half of the admin-override acceptance criterion so override abuse\ncan be reviewed after the fact.\n\n`check_storage_quota` / `check_universe_quota` now take `&AppState` to enqueue the\ndeferred audit write via `log_atividade` (best-effort, off the request path).\n\nThe rest of CO-80 — in-process token-bucket rate limiting, tier extraction from\nJWT/API-token in middleware, per-`(identity, op)` buckets, `429` with `Retry-After`,\n`402` with quota usage details, and quota enforcement on entry write + universe\ncreate — was already in place.\n\n### Why\nThe admin override is the only quota escape hatch; without a durable record there\nwas no way to audit who bypassed a quota or when, which the acceptance criterion\nexplicitly requires.",
+  "summary": "GIVEN current rate limit is a flat 60 req/min per token (CO-35), and at scale we need per-tier limits + per-operation limits + per-universe quotas to prevent abuse and enable tiered pricing, WHEN we a",
+  "co_auto_version": "0.1.0"
+}
