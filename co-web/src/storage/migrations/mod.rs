@@ -320,7 +320,6 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 86;
     const LATEST_VERSION: i64 = 87;
 
     fn max_version(storage: &Storage) -> i64 {
