@@ -1061,13 +1061,21 @@ impl Storage {
     /// test runs. Idempotent: `INSERT OR IGNORE` skips already-present rows.
     ///
     /// Fixture set:
-    /// - `recursion-a` / `recursion-ab` / `recursion-abc` — nested-universe fixture
+    /// - `recursion-a` / `recursion-a-b` / `recursion-a-b-c` — nested-universe
+    ///   fixture (keys match the CO-374 suite preconditions exactly)
     /// - `funnel-fixture` — pre-seeded mixed leads + users for funnel report tests
     /// - `mbya-staging` / `yoruba-staging` — workspace template fixtures
     pub fn seed_staging_fixture_universes(&mut self) {
         let now = Utc::now().to_rfc3339();
 
         // (key, name, description, visibility, parent_key)
+        //
+        // CO-401: the recursion chain keys are `recursion-a` → `recursion-a-b`
+        // → `recursion-a-b-c` — the exact keys the CO-374 staging suite
+        // (`universe-recursion.spec.ts`, `subuniverse-promotion.spec.ts`)
+        // preconditions on. (The original CO-379 seeder used `recursion-ab`/
+        // `recursion-abc`, which the suite never matched — every recursion test
+        // skipped.)
         let fixtures: &[(&str, &str, &str, &str, Option<&str>)] = &[
             (
                 "recursion-a",
@@ -1077,18 +1085,18 @@ impl Storage {
                 None,
             ),
             (
-                "recursion-ab",
+                "recursion-a-b",
                 "Recursion A/B",
                 "Staging fixture: sub-universe of recursion-a",
                 "public",
                 Some("recursion-a"),
             ),
             (
-                "recursion-abc",
+                "recursion-a-b-c",
                 "Recursion A/B/C",
-                "Staging fixture: sub-sub-universe of recursion-ab",
+                "Staging fixture: sub-sub-universe of recursion-a-b",
                 "public",
-                Some("recursion-ab"),
+                Some("recursion-a-b"),
             ),
             (
                 "funnel-fixture",
@@ -1130,9 +1138,110 @@ impl Storage {
         }
 
         tracing::info!(
-            "CO-379: staging fixture universes seeded: recursion-a, recursion-ab, \
-             recursion-abc, funnel-fixture, mbya-staging, yoruba-staging"
+            "CO-379: staging fixture universes seeded: recursion-a, recursion-a-b, \
+             recursion-a-b-c, funnel-fixture, mbya-staging, yoruba-staging"
         );
+    }
+
+    /// CO-401: seed synthetic funnel/lead fixtures for the staging suite.
+    ///
+    /// Each row is flagged `is_synthetic = 1` (migration v82) so the
+    /// acquisition-funnel rollup (`funnel_routes::query_funnel_steps`) excludes
+    /// it — the suite can assert lead/funnel behavior without polluting the real
+    /// analytics metrics. The set spans the lead lifecycle so funnel steps 4
+    /// (Capture) and 5 (Qualify) have data to exercise.
+    ///
+    /// Idempotent: once any synthetic lead exists this is a no-op, so re-running
+    /// on every staging boot never duplicates fixtures.
+    pub fn seed_staging_funnel_fixtures(&self) {
+        let existing: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM leads WHERE is_synthetic = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if existing > 0 {
+            return;
+        }
+
+        let now = Utc::now().to_rfc3339();
+        // (nome, email, mensagem, status)
+        let fixtures: &[(&str, &str, &str, &str)] = &[
+            (
+                "Fixture Lead — Novo",
+                "fixture-new@staging.local",
+                "synthetic funnel fixture",
+                "new",
+            ),
+            (
+                "Fixture Lead — Triado",
+                "fixture-triaged@staging.local",
+                "synthetic funnel fixture",
+                "triaged",
+            ),
+            (
+                "Fixture Lead — Em progresso",
+                "fixture-progress@staging.local",
+                "synthetic funnel fixture",
+                "in_progress",
+            ),
+            (
+                "Fixture Lead — Ganho",
+                "fixture-won@staging.local",
+                "synthetic funnel fixture",
+                "closed_won",
+            ),
+            (
+                "Fixture Lead — Perdido",
+                "fixture-lost@staging.local",
+                "synthetic funnel fixture",
+                "closed_lost",
+            ),
+        ];
+
+        for &(nome, email, mensagem, status) in fixtures {
+            let _ = self.conn.execute(
+                "INSERT INTO leads \
+                 (created_at, updated_at, nome, email, mensagem, status, priority, source, is_synthetic) \
+                 VALUES (?1, ?1, ?2, ?3, ?4, ?5, 'normal', 'staging-fixture', 1)",
+                rusqlite::params![now, nome, email, mensagem, status],
+            );
+        }
+
+        tracing::info!(
+            "CO-401: seeded {} synthetic funnel/lead fixtures (is_synthetic=1, excluded from rollups)",
+            fixtures.len()
+        );
+    }
+
+    /// CO-401: ensure the dedicated `staging-admin` user exists (admin tier),
+    /// idempotently. The staging suite's capability-scoped token is owned by
+    /// this user. Admin tier is required so the owner could legitimately *mint*
+    /// admin-surface capabilities — but the token itself (seeded separately)
+    /// carries explicit least-privilege scopes, never the owner's full tier.
+    /// Returns the user id.
+    pub fn ensure_staging_admin_user(&self) -> anyhow::Result<String> {
+        let id = "staging-admin";
+        let now = Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT OR IGNORE INTO users \
+             (id, email, display_name, tier, created_at, status) \
+             VALUES (?1, ?2, ?3, 'admin', ?4, 'active')",
+            rusqlite::params![
+                id,
+                "staging-admin@staging.local",
+                "Staging Suite Admin",
+                now
+            ],
+        )?;
+        // Idempotently keep admin tier even if a prior row drifted lower.
+        self.conn.execute(
+            "UPDATE users SET tier = 'admin' WHERE id = ?1 AND tier <> 'admin'",
+            rusqlite::params![id],
+        )?;
+        Ok(id.to_string())
     }
 
     /// CO-379: delete `u-test-*` universe rows (and their directories) that are
@@ -2425,8 +2534,8 @@ mod tests {
 
         for key in [
             "recursion-a",
-            "recursion-ab",
-            "recursion-abc",
+            "recursion-a-b",
+            "recursion-a-b-c",
             "funnel-fixture",
             "mbya-staging",
             "yoruba-staging",
@@ -2448,7 +2557,7 @@ mod tests {
         let ab: Option<String> = storage
             .conn()
             .query_row(
-                "SELECT parent_key FROM universes WHERE key = 'recursion-ab'",
+                "SELECT parent_key FROM universes WHERE key = 'recursion-a-b'",
                 [],
                 |r| r.get(0),
             )
@@ -2457,13 +2566,13 @@ mod tests {
         assert_eq!(
             ab.as_deref(),
             Some("recursion-a"),
-            "recursion-ab.parent_key"
+            "recursion-a-b.parent_key"
         );
 
         let abc: Option<String> = storage
             .conn()
             .query_row(
-                "SELECT parent_key FROM universes WHERE key = 'recursion-abc'",
+                "SELECT parent_key FROM universes WHERE key = 'recursion-a-b-c'",
                 [],
                 |r| r.get(0),
             )
@@ -2471,9 +2580,63 @@ mod tests {
             .flatten();
         assert_eq!(
             abc.as_deref(),
-            Some("recursion-ab"),
-            "recursion-abc.parent_key"
+            Some("recursion-a-b"),
+            "recursion-a-b-c.parent_key"
         );
+    }
+
+    /// CO-401: synthetic funnel fixtures seed once, are flagged `is_synthetic`,
+    /// and re-running is a no-op (no duplicates).
+    #[test]
+    fn test_seed_staging_funnel_fixtures_idempotent_and_flagged() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        storage.seed_staging_funnel_fixtures();
+        storage.seed_staging_funnel_fixtures(); // second run — must not duplicate
+
+        let synthetic: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM leads WHERE is_synthetic = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(synthetic, 5, "exactly 5 synthetic leads after re-seed");
+
+        let real: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM leads WHERE is_synthetic = 0",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(real, 0, "fixtures must never masquerade as real leads");
+    }
+
+    /// CO-401: the staging-admin user is admin-tier and idempotent.
+    #[test]
+    fn test_ensure_staging_admin_user_is_admin_and_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        let id1 = storage.ensure_staging_admin_user().unwrap();
+        let id2 = storage.ensure_staging_admin_user().unwrap();
+        assert_eq!(id1, id2, "stable user id across calls");
+
+        let (tier, count): (String, i64) = storage
+            .conn()
+            .query_row(
+                "SELECT tier, (SELECT COUNT(*) FROM users WHERE id = ?1) \
+                 FROM users WHERE id = ?1",
+                rusqlite::params![id1],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(tier, "admin", "staging-admin must be admin tier");
+        assert_eq!(count, 1, "idempotent: exactly one staging-admin row");
     }
 
     #[test]
@@ -2486,7 +2649,7 @@ mod tests {
         let count: i64 = storage
             .conn()
             .query_row(
-                "SELECT COUNT(*) FROM universes WHERE key LIKE 'recursion-%' OR key IN ('funnel-fixture','mbya-staging','yoruba-staging')",
+                "SELECT COUNT(*) FROM universes WHERE key LIKE 'recursion-a%' OR key IN ('funnel-fixture','mbya-staging','yoruba-staging')",
                 [],
                 |r| r.get(0),
             )
