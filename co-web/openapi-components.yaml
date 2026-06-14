@@ -37,6 +37,62 @@ components:
           type: string
           example: "Recurso não encontrado"
 
+    # --- Envelope opt-in (CO-456 / CO-278-A) ---
+    # Activated by `X-API-Envelope: 1` (or Accept: application/vnd.co.v1+json).
+    # Without the marker the body is the legacy shape (byte-identical).
+    EnvelopeMeta:
+      type: object
+      required: [request_id, api_version]
+      properties:
+        request_id:
+          type: string
+          format: uuid
+          description: Per-request id (mirrors the x-request-id header)
+        api_version:
+          type: string
+          example: "1.0"
+        page:
+          type: integer
+          description: Present only when the handler exposes pagination
+        page_size:
+          type: integer
+        total:
+          type: integer
+    EnvelopeError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          example: not_found
+        message:
+          type: string
+          example: "Resource not found"
+        field:
+          type: string
+          description: Offending input field (when applicable)
+        hint:
+          type: string
+          description: How to fix the error (when applicable)
+    Envelope:
+      type: object
+      required: [data, meta, errors]
+      description: >
+        Opt-in unified response shape for /api/v1/*. On success `data` holds the
+        original body and `errors` is null; on error (4xx/5xx) `data` is null and
+        `errors` lists the problems. Same HTTP status either way.
+      properties:
+        data:
+          nullable: true
+          description: Original handler body on success; null on error
+        meta:
+          $ref: '#/components/schemas/EnvelopeMeta'
+        errors:
+          type: array
+          nullable: true
+          items:
+            $ref: '#/components/schemas/EnvelopeError'
+
     # --- Projetos / Tarefas ---
     Task:
       type: object

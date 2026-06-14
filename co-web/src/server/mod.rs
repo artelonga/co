@@ -48,6 +48,9 @@ fn resolve_asset(embed_path: &str, fs_path: Option<&std::path::Path>) -> Option<
 pub mod allowlist;
 pub(crate) mod auth_handlers;
 pub mod crawl_routes;
+// CO-456 (CO-278-A): opt-in `{ data, meta, errors }` response envelope + version
+// headers, applied as a single response layer over `/api/v1/*`.
+pub mod envelope;
 pub(crate) mod legacy;
 pub mod router;
 // CO-436: boot-time universe seeding (`impl Storage` seed methods), relocated

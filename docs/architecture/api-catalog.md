@@ -22,6 +22,34 @@
 | **admin** | `crate::auth::require_admin` OR GitHub-gated (`AllowedAdmins`) for `/api/v1/gestao/*` |
 | **telemetry:read** | `Scoped<TelemetryRead>` (CO-448) — JWT/session OR an API token carrying the `telemetry:read` capability; a token without it → 403 |
 
+## Response envelope + version headers (CO-456 / CO-278-A)
+
+Every `/api/v1/*` response carries two additive headers, **always** (with or
+without opt-in):
+
+| Header | Value | Meaning |
+|---|---|---|
+| `X-API-Version` | `1.0` | Public API contract version |
+| `X-Co-Server-Version` | workspace version (e.g. `3.12.0`) | Running CO release |
+
+**Opt-in envelope.** Send `X-API-Envelope: 1` (or
+`Accept: application/vnd.co.v1+json`) and a single response layer wraps the JSON
+body in the unified shape:
+
+```jsonc
+// success (HTTP < 400)
+{ "data": <original body>, "meta": { "request_id": "<uuid>", "api_version": "1.0" }, "errors": null }
+
+// error (HTTP >= 400)
+{ "data": null, "meta": { "request_id": "<uuid>", "api_version": "1.0" }, "errors": [ { "code": "...", "message": "...", "field": "?", "hint": "?" } ] }
+```
+
+`meta` propagates `page`/`page_size`/`total` (best-effort) when the handler
+already exposes them. **Without the opt-in marker the body is byte-identical to
+the legacy shape** — so the SPA and existing consumers are unaffected. Non-JSON
+responses (HTML, CSS, streams, blobs) are never wrapped. Flipping the envelope
+to the default is a later one-liner once consumers adopt the header.
+
 ---
 
 ## auth — `/api/v1/auth/*` (auth_routes.rs + auth.rs)

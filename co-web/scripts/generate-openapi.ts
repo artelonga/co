@@ -420,6 +420,14 @@ info:
     1. Implemente o handler e registre-o no arquivo \`*_routes.rs\` adequado.
     2. Adicione uma linha na tabela correspondente em \`docs/architecture/api-catalog.md\`.
     3. Rode \`cd co-web && npm run openapi:gen\` para regenerar este arquivo.
+
+    ## Envelope opt-in + headers de versão (CO-456 / CO-278-A)
+
+    Toda resposta \`/api/v1/*\` traz \`X-API-Version: 1.0\` e
+    \`X-Co-Server-Version: <versão>\`. Envie \`X-API-Envelope: 1\` (ou
+    \`Accept: application/vnd.co.v1+json\`) para receber o corpo embrulhado no
+    schema \`Envelope\` (\`{ data, meta, errors }\`). Sem o marcador o corpo é
+    idêntico ao formato legado; respostas não-JSON nunca são embrulhadas.
   version: "2.40.0"
   contact:
     name: Arte Longa
