@@ -163,6 +163,12 @@ const NAV: &[NavItem] = &[
         path: "/e2e-walkthrough",
         depth: 0,
     },
+    // CO-452: discoverable entry point to the interactive API explorer.
+    NavItem {
+        label: "API docs",
+        path: "/api/docs",
+        depth: 0,
+    },
 ];
 
 /// Resolve a request path to its [`DocRoute`], or `None` if no doc serves it.

@@ -3641,7 +3641,7 @@ paths:
           description: OK
     post:
       tags: ["universes"]
-      summary: "Create invite — `{email\"
+      summary: "Create invite — `{email|handle, role}` (CO-444; API-token accepted)"
       security:
         - sessionCookie: []
       parameters:
@@ -4260,7 +4260,7 @@ paths:
   /api/v1/universes/{slug}/timeline:
     get:
       tags: ["entries"]
-      summary: "CO-396 project-timeline lens. Query `group_by=epic\"
+      summary: "CO-396 project-timeline lens. Query `group_by=epic|module|status` (default `status`). Returns `{ group_by, lanes[{key,label,items[{id,title,entry_type,span{start_ms,end_ms}}]}], markers[{id,title,kind,at_ms}], backlog[{id,title,entry_type}] }` — the same entries as the kanban board laid out by the shared `game_core::time_layout` engine (lanes + release/milestone markers + a no-date backlog)."
       security:
         - sessionCookie: []
       parameters:
@@ -4672,7 +4672,7 @@ paths:
   /api/v1/usage/summary:
     get:
       tags: ["usage"]
-      summary: "Aggregates by universe\"
+      summary: "Aggregates by universe|model|machine|task; `?cross=universe,model` adds the cross-tab matrix (CO-437)"
       security:
         - sessionCookie: []
       responses:
