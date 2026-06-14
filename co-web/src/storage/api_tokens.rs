@@ -10,6 +10,16 @@ fn hash_token(token: &str) -> String {
     hash.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// CO-448: parse the stored `api_tokens.scopes` JSON column.
+///
+/// `NULL` / absent ⇒ `None` (inherit owner tier). A malformed value is treated
+/// as `None` too (fail-open to the legacy behavior) rather than locking the
+/// token out — but well-formed JSON arrays round-trip exactly.
+fn parse_scopes(raw: Option<String>) -> Option<Vec<String>> {
+    let raw = raw?;
+    serde_json::from_str::<Vec<String>>(&raw).ok()
+}
+
 impl Storage {
     pub fn get_entry_body(&self, universe_key: &str, path: &str) -> Option<String> {
         self.conn
@@ -53,10 +63,38 @@ impl Storage {
     /// Create a new long-lived API token (90 days) for the given user.
     /// The raw token is returned once in `ApiToken.token`; only its SHA-256
     /// hash is persisted — the plaintext is never written to the database.
+    ///
+    /// Leaves `scopes` NULL → the token inherits the owner's tier (pre-CO-448
+    /// all-or-nothing behavior). For a least-privilege token, use
+    /// [`create_api_token_with_scopes`](Self::create_api_token_with_scopes).
     pub fn create_api_token(
         &self,
         user_id: &str,
         name: &str,
+    ) -> anyhow::Result<crate::vault_routes::ApiToken> {
+        self.create_api_token_inner(user_id, name, None)
+    }
+
+    /// CO-448: create a least-privilege API token whose access is restricted to
+    /// the resolved capability set (bundles already expanded, persisted as a
+    /// JSON array). A leaked secret then grants only this set, never owner-tier
+    /// admin. An empty set is still a *declared* scope (grants nothing) — to get
+    /// the inherit-tier behavior, use [`create_api_token`](Self::create_api_token).
+    pub fn create_api_token_with_scopes(
+        &self,
+        user_id: &str,
+        name: &str,
+        scopes: &std::collections::BTreeSet<String>,
+    ) -> anyhow::Result<crate::vault_routes::ApiToken> {
+        let ordered: Vec<String> = scopes.iter().cloned().collect();
+        self.create_api_token_inner(user_id, name, Some(ordered))
+    }
+
+    fn create_api_token_inner(
+        &self,
+        user_id: &str,
+        name: &str,
+        scopes: Option<Vec<String>>,
     ) -> anyhow::Result<crate::vault_routes::ApiToken> {
         let id = nanoid::nanoid!(21);
         let raw_token = format!("co_{}", nanoid::nanoid!(40));
@@ -72,10 +110,13 @@ impl Storage {
         // in `token_hash`). The UNIQUE index on `token` is satisfied because
         // the column value is unique per-row via the id-prefixed placeholder.
         let token_placeholder = format!("hashed:{id}");
+        // CO-448: NULL scopes (legacy path) → inherit owner tier; a JSON array
+        // (even empty) → least-privilege restriction to that capability set.
+        let scopes_json = scopes.as_ref().map(serde_json::to_string).transpose()?;
         self.conn.execute(
             "INSERT INTO api_tokens \
-             (id, user_id, name, token, token_hash, token_prefix, created_at, expires_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             (id, user_id, name, token, token_hash, token_prefix, created_at, expires_at, scopes) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 id,
                 user_id,
@@ -84,7 +125,8 @@ impl Storage {
                 token_hash,
                 token_prefix,
                 now_str,
-                exp_str
+                exp_str,
+                scopes_json
             ],
         )?;
         Ok(crate::vault_routes::ApiToken {
@@ -97,6 +139,7 @@ impl Storage {
             created_at: now,
             expires_at,
             last_used_at: None,
+            scopes,
         })
     }
 
@@ -106,7 +149,7 @@ impl Storage {
         user_id: &str,
     ) -> anyhow::Result<Vec<crate::vault_routes::ApiToken>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at \
+            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at, scopes \
              FROM api_tokens WHERE user_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![user_id], |row| {
@@ -119,12 +162,22 @@ impl Storage {
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })?;
         let mut tokens = vec![];
         for row in rows.filter_map(|r| r.ok()) {
-            let (id, uid, name, token_hash, token_prefix, created_str, expires_str, last_used_str) =
-                row;
+            let (
+                id,
+                uid,
+                name,
+                token_hash,
+                token_prefix,
+                created_str,
+                expires_str,
+                last_used_str,
+                scopes_raw,
+            ) = row;
             let created_at = created_str
                 .parse::<chrono::DateTime<Utc>>()
                 .unwrap_or_else(|_| Utc::now());
@@ -144,6 +197,7 @@ impl Storage {
                 created_at,
                 expires_at,
                 last_used_at,
+                scopes: parse_scopes(scopes_raw),
             });
         }
         Ok(tokens)
@@ -167,7 +221,7 @@ impl Storage {
     ) -> anyhow::Result<Option<crate::vault_routes::ApiToken>> {
         let incoming_hash = hash_token(token);
         let result = self.conn.query_row(
-            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at \
+            "SELECT id, user_id, name, token_hash, token_prefix, created_at, expires_at, last_used_at, scopes \
              FROM api_tokens WHERE token_hash = ?1",
             params![incoming_hash],
             |row| {
@@ -180,6 +234,7 @@ impl Storage {
                     row.get::<_, String>(5)?,
                     row.get::<_, String>(6)?,
                     row.get::<_, Option<String>>(7)?,
+                    row.get::<_, Option<String>>(8)?,
                 ))
             },
         );
@@ -193,6 +248,7 @@ impl Storage {
                 created_str,
                 expires_str,
                 last_used_str,
+                scopes_raw,
             )) => {
                 let created_at = created_str
                     .parse::<chrono::DateTime<Utc>>()
@@ -220,6 +276,7 @@ impl Storage {
                     created_at,
                     expires_at,
                     last_used_at,
+                    scopes: parse_scopes(scopes_raw),
                 }))
             }
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
