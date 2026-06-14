@@ -30,7 +30,10 @@ use crate::storage::WorkspaceState;
 
 #[derive(Debug, Deserialize)]
 pub struct UpsertStateBody {
-    /// Serialised layout: {nodes:[{entry_path,x,y}],edges:[{from,to,type}],view:{tx,ty,scale}}
+    /// Serialised layout, persisted opaquely (the canvas owns its schema):
+    /// `{cells, notes, folders, universes, edges, view}`. CO-400 universe nodes
+    /// (`universes:[{kind:"universe", key, x, y}]`) round-trip through here with
+    /// no server-side schema change — they are just JSON inside `layout_json`.
     pub layout_json: String,
     #[serde(default)]
     pub is_public: bool,
@@ -405,6 +408,42 @@ mod tests {
             .unwrap();
 
         assert!(layout.contains("\"x\""));
+    }
+
+    /// CO-400: a layout carrying a universe node must survive the upsert →
+    /// read trip byte-for-byte. The state API stores `layout_json` opaquely, so
+    /// universe nodes (a frontend-only schema addition) need no server change —
+    /// this test guards against a future "validate the layout shape" regression
+    /// that would reject the new `universes` array.
+    #[test]
+    fn test_universe_node_round_trips() {
+        let conn = setup_db();
+        let layout = r#"{"cells":{},"notes":[],"folders":[],"universes":[{"id":"u1","kind":"universe","key":"mse","name":"MSE","x":3,"y":-2}],"edges":[],"view":{"tx":0,"ty":0,"scale":1}}"#;
+
+        conn.execute(
+            "INSERT INTO workspace_states \
+             (id, universe_key, workspace_slug, user_id, layout_json, is_public, created_at, updated_at) \
+             VALUES ('id-1', 'miguel', 'default', 'user-1', ?1, 0, '2026-01-01', '2026-01-01')",
+            params![layout],
+        )
+        .unwrap();
+
+        let stored: String = conn
+            .query_row(
+                "SELECT layout_json FROM workspace_states WHERE id = 'id-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+
+        // Verbatim preservation, plus a structural check on the universe node.
+        assert_eq!(stored, layout);
+        let v: serde_json::Value = serde_json::from_str(&stored).unwrap();
+        let node = &v["universes"][0];
+        assert_eq!(node["kind"], "universe");
+        assert_eq!(node["key"], "mse");
+        assert_eq!(node["x"], 3);
+        assert_eq!(node["y"], -2);
     }
 
     #[test]

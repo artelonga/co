@@ -224,6 +224,18 @@
     margin-bottom: 10px;
   }
   #entry-search:focus { outline: none; border-color: var(--accent); }
+  #picker-tabs { display: flex; gap: 4px; margin-bottom: 10px; }
+  .picker-tab {
+    flex: 1; background: var(--bg); color: var(--muted);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 6px 8px; font-size: .8rem; cursor: pointer;
+  }
+  .picker-tab:hover { border-color: var(--accent); color: var(--text); }
+  .picker-tab.active { background: var(--accent); color: #1a1a1a; border-color: var(--accent); font-weight: 600; }
+  .entry-item .ei-badge {
+    float: right; background: rgba(94,200,224,.16); color: #8fd6e8;
+    border-radius: 10px; padding: 1px 8px; font-size: .7rem; margin-left: 6px;
+  }
   #entry-list { overflow-y: auto; flex: 1; }
   .entry-item {
     padding: 8px 10px; border-radius: 6px; cursor: pointer;
@@ -268,6 +280,7 @@
 <div id="app">
   <header>
     <a href="/">CO</a>
+    <a id="sala-back" href="#" style="display:none" title="Voltar à sala anterior">‹ Voltar</a>
     <span style="color:var(--border)">›</span>
     <a id="universe-link" href="/">…</a>
     <span style="color:var(--border)">›</span>
@@ -322,7 +335,11 @@
 <!-- Entry picker modal -->
 <div id="entry-picker-backdrop">
   <div id="entry-picker-modal">
-    <h3>Adicionar entrada ao canvas</h3>
+    <h3>Adicionar ao canvas</h3>
+    <div id="picker-tabs">
+      <button class="picker-tab active" id="tab-entries" data-tab="entries">Entradas</button>
+      <button class="picker-tab" id="tab-universes" data-tab="universes">Universos</button>
+    </div>
     <input type="search" id="entry-search" placeholder="Filtrar entradas…">
     <div id="entry-list"></div>
     <button id="picker-cancel-btn">Cancelar</button>
@@ -407,7 +424,7 @@
   var isLoggedIn = false;
 
   function emptyLayout() {
-    return { v: 2, cells: {}, notes: [], folders: [], nodes: [], edges: [],
+    return { v: 2, cells: {}, notes: [], folders: [], universes: [], nodes: [], edges: [],
              view: { tx: 0, ty: 0, scale: 1 } };
   }
 
@@ -424,6 +441,22 @@
     l.edges   = Array.isArray(l.edges)   ? l.edges   : [];
     l.nodes   = Array.isArray(l.nodes)   ? l.nodes   : [];
     l.view    = (l.view && typeof l.view === 'object') ? l.view : { tx: 0, ty: 0, scale: 1 };
+
+    // CO-400: universe nodes ({kind:'universe', key, x, y}) — coerce to a stable
+    // shape, dropping malformed rows so the canvas always renders cleanly.
+    l.universes = (Array.isArray(l.universes) ? l.universes : [])
+      .filter(function (u) { return u && u.key; })
+      .map(function (u) {
+        return {
+          id: u.id || newId('u'),
+          kind: 'universe',
+          key: String(u.key),
+          name: u.name || String(u.key),
+          count: (typeof u.count === 'number') ? u.count : null,
+          x: Math.floor(u.x || 0),
+          y: Math.floor(u.y || 0),
+        };
+      });
 
     if (!Array.isArray(l.notes)) {
       // v1 → v2: graph nodes (world coords) become notas snapped to the grid.
@@ -442,7 +475,7 @@
     }
 
     // A brand-new sala starts with the root pasta `/` at the origin square.
-    if (!l.notes.length && !l.folders.length && !Object.keys(l.cells).length) {
+    if (!l.notes.length && !l.folders.length && !l.universes.length && !Object.keys(l.cells).length) {
       l.folders.push({ id: 'root', name: '', x: 0, y: 0 });
     }
     return l;
@@ -555,20 +588,25 @@
 
   // ── Item helpers ──────────────────────────────────────────────────────────
   function visibleItems() {
-    // Folders + notas not inside a folder, in draw order (folders first so
-    // notas render on top when overlapping).
+    // Folders + universe nodes + notas not inside a folder, in draw order
+    // (folders first so notas/universes render on top when overlapping).
     var items = [];
     layout.folders.forEach(function (f) { items.push(f); });
+    layout.universes.forEach(function (u) { items.push(u); });
     layout.notes.forEach(function (n) { if (!n.folder) items.push(n); });
     return items;
   }
-  function isFolder(item) { return item && item.name !== undefined; }
+  // CO-400: a universe node carries a `kind` discriminator. Folders also have a
+  // `name`, so check `kind` first to keep the two apart.
+  function isUniverse(item) { return !!(item && item.kind === 'universe'); }
+  function isFolder(item) { return !!(item && item.kind === undefined && item.name !== undefined); }
   function folderById(id) {
     return layout.folders.find(function (f) { return f.id === id; }) || null;
   }
   function itemById(id) {
     return folderById(id) ||
-      layout.notes.find(function (n) { return n.id === id; }) || null;
+      layout.notes.find(function (n) { return n.id === id; }) ||
+      layout.universes.find(function (u) { return u.id === id; }) || null;
   }
   function folderMembers(folderId) {
     return layout.notes.filter(function (n) { return n.folder === folderId; });
@@ -692,6 +730,51 @@
     ctx.globalAlpha = 1;
   }
 
+  // CO-400: a universe node — a nested sala you can descend into. Rendered
+  // distinctly (teal world-ring + globe glyph + entry-count badge) so it never
+  // reads as a nota or pasta.
+  function drawUniverse(u, rect, ghost) {
+    var pad = Math.max(2, rect.w * 0.05);
+    var x = rect.x + pad, y = rect.y + pad, w = rect.w - pad * 2, h = rect.h - pad * 2;
+    var hot = (hoveredItem === u || (linkFrom && linkFrom === u));
+    ctx.globalAlpha = ghost ? 0.75 : 1;
+    rounded(x, y, w, h, Math.max(3, rect.w * 0.12));
+    ctx.fillStyle = '#142433';                 // deep teal-blue, distinct from notas/pastas
+    ctx.fill();
+    ctx.lineWidth = hot ? 2.4 : 1.5;
+    ctx.strokeStyle = hot ? '#5ec8e0' : '#2f6d80';
+    ctx.stroke();
+    if (rect.w > 16) {
+      var gfs = Math.max(9, rect.w * 0.34);
+      ctx.font = gfs + 'px system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = '#bfe3ee';
+      ctx.fillText('🌐', x + w / 2, y + h * 0.34);
+      var fs = Math.max(7, Math.min(12, rect.w * 0.17));
+      ctx.font = '600 ' + fs + 'px system-ui,sans-serif';
+      ctx.fillStyle = '#bfe3ee';
+      var label = u.name || u.key || '';
+      var maxChars = Math.max(2, Math.floor(w / (fs * 0.6)));
+      if (label.length > maxChars) label = label.slice(0, maxChars - 1) + '…';
+      ctx.fillText(label, x + w / 2, y + h * 0.76);
+      // entry-count badge (top-right)
+      if (typeof u.count === 'number' && u.count >= 0) {
+        var bfs = Math.max(7, fs * 0.78);
+        ctx.font = '600 ' + bfs + 'px system-ui,sans-serif';
+        var txt = String(u.count);
+        var bx = x + w - bfs * 0.9, by = y + bfs * 0.9;
+        ctx.beginPath();
+        ctx.arc(bx, by, bfs * 0.82, 0, 6.2832);
+        ctx.fillStyle = '#5ec8e0';
+        ctx.fill();
+        ctx.fillStyle = '#0d1a22';
+        ctx.fillText(txt, bx, by + 0.5);
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   function draw() {
     // Smooth camera animation
     if (camTarget) {
@@ -787,6 +870,7 @@
       var rect = cellScreenRect(it.x, it.y);
       if (rect.x > W + gs || rect.y > H + gs || rect.x + gs < -gs || rect.y + gs < -gs) return;
       if (isFolder(it)) drawFolder(it, rect, false, it === dropFolder);
+      else if (isUniverse(it)) drawUniverse(it, rect, false);
       else drawNote(it, rect, false);
     });
 
@@ -802,6 +886,7 @@
       var gp = w2s(dragState.wx - CELL / 2, dragState.wy - CELL / 2);
       var ghostRect = { x: gp[0], y: gp[1], w: gs, h: gs };
       if (isFolder(dragState.item)) drawFolder(dragState.item, ghostRect, true, false);
+      else if (isUniverse(dragState.item)) drawUniverse(dragState.item, ghostRect, true);
       else drawNote(dragState.item, ghostRect, true);
     }
   }
@@ -847,6 +932,7 @@
     var chars = Object.keys(layout.cells).length;
     statusEl.textContent =
       layout.notes.length + ' notas · ' +
+      layout.universes.length + ' universos · ' +
       layout.folders.length + ' pastas · ' +
       chars + ' letras · ' +
       layout.edges.length + ' ligações';
@@ -1105,10 +1191,16 @@
         hoveredItem = h;
         invalidate();
         if (h) {
-          tooltip.querySelector('.tt-title').textContent = isFolder(h) ? '/' + (h.name || '') : h.text;
-          tooltip.querySelector('.tt-type').textContent = isFolder(h)
-            ? 'pasta · ' + folderMembers(h.id).length + ' itens — arraste para mover'
-            : (h.entry_path || 'nota — arraste para mover · clique para abrir');
+          tooltip.querySelector('.tt-title').textContent =
+            isUniverse(h) ? (h.name || h.key)
+            : isFolder(h) ? '/' + (h.name || '')
+            : h.text;
+          tooltip.querySelector('.tt-type').textContent =
+            isUniverse(h)
+              ? 'universo' + (typeof h.count === 'number' && h.count >= 0 ? ' · ' + h.count + ' entradas' : '') + ' — toque 2× para descer'
+            : isFolder(h)
+              ? 'pasta · ' + folderMembers(h.id).length + ' itens — arraste para mover'
+              : (h.entry_path || 'nota — arraste para mover · clique para abrir');
           tooltip.style.left = (p[0] + 14) + 'px';
           tooltip.style.top  = (p[1] - 44) + 'px';
           tooltip.classList.add('show');
@@ -1136,8 +1228,8 @@
         var gx = Math.floor(dragState.wx / CELL);
         var gy = Math.floor(dragState.wy / CELL);
         var target = itemAtCell(gx, gy, it);
-        if (!isFolder(it) && target && isFolder(target)) {
-          // nota dropped onto a pasta → joins it
+        if (!isFolder(it) && !isUniverse(it) && target && isFolder(target)) {
+          // nota dropped onto a pasta → joins it (universe nodes never join)
           it.folder = target.id;
           showToast('Nota guardada em /' + (target.name || ''));
         } else if (target) {
@@ -1152,6 +1244,8 @@
         // ── Click on an item ──
         if (linkMode) {
           handleLinkClick(it);
+        } else if (isUniverse(it)) {
+          showUniversePanel(it);
         } else if (isFolder(it)) {
           showFolderPanel(it);
         } else if (it.entry_path) {
@@ -1165,7 +1259,8 @@
       // since dragState is only armed for writers)
       var clicked = hitItem(p[0], p[1]);
       if (clicked) {
-        if (isFolder(clicked)) { showFolderPanel(clicked); }
+        if (isUniverse(clicked)) { showUniversePanel(clicked); }
+        else if (isFolder(clicked)) { showFolderPanel(clicked); }
         else { showNotePanel(clicked); }
       } else if (linkMode) {
         exitLinkMode();
@@ -1190,6 +1285,13 @@
     dragState = null; downPos = null; panning = false; moved = false;
     canvas.style.cursor = '';
     invalidate();
+  });
+
+  // CO-400: double-tap / double-click a universe node → descend into its sala.
+  canvas.addEventListener('dblclick', function (e) {
+    var p = canvasPos(e);
+    var it = hitItem(p[0], p[1]);
+    if (it && isUniverse(it)) { closePanel(); descendInto(it.key); }
   });
 
   // ── Zoom (wheel) ──────────────────────────────────────────────────────────
@@ -1301,10 +1403,14 @@
 
   function applyLoadedLayout(parsed) {
     layout = normalizeLayout(parsed);
-    if (layout.view && layout.view.scale) {
-      cam = { x: layout.view.tx || 0, y: layout.view.ty || 0, s: layout.view.scale || 1 };
-    } else {
-      fit(false);
+    // CO-400: a camera stashed by ascend() wins over the persisted view, so the
+    // originating sala reappears exactly where the caller left it.
+    if (!applyRestoreCam()) {
+      if (layout.view && layout.view.scale) {
+        cam = { x: layout.view.tx || 0, y: layout.view.ty || 0, s: layout.view.scale || 1 };
+      } else {
+        fit(false);
+      }
     }
     updateStatus();
   }
@@ -1354,6 +1460,9 @@
   // ═══════════════════════════════════════════════════════════════════════════
   // Entry picker — bring an existing entrada onto the landscape
   // ═══════════════════════════════════════════════════════════════════════════
+  var allUniverses = [];     // fetched universe list for the "universos" tab
+  var pickerTab = 'entries'; // 'entries' | 'universes'
+
   function openEntryPicker() {
     var backdrop = document.getElementById('entry-picker-backdrop');
     var list = document.getElementById('entry-list');
@@ -1362,7 +1471,7 @@
     search.value = '';
     search.focus();
 
-    function renderList(filter) {
+    function renderEntries(filter) {
       var items = allEntries.filter(function (e) {
         if (!filter) return true;
         var f = filter.toLowerCase();
@@ -1384,19 +1493,72 @@
       });
     }
 
-    if (!allEntries.length) {
-      fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/entries?limit=200', { credentials: 'include' })
-        .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
-        .then(function (data) {
-          allEntries = data.entries || data || [];
-          renderList('');
-        })
-        .catch(function () { list.innerHTML = '<div style="padding:12px;color:var(--muted)">Erro ao carregar entradas</div>'; });
-    } else {
-      renderList('');
+    // CO-400: the "universos" tab lists universes the caller can see, each
+    // placeable on the canvas as a descend-able universe node.
+    function renderUniverses(filter) {
+      var items = allUniverses.filter(function (u) {
+        if (!filter) return true;
+        var f = filter.toLowerCase();
+        return (u.key || '').toLowerCase().includes(f) || (u.name || '').toLowerCase().includes(f);
+      }).slice(0, 50);
+      list.innerHTML = items.length
+        ? items.map(function (u) {
+            var cnt = (typeof u.content_count === 'number') ? u.content_count : 0;
+            return '<div class="entry-item" data-key="' + esc(u.key) + '" data-name="' +
+              esc(u.name || u.key) + '" data-count="' + cnt + '">' +
+              '<span class="ei-badge">' + cnt + '</span>' +
+              '<div class="ei-title">🌐 ' + esc(u.name || u.key) + '</div>' +
+              '<div class="ei-meta">' + esc(u.key) + '</div>' +
+              '</div>';
+          }).join('')
+        : '<div style="padding:12px;color:var(--muted);font-size:.82rem">Nenhum universo encontrado</div>';
+      list.querySelectorAll('.entry-item').forEach(function (el) {
+        el.addEventListener('click', function () {
+          addUniverseToCanvas(el.dataset.key, el.dataset.name, parseInt(el.dataset.count, 10));
+          backdrop.classList.remove('show');
+        });
+      });
     }
 
-    search.addEventListener('input', function () { renderList(search.value); });
+    function render(filter) {
+      if (pickerTab === 'universes') renderUniverses(filter);
+      else renderEntries(filter);
+    }
+
+    function loadEntries() {
+      if (allEntries.length) { render(search.value); return; }
+      list.innerHTML = '<div style="padding:12px;color:var(--muted)">Carregando…</div>';
+      fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/entries?limit=200', { credentials: 'include' })
+        .then(function (r) { return r.ok ? r.json() : { entries: [] }; })
+        .then(function (data) { allEntries = data.entries || data || []; render(search.value); })
+        .catch(function () { list.innerHTML = '<div style="padding:12px;color:var(--muted)">Erro ao carregar entradas</div>'; });
+    }
+
+    function loadUniverses() {
+      if (allUniverses.length) { render(search.value); return; }
+      list.innerHTML = '<div style="padding:12px;color:var(--muted)">Carregando…</div>';
+      fetch('/api/v1/universes', { credentials: 'include' })
+        .then(function (r) { return r.ok ? r.json() : []; })
+        .then(function (data) {
+          allUniverses = Array.isArray(data) ? data : (data.universes || []);
+          render(search.value);
+        })
+        .catch(function () { list.innerHTML = '<div style="padding:12px;color:var(--muted)">Erro ao carregar universos</div>'; });
+    }
+
+    function activateTab(tab) {
+      pickerTab = tab;
+      document.getElementById('tab-entries').classList.toggle('active', tab === 'entries');
+      document.getElementById('tab-universes').classList.toggle('active', tab === 'universes');
+      search.placeholder = tab === 'universes' ? 'Filtrar universos…' : 'Filtrar entradas…';
+      if (tab === 'universes') loadUniverses(); else loadEntries();
+    }
+
+    document.getElementById('tab-entries').onclick = function () { activateTab('entries'); };
+    document.getElementById('tab-universes').onclick = function () { activateTab('universes'); };
+    search.oninput = function () { render(search.value); };
+
+    activateTab(pickerTab);
   }
 
   function addEntryToCanvas(path) {
@@ -1411,6 +1573,140 @@
       entry_path: path,
       x: spot[0], y: spot[1],
       folder: null,
+    });
+    updateStatus(); scheduleSave();
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // CO-400: Universe-as-node — descend / ascend with camera-state restoration
+  //
+  // A universe node ({kind:'universe', key, x, y}) descends into that universe's
+  // own sala — the same surface, narrower scope. A breadcrumb stack in
+  // sessionStorage remembers each ancestor sala's camera so ascending restores
+  // it instantly, independent of server persistence (works for read-only viewers
+  // too). Cycles are inert: descend is navigation, never embedding, so a sala
+  // that holds its own universe node renders once and never recurses.
+  // ═══════════════════════════════════════════════════════════════════════════
+  var backLink = document.getElementById('sala-back');
+
+  function readStack() {
+    try { return JSON.parse(window.sessionStorage.getItem('sala_stack') || '[]') || []; }
+    catch (_) { return []; }
+  }
+  function writeStack(s) {
+    try { window.sessionStorage.setItem('sala_stack', JSON.stringify(s)); } catch (_) {}
+  }
+
+  // Persist the current layout+camera synchronously before navigating away, so a
+  // later fresh load of this sala still finds the right camera. keepalive lets
+  // the request outlive the navigation. No-op for read-only / anon callers.
+  function flushSave() {
+    if (isReadOnly || !isLoggedIn || !universeKey) return;
+    layout.view = { tx: cam.x, ty: cam.y, scale: cam.s };
+    try {
+      fetch('/api/v1/universes/' + encodeURIComponent(universeKey) + '/workspaces/' + encodeURIComponent(workspaceSlug) + '/state', {
+        method: 'PUT', credentials: 'include', keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ layout_json: JSON.stringify(layout), is_public: false }),
+      });
+    } catch (_) {}
+  }
+
+  function descendInto(key) {
+    if (!key) return;
+    if (key === universeKey) { showToast('Você já está neste universo'); return; }
+    var stack = readStack();
+    stack.push({ key: universeKey, slug: workspaceSlug, cam: { x: cam.x, y: cam.y, s: cam.s } });
+    if (stack.length > 50) stack = stack.slice(-50);   // guard runaway nesting
+    writeStack(stack);
+    flushSave();
+    window.location.href = '/u/' + encodeURIComponent(key) + '/sala';
+  }
+
+  function ascend() {
+    var stack = readStack();
+    var frame = stack.pop();
+    writeStack(stack);
+    if (!frame) {
+      window.location.href = universeKey ? '/' + encodeURIComponent(universeKey) : '/';
+      return;
+    }
+    try {
+      window.sessionStorage.setItem('sala_restore_cam', JSON.stringify({
+        key: frame.key, slug: frame.slug || 'default', cam: frame.cam,
+      }));
+    } catch (_) {}
+    var url = '/u/' + encodeURIComponent(frame.key) + '/sala';
+    if (frame.slug && frame.slug !== 'default') url += '/' + encodeURIComponent(frame.slug);
+    window.location.href = url;
+  }
+
+  // Restore the camera stashed by ascend(), if it targets this exact sala.
+  function applyRestoreCam() {
+    var raw;
+    try { raw = window.sessionStorage.getItem('sala_restore_cam'); } catch (_) { raw = null; }
+    if (!raw) return false;
+    try { window.sessionStorage.removeItem('sala_restore_cam'); } catch (_) {}
+    try {
+      var r = JSON.parse(raw);
+      if (r && r.key === universeKey && (r.slug || 'default') === workspaceSlug && r.cam) {
+        cam = { x: r.cam.x, y: r.cam.y, s: r.cam.s };
+        camTarget = null;
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function renderBreadcrumb() {
+    if (!backLink) return;
+    var stack = readStack();
+    if (!stack.length) { backLink.style.display = 'none'; return; }
+    var parent = stack[stack.length - 1];
+    backLink.textContent = '‹ ' + (parent.key || 'voltar');
+    backLink.title = 'Voltar à sala de ' + (parent.key || '');
+    backLink.style.display = '';
+    backLink.onclick = function (e) { e.preventDefault(); ascend(); };
+  }
+
+  function showUniversePanel(u) {
+    panelItem = u;
+    document.getElementById('panel-title').textContent = u.name || u.key;
+    document.getElementById('panel-type').textContent =
+      'universo' + (typeof u.count === 'number' && u.count >= 0 ? ' · ' + u.count + ' entradas' : '');
+    document.getElementById('panel-path').textContent = u.key;
+    document.getElementById('panel-list').innerHTML = '';
+    var actions = document.getElementById('panel-actions');
+    actions.innerHTML = '';
+    var descendBtn = document.createElement('button');
+    descendBtn.textContent = '↘ Descer';
+    descendBtn.onclick = function () { closePanel(); descendInto(u.key); };
+    actions.appendChild(descendBtn);
+    if (!isReadOnly) {
+      var delBtn = document.createElement('button');
+      delBtn.className = 'danger';
+      delBtn.textContent = '✕ Remover';
+      delBtn.onclick = function () {
+        layout.universes = layout.universes.filter(function (x) { return x !== u; });
+        layout.edges = layout.edges.filter(function (e) { return e.from !== u.id && e.to !== u.id; });
+        closePanel(); updateStatus(); scheduleSave();
+      };
+      actions.appendChild(delBtn);
+    }
+    nodePanel.classList.add('show');
+  }
+
+  function addUniverseToCanvas(key, name, count) {
+    if (!key) return;
+    if (layout.universes.some(function (u) { return u.key === key; })) {
+      showToast('Universo já está no canvas'); return;
+    }
+    var center = cellAt(W / 2, H / 2);
+    var spot = findFreeCell(center[0], center[1]);
+    layout.universes.push({
+      id: newId('u'), kind: 'universe', key: key, name: name || key,
+      count: (typeof count === 'number' && !isNaN(count)) ? count : null,
+      x: spot[0], y: spot[1],
     });
     updateStatus(); scheduleSave();
   }
@@ -1494,9 +1790,20 @@
   }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
+  // CO-400: minimal test hook so E2E can place a universe node and exercise
+  // descend/ascend deterministically (canvas pixels aren't reliably clickable).
+  window.__salaTest = {
+    addUniverse: function (key, name, count) { addUniverseToCanvas(key, name, count); },
+    hasUniverse: function (key) { return layout.universes.some(function (u) { return u.key === key; }); },
+    descendInto: function (key) { descendInto(key); },
+    getCam: function () { return { x: cam.x, y: cam.y, s: cam.s }; },
+    setCam: function (c) { cam = { x: c.x, y: c.y, s: c.s }; camTarget = null; invalidate(); },
+  };
+
   function boot() {
     resize();
     loop();
+    renderBreadcrumb();
 
     if (mode === 'share-token') {
       applyReadOnly(true);
