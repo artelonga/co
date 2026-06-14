@@ -798,6 +798,18 @@ pub async fn get_entry(
     }
 }
 
+/// CO-413: attach `"source": "co-edit"` to an entry-event payload when the
+/// write targets a bidirectional event-bus universe, so the round-trip event
+/// federates back as a CO-origin edit and the inbound echo-filter (this
+/// deployment's `YggdrasilNotes` and the hub-side YG-97 filter) drop the
+/// rebroadcast rather than re-applying it (anti-loop). A no-op otherwise.
+fn co_edit_payload(mut payload: serde_json::Value, source_co_edit: bool) -> serde_json::Value {
+    if source_co_edit && let Some(obj) = payload.as_object_mut() {
+        obj.insert("source".into(), serde_json::Value::String("co-edit".into()));
+    }
+    payload
+}
+
 /// POST /api/v1/universes/:slug/entries — create entry
 pub async fn create_entry(
     State(state): State<AppState>,
@@ -809,18 +821,26 @@ pub async fn create_entry(
         return Err(AppError::BadRequest("Entry path cannot be empty".into()));
     }
 
-    let universe_root = {
+    // CO-413: when the write targets a bidirectional event-bus universe, the
+    // re-emitted events + entry row are stamped `source = co-edit` so the YG-97
+    // echo-filter (and our own inbound subscriber) won't re-apply the round-trip.
+    let (universe_root, source_co_edit) = {
         let storage = lock_storage(&state);
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
 
-        // CO-383: reject writes on event-bus-backed universes (e.g. yggdrasil notes).
-        // CO-390 spike: delegated to EntryService::check_not_event_bus.
-        EntryService::check_not_event_bus(
+        // CO-383/CO-413: reject writes on read-only event-bus universes; accept
+        // them on bidirectional ones. CO-390 spike: delegated to EntryService.
+        EntryService::check_write_allowed(
             universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
             universe.source_url.clone(),
         )?;
+        let source_co_edit = EntryService::is_bidirectional_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+        );
 
         // CO-80: quota check — anonymous usage gate or tier-based storage quota.
         // CO-390 spike: anon quota rule delegated to EntryService::check_anon_quota.
@@ -830,7 +850,7 @@ pub async fn create_entry(
             EntryService::check_anon_quota(universe.content_count)?;
         }
 
-        storage.universe_root(&slug)
+        (storage.universe_root(&slug), source_co_edit)
     };
 
     // CO-79: load manifest once from L1 cache (singleflight stampede protection).
@@ -866,6 +886,11 @@ pub async fn create_entry(
             &universe_root,
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
+    // CO-413: stamp the row as a CO-origin edit so it is distinguishable from a
+    // `yggdrasil-live` inbound write when reconciling a bidirectional universe.
+    if source_co_edit {
+        lock_storage(&state).stamp_entry_source_marker(&slug, &body.path, "co-edit");
+    }
     // CO-220: route entry write through the event bus so embedding + other
     // workers subscribe without coupling to entry_routes directly.
     state
@@ -879,11 +904,17 @@ pub async fn create_entry(
         });
 
     // CO-380: also publish to EDA bus for universal observability.
+    // CO-413: on a bidirectional universe, tag the event `source = co-edit` so
+    // it federates back to the hub as a CO-origin edit and the inbound
+    // echo-filter (here and YG-97) drops the rebroadcast instead of re-applying.
     state.core.eda_bus.publish(crate::eda::Event::new(
         "entry.created",
         Some(slug.clone()),
         crate::auth::resolve_user_id(&state, &headers),
-        serde_json::json!({ "path": body.path, "entry_type": entry.entry_type }),
+        co_edit_payload(
+            serde_json::json!({ "path": body.path, "entry_type": entry.entry_type }),
+            source_co_edit,
+        ),
         crate::eda::Visibility::UniverseMembers,
     ));
 
@@ -987,18 +1018,23 @@ pub async fn update_entry(
     headers: HeaderMap,
     Json(body): Json<UpdateEntryBody>,
 ) -> Result<axum::response::Response, AppError> {
-    let universe_root = {
+    let (universe_root, source_co_edit) = {
         let storage = lock_storage(&state);
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-        // CO-383: reject writes on event-bus-backed universes.
-        // CO-390 spike: delegated to EntryService::check_not_event_bus.
-        EntryService::check_not_event_bus(
+        // CO-383/CO-413: reject writes on read-only event-bus universes; accept
+        // them on bidirectional ones. CO-390 spike: delegated to EntryService.
+        EntryService::check_write_allowed(
             universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
             universe.source_url.clone(),
         )?;
-        storage.universe_root(&slug)
+        let source_co_edit = EntryService::is_bidirectional_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+        );
+        (storage.universe_root(&slug), source_co_edit)
     };
 
     // Read existing entry from universe data.db
@@ -1090,6 +1126,10 @@ pub async fn update_entry(
             &universe_root,
         )
         .map_err(|e| AppError::Internal(e.to_string()))?;
+    // CO-413: stamp the row as a CO-origin edit (see create_entry).
+    if source_co_edit {
+        lock_storage(&state).stamp_entry_source_marker(&slug, &path, "co-edit");
+    }
     // CO-220: route entry update through the event bus.
     state
         .core
@@ -1115,11 +1155,14 @@ pub async fn update_entry(
         "entry.updated",
         Some(slug.clone()),
         None,
-        serde_json::json!({
-            "path": path,
-            "entry_type": entry.entry_type,
-            "status": new_status,
-        }),
+        co_edit_payload(
+            serde_json::json!({
+                "path": path,
+                "entry_type": entry.entry_type,
+                "status": new_status,
+            }),
+            source_co_edit,
+        ),
         crate::eda::Visibility::UniverseMembers,
     ));
     // CO-398: publish task.status_changed when the status field transitions.
@@ -1298,18 +1341,23 @@ pub async fn delete_entry(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
 ) -> Result<StatusCode, AppError> {
-    let universe_root = {
+    let (universe_root, source_co_edit) = {
         let storage = lock_storage(&state);
         let universe = storage
             .get_universe(&slug)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
-        // CO-383: reject writes on event-bus-backed universes.
-        // CO-390 spike: delegated to EntryService::check_not_event_bus.
-        EntryService::check_not_event_bus(
+        // CO-383/CO-413: reject writes on read-only event-bus universes; accept
+        // them on bidirectional ones. CO-390 spike: delegated to EntryService.
+        EntryService::check_write_allowed(
             universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
             universe.source_url.clone(),
         )?;
-        storage.universe_root(&slug)
+        let source_co_edit = EntryService::is_bidirectional_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+        );
+        (storage.universe_root(&slug), source_co_edit)
     };
 
     // CO-45: capture before_value on UAT before deletion
@@ -1339,11 +1387,12 @@ pub async fn delete_entry(
             path: path.clone(),
         });
     // CO-380: also publish to EDA bus.
+    // CO-413: tag bidirectional deletes `source = co-edit` for the echo-filter.
     state.core.eda_bus.publish(crate::eda::Event::new(
         "entry.deleted",
         Some(slug.clone()),
         None,
-        serde_json::json!({ "path": path }),
+        co_edit_payload(serde_json::json!({ "path": path }), source_co_edit),
         crate::eda::Visibility::UniverseMembers,
     ));
     let mut storage = lock_storage(&state);

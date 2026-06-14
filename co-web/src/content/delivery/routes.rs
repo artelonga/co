@@ -101,17 +101,22 @@ fn apply_status_transition(
     trigger: &str,
     extra_fields: Option<&serde_json::Value>,
 ) -> Result<(), AppError> {
-    let universe_root = {
+    let (universe_root, source_co_edit) = {
         let storage = state.core.storage.lock();
         let universe = storage
             .get_universe(universe_key)
             .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", universe_key)))?;
-        // Reject event-bus-backed universes.
-        crate::service::EntryService::check_not_event_bus(
+        // CO-383/CO-413: reject read-only event-bus universes; accept bidirectional ones.
+        crate::service::EntryService::check_write_allowed(
             universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
             universe.source_url.clone(),
         )?;
-        storage.universe_root(universe_key)
+        let source_co_edit = crate::service::EntryService::is_bidirectional_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+        );
+        (storage.universe_root(universe_key), source_co_edit)
     };
 
     let uc = {
@@ -153,6 +158,16 @@ fn apply_status_transition(
     index
         .upsert_entry(universe_key, &entry)
         .map_err(|e| AppError::Internal(e.to_string()))?;
+
+    // CO-413: stamp the row as a CO-origin edit on a bidirectional universe so
+    // it is distinguishable from a `yggdrasil-live` inbound write.
+    if source_co_edit {
+        state
+            .core
+            .storage
+            .lock()
+            .stamp_entry_source_marker(universe_key, entry_path, "co-edit");
+    }
 
     // Invalidate manifest cache if needed.
     state.index.cache.invalidate_universe(universe_key);

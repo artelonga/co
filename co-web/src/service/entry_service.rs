@@ -47,15 +47,24 @@ impl EntryService {
         }
     }
 
-    /// Reject writes on event-bus-backed universes.
+    /// Decide whether a write is allowed on a (possibly event-bus-backed) universe.
     ///
     /// CO-383: universes backed by an event bus (e.g. Yggdrasil notes) are
-    /// read-only from the CO API side.
-    pub fn check_not_event_bus(
+    /// read-only from the CO API side by default.
+    ///
+    /// CO-413: an event-bus universe explicitly marked `source_mode =
+    /// 'bidirectional'` becomes writable — CO accepts the edit and re-emits it to
+    /// the federated bus as a CO-origin edit. Only the read-only case (event-bus
+    /// **and** not bidirectional) is rejected; every non-event-bus universe and
+    /// every bidirectional one passes.
+    pub fn check_write_allowed(
         source_kind: Option<&str>,
+        source_mode: Option<&str>,
         source_url: Option<String>,
     ) -> Result<(), AppError> {
-        if source_kind == Some("event-bus") {
+        if source_kind == Some("event-bus")
+            && !Self::is_bidirectional_event_bus(source_kind, source_mode)
+        {
             Err(AppError::ReadOnlyUniverse {
                 source_kind: source_kind.unwrap_or_default().to_string(),
                 source_url,
@@ -63,6 +72,17 @@ impl EntryService {
         } else {
             Ok(())
         }
+    }
+
+    /// CO-413: `true` when writes to this universe must be re-emitted to the
+    /// federated bus as CO-origin edits — i.e. an `event-bus` universe in
+    /// `bidirectional` mode. Drives both the write gate (above) and the
+    /// `source = co-edit` marker on the re-emitted events / entry rows.
+    pub fn is_bidirectional_event_bus(
+        source_kind: Option<&str>,
+        source_mode: Option<&str>,
+    ) -> bool {
+        source_kind == Some("event-bus") && source_mode == Some("bidirectional")
     }
 
     /// Validate frontmatter against the universe manifest's content-type schema.
@@ -247,15 +267,41 @@ mod tests {
     }
 
     #[test]
-    fn event_bus_universe_is_rejected() {
-        let err = EntryService::check_not_event_bus(Some("event-bus"), None).unwrap_err();
+    fn read_only_event_bus_universe_is_rejected() {
+        // CO-413: event-bus with no source_mode (pre-v83) → read-only → rejected.
+        let err = EntryService::check_write_allowed(Some("event-bus"), None, None).unwrap_err();
+        assert!(matches!(err, AppError::ReadOnlyUniverse { .. }));
+        // Explicit read-only mode is likewise rejected.
+        let err = EntryService::check_write_allowed(Some("event-bus"), Some("read-only"), None)
+            .unwrap_err();
         assert!(matches!(err, AppError::ReadOnlyUniverse { .. }));
     }
 
     #[test]
+    fn bidirectional_event_bus_universe_is_accepted() {
+        // CO-413: event-bus marked bidirectional accepts writes (no 403).
+        assert!(
+            EntryService::check_write_allowed(Some("event-bus"), Some("bidirectional"), None)
+                .is_ok()
+        );
+        assert!(EntryService::is_bidirectional_event_bus(
+            Some("event-bus"),
+            Some("bidirectional")
+        ));
+        // A non-event-bus universe is never "bidirectional event-bus", even if
+        // someone mislabels its mode.
+        assert!(!EntryService::is_bidirectional_event_bus(
+            Some("local"),
+            Some("bidirectional")
+        ));
+    }
+
+    #[test]
     fn non_event_bus_universe_is_accepted() {
-        assert!(EntryService::check_not_event_bus(None, None).is_ok());
-        assert!(EntryService::check_not_event_bus(Some("local"), None).is_ok());
+        assert!(EntryService::check_write_allowed(None, None, None).is_ok());
+        assert!(EntryService::check_write_allowed(Some("local"), None, None).is_ok());
+        // source_mode on a non-event-bus universe is irrelevant.
+        assert!(EntryService::check_write_allowed(Some("local"), Some("read-only"), None).is_ok());
     }
 
     #[test]

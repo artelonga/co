@@ -89,6 +89,7 @@ impl Storage {
             source_kind: None,
             source_url: None,
             source_last_event_at: None,
+            source_mode: None,
         })
     }
 
@@ -124,6 +125,7 @@ impl Storage {
                         source_kind: None,
                         source_url: None,
                         source_last_event_at: None,
+                        source_mode: None,
                     })
                 },
             )
@@ -153,6 +155,19 @@ impl Storage {
             universe.source_url = su;
             universe.source_last_event_at = sla;
         }
+        // CO-413: source_mode (v83 column). Queried separately from the v68
+        // columns so a pre-v83 DB (column absent) degrades to `None` — read-only
+        // — WITHOUT also nulling source_kind/source_url and accidentally opening
+        // the write gate on yggdrasil.
+        universe.source_mode = self
+            .conn
+            .query_row(
+                "SELECT source_mode FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
         Some(universe)
     }
 
@@ -178,6 +193,36 @@ impl Storage {
             params![ts, key],
         ) {
             tracing::warn!(universe_key = %key, error = %e, "touch_universe_last_event_at failed");
+        }
+    }
+
+    /// CO-413: stamp the `source_marker` diagnostic column on a single entry in
+    /// a per-universe DB, recording which channel last wrote it. Used after a CO
+    /// API/editor write to a bidirectional event-bus universe (`'co-edit'`) so
+    /// the row is distinguishable from a `'yggdrasil-live'` inbound write. Best
+    /// effort — a failure is logged, never propagated (the write already
+    /// succeeded; the marker is observability only).
+    pub fn stamp_entry_source_marker(&self, universe_key: &str, path: &str, marker: &str) {
+        let uc = self.universe_conn(universe_key);
+        match uc.lock() {
+            Ok(conn) => {
+                if let Err(e) = conn.execute(
+                    "UPDATE entries SET source_marker = ?1 \
+                     WHERE universe_key = ?2 AND path = ?3",
+                    params![marker, universe_key, path],
+                ) {
+                    tracing::warn!(
+                        universe_key = %universe_key, path = %path, error = %e,
+                        "stamp_entry_source_marker failed"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    universe_key = %universe_key, path = %path, error = %e,
+                    "stamp_entry_source_marker: universe conn poisoned"
+                );
+            }
         }
     }
 
@@ -273,6 +318,7 @@ impl Storage {
                     source_kind: None,
                     source_url: None,
                     source_last_event_at: None,
+                    source_mode: None,
                 })
             })
             .expect("Failed to list universes for user")
@@ -446,6 +492,7 @@ impl Storage {
                 source_kind: None,
                 source_url: None,
                 source_last_event_at: None,
+                source_mode: None,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))
