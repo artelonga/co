@@ -1135,6 +1135,53 @@ impl Storage {
         );
     }
 
+    /// CO-401: seed synthetic funnel/lead fixture rows for the staging suite.
+    ///
+    /// The acquisition-funnel report tests precondition on leads spread across
+    /// the qualify pipeline (`new` → `triaged` → `in_progress` → `closed_won`).
+    /// Every row is flagged `synthetic = 1` so `query_funnel_steps` excludes
+    /// them from the real rollup — staging exercises the report machinery
+    /// without the fixtures distorting the numbers an operator reads.
+    ///
+    /// Idempotent: all synthetic rows are cleared and re-inserted on each boot,
+    /// so the fixture set is deterministic regardless of prior runs. Only ever
+    /// touches `synthetic = 1` rows — real leads are never deleted.
+    pub fn seed_staging_funnel_fixtures(&mut self) {
+        let now = Utc::now().to_rfc3339();
+
+        // Clear prior synthetic rows so the fixture set is deterministic. The
+        // `synthetic = 1` guard means a real lead is never collateral.
+        let _ = self
+            .conn
+            .execute("DELETE FROM leads WHERE synthetic = 1", []);
+
+        // (email, status) across the qualify pipeline so each funnel step has
+        // data. `closed_won`/`closed_lost`/`in_progress`/`triaged` count toward
+        // the "qualify" step; `new` only toward "capture".
+        let leads: &[(&str, &str)] = &[
+            ("funnel-new-1@staging.fixture", "new"),
+            ("funnel-new-2@staging.fixture", "new"),
+            ("funnel-triaged-1@staging.fixture", "triaged"),
+            ("funnel-progress-1@staging.fixture", "in_progress"),
+            ("funnel-won-1@staging.fixture", "closed_won"),
+            ("funnel-lost-1@staging.fixture", "closed_lost"),
+        ];
+
+        for &(email, status) in leads {
+            let _ = self.conn.execute(
+                "INSERT INTO leads \
+                 (created_at, updated_at, email, mensagem, status, priority, synthetic) \
+                 VALUES (?1, ?1, ?2, 'Staging funnel fixture', ?3, 'normal', 1)",
+                rusqlite::params![now, email, status],
+            );
+        }
+
+        tracing::info!(
+            "CO-401: staging funnel fixtures seeded ({} synthetic leads, excluded from analytics)",
+            leads.len()
+        );
+    }
+
     /// CO-379: delete `u-test-*` universe rows (and their directories) that are
     /// older than `max_age_days`, retaining the most recent `keep_count` rows for
     /// forensic inspection. Returns the number of universes deleted.
@@ -2492,6 +2539,127 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 6, "idempotent: exactly 6 fixture rows");
+    }
+
+    // CO-401: synthetic funnel/lead fixtures
+    #[test]
+    fn test_seed_staging_funnel_fixtures_inserts_synthetic_leads() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_staging_funnel_fixtures();
+
+        let synthetic: i64 = storage
+            .conn()
+            .query_row("SELECT COUNT(*) FROM leads WHERE synthetic = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(synthetic, 6, "all 6 fixture leads marked synthetic");
+
+        let real: i64 = storage
+            .conn()
+            .query_row("SELECT COUNT(*) FROM leads WHERE synthetic = 0", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(real, 0, "fixtures never write a non-synthetic lead");
+    }
+
+    #[test]
+    fn test_seed_staging_funnel_fixtures_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        storage.seed_staging_funnel_fixtures();
+        storage.seed_staging_funnel_fixtures(); // second run must not duplicate
+
+        let count: i64 = storage
+            .conn()
+            .query_row("SELECT COUNT(*) FROM leads WHERE synthetic = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(count, 6, "idempotent: exactly 6 synthetic leads");
+    }
+
+    #[test]
+    fn test_seed_staging_funnel_fixtures_preserves_real_leads() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        // A real (non-synthetic) lead must survive a fixture re-seed.
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO leads (created_at, updated_at, email, mensagem, status, synthetic) \
+                 VALUES ('2026-06-01T00:00:00Z', '2026-06-01T00:00:00Z', 'real@user.com', '', 'new', 0)",
+                [],
+            )
+            .unwrap();
+        storage.seed_staging_funnel_fixtures();
+
+        let real: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM leads WHERE email = 'real@user.com'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            real, 1,
+            "real leads are never deleted by the fixture seeder"
+        );
+    }
+
+    // CO-401: scoped staging admin token
+    #[test]
+    fn test_seed_staging_admin_token_installs_usable_token() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(data_dir.path().to_str().unwrap());
+        let raw = "co_staging_fixture_token_value";
+        storage.seed_staging_admin_token(raw).unwrap();
+
+        // The raw token resolves to the scoped admin user.
+        let tok = storage.get_api_token_by_value(raw).unwrap();
+        let tok = tok.expect("token must be resolvable by its raw value");
+        assert_eq!(tok.user_id, "staging-admin");
+        assert_eq!(tok.name, "CO_STAGING_ADMIN_TOKEN");
+
+        // The user is admin-tier.
+        let tier: String = storage
+            .conn()
+            .query_row(
+                "SELECT tier FROM users WHERE id = 'staging-admin'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tier, "admin");
+    }
+
+    #[test]
+    fn test_seed_staging_admin_token_is_idempotent() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(data_dir.path().to_str().unwrap());
+        let raw = "co_staging_fixture_token_value";
+        storage.seed_staging_admin_token(raw).unwrap();
+        storage.seed_staging_admin_token(raw).unwrap(); // second boot
+
+        let count: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM api_tokens WHERE name = 'CO_STAGING_ADMIN_TOKEN'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1, "idempotent: token installed exactly once");
+    }
+
+    #[test]
+    fn test_seed_staging_admin_token_rejects_empty() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(data_dir.path().to_str().unwrap());
+        assert!(storage.seed_staging_admin_token("   ").is_err());
     }
 
     // CO-379: test namespace sweep

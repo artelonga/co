@@ -95,11 +95,16 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       # Step 9: E2E staging suite
+      # CO-401: CO_STAGING_ADMIN_TOKEN unlocks the deep (authenticated) staging
+      # tests that otherwise skip — the same secret the boot seeder installs as a
+      # scoped admin API token (docs/cross-env-auth.md). Without it the suite
+      # falls back to anonymous-only coverage (3949 skips).
       - name: Run Playwright E2E against staging
         working-directory: co-web
         run: npx playwright test --project=chromium-desktop
         env:
           BASE_URL: ${{ env.STAGING_URL }}
+          CO_STAGING_ADMIN_TOKEN: ${{ secrets.CO_STAGING_ADMIN_TOKEN }}
           CI: "true"
         continue-on-error: true  # results captured in artifact; release-gate evaluates
 

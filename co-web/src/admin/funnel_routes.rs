@@ -181,7 +181,8 @@ pub fn query_funnel_steps(conn: &Connection, start: &str, end: &str) -> [i64; 8]
                WHERE email IS NOT NULL AND date(created_at) BETWEEN ?1 AND ?2 \
                UNION \
                SELECT lower(email) AS email FROM leads \
-               WHERE email IS NOT NULL AND date(created_at) BETWEEN ?1 AND ?2 \
+               WHERE email IS NOT NULL AND synthetic = 0 \
+                 AND date(created_at) BETWEEN ?1 AND ?2 \
              )",
             rusqlite::params![start, end],
             |r| r.get(0),
@@ -193,6 +194,7 @@ pub fn query_funnel_steps(conn: &Connection, start: &str, end: &str) -> [i64; 8]
         .query_row(
             "SELECT COUNT(*) FROM leads \
              WHERE status IN ('triaged','in_progress','closed_won','closed_lost') \
+               AND synthetic = 0 \
                AND date(updated_at) BETWEEN ?1 AND ?2",
             rusqlite::params![start, end],
             |r| r.get(0),
@@ -554,7 +556,8 @@ mod tests {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 email TEXT,
-                status TEXT NOT NULL DEFAULT 'new'
+                status TEXT NOT NULL DEFAULT 'new',
+                synthetic INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE universes (
                 key TEXT PRIMARY KEY,
@@ -608,6 +611,42 @@ mod tests {
             rusqlite::params![format!("{day} 09:00:00"), email, status],
         )
         .unwrap();
+    }
+
+    fn insert_synthetic_lead(conn: &Connection, email: &str, status: &str, day: &str) {
+        conn.execute(
+            "INSERT INTO leads (created_at, updated_at, email, status, synthetic) \
+             VALUES (?1, ?1, ?2, ?3, 1)",
+            rusqlite::params![format!("{day} 09:00:00"), email, status],
+        )
+        .unwrap();
+    }
+
+    /// CO-401: synthetic (staging fixture) leads must never reach the
+    /// acquisition-funnel rollup — they would inflate both the capture (step 4)
+    /// and qualify (step 5) counts an operator reads.
+    #[test]
+    fn test_synthetic_leads_excluded_from_funnel() {
+        let conn = create_test_db();
+        // One real qualified lead + one synthetic qualified lead, same window.
+        insert_lead(&conn, "real@x.com", "triaged", "2026-06-01");
+        insert_synthetic_lead(
+            &conn,
+            "fixture@staging.fixture",
+            "in_progress",
+            "2026-06-01",
+        );
+        let r = query_acquisition_funnel(
+            &conn,
+            "custom",
+            Some("2026-06-01"),
+            Some("2026-06-01"),
+            "none",
+        );
+        // Capture (step 4): only the real lead's email counts.
+        assert_eq!(r.steps[3].count, 1, "synthetic lead excluded from capture");
+        // Qualify (step 5): only the real triaged lead counts.
+        assert_eq!(r.steps[4].count, 1, "synthetic lead excluded from qualify");
     }
 
     #[test]

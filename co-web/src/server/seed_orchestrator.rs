@@ -417,15 +417,39 @@ pub fn run_co142_refresh(config: &WebConfig) {
     }
 }
 
-/// CO-379: seed stable fixture universes for the staging environment.
+/// CO-379 / CO-401: seed stable fixtures for the staging environment.
 ///
-/// Only runs when `CO_ENV=staging`. Idempotent — safe to call on every boot.
+/// Only runs when `CO_ENV=staging` — the gate that keeps production untouched
+/// (asserted by `seed_staging_fixtures_never_runs_in_prod`). Idempotent — safe
+/// to call on every boot.
+///
+/// Seeds, in order:
+/// 1. recursion-a → recursion-ab → recursion-abc universe chain + workspace
+///    fixtures (CO-379).
+/// 2. Synthetic funnel/lead rows for the acquisition-funnel suite, flagged
+///    `synthetic = 1` so analytics rollups exclude them (CO-401).
+/// 3. The `CO_STAGING_ADMIN_TOKEN` scoped admin API token, when the secret is
+///    present, so the deep staging suite can authenticate (CO-401).
 pub fn seed_staging_fixtures(config: &WebConfig) {
     if !config.is_staging() {
         return;
     }
     let mut storage = Storage::new(&config.data_dir);
     storage.seed_staging_fixture_universes();
+    storage.seed_staging_funnel_fixtures();
+
+    // CO-401: install the scoped admin token from the Fly secret (same value is
+    // set as a GitHub Actions secret so the suite's Bearer header matches).
+    if let Some(token) = crate::infra::secrets::global().get("CO_STAGING_ADMIN_TOKEN") {
+        match storage.seed_staging_admin_token(&token) {
+            Ok(()) => {}
+            Err(e) => tracing::error!("CO-401: failed to install staging admin token: {e}"),
+        }
+    } else {
+        tracing::warn!(
+            "CO-401: CO_STAGING_ADMIN_TOKEN not set — deep staging suite will skip authed tests"
+        );
+    }
 }
 
 /// CO-85: seed admin user from env (idempotent, runs in any env).
@@ -579,4 +603,74 @@ pub fn backfill_chat_push(config: &WebConfig) {
     }
     // CO-201: create push_subscriptions table if not yet present.
     chat_storage.ensure_push_subscriptions_table();
+}
+
+#[cfg(test)]
+mod staging_gate_tests {
+    use super::*;
+
+    /// Minimal `WebConfig` pointing at `data_dir`, scoped to `co_env`.
+    fn config_for(co_env: &str, data_dir: &str) -> WebConfig {
+        WebConfig {
+            port: 0,
+            data_dir: data_dir.to_string(),
+            static_dir: String::new(),
+            default_variant: "a".into(),
+            experiments: false,
+            plugins_dir: String::new(),
+            game_db_path: None,
+            universo_dir: String::new(),
+            gestao_github_admins: vec![],
+            universe_key: None,
+            co_env: co_env.to_string(),
+            wae_endpoint: None,
+            wae_api_key: None,
+            cookie_domain: None,
+            quilombo_legacy_login: true,
+            bypass_rate_limit: false,
+        }
+    }
+
+    fn fixtures_present(data_dir: &str) -> bool {
+        let storage = Storage::new(data_dir);
+        storage.get_universe("recursion-a").is_some()
+    }
+
+    /// CO-401: the staging fixtures must NEVER seed in production — the env gate
+    /// is the only thing keeping recursion/funnel fixtures off the real DB.
+    #[test]
+    fn seed_staging_fixtures_never_runs_in_prod() {
+        for env in ["prod", "production", "uat", "dev", "test", ""] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().to_str().unwrap();
+            seed_staging_fixtures(&config_for(env, path));
+            assert!(
+                !fixtures_present(path),
+                "staging fixtures must not seed when CO_ENV={env:?}"
+            );
+        }
+    }
+
+    /// CO-401: the same call DOES seed when `CO_ENV=staging` — proves the gate
+    /// is the env check, not a dead code path.
+    #[test]
+    fn seed_staging_fixtures_runs_in_staging() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_str().unwrap();
+        seed_staging_fixtures(&config_for("staging", path));
+        assert!(
+            fixtures_present(path),
+            "staging fixtures must seed when CO_ENV=staging"
+        );
+
+        // …and the synthetic funnel leads land too.
+        let storage = Storage::new(path);
+        let synthetic: i64 = storage
+            .conn()
+            .query_row("SELECT COUNT(*) FROM leads WHERE synthetic = 1", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(synthetic, 6, "synthetic funnel fixtures seeded in staging");
+    }
 }

@@ -99,6 +99,47 @@ Both tests passing confirms:
 - Admin password hash is identical in both seeds.
 - Cross-env token validation works bi-directionally.
 
+## `CO_STAGING_ADMIN_TOKEN` — scoped suite credential (CO-401)
+
+The deep staging suite (CO-374) authenticates as an admin to exercise scenarios
+that anonymous requests can't reach. Rather than ship a password into CI, a
+**scoped API token** bridges the two sides:
+
+- **Server side** — on every staging boot, the seeder
+  (`Storage::seed_staging_admin_token`, gated on `CO_ENV=staging`) reads the
+  `CO_STAGING_ADMIN_TOKEN` Fly secret and installs its SHA-256 hash as an
+  `api_tokens` row owned by the dedicated `staging-admin` user (tier `admin`).
+  Only the hash is stored — never the plaintext. Idempotent across boots.
+- **CI side** — the same value is a GitHub Actions secret. `staging-suite.yml`
+  passes it to Playwright as `CO_STAGING_ADMIN_TOKEN`; the suite sends it as
+  `Authorization: Bearer <token>`. The Bearer header hashes to the row the
+  seeder installed, so the request authenticates as `staging-admin`.
+
+The token is scoped to the synthetic `staging-admin` user and only ever exists
+in the staging environment (the boot gate refuses to seed it elsewhere). It is
+**not** a prod credential and never validates against production data.
+
+### Generate / rotate
+
+```bash
+# 1. Mint a fresh token value (must start with co_ to match the token convention)
+NEW="co_$(openssl rand -hex 32)"
+
+# 2. Set it on the staging Fly app (triggers a restart → seeder installs the hash)
+flyctl secrets set CO_STAGING_ADMIN_TOKEN="$NEW" -a co-artelonga-staging
+
+# 3. Mirror the SAME value into the GitHub Actions secret used by the suite
+gh secret set CO_STAGING_ADMIN_TOKEN -b "$NEW" --repo institutional-pointset/co
+
+# 4. (optional) Revoke the previous token row once the new one is live
+flyctl ssh console -a co-artelonga-staging \
+  -C "sqlite3 /data/co.db \"DELETE FROM api_tokens WHERE name='CO_STAGING_ADMIN_TOKEN' AND token_prefix <> substr('$NEW',1,11)\""
+```
+
+Both sides must hold the identical value — a drift between the Fly secret and
+the GitHub secret makes the suite fall back to anonymous-only coverage (the
+authed tests skip rather than fail).
+
 ## Risk model
 
 | Risk | Mitigation |
@@ -149,3 +190,4 @@ staging).
 | `JWT_SECRET` | Quarterly or on suspected compromise | [`docs/jwt-rotation.md`](jwt-rotation.md) |
 | `CO_SEED_ADMIN_PASSWORD_HASH` | On password change | Re-hash + update both apps |
 | `GOOGLE_CLIENT_SECRET` | Annually or on compromise | Google Console + update both apps |
+| `CO_STAGING_ADMIN_TOKEN` | Quarterly or on suspected compromise | Regenerate + set Fly **and** GitHub secret (see [generate / rotate](#generate--rotate)) |

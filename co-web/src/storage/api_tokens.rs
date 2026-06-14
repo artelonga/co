@@ -1,5 +1,5 @@
 use chrono::Utc;
-use rusqlite::params;
+use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
 use super::Storage;
@@ -98,6 +98,82 @@ impl Storage {
             expires_at,
             last_used_at: None,
         })
+    }
+
+    /// CO-401: install a known, externally-supplied API token for the staging
+    /// admin so CI can authenticate the deep staging suite.
+    ///
+    /// Unlike [`create_api_token`], the raw token value is **provided** (from the
+    /// `CO_STAGING_ADMIN_TOKEN` Fly secret) rather than generated — the same
+    /// secret is set in GitHub Actions so the workflow's `Authorization: Bearer`
+    /// header matches a row here. Only the SHA-256 hash is persisted.
+    ///
+    /// Steps (all idempotent — safe to run on every staging boot):
+    /// 1. Ensure a dedicated `staging-admin` user (tier `admin`) exists.
+    /// 2. Install the token's hash if it isn't already present.
+    ///
+    /// Refuses empty tokens. Scoped to the `staging-admin` user; never seeded
+    /// outside staging (the caller gates on `WebConfig::is_staging()`).
+    pub fn seed_staging_admin_token(&self, raw_token: &str) -> anyhow::Result<()> {
+        const STAGING_ADMIN_ID: &str = "staging-admin";
+        const STAGING_ADMIN_EMAIL: &str = "staging-admin@staging.local";
+        const TOKEN_NAME: &str = "CO_STAGING_ADMIN_TOKEN";
+
+        let raw_token = raw_token.trim();
+        if raw_token.is_empty() {
+            anyhow::bail!("seed_staging_admin_token: empty token");
+        }
+
+        let now = Utc::now();
+        let now_str = now.to_rfc3339();
+
+        // 1. Ensure the scoped admin user. INSERT OR IGNORE keeps it idempotent
+        //    and never clobbers a real user that happens to share the slug.
+        self.conn.execute(
+            "INSERT OR IGNORE INTO users (id, email, display_name, tier, created_at) \
+             VALUES (?1, ?2, 'Staging Admin', 'admin', ?3)",
+            params![STAGING_ADMIN_ID, STAGING_ADMIN_EMAIL, now_str],
+        )?;
+
+        // 2. Install the token hash if absent (idempotent across boots — the
+        //    same secret hashes to the same value every time).
+        let token_hash = hash_token(raw_token);
+        let already: bool = self
+            .conn
+            .query_row(
+                "SELECT 1 FROM api_tokens WHERE token_hash = ?1",
+                params![token_hash],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+        if already {
+            return Ok(());
+        }
+
+        let id = nanoid::nanoid!(21);
+        let token_prefix: String = raw_token.chars().take(11).collect();
+        let token_placeholder = format!("hashed:{id}");
+        // Long-lived (1 year) — this is an infrastructure credential rotated on
+        // a schedule (docs/cross-env-auth.md), not a user session token.
+        let expires_at = now + chrono::Duration::days(365);
+        self.conn.execute(
+            "INSERT INTO api_tokens \
+             (id, user_id, name, token, token_hash, token_prefix, created_at, expires_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                id,
+                STAGING_ADMIN_ID,
+                TOKEN_NAME,
+                token_placeholder,
+                token_hash,
+                token_prefix,
+                now_str,
+                expires_at.to_rfc3339(),
+            ],
+        )?;
+        tracing::info!("CO-401: staging admin token installed for {STAGING_ADMIN_ID}");
+        Ok(())
     }
 
     /// List API tokens for a user (raw token never returned).
