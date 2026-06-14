@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-459",
+  "title": "Local backup + junk sweep + retention optimization — reconstructable snapshot, remove unnecessary, scale-ready",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-459.md",
+  "branch": "feat/CO-459-local-backup-junk-sweep-retention-optimi",
+  "merge_sha": "418ba4f31493a3f8d603753a6b182bbb9f0e46b7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/267",
+    "number": 267
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T19:53:32Z",
+  "files_changed": 11,
+  "lines_added": 1530,
+  "lines_removed": 4,
+  "labels": [
+    "type:feat",
+    "module:platform",
+    "ops",
+    "storage"
+  ],
+  "changelog_entry": "## CO-459 — Local backup + junk sweep + retention optimization — reconstructable snapshot, remove unnecessary, scale-ready\n\nLocal-first backup and `/data` reclamation that stays reconstructable and is\nready to scale to StaaS.\n\n- **Reconstructable local snapshot** — `POST /api/v1/admin/backup` (admin-gated)\n  writes `/data/backups/<ts>/` with `meta.db` and every per-universe `data.db`\n  copied via SQLite `VACUUM INTO` (committed/consistent, not a hot WAL copy) plus\n  byte-copied blobs, and a `manifest.json` carrying a **sha256 + byte count per\n  file**. The endpoint re-hashes the directory against the manifest and returns\n  `verified: true|false` — proof the snapshot can be reconstructed.\n- **Junk sweep** — `POST /api/v1/admin/sweep`, **dry-run by default**\n  (`?apply=true` to delete). Identifies expired anonymous clones, stale\n  temp/lock files, rotated logs, orphan blobs (`assets.refcount <= 0`), and\n  snapshots beyond retention. Reports `reclaimable_bytes` before touching\n  anything; on apply, every removal re-checks its owner/refcount/retention guard\n  and is logged (no silent deletes). Nothing is deleted without a reference\n  check.\n- **Retention (count + space)** — directory snapshots are pruned by the same\n  CO-405 `select_prunable` policy (newest always kept; count / cumulative-size /\n  age caps), reused via `snapshot_dir::prunable_local_snapshots`. Parametrized\n  by the existing `CO_BACKUP_RETAIN_*` env knobs plus `CO_SWEEP_*`. The math and\n  the S3/StaaS handoff point are documented in\n  `docs/architecture/backup-retention.md`.\n\nNew routes added to `docs/architecture/api-catalog.md`; `openapi.yaml`\nregenerated (no drift). No schema migration — reuses existing tables\n(`universes`, `assets`, `entries`, `universe_members`).\n\n### Why\n\n`/data` was inching toward full again (the 2026-06-11/06-13 outages), and the\nexisting CO-365 tarball backup is a hot copy with a single whole-archive hash —\nnot per-file verifiable. This adds a consistent, verifiable, reconstructable\nsnapshot and a guarded sweep to reclaim space, with the retention logic shaped\nso the same code carries over to S3/StaaS (CO-458/CO-460) — \"local backup for\nnow.\"",
+  "summary": "Contexto Precisamos de um **backup local confiável** + uma **varredura de lixo** que reduza o `/data` sem perder a capacidade de **reconstruir**, e que escale quando virarmos StaaS. Reusa o guard/rete",
+  "co_auto_version": "0.1.0"
+}
