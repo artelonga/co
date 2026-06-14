@@ -120,6 +120,20 @@ pub fn grants(resolved: &BTreeSet<String>, required: &str) -> bool {
     resolved.contains(required)
 }
 
+/// Capabilities that gate **admin-surface** endpoints (the `BUNDLE_ADMIN_EXTRA`
+/// set). The scoped-token check grants an admin surface on capability alone
+/// (no tier re-check), so issuance MUST refuse to mint any of these for a
+/// non-admin requester — otherwise any logged-in user could mint a
+/// `chat:read` token and read admin data, escalating past the tier gate.
+pub const ADMIN_CAPABILITIES: &[&str] = BUNDLE_ADMIN_EXTRA;
+
+/// True if `resolved` contains any admin-surface capability, i.e. minting it
+/// requires the issuer to be admin-tier. A user can never grant a capability
+/// above their own authority (least-privilege at the source).
+pub fn requires_admin_to_grant(resolved: &BTreeSet<String>) -> bool {
+    ADMIN_CAPABILITIES.iter().any(|c| resolved.contains(*c))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +218,47 @@ mod tests {
             "read must not escalate to write"
         );
         assert!(!grants(&read, "chat:read"));
+    }
+
+    /// Issuance escalation guard: minting any admin-surface capability requires
+    /// an admin issuer. The scoped check authorizes admin surfaces on capability
+    /// alone, so a non-admin minting `chat:read` would otherwise escalate.
+    #[test]
+    fn admin_capabilities_require_admin_to_grant() {
+        // Non-admin-grantable: read/write/agent bundles + their raw caps.
+        assert!(!requires_admin_to_grant(
+            &resolve_scopes(&["read".to_string()]).unwrap()
+        ));
+        assert!(!requires_admin_to_grant(
+            &resolve_scopes(&["write".to_string()]).unwrap()
+        ));
+        assert!(!requires_admin_to_grant(
+            &resolve_scopes(&["agent".to_string()]).unwrap()
+        ));
+        assert!(!requires_admin_to_grant(&set(&["telemetry:read"])));
+
+        // Every admin-surface capability trips the guard, alone or mixed in.
+        for cap in [
+            "gestao:read",
+            "funnel:read",
+            "chat:read",
+            "chat:write",
+            "deployments:read",
+        ] {
+            assert!(
+                requires_admin_to_grant(&set(&[cap])),
+                "{cap} must require admin to grant"
+            );
+        }
+        assert!(
+            requires_admin_to_grant(
+                &resolve_scopes(&["read".to_string(), "chat:read".to_string()]).unwrap()
+            ),
+            "a read bundle + one admin cap still requires admin"
+        );
+        // The `admin` bundle obviously requires admin to grant.
+        assert!(requires_admin_to_grant(
+            &resolve_scopes(&["admin".to_string()]).unwrap()
+        ));
     }
 }

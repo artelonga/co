@@ -1734,6 +1734,22 @@ pub async fn create_api_token(
             crate::auth::capabilities::resolve_scopes(&req.scopes).map_err(|invalid| {
                 AppError::BadRequest(format!("unknown capability/bundle: {}", invalid.join(", ")))
             })?;
+        // CO-448 escalation guard: a user can't grant a capability above their
+        // own authority. Admin-surface capabilities (gestao/funnel/chat/
+        // deployments) gate endpoints the scoped check authorizes on capability
+        // alone — so only an admin-tier issuer may mint them. Without this, any
+        // logged-in user could mint a `chat:read` token and read admin data.
+        if crate::auth::capabilities::requires_admin_to_grant(&resolved) {
+            let issuer_is_admin = storage
+                .get_user_by_id(&user_id.0)
+                .map(|u| u.tier == "admin")
+                .unwrap_or(false);
+            if !issuer_is_admin {
+                return Err(AppError::Forbidden(
+                    "Only an admin may mint a token with admin-surface capabilities".into(),
+                ));
+            }
+        }
         storage
             .create_api_token_with_scopes(&user_id.0, &req.name, &resolved)
             .map_err(|e| AppError::Internal(e.to_string()))?
