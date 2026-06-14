@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-460",
+  "title": "StaaS partner model — design doc for multi-tenant storage-as-a-service (namespaces, quota, metering, partner backends)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-460.md",
+  "branch": "feat/CO-460-staas-partner-model-design-doc-for-multi",
+  "merge_sha": "813a89cb310200e29d4e848ffef52899b3a0b59f",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/262",
+    "number": 262
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T19:52:15Z",
+  "files_changed": 4,
+  "lines_added": 364,
+  "lines_removed": 1,
+  "labels": [
+    "type:docs",
+    "staas",
+    "platform",
+    "design"
+  ],
+  "changelog_entry": "## CO-460 — StaaS partner model — design doc for multi-tenant storage-as-a-service (namespaces, quota, metering, partner backends)\n\nAdded `docs/architecture/staas-partners.md` — the written contract for selling\nstorage as a service to partners. Design only: no code, no migration, no new route.\n\nIt covers the eight required points, each tied to real artifacts in the tree:\nmulti-tenant namespaces (key-prefix isolation, mapping to `blob_refs`/CO-458 via a\n`namespaces` + `blob_namespace` join), partner API shape over the CO-456 envelope\n(`PUT/GET/HEAD/DELETE/LIST` + pagination + size limits), least-privilege auth with\nnew `storage:read`/`storage:write` capabilities and namespace binding (CO-448\n`Scoped<C>`), metering as Σ(`blob_refs.size`×Δt)+ops sourced from CO-453 telemetry\nwith a `staas.usage.window_closed` billing hook, quota/rate-limit via CO-80\n`TierLimits`/`RateLimiter`, bring-your-own partner S3 backends behind the CO-458\n`StorageBackend` trait (trust boundary spelled out), per-namespace durability via\nCO-459/CO-81 backup, and a CO-461..CO-467 implementation roadmap with dependencies\nand per-task migrations. Includes a mermaid flow diagram (partner → token →\nnamespace → backend → metering) and links the doc from the existing\n`docs/architecture/COMPOSABILITY.md` seam index.\n\n### Why\nThe owner decided to \"scale to partners later — serve storage as a service.\" This\nis the architecture slice so the implementation tasks have a written contract\n(partners, namespaces, auth, metering, billing) to follow instead of inventing it\nad-hoc, and so the architecture can be approved before spending Opus on impl.",
+  "summary": "Contexto Vamos **vender storage as a service** a parceiros. Antes de implementar, precisamos do **desenho** que amarra as peças que já existem/estão saindo: o `StorageBackend` (CO-458), escopos de tok",
+  "co_auto_version": "0.1.0"
+}
