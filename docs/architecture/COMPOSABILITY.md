@@ -52,3 +52,10 @@ the defaults, your `impl` joins them, no edit to the boot block.
   finish is incremental (no consumer impact; the seams above are stable).
 - **Raw SQL in content handlers** (workspace/assets/vault/op_log/template) →
   **CO-441** (move to storage methods; security/auth/eda already done in CO-433).
+
+## 5. Productizing the seams
+
+- **StaaS — storage as a service for partners** → [`staas-partners.md`](staas-partners.md)
+  (CO-460): multi-tenant design that productizes the **Per-universe storage** and
+  **Blob store** seams above (`StorageBackend`/`BlobStore`) into partner namespaces,
+  with capability-scoped auth (CO-448), metering (CO-453), and quota (CO-80).
