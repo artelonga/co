@@ -348,6 +348,8 @@
 
 <div id="toast"></div>
 
+<!-- CO-353: realtime presence + collaborative canvas client -->
+<script src="/shared/sala-realtime.js"></script>
 <script>
 (function () {
   'use strict';
@@ -422,6 +424,8 @@
   var linkMode = false;       // true when btn-link is active
   var linkFrom = null;        // item selected as link source
   var isLoggedIn = false;
+  var realtime = null;        // CO-353: SalaRealtime client (null until connected)
+  var lastCursorWorld = null; // throttle source for cursor broadcast
 
   function emptyLayout() {
     return { v: 2, cells: {}, notes: [], folders: [], universes: [], nodes: [], edges: [],
@@ -889,6 +893,67 @@
       else if (isUniverse(dragState.item)) drawUniverse(dragState.item, ghostRect, true);
       else drawNote(dragState.item, ghostRect, true);
     }
+
+    // CO-353: presence layer — other people's live cursors (world coords).
+    drawRemoteCursors();
+  }
+
+  // CO-353: draw each remote cursor as a small arrow + name label.
+  function drawRemoteCursors() {
+    if (!realtime) return;
+    var cursors = realtime.cursors;
+    for (var uid in cursors) {
+      if (!Object.prototype.hasOwnProperty.call(cursors, uid)) continue;
+      var c = cursors[uid];
+      var sp = w2s(c.x, c.y);
+      if (sp[0] < -40 || sp[0] > W + 40 || sp[1] < -40 || sp[1] > H + 40) continue;
+      var color = c.color || '#9ad';
+      // Arrow
+      ctx.save();
+      ctx.fillStyle = color;
+      ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sp[0], sp[1]);
+      ctx.lineTo(sp[0], sp[1] + 16);
+      ctx.lineTo(sp[0] + 4.5, sp[1] + 12);
+      ctx.lineTo(sp[0] + 11, sp[1] + 11);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Name label
+      var label = c.name || 'Visitante';
+      ctx.font = '600 11px ui-sans-serif,system-ui,sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      var tw = ctx.measureText(label).width;
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.9;
+      roundRect(sp[0] + 13, sp[1] + 8, tw + 10, 16, 4);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#0b0f0d';
+      ctx.fillText(label, sp[0] + 18, sp[1] + 16);
+      ctx.restore();
+    }
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  function hasRemoteCursors() {
+    if (!realtime) return false;
+    for (var k in realtime.cursors) {
+      if (Object.prototype.hasOwnProperty.call(realtime.cursors, k)) return true;
+    }
+    return false;
   }
 
   // ── RAF loop (dirty-flag: redraw only on interaction/animation) ──────────
@@ -896,7 +961,8 @@
   var needsDraw = true;
   function invalidate() { needsDraw = true; }
   function loop() {
-    if (needsDraw || camTarget || dragState) {
+    // CO-353: keep redrawing while remote cursors are present so they animate.
+    if (needsDraw || camTarget || dragState || hasRemoteCursors()) {
       draw();
       needsDraw = !!(camTarget || dragState);
     }
@@ -1167,6 +1233,11 @@
 
   canvas.addEventListener('pointermove', function (e) {
     var p = canvasPos(e);
+    // CO-353: broadcast our cursor (world coords) — the client throttles to ~20 Hz.
+    if (realtime) {
+      var cw = s2w(p[0], p[1]);
+      realtime.sendCursor(cw[0], cw[1]);
+    }
     if (downPos && Math.hypot(p[0] - downPos[0], p[1] - downPos[1]) > 5) {
       moved = true;
     }
@@ -1238,6 +1309,10 @@
           it.x = spot[0]; it.y = spot[1];
         } else {
           it.x = gx; it.y = gy;
+        }
+        // CO-353: optimistic — local move already applied above; tell the room.
+        if (realtime && it.folder == null) {
+          realtime.sendNodeMove(it.id, it.x, it.y, newId('op'));
         }
         updateStatus(); scheduleSave();
       } else {
@@ -1829,7 +1904,51 @@
         applyReadOnly();
       }
       loadState();
+      initRealtime();
     });
+  }
+
+  // CO-353: open the realtime socket and wire presence + remote ops.
+  function initRealtime() {
+    if (!universeKey || typeof SalaRealtime !== 'function') return;
+    realtime = SalaRealtime({
+      universeKey: universeKey,
+      workspaceSlug: workspaceSlug,
+      onNodeMove: function (entryPath, x, y) {
+        window.__salaLastRemoteMove = { entry_path: entryPath, x: x, y: y };
+        applyRemoteMove(entryPath, x, y);
+      },
+      onNodeAdd: function (entryPath, x, y) {
+        window.__salaLastRemoteMove = { entry_path: entryPath, x: x, y: y };
+        applyRemoteMove(entryPath, x, y);
+      },
+      onPresence: function (users) {
+        var others = users.filter(function (u) { return !u.anon; }).length +
+                     users.filter(function (u) { return u.anon; }).length;
+        if (salaStatus) {
+          salaStatus.textContent = others > 1 ? (others + ' na sala') : 'só você';
+        }
+        invalidate();
+      },
+      onStatus: function (connected) {
+        if (salaStatus && !connected) salaStatus.textContent = 'reconectando…';
+      },
+      onRevert: function () {
+        // Server rejected our op (e.g. read-only) — reload authoritative state.
+        showToast('Edição rejeitada — recarregando');
+        loadState();
+      },
+    });
+    // CO-353: expose the client for E2E presence/realtime assertions.
+    window.__salaRealtime = realtime;
+  }
+
+  // CO-353: apply a remote node move to the matching nota/pasta and redraw.
+  function applyRemoteMove(entryPath, x, y) {
+    var it = itemById(entryPath);
+    if (!it) return;
+    it.x = x; it.y = y;
+    invalidate();
   }
 
   boot();
