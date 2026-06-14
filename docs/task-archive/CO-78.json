@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-78",
+  "title": "Job queue + worker pool — doc gen, sync, indexing, changelog",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-78.md",
+  "branch": "feat/CO-78-job-queue-worker-pool-doc-gen-sync-index",
+  "merge_sha": "050137d00ba7a1ad51aff39ee41fc6e0b0147c9e",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/268",
+    "number": 268
+  },
+  "started_at": "2026-04-26T00:00:00Z",
+  "merged_at": "2026-06-14T23:12:29Z",
+  "files_changed": 10,
+  "lines_added": 1129,
+  "lines_removed": 56,
+  "labels": [
+    "jobs",
+    "queue",
+    "workers"
+  ],
+  "changelog_entry": "## CO-78 — Job queue + worker pool — doc gen, sync, indexing, changelog\n\nGeneralized the single-kind CO-72 doc-gen queue into a multi-kind, rate-limited,\nmetered job queue + worker pool so CPU-heavy non-real-time work (doc generation,\nsearch-index rebuilds, changelog regeneration, full-universe re-syncs, webhook\ndispatch, cleanup) scales off the request threads.\n\n- **Migration v088** — adds `jobs.timeout_secs` (per-job wall-time budget), the\n  composite claim index `(status, run_at, universe_key)`, and the\n  `(universe_key, kind, created_at)` rate-limit index. The base `jobs` table and\n  its other indexes already exist from v25 (CO-72); this migration is additive\n  and idempotent.\n- **Internal submit API** — `enqueue_job(universe_key, kind, payload, dedupe_key)`\n  enqueues any `JobKind` (`doc_gen`, `index_rebuild`, `changelog_regen`,\n  `sync_pull`, `webhook_dispatch`, `cleanup`). `enqueue_doc_gen` now delegates to\n  it. Content-derived `dedupe_key` makes resubmission a no-op (idempotent).\n- **Per-universe rate limiting (CO-80)** — each kind carries a per-universe\n  hourly cap; heavy kinds (`index_rebuild`, `changelog_regen`) are stricter.\n  Over-limit submits return `429 TooManyRequests`; deduped no-ops don't consume\n  budget.\n- **Per-job timeout** — default 5 min, configurable per kind via\n  `JobKind::default_timeout_secs` (stamped into `jobs.timeout_secs` at enqueue),\n  enforced by the worker's wall-time wrapper.\n- **Reliability** — workers claim the oldest pending job atomically\n  (`UPDATE … RETURNING`) in FIFO order with starvation protection; failures\n  retry with exponential backoff; 5 failures move a job to the dead-letter\n  queue. A reaper reclaims jobs whose worker died mid-run, and the dead-letter\n  queue is pruned to its 100-row cap each tick.\n- **Metrics** — `GET /metrics` exposes queue depth, running count, dead-letter\n  count, the autoscale recommendation, and per-kind success rate + p99 latency.\n- **Worker-pool autoscale** — `desired_worker_count` recommends 4–16 machines\n  scaling one per 100 backlog jobs (surfaced as `desired_workers` in `/metrics`)\n  for Fly autoscaling to consume.\n\n### Why\nAt scale, doc-gen / re-index / changelog / re-sync jobs are CPU-heavy and must\nnot block API request threads. A durable SQLite-backed queue with idempotency,\nbackoff, dead-lettering, and per-universe fairness lets these run on a dedicated,\nautoscaling worker pool without degrading API latency.",
+  "summary": "GIVEN doc generators (CO-72), changelog regeneration (CO-75), search index updates, and full-universe re-syncs are CPU-heavy non-real-time tasks that must NOT block request threads at scale, WHEN we a",
+  "co_auto_version": "0.1.0"
+}
