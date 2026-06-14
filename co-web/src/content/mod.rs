@@ -57,5 +57,7 @@ pub use vault::routes as vault_routes;
 pub use versioning::branches as branch_routes;
 pub use versioning::op_log as op_log_routes;
 pub use versioning::states as state_routes;
+pub use workspace::lobby as workspace_lobby;
 pub use workspace::routes as workspace_routes;
 pub use workspace::template_routes as workspace_template_routes;
+pub use workspace::ws as workspace_ws;

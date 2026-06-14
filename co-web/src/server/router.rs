@@ -254,6 +254,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         "/api/v1/universes/{slug}/chat/rooms/{room_slug}/ws",
         get(crate::chat::chat_ws_handler),
     );
+    // CO-353: Sala realtime canvas WebSocket — auth (or anon read-only) done in handler.
+    let sala_ws_route = Router::new().route(
+        "/ws/sala/{universe_key}/{workspace_slug}",
+        get(crate::workspace_ws::sala_ws_handler),
+    );
     // CO-329: Analytics real-time stream — auth done inside handler.
     let analytics_ws_route = crate::analytics_routes::router();
     // CO-380: Universal EDA event stream — auth/visibility enforced in handler.
@@ -393,6 +398,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(ws_route)
             .merge(sync_ws_route)
             .merge(chat_ws_route)
+            .merge(sala_ws_route)
             .merge(analytics_ws_route)
             .merge(eda_events_ws_route)
             .merge(eda_bridge_ws_route)

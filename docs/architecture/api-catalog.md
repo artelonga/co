@@ -944,6 +944,7 @@ CO-372: Sprint calendar with Definition of Done + ICS export. Public endpoints, 
 | `WS /ws/doc/{slug}/{doc_id}` | CRDT document room (Yjs-style) |
 | `WS /api/v1/sync/ws` | CO-151 SyncDelta protobuf sync |
 | `WS /api/v1/universes/{slug}/chat/rooms/{room_slug}/ws` | CO-194 chat fan-out + presence |
+| `WS /ws/sala/{universe_key}/{workspace_slug}` | CO-353 Sala realtime canvas — presence (cursors), node/edge LWW ops, suggest/publish fan-out; anon = read-only |
 
 ---
 

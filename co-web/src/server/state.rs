@@ -40,6 +40,10 @@ pub struct CoreState {
     /// filesystem factory; alternative backends plug in via
     /// [`with_universo_factory`](CoreState::with_universo_factory).
     pub universo_factory: Arc<dyn co::universo::UniversoFactory>,
+    /// CO-353: realtime lobby for Sala workspace canvases — one shared room per
+    /// `(universe_key, workspace_slug)`, broadcasting cursors/node-edge ops and
+    /// keeping the authoritative (LWW) layout in memory.
+    pub sala_lobby: Arc<crate::content::workspace::lobby::SalaLobby>,
 }
 
 impl CoreState {
@@ -117,6 +121,7 @@ impl CoreState {
             timeline_tx,
             active_launchers: Arc::new(crate::observability::ActiveLaunchers::new()),
             universo_factory: Arc::new(crate::content::universo::UniversoLocalFactory),
+            sala_lobby: Arc::new(crate::content::workspace::lobby::SalaLobby::new()),
         }
     }
 
