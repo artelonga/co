@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-401",
+  "title": "Staging fixtures + CO_STAGING_ADMIN_TOKEN — unlock the deep staging suite (3949 skips → coverage)",
+  "type": "task",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-401.md",
+  "branch": "feat/CO-401-staging-fixtures-co-staging-admin-token-",
+  "merge_sha": "9ae4b14756f7cfea2e0d13b03265309f939c27ac",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/250",
+    "number": 250
+  },
+  "started_at": "2026-06-10T00:00:00Z",
+  "merged_at": "2026-06-14T03:15:25Z",
+  "files_changed": 11,
+  "lines_added": 711,
+  "lines_removed": 24,
+  "labels": [
+    "type:chore",
+    "module:ci",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-401 — Staging fixtures + CO_STAGING_ADMIN_TOKEN — unlock the deep staging suite (3949 skips → coverage)\n\nSeeds the fixtures the CO-374 deep staging suite preconditions on, plus a\nleast-privilege admin token for CI, so the Thursday release gate exercises real\nscenarios instead of skipping the authenticated suite. All seeding is gated on\n`CO_ENV=staging` and never runs in production.\n\n- **Recursion universe chain** — the staging seeder now creates\n  `recursion-a` → `recursion-a-b` → `recursion-a-b-c` (the exact keys the suite\n  matches; the original CO-379 seeder used `recursion-ab`/`recursion-abc`, which\n  the specs never matched, so every recursion test skipped).\n- **Synthetic funnel/lead fixtures** — `seed_staging_funnel_fixtures` inserts a\n  lifecycle of leads flagged `is_synthetic = 1`. **Migration v82** adds\n  `leads.is_synthetic` (`NOT NULL DEFAULT 0`), and the acquisition-funnel rollup\n  (`funnel_routes`) excludes synthetic rows from Capture (step 4) and Qualify\n  (step 5), so fixtures never pollute real analytics metrics. (CO-448 took v81;\n  this task claims v82.)\n- **`CO_STAGING_ADMIN_TOKEN` as a CO-448 capability-scoped token** — on staging\n  boot, `seed_staging_admin_token` registers the secret's value as an\n  `api_tokens` row owned by the admin-tier `staging-admin` user, carrying an\n  explicit least-privilege scope set (`entries:read/write`,\n  `universes:read/write`, `gestao:read`, `funnel:read`, `chat:read`,\n  `telemetry:read`) — **not** an admin-tier NULL-scope token. A leaked secret\n  grants only that scope, never full admin. Seeding is idempotent and\n  rotation-safe (a new secret value retires the old token row).\n- **CI wiring** — `staging-suite.yml` runs the CO-374 staging config and passes\n  `CO_STAGING_ADMIN_TOKEN`; the Playwright `apiContext` fixture authenticates\n  with the scoped Bearer token (falling back to password-login locally only).\n- **Docs** — `docs/cross-env-auth.md` gains a CO-401 section with the\n  seed-on-boot model and a Fly + GitHub rotation runbook.\n\n### Why\n\nThe deep staging suite skipped ~3949 tests because its fixtures (recursion\nuniverses, funnel data) and an authenticated admin credential were missing. The\nheld first draft would have shared an admin-full credential with CI; the rework\n(on CO-448) makes the credential least-privilege so a CI-secret leak can never\nescalate to full admin, while still unlocking the suite's coverage.",
+  "summary": "the release gate, I need staging seeded with the fixtures the CO-374 suite preconditions on (recursion-a/-b/-c universes, funnel test data) and a scoped admin token in CI secrets, so the Thursday gate",
+  "co_auto_version": "0.1.0"
+}
