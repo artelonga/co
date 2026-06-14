@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-79",
+  "title": "Caching layer — manifest, theme.css, hot queries + CDN strategy",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-79.md",
+  "branch": "feat/CO-79-caching-layer-manifest-theme-css-hot-que",
+  "merge_sha": "e8ef9ddb9d5eaf5cb952f3de0f408fc673f52302",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/263",
+    "number": 263
+  },
+  "started_at": "2026-04-26T00:00:00Z",
+  "merged_at": "2026-06-14T19:52:38Z",
+  "files_changed": 3,
+  "lines_added": 157,
+  "lines_removed": 7,
+  "labels": [
+    "cache",
+    "performance",
+    "cdn"
+  ],
+  "changelog_entry": "## CO-79 — Caching layer — manifest, theme.css, hot queries + CDN strategy\n\nCompleted the caching layer by wiring the L1 query-result cache into the hot\nread path. The `POST /api/v1/universes/{slug}/query` handler now consults the\nin-process query cache before touching the universe `data.db`:\n\n- Cache key = `query_cache_key(SQL + limit, universe_key, manifest_hash)` —\n  SHA-256 scoped per universe, busted automatically when the manifest content\n  hash changes or when a write invalidates the universe prefix.\n- On a hit the serialized `QueryResponse` is returned without preparing or\n  executing any SQL; on a miss the result is serialized and inserted.\n- Access is verified before the cache lookup, so a hit never leaks data to an\n  unauthorized caller, and the slug component prevents cross-universe reuse.\n\nThis closes the last open deliverable of CO-79. The surrounding layers were\nalready in place: the 10K-entry in-process LRU caches (manifest / theme.css /\nquery), manifest-cache invalidation on universe writes, the `theme.css`\nendpoint with a 60s `Cache-Control` + ETag (never `immutable`), the in-process\npub/sub invalidation broadcast, and the `GET /api/v1/cache/stats` metrics\nendpoint (hit/miss/eviction per layer).\n\n### Why\n\nRead-heavy workloads repeatedly ran identical SELECTs against per-universe\n`data.db` files. Routing those reads through the existing query cache lets hot\nreads serve from memory instead of re-executing SQL, reducing DB load while\nkeeping results fresh via manifest-hash keying and universe-prefix invalidation.",
+  "summary": "GIVEN every request loads the universe manifest (CO-70), `theme.css` is computed per request, and read-heavy workloads dominate, with no shared cache today, WHEN we add an in-process LRU for manifests",
+  "co_auto_version": "0.1.0"
+}
