@@ -71,6 +71,9 @@ function resolveCatalogPath(raw: string, sectionPrefix: string): string {
 
 const SKIP_SECTIONS = new Set([
   'SPA + page routes (server.rs)',
+  // CO-210: server-rendered docs viewer — literal SPA-style page routes
+  // (/seguranca, /licensa, …), no API handler, so excluded from the API drift.
+  'docs pages',
   'WebSockets',
   'proposals — see entries section above',
   'vault — see vault section above',
@@ -173,6 +176,10 @@ function isApiRouteForCheck(path: string, file: string): boolean {
   if (path === '/_schema_check') return false;
   // Skip files that are not route modules (e.g. middleware extractors)
   if (file.includes('extractors.rs') && !file.includes('routes')) return false;
+  // CO-210: docs_routes.rs is entirely SPA-style page routes (the docs viewer +
+  // its /seguranca/{*rest} catch-all) — not API; catalogued under the skipped
+  // "docs pages" section, so exclude it from the code-side API check too.
+  if (file.includes('docs_routes.rs')) return false;
   return true;
 }
 
