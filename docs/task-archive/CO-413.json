@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-413",
+  "title": "Bidirectional bridge universes — event-bus universos aceitam writes + emitem entry.updated de volta (destrava YG-124)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-413.md",
+  "branch": "feat/CO-413-bidirectional-bridge-universes-event-bus",
+  "merge_sha": "8bc76bfd56c84eebe550c3c820496049dff8d6c4",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/251",
+    "number": 251
+  },
+  "started_at": "2026-06-12T00:00:00Z",
+  "merged_at": "2026-06-14T12:18:13Z",
+  "files_changed": 15,
+  "lines_added": 679,
+  "lines_removed": 41,
+  "labels": [
+    "type:feat",
+    "module:sync",
+    "module:collab"
+  ],
+  "changelog_entry": "## CO-413 — Bidirectional bridge universes — event-bus universos aceitam writes + emitem entry.updated de volta (destrava YG-124)\n\nEvent-bus-backed universes (e.g. `yggdrasil`) can now be marked **bidirectional**,\nturning the one-way ingestion bridge (CO-383/CO-384) into an editable round-trip.\nWhen a universe is bidirectional, writes from the CO API/editor are accepted\ninstead of returning `405 read_only_universe`, and each accepted write is\nre-emitted to the federated bus as a CO-origin edit so the hub (Yggdrasil) can\napply it. This unblocks YG-124 (\"Editar no CO\": deep-link a nota → CO editor →\nbridge → Yggdrasil NoteStore) without duplicating the editor.\n\n### What changed\n\n- **Flag (`source_mode`).** Meta-DB migration **v83** adds\n  `universes.source_mode TEXT NOT NULL DEFAULT 'read-only'`. `yggdrasil` keeps\n  `source_kind = 'event-bus'` and defaults to `read-only`, so its behavior is\n  unchanged until an operator explicitly flips it to `bidirectional`. No\n  destructive data migration.\n- **Relaxed gate.** `EntryService::check_not_event_bus` → `check_write_allowed\n  (source_kind, source_mode, source_url)`: it rejects only the event-bus +\n  non-bidirectional case (preserving the `read_only_universe` 405), and accepts\n  bidirectional event-bus and every non-event-bus universe. All call-sites\n  (entry create/update/delete + delivery status transition) pass the new arg.\n- **Emit back.** On an accepted write to a bidirectional universe, the\n  `entry.{created,updated,deleted}` EDA event payload carries `source = \"co-edit\"`\n  and the entry row is stamped `source_marker = 'co-edit'`. The `co-edit` events\n  federate back over the CO-384 bridge as CO-origin edits.\n- **Symmetric echo-filter (anti-loop).** The inbound `YggdrasilNotes` subscriber\n  now drops any event whose payload `source = \"co-edit\"` (a CO edit rebroadcast\n  by the hub), distinguishing it from genuine `yggdrasil-live` upstream writes.\n  This breaks the CO → hub → CO → … convergence loop; an integration test\n  simulates the rebroadcast and asserts no re-application.\n- **Capability surface.** `GET /api/v1/universes/{slug}` now returns `source_kind`\n  and `source_bidirectional`, so YG-124 can show/hide the \"Editar no CO\" button\n  (read-only universes reuse the existing i18n key `universe.source_bus_readonly`).\n\n### Why\n\nThe CO-385 UPSERT/conflict resolver existed but never fired for federated\nentries because this read-only gate blocked every CO-side write. Marking a\nuniverse bidirectional lets concurrent CO + Yggdrasil edits reach the resolver\n(last-write/UPSERT) instead of being blocked blindly, while the `co-edit` marker\ncontract (shared with YG-97's echo-filter) keeps the round-trip from looping.",
+  "summary": "As O hub yggdrasil (e qualquer origem event-bus que queira round-trip editável), preciso que o universo federado no CO aceite edições e as devolva ao hub.",
+  "co_auto_version": "0.1.0"
+}
