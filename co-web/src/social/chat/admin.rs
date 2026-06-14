@@ -1,13 +1,18 @@
 //! CO-204 — admin-only chat origin telemetry.
 //!
 //! `GET /api/v1/admin/chat/origin-breakdown` — aggregated message counts
-//! grouped by the sender's `origin_universe_key`. Admin-gated via the
-//! [`AdminUser`](crate::auth::extractors::AdminUser) extractor (JWT `tier == "admin"`).
+//! grouped by the sender's `origin_universe_key`.
+//!
+//! CO-448: capability-gated via [`Scoped<ChatRead>`](crate::auth::extractors::Scoped)
+//! (`chat:read`, an admin surface). A JWT admin or a NULL-scope token owned by
+//! an admin still passes (unchanged); additionally, a least-privilege API token
+//! that carries `chat:read` (e.g. the staging suite's scoped token) is admitted
+//! without needing admin-pleno.
 
 use axum::{Router, response::IntoResponse, routing::get};
 use serde::Serialize;
 
-use crate::auth::extractors::AdminUser;
+use crate::auth::extractors::{ChatRead, Scoped};
 use crate::server::AppState;
 
 use super::permissions::lock_storage;
@@ -27,7 +32,7 @@ pub struct OriginBreakdownResponse {
 
 /// GET /api/v1/admin/chat/origin-breakdown
 async fn origin_breakdown_handler(
-    _admin: AdminUser,
+    _cap: Scoped<ChatRead>,
     axum::extract::State(state): axum::extract::State<AppState>,
 ) -> impl IntoResponse {
     let storage = lock_storage(&state);

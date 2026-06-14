@@ -465,7 +465,7 @@ paths:
   /api/v1/admin/chat/origin-breakdown:
     get:
       tags: ["admin"]
-      summary: "CO-204 — chat message origin-universe breakdown"
+      summary: "CO-204 — chat message origin-universe breakdown; CO-448 requires capability `chat:read`"
       security:
         - sessionCookie: []
       responses:
@@ -903,7 +903,7 @@ paths:
   /api/v1/auth/token:
     post:
       tags: ["auth"]
-      summary: "CO-35 — create long-lived API token"
+      summary: "CO-35 — create long-lived API token; CO-448 accepts optional `scopes` (capability/bundle list) for a least-privilege token"
       security:
         - sessionCookie: []
       responses:

@@ -46,7 +46,7 @@
 | POST | `/api/v1/auth/reset-password` | anon | CO-165 — complete reset |
 | POST | `/api/v1/auth/onboard-with-email` | anon | CO-190 — passwordless onboarding |
 | POST | `/api/v1/auth/onboard-with-email/verify` | anon | CO-190 — verify code |
-| POST | `/api/v1/auth/token` | authed | CO-35 — create long-lived API token |
+| POST | `/api/v1/auth/token` | authed | CO-35 — create long-lived API token; CO-448 accepts optional `scopes` (capability/bundle list) for a least-privilege token |
 | GET | `/api/v1/auth/tokens` | authed | List API tokens |
 | DELETE | `/api/v1/auth/tokens/{id}` | authed | Revoke API token |
 | GET | `/api/v1/auth/login-options` | anon | CO-303 — login methods available |
@@ -381,7 +381,7 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 |---|---|---|---|
 | GET | `/api/v1/admin/dashboard` | admin | Cross-system dashboard |
 | GET | `/api/v1/admin/users/origin-breakdown` | admin | User signup origin breakdown |
-| GET | `/api/v1/admin/chat/origin-breakdown` | admin | CO-204 — chat message origin-universe breakdown |
+| GET | `/api/v1/admin/chat/origin-breakdown` | admin | CO-204 — chat message origin-universe breakdown; CO-448 requires capability `chat:read` |
 | GET | `/api/v1/admin/co-dev` | admin | CO-43 dev board info |
 | GET | `/api/v1/admin/co-dev/entries` | admin | Dev board entries |
 | GET | `/api/v1/admin/co-dev/entries/tags` | admin | Dev board tags |

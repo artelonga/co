@@ -149,3 +149,76 @@ staging).
 | `JWT_SECRET` | Quarterly or on suspected compromise | [`docs/jwt-rotation.md`](jwt-rotation.md) |
 | `CO_SEED_ADMIN_PASSWORD_HASH` | On password change | Re-hash + update both apps |
 | `GOOGLE_CLIENT_SECRET` | Annually or on compromise | Google Console + update both apps |
+
+## Token capability scopes (CO-448 — least-privilege API tokens)
+
+Until CO-448 an `api_tokens` row had **no scope column**: a token inherited the
+owner's *tier* (all-or-nothing). That is why the CO-401 staging-suite token had
+to be **admin-pleno** — a leaked secret would have granted full admin. CO-448
+adds a **least-privilege**, **hybrid** model: an issuer requests **exactly** the
+capabilities a token needs.
+
+### Model — capabilities + named bundles
+
+- **Capability** — a `recurso:ação` string, e.g. `entries:read`, `chat:write`.
+- **Bundle** — a named preset that expands to a set of capabilities. Issuers may
+  pass either raw capabilities, bundle names, or a mix; the request is resolved
+  and **expanded at issuance**, and the expanded set is what is persisted in
+  `api_tokens.scopes` (a JSON array), so a token is **auditable** — you can read
+  exactly what it can do.
+
+| Bundle | Expands to |
+|---|---|
+| `read`  | `entries:read`, `universes:read`, `telemetry:read` |
+| `write` | `read` ∪ `entries:write`, `universes:write` |
+| `admin` | `write` ∪ `gestao:read`, `funnel:read`, `chat:read`, `chat:write`, `deployments:read` |
+| `agent` | `write` ∪ `agent:dispatch` |
+
+Initial capability vocabulary (extensible — new surfaces add capabilities
+additively, e.g. the CO-288 cost panel maps to `deployments:read`):
+
+`entries:read`, `universes:read`, `telemetry:read`, `gestao:read`,
+`funnel:read`, `chat:read`, `deployments:read`, `entries:write`,
+`universes:write`, `chat:write`, `agent:dispatch`.
+
+### Issuing a scoped token
+
+```bash
+# Least-privilege: only what the staging suite (CO-374) exercises.
+curl -X POST https://co.artelonga.com.br/api/v1/auth/token \
+  -H "Authorization: Bearer $JWT" -H 'Content-Type: application/json' \
+  -d '{"name":"staging-suite","scopes":["chat:read","telemetry:read"]}'
+# → { id, name, token, expires_at, scopes: ["chat:read","telemetry:read"] }
+```
+
+An unknown capability or bundle name is rejected with `400 Bad Request` (a typo
+fails loudly rather than minting a misleading token). Omitting `scopes` (or an
+empty list) issues a **NULL-scope** token — see compatibility below.
+
+### Enforcement
+
+Each protected endpoint declares the capability it requires via the
+`Scoped<C>` extractor (`co-web/src/auth/extractors.rs`). The gate resolves the
+caller, and:
+
+- **API token, scopes present** — admitted iff the resolved set contains the
+  required capability; otherwise **403**. No escalation — a token never gains a
+  capability outside its persisted set.
+- **API token, scopes NULL** — inherits the owner's tier (pre-CO-448 behavior).
+  On an admin surface the owner must still be an admin.
+- **JWT / session** — a full user session; capabilities only restrict tokens
+  (an admin surface still requires `tier == "admin"`).
+
+| Endpoint | Required capability |
+|---|---|
+| `GET /api/v1/admin/chat/origin-breakdown` | `chat:read` (admin surface) |
+
+(The table grows as more surfaces adopt `Scoped<C>`; the public API CO-278 maps
+each route to its capability as it lands.)
+
+### Compatibility
+
+Tokens issued before CO-448 have `scopes = NULL` and are **unchanged** — they
+keep inheriting the owner's tier (vault sync, co-auto reporting, …). Only tokens
+issued *with* a `scopes` value are capability-restricted. A leaked scoped secret
+grants only that token's set, never owner-tier admin.

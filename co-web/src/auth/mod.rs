@@ -910,6 +910,8 @@ pub fn new_code_entry(user_id: Option<String>, code: String) -> VerifyCodeEntry 
     }
 }
 
+/// CO-448: token capability scopes — capability vocabulary + bundle expansion.
+pub mod capabilities;
 /// CO-222: typed extractor hierarchy (`AuthedUser`, `OwnerOf`, `AdminUser`, `TokenOrJwtUser`).
 pub mod extractors;
 

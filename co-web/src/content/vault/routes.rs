@@ -64,6 +64,11 @@ pub struct ApiToken {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
+    /// CO-448: least-privilege capability set (`recurso:ação`), resolved from
+    /// the issuance request (bundles already expanded). `None` ⇒ no declared
+    /// scope → inherit the owner's tier (pre-CO-448 all-or-nothing behavior).
+    #[serde(default)]
+    pub scopes: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -156,6 +161,12 @@ pub struct ClipResponse {
 pub struct CreateTokenRequest {
     #[serde(default = "default_token_name")]
     pub name: String,
+    /// CO-448: optional least-privilege scope. A list of capability strings
+    /// (`recurso:ação`) and/or bundle names (`read`/`write`/`admin`/`agent`),
+    /// resolved + expanded at issuance. Absent/empty ⇒ NULL scopes (the token
+    /// inherits the owner's tier, pre-CO-448 behavior).
+    #[serde(default)]
+    pub scopes: Vec<String>,
 }
 
 fn default_token_name() -> String {
@@ -169,6 +180,9 @@ pub struct CreateTokenResponse {
     pub name: String,
     pub token: String,
     pub expires_at: DateTime<Utc>,
+    /// CO-448: the resolved capability set the token carries (bundles already
+    /// expanded). `None` ⇒ no declared scope (inherits the owner's tier).
+    pub scopes: Option<Vec<String>>,
 }
 
 /// Token info for listing (token value omitted).
@@ -180,6 +194,8 @@ pub struct TokenInfo {
     pub created_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
     pub last_used_at: Option<DateTime<Utc>>,
+    /// CO-448: the resolved capability set (auditable). `None` ⇒ inherits tier.
+    pub scopes: Option<Vec<String>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1707,9 +1723,37 @@ pub async fn create_api_token(
     Json(req): Json<CreateTokenRequest>,
 ) -> Result<impl IntoResponse, AppError> {
     let storage = lock_storage(&state);
-    let tok = storage
-        .create_api_token(&user_id.0, &req.name)
-        .map_err(|e| AppError::Internal(e.to_string()))?;
+    // CO-448: an explicit (non-empty) scope mints a least-privilege token; an
+    // empty list keeps the legacy NULL-scope (inherit-tier) behavior.
+    let tok = if req.scopes.is_empty() {
+        storage
+            .create_api_token(&user_id.0, &req.name)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    } else {
+        let resolved =
+            crate::auth::capabilities::resolve_scopes(&req.scopes).map_err(|invalid| {
+                AppError::BadRequest(format!("unknown capability/bundle: {}", invalid.join(", ")))
+            })?;
+        // CO-448 escalation guard: a user can't grant a capability above their
+        // own authority. Admin-surface capabilities (gestao/funnel/chat/
+        // deployments) gate endpoints the scoped check authorizes on capability
+        // alone — so only an admin-tier issuer may mint them. Without this, any
+        // logged-in user could mint a `chat:read` token and read admin data.
+        if crate::auth::capabilities::requires_admin_to_grant(&resolved) {
+            let issuer_is_admin = storage
+                .get_user_by_id(&user_id.0)
+                .map(|u| u.tier == "admin")
+                .unwrap_or(false);
+            if !issuer_is_admin {
+                return Err(AppError::Forbidden(
+                    "Only an admin may mint a token with admin-surface capabilities".into(),
+                ));
+            }
+        }
+        storage
+            .create_api_token_with_scopes(&user_id.0, &req.name, &resolved)
+            .map_err(|e| AppError::Internal(e.to_string()))?
+    };
 
     Ok((
         StatusCode::CREATED,
@@ -1718,6 +1762,7 @@ pub async fn create_api_token(
             name: tok.name,
             token: tok.token.unwrap_or_default(),
             expires_at: tok.expires_at,
+            scopes: tok.scopes,
         }),
     )
         .into_response())
@@ -1743,6 +1788,7 @@ pub async fn list_api_tokens(
             created_at: t.created_at,
             expires_at: t.expires_at,
             last_used_at: t.last_used_at,
+            scopes: t.scopes,
         })
         .collect();
 
