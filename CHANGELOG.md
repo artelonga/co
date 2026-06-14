@@ -5,6 +5,112 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.13.0] — 2026-06-14 — Fractal Sala + API envelope [--ignore-dod override]
+
+## CO-399 — Sala scope expansion — all-universes /sala + subset /sala?u=a,b (fractal scope phase 2)
+
+The Sala canvas is no longer bound to a single universe. The same
+`shared/sala.html` surface now also serves:
+
+- `GET /sala` — scope = **every universe visible to the caller**
+- `GET /sala?u=a,b` — an explicit, **visibility-gated subset**
+
+Nodes carry their universe; cross-universe edges persist in the canonical
+`key::path` link notation. State persists per `(scope, user)` — deterministic,
+machine-local-state-free, so Wave 7 cross-device sync can op-log these rows.
+
+### What changed
+
+- **Migration v85** — additive `workspace_states.scope` column (`NOT NULL
+  DEFAULT ''`). Legacy single-universe rows are untouched (`scope = ''`); a
+  multi-universe row stores `'*'` (all visible) or a normalized `'a,b'` subset
+  and a sentinel `universe_key = '@scope:<scope>'` so the existing UNIQUE
+  constraint keys one row per scope without a table rebuild.
+- **Scope resolver** — `GET /api/v1/sala/scope?u=a,b` resolves a scope to its
+  visibility-filtered universes (the single authority: anonymous and
+  cross-account callers only ever see the public slice).
+- **Scope-keyed state** — `GET/PUT /api/v1/sala/state?scope=…` and
+  `POST /api/v1/sala/state/share?scope=…`. Share tokens resolve through the
+  existing `/api/v1/workspace-states/{token}` and now carry their `scope`;
+  visibility is re-checked at read time via the scope resolver.
+- **Frontend** — `shared/sala.html` parses the bare `/sala` and `?u=` query,
+  fetches entries from every in-scope universe (labeled by universe in the
+  picker), and places/links them as `key::path`.
+
+### Why
+
+A brain owner thinks across containers, not inside one. CO-399 makes the canvas
+match that: one surface whose scope is all your universes — or any subset you
+pick — extending the per-universe sala (CO-352) toward universe-as-node
+recursion (CO-400) without forking the page or the table.
+
+## CO-451 — co-auto: injetar skill de processo core + mapear labels de papel para skills
+
+`skills_for_task` (em `dev/co-auto/src/auto.rs`) agora resolve as skills de uma
+tarefa por um único caminho compartilhado (`skill_names_for_task`):
+
+- **Skill de processo core** (`co-auto-process.md`) é **sempre** injetada quando
+  presente no workspace, então todo agente herda o loop canônico do co-auto, os
+  3 gates e o fallback de modelo — independente de papel ou módulo.
+- **Labels de papel → skill**: `type:orchestrate→orchestrate`,
+  `type:implement|feat|fix→implement`, `type:review→review`, `type:test→test`
+  (somando a `playwright-pattern`), `type:release|deploy→release`. O mapa de
+  módulo existente (`spa-conventions`, `deploy-runbook`, `rust-architecture`) é
+  preservado.
+- **Frontmatter `skills: [..]`**: lido em `parse_task` (entradas vazias
+  descartadas) e mesclado, deduplicado, com as skills derivadas dos labels.
+
+`skills_for_session` foi reescrita para usar a mesma resolução de nomes (filtrada
+aos arquivos que existem em disco), eliminando a duplicação que existia entre as
+duas funções. Skills ausentes degradam graciosamente. Novo `skills/README.md`
+documenta o contrato (core + papéis + `skills:`).
+
+### Why
+
+O playbook canônico (processo co-auto + papéis) passou a existir como skills nos
+workspaces (ex.: `ArteLonga/skills/`), mas não era carregado por co-auto por falta
+de mapeamento. Agora tarefas de qualquer space herdam o processo canônico e a
+skill do seu papel automaticamente, sem injeção manual pelo orquestrador.
+
+## CO-455 — Document the contact endpoint in the API spec
+
+`POST /api/v1/universes/{slug}/messages` (the CO-326 public contact form) was
+served but missing from `api-catalog.md`, `openapi.yaml`, and the Swagger UI —
+even though the public docs site advertises it. Added it to the catalog and
+regenerated the OpenAPI spec so it now appears in `/api/docs`, closing the gap
+between the published documentation and the API's own contract.
+
+### Why
+Doc-sync review (2026-06-14): the marketing /docs listed a contact endpoint the
+API spec didn't document. The endpoint is real (anon, rate-limited 5/hr/IP,
+honeypot-protected); it just wasn't in the source-of-truth catalog.
+
+## CO-456 (CO-278-A) — API response envelope `{data,meta,errors}` + version headers
+
+Added an **opt-in** unified response envelope to the public API, implemented as a
+**single response layer** over every `/api/v1/*` route (no per-handler edits).
+
+- Send `X-API-Envelope: 1` (or `Accept: application/vnd.co.v1+json`) and success
+  bodies are wrapped as `{ data, meta, errors: null }`; errors (4xx/5xx) become
+  `{ data: null, meta, errors: [{ code, message, field?, hint? }] }` with the
+  same HTTP status.
+- `meta` carries `request_id` (uuid, reusing `x-request-id`) and
+  `api_version: "1.0"`, plus best-effort pagination (`page`/`page_size`/`total`)
+  when the handler already exposes it.
+- `X-API-Version: 1.0` and `X-Co-Server-Version: <workspace version>` are now on
+  **every** `/api/v1/*` response, with or without opt-in.
+- Without the opt-in marker, response bodies are **byte-identical** to before —
+  the SPA's 55 raw `fetch()` call sites and existing external consumers are
+  unaffected. Non-JSON responses (HTML, CSS, streams, blobs) are never wrapped.
+
+### Why
+CO-278 needs a single, predictable shape for the public API. Doing it
+unconditionally would break the SPA and external consumers on deploy, so the
+envelope is opt-in via header and lives in one place — flipping it to the
+default is a later one-line change once consumers adopt the header. No migration,
+no new tables.
+
+
 ## [3.12.0] — 2026-06-14 — Federation + Public API [--ignore-dod override]
 
 ## CO-338 — Surface keys — `key::path` cross-universe links that resolve to deployment DNS, at any nesting depth
