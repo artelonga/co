@@ -5,6 +5,272 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.12.0] — 2026-06-14 — Federation + Public API [--ignore-dod override]
+
+## CO-338 — Surface keys — `key::path` cross-universe links that resolve to deployment DNS, at any nesting depth
+
+A `<key>::<subpath>` reference now resolves to a node's **live deployment URL**
+no matter where it sits in the recursive universe tree, and no matter whether
+the node deploys itself or inherits a deploying ancestor's DNS. This is the
+addressing half of the sub-universe ⇄ universe ⇄ deployable-unit model: links
+address each other by *logical identity*, so promoting/demoting/remounting a
+universe reroutes every reference with **zero link edits**.
+
+`yggdrasil::comunicacao/mbya` and `mbya::` both resolve to
+`https://yggdrasil.artelonga.com.br/comunicacao/mbya`; promote `comunicacao` to
+its own surface and `comunicacao::*` follows it to
+`https://comunicacao.artelonga.com.br/` automatically.
+
+### What changed
+
+- **Resolver in `core` (`co::surface`).** `resolve_surface_ref(key, subpath)`
+  walks the key to its node (outermost-wins on shadowed keys; same-depth
+  collision → `Ambiguous` error mirroring CO-277), then up `parent` links to the
+  nearest deployable ancestor (a node with `surface_dns`). Base =
+  `https://<ancestor dns>`; path = the handle chain from that ancestor down to
+  the node. With **no** deployable ancestor it falls back to the CO platform
+  host (`co.artelonga.com.br`) over the full lineage — exactly the pre-promotion
+  state. Unit-tested against all six worked-example rows + ambiguity + shadowing
+  + the promotion flip.
+- **Data fields.** New `surface_dns` column on `universes` (meta-DB migration
+  **v84**, nullable) alongside the existing `parent_key` lineage. Parsed from
+  both `_universe.yaml` (`core::manifest::Manifest`) and `co-universes.yaml`
+  (`UniverseDecl`), and loaded onto the `Universe` model. `Storage::
+  list_surface_nodes()` exposes the `(key, parent, surface_dns)` registry.
+- **`GET /api/v1/resolve?ref=<key>::<path>`** → `{ url, universe,
+  deployable_ancestor }`.
+- **Deployment worker is registry-driven.** `deployment_snapshot_worker` no
+  longer hardcodes per-unit URLs: `build_units` resolves each unit's URL through
+  `co::surface` from `(key, parent, surface_dns)` and overlays live
+  `universes.surface_dns` rows, so an operator-recorded promotion reroutes a unit
+  with no code change (kills the URL duplication — ties to CO-280).
+- **Markdown render.** `co::surface::rewrite_surface_links` rewrites
+  `[[key::path]]` body wikilinks to resolved links;
+  `markdown_to_html_with_surfaces` turns them into `<a href="…">` for content +
+  surfaces. Unresolvable/non-surface wikilinks are left untouched.
+
+### Why
+
+`::` complements CO-153's logical `co://`: `co://` returns `{universe, path}`,
+`::` returns the physical URL. Content and surfaces can address each other by
+logical identity, so deployment topology changes (promotion/demotion) never
+break links — the resolver is what makes seamless promotion possible.
+
+## CO-353 — Lobby + realtime presence — WebSocket layer for workspace canvases
+
+A Sala (CO-352 workspace canvas) is now a **shared room** instead of a
+single-user offline surface. A dedicated WebSocket layer broadcasts cursor
+positions, node placements/moves, edge creations and suggest/publish events to
+every connected client of a workspace, with the server as arbiter
+(last-write-wins) and persistence back into CO-352's `workspace_states`.
+
+Open two browsers on `/u/{universe}/sala` and you see each other's cursors and
+edits live; close the last tab and the layout flushes to storage; reopen and the
+snapshot restores it.
+
+### What changed
+
+- **`WS /ws/sala/{universe_key}/{workspace_slug}`** (`co-web/src/content/workspace/ws.rs`).
+  On connect the server authenticates the session (JWT via `Authorization`
+  header, `session` cookie, or `?token=`) or admits a **read-only anonymous
+  visitor** (`anon:<id>`, `Visitante <id>`). It sends a `snapshot`
+  (`{state, users}`) to the newcomer and broadcasts `user_join`/`user_leave`
+  presence deltas to the room.
+- **Lobby state** (`co-web/src/content/workspace/lobby.rs`). One shared `Room`
+  per `(universe_key, workspace_slug)`, keyed on `crate::server::CoreState`'s new
+  `sala_lobby`. Each room holds a `tokio::sync::broadcast` channel + the
+  authoritative layout. Ops mutate the layout **LWW** (node upsert/remove, edge
+  add/remove); cursors are ephemeral. A deterministic per-user colour hash
+  (desaturated for visitors) drives presence identity.
+- **Conflict + echo model.** The server is the arbiter; clients apply ops
+  optimistically and the server echoes to *everyone else* (a client never gets
+  its own op back — broadcast frames are tagged with the originating connection
+  id). Rejected writes (e.g. an anonymous visitor) get a targeted `revert`
+  carrying the client's `op_id` so the optimistic change rolls back cleanly.
+- **Throttling.** Cursor frames are throttled to **≤ 20 Hz** per connection
+  server-side (and again client-side).
+- **Persistence.** The room flushes its layout to `workspace_states` every 2 s
+  while dirty and once more when the **last** connection leaves, under a
+  synthetic shared user so it never collides with CO-352's per-user saves and
+  survives a full server restart. Reuses `Storage::upsert_workspace_state` (an
+  internal call, not HTTP).
+- **Frontend** (`co-web/static/shared/sala-realtime.js` + wiring in
+  `shared/sala.html`). A small WS client with reconnect (exponential backoff),
+  a presence overlay (other users' cursors drawn as labelled arrows on the
+  canvas), optimistic node-move broadcast on drop, and live application of
+  remote moves.
+
+### Why
+
+CO-352 shipped the canvas as a per-user surface; CO-61 will bring offline-first
+CRDT sync later. For v1, server-arbitrated LWW (the model Yggdrasil's game
+runtime already uses) is enough to make the "Sala" metaphor pay off — multiple
+authors composing around one canvas, suggestions appearing live — without a
+voice/video layer underneath. Anonymous visitors get a read-only socket so a
+public Sala still feels alive without granting write access.
+
+## CO-400 — Universe-as-node — sala nodes can be universes; descend/ascend recursion (fractal scope phase 3)
+
+The sala canvas can now hold **universe nodes**: a universe placed on the
+landscape as a node you descend into. Same surface, narrower scope — fractal
+salas all the way down.
+
+- **Entry picker "Universos" tab** lists the caller's visible universes (`GET
+  /api/v1/universes`); picking one drops a universe node on the canvas.
+- **Distinct rendering**: teal world-ring + globe glyph + entry-count badge, so a
+  universe never reads as a nota or pasta. Draggable like any node.
+- **Descend**: double-tap a universe node (or its panel's *Descer* button)
+  navigates to that universe's sala at `/u/{key}/sala`.
+- **Ascend**: a header breadcrumb back-link (`‹ {parent}`) returns to the
+  originating sala with **camera state restored** — kept in `sessionStorage`, so
+  it works instantly even for read-only viewers.
+- **No breaking change**: universe nodes live in `layout.universes` and
+  round-trip through the existing `workspace_states` state API, which stores
+  `layout_json` opaquely.
+- **Cycles tolerated**: descend is navigation, not embedding, so a sala holding
+  its own universe node renders once (no recursion); activating a self-reference
+  is inert.
+
+### Why
+Phase 3 of the one-surface, fractal-scope sala (`docs/architecture/sala-surface.md`).
+Brain owners navigate nested universes (`parent_key` chains like miguel→mse) by
+descending into universe nodes on the same canvas, never a forked second surface.
+
+## CO-413 — Bidirectional bridge universes — event-bus universos aceitam writes + emitem entry.updated de volta (destrava YG-124)
+
+Event-bus-backed universes (e.g. `yggdrasil`) can now be marked **bidirectional**,
+turning the one-way ingestion bridge (CO-383/CO-384) into an editable round-trip.
+When a universe is bidirectional, writes from the CO API/editor are accepted
+instead of returning `405 read_only_universe`, and each accepted write is
+re-emitted to the federated bus as a CO-origin edit so the hub (Yggdrasil) can
+apply it. This unblocks YG-124 ("Editar no CO": deep-link a nota → CO editor →
+bridge → Yggdrasil NoteStore) without duplicating the editor.
+
+### What changed
+
+- **Flag (`source_mode`).** Meta-DB migration **v83** adds
+  `universes.source_mode TEXT NOT NULL DEFAULT 'read-only'`. `yggdrasil` keeps
+  `source_kind = 'event-bus'` and defaults to `read-only`, so its behavior is
+  unchanged until an operator explicitly flips it to `bidirectional`. No
+  destructive data migration.
+- **Relaxed gate.** `EntryService::check_not_event_bus` → `check_write_allowed
+  (source_kind, source_mode, source_url)`: it rejects only the event-bus +
+  non-bidirectional case (preserving the `read_only_universe` 405), and accepts
+  bidirectional event-bus and every non-event-bus universe. All call-sites
+  (entry create/update/delete + delivery status transition) pass the new arg.
+- **Emit back.** On an accepted write to a bidirectional universe, the
+  `entry.{created,updated,deleted}` EDA event payload carries `source = "co-edit"`
+  and the entry row is stamped `source_marker = 'co-edit'`. The `co-edit` events
+  federate back over the CO-384 bridge as CO-origin edits.
+- **Symmetric echo-filter (anti-loop).** The inbound `YggdrasilNotes` subscriber
+  now drops any event whose payload `source = "co-edit"` (a CO edit rebroadcast
+  by the hub), distinguishing it from genuine `yggdrasil-live` upstream writes.
+  This breaks the CO → hub → CO → … convergence loop; an integration test
+  simulates the rebroadcast and asserts no re-application.
+- **Capability surface.** `GET /api/v1/universes/{slug}` now returns `source_kind`
+  and `source_bidirectional`, so YG-124 can show/hide the "Editar no CO" button
+  (read-only universes reuse the existing i18n key `universe.source_bus_readonly`).
+
+### Why
+
+The CO-385 UPSERT/conflict resolver existed but never fired for federated
+entries because this read-only gate blocked every CO-side write. Marking a
+universe bidirectional lets concurrent CO + Yggdrasil edits reach the resolver
+(last-write/UPSERT) instead of being blocked blindly, while the `co-edit` marker
+contract (shared with YG-97's echo-filter) keeps the round-trip from looping.
+
+## CO-450 — Deep-link ?criar handler — Yggdrasil 'Criar no CO' prefill → create-universe modal (YG-138 round-trip, CO side)
+
+The CO SPA (variant-a) now handles the `?criar=1` deep-link emitted by the
+Yggdrasil **🌐 Criar no CO** button (YG-138). Visiting
+`/?criar=1&name=<nome>&key=<chave>&source=yggdrasil&instance=<id>` opens the
+CO-96 create-universe modal **pre-filled** with `name` and `key`, runs the CO-96
+inline validation immediately (an invalid key surfaces its error instead of
+creating blindly), and submits via the existing `POST /api/v1/universes`
+(CO-444) — redirecting to `/co/<key>` on success.
+
+The handler is **auth-aware**: an expired/absent session triggers the login flow
+over a template backdrop and leaves the `?criar` params in the URL so the
+post-login reload resumes the prefill. The prefill is never persisted
+cross-session, so it can't leak to a different user. Once the modal opens the
+params are stripped via `history.replaceState`, so a refresh won't re-fire.
+
+A `universe_created` telemetry event (CO-46 `window.coTrack`) is emitted on every
+create, carrying `source` + `instance` when they came from the deep-link — this
+measures YG→CO federation conversion.
+
+### Why
+Closes the live YG-126/YG-138 ↔ CO-444 round-trip: "criar universo" in Yggdrasil
+becomes a federated universe in CO in one click, with provenance measured. No
+migration and no backend change — reuses CO-444 (create) + CO-96 (modal) + CO-46
+(telemetry).
+
+## CO-452 — Public API docs — Swagger UI + OpenAPI discovery at /api/docs (CO-278-C)
+
+Turned the CO HTTP API into a documented, explorable contract.
+
+- **Swagger UI at `GET /api/docs`** now loads a **vendored** Swagger UI bundle
+  (`co-web/static/shared/swagger/`, served same-origin) instead of the previous
+  external `unpkg.com` CDN — CSP-safe, no third-party runtime dependency.
+- **Discovery: `GET /api/openapi.json`** now serves the **catalog-generated**
+  spec (`co-web/openapi.yaml`, the single source of truth verified by
+  `npm run openapi:check`) instead of the older hand-maintained
+  `docs/api/openapi.yaml`, removing the two-spec drift risk. The response now
+  carries an `X-API-Version: v1` header so clients can pin the major version
+  without parsing the body.
+- A discoverable **"API docs"** link was added to the CO-210 docs navigation
+  rail (`/seguranca` and siblings).
+- Fixed a latent bug in `generate-openapi.ts`: catalog table cells containing an
+  escaped pipe (`\|`) were truncated mid-string, producing malformed YAML. The
+  generator now splits on unescaped pipes and hardens double-quoted-scalar
+  escaping. (This never surfaced before because the served spec was the
+  hand-maintained file.)
+
+Additive: no migration, anon-readable docs; the documented endpoints stay gated.
+
+### Why
+CO-278 (public API) needs an explorable contract before its other slices
+(versioning/envelope, agent dispatch, SDKs) and so sister-repos (yggdrasil, qb,
+rfq) can consume the surface without reverse-engineering it. Serving the
+catalog-generated spec keeps docs and routes from drifting.
+
+## CO-453 — Public API telemetry + analytics endpoints — agent sessions, deployments, metrics (CO-278-E)
+
+Added a documented, read-only telemetry/analytics surface to the public API
+(CO-278), nested under `/api/v1/telemetry/*` and gated by the CO-448
+`telemetry:read` capability via the new `Scoped<TelemetryRead>` extractor:
+
+- `GET /api/v1/telemetry/agent/sessions` — list agent sessions (CO-275),
+  filters `?model=&since=`, pagination `?limit=&offset=`.
+- `GET /api/v1/telemetry/agent/sessions/{id}` — one session by id (404 if absent).
+- `GET /api/v1/telemetry/deployments` — latest deployment snapshot per app/unit
+  (CO-273); `?limit=` caps units.
+- `GET /api/v1/telemetry/metrics/throughput` — token/session throughput over a
+  window with a per-model breakdown (aggregates `usage_sessions`, CO-426).
+- `GET /api/v1/telemetry/metrics/token-budget` — spend vs the
+  `CO_AUTO_SOFT_LIMIT_5H_TOKENS` budget (CO-427) over a window.
+- `GET /api/v1/telemetry/metrics/release-cadence` — releases per period from
+  `release_notes` (CO-334).
+
+A least-privilege token carrying `telemetry:read` (or the `read` bundle, or a
+full JWT/session) is admitted; a token without it (e.g. `entries:read`-only)
+gets 403. Routes are documented in `docs/architecture/api-catalog.md` and appear
+in the generated `openapi.yaml` (Swagger UI, CO-452) with no drift.
+
+### Why
+
+CO-278-E gives the public API the "panel-of-glass" telemetry the north star
+calls for — consumable by dashboards / sister-repos with a `telemetry:read`
+token — and exercises the CO-448 scope model on a real surface.
+
+Reuses existing tables and aggregations only; **no migration, no new table, no
+MCP**. The surface is namespaced under `/api/v1/telemetry/*` rather than the bare
+`/api/v1/agent/sessions` paths because the latter already exists as a pre-existing
+anonymous, task-scoped kanban read endpoint (CO-275) and the two cannot share a
+route. The new read helpers (`list_agent_sessions_filtered`, `get_agent_session`)
+are read-only SELECTs over the existing `agent_sessions` table.
+
+
 ## [3.11.0] — 2026-06-14 — Least-privilege token scopes, scrum board & staging coverage
 
 ## CO-210 — Segurança + Dependências + Licença SPA routes — markdown renderer with telemetry + 404 tracing
