@@ -48,7 +48,7 @@ pub struct DeploymentListResponse {
 // Load all 6 units from DB (always returns 6 rows — missing = defaults)
 // ---------------------------------------------------------------------------
 
-fn load_snapshots(storage: &crate::storage::Storage) -> Vec<DeploymentSnapshot> {
+pub(crate) fn load_snapshots(storage: &crate::storage::Storage) -> Vec<DeploymentSnapshot> {
     use crate::platform::deployment_snapshot_worker::build_units;
 
     // CO-338: units (and their resolved URLs) come from the surface registry.

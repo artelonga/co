@@ -240,6 +240,7 @@ pub use usage_sessions::{
 };
 
 pub use invitations::Invitation;
+pub use release_notes::{ReleaseNoteRow, RepoSummary};
 pub use workspace_states::WorkspaceState;
 
 pub use schema::parse_datetime;

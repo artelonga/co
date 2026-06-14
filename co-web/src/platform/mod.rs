@@ -29,6 +29,7 @@ pub mod resolve_routes;
 pub mod server_config;
 pub mod source;
 pub mod telemetry;
+pub mod telemetry_api;
 pub mod theme_engine;
 pub mod universe_pool;
 pub mod vcs;

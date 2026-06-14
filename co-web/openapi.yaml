@@ -77,6 +77,8 @@ tags:
     description: "agent-sessions endpoints"
   - name: "usage"
     description: "usage endpoints"
+  - name: "telemetry"
+    description: "telemetry endpoints"
   - name: "ai"
     description: "ai endpoints"
   - name: "chat-llm"
@@ -2507,6 +2509,39 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/telemetry/agent/sessions:
+    get:
+      tags: ["telemetry"]
+      summary: "List agent sessions; filters `?model=&since=`, pagination `?limit=&offset=`"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/agent/sessions/{id}:
+    get:
+      tags: ["telemetry"]
+      summary: "One agent session by id (404 if absent)"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/deployments:
+    get:
+      tags: ["telemetry"]
+      summary: "Latest deployment snapshot per app/unit; `?limit=` caps units"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/telemetry/event:
     post:
       tags: ["analytics + telemetry"]
@@ -2518,6 +2553,33 @@ paths:
     post:
       tags: ["analytics + telemetry"]
       summary: "Batch (Plausible-style)"
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/metrics/release-cadence:
+    get:
+      tags: ["telemetry"]
+      summary: "Releases per period from `release_notes` (`?since=` ISO date, `?limit=`)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/metrics/throughput:
+    get:
+      tags: ["telemetry"]
+      summary: "Token/session throughput over a window (`?since=`), with per-model breakdown"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/telemetry/metrics/token-budget:
+    get:
+      tags: ["telemetry"]
+      summary: "Spend vs `CO_AUTO_SOFT_LIMIT_5H_TOKENS` budget over a window (`?since=`)"
+      security:
+        - sessionCookie: []
       responses:
         "200":
           description: OK

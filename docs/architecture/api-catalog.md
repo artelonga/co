@@ -20,6 +20,7 @@
 | **owner** | inside `universe_content_api` — passes `universe_visibility_gate` + `universe_writer_gate` (owner/admin/member) |
 | **visibility** | `universe_visibility_gate` only — readable if public or owned by caller |
 | **admin** | `crate::auth::require_admin` OR GitHub-gated (`AllowedAdmins`) for `/api/v1/gestao/*` |
+| **telemetry:read** | `Scoped<TelemetryRead>` (CO-448) — JWT/session OR an API token carrying the `telemetry:read` capability; a token without it → 403 |
 
 ---
 
@@ -555,6 +556,27 @@ model×universe cross-tab plus a per-session listing.
 | GET | `/api/v1/usage/summary` | admin | Aggregates by universe\|model\|machine\|task; `?cross=universe,model` adds the cross-tab matrix (CO-437) |
 | GET | `/api/v1/usage/active` | admin | Launchers active right now |
 | GET | `/api/v1/usage/projects` | admin | Fleet roll-up: usage + board + last deploy per universe |
+
+---
+
+## telemetry — `/api/v1/telemetry/*` (telemetry_api.rs)
+
+CO-453 (CO-278-E) public, read-only telemetry/analytics surface. Every route is
+gated by `Scoped<TelemetryRead>` (CO-448 `telemetry:read`): a least-privilege
+API token carrying the capability reads telemetry without being admin-pleno, and
+a full JWT/session also passes. Reuses existing tables/aggregations only — no new
+schema (`agent_sessions` CO-275, `deployment_snapshots` CO-273, `usage_sessions`
+CO-426, `release_notes` CO-334). Nested under `/api/v1/telemetry/*` to avoid the
+pre-existing anon, task-scoped `/api/v1/agent/sessions` kanban reads.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/telemetry/agent/sessions` | telemetry:read | List agent sessions; filters `?model=&since=`, pagination `?limit=&offset=` |
+| GET | `/api/v1/telemetry/agent/sessions/{id}` | telemetry:read | One agent session by id (404 if absent) |
+| GET | `/api/v1/telemetry/deployments` | telemetry:read | Latest deployment snapshot per app/unit; `?limit=` caps units |
+| GET | `/api/v1/telemetry/metrics/throughput` | telemetry:read | Token/session throughput over a window (`?since=`), with per-model breakdown |
+| GET | `/api/v1/telemetry/metrics/token-budget` | telemetry:read | Spend vs `CO_AUTO_SOFT_LIMIT_5H_TOKENS` budget over a window (`?since=`) |
+| GET | `/api/v1/telemetry/metrics/release-cadence` | telemetry:read | Releases per period from `release_notes` (`?since=` ISO date, `?limit=`) |
 
 ---
 

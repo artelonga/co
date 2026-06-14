@@ -590,6 +590,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                     crate::auth::require_auth_with_token,
                 )),
             )
+            // CO-453: public telemetry/analytics API (CO-278-E). Read-only;
+            // each handler self-gates via `Scoped<TelemetryRead>` (CO-448
+            // `telemetry:read`), so no auth middleware layer is needed here.
+            .nest("/api/v1/telemetry", crate::telemetry_api::router())
             .nest("/api/v1", crate::search_routes::router())
             .nest(
                 "/api/v1/auth/recovery",
