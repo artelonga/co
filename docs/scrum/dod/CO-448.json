@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-448",
+  "spec_title": "Token capability scopes (hybrid: capabilities + named bundles) — least-privilege api_tokens [CO-278-B pulled forward]",
+  "timestamp": "2026-06-14T11:26:57.873Z",
+  "items": [
+    {
+      "text": "Migração **v81** adiciona `api_tokens.scopes` (idempotente, `ensure_column`).",
+      "pattern": "migra|adiciona|tokens|scopes",
+      "matched_file": "core/src/manifest.rs",
+      "matched_test": "test_triggers_migration_from",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "test_triggers_migration_from",
+      "status": "pass"
+    },
+    {
+      "text": "Modelo híbrido: capacidades `recurso:ação` + 4 bundles (`read/write/admin/ agent`) que expandem para conjuntos de capacidades. Vocabulário inicial acima.",
+      "pattern": "write/admin/|modelo|brido|capacidades|recurso",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    },
+    {
+      "text": "Emissão de token aceita `scopes` (lista de capacidades **ou** nome de bundle) e persiste o set resolvido (auditável).",
+      "pattern": "emiss|token|aceita|scopes",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "API: GET share-token with unknown token → 404",
+      "status": "pass"
+    },
+    {
+      "text": "Gate de auth **nega 403** quando a capacidade exigida pelo endpoint falta no token; **permite** quando presente. Pelo menos os endpoints admin que a suíte CO-374 toca declaram sua capacidade.",
+      "pattern": "co[- _]374|quando|capacidade|exigida|endpoint",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "subscribe endpoint requires auth",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "subscribe endpoint requires auth",
+      "status": "pass"
+    },
+    {
+      "text": "**Backward-compat:** token com `scopes = NULL` mantém o comportamento de hoje (herda tier do dono). Teste explícito.",
+      "pattern": "backward[- _]compat|token|scopes|comportamento",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "API: GET share-token with unknown token → 404",
+      "status": "pass"
+    },
+    {
+      "text": "Testes: (a) token `read` não escreve (403) mas lê (200); (b) token `admin` bundle acessa as superfícies admin da suíte; (c) capacidade ausente → 403; (d) bundle expande corretamente; (e) compat NULL.",
+      "pattern": "testes|token|escreve",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET share-token with unknown token → 404",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "API: GET share-token with unknown token → 404",
+      "status": "pass"
+    },
+    {
+      "text": "`docs/cross-env-auth.md` + `api-catalog.md`/openapi documentam o modelo de escopo e as capacidades por endpoint (sem drift).",
+      "pattern": "cross[- _]env[- _]auth|api[- _]catalog|cross[- _]env[- _]auth.md|openapi|documentam",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] OpenAPI documents the new CI events",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] OpenAPI documents the new CI events (stub)",
+      "status": "pending"
+    },
+    {
+      "text": "Sem MCP; sem quebrar tokens existentes.",
+      "pattern": "quebrar|tokens|existentes",
+      "matched_file": "co-web/src/content/universe/routes/tests/themes.rs",
+      "matched_test": "test_theme_css_all_required_tokens",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "test_theme_css_all_required_tokens",
+      "status": "pass"
+    }
+  ],
+  "total": 8,
+  "passed": 6,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 75
+}

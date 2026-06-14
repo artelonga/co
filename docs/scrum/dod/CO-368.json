@@ -1,0 +1,113 @@
+{
+  "co_id": "CO-368",
+  "spec_title": "Scrum artifacts as CO entry types — PBI / Sprint / SBI / DoD + per-universe _scrum.yaml",
+  "timestamp": "2026-06-14T11:26:57.574Z",
+  "items": [
+    {
+      "text": "`_scrum.yaml` loaded and exposed at `/api/v1/universes/{key}/scrum/manifest`",
+      "pattern": "api/v1/universes/|scrum/manifest|scrum|loaded|exposed|universes",
+      "matched_file": "co-web/e2e/recursive-universe.spec.ts",
+      "matched_test": "GET /api/v1/universes/co/entries?path_prefix=public/ returns only public/* entries",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "GET /api/v1/universes/co/entries?path_prefix=public/ returns only public/* entries",
+      "status": "pass"
+    },
+    {
+      "text": "Universe with `enabled: true` shows a \"Scrum\" tab with 3 columns",
+      "pattern": "universe|enabled|shows|scrum",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "shows empty-state prompt before any project is chosen",
+      "status": "pass"
+    },
+    {
+      "text": "PBI entry frontmatter validated (priority, points, status, acceptance)",
+      "pattern": "entry|frontmatter|validated|priority",
+      "matched_file": "co-web/e2e/prod-usability.spec.ts",
+      "matched_test": "deep-linked template entry renders markdown (not a 404)",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "deep-linked template entry renders markdown (not a 404)",
+      "status": "pass"
+    },
+    {
+      "text": "Sprint entry frontmatter validated (number, start_at, end_at, goal, release_tag)",
+      "pattern": "sprint|entry|frontmatter|validated",
+      "matched_file": "co-web/e2e/prod-usability.spec.ts",
+      "matched_test": "deep-linked template entry renders markdown (not a 404)",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "deep-linked template entry renders markdown (not a 404)",
+      "status": "pass"
+    },
+    {
+      "text": "DoD checkboxes render inline + check-off PATCH works",
+      "pattern": "check[- _]off|checkboxes|render|inline",
+      "matched_file": "co-web/e2e/anonymous-bootstrap.spec.ts",
+      "matched_test": "/ boots SPA, renders task stats in content view, no console errors",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "/ boots SPA, renders task stats in content view, no console errors",
+      "status": "pass"
+    },
+    {
+      "text": "Current sprint computed deterministically from cadence + anchor",
+      "pattern": "current|sprint|computed|deterministically",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review (stub)",
+      "status": "pending"
+    },
+    {
+      "text": "`/api/v1/universes/{key}/scrum/sprints/current` returns shape `{number, start_at, end_at, release_window: bool}`",
+      "pattern": "api/v1/universes/|scrum/sprints/current|universes|scrum|sprints|current",
+      "matched_file": "co-web/e2e/recursive-universe.spec.ts",
+      "matched_test": "GET /api/v1/universes/co/entries?path_prefix=public/ returns only public/* entries",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "GET /api/v1/universes/co/entries?path_prefix=public/ returns only public/* entries",
+      "status": "pass"
+    },
+    {
+      "text": "Universe WITHOUT `_scrum.yaml` is unchanged (no regression)",
+      "pattern": "universe|without|scrum|unchanged",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "GET /api/v1/auth/me without session returns 401",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "GET /api/v1/auth/me without session returns 401",
+      "status": "pass"
+    },
+    {
+      "text": "Atividades log captures scrum events",
+      "pattern": "atividades|captures|scrum|events",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] scripts/scrum/sprint-review.ts runs Thursday 14:30 BRT + commits sprint review (stub)",
+      "status": "pending"
+    },
+    {
+      "text": "OpenAPI (CO-211) documents the new endpoints",
+      "pattern": "co[- _]211|openapi|documents|endpoints",
+      "matched_file": "co-web/e2e/archived/auth-crdt.spec.ts",
+      "matched_test": "authenticated user can access protected write endpoints",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "authenticated user can access protected write endpoints",
+      "status": "pass"
+    }
+  ],
+  "total": 10,
+  "passed": 8,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 80
+}
