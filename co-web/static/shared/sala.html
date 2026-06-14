@@ -403,7 +403,13 @@
     universeKey = pathParts[1];
     if (pathParts[3]) {
       mode = 'named';
-      workspaceSlug = pathParts[3];
+      // CO-454: a folder-sub-sala slug encodes a pasta path (`default/jardim`).
+      // It rides the URL as ONE percent-encoded segment (`default%2Fjardim`), but
+      // tolerate a proxy that decoded the slash into real path segments by
+      // re-joining everything after `/sala/`.
+      workspaceSlug = pathParts.slice(3).map(function (p) {
+        try { return decodeURIComponent(p); } catch (_) { return p; }
+      }).join('/');
     }
   }
 
@@ -1187,6 +1193,14 @@
     }
     var actions = document.getElementById('panel-actions');
     actions.innerHTML = '';
+    // CO-454: a named pasta is descendable into its sub-sala (root `/` is not —
+    // it already IS this sala).
+    if (folder.name) {
+      var descendBtn = document.createElement('button');
+      descendBtn.textContent = '↘ Descer';
+      descendBtn.onclick = function () { closePanel(); descendIntoFolder(folder); };
+      actions.appendChild(descendBtn);
+    }
     if (!isReadOnly) {
       var renameBtn = document.createElement('button');
       renameBtn.textContent = '✎ Renomear';
@@ -1381,11 +1395,13 @@
     invalidate();
   });
 
-  // CO-400: double-tap / double-click a universe node → descend into its sala.
+  // CO-400/CO-454: double-tap / double-click descends — a universe node into its
+  // own sala, a pasta node into its folder-sub-sala (same surface, narrower scope).
   canvas.addEventListener('dblclick', function (e) {
     var p = canvasPos(e);
     var it = hitItem(p[0], p[1]);
     if (it && isUniverse(it)) { closePanel(); descendInto(it.key); }
+    else if (it && isFolder(it) && it.name) { closePanel(); descendIntoFolder(it); }
   });
 
   // ── Zoom (wheel) ──────────────────────────────────────────────────────────
@@ -1788,6 +1804,40 @@
     window.location.href = '/u/' + encodeURIComponent(key) + '/sala';
   }
 
+  // ─── CO-454: folder-as-sub-sala (pasta=sala, 1:1 with Yggdrasil /mundo rooms) ──
+  // A pasta node descends into a SUB-SALA whose scope is that folder: the same
+  // universe, a narrower slug. The child slug appends the pasta to the current
+  // slug path (`default` → `default/jardim` → `default/jardim/estufa`), so the
+  // parent/child relation is a slug *prefix* — exactly the enter/exit nesting the
+  // YG `/mundo` walks through doors. It is "just another slug" (CO-352): no new
+  // table, no migration; the path rides one percent-encoded URL segment.
+
+  // A URL-safe segment for a pasta. Names are user-facing (`/jardim`), so slug-ify
+  // them; fall back to the stable folder id so unnamed/odd pastas stay addressable.
+  function folderSlugSegment(folder) {
+    var raw = String((folder && folder.name) || '').replace(/^\/+/, '').trim();
+    var seg = raw.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
+    return seg || (folder && folder.id) || 'pasta';
+  }
+
+  function descendIntoFolder(folder) {
+    if (!folder) return;
+    // The root pasta `/` (no name) IS the current sala — descending is a soft
+    // no-op, mirroring CO-400's "already here" cycle guard.
+    if (!folder.name) { showToast('Esta é a sala raiz'); return; }
+    var childSlug = workspaceSlug + '/' + folderSlugSegment(folder);
+    if (childSlug === workspaceSlug) { showToast('Você já está nesta pasta'); return; }
+    var stack = readStack();
+    stack.push({ key: universeKey, slug: workspaceSlug, cam: { x: cam.x, y: cam.y, s: cam.s } });
+    if (stack.length > 50) stack = stack.slice(-50);   // guard runaway nesting
+    writeStack(stack);
+    flushSave();
+    // encodeURIComponent turns the `/` into `%2F`, keeping the whole path in one
+    // segment so `/u/{universe}/sala/{slug}` still matches (server decodes it).
+    window.location.href = '/u/' + encodeURIComponent(universeKey) +
+      '/sala/' + encodeURIComponent(childSlug);
+  }
+
   function ascend() {
     var stack = readStack();
     var frame = stack.pop();
@@ -1828,8 +1878,14 @@
     var stack = readStack();
     if (!stack.length) { backLink.style.display = 'none'; return; }
     var parent = stack[stack.length - 1];
-    backLink.textContent = '‹ ' + (parent.key || 'voltar');
-    backLink.title = 'Voltar à sala de ' + (parent.key || '');
+    // CO-454: a folder-sub-sala parent is the same universe with a deeper slug —
+    // label it by the parent's last path segment (the pasta we came from), falling
+    // back to the universe key for a universe-node parent (CO-400).
+    var label = (parent.slug && parent.slug !== 'default')
+      ? parent.slug.split('/').pop()
+      : (parent.key || 'voltar');
+    backLink.textContent = '‹ ' + label;
+    backLink.title = 'Voltar à sala anterior';
     backLink.style.display = '';
     backLink.onclick = function (e) { e.preventDefault(); ascend(); };
   }
@@ -1963,6 +2019,20 @@
     descendInto: function (key) { descendInto(key); },
     getCam: function () { return { x: cam.x, y: cam.y, s: cam.s }; },
     setCam: function (c) { cam = { x: c.x, y: c.y, s: c.s }; camTarget = null; invalidate(); },
+    // CO-454: place + descend into a pasta deterministically (canvas pixels
+    // aren't reliably clickable in E2E). Returns the new folder id.
+    addFolder: function (name, gx, gy) {
+      var id = newId('f');
+      var spot = findFreeCell(typeof gx === 'number' ? gx : 2, typeof gy === 'number' ? gy : 0);
+      layout.folders.push({ id: id, name: name, x: spot[0], y: spot[1] });
+      updateStatus(); scheduleSave();
+      return id;
+    },
+    descendIntoFolder: function (id) {
+      var f = folderById(id);
+      if (f) descendIntoFolder(f);
+    },
+    getSlug: function () { return workspaceSlug; },
   };
 
   function boot() {

@@ -642,6 +642,31 @@ mod tests {
         assert_eq!(lobby.room_count(), 0);
     }
 
+    /// CO-454: presence is per-sub-sala. A folder-path slug (`default/jardim`)
+    /// yields a distinct room key, so a pasta's sub-sala has its own roster —
+    /// 1:1 with a Yggdrasil `/mundo` room (YG-146). `workspace_id` accepts the
+    /// `/` in the slug because the room key is just an opaque string.
+    #[test]
+    fn workspace_id_accepts_folder_path_slug() {
+        let parent = workspace_id("template", "default");
+        let child = workspace_id("template", "default/jardim");
+        let grandchild = workspace_id("template", "default/jardim/estufa");
+        assert_eq!(child, "template/default/jardim");
+        assert_eq!(grandchild, "template/default/jardim/estufa");
+        assert_ne!(parent, child);
+        assert_ne!(child, grandchild);
+
+        let lobby = SalaLobby::new();
+        lobby.get_or_create(&parent, serde_json::json!({"nodes": []}));
+        lobby.get_or_create(&child, serde_json::json!({"nodes": []}));
+        lobby.get_or_create(&grandchild, serde_json::json!({"nodes": []}));
+        assert_eq!(
+            lobby.room_count(),
+            3,
+            "parent sala + folder-sub-sala + nested sub-sala are independent rooms"
+        );
+    }
+
     #[test]
     fn conn_ids_are_unique_and_nonzero() {
         let lobby = SalaLobby::new();
