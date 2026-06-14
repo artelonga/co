@@ -69,6 +69,10 @@ COPY CHANGELOG.md README.md LICENSE ./
 COPY docs/api/ docs/api/
 # CO-372: calendar.rs uses include_str! to embed the sprint index at compile time.
 COPY docs/scrum/sprints/ docs/scrum/sprints/
+# CO-210: docs_routes.rs include_str!s the security/license/renderer docs served
+# by the docs viewer; they must be in the build context or the release build fails.
+COPY docs/security/ docs/security/
+COPY docs/vapid-security.md docs/licensa.md docs/markdown-renderers.md docs/e2e-walkthrough.md docs/
 
 # Remove dummy crate artifacts so cargo rebuilds from real source
 RUN rm -rf target/release/.fingerprint/co-* target/release/.fingerprint/co_web-* \
