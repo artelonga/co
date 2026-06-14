@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-400",
+  "title": "Universe-as-node — sala nodes can be universes; descend/ascend recursion (fractal scope phase 3)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-400.md",
+  "branch": "feat/CO-400-universe-as-node-sala-nodes-can-be-unive",
+  "merge_sha": "43135b2d7f98a9ab5bb799c6e61c4f156ba61221",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/256",
+    "number": 256
+  },
+  "started_at": "2026-06-10T00:00:00Z",
+  "merged_at": "2026-06-14T14:25:20Z",
+  "files_changed": 6,
+  "lines_added": 559,
+  "lines_removed": 29,
+  "labels": [
+    "type:feat",
+    "module:workspace",
+    "module:co-web"
+  ],
+  "changelog_entry": "## CO-400 — Universe-as-node — sala nodes can be universes; descend/ascend recursion (fractal scope phase 3)\n\nThe sala canvas can now hold **universe nodes**: a universe placed on the\nlandscape as a node you descend into. Same surface, narrower scope — fractal\nsalas all the way down.\n\n- **Entry picker \"Universos\" tab** lists the caller's visible universes (`GET\n  /api/v1/universes`); picking one drops a universe node on the canvas.\n- **Distinct rendering**: teal world-ring + globe glyph + entry-count badge, so a\n  universe never reads as a nota or pasta. Draggable like any node.\n- **Descend**: double-tap a universe node (or its panel's *Descer* button)\n  navigates to that universe's sala at `/u/{key}/sala`.\n- **Ascend**: a header breadcrumb back-link (`‹ {parent}`) returns to the\n  originating sala with **camera state restored** — kept in `sessionStorage`, so\n  it works instantly even for read-only viewers.\n- **No breaking change**: universe nodes live in `layout.universes` and\n  round-trip through the existing `workspace_states` state API, which stores\n  `layout_json` opaquely.\n- **Cycles tolerated**: descend is navigation, not embedding, so a sala holding\n  its own universe node renders once (no recursion); activating a self-reference\n  is inert.\n\n### Why\nPhase 3 of the one-surface, fractal-scope sala (`docs/architecture/sala-surface.md`).\nBrain owners navigate nested universes (`parent_key` chains like miguel→mse) by\ndescending into universe nodes on the same canvas, never a forked second surface.",
+  "summary": "a brain owner navigating nested universes (parent_key chains like miguel→mse), I need to place a UNIVERSE on the canvas as a node and open it to descend into that universe's own sala — same surface, n",
+  "co_auto_version": "0.1.0"
+}
