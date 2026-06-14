@@ -473,6 +473,49 @@ fn has_admin_override(headers: &HeaderMap) -> bool {
         .unwrap_or(false)
 }
 
+/// CO-80: build the audit-log entry recorded when an admin bypasses a quota
+/// check via `X-Admin-Override-Quota`. Kept pure (no I/O) so the entry shape is
+/// deterministically unit-testable; [`log_quota_override`] wraps it with the
+/// deferred DB write. `scope` is the quota being bypassed (`"storage"` or
+/// `"universe"`).
+fn quota_override_atividade(
+    user_id: &str,
+    scope: &str,
+    headers: &HeaderMap,
+) -> crate::atividade::Atividade {
+    use crate::atividade::{Acao, Atividade, Tipo};
+    let ua = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from);
+    Atividade {
+        acao: Acao::Criar,
+        entidade: "quota_override".to_string(),
+        entidade_id: Some(scope.to_string()),
+        before: None,
+        after: Some(json!({ "scope": scope, "user_id": user_id })),
+        tipo: Tipo::Sistema,
+        user_id: Some(user_id.to_string()),
+        ip: Some(extract_client_ip(headers)),
+        user_agent: ua,
+    }
+}
+
+/// CO-80: persist an audit-log entry for an admin quota override. The
+/// `(audit logged)` half of the acceptance criterion — a `tracing::warn!` alone
+/// is not durable, so abuse of the override can't be reviewed after the fact.
+fn log_quota_override(state: &AppState, user_id: &str, scope: &str, headers: &HeaderMap) {
+    tracing::warn!(
+        user_id,
+        scope,
+        "Admin quota override used (X-Admin-Override-Quota)"
+    );
+    crate::atividade::log_atividade(
+        state.clone(),
+        quota_override_atividade(user_id, scope, headers),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // CO-397: Response helpers
 // ---------------------------------------------------------------------------
@@ -696,13 +739,14 @@ pub async fn rate_limit_middleware(
 ///
 /// Admin tier with `X-Admin-Override-Quota: true` bypasses the check (audit logged).
 pub fn check_storage_quota(
+    state: &AppState,
     storage: &crate::storage::Storage,
     user_id: &str,
     tier: Tier,
     headers: &HeaderMap,
 ) -> Result<(), crate::error::AppError> {
     if tier == Tier::Admin && has_admin_override(headers) {
-        tracing::warn!(user_id, "Admin quota override used for storage quota check");
+        log_quota_override(state, user_id, "storage", headers);
         return Ok(());
     }
 
@@ -726,16 +770,14 @@ pub fn check_storage_quota(
 ///
 /// Admin tier with `X-Admin-Override-Quota: true` bypasses the check (audit logged).
 pub fn check_universe_quota(
+    state: &AppState,
     storage: &crate::storage::Storage,
     user_id: &str,
     tier: Tier,
     headers: &HeaderMap,
 ) -> Result<(), crate::error::AppError> {
     if tier == Tier::Admin && has_admin_override(headers) {
-        tracing::warn!(
-            user_id,
-            "Admin quota override used for universe count check"
-        );
+        log_quota_override(state, user_id, "universe", headers);
         return Ok(());
     }
 
@@ -819,6 +861,49 @@ mod tests {
         assert!(!is_vault_path("/api/v1/universes/co"));
         assert!(!is_vault_path("/api/projects/CO/tasks"));
         assert!(!is_vault_path("/api/v1/universes/co/entries"));
+    }
+
+    #[test]
+    fn test_has_admin_override_accepts_true_and_one() {
+        let mut h = HeaderMap::new();
+        assert!(!has_admin_override(&h), "absent header → no override");
+        h.insert("x-admin-override-quota", HeaderValue::from_static("true"));
+        assert!(has_admin_override(&h), "\"true\" enables override");
+        h.insert("x-admin-override-quota", HeaderValue::from_static("TRUE"));
+        assert!(has_admin_override(&h), "case-insensitive");
+        h.insert("x-admin-override-quota", HeaderValue::from_static("1"));
+        assert!(has_admin_override(&h), "\"1\" enables override");
+        h.insert("x-admin-override-quota", HeaderValue::from_static("false"));
+        assert!(!has_admin_override(&h), "\"false\" disables override");
+    }
+
+    #[test]
+    fn test_quota_override_atividade_shape() {
+        // CO-80: an admin quota override must produce a durable audit entry.
+        let mut h = HeaderMap::new();
+        h.insert("user-agent", HeaderValue::from_static("co-cli/1.0"));
+        h.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.7"));
+
+        let a = quota_override_atividade("user-42", "storage", &h);
+
+        assert_eq!(a.entidade, "quota_override");
+        assert_eq!(a.entidade_id.as_deref(), Some("storage"));
+        assert_eq!(a.user_id.as_deref(), Some("user-42"));
+        assert_eq!(a.ip.as_deref(), Some("203.0.113.7"));
+        assert_eq!(a.user_agent.as_deref(), Some("co-cli/1.0"));
+        let after = a.after.expect("after payload present");
+        assert_eq!(after["scope"], "storage");
+        assert_eq!(after["user_id"], "user-42");
+    }
+
+    #[test]
+    fn test_quota_override_atividade_universe_scope() {
+        let h = HeaderMap::new();
+        let a = quota_override_atividade("u1", "universe", &h);
+        assert_eq!(a.entidade_id.as_deref(), Some("universe"));
+        // No XFF header → client IP falls back to "unknown".
+        assert_eq!(a.ip.as_deref(), Some("unknown"));
+        assert!(a.user_agent.is_none());
     }
 
     #[test]
