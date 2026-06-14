@@ -46,7 +46,7 @@ import {
     showLoginModal, hideLoginModal, setupLoginModal, setupSecurityModal,
     injectLoginCallbacks,
 } from './modules/login.js';
-import { setupOnboarding, setupCriarModal, injectOnboardingCallbacks } from './modules/onboarding.js';
+import { setupOnboarding, setupCriarModal, openCriarModal, injectOnboardingCallbacks } from './modules/onboarding.js';
 import { bootYggdrasil, injectYggdrasilCallbacks } from './modules/yggdrasil.js';
 import {
     bootAppForUniverse, renderUniverseHome, bootApp as _bootApp,
@@ -899,6 +899,65 @@ window.coOnChatMessageArrived = (_msg, _roomId) => {
     }
 };
 
+// CO-450: strip the deep-link params after consuming them so a refresh (or the
+// history back/forward) doesn't re-fire the create modal.
+function clearCriarParamsFromUrl() {
+    const url = new URL(window.location.href);
+    ['criar', 'name', 'key', 'source', 'instance'].forEach(p => url.searchParams.delete(p));
+    window.history.replaceState({}, '', url.pathname + url.search + url.hash);
+}
+
+// CO-450: Yggdrasil "Criar no CO" (🌐, YG-138) deep-link handler. The owner
+// clicks the button in Yggdrasil and lands here authenticated at
+// `/?criar=1&name=<nome>&key=<chave>&source=yggdrasil&instance=<id>`. We open
+// the CO-96 create-universe modal pre-filled with `name`/`key`. If the session
+// has expired we kick off login first and leave the params in the URL so the
+// post-login reload resumes the prefill — we only clear them once the modal
+// actually opens, so a plain refresh won't re-fire. The prefill is never
+// persisted cross-session, so it can't leak to a different user.
+async function maybeHandleCriarDeepLink() {
+    const params = new URLSearchParams(window.location.search);
+    const trigger = (params.get('criar') || '').toLowerCase();
+    if (!trigger || trigger === '0' || trigger === 'false') return false;
+
+    const prefill = {
+        name: params.get('name') || '',
+        key: params.get('key') || '',
+        source: params.get('source') || '',
+        instance: params.get('instance') || '',
+    };
+
+    const me = await api.me();
+    if (!me) {
+        // Session expired / not authenticated: show login over a template
+        // backdrop, leaving the ?criar params in place for the post-login reload.
+        state.currentUniverseSlug = 'template';
+        state.isTemplate = true;
+        showTemplateBanner();
+        await bootAppForUniverse('template');
+        showLoginModal();
+        return true;
+    }
+
+    // Authenticated: boot the owner's default universe (or template) behind the
+    // modal, consume the URL params, then open the prefilled CO-96 modal.
+    hideLoginModal();
+    renderUserBadge(me);
+    state.me = me;
+    _updateChatButton(me);
+    await loadMeUniverses();
+    const mine = state.userUniverses.filter(u => !u.is_template);
+    const target = mine.length ? mine[0].key : 'template';
+    state.currentUniverseSlug = target;
+    state.isTemplate = target === 'template';
+    if (state.isTemplate) showTemplateBanner(); else hideTemplateBanner();
+    await bootAppForUniverse(target);
+
+    clearCriarParamsFromUrl();
+    openCriarModal({ prefill });
+    return true;
+}
+
 // ===== Entry point =====
 async function init() {
     // CO-323: apply single-universe mode when the page is served from a
@@ -936,6 +995,11 @@ async function init() {
     // CO-189: Handle /invitations/:token SPA route before normal boot
     const isInvitePage = await setupInvitationsPage();
     if (isInvitePage) return;
+
+    // CO-450: Handle the Yggdrasil "Criar no CO" deep-link (?criar=1) before
+    // normal slug-based boot — it opens the CO-96 create modal pre-filled.
+    const handledCriar = await maybeHandleCriarDeepLink();
+    if (handledCriar) return;
 
     const slug = readUniverseSlugFromUrl();
     state.currentUniverseSlug = slug;
