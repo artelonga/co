@@ -229,7 +229,7 @@ impl Storage {
             self.conn
                 .execute_batch(r#"
                     UPDATE universes SET local_repo_path='~/projects/ArteLonga', content_subdirs='["docs","content"]' WHERE key='artelonga' AND local_repo_path IS NULL;
-                    UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["relatos","jardim","quadro","eventos","membros","modelos"]', remote_url='https://github.com/artelonga/quilomboaraucaria', remote_ref='main' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
+                    UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["relatos","jardim","quadro","eventos","membros","modelos"]' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
                     UPDATE universes SET local_repo_path='~/projects/yggdrasil', content_subdirs='["docs","content"]' WHERE key='yggdrasil' AND local_repo_path IS NULL;
                     UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
                     UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
@@ -456,5 +456,16 @@ impl Storage {
         ] {
             let _ = self.conn.execute(sql, []);
         }
+        // quilomboaraucaria content cloning on production: the remote_url/remote_ref
+        // binding belongs to the universe→repo backfill conceptually specified at
+        // v51 (CO-330), but those columns are only added here at v56 (CO-337) — so
+        // the write MUST happen after the columns exist, not in the v51 block (a
+        // fresh sequential migration would otherwise fail at v51 with
+        // "no such column: remote_url"). Idempotent via `remote_url IS NULL`.
+        let _ = self.conn.execute(
+            "UPDATE universes SET remote_url='https://github.com/artelonga/quilomboaraucaria', remote_ref='main' \
+             WHERE key='quilomboaraucaria' AND remote_url IS NULL",
+            [],
+        );
     }
 }
