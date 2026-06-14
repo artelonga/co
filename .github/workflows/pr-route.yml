@@ -269,6 +269,12 @@ jobs:
               co-web/src/security/audit/*) continue ;;
               co-web/src/storage/*) continue ;;
               co-web/src/repository/*) continue ;;
+              # CO-78: the job queue is a storage-layer component that follows the
+              # same const-column-list convention as storage/* and repository/* —
+              # `format!("SELECT {JOB_COLUMNS} FROM jobs WHERE id = ?1")` interpolates
+              # a compile-time `const JOB_COLUMNS` and binds the value with `?N`, so
+              # the crude SQL-verb regex only false-positives here.
+              co-web/src/platform/job_queue.rs) continue ;;
               # Vendored third-party bundles (minified, not our code): Swagger UI
               # (CO-452), mermaid, etc. They legitimately use innerHTML internally
               # — scanning them only false-positives.

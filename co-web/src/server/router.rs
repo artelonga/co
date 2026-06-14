@@ -413,6 +413,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-338: surface-key resolution (GET /api/v1/resolve?ref=key::path).
             .merge(crate::resolve_routes::router())
             .merge(co_routes)
+            // CO-78: job-queue metrics (queue depth, dead-letter, p99/kind).
+            // Public + aggregate only, like /health.
+            .route("/metrics", get(crate::job_queue::metrics_handler))
             .nest("/api", openapi_api)
             .nest("/api", board_public)
             .nest("/api", board_protected)
