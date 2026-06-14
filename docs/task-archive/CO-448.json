@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-448",
+  "title": "Token capability scopes (hybrid: capabilities + named bundles) — least-privilege api_tokens [CO-278-B pulled forward]",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-448.md",
+  "branch": "feat/CO-448-token-capability-scopes-hybrid-capabilit",
+  "merge_sha": "1f0e2e815d336b9f1f45bbfaca1a4cc0dab4c4f8",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/247",
+    "number": 247
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T02:39:25Z",
+  "files_changed": 14,
+  "lines_added": 1027,
+  "lines_removed": 25,
+  "labels": [
+    "type:feat",
+    "module:auth",
+    "security",
+    "api"
+  ],
+  "changelog_entry": "## CO-448 — Token capability scopes (hybrid: capabilities + named bundles) — least-privilege api_tokens [CO-278-B pulled forward]\n\nAPI tokens (`api_tokens`) can now carry a **least-privilege capability scope**\ninstead of inheriting the owner's full tier (all-or-nothing). The model is\n**hybrid**: an issuer requests either raw capabilities (`recurso:ação`, e.g.\n`entries:read`, `chat:write`) or a named **bundle** that expands to a capability\nset.\n\n- **Migration v81** adds a nullable `api_tokens.scopes` column (JSON array of\n  resolved capabilities; idempotent via `ensure_column`).\n- **Bundles**: `read` → `{entries:read, universes:read, telemetry:read}`,\n  `write` → `read ∪ {entries:write, universes:write}`,\n  `admin` → `write ∪ {gestao:read, funnel:read, chat:read, chat:write, deployments:read}`,\n  `agent` → `write ∪ {agent:dispatch}`. Bundles are expanded **at issuance** and\n  the expanded set is persisted, so a token is auditable.\n- **Issuance**: `POST /api/v1/auth/token` accepts an optional `scopes` list\n  (capabilities and/or bundle names). An unknown capability/bundle → `400`. The\n  resolved set is returned and listed (`GET /api/v1/auth/tokens`).\n- **Enforcement**: a new `Scoped<C>` axum extractor declares the capability an\n  endpoint requires and **denies with 403** when a scoped token lacks it (no\n  escalation). `GET /api/v1/admin/chat/origin-breakdown` now requires `chat:read`.\n- **Backward-compatible**: tokens with `scopes = NULL` (every pre-CO-448 token +\n  the legacy `create_api_token` path) keep inheriting the owner's tier — nothing\n  already issued (vault sync, co-auto reporting, …) breaks.\n\nDocs: `docs/cross-env-auth.md` (scope model + capability vocabulary + per-endpoint\ncapabilities) and `docs/architecture/api-catalog.md` / `openapi.yaml` (no drift).\n\n### Why\nA leaked token secret previously granted full admin (the CO-401 staging-suite\ntoken had to be admin-pleno for exactly this reason). Least-privilege scoping\nmeans a leak grants only the token's capability set, and gives the future public\nAPI (CO-278) granular authorization natively. This is CO-278-B pulled forward so\nthe reworked CO-401 staging token (v82) can be least-privilege.",
+  "summary": "As A token issuer (operator, staging CI, future public-API consumer), QUERO emitir um api-token com **exatamente** as capacidades que ele precisa — nem mais — PARA que um vazamento de secret não conce",
+  "co_auto_version": "0.1.0"
+}
