@@ -12,10 +12,34 @@ use rusqlite::types::ValueRef;
 use serde::{Deserialize, Serialize};
 
 use crate::auth::UserId;
+use crate::cache::{manifest_content_hash, query_cache_key};
 use crate::error::AppError;
 use crate::server::AppState;
 
 const MAX_QUERY_ROWS: usize = 1000;
+
+/// CO-79: build the query-cache params component from a request.
+///
+/// Combines the (trimmed) SQL with the effective row limit, separated by a NUL
+/// byte so that `"SELECT 1"` with `limit=1` can never collide with a different
+/// SQL string that happens to end in `\nlimit=1`.
+fn query_params(sql: &str, limit: usize) -> String {
+    format!("{sql}\u{0}limit={limit}")
+}
+
+/// CO-79: content hash of a universe manifest, read best-effort from disk.
+///
+/// Used as the schema-version component of the query cache key so that results
+/// cached under an old manifest are never served after the schema changes.
+/// Returns `0` when the manifest is absent or unparseable — a stable sentinel
+/// that still produces a valid, universe-scoped key.
+fn manifest_hash(universe_root: &std::path::Path) -> u64 {
+    std::fs::read(universe_root.join(co::manifest::MANIFEST_FILENAME))
+        .ok()
+        .and_then(|bytes| co::manifest::parse(&bytes).ok())
+        .map(|r| manifest_content_hash(&r.manifest))
+        .unwrap_or(0)
+}
 
 fn default_limit() -> usize {
     MAX_QUERY_ROWS
@@ -28,7 +52,7 @@ pub struct QueryRequest {
     pub limit: usize,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct QueryResponse {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<serde_json::Value>>,
@@ -76,11 +100,25 @@ pub async fn query_universe(
 
     let limit = body.limit.min(MAX_QUERY_ROWS);
 
-    // Get the universe connection, then drop the storage lock.
-    let conn_arc = {
+    // CO-79: query result cache (L1). The key is SHA-256 over the SQL+limit, the
+    // universe key, and the manifest content hash, so a schema change (new
+    // manifest hash) or a write that invalidates the universe prefix busts it.
+    // Access is verified above, so a hit never leaks data to an unauthorized
+    // user, and the slug component scopes keys per universe.
+    let (conn_arc, universe_root) = {
         let storage = state.core.storage.lock();
-        storage.universe_conn(&slug)
+        (storage.universe_conn(&slug), storage.universe_root(&slug))
     };
+    let cache_key = query_cache_key(
+        &query_params(trimmed, limit),
+        &slug,
+        manifest_hash(&universe_root),
+    );
+    if let Some(bytes) = state.index.cache.query.get(&cache_key)
+        && let Ok(cached) = serde_json::from_slice::<QueryResponse>(&bytes)
+    {
+        return Ok(Json(cached));
+    }
 
     let conn_guard = conn_arc
         .lock()
@@ -134,12 +172,20 @@ pub async fn query_universe(
     }
     let row_count = all_rows.len();
 
-    Ok(Json(QueryResponse {
+    let response = QueryResponse {
         columns,
         rows: all_rows,
         row_count,
         truncated,
-    }))
+    };
+
+    // CO-79: populate the L1 query cache with the serialized result. Best-effort:
+    // a serialization failure simply skips caching rather than failing the request.
+    if let Ok(bytes) = serde_json::to_vec(&response) {
+        state.index.cache.query.insert(cache_key, bytes);
+    }
+
+    Ok(Json(response))
 }
 
 #[cfg(test)]
@@ -257,5 +303,82 @@ mod tests {
         let (cols, rows, _) = run_query(&conn, "select 42 as answer", 10).unwrap();
         assert_eq!(cols, vec!["answer"]);
         assert_eq!(rows[0][0], serde_json::json!(42_i64));
+    }
+
+    // --- CO-79: query cache wiring ---
+
+    #[test]
+    fn test_query_params_distinguishes_sql_and_limit() {
+        // Same SQL + limit → identical params (cache hit).
+        assert_eq!(
+            super::query_params("SELECT 1", 100),
+            super::query_params("SELECT 1", 100)
+        );
+        // Different SQL → different params (no false hit).
+        assert_ne!(
+            super::query_params("SELECT 1", 100),
+            super::query_params("SELECT 2", 100)
+        );
+        // Different limit → different params (a smaller limit may truncate).
+        assert_ne!(
+            super::query_params("SELECT 1", 100),
+            super::query_params("SELECT 1", 10)
+        );
+    }
+
+    #[test]
+    fn test_query_cache_key_is_universe_scoped() {
+        use crate::cache::query_cache_key;
+        let params = super::query_params("SELECT 1", 100);
+        let a = query_cache_key(&params, "uni-a", 7);
+        let b = query_cache_key(&params, "uni-b", 7);
+        // Same SQL, different universe → different keys (no cross-universe leak).
+        assert_ne!(a, b);
+        // Keys are prefixed with the slug so prefix-invalidation works.
+        assert!(a.starts_with("uni-a:"));
+        assert!(b.starts_with("uni-b:"));
+    }
+
+    #[test]
+    fn test_query_cache_key_busts_on_manifest_hash() {
+        use crate::cache::query_cache_key;
+        let params = super::query_params("SELECT 1", 100);
+        // Same query + universe but a new manifest hash → different key, so
+        // results cached under the old schema are never served afterward.
+        assert_ne!(
+            query_cache_key(&params, "uni", 1),
+            query_cache_key(&params, "uni", 2)
+        );
+    }
+
+    #[test]
+    fn test_query_response_cache_roundtrip() {
+        use crate::cache::QueryCache;
+
+        let response = super::QueryResponse {
+            columns: vec!["id".into(), "name".into()],
+            rows: vec![vec![serde_json::json!(1_i64), serde_json::json!("alpha")]],
+            row_count: 1,
+            truncated: false,
+        };
+
+        let cache = QueryCache::new();
+        let key = "uni:abc".to_string();
+
+        // Miss before insertion.
+        assert!(cache.get(&key).is_none());
+
+        // Serialize → insert → get → deserialize must reconstruct the response.
+        let bytes = serde_json::to_vec(&response).unwrap();
+        cache.insert(key.clone(), bytes);
+        let cached: super::QueryResponse =
+            serde_json::from_slice(&cache.get(&key).unwrap()).unwrap();
+        assert_eq!(cached.columns, response.columns);
+        assert_eq!(cached.row_count, 1);
+        assert_eq!(cached.rows[0][1], serde_json::json!("alpha"));
+
+        // Universe-prefix invalidation clears it.
+        cache.invalidate_prefix("uni:");
+        assert!(cache.get(&key).is_none());
     }
 }
