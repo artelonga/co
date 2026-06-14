@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-455",
+  "title": "Document the contact endpoint in the API spec — POST /universes/{slug}/messages (CO-326)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-455.md",
+  "branch": "docs/CO-455-document-contact-endpoint",
+  "merge_sha": "2626f5be261c6b0943767e2f53ecb1725e4289fb",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/259",
+    "number": 259
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T17:59:15Z",
+  "files_changed": 4,
+  "lines_added": 68,
+  "lines_removed": 0,
+  "labels": [
+    "type:docs",
+    "api"
+  ],
+  "changelog_entry": "## CO-455 — Document the contact endpoint in the API spec\n\n`POST /api/v1/universes/{slug}/messages` (the CO-326 public contact form) was\nserved but missing from `api-catalog.md`, `openapi.yaml`, and the Swagger UI —\neven though the public docs site advertises it. Added it to the catalog and\nregenerated the OpenAPI spec so it now appears in `/api/docs`, closing the gap\nbetween the published documentation and the API's own contract.\n\n### Why\nDoc-sync review (2026-06-14): the marketing /docs listed a contact endpoint the\nAPI spec didn't document. The endpoint is real (anon, rate-limited 5/hr/IP,\nhoneypot-protected); it just wasn't in the source-of-truth catalog.",
+  "summary": "Contexto Doc-sync review (2026-06-14): o site público `/docs` (artelonga.com.br) anuncia um endpoint de contato, mas a rota real — **`POST /api/v1/universes/{slug}/messages`** (formulário de contato C",
+  "co_auto_version": "0.1.0"
+}
