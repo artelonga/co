@@ -5,6 +5,165 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.11.0] — 2026-06-14 — Least-privilege token scopes, scrum board & staging coverage
+
+## CO-210 — Segurança + Dependências + Licença SPA routes — markdown renderer with telemetry + 404 tracing
+
+Browsable documentation pages backed by the markdown already in `docs/`:
+`/seguranca` (overview), `/seguranca/dependencias` (+ `/decisoes`),
+`/seguranca/red-team` (+ `/playbook`), `/seguranca/vapid`, `/licensa`,
+`/renderers`, and `/e2e-walkthrough`. `/dependencias` redirects to
+`/seguranca/dependencias`. Shared navigation renders as a collapsible left rail
+on desktop and a dropdown on mobile.
+
+### What changed
+
+- **New module `co-web/src/platform/docs_routes.rs`** — a tiny CommonMark +
+  GFM-table markdown→HTML renderer (headings, lists, fenced code, tables,
+  blockquotes, inline bold/italic/code, links). Every span of document text is
+  HTML-escaped before tags are emitted, so no raw HTML — and in particular no
+  inline `<script>` — survives into the page (CSP-safe).
+- **Cross-links** between docs (`[ver vapid](vapid-security.md)`) are rewritten
+  to their canonical route (`/seguranca/vapid`) at render time; external URLs and
+  in-page anchors are left untouched.
+- **Telemetry**: each render emits a server-side `page_view` event (with
+  `duration_ms`); unmatched `/seguranca/...` paths return a 404 page and emit a
+  `404_route` event with the attempted path. The client (`docs-viewer.js`) sends
+  `page_render` with the real load duration so slow pages (>500ms) are detectable
+  via the `duration_ms` field.
+- **Privacy / opt-out**: `localStorage["co_viewer_telemetry"] = "0"` (toggled by a
+  footer checkbox) is the source of truth; `docs-viewer.js` mirrors it to a
+  `co_viewer_telemetry=0` cookie so the server suppresses its own emission too.
+- Routes are merged before the `/{slug}` catch-all so these literal paths win
+  over universe-slug resolution.
+- New static assets: `co-web/static/shared/docs-viewer.js` (nav + telemetry,
+  the page's only script) and `docs-viewer.css` (responsive rail/dropdown).
+- Documented in `docs/architecture/api-catalog.md`.
+
+### Why
+
+Security, dependency, and license docs need to be findable and indexable for
+trust, served from a single source (`docs/`) rather than duplicated. Embedded
+telemetry + 404 tracing lets us see which pages 404, which links break, and which
+pages load slowly — and iterate — without users having to raise a flag.
+
+## CO-368 — Scrum artifacts as CO entry types — PBI / Sprint / SBI / DoD + per-universe _scrum.yaml
+
+Scrum becomes data, not a separate tool. A universe can opt in to a Scrum
+surface by dropping a `_scrum.yaml` at its content root; PBIs and Sprints are
+ordinary CO entries (`entry_type = "pbi" | "sprint"`), so the feature is purely
+additive — no migration, no new tables.
+
+### What changed
+
+- **`_scrum.yaml` manifest loader** (`co-web/src/scrum/manifest.rs`) — cadence,
+  roles and `default_dod`, mirroring the `_calendar.yaml` pattern. Absent or
+  invalid manifest ⇒ `enabled: false`, so universes without one are unchanged.
+- **Deterministic current-sprint computation** (`co-web/src/scrum/current.rs`) —
+  a pure function `current_sprint(now, anchor, length_days, release_window_hours)`
+  returning `{ number, start_at, end_at, release_window }`. No DB, no hidden clock.
+- **Frontmatter validation** (`co-web/src/scrum/validate.rs`) for PBI (`priority`,
+  `points`, `status`, `acceptance`) and Sprint (`number`, `start_at`, `end_at`,
+  `goal`, `release_tag`), wired into `EntryService::validate_entry_type` so both
+  the sugar endpoints and the raw `/entries` POST validate identically.
+- **Five per-universe endpoints** (`co-web/src/scrum/routes.rs`, mounted under
+  `/api/v1/universes`):
+  - `GET  /{key}/scrum/manifest` — manifest + computed current sprint
+  - `GET  /{key}/scrum/sprints` — list sprint entries
+  - `GET  /{key}/scrum/sprints/current` — `{number, start_at, end_at, release_window}`
+  - `GET  /{key}/scrum/backlog?status=&sprint=` — filtered PBI list
+  - `POST /{key}/scrum/pbi` — create a PBI (sugar over an entry write)
+  - `PATCH /{key}/scrum/pbi/{id}/dod` — check off a DoD item (seeds from `default_dod`)
+- **Scrum board SPA tab** — a three-column board (Product Backlog / Sprint
+  Backlog / Increment) shown only when the universe's manifest is enabled, with
+  the sprint goal above the columns and inline DoD checkboxes that PATCH on toggle.
+- **Telemetry** — `scrum.pbi.created` / `scrum.pbi.dod_checked` events published
+  to the EDA bus and captured in the atividades audit log (CO-361).
+- **OpenAPI** — new endpoints documented in `docs/architecture/api-catalog.md`
+  and regenerated into `co-web/openapi.yaml`.
+
+### Why
+
+The retrospective simulation (CO-369), sprint calendar (CO-372) and funnel
+report (CO-371) can now read the same entry tables — no parallel data model —
+and ArteLonga's `~/projects/ArteLonga/scrum/` draft becomes an executable
+workspace.
+
+## CO-401 — Staging fixtures + CO_STAGING_ADMIN_TOKEN — unlock the deep staging suite (3949 skips → coverage)
+
+Seeds the fixtures the CO-374 deep staging suite preconditions on, plus a
+least-privilege admin token for CI, so the Thursday release gate exercises real
+scenarios instead of skipping the authenticated suite. All seeding is gated on
+`CO_ENV=staging` and never runs in production.
+
+- **Recursion universe chain** — the staging seeder now creates
+  `recursion-a` → `recursion-a-b` → `recursion-a-b-c` (the exact keys the suite
+  matches; the original CO-379 seeder used `recursion-ab`/`recursion-abc`, which
+  the specs never matched, so every recursion test skipped).
+- **Synthetic funnel/lead fixtures** — `seed_staging_funnel_fixtures` inserts a
+  lifecycle of leads flagged `is_synthetic = 1`. **Migration v82** adds
+  `leads.is_synthetic` (`NOT NULL DEFAULT 0`), and the acquisition-funnel rollup
+  (`funnel_routes`) excludes synthetic rows from Capture (step 4) and Qualify
+  (step 5), so fixtures never pollute real analytics metrics. (CO-448 took v81;
+  this task claims v82.)
+- **`CO_STAGING_ADMIN_TOKEN` as a CO-448 capability-scoped token** — on staging
+  boot, `seed_staging_admin_token` registers the secret's value as an
+  `api_tokens` row owned by the admin-tier `staging-admin` user, carrying an
+  explicit least-privilege scope set (`entries:read/write`,
+  `universes:read/write`, `gestao:read`, `funnel:read`, `chat:read`,
+  `telemetry:read`) — **not** an admin-tier NULL-scope token. A leaked secret
+  grants only that scope, never full admin. Seeding is idempotent and
+  rotation-safe (a new secret value retires the old token row).
+- **CI wiring** — `staging-suite.yml` runs the CO-374 staging config and passes
+  `CO_STAGING_ADMIN_TOKEN`; the Playwright `apiContext` fixture authenticates
+  with the scoped Bearer token (falling back to password-login locally only).
+- **Docs** — `docs/cross-env-auth.md` gains a CO-401 section with the
+  seed-on-boot model and a Fly + GitHub rotation runbook.
+
+### Why
+
+The deep staging suite skipped ~3949 tests because its fixtures (recursion
+universes, funnel data) and an authenticated admin credential were missing. The
+held first draft would have shared an admin-full credential with CI; the rework
+(on CO-448) makes the credential least-privilege so a CI-secret leak can never
+escalate to full admin, while still unlocking the suite's coverage.
+
+## CO-448 — Token capability scopes (hybrid: capabilities + named bundles) — least-privilege api_tokens [CO-278-B pulled forward]
+
+API tokens (`api_tokens`) can now carry a **least-privilege capability scope**
+instead of inheriting the owner's full tier (all-or-nothing). The model is
+**hybrid**: an issuer requests either raw capabilities (`recurso:ação`, e.g.
+`entries:read`, `chat:write`) or a named **bundle** that expands to a capability
+set.
+
+- **Migration v81** adds a nullable `api_tokens.scopes` column (JSON array of
+  resolved capabilities; idempotent via `ensure_column`).
+- **Bundles**: `read` → `{entries:read, universes:read, telemetry:read}`,
+  `write` → `read ∪ {entries:write, universes:write}`,
+  `admin` → `write ∪ {gestao:read, funnel:read, chat:read, chat:write, deployments:read}`,
+  `agent` → `write ∪ {agent:dispatch}`. Bundles are expanded **at issuance** and
+  the expanded set is persisted, so a token is auditable.
+- **Issuance**: `POST /api/v1/auth/token` accepts an optional `scopes` list
+  (capabilities and/or bundle names). An unknown capability/bundle → `400`. The
+  resolved set is returned and listed (`GET /api/v1/auth/tokens`).
+- **Enforcement**: a new `Scoped<C>` axum extractor declares the capability an
+  endpoint requires and **denies with 403** when a scoped token lacks it (no
+  escalation). `GET /api/v1/admin/chat/origin-breakdown` now requires `chat:read`.
+- **Backward-compatible**: tokens with `scopes = NULL` (every pre-CO-448 token +
+  the legacy `create_api_token` path) keep inheriting the owner's tier — nothing
+  already issued (vault sync, co-auto reporting, …) breaks.
+
+Docs: `docs/cross-env-auth.md` (scope model + capability vocabulary + per-endpoint
+capabilities) and `docs/architecture/api-catalog.md` / `openapi.yaml` (no drift).
+
+### Why
+A leaked token secret previously granted full admin (the CO-401 staging-suite
+token had to be admin-pleno for exactly this reason). Least-privilege scoping
+means a leak grants only the token's capability set, and gives the future public
+API (CO-278) granular authorization natively. This is CO-278-B pulled forward so
+the reworked CO-401 staging token (v82) can be least-privilege.
+
+
 ## [3.10.0] — 2026-06-13 — Resilience hardening + chat/timeline polish
 
 ## CO-204 — Chat message origin telemetry — track which universe context each message was sent from
