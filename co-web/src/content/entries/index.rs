@@ -1043,6 +1043,8 @@ mod tests {
         Manifest {
             schema_version: 1,
             name: "Test".to_string(),
+            parent: None,
+            surface_dns: None,
             content_types: vec![ContentType {
                 name: "evento".to_string(),
                 schema,

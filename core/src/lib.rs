@@ -57,6 +57,7 @@ pub mod query;
 pub mod schema;
 pub mod space;
 pub mod storage;
+pub mod surface;
 pub mod sync;
 pub mod types;
 pub mod universo;

@@ -969,6 +969,7 @@ impl Storage {
             source_url: None,
             source_last_event_at: None,
             source_mode: None,
+            surface_dns: None,
         })
     }
 
@@ -1209,6 +1210,7 @@ impl Storage {
             source_url: None,
             source_last_event_at: None,
             source_mode: None,
+            surface_dns: None,
         })
     }
 }

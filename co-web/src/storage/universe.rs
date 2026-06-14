@@ -90,6 +90,7 @@ impl Storage {
             source_url: None,
             source_last_event_at: None,
             source_mode: None,
+            surface_dns: None,
         })
     }
 
@@ -126,6 +127,7 @@ impl Storage {
                         source_url: None,
                         source_last_event_at: None,
                         source_mode: None,
+                        surface_dns: None,
                     })
                 },
             )
@@ -168,7 +170,52 @@ impl Storage {
             )
             .ok()
             .flatten();
+        // CO-338: surface_dns (v84 column). Queried separately so a pre-v84 DB
+        // (column absent) degrades to `None` without affecting the other fields.
+        universe.surface_dns = self
+            .conn
+            .query_row(
+                "SELECT surface_dns FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .ok()
+            .flatten();
         Some(universe)
+    }
+
+    /// CO-338: every universe's `(key, parent_key, surface_dns)` — the registry
+    /// the `core::surface` resolver walks to turn a `key::path` reference into a
+    /// live deployment URL, and the deployment-snapshot worker reads instead of
+    /// a hardcoded unit list. Panic-free under the storage mutex: any SQLite
+    /// error degrades to an empty list (see `feedback_no_panic_under_mutex`).
+    pub fn list_surface_nodes(&self) -> Vec<co::surface::SurfaceNode> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, parent_key, surface_dns FROM universes \
+             WHERE deleted_at IS NULL AND archived_at IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_surface_nodes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map([], |row| {
+            let key: String = row.get(0)?;
+            let parent: Option<String> = row.get(1).unwrap_or(None);
+            let surface_dns: Option<String> = row.get(2).unwrap_or(None);
+            Ok(co::surface::SurfaceNode {
+                key,
+                parent,
+                surface_dns,
+            })
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_surface_nodes query: {e}");
+                Vec::new()
+            }
+        }
     }
 
     /// CO-96: true when the universe is soft-deleted or archived (i.e. in the
@@ -319,6 +366,7 @@ impl Storage {
                     source_url: None,
                     source_last_event_at: None,
                     source_mode: None,
+                    surface_dns: None,
                 })
             })
             .expect("Failed to list universes for user")
@@ -493,6 +541,7 @@ impl Storage {
                 source_url: None,
                 source_last_event_at: None,
                 source_mode: None,
+                surface_dns: None,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))

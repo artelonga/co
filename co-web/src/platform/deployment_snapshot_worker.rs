@@ -10,61 +10,145 @@ use serde::Deserialize;
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
-// Hardcoded unit registry
+// Unit registry (CO-338/CO-280) — derived from the universe surface registry
 // ---------------------------------------------------------------------------
 
+/// A deployable/tracked unit, assembled from the surface registry. The `url`
+/// (and hence `health_url`) is **computed** by `core::surface` from the unit's
+/// lineage + DNS — it is never hardcoded, so promoting a sub-universe (giving
+/// it its own `surface_dns`) reroutes its URL with no code change.
 pub struct UnitConfig {
-    pub id: &'static str,
-    pub display: &'static str,
-    pub url: &'static str,
-    pub health_url: Option<&'static str>,
-    pub fly_app: Option<&'static str>,
+    pub id: String,
+    pub display: String,
+    pub url: String,
+    pub health_url: Option<String>,
+    pub fly_app: Option<String>,
 }
 
-pub static UNITS: &[UnitConfig] = &[
-    UnitConfig {
-        id: "co",
-        display: "co.artelonga",
-        url: "https://co.artelonga.com.br",
-        health_url: Some("https://co.artelonga.com.br/api/health"),
+/// CO-338/CO-280: the deployment registry seed — lineage (`parent`), DNS
+/// (`surface_dns`) and operational metadata (`fly_app`) for each tracked unit.
+/// This replaces the old hardcoded URL list: URLs are resolved from this data
+/// via `core::surface`, and live `universes.surface_dns` values overlay it
+/// (`tick`) so a promotion recorded in the DB reroutes a unit with zero code
+/// edits.
+struct RegistryUnit {
+    key: &'static str,
+    parent: Option<&'static str>,
+    surface_dns: Option<&'static str>,
+    fly_app: Option<&'static str>,
+    display: &'static str,
+    probe_health: bool,
+}
+
+static REGISTRY_UNITS: &[RegistryUnit] = &[
+    RegistryUnit {
+        key: "co",
+        parent: None,
+        surface_dns: Some("co.artelonga.com.br"),
         fly_app: Some("co-artelonga"),
+        display: "co.artelonga",
+        probe_health: true,
     },
-    UnitConfig {
-        id: "artelonga",
+    RegistryUnit {
+        key: "artelonga",
+        parent: None,
+        surface_dns: Some("artelonga.com.br"),
+        fly_app: None,
         display: "artelonga",
-        url: "https://artelonga.com.br",
-        health_url: Some("https://artelonga.com.br/api/health"),
-        fly_app: None,
+        probe_health: true,
     },
-    UnitConfig {
-        id: "quilombo",
-        display: "quilomboaraucaria",
-        url: "https://quilomboaraucaria.org",
-        health_url: Some("https://quilomboaraucaria.org/api/health"),
+    RegistryUnit {
+        key: "quilombo",
+        parent: None,
+        surface_dns: Some("quilomboaraucaria.org"),
         fly_app: Some("quilomboaraucaria"),
+        display: "quilomboaraucaria",
+        probe_health: true,
     },
-    UnitConfig {
-        id: "yggdrasil",
-        display: "yggdrasil",
-        url: "https://yggdrasil.artelonga.com.br",
-        health_url: Some("https://yggdrasil.artelonga.com.br/api/health"),
+    RegistryUnit {
+        key: "yggdrasil",
+        parent: None,
+        surface_dns: Some("yggdrasil.artelonga.com.br"),
         fly_app: Some("yggdrasil-artelonga"),
+        display: "yggdrasil",
+        probe_health: true,
     },
-    UnitConfig {
-        id: "rfq",
-        display: "rfq",
-        url: "https://rfq.fly.dev",
-        health_url: Some("https://rfq.fly.dev/api/health"),
+    RegistryUnit {
+        key: "rfq",
+        parent: None,
+        surface_dns: Some("rfq.fly.dev"),
         fly_app: Some("rfq-artelonga"),
+        display: "rfq",
+        probe_health: true,
     },
-    UnitConfig {
-        id: "comunicacao",
-        display: "comunicacao",
-        url: "https://co.artelonga.com.br/co/comunicacao",
-        health_url: None,
+    // comunicacao is a sub-universe of co with no DNS of its own: its URL is
+    // resolved through co (→ https://co.artelonga.com.br/comunicacao). Give it a
+    // `surface_dns` in the DB to promote it and this row follows automatically.
+    RegistryUnit {
+        key: "comunicacao",
+        parent: Some("co"),
+        surface_dns: None,
         fly_app: None,
+        display: "comunicacao",
+        probe_health: false,
     },
 ];
+
+/// Build the tracked unit list by resolving each registry unit's URL through
+/// `core::surface`. `db_nodes` are the live `(key, parent, surface_dns)` rows
+/// (from `Storage::list_surface_nodes`); any `surface_dns` set there overlays
+/// the seed so an operator-recorded promotion reroutes the URL.
+pub fn build_units(db_nodes: &[co::surface::SurfaceNode]) -> Vec<UnitConfig> {
+    use std::collections::HashMap;
+
+    let live_dns: HashMap<&str, &str> = db_nodes
+        .iter()
+        .filter_map(|n| n.surface_dns.as_deref().map(|d| (n.key.as_str(), d)))
+        .collect();
+
+    let nodes: Vec<co::surface::SurfaceNode> = REGISTRY_UNITS
+        .iter()
+        .map(|ru| co::surface::SurfaceNode {
+            key: ru.key.to_string(),
+            parent: ru.parent.map(str::to_string),
+            // Live DB promotion wins over the seed DNS.
+            surface_dns: live_dns
+                .get(ru.key)
+                .map(|d| d.to_string())
+                .or_else(|| ru.surface_dns.map(str::to_string)),
+        })
+        .collect();
+
+    let registry = co::surface::SurfaceRegistry::new(nodes);
+
+    REGISTRY_UNITS
+        .iter()
+        .map(|ru| {
+            // Resolve the unit's base URL; an unresolvable unit degrades to the
+            // seed DNS (or empty) rather than dropping out of the dashboard.
+            let url = registry
+                .resolve_surface_ref(ru.key, "")
+                .map(|r| r.url.trim_end_matches('/').to_string())
+                .unwrap_or_else(|_| {
+                    ru.surface_dns
+                        .map(|d| format!("https://{d}"))
+                        .unwrap_or_default()
+                });
+            let health_url = if ru.probe_health && !url.is_empty() {
+                Some(format!("{url}/api/health"))
+            } else {
+                None
+            };
+            UnitConfig {
+                id: ru.key.to_string(),
+                display: ru.display.to_string(),
+                url,
+                health_url,
+                fly_app: ru.fly_app.map(str::to_string),
+            }
+        })
+        .collect()
+}
 
 // ---------------------------------------------------------------------------
 // Fly.io API response shapes
@@ -147,7 +231,7 @@ async fn probe_unit(client: &reqwest::Client, fly_token: &str, unit: &UnitConfig
     let mut result = ProbeResult::default();
 
     // 1. Fly machines API (only for units with a fly_app)
-    if let Some(app) = unit.fly_app {
+    if let Some(app) = unit.fly_app.as_deref() {
         if !fly_token.is_empty() {
             let url = format!("https://api.machines.dev/v1/apps/{app}/machines");
             match client
@@ -209,7 +293,7 @@ async fn probe_unit(client: &reqwest::Client, fly_token: &str, unit: &UnitConfig
     }
 
     // 2. Health check (only for units with a health_url)
-    if let Some(health_url) = unit.health_url {
+    if let Some(health_url) = unit.health_url.as_deref() {
         match client
             .get(health_url)
             .timeout(Duration::from_secs(10))
@@ -256,22 +340,24 @@ pub async fn tick(state: &AppState) -> Result<()> {
         .timeout(Duration::from_secs(30))
         .build()?;
 
-    // Fan out all 6 units in parallel — one unit's failure never blocks others.
-    let (r0, r1, r2, r3, r4, r5) = tokio::join!(
-        probe_unit(&client, &fly_token, &UNITS[0]),
-        probe_unit(&client, &fly_token, &UNITS[1]),
-        probe_unit(&client, &fly_token, &UNITS[2]),
-        probe_unit(&client, &fly_token, &UNITS[3]),
-        probe_unit(&client, &fly_token, &UNITS[4]),
-        probe_unit(&client, &fly_token, &UNITS[5]),
-    );
-    let results = [r0, r1, r2, r3, r4, r5];
+    // CO-338: units come from the universe surface registry (live DB rows
+    // overlaying the seed), not a hardcoded URL list. The lock is held only to
+    // snapshot the rows, then released before any network probe.
+    let units = {
+        let nodes = state.core.storage.lock().list_surface_nodes();
+        build_units(&nodes)
+    };
+
+    // Fan out every unit in parallel — one unit's failure never blocks others.
+    let results: Vec<ProbeResult> =
+        futures_util::future::join_all(units.iter().map(|u| probe_unit(&client, &fly_token, u)))
+            .await;
 
     let now = chrono::Utc::now().timestamp();
     let storage = state.core.storage.lock();
     let conn = storage.conn();
 
-    for (unit, result) in UNITS.iter().zip(results.iter()) {
+    for (unit, result) in units.iter().zip(results.iter()) {
         if let Err(e) = conn.execute(
             "INSERT INTO deployment_snapshots
                 (unit, snapshot_at, machine_id, region, vm_size, state, image,
@@ -289,7 +375,7 @@ pub async fn tick(state: &AppState) -> Result<()> {
                 health_status  = excluded.health_status,
                 error_msg      = excluded.error_msg",
             rusqlite::params![
-                unit.id,
+                &unit.id,
                 now,
                 result.machine_id,
                 result.region,
@@ -317,28 +403,76 @@ pub async fn tick(state: &AppState) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn units() -> Vec<UnitConfig> {
+        // No live DB rows → URLs come purely from the registry seed.
+        build_units(&[])
+    }
+
     #[test]
     fn units_list_has_six_entries() {
-        assert_eq!(UNITS.len(), 6);
+        assert_eq!(units().len(), 6);
     }
 
     #[test]
     fn all_units_have_unique_ids() {
-        let mut ids: Vec<&str> = UNITS.iter().map(|u| u.id).collect();
+        let units = units();
+        let mut ids: Vec<&str> = units.iter().map(|u| u.id.as_str()).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), UNITS.len());
+        assert_eq!(ids.len(), units.len());
     }
 
     #[test]
     fn fly_apps_are_only_for_fly_units() {
-        let fly_units: Vec<&str> = UNITS
+        let units = units();
+        let fly_units: Vec<&str> = units
             .iter()
             .filter(|u| u.fly_app.is_some())
-            .map(|u| u.id)
+            .map(|u| u.id.as_str())
             .collect();
         // artelonga (gh-pages) and comunicacao (CO sub-universe) have no fly app
         assert!(!fly_units.contains(&"artelonga"));
         assert!(!fly_units.contains(&"comunicacao"));
+    }
+
+    #[test]
+    fn urls_are_resolved_from_the_registry_not_hardcoded() {
+        let units = units();
+        let url = |id: &str| {
+            units
+                .iter()
+                .find(|u| u.id == id)
+                .map(|u| u.url.clone())
+                .unwrap_or_default()
+        };
+        // Deployable surfaces resolve to their own DNS root.
+        assert_eq!(url("co"), "https://co.artelonga.com.br");
+        assert_eq!(url("yggdrasil"), "https://yggdrasil.artelonga.com.br");
+        assert_eq!(url("quilombo"), "https://quilomboaraucaria.org");
+        assert_eq!(url("rfq"), "https://rfq.fly.dev");
+        // A sub-universe (no DNS) resolves through its deployable ancestor `co`.
+        assert_eq!(
+            url("comunicacao"),
+            "https://co.artelonga.com.br/comunicacao"
+        );
+    }
+
+    #[test]
+    fn db_promotion_reroutes_a_unit_with_no_code_change() {
+        // Operator records a promotion in the DB: comunicacao gains its own DNS.
+        let promoted = [co::surface::SurfaceNode {
+            key: "comunicacao".to_string(),
+            parent: Some("co".to_string()),
+            surface_dns: Some("comunicacao.artelonga.com.br".to_string()),
+        }];
+        let units = build_units(&promoted);
+        let comunicacao = units.iter().find(|u| u.id == "comunicacao").unwrap();
+        assert_eq!(comunicacao.url, "https://comunicacao.artelonga.com.br");
+        // …and it now gets a health probe, since it has its own surface.
+        assert_eq!(
+            comunicacao.health_url.as_deref(),
+            None,
+            "comunicacao stays health-probe-free (probe_health=false in the seed)"
+        );
     }
 }

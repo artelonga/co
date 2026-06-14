@@ -401,6 +401,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .merge(crawl_routes)
             // CO-210: doc pages before co_routes (literal paths beat /{slug}).
             .merge(docs_routes)
+            // CO-338: surface-key resolution (GET /api/v1/resolve?ref=key::path).
+            .merge(crate::resolve_routes::router())
             .merge(co_routes)
             .nest("/api", openapi_api)
             .nest("/api", board_public)

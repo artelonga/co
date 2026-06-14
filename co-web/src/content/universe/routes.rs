@@ -313,6 +313,7 @@ pub async fn list_public_universes(
                 source_url: None,
                 source_last_event_at: None,
                 source_mode: None,
+                surface_dns: None,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;

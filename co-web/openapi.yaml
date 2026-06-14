@@ -83,6 +83,8 @@ tags:
     description: "chat-llm endpoints"
   - name: "changelog"
     description: "changelog endpoints"
+  - name: "resolve"
+    description: "resolve endpoints"
   - name: "events"
     description: "events endpoints"
   - name: "sync"
@@ -2457,6 +2459,13 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/resolve:
+    get:
+      tags: ["resolve"]
+      summary: "Resolve a surface ref (query `?ref=<key>::<path>`) → `{ url, universe, deployable_ancestor }`; unknown key → 404, ambiguous/malformed → 400"
       responses:
         "200":
           description: OK
