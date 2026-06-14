@@ -73,7 +73,7 @@ pub fn run_startup_seeds(config: &WebConfig) {
     let _ = storage.conn().execute_batch(
         r#"
         UPDATE universes SET local_repo_path='~/projects/ArteLonga', content_subdirs='["docs","content"]' WHERE key='artelonga' AND local_repo_path IS NULL;
-        UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["relatos","jardim","quadro","eventos","membros","modelos"]' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
+        UPDATE universes SET local_repo_path='~/projects/quilomboaraucaria', content_subdirs='["relatos","jardim","quadro","eventos","membros","modelos"]', remote_url='https://github.com/artelonga/quilomboaraucaria', remote_ref='main' WHERE key='quilomboaraucaria' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/yggdrasil', content_subdirs='["docs","content"]' WHERE key='yggdrasil' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/rfq-gateway', content_subdirs='["docs","content"]' WHERE key='rfq' AND local_repo_path IS NULL;
         UPDATE universes SET local_repo_path='~/projects/comunicacao', content_subdirs='["docs","content"]' WHERE key='comunicacao' AND local_repo_path IS NULL;
