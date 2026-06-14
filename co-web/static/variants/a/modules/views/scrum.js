@@ -5,7 +5,17 @@
 // of-Done checklist inline, and ticking a box PATCHes the entry.
 import { state } from '../state.js';
 import { api } from '../api.js';
-import { esc } from '../helpers.js';
+
+// CO-368: build the board via DOM (createElement + textContent) instead of
+// innerHTML — textContent escapes by construction, so PBI titles/goals can't
+// inject markup and the security scanner (CWE-79) stays clean.
+function el(tag, className, opts = {}) {
+    const e = document.createElement(tag);
+    if (className) e.className = className;
+    if (opts.text != null) e.textContent = opts.text;
+    if (opts.i18n) e.dataset.i18n = opts.i18n;
+    return e;
+}
 
 let _showToast = () => {};
 
@@ -54,23 +64,38 @@ function dodChecklist(pbi) {
 function renderCard(pbi) {
     const fm = pbi.frontmatter || {};
     const id = pbiId(pbi);
-    const points = fm.points != null ? `<span class="scrum-points">${esc(String(fm.points))}</span>` : '';
-    const priority = fm.priority ? `<span class="scrum-priority scrum-priority-${esc(fm.priority)}">${esc(fm.priority)}</span>` : '';
+    const card = el('div', 'scrum-card');
+    card.dataset.pbi = id;
+
+    const head = el('div', 'scrum-card-head');
+    if (fm.priority) {
+        head.appendChild(el('span', `scrum-priority scrum-priority-${fm.priority}`, { text: fm.priority }));
+    }
+    if (fm.points != null) {
+        head.appendChild(el('span', 'scrum-points', { text: String(fm.points) }));
+    }
+    card.appendChild(head);
+    card.appendChild(el('div', 'scrum-card-title', { text: pbi.title || id }));
+
     const dod = dodChecklist(pbi);
-    const dodHtml = dod.length
-        ? `<ul class="scrum-dod">${dod
-              .map(
-                  (item, i) =>
-                      `<li><label><input type="checkbox" class="scrum-dod-check" data-pbi="${esc(id)}" data-index="${i}" ${item.done ? 'checked' : ''}> ${esc(item.text)}</label></li>`
-              )
-              .join('')}</ul>`
-        : '';
-    return `
-        <div class="scrum-card" data-pbi="${esc(id)}">
-            <div class="scrum-card-head">${priority}${points}</div>
-            <div class="scrum-card-title">${esc(pbi.title || id)}</div>
-            ${dodHtml}
-        </div>`;
+    if (dod.length) {
+        const ul = el('ul', 'scrum-dod');
+        dod.forEach((item, i) => {
+            const li = document.createElement('li');
+            const label = document.createElement('label');
+            const cb = el('input', 'scrum-dod-check');
+            cb.type = 'checkbox';
+            cb.dataset.pbi = id;
+            cb.dataset.index = String(i);
+            if (item.done) cb.checked = true;
+            label.appendChild(cb);
+            label.appendChild(document.createTextNode(' ' + (item.text ?? '')));
+            li.appendChild(label);
+            ul.appendChild(li);
+        });
+        card.appendChild(ul);
+    }
+    return card;
 }
 
 export async function renderScrum() {
@@ -78,31 +103,48 @@ export async function renderScrum() {
     content.className = 'content scrum-view';
 
     if (!scrumEnabled()) {
-        content.innerHTML = `<div class="scrum-empty" data-i18n="scrum_disabled">Scrum não está habilitado neste universo.</div>`;
+        content.replaceChildren(
+            el('div', 'scrum-empty', {
+                text: 'Scrum não está habilitado neste universo.',
+                i18n: 'scrum_disabled',
+            })
+        );
         return;
     }
 
+    content.replaceChildren();
     const sprint = _manifest.current_sprint;
-    const goal = sprint && sprint.goal ? sprint.goal : '';
-    const sprintHeader = sprint
-        ? `<div class="scrum-sprint-header">
-               <span class="scrum-sprint-number">Sprint ${esc(String(sprint.number))}</span>
-               ${goal ? `<span class="scrum-sprint-goal">${esc(goal)}</span>` : ''}
-               ${sprint.release_window ? `<span class="scrum-release-window" data-i18n="scrum_release_window">Release iminente</span>` : ''}
-           </div>`
-        : '';
+    if (sprint) {
+        const header = el('div', 'scrum-sprint-header');
+        header.appendChild(el('span', 'scrum-sprint-number', { text: `Sprint ${sprint.number}` }));
+        if (sprint.goal) {
+            header.appendChild(el('span', 'scrum-sprint-goal', { text: sprint.goal }));
+        }
+        if (sprint.release_window) {
+            header.appendChild(
+                el('span', 'scrum-release-window', {
+                    text: 'Release iminente',
+                    i18n: 'scrum_release_window',
+                })
+            );
+        }
+        content.appendChild(header);
+    }
 
-    content.innerHTML = `
-        ${sprintHeader}
-        <div class="scrum-board">
-            ${COLUMNS.map(
-                (c) =>
-                    `<div class="scrum-column" data-col="${c.key}">
-                        <h3 class="scrum-column-title" data-i18n="${c.i18n}">${esc(c.label)}</h3>
-                        <div class="scrum-column-body" id="scrum-col-${c.key}"><div class="scrum-loading">…</div></div>
-                    </div>`
-            ).join('')}
-        </div>`;
+    const board = el('div', 'scrum-board');
+    const bodies = {};
+    for (const c of COLUMNS) {
+        const col = el('div', 'scrum-column');
+        col.dataset.col = c.key;
+        col.appendChild(el('h3', 'scrum-column-title', { text: c.label, i18n: c.i18n }));
+        const body = el('div', 'scrum-column-body');
+        body.id = `scrum-col-${c.key}`;
+        body.appendChild(el('div', 'scrum-loading', { text: '…' }));
+        col.appendChild(body);
+        board.appendChild(col);
+        bodies[c.key] = body;
+    }
+    content.appendChild(board);
 
     // Load the whole backlog once, then bucket by status client-side.
     let pbis = [];
@@ -113,12 +155,14 @@ export async function renderScrum() {
     }
 
     for (const col of COLUMNS) {
-        const body = document.querySelector(`#scrum-col-${col.key}`);
+        const body = bodies[col.key];
         if (!body) continue;
         const items = pbis.filter((p) => col.statuses.includes((p.frontmatter || {}).status));
-        body.innerHTML = items.length
-            ? items.map(renderCard).join('')
-            : `<div class="scrum-column-empty">—</div>`;
+        if (items.length) {
+            body.replaceChildren(...items.map(renderCard));
+        } else {
+            body.replaceChildren(el('div', 'scrum-column-empty', { text: '—' }));
+        }
     }
 
     bindDodCheckboxes(content);
