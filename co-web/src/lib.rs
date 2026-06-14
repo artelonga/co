@@ -151,6 +151,7 @@ pub use platform::server_config::CoServerConfig;
 pub use platform::source;
 pub use platform::telemetry;
 pub use platform::telemetry_api;
+pub use platform::telemetry_archive;
 pub use platform::theme_engine;
 pub use platform::universe_pool;
 pub use platform::vcs;
