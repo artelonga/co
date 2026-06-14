@@ -137,6 +137,14 @@ pub async fn run_backup_tick(state: &AppState) -> anyhow::Result<()> {
                 .await??;
         let id = backend.put(&snapshot).await?;
         tracing::info!("backup: snapshot stored as {id} ({} bytes)", snapshot.bytes);
+
+        // CO-458: register the snapshot's manifest in the central StaaS blob
+        // ledger (content-addressed via the pluggable `StorageBackend`). This is
+        // a real producer/consumer of the new backend — backups become a backend
+        // consumer (CO-405) and the manifest gets a dedupe + billing-traceable
+        // `blob_refs` row. Best-effort: a ledger hiccup must never fail a backup.
+        register_manifest_blob(&data_dir, &snapshot).await;
+
         anyhow::Ok((id, snapshot.bytes))
     })
     .await;
@@ -190,6 +198,50 @@ pub async fn run_backup_tick(state: &AppState) -> anyhow::Result<()> {
             );
             Err(e)
         }
+    }
+}
+
+/// CO-458: store the snapshot manifest in the central StaaS blob ledger via the
+/// pluggable [`StorageBackend`](crate::storage::backend::StorageBackend), then
+/// read it back to verify integrity. This is the integration proof that a real
+/// call-site writes and reads through the backend; it is best-effort and only
+/// logs on failure so it can never take a backup down.
+async fn register_manifest_blob(data_dir: &std::path::Path, snapshot: &super::Snapshot) {
+    use crate::storage::backend;
+
+    let manifest_bytes = match serde_json::to_vec(&snapshot.manifest_json) {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::warn!("backup: could not serialize manifest for blob ledger: {e}");
+            return;
+        }
+    };
+
+    let store = match backend::from_config(data_dir, crate::infra::secrets::global().as_ref()) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("backup: StorageBackend unavailable, skipping manifest ledger: {e}");
+            return;
+        }
+    };
+
+    match store.put(&manifest_bytes, "application/json").await {
+        Ok(blob) => match store.get(&blob.hash).await {
+            Ok(got) if got == manifest_bytes => {
+                tracing::info!(
+                    "backup: manifest registered in StaaS ledger (hash={}, {} bytes, backend={})",
+                    blob.hash,
+                    blob.size,
+                    blob.backend
+                );
+            }
+            Ok(_) => tracing::warn!(
+                "backup: manifest blob {} read back with mismatched bytes",
+                blob.hash
+            ),
+            Err(e) => tracing::warn!("backup: manifest blob read-back failed: {e}"),
+        },
+        Err(e) => tracing::warn!("backup: could not register manifest in StaaS ledger: {e}"),
     }
 }
 
