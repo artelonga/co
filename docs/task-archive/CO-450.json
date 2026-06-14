@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-450",
+  "title": "Deep-link ?criar handler — Yggdrasil 'Criar no CO' prefill → create-universe modal (YG-138 round-trip, CO side)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-450.md",
+  "branch": "feat/CO-450-deep-link-criar-handler-yggdrasil-criar-",
+  "merge_sha": "aa988678e0bab6d98c362d6acc3403597d17a686",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/253",
+    "number": 253
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T13:49:30Z",
+  "files_changed": 5,
+  "lines_added": 207,
+  "lines_removed": 4,
+  "labels": [
+    "type:feat",
+    "module:collab",
+    "module:content",
+    "spa"
+  ],
+  "changelog_entry": "## CO-450 — Deep-link ?criar handler — Yggdrasil 'Criar no CO' prefill → create-universe modal (YG-138 round-trip, CO side)\n\nThe CO SPA (variant-a) now handles the `?criar=1` deep-link emitted by the\nYggdrasil **🌐 Criar no CO** button (YG-138). Visiting\n`/?criar=1&name=<nome>&key=<chave>&source=yggdrasil&instance=<id>` opens the\nCO-96 create-universe modal **pre-filled** with `name` and `key`, runs the CO-96\ninline validation immediately (an invalid key surfaces its error instead of\ncreating blindly), and submits via the existing `POST /api/v1/universes`\n(CO-444) — redirecting to `/co/<key>` on success.\n\nThe handler is **auth-aware**: an expired/absent session triggers the login flow\nover a template backdrop and leaves the `?criar` params in the URL so the\npost-login reload resumes the prefill. The prefill is never persisted\ncross-session, so it can't leak to a different user. Once the modal opens the\nparams are stripped via `history.replaceState`, so a refresh won't re-fire.\n\nA `universe_created` telemetry event (CO-46 `window.coTrack`) is emitted on every\ncreate, carrying `source` + `instance` when they came from the deep-link — this\nmeasures YG→CO federation conversion.\n\n### Why\nCloses the live YG-126/YG-138 ↔ CO-444 round-trip: \"criar universo\" in Yggdrasil\nbecomes a federated universe in CO in one click, with provenance measured. No\nmigration and no backend change — reuses CO-444 (create) + CO-96 (modal) + CO-46\n(telemetry).",
+  "summary": "Contexto O Yggdrasil (YG-138, lado deles, shipping em v2.29.0) tem um botão **🌐 Criar no CO** (owner-only) que redireciona ao CO **autenticado** com prefill. O CO precisa de um handler de deep-link `?",
+  "co_auto_version": "0.1.0"
+}
