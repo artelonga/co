@@ -59,6 +59,9 @@ nix = { version = "0.28", features = ["fs"] }
 opentelemetry = { version = "0.26", features = ["trace"] }
 opentelemetry_sdk = { version = "0.26", features = ["rt-tokio"] }
 opentelemetry-otlp = { version = "0.26", features = ["tonic"] }
+# CO-457: decode inbound OTLP metric exports (Claude Code native telemetry).
+# Reuses the CO-291 OTLP stack — message structs only (no tonic client/server).
+opentelemetry-proto = { version = "0.26", default-features = false, features = ["gen-tonic-messages", "metrics"] }
 tracing-opentelemetry = "0.27"
 # CO-384: outbound bridge WS client (connects CO to peer deployments).
 tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }

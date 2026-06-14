@@ -587,6 +587,7 @@ model×universe cross-tab plus a per-session listing.
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
+| POST | `/v1/metrics` | bearer (OTLP) | OTLP/HTTP metrics receiver — ingests Claude Code native `claude_code.*` telemetry into `usage_sessions` (CO-457) |
 | POST | `/api/v1/usage/sessions` | token-or-jwt | Ingest a session's token/cost + metadata report (CO-425/CO-437 producer) |
 | GET | `/api/v1/usage/sessions` | admin | Recent per-session listing with tool usage + PR link (CO-437) |
 | POST | `/api/v1/usage/heartbeat` | token-or-jwt | Register/refresh an active launcher (in-memory TTL) |

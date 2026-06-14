@@ -82,10 +82,6 @@ struct ClaudeOutput {
     stdout: String,
     /// Captured stderr (headless mode only; empty in interactive mode).
     stderr: String,
-    /// CO-425: token usage parsed from the `--output-format stream-json` events
-    /// (headless mode only). `None` in interactive mode or when no usage event
-    /// was emitted. Best-effort — never blocks or fails the task.
-    usage: Option<crate::usage::SessionUsage>,
 }
 
 /// One agent-session record, posted to the CO endpoint after each run.
@@ -378,6 +374,7 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             config.interactive,
             &task.key,
             &task.title,
+            &space_to_universe(&config.space),
         )?;
 
         let duration_ms = wall_start.elapsed().as_millis() as i64;
@@ -531,29 +528,14 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
             tracker.tasks_failed.push(task.key.clone());
         }
 
-        // CO-425: stream-json usage is the primary token source (headless mode).
-        // Fall back to the legacy stdout scraping when no usage event was parsed
-        // (interactive mode, or an older claude that lacks stream-json).
-        let stream_usage = claude_out.usage.clone();
-        let tokens_in = stream_usage
-            .as_ref()
-            .map(|u| u.total_input())
-            .filter(|&n| n > 0)
-            .or_else(|| parse_token_count(&claude_out.stdout, "input"));
-        let tokens_out = stream_usage
-            .as_ref()
-            .map(|u| u.output_tokens)
-            .filter(|&n| n > 0)
-            .or_else(|| parse_token_count(&claude_out.stdout, "output"));
-
-        // CO-425: print a one-line usage summary for the operator.
-        if let Some(ref u) = stream_usage {
-            let mut line = u.summary_line();
-            if let Some(d) = u.duration_ms {
-                line.push_str(&format!(" — {}", human_duration(d)));
-            }
-            println!("  {} {}", "◆".dimmed(), line.dimmed());
-        }
+        // CO-457: token usage no longer comes from a hand-parsed stream-json
+        // (CO-425's deleted usage.rs). Claude Code now emits it as native OTel
+        // metrics straight to co-web's OTLP receiver (configured in
+        // `launch_claude`). The CO-275 session record below keeps a best-effort
+        // stdout scrape for tokens_in/out — usually `None` now, which is fine:
+        // the authoritative ledger is `usage_sessions`, fed via OTLP.
+        let tokens_in = parse_token_count(&claude_out.stdout, "input");
+        let tokens_out = parse_token_count(&claude_out.stdout, "output");
 
         // CO-275: emit agent-session record (best-effort — never fails the run)
         let session = AgentSessionRecord {
@@ -576,26 +558,9 @@ pub fn run(mut config: AutoConfig) -> Result<()> {
         };
         post_session_to_co(&session);
 
-        // CO-425: POST the structured usage summary to the dedicated ingestion
-        // endpoint (CO-426). Best-effort, default OFF — no-op when CO_USAGE_ENDPOINT
-        // is unset. Never fails or blocks the task.
-        if let Some(mut usage) = stream_usage {
-            let outcome = if success { "success" } else { "error" };
-            // CO-437: attach the PR link co-auto opened (from stdout) — not part
-            // of the stream-json, so the producer enriches it here.
-            usage.pr_url = parse_pr_url(&claude_out.stdout);
-            post_usage_to_co(
-                &task.key,
-                &space_to_universe(&config.space),
-                spawn_time,
-                finish_time,
-                outcome,
-                &usage,
-                &model_requested,
-                &model_used,
-                downshift.as_ref(),
-            );
-        }
+        // CO-457: usage is now reported by Claude Code's native OTel exporter
+        // (enabled in `launch_claude`) straight to co-web's OTLP receiver — the
+        // bespoke `post_usage_to_co` + stream-json parser (CO-425) are gone.
 
         // Restore git-crypt filters after task completes
         if has_git_crypt_wt {
@@ -1081,7 +1046,13 @@ fn launch_claude(
     interactive: bool,
     task_key: &str,
     task_title: &str,
+    universe_key: &str,
 ) -> Result<ClaudeOutput> {
+    // CO-457: native Claude Code OTel telemetry env (opt-in via CO_USAGE_ENDPOINT).
+    // pr_url is not known until the PR is opened (after the run), so it is omitted
+    // here — an accepted minor loss noted in the CO-457 spec.
+    let telemetry_env = native_telemetry_env(task_key, universe_key, model, None);
+
     // Write context to a temp file to avoid CLI arg length limits
     let context_file = workdir.join(".claude").join("co-auto-context.md");
     fs::create_dir_all(context_file.parent().unwrap())?;
@@ -1113,6 +1084,9 @@ fn launch_claude(
         if teams {
             cmd.env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1");
         }
+        for (k, v) in &telemetry_env {
+            cmd.env(k, v);
+        }
 
         // Interactive: inherit stdio so user sees the session
         cmd.stdin(std::process::Stdio::inherit());
@@ -1134,19 +1108,15 @@ fn launch_claude(
             exit_code: code,
             stdout: String::new(), // interactive mode — stdout goes to terminal
             stderr: String::new(),
-            usage: None, // interactive mode emits human stdout, not stream-json
         })
     } else {
         println!("  {} Launching Claude Code (headless)...", "◆".cyan());
 
         let mut cmd = Command::new("claude");
         cmd.arg("-p").arg(&user_prompt);
-        // CO-425: request structured streaming output so we can capture per-message
-        // token usage. `--verbose` is required by Claude Code for stream-json in
-        // `-p` mode. The "human" assistant text is re-emitted to the launcher log
-        // below, so task visibility is unchanged.
-        cmd.arg("--output-format").arg("stream-json");
-        cmd.arg("--verbose");
+        // CO-457: plain `-p` text output. Token usage is captured out-of-band via
+        // Claude Code's native OTel exporter (env vars below), so the stream-json
+        // re-parse (CO-425) is gone — `-p` stdout is the human log we print.
         // `--bare` requires ANTHROPIC_API_KEY (OAuth/keychain are never read in
         // bare mode — see `claude --help`). Only enable it for API-key users;
         // subscription users (keychain-auth via `claude /login`) need claude to
@@ -1162,13 +1132,15 @@ fn launch_claude(
         if teams {
             cmd.env("CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS", "1");
         }
+        // CO-457: enable native OTel usage metrics → co-web's OTLP receiver.
+        for (k, v) in &telemetry_env {
+            cmd.env(k, v);
+        }
 
         // CO-440: pipe stdout/stderr so `wait_with_output()` actually captures
-        // the stream-json. Without this, `spawn()` inherits the parent's stdio,
-        // `output.stdout` comes back EMPTY, and CO-425 usage capture +
-        // assistant-text re-emit silently get nothing on every headless run.
-        // `wait_with_output` drains both pipes concurrently, so no deadlock on
-        // long runs.
+        // the output. Without this, `spawn()` inherits the parent's stdio and
+        // `output.stdout` comes back EMPTY. `wait_with_output` drains both pipes
+        // concurrently, so no deadlock on long runs.
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
 
@@ -1183,16 +1155,10 @@ fn launch_claude(
 
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
 
-        // CO-425: re-emit the human assistant text so the launcher log stays
-        // readable, then parse usage. Both steps are best-effort and infallible.
+        // Re-emit claude's stdout to the launcher log so the run stays visible.
         for line in stdout.lines() {
-            if let Some(text) = crate::usage::assistant_text(line) {
-                for tl in text.lines() {
-                    println!("    {}", tl.dimmed());
-                }
-            }
+            println!("    {}", line.dimmed());
         }
-        let usage = crate::usage::parse_stream_json(&stdout);
 
         let exit_code = output.status.code().unwrap_or(-1);
         Ok(ClaudeOutput {
@@ -1200,9 +1166,109 @@ fn launch_claude(
             exit_code,
             stdout,
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            usage: Some(usage),
         })
     }
+}
+
+/// CO-457: build the OTLP resource-attribute string Claude Code's native
+/// telemetry exporter reads from `OTEL_RESOURCE_ATTRIBUTES`. Always carries
+/// `task.key`, `universe.key`, `model`, `machine`; appends `pr.url` when known
+/// (it usually isn't at launch — the PR opens after the run).
+fn build_resource_attributes(
+    task_key: &str,
+    universe_key: &str,
+    model: &str,
+    machine: &str,
+    pr_url: Option<&str>,
+) -> String {
+    let mut attrs =
+        format!("task.key={task_key},universe.key={universe_key},model={model},machine={machine}");
+    if let Some(pr) = pr_url
+        && !pr.is_empty()
+    {
+        attrs.push_str(&format!(",pr.url={pr}"));
+    }
+    attrs
+}
+
+/// CO-457: the env vars that turn on Claude Code's native OTel usage metrics,
+/// pointed at co-web's OTLP receiver. Pure over its inputs (the public wrapper
+/// reads the process env). Returns an **empty** vec — telemetry stays OFF — when
+/// no endpoint is configured, so reporting is opt-in exactly like the deleted
+/// bespoke POST. Reuses the same `CO_USAGE_ENDPOINT` / `CO_SESSION_TOKEN` config
+/// the CO-427 downshift consumer already reads.
+fn native_telemetry_env_from(
+    endpoint: Option<&str>,
+    token: Option<&str>,
+    task_key: &str,
+    universe_key: &str,
+    model: &str,
+    machine: &str,
+    pr_url: Option<&str>,
+) -> Vec<(String, String)> {
+    let endpoint = match endpoint {
+        Some(e) if !e.is_empty() => e.trim_end_matches('/'),
+        _ => return Vec::new(),
+    };
+    let mut env = vec![
+        ("CLAUDE_CODE_ENABLE_TELEMETRY".to_string(), "1".to_string()),
+        ("OTEL_METRICS_EXPORTER".to_string(), "otlp".to_string()),
+        (
+            "OTEL_EXPORTER_OTLP_PROTOCOL".to_string(),
+            "http/protobuf".to_string(),
+        ),
+        (
+            "OTEL_EXPORTER_OTLP_ENDPOINT".to_string(),
+            endpoint.to_string(),
+        ),
+        // CRITICAL: short `-p` sessions never reach the 60s default flush.
+        (
+            "OTEL_METRIC_EXPORT_INTERVAL".to_string(),
+            "1000".to_string(),
+        ),
+        // Delta temporality → each export carries the increment since the last
+        // flush; co-web SUMs the rows, so totals stay correct with no migration.
+        (
+            "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE".to_string(),
+            "delta".to_string(),
+        ),
+        (
+            "OTEL_RESOURCE_ATTRIBUTES".to_string(),
+            build_resource_attributes(task_key, universe_key, model, machine, pr_url),
+        ),
+    ];
+    if let Some(t) = token
+        && !t.is_empty()
+    {
+        env.push((
+            "OTEL_EXPORTER_OTLP_HEADERS".to_string(),
+            format!("Authorization=Bearer {t}"),
+        ));
+    }
+    env
+}
+
+/// Process-env wrapper for [`native_telemetry_env_from`]: reads the OTLP endpoint
+/// from `CO_USAGE_ENDPOINT`, the bearer from `CO_SESSION_TOKEN`, and the host
+/// name for the `machine` attribute.
+fn native_telemetry_env(
+    task_key: &str,
+    universe_key: &str,
+    model: &str,
+    pr_url: Option<&str>,
+) -> Vec<(String, String)> {
+    let endpoint = std::env::var("CO_USAGE_ENDPOINT").ok();
+    let token = std::env::var("CO_SESSION_TOKEN").ok();
+    let machine = whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string());
+    native_telemetry_env_from(
+        endpoint.as_deref(),
+        token.as_deref(),
+        task_key,
+        universe_key,
+        model,
+        &machine,
+        pr_url,
+    )
 }
 
 // ==================== ACCEPTANCE REVIEWER ====================
@@ -1983,29 +2049,6 @@ fn parse_pr_number(stdout: &str) -> Option<i64> {
     None
 }
 
-/// CO-437: extract the full GitHub PR URL from Claude's stdout (the link
-/// co-auto/`gh pr create` printed). Returns the canonical
-/// `https://github.com/<owner>/<repo>/pull/<n>` form, trimmed to the digits so
-/// trailing text on the line doesn't leak in. Best-effort: `None` when no PR
-/// link is present.
-fn parse_pr_url(stdout: &str) -> Option<String> {
-    for line in stdout.lines() {
-        if let Some(start) = line.find("https://github.com/")
-            && let Some(rel) = line[start..].find("/pull/")
-        {
-            let pull_at = start + rel + "/pull/".len();
-            let digits: String = line[pull_at..]
-                .chars()
-                .take_while(|c| c.is_ascii_digit())
-                .collect();
-            if !digits.is_empty() {
-                return Some(format!("{}{}", &line[start..pull_at], digits));
-            }
-        }
-    }
-    None
-}
-
 /// Get the skill names actually loaded for a given task (mirrors
 /// `skills_for_task`: same name resolution, filtered to files that exist on
 /// disk so the session record reflects what was really injected).
@@ -2081,135 +2124,6 @@ fn post_session_to_co(session: &AgentSessionRecord) {
         }
         Err(e) => {
             eprintln!("  {} agent session POST error: {}", "⚠".yellow(), e);
-        }
-    }
-}
-
-/// Format a millisecond duration compactly: `372000` → `6m12s`, `8000` → `8s`.
-fn human_duration(ms: i64) -> String {
-    let secs = ms / 1000;
-    let m = secs / 60;
-    let s = secs % 60;
-    if m > 0 {
-        format!("{m}m{s:02}s")
-    } else {
-        format!("{s}s")
-    }
-}
-
-/// CO-425: POST a [`SessionUsage`] summary to the CO usage-ingestion endpoint.
-///
-/// Best-effort and **default OFF**: when `CO_USAGE_ENDPOINT` is unset (or empty)
-/// this is a silent no-op. A POST failure, a serialize error, or a missing token
-/// never panics, never returns an error, and never blocks the co-auto task — the
-/// worst case is an `info`-level log line. The auth token reuses the existing
-/// `CO_SESSION_TOKEN` scheme (same as `post_session_to_co`).
-///
-/// Payload shape (CO-426 defines the canonical schema):
-/// ```json
-/// {"task_key","universe_key","machine","model","usage":{...},
-///  "started_at","ended_at","outcome"}
-/// ```
-#[allow(clippy::too_many_arguments)]
-fn post_usage_to_co(
-    task_key: &str,
-    universe_key: &str,
-    started_at: i64,
-    ended_at: i64,
-    outcome: &str,
-    usage: &crate::usage::SessionUsage,
-    model_requested: &str,
-    model_used: &str,
-    downshift: Option<&crate::routing::Downshift>,
-) {
-    let endpoint = match std::env::var("CO_USAGE_ENDPOINT") {
-        Ok(v) if !v.is_empty() => v,
-        // Default off: telemetry is opt-in. Log at info so it's discoverable
-        // without being noisy, then return.
-        _ => {
-            println!(
-                "  {} usage report skipped (CO_USAGE_ENDPOINT unset)",
-                "◆".dimmed()
-            );
-            return;
-        }
-    };
-
-    let payload = serde_json::json!({
-        "task_key": task_key,
-        "universe_key": universe_key,
-        "machine": whoami::fallible::hostname().unwrap_or_else(|_| "unknown".to_string()),
-        "model": model_used,
-        // CO-427: routing transparency — what was asked for vs what ran, plus the
-        // downshift record (if any) so the CO-426 dashboard can surface degradations.
-        "model_requested": model_requested,
-        "model_used": model_used,
-        "downshifted": downshift.map(|d| serde_json::json!({
-            "from": d.from,
-            "to": d.to,
-            "reason": d.reason,
-        })),
-        "usage": usage,
-        "started_at": started_at,
-        "ended_at": ended_at,
-        "outcome": outcome,
-        "co_auto_version": env!("CARGO_PKG_VERSION"),
-    });
-
-    let json = match serde_json::to_string(&payload) {
-        Ok(j) => j,
-        Err(e) => {
-            eprintln!("  {} usage serialize error: {}", "⚠".yellow(), e);
-            return;
-        }
-    };
-
-    let url = format!("{}/api/v1/usage/sessions", endpoint.trim_end_matches('/'));
-
-    let mut args: Vec<String> = vec![
-        "-s".into(),
-        "-X".into(),
-        "POST".into(),
-        "-H".into(),
-        "Content-Type: application/json".into(),
-    ];
-    // Auth is optional for the usage endpoint (CO-426 may make it open within
-    // the tailnet); attach the bearer token when configured.
-    if let Ok(token) = std::env::var("CO_SESSION_TOKEN")
-        && !token.is_empty()
-    {
-        args.push("-H".into());
-        args.push(format!("Authorization: Bearer {token}"));
-    }
-    args.extend([
-        "-d".into(),
-        json,
-        "--max-time".into(),
-        "10".into(),
-        "--retry".into(),
-        "1".into(),
-        url,
-    ]);
-
-    match Command::new("curl").args(&args).output() {
-        Ok(o) if o.status.success() => {
-            println!("  {} usage reported", "◆".dimmed());
-        }
-        Ok(o) => {
-            let body = String::from_utf8_lossy(&o.stdout);
-            eprintln!(
-                "  {} usage POST failed ({}): {} — task unaffected",
-                "⚠".yellow(),
-                o.status,
-                body.trim()
-            );
-        }
-        Err(e) => {
-            eprintln!(
-                "  {} usage POST error: {} — task unaffected",
-                "⚠".yellow(),
-                e
-            );
         }
     }
 }
@@ -2874,83 +2788,93 @@ mod tests {
         assert_eq!(arr[0].as_str(), Some(CORE_PROCESS_SKILL));
     }
 
-    // -------------------- CO-425: usage capture --------------------
+    // -------------------- CO-457: native OTel telemetry --------------------
 
     #[test]
-    fn human_duration_formats_minutes_and_seconds() {
-        assert_eq!(human_duration(372_000), "6m12s");
-        assert_eq!(human_duration(8_000), "8s");
-        assert_eq!(human_duration(60_000), "1m00s");
-        assert_eq!(human_duration(0), "0s");
-    }
-
-    #[test]
-    fn post_usage_is_noop_when_endpoint_unset() {
-        // Best-effort swallow: with CO_USAGE_ENDPOINT unset, the report path must
-        // return without panicking or doing any network work — the task is never
-        // blocked by telemetry. (We assert the absence of a panic / hang.)
-        //
-        // SAFETY: single-threaded test mutating process env; restored immediately.
-        let prev = std::env::var("CO_USAGE_ENDPOINT").ok();
-        unsafe {
-            std::env::remove_var("CO_USAGE_ENDPOINT");
-        }
-
-        let usage = crate::usage::parse_stream_json(
-            r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":10,"output_tokens":5}}}"#,
-        );
-        // Must not panic; returns unit.
-        post_usage_to_co(
-            "CO-425", "co", 1, 2, "success", &usage, "opus", "opus", None,
-        );
-
-        // Restore prior env (other tests may rely on it being unset/set).
-        unsafe {
-            match prev {
-                Some(v) => std::env::set_var("CO_USAGE_ENDPOINT", v),
-                None => std::env::remove_var("CO_USAGE_ENDPOINT"),
-            }
-        }
-    }
-
-    #[test]
-    fn parse_pr_url_extracts_canonical_link() {
-        let stdout = "Some log line\n\
-                      Created PR: https://github.com/artelonga/co/pull/217 (CO-437)\n\
-                      more output";
+    fn resource_attributes_carry_task_universe_model_machine() {
+        let attrs = build_resource_attributes("CO-457", "co", "opus", "macbook", None);
         assert_eq!(
-            parse_pr_url(stdout).as_deref(),
-            Some("https://github.com/artelonga/co/pull/217")
+            attrs,
+            "task.key=CO-457,universe.key=co,model=opus,machine=macbook"
         );
-        // No PR link → None, never panics.
-        assert_eq!(parse_pr_url("nothing here"), None);
-        // A bare #89 reference (no URL) is not a full URL → None.
-        assert_eq!(parse_pr_url("opened #89"), None);
     }
 
     #[test]
-    fn agent_session_record_serializes_with_stream_usage_tokens() {
-        // The payload built from a SessionUsage carries the aggregated tokens.
-        let usage = crate::usage::parse_stream_json(
-            r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5","usage":{"input_tokens":1000,"output_tokens":400,"cache_read_input_tokens":8000}}}
-{"type":"result","num_turns":3,"duration_ms":120000}"#,
+    fn resource_attributes_append_pr_url_when_known() {
+        let attrs = build_resource_attributes(
+            "CO-457",
+            "co",
+            "opus",
+            "macbook",
+            Some("https://github.com/artelonga/co/pull/457"),
         );
-        let payload = serde_json::json!({
-            "task_key": "CO-425",
-            "universe_key": "co",
-            "machine": "test-host",
-            "model": usage.primary_model_short(),
-            "usage": &usage,
-            "started_at": 1i64,
-            "ended_at": 2i64,
-            "outcome": "success",
-        });
-        let s = serde_json::to_string(&payload).unwrap();
-        assert!(s.contains("\"model\":\"sonnet\""), "got: {s}");
-        assert!(s.contains("\"input_tokens\":1000"), "got: {s}");
-        assert!(s.contains("\"cache_read_input_tokens\":8000"), "got: {s}");
-        assert!(s.contains("\"outcome\":\"success\""), "got: {s}");
-        // total_input = 1000 + 0 + 8000 = 9000
-        assert_eq!(usage.total_input(), 9000);
+        assert!(
+            attrs.ends_with(",pr.url=https://github.com/artelonga/co/pull/457"),
+            "got: {attrs}"
+        );
+        // Empty pr_url is treated as absent (no trailing key).
+        let none = build_resource_attributes("CO-457", "co", "opus", "macbook", Some(""));
+        assert!(!none.contains("pr.url"), "got: {none}");
+    }
+
+    #[test]
+    fn telemetry_env_off_without_endpoint() {
+        // Opt-in: no endpoint configured → no env vars, exactly like the deleted
+        // bespoke POST was a no-op when CO_USAGE_ENDPOINT was unset.
+        assert!(
+            native_telemetry_env_from(None, None, "CO-457", "co", "opus", "m", None).is_empty()
+        );
+        assert!(
+            native_telemetry_env_from(Some(""), None, "CO-457", "co", "opus", "m", None).is_empty()
+        );
+    }
+
+    #[test]
+    fn telemetry_env_wires_native_otel_exporter() {
+        let env = native_telemetry_env_from(
+            Some("https://co-artelonga.fly.dev/"),
+            Some("vault-token-xyz"),
+            "CO-457",
+            "co",
+            "opus",
+            "macbook",
+            None,
+        );
+        let get = |k: &str| -> &str {
+            env.iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.as_str())
+                .unwrap_or("<missing>")
+        };
+        assert_eq!(get("CLAUDE_CODE_ENABLE_TELEMETRY"), "1");
+        assert_eq!(get("OTEL_METRICS_EXPORTER"), "otlp");
+        assert_eq!(get("OTEL_EXPORTER_OTLP_PROTOCOL"), "http/protobuf");
+        // Trailing slash trimmed so the SDK appends a single `/v1/metrics`.
+        assert_eq!(
+            get("OTEL_EXPORTER_OTLP_ENDPOINT"),
+            "https://co-artelonga.fly.dev"
+        );
+        // Short -p sessions need a sub-default flush interval.
+        assert_eq!(get("OTEL_METRIC_EXPORT_INTERVAL"), "1000");
+        // Delta temporality keeps usage_summary SUMs correct without upsert.
+        assert_eq!(
+            get("OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE"),
+            "delta"
+        );
+        assert!(get("OTEL_RESOURCE_ATTRIBUTES").contains("task.key=CO-457"));
+        // Bearer header reuses the CO_SESSION_TOKEN scheme.
+        assert_eq!(
+            get("OTEL_EXPORTER_OTLP_HEADERS"),
+            "Authorization=Bearer vault-token-xyz"
+        );
+    }
+
+    #[test]
+    fn telemetry_env_omits_auth_header_without_token() {
+        let env =
+            native_telemetry_env_from(Some("https://x"), None, "CO-457", "co", "opus", "m", None);
+        assert!(!env.iter().any(|(k, _)| k == "OTEL_EXPORTER_OTLP_HEADERS"));
+        // The endpoint var is still present — telemetry just flows unauthenticated.
+        assert!(env.iter().any(|(k, _)| k == "OTEL_EXPORTER_OTLP_ENDPOINT"));
     }
 }

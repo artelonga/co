@@ -977,6 +977,118 @@ mod tests {
         assert_eq!(v["launchers"][0]["progress"], "writing tests");
     }
 
+    /// CO-457: an OTLP protobuf metrics export hits `/v1/metrics`, lands one
+    /// `usage_sessions` row, and `/usage/summary` aggregates it over the 5h
+    /// window — proving the native-telemetry path feeds the same ledger the
+    /// dashboard + CO-427 downshift read.
+    #[tokio::test]
+    async fn otlp_metrics_ingest_then_summary() {
+        use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
+        use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue, any_value};
+        use opentelemetry_proto::tonic::metrics::v1::{
+            Metric, NumberDataPoint, ResourceMetrics, ScopeMetrics, Sum, metric, number_data_point,
+        };
+        use opentelemetry_proto::tonic::resource::v1::Resource;
+        use prost::Message;
+
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let now = chrono::Utc::now().timestamp();
+        let now_nanos = now as u64 * 1_000_000_000;
+
+        let kv = |k: &str, v: &str| KeyValue {
+            key: k.to_string(),
+            value: Some(AnyValue {
+                value: Some(any_value::Value::StringValue(v.to_string())),
+            }),
+        };
+        let point = |type_attr: &str, n: i64| NumberDataPoint {
+            attributes: vec![kv("type", type_attr), kv("model", "claude-opus-4-8")],
+            start_time_unix_nano: now_nanos,
+            time_unix_nano: now_nanos,
+            value: Some(number_data_point::Value::AsInt(n)),
+            ..Default::default()
+        };
+        let req = ExportMetricsServiceRequest {
+            resource_metrics: vec![ResourceMetrics {
+                resource: Some(Resource {
+                    attributes: vec![
+                        kv("task.key", "CO-457"),
+                        kv("universe.key", "co"),
+                        kv("machine", "macbook"),
+                    ],
+                    ..Default::default()
+                }),
+                scope_metrics: vec![ScopeMetrics {
+                    metrics: vec![Metric {
+                        name: "claude_code.token.usage".to_string(),
+                        data: Some(metric::Data::Sum(Sum {
+                            data_points: vec![
+                                point("input", 12_000),
+                                point("output", 4_000),
+                                point("cacheRead", 30_000),
+                                point("cacheCreation", 1_000),
+                            ],
+                            aggregation_temporality: 1,
+                            is_monotonic: true,
+                        })),
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }],
+        };
+        let mut buf = Vec::new();
+        req.encode(&mut buf).unwrap();
+
+        // POST the protobuf export with the OTLP bearer header.
+        let post = Request::builder()
+            .method("POST")
+            .uri("/v1/metrics")
+            .header("content-type", "application/x-protobuf")
+            .header("authorization", test_bearer())
+            .body(Body::from(buf))
+            .unwrap();
+        let resp = app.clone().oneshot(post).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        // /usage/summary over the 5h window aggregates the ingested tokens.
+        let req = Request::builder()
+            .method("GET")
+            .uri("/api/v1/usage/summary?window=5h&by=model")
+            .header("authorization", test_bearer())
+            .body(Body::empty())
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+        let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        let groups = v["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["key"], "opus");
+        assert_eq!(groups[0]["sessions"].as_i64().unwrap(), 1);
+        // total = 12000 + 4000 + 30000 + 1000
+        assert_eq!(v["totals"]["total_tokens"].as_i64().unwrap(), 47_000);
+        assert_eq!(v["window_5h"]["tokens_in"].as_i64().unwrap(), 12_000);
+    }
+
+    /// CO-457: the receiver refuses an unauthenticated export (no bearer) — the
+    /// fleet ledger is not an open write surface.
+    #[tokio::test]
+    async fn otlp_metrics_requires_token() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+        let post = Request::builder()
+            .method("POST")
+            .uri("/v1/metrics")
+            .header("content-type", "application/x-protobuf")
+            .body(Body::from(Vec::<u8>::new()))
+            .unwrap();
+        let resp = app.oneshot(post).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
     #[tokio::test]
     async fn projects_rollup_route() {
         let dir = tempdir().unwrap();

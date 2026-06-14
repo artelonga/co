@@ -52,6 +52,7 @@ pub use search::query as query_routes;
 pub use search::routes as search_routes;
 pub use translate::routes as translate_routes;
 pub use universe::routes as universe_routes;
+pub use usage::otlp as usage_otlp;
 pub use usage::routes as usage_routes;
 pub use vault::routes as vault_routes;
 pub use versioning::branches as branch_routes;
