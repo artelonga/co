@@ -3869,6 +3869,19 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/messages:
+    post:
+      tags: ["universes"]
+      summary: "Contact form — message the universe owner; body `{from_email,from_name,subject,body,website?}` (`website` = honeypot); rate-limited 5/hr/IP; delivers via email + in-app notification (CO-326)"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/op-diff:
     get:
       tags: ["entries"]

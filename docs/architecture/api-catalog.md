@@ -151,6 +151,7 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 | GET | `/api/v1/universes/{slug}/invites` | owner | List pending invites (CO-444) |
 | DELETE | `/api/v1/universes/{slug}/invites/{token}` | owner | Revoke an invite by token_hash (CO-444) |
 | POST | `/api/v1/universes/{slug}/invites/{token}/accept` | authed | Accept an invite (universe-scoped, CO-444) |
+| POST | `/api/v1/universes/{slug}/messages` | anon | Contact form — message the universe owner; body `{from_email,from_name,subject,body,website?}` (`website` = honeypot); rate-limited 5/hr/IP; delivers via email + in-app notification (CO-326) |
 | GET | `/api/v1/me/universes` | authed | Bucketed: owned/member/subscribed (CO-191) |
 | GET | `/api/v1/themes/available` | anon | List available themes per tier |
 | GET | `/api/v1/themes/{preset}` | anon | Compiled CSS for a specific theme preset |
