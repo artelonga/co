@@ -11,6 +11,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 pub mod local_fs;
+pub mod snapshot_dir;
 pub mod worker;
 
 #[cfg(feature = "backup-s3")]

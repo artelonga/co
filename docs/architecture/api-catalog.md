@@ -459,6 +459,8 @@ All inside `universe_content_api` gate (owner for write). `blob/*` is read-throu
 | POST | `/v1/log-drains/vercel/{universe_id}` | shared-secret | CO-124 Vercel log drain receiver |
 | POST | `/api/v1/admin/backup/snapshot` | admin | CO-365 — force snapshot via active backup backend |
 | GET | `/api/v1/admin/backup/snapshots` | admin | CO-365 — list snapshots from backup backend |
+| POST | `/api/v1/admin/backup` | admin | CO-459 — reconstructable local snapshot (VACUUM INTO + sha256 manifest); returns verified manifest |
+| POST | `/api/v1/admin/sweep` | admin | CO-459 — junk sweep; dry-run default, `?apply=true` to delete |
 
 ---
 

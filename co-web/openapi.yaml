@@ -447,6 +447,15 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/admin/backup:
+    post:
+      tags: ["admin"]
+      summary: "CO-459 — reconstructable local snapshot (VACUUM INTO + sha256 manifest); returns verified manifest"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /api/v1/admin/backup/snapshot:
     post:
       tags: ["admin"]
@@ -591,6 +600,15 @@ paths:
     get:
       tags: ["storage"]
       summary: "Cluster-wide storage breakdown"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
+  /api/v1/admin/sweep:
+    post:
+      tags: ["admin"]
+      summary: "CO-459 — junk sweep; dry-run default, `?apply=true` to delete"
       security:
         - sessionCookie: []
       responses:

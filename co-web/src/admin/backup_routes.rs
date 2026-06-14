@@ -3,17 +3,23 @@
 //! POST /api/v1/admin/backup/snapshot — trigger a snapshot now
 //! GET  /api/v1/admin/backup/snapshots — list stored snapshots
 
+use std::time::SystemTime;
+
 use axum::{
     Json, Router,
-    extract::State,
+    extract::{Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use chrono::Utc;
+use serde::Deserialize;
 
 use crate::admin::admin_routes::{check_admin_email, extract_claims};
+use crate::platform::universe_pool::UniversePool;
 use crate::server::AppState;
-use crate::storage::backup::{SnapshotMeta, backend_from_env};
+use crate::storage::backup::{SnapshotMeta, backend_from_env, snapshot_dir};
+use crate::storage::sweep::{self, SweepOptions};
 
 // ---------------------------------------------------------------------------
 // POST /api/v1/admin/backup/snapshot
@@ -87,13 +93,143 @@ pub async fn list_snapshots(
 }
 
 // ---------------------------------------------------------------------------
+// CO-459: POST /api/v1/admin/backup
+// Reconstructable local snapshot (VACUUM INTO + per-file sha256 manifest),
+// built + verified synchronously so the manifest is returned to the caller.
+// ---------------------------------------------------------------------------
+
+fn forbidden() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        Json(serde_json::json!({"error": "Forbidden"})),
+    )
+        .into_response()
+}
+
+fn unauthorized() -> Response {
+    (
+        StatusCode::UNAUTHORIZED,
+        Json(serde_json::json!({"error": "Unauthorized"})),
+    )
+        .into_response()
+}
+
+pub async fn trigger_local_backup(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, Response> {
+    let claims = extract_claims(&headers).map_err(|_| unauthorized())?;
+    if !check_admin_email(&claims.email) {
+        return Err(forbidden());
+    }
+
+    let data_dir = {
+        let storage = state.core.storage.lock();
+        storage.data_dir.clone()
+    };
+
+    let result = tokio::task::spawn_blocking(move || {
+        let root = snapshot_dir::backups_root(&data_dir);
+        std::fs::create_dir_all(&root)?;
+        let (dir, manifest) = snapshot_dir::build_local_snapshot(&data_dir, &root, Utc::now())?;
+        let report = snapshot_dir::verify_snapshot(&dir)?;
+        anyhow::Ok((dir, manifest, report))
+    })
+    .await;
+
+    match result {
+        Ok(Ok((dir, manifest, report))) => Ok(Json(serde_json::json!({
+            "status": "ok",
+            "snapshot_dir": dir.to_string_lossy(),
+            "verified": report.verified,
+            "manifest": manifest,
+        }))),
+        Ok(Err(e)) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response()),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("snapshot task panicked: {e}")})),
+        )
+            .into_response()),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CO-459: POST /api/v1/admin/sweep
+// Junk sweep. Dry-run by default; `?apply=true` performs the deletions.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Deserialize, Default)]
+pub struct SweepQuery {
+    #[serde(default)]
+    pub apply: bool,
+}
+
+pub async fn run_sweep(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<SweepQuery>,
+) -> Result<Json<serde_json::Value>, Response> {
+    let claims = extract_claims(&headers).map_err(|_| unauthorized())?;
+    if !check_admin_email(&claims.email) {
+        return Err(forbidden());
+    }
+
+    let data_dir = {
+        let storage = state.core.storage.lock();
+        storage.data_dir.clone()
+    };
+    let apply = q.apply;
+
+    let result = tokio::task::spawn_blocking(move || {
+        let opts = SweepOptions::from_env();
+        let root = snapshot_dir::backups_root(&data_dir);
+        let pool = UniversePool::new(&data_dir, 16);
+        let conn = rusqlite::Connection::open(data_dir.join("meta.db"))?;
+        let mut report = sweep::plan_sweep(
+            &conn,
+            &data_dir,
+            &pool,
+            &root,
+            &opts,
+            Utc::now(),
+            SystemTime::now(),
+        );
+        if apply {
+            sweep::apply_sweep(&conn, &mut report);
+        }
+        anyhow::Ok(report)
+    })
+    .await;
+
+    match result {
+        Ok(Ok(report)) => Ok(Json(serde_json::to_value(&report).unwrap_or_default())),
+        Ok(Err(e)) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response()),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": format!("sweep task panicked: {e}")})),
+        )
+            .into_response()),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/backup", post(trigger_local_backup))
         .route("/backup/snapshot", post(trigger_snapshot))
         .route("/backup/snapshots", get(list_snapshots))
+        .route("/sweep", post(run_sweep))
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +314,44 @@ mod tests {
                 Request::builder()
                     .method("POST")
                     .uri("/api/v1/admin/backup/snapshot")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), AxumStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn trigger_local_backup_no_auth_returns_401() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/backup")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), AxumStatus::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn run_sweep_no_auth_returns_401() {
+        let dir = tempdir().unwrap();
+        let app = build_test_router(dir.path());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/v1/admin/sweep")
                     .body(Body::empty())
                     .unwrap(),
             )
