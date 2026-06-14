@@ -4165,6 +4165,21 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/timeline:
+    get:
+      tags: ["entries"]
+      summary: "CO-396 project-timeline lens. Query `group_by=epic\"
+      security:
+        - sessionCookie: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/translate/{*path}:
     post:
       tags: ["entries"]

@@ -222,6 +222,7 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | GET | `/{slug}/relations/outbound` | visibility | CO-153 outbound typed FKs |
 | GET | `/{slug}/graph` | visibility | CO-335 — entry relation graph (nodes + edges) |
 | GET | `/{slug}/dev-tasks` | visibility | CO-272 dev board tasks for dogfooding |
+| GET | `/{slug}/timeline` | visibility | CO-396 project-timeline lens. Query `group_by=epic\|module\|status` (default `status`). Returns `{ group_by, lanes[{key,label,items[{id,title,entry_type,span{start_ms,end_ms}}]}], markers[{id,title,kind,at_ms}], backlog[{id,title,entry_type}] }` — the same entries as the kanban board laid out by the shared `game_core::time_layout` engine (lanes + release/milestone markers + a no-date backlog). |
 | POST | `/{slug}/states` | owner | CO-native versioning Phase 1 — snapshot |
 | GET | `/{slug}/states/diff` | visibility | Diff between two states |
 | POST | `/{slug}/branches` | owner | Phase 2 — named pointer to state |

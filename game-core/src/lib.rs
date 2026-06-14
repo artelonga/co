@@ -14,6 +14,7 @@ pub use engine::{
 
 pub mod mail;
 pub mod plugin;
+pub mod time_layout;
 
 pub use mail::{LogMailProvider, MailProvider};
 

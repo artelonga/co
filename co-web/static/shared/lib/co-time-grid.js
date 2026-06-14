@@ -20,10 +20,14 @@
 import {
     defaultCalendarConfig, resolvedCanonicalField, readCanonicalValue,
     entryToLensPosition, lensPositionToCanonical, formatLensPosition,
+    layoutProjectTimeline, entryToTimelineEntry, ganttSpan, MS_PER_DAY,
 } from './co-time.js';
 
 const PALETTE = ['#a8d8c8', '#b1c4e8', '#e8c4a3', '#d8a8c8', '#c8e8a8', '#e8a8a8'];
-const VIEW_MODES = ['grid', 'timeline', 'scatter', 'gantt'];
+// CO-396: `roadmap` = the project-timeline lane layout (lanes + markers +
+// backlog). Lane grouping comes from the lens' `lane_by` or the `lane-by` attr.
+const VIEW_MODES = ['grid', 'timeline', 'scatter', 'gantt', 'roadmap'];
+const LANE_FIELDS = ['epic', 'module', 'status'];
 
 function t(key, fallback) {
     const v = window.t ? window.t(key) : key;
@@ -69,6 +73,19 @@ const STYLE = `
 .ctg-empty { padding: 24px; text-align: center; opacity: 0.6; font-size: 13px; }
 .ctg-orphans { font-size: 10px; opacity: 0.5; margin-top: 6px; }
 .ctg-break { opacity: 0.45; }
+/* CO-396 project-timeline (roadmap) */
+.ctg-lane { display: flex; align-items: stretch; gap: 8px; margin: 2px 0; }
+.ctg-lane-label { width: 140px; flex: none; font-size: 11px; font-weight: 600; padding: 4px 6px; opacity: 0.85; align-self: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctg-lane-track { position: relative; flex: 1; min-height: 22px; padding: 2px 0; border-top: 1px solid rgba(127,127,127,0.15); }
+.ctg-bar { position: absolute; height: 14px; border-radius: 7px; background: var(--dot, #888); min-width: 6px; box-sizing: border-box; cursor: default; color: #111; font-size: 10px; line-height: 14px; padding: 0 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ctg-bar.ctg-point { width: 14px; min-width: 14px; border-radius: 50%; padding: 0; }
+.ctg-roadmap-axis { position: relative; height: 18px; margin-left: 148px; border-bottom: 1px dashed rgba(127,127,127,0.4); }
+.ctg-roadmap-marker { position: absolute; top: 0; font-size: 9px; opacity: 0.8; transform: translateX(-50%); white-space: nowrap; }
+.ctg-roadmap-marker::after { content: ''; position: absolute; left: 50%; top: 12px; height: 1000px; border-left: 1px dashed rgba(180,120,80,0.45); z-index: 0; }
+.ctg-roadmap-marker.ctg-release { color: #b9742c; font-weight: 600; }
+.ctg-backlog { margin-top: 14px; padding: 8px; border: 1px dashed rgba(127,127,127,0.35); border-radius: 6px; }
+.ctg-backlog-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.6; margin-bottom: 6px; }
+.ctg-backlog-chip { display: inline-block; border-radius: 3px; padding: 1px 6px; margin: 2px; font-size: 11px; background: rgba(127,127,127,0.18); }
 `;
 
 class CoTimeGrid extends HTMLElement {
@@ -113,6 +130,15 @@ class CoTimeGrid extends HTMLElement {
     get _viewMode() {
         const m = this.getAttribute('view-mode');
         return VIEW_MODES.includes(m) ? m : 'grid';
+    }
+
+    // CO-396: lane grouping for the roadmap (project-timeline) mode.
+    // Priority: the `lane-by` attribute → the active lens' `lane_by` → status.
+    _laneBy(lens) {
+        const attr = (this.getAttribute('lane-by') || '').trim().toLowerCase();
+        if (LANE_FIELDS.includes(attr)) return attr;
+        if (lens && LANE_FIELDS.includes(lens.lane_by)) return lens.lane_by;
+        return 'status';
     }
 
     // Pinned lens list from the attribute (?lens=A,B,C stacking).
@@ -308,6 +334,14 @@ class CoTimeGrid extends HTMLElement {
                 h.textContent = lens.name;
                 section.appendChild(h);
             }
+            // CO-396: roadmap mode reads dates itself (lanes/markers/backlog)
+            // and must render even when no entry has a positionable date — the
+            // backlog lane is the whole point ("nada some").
+            if (this._viewMode === 'roadmap') {
+                this._renderProjectTimeline(section, lens);
+                root.appendChild(section);
+                continue;
+            }
             const { items, orphans } = this._items(lens);
             track('time.grid_rendered', { universe: this._universes.join(','), lens: lens.id, entry_count: items.length });
             if (items.length === 0) {
@@ -431,13 +465,14 @@ class CoTimeGrid extends HTMLElement {
         section.appendChild(axis);
     }
 
-    // gantt: bar per entry from event→due (ms lenses); degrades to a point.
+    // gantt: bar per entry. CO-396: duration is the shared engine's span —
+    // scheduled→due, else created→done, else a point — not just event→due.
     _renderGantt(section, lens, items) {
-        const dueLens = { ...lens, canonical_field: 'due_at_ms', custom_event_field: undefined };
         const spans = items.map(it => {
-            const start = it.raw;
-            const due = readCanonicalValue(it.entry, dueLens);
-            return { it, start, end: (due !== null && due > start) ? due : start };
+            const span = ganttSpan(entryToTimelineEntry(it.entry));
+            const start = span ? span.start_ms : it.raw;
+            const end = span ? span.end_ms : it.raw;
+            return { it, start, end };
         });
         let min = Math.min(...spans.map(s => s.start));
         let max = Math.max(...spans.map(s => s.end));
@@ -452,6 +487,88 @@ class CoTimeGrid extends HTMLElement {
                 </div>`);
         }
         section.appendChild(wrap);
+    }
+
+    // CO-396: project-timeline (roadmap) — the shared engine's lanes + markers
+    // + backlog. Lanes are grouped by epic/module/status; release/milestone
+    // entries become vertical markers; undated entries sit in the backlog.
+    _renderProjectTimeline(section, lens) {
+        const groupBy = this._laneBy(lens);
+        const tl = layoutProjectTimeline(this._entries, groupBy);
+        track('time.roadmap_rendered', {
+            universe: this._universes.join(','), group_by: groupBy,
+            lanes: tl.lanes.length, markers: tl.markers.length, backlog: tl.backlog.length,
+        });
+
+        if (tl.lanes.length === 0 && tl.markers.length === 0 && tl.backlog.length === 0) {
+            section.insertAdjacentHTML('beforeend',
+                `<div class="ctg-empty">${esc(t('time.no_entries', 'Nenhuma entrada com data neste intervalo'))}</div>`);
+            return;
+        }
+
+        // Shared time axis across every dated item + marker.
+        const ends = [];
+        for (const lane of tl.lanes) for (const it of lane.items) ends.push(it.span.start_ms, it.span.end_ms);
+        for (const m of tl.markers) ends.push(m.at_ms);
+        let min = ends.length ? Math.min(...ends) : 0;
+        let max = ends.length ? Math.max(...ends) : 1;
+        if (min === max) { min -= MS_PER_DAY; max += MS_PER_DAY; }
+        const pct = v => ((v - min) / (max - min)) * 100;
+
+        // Marker rail (releases/milestones) above the lanes.
+        if (tl.markers.length) {
+            const axis = document.createElement('div');
+            axis.className = 'ctg-roadmap-axis';
+            for (const m of tl.markers) {
+                const cls = m.kind === 'release' ? 'ctg-release' : '';
+                axis.insertAdjacentHTML('beforeend',
+                    `<div class="ctg-roadmap-marker ${cls}" style="left:${pct(m.at_ms)}%" title="${esc(m.title)} (${esc(m.kind)})">◆ ${esc(m.title)}</div>`);
+            }
+            section.appendChild(axis);
+        }
+
+        // One row per lane; bars positioned on the shared axis.
+        let laneColor = 0;
+        for (const lane of tl.lanes) {
+            const color = PALETTE[laneColor++ % PALETTE.length];
+            const row = document.createElement('div');
+            row.className = 'ctg-lane';
+            const label = lane.label || t('time.ungrouped', '(sem grupo)');
+            row.insertAdjacentHTML('beforeend',
+                `<div class="ctg-lane-label" title="${esc(label)}">${esc(label)}</div>`);
+            const track = document.createElement('div');
+            track.className = 'ctg-lane-track';
+            let stack = 0;
+            for (const it of lane.items) {
+                const isPoint = it.span.start_ms === it.span.end_ms;
+                const left = pct(it.span.start_ms);
+                const width = Math.max(pct(it.span.end_ms) - left, 0.4);
+                const top = (stack++ % 3) * 16;
+                if (isPoint) {
+                    track.insertAdjacentHTML('beforeend',
+                        `<span class="ctg-bar ctg-point" style="left:${left}%;top:${top}px;--dot:${color}" title="${esc(it.title)}"></span>`);
+                } else {
+                    track.insertAdjacentHTML('beforeend',
+                        `<span class="ctg-bar" style="left:${left}%;width:${width}%;top:${top}px;--dot:${color}" title="${esc(it.title)}">${esc(it.title)}</span>`);
+                }
+            }
+            track.style.minHeight = (Math.min(lane.items.length, 3) * 16 + 6) + 'px';
+            row.appendChild(track);
+            section.appendChild(row);
+        }
+
+        // Backlog lane on the margin — undated entries never vanish.
+        if (tl.backlog.length) {
+            const box = document.createElement('div');
+            box.className = 'ctg-backlog';
+            box.insertAdjacentHTML('beforeend',
+                `<div class="ctg-backlog-title">${esc(t('time.backlog', 'Sem data'))} (${tl.backlog.length})</div>`);
+            for (const b of tl.backlog) {
+                box.insertAdjacentHTML('beforeend',
+                    `<span class="ctg-backlog-chip" title="${esc(b.title)}">${esc(b.title || b.id)}</span>`);
+            }
+            section.appendChild(box);
+        }
     }
 }
 
