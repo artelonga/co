@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-368",
+  "title": "Scrum artifacts as CO entry types — PBI / Sprint / SBI / DoD + per-universe _scrum.yaml",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-368.md",
+  "branch": "feat/CO-368-scrum-artifacts-as-co-entry-types-pbi-sp",
+  "merge_sha": "4f3d888d7f9eadab3e987dab0e4c18810f5c712c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/248",
+    "number": 248
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-14T02:59:35Z",
+  "files_changed": 19,
+  "lines_added": 1799,
+  "lines_removed": 9,
+  "labels": [
+    "type:feat",
+    "module:scrum",
+    "module:content",
+    "module:platform"
+  ],
+  "changelog_entry": "## CO-368 — Scrum artifacts as CO entry types — PBI / Sprint / SBI / DoD + per-universe _scrum.yaml\n\nScrum becomes data, not a separate tool. A universe can opt in to a Scrum\nsurface by dropping a `_scrum.yaml` at its content root; PBIs and Sprints are\nordinary CO entries (`entry_type = \"pbi\" | \"sprint\"`), so the feature is purely\nadditive — no migration, no new tables.\n\n### What changed\n\n- **`_scrum.yaml` manifest loader** (`co-web/src/scrum/manifest.rs`) — cadence,\n  roles and `default_dod`, mirroring the `_calendar.yaml` pattern. Absent or\n  invalid manifest ⇒ `enabled: false`, so universes without one are unchanged.\n- **Deterministic current-sprint computation** (`co-web/src/scrum/current.rs`) —\n  a pure function `current_sprint(now, anchor, length_days, release_window_hours)`\n  returning `{ number, start_at, end_at, release_window }`. No DB, no hidden clock.\n- **Frontmatter validation** (`co-web/src/scrum/validate.rs`) for PBI (`priority`,\n  `points`, `status`, `acceptance`) and Sprint (`number`, `start_at`, `end_at`,\n  `goal`, `release_tag`), wired into `EntryService::validate_entry_type` so both\n  the sugar endpoints and the raw `/entries` POST validate identically.\n- **Five per-universe endpoints** (`co-web/src/scrum/routes.rs`, mounted under\n  `/api/v1/universes`):\n  - `GET  /{key}/scrum/manifest` — manifest + computed current sprint\n  - `GET  /{key}/scrum/sprints` — list sprint entries\n  - `GET  /{key}/scrum/sprints/current` — `{number, start_at, end_at, release_window}`\n  - `GET  /{key}/scrum/backlog?status=&sprint=` — filtered PBI list\n  - `POST /{key}/scrum/pbi` — create a PBI (sugar over an entry write)\n  - `PATCH /{key}/scrum/pbi/{id}/dod` — check off a DoD item (seeds from `default_dod`)\n- **Scrum board SPA tab** — a three-column board (Product Backlog / Sprint\n  Backlog / Increment) shown only when the universe's manifest is enabled, with\n  the sprint goal above the columns and inline DoD checkboxes that PATCH on toggle.\n- **Telemetry** — `scrum.pbi.created` / `scrum.pbi.dod_checked` events published\n  to the EDA bus and captured in the atividades audit log (CO-361).\n- **OpenAPI** — new endpoints documented in `docs/architecture/api-catalog.md`\n  and regenerated into `co-web/openapi.yaml`.\n\n### Why\n\nThe retrospective simulation (CO-369), sprint calendar (CO-372) and funnel\nreport (CO-371) can now read the same entry tables — no parallel data model —\nand ArteLonga's `~/projects/ArteLonga/scrum/` draft becomes an executable\nworkspace.",
+  "summary": "As A product owner running scrum on top of CO",
+  "co_auto_version": "0.1.0"
+}
