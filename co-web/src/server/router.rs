@@ -666,6 +666,13 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .fallback(serve_variant_file)
         .with_state(state)
         .layer(DefaultBodyLimit::max(1_048_576))
+        // CO-456 (CO-278-A): opt-in `{data,meta,errors}` envelope + version
+        // headers on `/api/v1/*`. Sits INSIDE the compression layer so it wraps
+        // the handler's JSON before it is compressed, and OUTSIDE the route
+        // handlers so it captures every success + error response uniformly.
+        .layer(axum::middleware::from_fn(
+            crate::server::envelope::envelope_middleware,
+        ))
         .layer(CompressionLayer::new())
         .layer(cors)
         .layer(SetResponseHeaderLayer::overriding(

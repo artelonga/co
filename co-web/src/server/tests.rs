@@ -1275,3 +1275,153 @@ fn corestate_server_config_is_provider_driven() {
     // Global process env was never mutated.
     assert!(std::env::var("CO_SECURITY_MAX_SCANS_PER_DAY").is_err());
 }
+
+// ---------------------------------------------------------------------------
+// CO-456 (CO-278-A): opt-in response envelope + version headers
+// ---------------------------------------------------------------------------
+
+/// Helper: GET a path optionally sending the opt-in envelope header.
+async fn get_v1(app: axum::Router, path: &str, opt_in: bool) -> (StatusCode, HeaderMap, String) {
+    let mut builder = Request::builder().method("GET").uri(path);
+    if opt_in {
+        builder = builder.header("x-api-envelope", "1");
+    }
+    let resp = app
+        .oneshot(builder.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let headers = resp.headers().clone();
+    let body = body_str(resp.into_body()).await;
+    (status, headers, body)
+}
+
+/// (a) A success route WITH the opt-in header is wrapped in `{data,meta,errors}`.
+#[tokio::test]
+async fn test_envelope_success_with_header() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let (status, _headers, body) = get_v1(app, "/api/v1/auth/login-options", true).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let v: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or_else(|_| panic!("body: {body}"));
+    // Envelope shape.
+    assert!(v.get("data").is_some(), "missing data: {body}");
+    assert!(
+        v["errors"].is_null(),
+        "errors should be null on success: {body}"
+    );
+    assert_eq!(v["meta"]["api_version"], "1.0");
+    assert!(
+        v["meta"]["request_id"].is_string(),
+        "request_id missing: {body}"
+    );
+    // The original handler body now lives under `data`.
+    assert!(
+        v["data"]["magic_code"].is_boolean(),
+        "data not wrapped: {body}"
+    );
+}
+
+/// (b) The SAME route WITHOUT the header is byte-identical to the raw handler
+/// output — no envelope keys, native fields at the top level.
+#[tokio::test]
+async fn test_no_envelope_byte_identical() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    let (status, _headers, body) = get_v1(app, "/api/v1/auth/login-options", false).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    // Native handler fields are at the top level (not wrapped).
+    assert!(v.get("magic_code").is_some(), "raw body changed: {body}");
+    assert!(
+        v.get("data").is_none(),
+        "body was wrapped without opt-in: {body}"
+    );
+    assert!(
+        v.get("meta").is_none(),
+        "body was wrapped without opt-in: {body}"
+    );
+}
+
+/// (c) An error route WITH the opt-in header → `{data:null, meta, errors:[...]}`
+/// with the same HTTP status.
+#[tokio::test]
+async fn test_envelope_error_with_header() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // `/api/v1/auth/me` is behind require_auth → 401 JSON when unauthenticated.
+    let (status, _headers, body) = get_v1(app, "/api/v1/auth/me", true).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let v: serde_json::Value =
+        serde_json::from_str(&body).unwrap_or_else(|_| panic!("body: {body}"));
+    assert!(v["data"].is_null(), "data should be null on error: {body}");
+    assert_eq!(v["meta"]["api_version"], "1.0");
+    let errors = v["errors"].as_array().expect("errors is an array");
+    assert_eq!(errors.len(), 1, "one error expected: {body}");
+    assert!(errors[0]["code"].is_string(), "error code missing: {body}");
+    assert!(
+        errors[0]["message"].is_string(),
+        "error message missing: {body}"
+    );
+}
+
+/// (d) Version headers ride on every `/api/v1/*` response — with AND without
+/// the opt-in header.
+#[tokio::test]
+async fn test_version_headers_always_present() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    for opt_in in [false, true] {
+        let (_status, headers, _body) =
+            get_v1(app.clone(), "/api/v1/auth/login-options", opt_in).await;
+        assert_eq!(
+            headers.get("x-api-version").and_then(|v| v.to_str().ok()),
+            Some("1.0"),
+            "x-api-version missing (opt_in={opt_in})"
+        );
+        assert!(
+            headers.get("x-co-server-version").is_some(),
+            "x-co-server-version missing (opt_in={opt_in})"
+        );
+    }
+}
+
+/// Non-JSON responses are NEVER wrapped, even with the opt-in header — but the
+/// version headers are still attached.
+#[tokio::test]
+async fn test_non_json_never_wrapped() {
+    let dir = tempdir().unwrap();
+    let app = build_test_router(dir.path());
+
+    // `/api/v1/scrum/calendar.ics` returns text/calendar.
+    let (status, headers, body) = get_v1(app, "/api/v1/scrum/calendar.ics", true).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(
+        headers
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("text/calendar"),
+        "content-type changed: {:?}",
+        headers.get("content-type")
+    );
+    // The iCalendar payload is untouched (not JSON-wrapped).
+    assert!(
+        body.starts_with("BEGIN:VCALENDAR"),
+        "ics body wrapped: {body}"
+    );
+    assert!(!body.contains("\"data\""), "ics body wrapped: {body}");
+    // Version headers still present on this /api/v1/* response.
+    assert_eq!(
+        headers.get("x-api-version").and_then(|v| v.to_str().ok()),
+        Some("1.0")
+    );
+}
