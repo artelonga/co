@@ -106,6 +106,7 @@ impl Storage {
                 source_kind: None,
                 source_url: None,
                 source_last_event_at: None,
+                source_mode: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())

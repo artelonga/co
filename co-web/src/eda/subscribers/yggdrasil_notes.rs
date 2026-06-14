@@ -55,8 +55,26 @@ impl EdaSubscriber for YggdrasilNotes {
 // Handler
 // ---------------------------------------------------------------------------
 
+/// CO-413: `true` when an event payload carries `source = "co-edit"` — i.e. it
+/// originated from a CO-side write to a bidirectional universe and is now
+/// echoing back via the hub's rebroadcast. Such events must be dropped, not
+/// re-applied, to break the sync loop.
+fn is_co_edit_echo(payload: &serde_json::Value) -> bool {
+    payload.get("source").and_then(|v| v.as_str()) == Some("co-edit")
+}
+
 fn handle_note_event(ev: &Event, bus: &Arc<dyn EdaBus>, storage: &Arc<Mutex<Storage>>) {
     let payload = &ev.payload;
+
+    // CO-413: anti-loop echo-filter. A bidirectional CO write re-emits
+    // `entry.{created,updated,deleted}` on the `yggdrasil` key tagged
+    // `source = co-edit`; when the hub rebroadcasts it back over the bridge we
+    // must NOT re-apply it (CO wrote → hub → here → rebroadcast → … never
+    // converges). Only genuine upstream writes (`yggdrasil-live`, i.e. no
+    // `source = co-edit` tag) are ingested.
+    if is_co_edit_echo(payload) {
+        return;
+    }
 
     let path = match payload.get("path").and_then(|v| v.as_str()) {
         Some(p) => p.to_string(),
@@ -367,5 +385,101 @@ mod tests {
     fn test_ingested_event_type() {
         let expected = "sync.yggdrasil.note_ingested";
         assert!(expected.starts_with("sync.yggdrasil."));
+    }
+
+    // CO-413: echo-filter unit + anti-loop convergence tests.
+
+    #[test]
+    fn co_edit_payload_is_recognized_as_echo() {
+        assert!(is_co_edit_echo(
+            &serde_json::json!({ "path": "x", "source": "co-edit" })
+        ));
+        // Genuine upstream writes (no source, or yggdrasil-origin) are NOT echoes.
+        assert!(!is_co_edit_echo(&serde_json::json!({ "path": "x" })));
+        assert!(!is_co_edit_echo(
+            &serde_json::json!({ "path": "x", "source": "yggdrasil" })
+        ));
+    }
+
+    /// Helper: read `(body_hash, source_marker)` for a yggdrasil note row.
+    fn read_row(storage: &Arc<Mutex<Storage>>, path: &str) -> Option<(String, Option<String>)> {
+        let uc = {
+            let st = storage.lock();
+            st.universe_conn(UNIVERSE_KEY)
+        };
+        let conn = uc.lock().unwrap();
+        conn.query_row(
+            "SELECT body_hash, source_marker FROM entries \
+             WHERE universe_key = ?1 AND path = ?2",
+            rusqlite::params![UNIVERSE_KEY, path],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)),
+        )
+        .ok()
+    }
+
+    /// The critical anti-loop test (spec Notas): a CO-side edit re-emitted as
+    /// `source = co-edit` and rebroadcast by the hub must be DROPPED here — never
+    /// re-applied — so CO write → hub → CO converges without an echo storm.
+    #[test]
+    fn co_edit_echo_is_dropped_genuine_write_applies() {
+        use crate::eda::tokio_bus::TokioBroadcastBus;
+
+        let dir = tempfile::tempdir().unwrap();
+        let storage: Arc<Mutex<Storage>> = Arc::new(Mutex::new(Storage::new(dir.path())));
+        let bus: Arc<dyn EdaBus> = Arc::new(TokioBroadcastBus::new());
+
+        let path = "instances/inst-01/notes/loop.md";
+
+        // 1) A genuine upstream (yggdrasil-live) write is ingested.
+        let live = make_event(
+            "entry.created",
+            Some(UNIVERSE_KEY),
+            serde_json::json!({
+                "path": path,
+                "body": "from hub",
+                "body_hash": "h1",
+                "frontmatter": { "title": "Loop" },
+            }),
+        );
+        handle_note_event(&live, &bus, &storage);
+        let row = read_row(&storage, path).expect("genuine write should upsert a row");
+        assert_eq!(row.0, "h1");
+        assert_eq!(row.1.as_deref(), Some("yggdrasil-live"));
+
+        // 2) A CO-origin edit echoing back (source = co-edit) must be dropped:
+        //    the row is unchanged — no re-application, loop broken.
+        let echo = make_event(
+            "entry.updated",
+            Some(UNIVERSE_KEY),
+            serde_json::json!({
+                "path": path,
+                "body": "echoed back",
+                "body_hash": "h2-echo",
+                "source": "co-edit",
+                "frontmatter": { "title": "Loop" },
+            }),
+        );
+        handle_note_event(&echo, &bus, &storage);
+        let row = read_row(&storage, path).expect("row still present");
+        assert_eq!(row.0, "h1", "echo must NOT overwrite the body_hash");
+        assert_eq!(
+            row.1.as_deref(),
+            Some("yggdrasil-live"),
+            "echo must NOT flip the source_marker"
+        );
+
+        // 3) A co-edit delete echo must likewise NOT soft-delete the row.
+        let del_echo = make_event(
+            "entry.deleted",
+            Some(UNIVERSE_KEY),
+            serde_json::json!({ "path": path, "source": "co-edit" }),
+        );
+        handle_note_event(&del_echo, &bus, &storage);
+        let row = read_row(&storage, path).expect("row still present after echo delete");
+        assert_eq!(
+            row.1.as_deref(),
+            Some("yggdrasil-live"),
+            "echo delete must NOT stamp yggdrasil-deleted"
+        );
     }
 }

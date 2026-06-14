@@ -407,6 +407,12 @@ pub struct Universe {
     /// CO-383: ISO timestamp of the last event received from the upstream bus.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_last_event_at: Option<String>,
+    /// CO-413: write policy for event-bus-backed universes — `'read-only'`
+    /// (default) or `'bidirectional'`. When bidirectional, CO accepts writes and
+    /// re-emits them to the federated bus as CO-origin edits. `None` on pre-v83
+    /// rows (treated as read-only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_mode: Option<String>,
 }
 
 fn default_visibility() -> String {

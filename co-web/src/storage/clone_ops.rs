@@ -968,6 +968,7 @@ impl Storage {
             source_kind: None,
             source_url: None,
             source_last_event_at: None,
+            source_mode: None,
         })
     }
 
@@ -1207,6 +1208,7 @@ impl Storage {
             source_kind: None,
             source_url: None,
             source_last_event_at: None,
+            source_mode: None,
         })
     }
 }

@@ -55,6 +55,16 @@ pub struct UniverseInfo {
     /// processes (e.g. alterar-pagina-na-web). Defaults to "0.0.0".
     #[serde(default)]
     pub content_version: String,
+    /// CO-383: origin kind for event-bus-backed universes (`event-bus` etc.).
+    /// `None` for ordinary universes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<String>,
+    /// CO-413: `true` when this universe is an `event-bus` source in
+    /// `bidirectional` mode — i.e. CO accepts edits and round-trips them to the
+    /// hub. The YG-124 client uses this to show/hide the "Editar no CO" button
+    /// (hidden when read-only; see i18n `universe.source_bus_readonly`).
+    #[serde(default)]
+    pub source_bidirectional: bool,
 }
 
 /// Typed request body for `PUT /api/v1/universes/:slug`.
@@ -302,6 +312,7 @@ pub async fn list_public_universes(
                 source_kind: None,
                 source_url: None,
                 source_last_event_at: None,
+                source_mode: None,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;
@@ -1178,6 +1189,14 @@ pub async fn get_universe_info(
         )
         .unwrap_or_else(|_| "0.0.0".to_string());
 
+    // CO-413: surface bidirectional capability so YG-124 can show/hide the
+    // "Editar no CO" button (only event-bus universes in bidirectional mode are
+    // writable from the CO side).
+    let source_bidirectional = crate::service::EntryService::is_bidirectional_event_bus(
+        universe.source_kind.as_deref(),
+        universe.source_mode.as_deref(),
+    );
+
     Ok(Json(UniverseInfo {
         key: universe.key,
         name: universe.name,
@@ -1189,6 +1208,8 @@ pub async fn get_universe_info(
         visibility: universe.visibility,
         parent_key: universe.parent_key,
         content_version,
+        source_kind: universe.source_kind,
+        source_bidirectional,
     }))
 }
 
