@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-353",
+  "title": "Lobby + realtime presence — WebSocket layer for workspace canvases",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-353.md",
+  "branch": "feat/CO-353-lobby-realtime-presence-websocket-layer-",
+  "merge_sha": "c807ccdef46d83aadf2841b9435597d7ceb70a1f",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/257",
+    "number": 257
+  },
+  "started_at": "2026-06-05T00:00:00Z",
+  "merged_at": "2026-06-14T15:07:57Z",
+  "files_changed": 14,
+  "lines_added": 1973,
+  "lines_removed": 3,
+  "labels": [
+    "type:feat",
+    "module:co-web",
+    "module:realtime"
+  ],
+  "changelog_entry": "## CO-353 — Lobby + realtime presence — WebSocket layer for workspace canvases\n\nA Sala (CO-352 workspace canvas) is now a **shared room** instead of a\nsingle-user offline surface. A dedicated WebSocket layer broadcasts cursor\npositions, node placements/moves, edge creations and suggest/publish events to\nevery connected client of a workspace, with the server as arbiter\n(last-write-wins) and persistence back into CO-352's `workspace_states`.\n\nOpen two browsers on `/u/{universe}/sala` and you see each other's cursors and\nedits live; close the last tab and the layout flushes to storage; reopen and the\nsnapshot restores it.\n\n### What changed\n\n- **`WS /ws/sala/{universe_key}/{workspace_slug}`** (`co-web/src/content/workspace/ws.rs`).\n  On connect the server authenticates the session (JWT via `Authorization`\n  header, `session` cookie, or `?token=`) or admits a **read-only anonymous\n  visitor** (`anon:<id>`, `Visitante <id>`). It sends a `snapshot`\n  (`{state, users}`) to the newcomer and broadcasts `user_join`/`user_leave`\n  presence deltas to the room.\n- **Lobby state** (`co-web/src/content/workspace/lobby.rs`). One shared `Room`\n  per `(universe_key, workspace_slug)`, keyed on `crate::server::CoreState`'s new\n  `sala_lobby`. Each room holds a `tokio::sync::broadcast` channel + the\n  authoritative layout. Ops mutate the layout **LWW** (node upsert/remove, edge\n  add/remove); cursors are ephemeral. A deterministic per-user colour hash\n  (desaturated for visitors) drives presence identity.\n- **Conflict + echo model.** The server is the arbiter; clients apply ops\n  optimistically and the server echoes to *everyone else* (a client never gets\n  its own op back — broadcast frames are tagged with the originating connection\n  id). Rejected writes (e.g. an anonymous visitor) get a targeted `revert`\n  carrying the client's `op_id` so the optimistic change rolls back cleanly.\n- **Throttling.** Cursor frames are throttled to **≤ 20 Hz** per connection\n  server-side (and again client-side).\n- **Persistence.** The room flushes its layout to `workspace_states` every 2 s\n  while dirty and once more when the **last** connection leaves, under a\n  synthetic shared user so it never collides with CO-352's per-user saves and\n  survives a full server restart. Reuses `Storage::upsert_workspace_state` (an\n  internal call, not HTTP).\n- **Frontend** (`co-web/static/shared/sala-realtime.js` + wiring in\n  `shared/sala.html`). A small WS client with reconnect (exponential backoff),\n  a presence overlay (other users' cursors drawn as labelled arrows on the\n  canvas), optimistic node-move broadcast on drop, and live application of\n  remote moves.\n\n### Why\n\nCO-352 shipped the canvas as a per-user surface; CO-61 will bring offline-first\nCRDT sync later. For v1, server-arbitrated LWW (the model Yggdrasil's game\nruntime already uses) is enough to make the \"Sala\" metaphor pay off — multiple\nauthors composing around one canvas, suggestions appearing live — without a\nvoice/video layer underneath. Anonymous visitors get a read-only socket so a\npublic Sala still feels alive without granting write access.",
+  "summary": "a user working in a Sala (CO-352) with collaborators — co-authoring a workspace on the mbya lexicon, planning a comunicacao event, drafting a piece of game content — I need to *see* the other people i",
+  "co_auto_version": "0.1.0"
+}
