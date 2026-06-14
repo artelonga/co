@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-452",
+  "title": "Public API docs — Swagger UI + OpenAPI discovery at /api/docs (CO-278-C)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-452.md",
+  "branch": "feat/CO-452-public-api-docs-swagger-ui-openapi-disco",
+  "merge_sha": "949348dc8c4fbb24fbaf95b3718ff75283ba4a36",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/254",
+    "number": 254
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T14:45:13Z",
+  "files_changed": 13,
+  "lines_added": 350,
+  "lines_removed": 88,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "api",
+    "docs"
+  ],
+  "changelog_entry": "## CO-452 — Public API docs — Swagger UI + OpenAPI discovery at /api/docs (CO-278-C)\n\nTurned the CO HTTP API into a documented, explorable contract.\n\n- **Swagger UI at `GET /api/docs`** now loads a **vendored** Swagger UI bundle\n  (`co-web/static/shared/swagger/`, served same-origin) instead of the previous\n  external `unpkg.com` CDN — CSP-safe, no third-party runtime dependency.\n- **Discovery: `GET /api/openapi.json`** now serves the **catalog-generated**\n  spec (`co-web/openapi.yaml`, the single source of truth verified by\n  `npm run openapi:check`) instead of the older hand-maintained\n  `docs/api/openapi.yaml`, removing the two-spec drift risk. The response now\n  carries an `X-API-Version: v1` header so clients can pin the major version\n  without parsing the body.\n- A discoverable **\"API docs\"** link was added to the CO-210 docs navigation\n  rail (`/seguranca` and siblings).\n- Fixed a latent bug in `generate-openapi.ts`: catalog table cells containing an\n  escaped pipe (`\\|`) were truncated mid-string, producing malformed YAML. The\n  generator now splits on unescaped pipes and hardens double-quoted-scalar\n  escaping. (This never surfaced before because the served spec was the\n  hand-maintained file.)\n\nAdditive: no migration, anon-readable docs; the documented endpoints stay gated.\n\n### Why\nCO-278 (public API) needs an explorable contract before its other slices\n(versioning/envelope, agent dispatch, SDKs) and so sister-repos (yggdrasil, qb,\nrfq) can consume the surface without reverse-engineering it. Serving the\ncatalog-generated spec keeps docs and routes from drifting.",
+  "summary": "Contexto CO-278 (API pública) é um épico de 5-7 sub-stories. **CO-278-B (token scopes)** já saiu no CO-448; **a spec OpenAPI já é servida** pelo CO-211 (`openapi_routes.rs` faz `include_str!` de `docs",
+  "co_auto_version": "0.1.0"
+}
