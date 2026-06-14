@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-451",
+  "title": "co-auto: injetar skill de processo core + mapear labels de papel para skills",
+  "type": "refactor",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-451.md",
+  "branch": "feat/CO-451-co-auto-injetar-skill-de-processo-core-m",
+  "merge_sha": "e272ab5960319d056e535a437ecf47c6c379bdaa",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/260",
+    "number": 260
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T17:15:08Z",
+  "files_changed": 4,
+  "lines_added": 321,
+  "lines_removed": 37,
+  "labels": [
+    "refactor",
+    "module:co-auto"
+  ],
+  "changelog_entry": "## CO-451 — co-auto: injetar skill de processo core + mapear labels de papel para skills\n\n`skills_for_task` (em `dev/co-auto/src/auto.rs`) agora resolve as skills de uma\ntarefa por um único caminho compartilhado (`skill_names_for_task`):\n\n- **Skill de processo core** (`co-auto-process.md`) é **sempre** injetada quando\n  presente no workspace, então todo agente herda o loop canônico do co-auto, os\n  3 gates e o fallback de modelo — independente de papel ou módulo.\n- **Labels de papel → skill**: `type:orchestrate→orchestrate`,\n  `type:implement|feat|fix→implement`, `type:review→review`, `type:test→test`\n  (somando a `playwright-pattern`), `type:release|deploy→release`. O mapa de\n  módulo existente (`spa-conventions`, `deploy-runbook`, `rust-architecture`) é\n  preservado.\n- **Frontmatter `skills: [..]`**: lido em `parse_task` (entradas vazias\n  descartadas) e mesclado, deduplicado, com as skills derivadas dos labels.\n\n`skills_for_session` foi reescrita para usar a mesma resolução de nomes (filtrada\naos arquivos que existem em disco), eliminando a duplicação que existia entre as\nduas funções. Skills ausentes degradam graciosamente. Novo `skills/README.md`\ndocumenta o contrato (core + papéis + `skills:`).\n\n### Why\n\nO playbook canônico (processo co-auto + papéis) passou a existir como skills nos\nworkspaces (ex.: `ArteLonga/skills/`), mas não era carregado por co-auto por falta\nde mapeamento. Agora tarefas de qualquer space herdam o processo canônico e a\nskill do seu papel automaticamente, sem injeção manual pelo orquestrador.",
+  "summary": "GIVEN `skills_for_task` (em `dev/co-auto/src/auto.rs`) carrega skills de `{workspace}/skills/*.md` por um mapa label→skill **hardcoded** que só cobre `module:spa|editor|ui → spa-conventions`, `module:",
+  "co_auto_version": "0.1.0"
+}
