@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-454",
+  "title": "Folder-as-sub-sala — pasta nodes are descendable; align CO fractal layer with Yggdrasil /mundo rooms (1:1 convergence)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-454.md",
+  "branch": "feat/CO-454-folder-as-sub-sala-pasta-nodes-are-desce",
+  "merge_sha": "a0282532e7d2c699f14d8107555c8e8cc77d9fd4",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/270",
+    "number": 270
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T23:23:23Z",
+  "files_changed": 7,
+  "lines_added": 383,
+  "lines_removed": 5,
+  "labels": [
+    "type:feat",
+    "module:content",
+    "spa",
+    "federation"
+  ],
+  "changelog_entry": "## CO-454 — Folder-as-sub-sala — pasta nodes are descendable; align CO fractal layer with Yggdrasil /mundo rooms (1:1 convergence)\n\nA **pasta** node on the sala canvas is now *descendable* into its own **sub-sala**\n(double-tap, or its panel's *Descer* button), reusing the CO-400 descend/ascend +\nbreadcrumb machinery — but recursing at the **folder** layer instead of the\nuniverse layer.\n\n- **Descend into a folder** stacks the camera (`sala_stack`) and opens the\n  sub-sala whose scope is that pasta. The child slug appends the pasta to the\n  current slug path (`default` → `default/jardim` → `default/jardim/estufa`), so\n  parent/child is a slug **prefix** — the same enter/exit nesting Yggdrasil\n  `/mundo` walks through doors (YG-146).\n- **Identity = just a deeper slug (CO-352).** No new table, no migration: the\n  folder path rides one percent-encoded URL segment (`default%2Fjardim`) so the\n  page, state-API, and realtime-WS routes match unchanged and the server decodes\n  the slash back into the opaque `workspace_slug`. The UNIQUE\n  `(universe_key, workspace_slug, user_id)` keeps each depth an independent row.\n- **Presence is per-sub-sala (CO-353):** the realtime room key\n  `\"{universe_key}/{workspace_slug}\"` accepts the `/`, so a pasta's sub-sala has\n  its own roster — 1:1 with a YG `/mundo` room.\n- **Inert cases** mirror CO-400: the root pasta `/` (no name) is a soft no-op;\n  ascending restores the parent slug + camera via `sala_restore_cam`.\n- Documented in `docs/architecture/sala-surface.md` (\"Folder-sub-sala ↔ YG room\n  (1:1)\"); covered by unit tests (distinct-row slug, folder-path room key) and an\n  e2e spec (descend → child slug → ascend → camera + parent scope restored).\n\n### Why\nCO and the Yggdrasil content rooms were not 1:1 because they recursed at\ndifferent layers — CO by universe, YG `/mundo` by folder (pasta=sala). The owner\napproved **Option A** (2026-06-14): converge by making CO folders descendable\nsub-salas, not by promoting every room to a universe (Option B / CO-98,\nrejected). This closes the layer mismatch the federation round-trip\n(CO-413 ↔ YG-146 Fatia 2) needs to persist `pos{room,x,y}` unambiguously.",
+  "summary": "Contexto — por que (verificação 2026-06-14) CO e as **content rooms** do Yggdrasil **não são 1:1 hoje** porque recursam em camadas diferentes: **CO recursa por universo** (CO-400: um nó `{kind:\"univer",
+  "co_auto_version": "0.1.0"
+}
