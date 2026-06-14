@@ -29,6 +29,7 @@ import {
 import { renderDashboard, injectDashboardCallbacks } from './modules/views/dashboard.js';
 import { renderChangelog, injectChangelogCallbacks } from './modules/views/changelog.js';
 import { renderWorkspace, injectWorkspaceCallbacks } from './modules/views/workspace.js';
+import { renderScrum, refreshScrumManifest, scrumEnabled, injectScrumCallbacks } from './modules/views/scrum.js';
 import {
     renderConteudo, openZoomModal, injectConteudoCallbacks, injectOpenContentEditor,
 } from './modules/views/conteudo.js';
@@ -133,6 +134,29 @@ window.addEventListener('popstate', async (event) => {
         state.switchingUniverse = false;
     }
 });
+
+// CO-368: show the Scrum tab only for universes whose `_scrum.yaml` enables it.
+// Guarded by slug so render()'s frequent calls fetch the manifest only on a
+// universe change, not on every re-render.
+let _scrumTabSlug = null;
+async function updateScrumTab() {
+    const tab = document.getElementById('scrum-tab');
+    if (!tab) return;
+    const slug = state.currentUniverseSlug;
+    if (slug === _scrumTabSlug) return;
+    _scrumTabSlug = slug;
+    try {
+        const manifest = await refreshScrumManifest();
+        if (state.currentUniverseSlug !== slug) return; // raced past another switch
+        tab.classList.toggle('hidden', !(manifest && manifest.enabled));
+        // If the active view was Scrum but the new universe has none, fall back.
+        if (!scrumEnabled() && state.view === 'scrum') {
+            switchView('conteudo');
+        }
+    } catch (_) {
+        tab.classList.add('hidden');
+    }
+}
 
 function showTemplateBanner() {
     const b = document.getElementById('template-banner');
@@ -559,6 +583,7 @@ function renderContent() {
     else if (state.view === 'dashboard') renderDashboard();
     else if (state.view === 'changelog') renderChangelog();
     else if (state.view === 'workspace') renderWorkspace();
+    else if (state.view === 'scrum') renderScrum();
 }
 
 function render() {
@@ -567,6 +592,7 @@ function render() {
     renderBreadcrumbs();
     renderMiniCalendar();
     renderContent();
+    updateScrumTab(); // CO-368: fire-and-forget; slug-guarded so it fetches once per universe
 }
 
 // ===== Navigation =====
@@ -662,6 +688,7 @@ function wireModules() {
     injectDashboardCallbacks({ openTaskModal });
     injectChangelogCallbacks({ showToast, showLoginModal });
     injectWorkspaceCallbacks({ showToast });
+    injectScrumCallbacks({ showToast });
     injectConteudoCallbacks({ openZoomModal, showLoginModal, showToast, loadEditorBundle, showSubscribePromptModal });
     injectOpenContentEditor(openContentEditor);
     injectModalCallbacks({ showToast, showLoginModal, refreshTasks, render, renderContent, ensureOwnUniverse, loadMeUniverses, renderSidebar });

@@ -179,6 +179,24 @@ CO-387: per-universe calendar lens configuration (`_calendar.yaml`) for the
 
 ---
 
+## scrum (universe) — `/api/v1/universes/{key}/scrum/*` (scrum/routes.rs)
+
+CO-368: per-universe Scrum artifacts. PBIs and Sprints are ordinary CO entries
+(`entry_type = "pbi" | "sprint"`); the cadence comes from the universe's
+`_scrum.yaml`. A universe without a manifest reports `enabled: false` and is
+otherwise unchanged. Distinct from the global CO-372 calendar at `/api/v1/scrum/*`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/universes/{key}/scrum/manifest` | anon | Parsed `_scrum.yaml` (`enabled`, `sprint_length_days`, `sprint_start_anchor`, `release_tag_pattern`, `roles`, `default_dod`, …) plus the computed `current_sprint` (or `null` when disabled / no anchor). |
+| GET | `/api/v1/universes/{key}/scrum/sprints` | anon | `{ sprints[], total }` — all `sprint` entries, sorted by `number`. Each: `{ path, type, title, frontmatter, body }`. |
+| GET | `/api/v1/universes/{key}/scrum/sprints/current` | anon | Current sprint computed from cadence + anchor: `{ number, start_at, end_at, release_window }`. `404` when Scrum is disabled or `sprint_start_anchor` is missing. |
+| GET | `/api/v1/universes/{key}/scrum/backlog` | anon | `{ pbis[], total }` — `pbi` entries. Query `status=` (backlog/ready/in-sprint/done) and `sprint=` filter. |
+| POST | `/api/v1/universes/{key}/scrum/pbi` | anon | Create a PBI (sugar over an entry write at `scrum/pbi/{id}.md`). Body: `{ id, title, priority, points?, status?, acceptance?[], sprint?, assignees?[], epic?, body? }`. `422` on invalid frontmatter. Returns the created entry. |
+| PATCH | `/api/v1/universes/{key}/scrum/pbi/{id}/dod` | anon | Check off a Definition-of-Done item. Body: `{ index, done }`. Seeds the checklist from `_scrum.yaml.default_dod` on first toggle. Returns `{ path, dod[] }`. `404` if the PBI is absent. |
+
+---
+
 ## suggest/review — `/api/v1/universes/{slug}/suggest` + `/{slug}/review*` (review_routes.rs)
 
 CO-354: entry lifecycle (draft → reviewed → published) with anon submissions. Outside the writer gate so anonymous visitors can suggest; review actions enforce ownership in-handler.

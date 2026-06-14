@@ -6836,3 +6836,81 @@ body.co-single-universe-mode .hamburger-btn {
 }
 .sidebar-trash { opacity: 0.65; }
 .sidebar-trash:hover { opacity: 1; }
+
+/* ===== CO-368: Scrum board view ===== */
+.scrum-view { padding: 16px; overflow-y: auto; }
+.scrum-sprint-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+}
+.scrum-sprint-number { font-weight: 600; color: var(--text); }
+.scrum-sprint-goal { color: var(--muted, #6b7280); font-style: italic; }
+.scrum-release-window {
+    margin-left: auto;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-size: 0.78rem;
+    font-weight: 600;
+}
+.scrum-board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 14px;
+    align-items: start;
+}
+.scrum-column {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 8px);
+    padding: 10px;
+    min-height: 120px;
+}
+.scrum-column-title {
+    margin: 0 0 10px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--muted, #6b7280);
+}
+.scrum-column-body { display: flex; flex-direction: column; gap: 8px; }
+.scrum-column-empty { color: var(--muted, #9ca3af); text-align: center; padding: 8px 0; }
+.scrum-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 8px);
+    padding: 10px;
+}
+.scrum-card-head { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; }
+.scrum-card-title { font-weight: 500; color: var(--text); margin-bottom: 6px; }
+.scrum-points {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 999px;
+    padding: 1px 8px;
+}
+.scrum-priority {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--muted, #6b7280);
+}
+.scrum-priority-high { color: #dc2626; }
+.scrum-priority-medium { color: #d97706; }
+.scrum-priority-low { color: #16a34a; }
+.scrum-dod { list-style: none; margin: 6px 0 0; padding: 0; font-size: 0.82rem; }
+.scrum-dod li { margin: 2px 0; }
+.scrum-dod label { display: flex; gap: 6px; align-items: flex-start; cursor: pointer; color: var(--text); }
+.scrum-empty { color: var(--muted, #6b7280); padding: 24px; text-align: center; }
+@media (max-width: 720px) {
+    .scrum-board { grid-template-columns: 1fr; }
+}

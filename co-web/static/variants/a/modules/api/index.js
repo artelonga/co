@@ -7,10 +7,12 @@ import * as authFns from './auth.js';
 import * as tasksFns from './tasks.js';
 import * as universesFns from './universes.js';
 import * as entriesFns from './entries.js';
+import * as scrumFns from './scrum.js';
 
 export const api = {
     ...authFns,
     ...tasksFns,
     ...universesFns,
     ...entriesFns,
+    ...scrumFns,
 };

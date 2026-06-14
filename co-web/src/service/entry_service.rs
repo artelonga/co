@@ -81,6 +81,13 @@ impl EntryService {
         entry_type: &str,
         frontmatter: &serde_json::Value,
     ) -> Result<(), AppError> {
+        // CO-368: Scrum entry types (pbi/sprint) carry a fixed frontmatter
+        // shape contract enforced here, regardless of whether a manifest
+        // declares them — so the sugar endpoints and the raw `/entries` POST
+        // validate identically. No-op for every other type.
+        crate::scrum::validate::validate_scrum_entry(entry_type, frontmatter)
+            .map_err(AppError::UnprocessableEntity)?;
+
         let manifest = match manifest {
             Some(m) => m,
             None => return Ok(()),
