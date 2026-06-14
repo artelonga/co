@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-338",
+  "title": "Surface keys — `key::path` cross-universe links that resolve to deployment DNS, at any nesting depth",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-338.md",
+  "branch": "feat/CO-338-surface-keys-key-path-cross-universe-lin",
+  "merge_sha": "eb3d9a07aba1c3dcc057bf95d4d8c9cd473d671a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/252",
+    "number": 252
+  },
+  "started_at": "2026-06-04T00:00:00Z",
+  "merged_at": "2026-06-14T13:06:13Z",
+  "files_changed": 26,
+  "lines_added": 1192,
+  "lines_removed": 114,
+  "labels": [
+    "type:feat",
+    "module:universe",
+    "module:content",
+    "module:co-web"
+  ],
+  "changelog_entry": "## CO-338 — Surface keys — `key::path` cross-universe links that resolve to deployment DNS, at any nesting depth\n\nA `<key>::<subpath>` reference now resolves to a node's **live deployment URL**\nno matter where it sits in the recursive universe tree, and no matter whether\nthe node deploys itself or inherits a deploying ancestor's DNS. This is the\naddressing half of the sub-universe ⇄ universe ⇄ deployable-unit model: links\naddress each other by *logical identity*, so promoting/demoting/remounting a\nuniverse reroutes every reference with **zero link edits**.\n\n`yggdrasil::comunicacao/mbya` and `mbya::` both resolve to\n`https://yggdrasil.artelonga.com.br/comunicacao/mbya`; promote `comunicacao` to\nits own surface and `comunicacao::*` follows it to\n`https://comunicacao.artelonga.com.br/` automatically.\n\n### What changed\n\n- **Resolver in `core` (`co::surface`).** `resolve_surface_ref(key, subpath)`\n  walks the key to its node (outermost-wins on shadowed keys; same-depth\n  collision → `Ambiguous` error mirroring CO-277), then up `parent` links to the\n  nearest deployable ancestor (a node with `surface_dns`). Base =\n  `https://<ancestor dns>`; path = the handle chain from that ancestor down to\n  the node. With **no** deployable ancestor it falls back to the CO platform\n  host (`co.artelonga.com.br`) over the full lineage — exactly the pre-promotion\n  state. Unit-tested against all six worked-example rows + ambiguity + shadowing\n  + the promotion flip.\n- **Data fields.** New `surface_dns` column on `universes` (meta-DB migration\n  **v84**, nullable) alongside the existing `parent_key` lineage. Parsed from\n  both `_universe.yaml` (`core::manifest::Manifest`) and `co-universes.yaml`\n  (`UniverseDecl`), and loaded onto the `Universe` model. `Storage::\n  list_surface_nodes()` exposes the `(key, parent, surface_dns)` registry.\n- **`GET /api/v1/resolve?ref=<key>::<path>`** → `{ url, universe,\n  deployable_ancestor }`.\n- **Deployment worker is registry-driven.** `deployment_snapshot_worker` no\n  longer hardcodes per-unit URLs: `build_units` resolves each unit's URL through\n  `co::surface` from `(key, parent, surface_dns)` and overlays live\n  `universes.surface_dns` rows, so an operator-recorded promotion reroutes a unit\n  with no code change (kills the URL duplication — ties to CO-280).\n- **Markdown render.** `co::surface::rewrite_surface_links` rewrites\n  `[[key::path]]` body wikilinks to resolved links;\n  `markdown_to_html_with_surfaces` turns them into `<a href=\"…\">` for content +\n  surfaces. Unresolvable/non-surface wikilinks are left untouched.\n\n### Why\n\n`::` complements CO-153's logical `co://`: `co://` returns `{universe, path}`,\n`::` returns the physical URL. Content and surfaces can address each other by\nlogical identity, so deployment topology changes (promotion/demotion) never\nbreak links — the resolver is what makes seamless promotion possible.",
+  "summary": "an author (or surface) linking across the recursive universe tree — where a node may be a root universe (`yggdrasil`), a nested sub-universe (`comunicacao` under `yggdrasil`, `mbya` under `comunicacao",
+  "co_auto_version": "0.1.0"
+}
