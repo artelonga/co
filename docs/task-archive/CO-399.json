@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-399",
+  "title": "Sala scope expansion — all-universes /sala + subset /sala?u=a,b (fractal scope phase 2)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-399.md",
+  "branch": "feat/CO-399-sala-scope-expansion-all-universes-sala-",
+  "merge_sha": "55b28150bd0720ed8c0f8a346aea1764a75c848d",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/258",
+    "number": 258
+  },
+  "started_at": "2026-06-10T00:00:00Z",
+  "merged_at": "2026-06-14T17:15:42Z",
+  "files_changed": 13,
+  "lines_added": 1195,
+  "lines_removed": 22,
+  "labels": [
+    "type:feat",
+    "module:workspace",
+    "module:co-web"
+  ],
+  "changelog_entry": "## CO-399 — Sala scope expansion — all-universes /sala + subset /sala?u=a,b (fractal scope phase 2)\n\nThe Sala canvas is no longer bound to a single universe. The same\n`shared/sala.html` surface now also serves:\n\n- `GET /sala` — scope = **every universe visible to the caller**\n- `GET /sala?u=a,b` — an explicit, **visibility-gated subset**\n\nNodes carry their universe; cross-universe edges persist in the canonical\n`key::path` link notation. State persists per `(scope, user)` — deterministic,\nmachine-local-state-free, so Wave 7 cross-device sync can op-log these rows.\n\n### What changed\n\n- **Migration v85** — additive `workspace_states.scope` column (`NOT NULL\n  DEFAULT ''`). Legacy single-universe rows are untouched (`scope = ''`); a\n  multi-universe row stores `'*'` (all visible) or a normalized `'a,b'` subset\n  and a sentinel `universe_key = '@scope:<scope>'` so the existing UNIQUE\n  constraint keys one row per scope without a table rebuild.\n- **Scope resolver** — `GET /api/v1/sala/scope?u=a,b` resolves a scope to its\n  visibility-filtered universes (the single authority: anonymous and\n  cross-account callers only ever see the public slice).\n- **Scope-keyed state** — `GET/PUT /api/v1/sala/state?scope=…` and\n  `POST /api/v1/sala/state/share?scope=…`. Share tokens resolve through the\n  existing `/api/v1/workspace-states/{token}` and now carry their `scope`;\n  visibility is re-checked at read time via the scope resolver.\n- **Frontend** — `shared/sala.html` parses the bare `/sala` and `?u=` query,\n  fetches entries from every in-scope universe (labeled by universe in the\n  picker), and places/links them as `key::path`.\n\n### Why\n\nA brain owner thinks across containers, not inside one. CO-399 makes the canvas\nmatch that: one surface whose scope is all your universes — or any subset you\npick — extending the per-universe sala (CO-352) toward universe-as-node\nrecursion (CO-400) without forking the page or the table.",
+  "summary": "a brain owner working across several universes at once, I need ONE sala whose scope is all my universes — or any subset I pick — so the canvas matches how I actually think: across containers, not insi",
+  "co_auto_version": "0.1.0"
+}
