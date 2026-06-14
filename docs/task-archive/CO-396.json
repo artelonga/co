@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-396",
+  "title": "Project timeline lens — roadmap/gantt de um universo-projeto sobre o <co-time-grid>, com engine de layout compartilhada com o Yggdrasil (YG-123)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-396.md",
+  "branch": "feat/CO-396-project-timeline-lens-roadmap-gantt-de-u",
+  "merge_sha": "982410a7aa9578af5c23390689b42782c3725c04",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/245",
+    "number": 245
+  },
+  "started_at": "2026-06-09T00:00:00Z",
+  "merged_at": "2026-06-14T00:05:51Z",
+  "files_changed": 18,
+  "lines_added": 1748,
+  "lines_removed": 496,
+  "labels": [
+    "type:feat",
+    "module:time",
+    "module:render",
+    "module:spa"
+  ],
+  "changelog_entry": "## CO-396 — Project timeline lens — roadmap/gantt de um universo-projeto sobre o `<co-time-grid>`, com engine de layout compartilhada com o Yggdrasil (YG-123)\n\nA **project-timeline** (roadmap/gantt) lens: the same entries that fill a\nproject's kanban board, rendered on a time axis — tasks in lanes by\n`epic`/`module`/`status`, releases and milestones as markers, and a \"no date\"\nbacklog so a task without a date never disappears. Quadro and timeline are now\ntwo *forms* of the same canonical entries — no new data structure.\n\n### Shared layout engine (the central constraint)\n\nThe timeline lens/layout math now lives **once**, in the path-dep crate both\nhosts consume:\n\n- New `game_core::time_layout` module. CO-387's per-lens conversion math\n  (`LensDef`, `LensPosition`, `entry_to_lens_position`, …) was **hoisted** out\n  of `co-web/src/time/conversion.rs` into it; co-web re-exports the same paths\n  so nothing else changed. On top, CO-396 adds the project-timeline layout:\n  `layout_project_timeline(entries, group_by)` → lanes + markers + backlog, and\n  `gantt_span` (duration precedence: `scheduled→due`, else `created→done`, else\n  a point).\n- `yggdrasil-core` already path-deps `game-core`, so YG-123's\n  `generators/timeline.rs` consumes the **same** engine instead of a parallel\n  implementation (the yggdrasil-side wiring lands with YG-123 in that repo).\n- `static/shared/lib/co-time.js` mirrors the engine for the client\n  (`<co-time-grid>`) — one shared lib, not a divergent fork.\n\n### co-web\n\n- `GET /api/v1/universes/{slug}/timeline?group_by=epic|module|status` — builds\n  the project timeline from the universe's entries through the shared engine\n  (inherits the content visibility gate). New `time::project_timeline` mapper\n  turns an `EntryRow` into the engine's neutral `TimelineEntry`.\n- `_calendar.yaml` lenses gain `lane_by: epic|module|status` to declare\n  themselves project-timeline lenses.\n- `<co-time-grid>` gains a `roadmap` view mode (lanes + marker rail + backlog)\n  and its `gantt` mode now uses the engine's duration semantics. New\n  `project-timeline` SPA lens registers into the CO-393 lens frame, appearing as\n  a header tab next to Kanban — the toggle quadro ⇄ timeline.\n\n### Tests\n\n- `game-core`: project-timeline + conversion engine tests (independent of\n  co-web).\n- `co-web`: entry→timeline mapper tests, `_calendar.yaml` `lane_by` parsing, and\n  a route wiring/visibility-gate test.\n- `co-web` vitest: `layoutProjectTimeline`/`ganttSpan` JS-mirror tests\n  paralleling the Rust suite so the two cannot silently diverge.\n\n### Why\n\nRoadmap and project review come out of the same markdown the board already\nuses (content × form), and the layout engine is shared with Yggdrasil's\ntimeline-world rather than reimplemented per host.",
+  "summary": "As Dono/membro de um universo-projeto (ex.: board do CO Platform, grcsamazonia, mse) que hoje só enxerga o trabalho como quadro kanban",
+  "co_auto_version": "0.1.0"
+}
