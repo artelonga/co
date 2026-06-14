@@ -994,6 +994,17 @@ CO-372: Sprint calendar with Definition of Done + ICS export. Public endpoints, 
 
 ---
 
+## Metrics
+
+CO-78: job-queue worker-pool metrics. Aggregate + per-kind only (no universe
+keys), public like `/health`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/metrics` | anon | Queue depth, dead-letter count, autoscale recommendation, per-kind success rate + p99 latency |
+
+---
+
 ## crawl — robots + sitemap (server/crawl_routes.rs)
 
 CO-397: edge protection — crawl policy respects per-universe visibility and noindex.

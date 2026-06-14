@@ -123,6 +123,8 @@ tags:
     description: "suggest/review pages endpoints"
   - name: "Health"
     description: "Health endpoints"
+  - name: "Metrics"
+    description: "Metrics endpoints"
   - name: "crawl"
     description: "crawl endpoints"
 
@@ -4883,6 +4885,13 @@ paths:
     get:
       tags: ["live timeline"]
       summary: "CO-381 — live timeline SPA (en) — same SPA as /agora"
+      responses:
+        "200":
+          description: OK
+  /metrics:
+    get:
+      tags: ["Metrics"]
+      summary: "Queue depth, dead-letter count, autoscale recommendation, per-kind success rate + p99 latency"
       responses:
         "200":
           description: OK

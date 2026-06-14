@@ -32,6 +32,9 @@ mod v085;
 mod v086;
 // CO-458 takes v086 (merged separately); CO-449 claims v087.
 mod v087;
+// CO-78: job-queue work pinned to v088. The numeric gap is benign — each guard
+// checks `current_version < N` independently, so v086/v087/v088 converge.
+mod v088;
 
 /// CO-446: minimum free bytes required on the data volume before the boot path
 /// runs migrations. Default 200 MiB. Override with `CO_MIGRATION_MIN_FREE_BYTES`.
@@ -171,6 +174,7 @@ impl Storage {
             self.migrate_v085(current_version);
             self.migrate_v086(current_version);
             self.migrate_v087(current_version);
+            self.migrate_v088(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(
@@ -320,7 +324,7 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 87;
+    const LATEST_VERSION: i64 = 88;
 
     fn max_version(storage: &Storage) -> i64 {
         storage
