@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-458",
+  "title": "Storage backend abstraction — pluggable StorageBackend trait + LocalFsBackend (StaaS keystone; S3/partner plug in later)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": "minor",
+  "spec_path": "work/co/CO-458.md",
+  "branch": "feat/CO-458-storage-backend-abstraction-pluggable-st",
+  "merge_sha": "514200a5fa296339e041c780070277c6361c122a",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/265",
+    "number": 265
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-14T19:54:11Z",
+  "files_changed": 8,
+  "lines_added": 705,
+  "lines_removed": 2,
+  "labels": [
+    "type:feat",
+    "module:platform",
+    "storage",
+    "staas"
+  ],
+  "changelog_entry": "## CO-458 — Storage backend abstraction — pluggable StorageBackend trait + LocalFsBackend (StaaS keystone; S3/partner plug in later)\n\nAdded a pluggable `StorageBackend` trait (`co-web/src/storage/backend/`) as the\nsingle abstraction point for content-addressed blob storage — the keystone for\nserving **storage as a service** (StaaS) to partners.\n\n- **`trait StorageBackend`** (`Send + Sync`, async via `async_trait`):\n  `put` / `get` / `head` / `delete` / `exists` / `list`, errors via `AppError`.\n- **`LocalFsBackend`** — content-addressed (sha256), 2-level sharded under\n  `<data_dir>/blobs/<aa>/<bb>/<hash>`, with refcounted **dedupe**: re-`put`ting\n  identical bytes bumps the refcount instead of rewriting, and `delete` only\n  unlinks the file when the last reference drops.\n- **`from_config()`** selects the backend from `CO_STORAGE_BACKEND`\n  (default `local`); `s3` is reserved for CO-81 and currently returns a clear\n  \"not implemented yet\" error.\n- **Migration v086** adds the `blob_refs` ledger table\n  (`hash` PK, `backend`, `size`, `content_type`, `refcount`, `created_at`) for\n  dedupe, traceability, and future StaaS billing.\n- **Integration proof**: the backup worker now registers each snapshot's\n  manifest in the central blob ledger via the backend (write + read-back),\n  making backups a real `StorageBackend` consumer (CO-405).\n\n### Why\nTo serve storage as a service we need one place where S3 (CO-81), partner\nbackends, and StaaS billing plug in without touching call-sites. This ships that\nseam now, 100% local with no new infrastructure; S3 and partner tenants become\nalternate implementations of the same trait.",
+  "summary": "Contexto Para servir **storage as a service** (StaaS) a parceiros, o CO precisa de **um ponto de abstração** de armazenamento de blobs/conteúdo — hoje espalhado em escrita direta no filesystem. Esta t",
+  "co_auto_version": "0.1.0"
+}
