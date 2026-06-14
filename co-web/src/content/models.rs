@@ -413,6 +413,11 @@ pub struct Universe {
     /// rows (treated as read-only).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_mode: Option<String>,
+    /// CO-338: deployment DNS host — set only on deployable units (e.g.
+    /// `yggdrasil.artelonga.com.br`). `None` = the universe inherits a deploying
+    /// ancestor's DNS. Drives `key::path` surface-ref resolution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_dns: Option<String>,
 }
 
 fn default_visibility() -> String {

@@ -138,6 +138,8 @@ fn test_backfill_no_affected_types_is_noop() {
     let manifest = Manifest {
         schema_version: 1,
         name: "X".to_string(),
+        parent: None,
+        surface_dns: None,
         content_types: vec![ContentType {
             name: "tarefa".to_string(),
             schema: BTreeMap::new(),

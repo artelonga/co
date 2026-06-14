@@ -48,8 +48,12 @@ pub struct DeploymentListResponse {
 // Load all 6 units from DB (always returns 6 rows — missing = defaults)
 // ---------------------------------------------------------------------------
 
-fn load_snapshots(conn: &rusqlite::Connection) -> Vec<DeploymentSnapshot> {
-    use crate::platform::deployment_snapshot_worker::UNITS;
+fn load_snapshots(storage: &crate::storage::Storage) -> Vec<DeploymentSnapshot> {
+    use crate::platform::deployment_snapshot_worker::build_units;
+
+    // CO-338: units (and their resolved URLs) come from the surface registry.
+    let units = build_units(&storage.list_surface_nodes());
+    let conn = storage.conn();
 
     // Load whatever is in DB
     let db_rows: std::collections::HashMap<String, DeploymentSnapshot> = conn
@@ -83,27 +87,30 @@ fn load_snapshots(conn: &rusqlite::Connection) -> Vec<DeploymentSnapshot> {
         })
         .unwrap_or_default();
 
-    // Always return all 6 hardcoded units (with DB data merged in)
-    UNITS
+    // Always return every registry unit (with DB data merged in).
+    units
         .iter()
         .map(|u| {
-            let mut s = db_rows.get(u.id).cloned().unwrap_or(DeploymentSnapshot {
-                unit: u.id.to_string(),
-                display: u.display.to_string(),
-                url: u.url.to_string(),
-                snapshot_at: 0,
-                machine_id: String::new(),
-                region: String::new(),
-                vm_size: String::new(),
-                state: String::new(),
-                image: String::new(),
-                version: String::new(),
-                last_deploy_at: String::new(),
-                health_status: "unknown".to_string(),
-                error_msg: String::new(),
-            });
-            s.display = u.display.to_string();
-            s.url = u.url.to_string();
+            let mut s = db_rows
+                .get(u.id.as_str())
+                .cloned()
+                .unwrap_or(DeploymentSnapshot {
+                    unit: u.id.clone(),
+                    display: u.display.clone(),
+                    url: u.url.clone(),
+                    snapshot_at: 0,
+                    machine_id: String::new(),
+                    region: String::new(),
+                    vm_size: String::new(),
+                    state: String::new(),
+                    image: String::new(),
+                    version: String::new(),
+                    last_deploy_at: String::new(),
+                    health_status: "unknown".to_string(),
+                    error_msg: String::new(),
+                });
+            s.display = u.display.clone();
+            s.url = u.url.clone();
             s
         })
         .collect()
@@ -131,7 +138,7 @@ pub async fn list_handler(
 
     let units = {
         let storage = state.core.storage.lock();
-        load_snapshots(storage.conn())
+        load_snapshots(&storage)
     };
 
     Ok(Json(DeploymentListResponse {
@@ -167,7 +174,7 @@ pub async fn refresh_handler(
 
     let units = {
         let storage = state.core.storage.lock();
-        load_snapshots(storage.conn())
+        load_snapshots(&storage)
     };
 
     Ok(Json(DeploymentListResponse {
@@ -231,48 +238,38 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rusqlite::Connection;
+    use crate::storage::Storage;
 
-    fn make_test_db() -> Connection {
-        let conn = Connection::open_in_memory().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE deployment_snapshots (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                unit TEXT NOT NULL UNIQUE,
-                snapshot_at INTEGER NOT NULL DEFAULT 0,
-                machine_id TEXT NOT NULL DEFAULT '',
-                region TEXT NOT NULL DEFAULT '',
-                vm_size TEXT NOT NULL DEFAULT '',
-                state TEXT NOT NULL DEFAULT '',
-                image TEXT NOT NULL DEFAULT '',
-                version TEXT NOT NULL DEFAULT '',
-                last_deploy_at TEXT NOT NULL DEFAULT '',
-                health_status TEXT NOT NULL DEFAULT 'unknown',
-                error_msg TEXT NOT NULL DEFAULT ''
-            );",
-        )
-        .unwrap();
-        conn
+    /// CO-338: `load_snapshots` now reads the unit registry from `Storage`
+    /// (surface rows) rather than a bare connection. A fresh Storage has no
+    /// `universes.surface_dns` rows, so units come purely from the registry seed.
+    fn make_test_storage() -> Storage {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        std::mem::forget(dir); // keep the SQLite files alive for the test
+        storage
     }
 
     #[test]
     fn load_snapshots_returns_six_rows_when_db_empty() {
-        let conn = make_test_db();
-        let rows = load_snapshots(&conn);
+        let storage = make_test_storage();
+        let rows = load_snapshots(&storage);
         assert_eq!(rows.len(), 6);
     }
 
     #[test]
     fn load_snapshots_merges_db_data() {
-        let conn = make_test_db();
-        conn.execute(
-            "INSERT INTO deployment_snapshots (unit, snapshot_at, version, health_status)
+        let storage = make_test_storage();
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO deployment_snapshots (unit, snapshot_at, version, health_status)
              VALUES ('co', 1234567890, '2.28.0', 'ok')",
-            [],
-        )
-        .unwrap();
+                [],
+            )
+            .unwrap();
 
-        let rows = load_snapshots(&conn);
+        let rows = load_snapshots(&storage);
         assert_eq!(rows.len(), 6);
 
         let co = rows.iter().find(|r| r.unit == "co").unwrap();
@@ -283,8 +280,8 @@ mod tests {
 
     #[test]
     fn load_snapshots_fills_display_and_url() {
-        let conn = make_test_db();
-        let rows = load_snapshots(&conn);
+        let storage = make_test_storage();
+        let rows = load_snapshots(&storage);
         for row in &rows {
             assert!(!row.display.is_empty(), "unit {} has no display", row.unit);
             assert!(!row.url.is_empty(), "unit {} has no url", row.unit);

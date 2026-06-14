@@ -346,6 +346,15 @@ fn find_marker(chars: &[char], from: usize, marker: &str) -> Option<usize> {
     None
 }
 
+/// CO-338: convert markdown to HTML after rewriting `[[key::path]]` surface
+/// wikilinks to resolved deployment links. The shared render entry point for
+/// content + surfaces that want live cross-universe `<a href>`s: the wikilinks
+/// become `[label](url)` (via [`co::surface::rewrite_surface_links`]) and then
+/// ordinary `<a href="url">label</a>` anchors through [`markdown_to_html`].
+pub fn markdown_to_html_with_surfaces(md: &str, registry: &co::surface::SurfaceRegistry) -> String {
+    markdown_to_html(&co::surface::rewrite_surface_links(md, registry))
+}
+
 /// Convert a markdown document to CSP-safe HTML.
 pub fn markdown_to_html(md: &str) -> String {
     let lines: Vec<&str> = md.lines().collect();
@@ -827,6 +836,27 @@ mod tests {
     use tower::ServiceExt;
 
     // --- unit: route resolution ---------------------------------------------
+
+    #[test]
+    fn surface_wikilinks_render_to_resolved_anchors() {
+        let reg = co::surface::SurfaceRegistry::new(vec![
+            co::surface::SurfaceNode::new(
+                "yggdrasil",
+                None::<String>,
+                Some("yggdrasil.artelonga.com.br"),
+            ),
+            co::surface::SurfaceNode::new("comunicacao", Some("yggdrasil"), None::<String>),
+            co::surface::SurfaceNode::new("mbya", Some("comunicacao"), None::<String>),
+        ]);
+        let html = markdown_to_html_with_surfaces("Veja [[mbya::]] aqui.", &reg);
+        assert!(
+            html.contains(
+                "<a href=\"https://yggdrasil.artelonga.com.br/comunicacao/mbya\" \
+                 target=\"_blank\" rel=\"noopener noreferrer\">mbya::</a>"
+            ),
+            "surface wikilink must render to a resolved anchor; got: {html}"
+        );
+    }
 
     #[test]
     fn resolve_maps_all_nine_routes() {

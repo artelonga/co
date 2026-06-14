@@ -144,6 +144,7 @@ pub use platform::pipeline;
 pub use platform::plugin_loader;
 pub use platform::pretty_urls;
 pub use platform::rate_limit;
+pub use platform::resolve_routes;
 pub use platform::server_config::CoServerConfig;
 pub use platform::source;
 pub use platform::telemetry;

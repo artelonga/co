@@ -15,6 +15,9 @@ universes:
     local: work/co          # relative to this file
     visibility: public-subscribable
     description: CO open-source platform — board, tasks, docs
+    # CO-338: deployable surface — `co::path` resolves to this host; sub-universes
+    # without their own `surface_dns` resolve under it (e.g. comunicacao::).
+    surface_dns: co.artelonga.com.br
 
   # --- Comunicação (i18n + chat + chamadas) ---
   # Replaces the separate `language` / `mbya` / `topologia` entries (1.69.0).
@@ -31,6 +34,7 @@ universes:
     local: ~/projects/artelonga
     visibility: public-subscribable
     description: Arte Longa — agência de gestão de carreira e comunicação
+    surface_dns: artelonga.com.br   # CO-338: deployable surface (GitHub Pages)
 
   - slug: quilomboaraucaria
     name: Quilombo Araucária
@@ -38,12 +42,14 @@ universes:
     visibility: public-subscribable
     description: Plataforma comunitária do Quilombo Araucária
     rust_module: universes/quilombo   # co-web/src/universes/quilombo/ — processos, permissoes, storage
+    surface_dns: quilomboaraucaria.org   # CO-338: deployable surface
 
   - slug: rfq
     name: RFQ Gateway
     local: ~/projects/rfq-gateway
     visibility: private
     description: RFQ Gateway — trading API documentation
+    surface_dns: rfq.fly.dev   # CO-338: deployable surface
 
   - slug: time
     name: Time — earth, sky, and system events

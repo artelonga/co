@@ -25,6 +25,7 @@ pub mod pipeline;
 pub mod plugin_loader;
 pub mod pretty_urls;
 pub mod rate_limit;
+pub mod resolve_routes;
 pub mod server_config;
 pub mod source;
 pub mod telemetry;

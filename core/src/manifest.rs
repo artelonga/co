@@ -100,6 +100,15 @@ pub struct PropDef {
 pub struct Manifest {
     pub schema_version: u32,
     pub name: String,
+    /// CO-338: parent universe key (lineage). `None` = top-level / root.
+    /// Surfaces the recursive sub-universe ⇄ universe relationship in the
+    /// manifest so `key::path` refs can walk to a deployable ancestor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
+    /// CO-338: deployment DNS host — set only on deployable units (e.g.
+    /// `yggdrasil.artelonga.com.br`). `None` = inherits a deploying ancestor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub surface_dns: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_types: Vec<ContentType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -552,6 +561,8 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
     Manifest {
         schema_version: 1,
         name: name.into(),
+        parent: None,
+        surface_dns: None,
         content_types: vec![ContentType {
             name: "task".to_string(),
             schema,
@@ -893,6 +904,8 @@ content_types:
         let m = Manifest {
             schema_version: 2,
             name: "X".to_string(),
+            parent: None,
+            surface_dns: None,
             content_types: vec![],
             doc_generators: vec![],
             relationships: vec![],

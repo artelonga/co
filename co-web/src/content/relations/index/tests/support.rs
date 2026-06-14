@@ -66,6 +66,8 @@ pub fn evento_manifest() -> Manifest {
     Manifest {
         schema_version: 1,
         name: "Test".to_string(),
+        parent: None,
+        surface_dns: None,
         content_types: vec![ContentType {
             name: "evento".to_string(),
             schema,
@@ -109,6 +111,8 @@ pub fn term_manifest() -> Manifest {
     Manifest {
         schema_version: 1,
         name: "guarani-mbya".to_string(),
+        parent: None,
+        surface_dns: None,
         content_types: vec![ContentType {
             name: "term".to_string(),
             schema,

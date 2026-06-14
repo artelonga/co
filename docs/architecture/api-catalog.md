@@ -592,6 +592,18 @@ CO-260 cross-version changelog viewer.
 
 ---
 
+## resolve — `/api/v1/resolve` (resolve_routes.rs)
+
+CO-338 surface-key resolution: turn a logical `<key>::<path>` cross-universe
+reference into a live deployment URL by walking the universe registry (`key`,
+`parent_key`, `surface_dns`) to the nearest deployable ancestor.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/api/v1/resolve?ref=<key>::<path>` | anon | Resolve a surface ref → `{ url, universe, deployable_ancestor }`; unknown key → 404, ambiguous/malformed → 400 |
+
+---
+
 ## events — `/api/v1/events` (event_bus / live_routes.rs)
 
 CO-380 universal event bus + CO-381 live timeline WebSocket fanout.

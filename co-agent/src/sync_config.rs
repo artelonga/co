@@ -60,6 +60,12 @@ pub struct UniverseDecl {
     pub local: Option<String>,
     /// Parent universe slug for hierarchical grouping.
     pub parent: Option<String>,
+    /// CO-338: deployment DNS host — set only on deployable units (e.g.
+    /// `yggdrasil.artelonga.com.br`). `None` = inherits a deploying ancestor's
+    /// DNS. Drives `key::path` surface-ref resolution and the deployment-unit
+    /// registry (replaces the hardcoded list in `deployment_snapshot_worker`).
+    #[serde(default)]
+    pub surface_dns: Option<String>,
     #[serde(default = "default_visibility")]
     pub visibility: String,
     /// If true, universe is created on server but no files are synced.
