@@ -611,6 +611,57 @@ mod tests {
         assert_eq!(node["y"], -2);
     }
 
+    /// CO-454: a folder-sub-sala is "just another slug" (CO-352) — a path-encoded
+    /// `workspace_slug` (`default/jardim`) is a row DISTINCT from its parent
+    /// `default`, so descending into a pasta never collides with the parent sala.
+    /// No new table, no migration: the slug column is opaque TEXT and the UNIQUE
+    /// key (universe_key, workspace_slug, user_id) keeps each depth independent.
+    #[test]
+    fn test_folder_subsala_slug_is_distinct_row() {
+        let conn = setup_db();
+        insert_state(&conn, "id-parent", "template", "default", "user-1", 0, None);
+        insert_state(
+            &conn,
+            "id-child",
+            "template",
+            "default/jardim",
+            "user-1",
+            0,
+            None,
+        );
+        insert_state(
+            &conn,
+            "id-grand",
+            "template",
+            "default/jardim/estufa",
+            "user-1",
+            0,
+            None,
+        );
+
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM workspace_states \
+                 WHERE universe_key = 'template' AND user_id = 'user-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            count, 3,
+            "parent + folder-sub-sala + nested are separate rows"
+        );
+
+        let child_slug: String = conn
+            .query_row(
+                "SELECT workspace_slug FROM workspace_states WHERE id = 'id-child'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(child_slug, "default/jardim", "folder path rides the slug");
+    }
+
     #[test]
     fn test_empty_layout_json_is_valid_json() {
         let s = empty_layout_json();
