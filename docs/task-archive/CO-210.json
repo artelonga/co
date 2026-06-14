@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-210",
+  "title": "Seguranca + Dependencias + Licensa SPA routes — markdown renderer with telemetry + 404 tracing",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-210.md",
+  "branch": "feat/CO-210-seguranca-dependencias-licensa-spa-route",
+  "merge_sha": "0fa570d10502d2d954404c5e9a20cf1e930dba91",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/249",
+    "number": 249
+  },
+  "started_at": "2026-05-13T00:00:00Z",
+  "merged_at": "2026-06-14T02:45:06Z",
+  "files_changed": 10,
+  "lines_added": 1555,
+  "lines_removed": 1,
+  "labels": [
+    "type:feat",
+    "module:platform",
+    "module:ux",
+    "co-auto"
+  ],
+  "changelog_entry": "## CO-210 — Segurança + Dependências + Licença SPA routes — markdown renderer with telemetry + 404 tracing\n\nBrowsable documentation pages backed by the markdown already in `docs/`:\n`/seguranca` (overview), `/seguranca/dependencias` (+ `/decisoes`),\n`/seguranca/red-team` (+ `/playbook`), `/seguranca/vapid`, `/licensa`,\n`/renderers`, and `/e2e-walkthrough`. `/dependencias` redirects to\n`/seguranca/dependencias`. Shared navigation renders as a collapsible left rail\non desktop and a dropdown on mobile.\n\n### What changed\n\n- **New module `co-web/src/platform/docs_routes.rs`** — a tiny CommonMark +\n  GFM-table markdown→HTML renderer (headings, lists, fenced code, tables,\n  blockquotes, inline bold/italic/code, links). Every span of document text is\n  HTML-escaped before tags are emitted, so no raw HTML — and in particular no\n  inline `<script>` — survives into the page (CSP-safe).\n- **Cross-links** between docs (`[ver vapid](vapid-security.md)`) are rewritten\n  to their canonical route (`/seguranca/vapid`) at render time; external URLs and\n  in-page anchors are left untouched.\n- **Telemetry**: each render emits a server-side `page_view` event (with\n  `duration_ms`); unmatched `/seguranca/...` paths return a 404 page and emit a\n  `404_route` event with the attempted path. The client (`docs-viewer.js`) sends\n  `page_render` with the real load duration so slow pages (>500ms) are detectable\n  via the `duration_ms` field.\n- **Privacy / opt-out**: `localStorage[\"co_viewer_telemetry\"] = \"0\"` (toggled by a\n  footer checkbox) is the source of truth; `docs-viewer.js` mirrors it to a\n  `co_viewer_telemetry=0` cookie so the server suppresses its own emission too.\n- Routes are merged before the `/{slug}` catch-all so these literal paths win\n  over universe-slug resolution.\n- New static assets: `co-web/static/shared/docs-viewer.js` (nav + telemetry,\n  the page's only script) and `docs-viewer.css` (responsive rail/dropdown).\n- Documented in `docs/architecture/api-catalog.md`.\n\n### Why\n\nSecurity, dependency, and license docs need to be findable and indexable for\ntrust, served from a single source (`docs/`) rather than duplicated. Embedded\ntelemetry + 404 tracing lets us see which pages 404, which links break, and which\npages load slowly — and iterate — without users having to raise a flag.",
+  "summary": "a visitor curious about CO's security model, dependencies, license, or how to render universe content",
+  "co_auto_version": "0.1.0"
+}
