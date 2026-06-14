@@ -274,6 +274,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // CO-397: robots.txt + sitemap.xml (must be before the /{slug} catch-all).
     let crawl_routes = crate::server::crawl_routes::router();
 
+    // CO-210: seguranca/dependencias/licensa docs SPA — literal page routes that
+    // must be merged before co_routes so they win over the /{slug} catch-all.
+    let docs_routes = crate::docs_routes::router();
+
     // All literal routes are registered before `/{slug}` so axum's matcher
     // prefers them over the param capture.
     let co_routes = Router::new()
@@ -395,6 +399,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-397: robots.txt + sitemap.xml (merged before co_routes so
             // literal paths win over the /{slug} catch-all in co_routes).
             .merge(crawl_routes)
+            // CO-210: doc pages before co_routes (literal paths beat /{slug}).
+            .merge(docs_routes)
             .merge(co_routes)
             .nest("/api", openapi_api)
             .nest("/api", board_public)

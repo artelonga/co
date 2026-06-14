@@ -127,6 +127,7 @@ pub use platform::config;
 pub use platform::deployment_snapshot_worker;
 pub use platform::desktop_notify;
 pub use platform::doc_gen;
+pub use platform::docs_routes;
 pub use platform::embedding;
 pub use platform::embedding_index;
 pub use platform::embedding_worker;

@@ -782,6 +782,30 @@ CO-381: real-time deployed-interface visualization. SPA shell connecting to the 
 
 ---
 
+## docs pages — seguranca / dependencias / licensa (docs_routes.rs)
+
+CO-210: server-rendered docs viewer over the markdown in `docs/`. Literal page
+routes merged before the `/{slug}` catch-all; shared collapsible/dropdown nav;
+markdown → CSP-safe HTML; per-render telemetry (`page_view` / `404_route`
+server-side, `page_render` from `docs-viewer.js`) with reader opt-out via
+`localStorage["co_viewer_telemetry"]`.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | /seguranca | anon | Security overview (docs/security/SECURITY.md) |
+| GET | /seguranca/dependencias | anon | Dependencies (docs/security/dependencies.md) |
+| GET | /seguranca/dependencias/decisoes | anon | Dependency decisions |
+| GET | /seguranca/red-team | anon | Red-team scenarios |
+| GET | /seguranca/red-team/playbook | anon | Incident playbook |
+| GET | /seguranca/vapid | anon | VAPID push security |
+| GET | /licensa | anon | License (AGPL v3) |
+| GET | /renderers | anon | Markdown renderers guide |
+| GET | /e2e-walkthrough | anon | E2E walkthrough |
+| GET | /dependencias | anon | Redirect → /seguranca/dependencias |
+| GET | /seguranca/{*rest} | anon | 404 page + `404_route` telemetry |
+
+---
+
 ## kb — `/api/v1/kb/*` (kb_routes.rs)
 
 CO-367: universal content → KB sync warehouse (history + latest + FTS).
