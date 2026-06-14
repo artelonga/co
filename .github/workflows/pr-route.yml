@@ -269,6 +269,12 @@ jobs:
               co-web/src/security/audit/*) continue ;;
               co-web/src/storage/*) continue ;;
               co-web/src/repository/*) continue ;;
+              # Vendored third-party bundles (minified, not our code): Swagger UI
+              # (CO-452), mermaid, etc. They legitimately use innerHTML internally
+              # — scanning them only false-positives.
+              co-web/static/shared/swagger/*) continue ;;
+              co-web/static/shared/vendor/*) continue ;;
+              co-web/static/pdfjs/*) continue ;;
             esac
             if [ -f "$file" ]; then
               # Scan ONLY the lines this PR ADDED (diff '+' lines), not the whole
