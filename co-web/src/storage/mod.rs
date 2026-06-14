@@ -199,6 +199,7 @@ impl Storage {
 pub mod agent_sessions;
 pub(crate) mod api_tokens;
 pub(crate) mod auth;
+pub mod backend;
 pub mod backup;
 pub(crate) mod changelog;
 pub(crate) mod chat;
