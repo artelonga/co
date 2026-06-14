@@ -55,6 +55,10 @@ pub struct Task {
     /// present-but-invalid value is dropped to `None` at parse time (with a
     /// warning) so routing falls through to the policy.
     pub model: Option<String>,
+    /// CO-451: optional `skills:` frontmatter array (explicit skill inclusion).
+    /// Names map to `{workspace}/skills/{name}.md`; merged (deduped) with the
+    /// skills derived from the task's labels. Missing files degrade gracefully.
+    pub skills: Vec<String>,
     pub body: String,
     pub file_path: PathBuf,
 }
@@ -700,6 +704,17 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
         .and_then(|v| v.as_str())
         .map(String::from);
     let model = parse_task_model(map, path);
+    let skills = map
+        .get(serde_yaml::Value::String("skills".into()))
+        .and_then(|v| v.as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
 
     Some(Task {
         id,
@@ -711,6 +726,7 @@ fn parse_task(content: &str, path: &Path, project_key: &str) -> Option<Task> {
         labels,
         module,
         model,
+        skills,
         body,
         file_path: path.to_path_buf(),
     })
@@ -822,26 +838,75 @@ fn select_and_lock_next_task(
 
 // ==================== CONTEXT BUILDER ====================
 
-/// Returns skill text blocks relevant to the task based on its labels.
-/// Each skill is a markdown file from `{workspace_root}/skills/`.
-fn skills_for_task(task: &Task, workspace_root: &Path) -> Vec<String> {
-    let skills_dir = workspace_root.join("skills");
-    let mut names: Vec<&str> = vec![];
+/// The core process skill injected into **every** task's context when present
+/// in the workspace. Carries the canonical co-auto loop, the three gates, and
+/// the model fallback so every agent inherits the same process (CO-451).
+const CORE_PROCESS_SKILL: &str = "co-auto-process";
 
+/// Resolve the ordered, deduplicated list of skill *names* for a task (CO-451).
+///
+/// Order of inclusion (deduped, first occurrence wins so it stays stable):
+///
+/// (1) the core process skill (`co-auto-process`) — always, for every task;
+/// then (2) skills derived from the task's labels — module labels map to a
+/// subsystem skill (`module:spa|editor|ui` to `spa-conventions`,
+/// `module:deploy|infra` to `deploy-runbook`, any other `module:*` to
+/// `rust-architecture`), and role labels map to a playbook skill
+/// (`type:orchestrate` to `orchestrate`, `type:implement|feat|fix` to
+/// `implement`, `type:review` to `review`, `type:test` to `test` plus
+/// `playwright-pattern`, `type:release|deploy` to `release`); then
+/// (3) explicit `skills:` frontmatter entries (override/extra).
+///
+/// This is name resolution only — it does not touch the filesystem, so callers
+/// decide how to handle a missing `{name}.md` (load text vs. report loaded).
+fn skill_names_for_task(task: &Task) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let push = |name: &str, names: &mut Vec<String>| {
+        if !names.iter().any(|n| n == name) {
+            names.push(name.to_string());
+        }
+    };
+
+    // 1. Core process skill, always first.
+    push(CORE_PROCESS_SKILL, &mut names);
+
+    // 2. Label-derived skills.
     for label in &task.labels {
         match label.as_str() {
-            "module:spa" | "module:editor" | "module:ui" => names.push("spa-conventions"),
-            "module:deploy" | "module:infra" => names.push("deploy-runbook"),
-            "type:test" => names.push("playwright-pattern"),
-            l if l.starts_with("module:") => names.push("rust-architecture"),
+            // module → subsystem
+            "module:spa" | "module:editor" | "module:ui" => push("spa-conventions", &mut names),
+            "module:deploy" | "module:infra" => push("deploy-runbook", &mut names),
+            // role → playbook
+            "type:orchestrate" => push("orchestrate", &mut names),
+            "type:implement" | "type:feat" | "type:fix" => push("implement", &mut names),
+            "type:review" => push("review", &mut names),
+            "type:test" => {
+                push("playwright-pattern", &mut names);
+                push("test", &mut names);
+            }
+            "type:release" | "type:deploy" => push("release", &mut names),
+            // any remaining module label → generic Rust architecture
+            l if l.starts_with("module:") => push("rust-architecture", &mut names),
             _ => {}
         }
     }
 
-    names.sort_unstable();
-    names.dedup();
+    // 3. Explicit frontmatter skills (override/extra), deduped with the above.
+    for skill in &task.skills {
+        push(skill, &mut names);
+    }
 
     names
+}
+
+/// Returns skill text blocks relevant to the task (core process, label-derived,
+/// and explicit `skills:` entries). Each skill is a markdown file from
+/// `{workspace_root}/skills/`; a name with no file on disk degrades gracefully
+/// (silently skipped).
+fn skills_for_task(task: &Task, workspace_root: &Path) -> Vec<String> {
+    let skills_dir = workspace_root.join("skills");
+
+    skill_names_for_task(task)
         .into_iter()
         .filter_map(|name| {
             let path = skills_dir.join(format!("{name}.md"));
@@ -1941,32 +2006,19 @@ fn parse_pr_url(stdout: &str) -> Option<String> {
     None
 }
 
-/// Get the skill names loaded for a given task (mirrors skills_for_task).
+/// Get the skill names actually loaded for a given task (mirrors
+/// `skills_for_task`: same name resolution, filtered to files that exist on
+/// disk so the session record reflects what was really injected).
 fn skills_for_session(task: &Task, workspace_root: &Path) -> serde_json::Value {
-    let names: Vec<String> = {
-        let mut v: Vec<&str> = vec![];
-        for label in &task.labels {
-            match label.as_str() {
-                "module:spa" | "module:editor" | "module:ui" => v.push("spa-conventions"),
-                "module:deploy" | "module:infra" => v.push("deploy-runbook"),
-                "type:test" => v.push("playwright-pattern"),
-                l if l.starts_with("module:") => v.push("rust-architecture"),
-                _ => {}
-            }
-        }
-        v.sort_unstable();
-        v.dedup();
-        // Only include skills that actually exist on disk
-        v.into_iter()
-            .filter(|name| {
-                workspace_root
-                    .join("skills")
-                    .join(format!("{name}.md"))
-                    .exists()
-            })
-            .map(String::from)
-            .collect()
-    };
+    let names: Vec<String> = skill_names_for_task(task)
+        .into_iter()
+        .filter(|name| {
+            workspace_root
+                .join("skills")
+                .join(format!("{name}.md"))
+                .exists()
+        })
+        .collect();
     serde_json::to_value(names).unwrap_or(serde_json::Value::Array(vec![]))
 }
 
@@ -2486,6 +2538,7 @@ mod tests {
             labels: vec![],
             module: None,
             model: None,
+            skills: vec![],
             body: String::new(),
             file_path: PathBuf::from("/tmp/nonexistent"),
         }
@@ -2678,6 +2731,147 @@ mod tests {
             let task = parse_task(&content, &path, "CO").unwrap();
             assert_eq!(task.model, None, "input: {bad}");
         }
+    }
+
+    // -------------------- CO-451: skill injection --------------------
+
+    #[test]
+    fn parse_task_reads_skills_frontmatter() {
+        let content = "---\nid: 1\ntitle: T\nstatus: todo\npriority: medium\nskills:\n  - implement\n  - custom-thing\n  - \"\"\n---\n\nbody\n";
+        let path = PathBuf::from("/tmp/CO-1.md");
+        let task = parse_task(content, &path, "CO").unwrap();
+        // empty/whitespace entries are dropped; valid ones trimmed
+        assert_eq!(task.skills, vec!["implement", "custom-thing"]);
+    }
+
+    #[test]
+    fn parse_task_absent_skills_is_empty() {
+        let content = "---\nid: 1\ntitle: T\nstatus: todo\npriority: medium\n---\n\nbody\n";
+        let path = PathBuf::from("/tmp/CO-1.md");
+        let task = parse_task(content, &path, "CO").unwrap();
+        assert!(task.skills.is_empty());
+    }
+
+    #[test]
+    fn skill_names_always_inject_core_process() {
+        // Even a task with no labels and no explicit skills gets the core skill.
+        let task = mk_task(1, "CO-1", "x");
+        let names = skill_names_for_task(&task);
+        assert_eq!(names.first().map(String::as_str), Some(CORE_PROCESS_SKILL));
+    }
+
+    #[test]
+    fn skill_names_map_role_labels() {
+        let cases = [
+            ("type:orchestrate", "orchestrate"),
+            ("type:implement", "implement"),
+            ("type:feat", "implement"),
+            ("type:fix", "implement"),
+            ("type:review", "review"),
+            ("type:release", "release"),
+            ("type:deploy", "release"),
+        ];
+        for (label, skill) in cases {
+            let mut task = mk_task(1, "CO-1", "x");
+            task.labels = vec![label.into()];
+            let names = skill_names_for_task(&task);
+            assert!(
+                names.contains(&CORE_PROCESS_SKILL.to_string()),
+                "core missing for {label}"
+            );
+            assert!(
+                names.contains(&skill.to_string()),
+                "label {label} should map to skill {skill}, got {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn skill_names_test_label_adds_both_playwright_and_test() {
+        let mut task = mk_task(1, "CO-1", "x");
+        task.labels = vec!["type:test".into()];
+        let names = skill_names_for_task(&task);
+        assert!(names.contains(&"playwright-pattern".to_string()));
+        assert!(names.contains(&"test".to_string()));
+    }
+
+    #[test]
+    fn skill_names_merge_explicit_skills_deduped() {
+        let mut task = mk_task(1, "CO-1", "x");
+        task.labels = vec!["type:implement".into()];
+        // "implement" is also label-derived → must not be duplicated;
+        // "extra-skill" is added once.
+        task.skills = vec!["implement".into(), "extra-skill".into()];
+        let names = skill_names_for_task(&task);
+        assert_eq!(names.iter().filter(|n| *n == "implement").count(), 1);
+        assert!(names.contains(&"extra-skill".to_string()));
+        // No duplicates anywhere.
+        let mut sorted = names.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(sorted.len(), names.len(), "names had duplicates: {names:?}");
+    }
+
+    #[test]
+    fn skills_for_task_loads_present_and_skips_missing() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("co-auto-skills-{ts}"));
+        let skills_dir = root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        // Core present, role skill present, but "rust-architecture" absent.
+        fs::write(
+            skills_dir.join(format!("{CORE_PROCESS_SKILL}.md")),
+            "core loop + 3 gates + model fallback",
+        )
+        .unwrap();
+        fs::write(skills_dir.join("implement.md"), "implement role playbook").unwrap();
+
+        let mut task = mk_task(1, "CO-1", "x");
+        task.labels = vec!["type:implement".into(), "module:co-auto".into()];
+
+        let blocks = skills_for_task(&task, &root);
+        let _ = fs::remove_dir_all(&root);
+
+        // Core process always first when present.
+        assert!(blocks[0].starts_with(&format!("## Skill: {CORE_PROCESS_SKILL}")));
+        assert!(blocks[0].contains("core loop + 3 gates"));
+        // Role skill present.
+        assert!(blocks.iter().any(|b| b.contains("implement role playbook")));
+        // Missing rust-architecture file is silently skipped — no block for it.
+        assert!(!blocks.iter().any(|b| b.contains("rust-architecture")));
+    }
+
+    #[test]
+    fn skills_for_task_graceful_when_no_skills_dir() {
+        let root = std::env::temp_dir().join("co-auto-skills-nonexistent-xyz");
+        let _ = fs::remove_dir_all(&root);
+        let task = mk_task(1, "CO-1", "x");
+        // No skills dir at all → empty, no panic.
+        assert!(skills_for_task(&task, &root).is_empty());
+    }
+
+    #[test]
+    fn skills_for_session_reflects_only_existing_files() {
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("co-auto-session-{ts}"));
+        let skills_dir = root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        fs::write(skills_dir.join(format!("{CORE_PROCESS_SKILL}.md")), "x").unwrap();
+
+        let task = mk_task(1, "CO-1", "x"); // no labels
+        let value = skills_for_session(&task, &root);
+        let _ = fs::remove_dir_all(&root);
+
+        let arr = value.as_array().unwrap();
+        // Only the core skill exists on disk → it is the sole entry.
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0].as_str(), Some(CORE_PROCESS_SKILL));
     }
 
     // -------------------- CO-425: usage capture --------------------
