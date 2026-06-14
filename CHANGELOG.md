@@ -5,6 +5,151 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.14.0] — 2026-06-14 — Storage-as-a-Service foundation [--ignore-dod override]
+
+## CO-458 — Storage backend abstraction — pluggable StorageBackend trait + LocalFsBackend (StaaS keystone; S3/partner plug in later)
+
+Added a pluggable `StorageBackend` trait (`co-web/src/storage/backend/`) as the
+single abstraction point for content-addressed blob storage — the keystone for
+serving **storage as a service** (StaaS) to partners.
+
+- **`trait StorageBackend`** (`Send + Sync`, async via `async_trait`):
+  `put` / `get` / `head` / `delete` / `exists` / `list`, errors via `AppError`.
+- **`LocalFsBackend`** — content-addressed (sha256), 2-level sharded under
+  `<data_dir>/blobs/<aa>/<bb>/<hash>`, with refcounted **dedupe**: re-`put`ting
+  identical bytes bumps the refcount instead of rewriting, and `delete` only
+  unlinks the file when the last reference drops.
+- **`from_config()`** selects the backend from `CO_STORAGE_BACKEND`
+  (default `local`); `s3` is reserved for CO-81 and currently returns a clear
+  "not implemented yet" error.
+- **Migration v086** adds the `blob_refs` ledger table
+  (`hash` PK, `backend`, `size`, `content_type`, `refcount`, `created_at`) for
+  dedupe, traceability, and future StaaS billing.
+- **Integration proof**: the backup worker now registers each snapshot's
+  manifest in the central blob ledger via the backend (write + read-back),
+  making backups a real `StorageBackend` consumer (CO-405).
+
+### Why
+To serve storage as a service we need one place where S3 (CO-81), partner
+backends, and StaaS billing plug in without touching call-sites. This ships that
+seam now, 100% local with no new infrastructure; S3 and partner tenants become
+alternate implementations of the same trait.
+
+## CO-459 — Local backup + junk sweep + retention optimization — reconstructable snapshot, remove unnecessary, scale-ready
+
+Local-first backup and `/data` reclamation that stays reconstructable and is
+ready to scale to StaaS.
+
+- **Reconstructable local snapshot** — `POST /api/v1/admin/backup` (admin-gated)
+  writes `/data/backups/<ts>/` with `meta.db` and every per-universe `data.db`
+  copied via SQLite `VACUUM INTO` (committed/consistent, not a hot WAL copy) plus
+  byte-copied blobs, and a `manifest.json` carrying a **sha256 + byte count per
+  file**. The endpoint re-hashes the directory against the manifest and returns
+  `verified: true|false` — proof the snapshot can be reconstructed.
+- **Junk sweep** — `POST /api/v1/admin/sweep`, **dry-run by default**
+  (`?apply=true` to delete). Identifies expired anonymous clones, stale
+  temp/lock files, rotated logs, orphan blobs (`assets.refcount <= 0`), and
+  snapshots beyond retention. Reports `reclaimable_bytes` before touching
+  anything; on apply, every removal re-checks its owner/refcount/retention guard
+  and is logged (no silent deletes). Nothing is deleted without a reference
+  check.
+- **Retention (count + space)** — directory snapshots are pruned by the same
+  CO-405 `select_prunable` policy (newest always kept; count / cumulative-size /
+  age caps), reused via `snapshot_dir::prunable_local_snapshots`. Parametrized
+  by the existing `CO_BACKUP_RETAIN_*` env knobs plus `CO_SWEEP_*`. The math and
+  the S3/StaaS handoff point are documented in
+  `docs/architecture/backup-retention.md`.
+
+New routes added to `docs/architecture/api-catalog.md`; `openapi.yaml`
+regenerated (no drift). No schema migration — reuses existing tables
+(`universes`, `assets`, `entries`, `universe_members`).
+
+### Why
+
+`/data` was inching toward full again (the 2026-06-11/06-13 outages), and the
+existing CO-365 tarball backup is a hot copy with a single whole-archive hash —
+not per-file verifiable. This adds a consistent, verifiable, reconstructable
+snapshot and a guarded sweep to reclaim space, with the retention logic shaped
+so the same code carries over to S3/StaaS (CO-458/CO-460) — "local backup for
+now."
+
+## CO-460 — StaaS partner model — design doc for multi-tenant storage-as-a-service (namespaces, quota, metering, partner backends)
+
+Added `docs/architecture/staas-partners.md` — the written contract for selling
+storage as a service to partners. Design only: no code, no migration, no new route.
+
+It covers the eight required points, each tied to real artifacts in the tree:
+multi-tenant namespaces (key-prefix isolation, mapping to `blob_refs`/CO-458 via a
+`namespaces` + `blob_namespace` join), partner API shape over the CO-456 envelope
+(`PUT/GET/HEAD/DELETE/LIST` + pagination + size limits), least-privilege auth with
+new `storage:read`/`storage:write` capabilities and namespace binding (CO-448
+`Scoped<C>`), metering as Σ(`blob_refs.size`×Δt)+ops sourced from CO-453 telemetry
+with a `staas.usage.window_closed` billing hook, quota/rate-limit via CO-80
+`TierLimits`/`RateLimiter`, bring-your-own partner S3 backends behind the CO-458
+`StorageBackend` trait (trust boundary spelled out), per-namespace durability via
+CO-459/CO-81 backup, and a CO-461..CO-467 implementation roadmap with dependencies
+and per-task migrations. Includes a mermaid flow diagram (partner → token →
+namespace → backend → metering) and links the doc from the existing
+`docs/architecture/COMPOSABILITY.md` seam index.
+
+### Why
+The owner decided to "scale to partners later — serve storage as a service." This
+is the architecture slice so the implementation tasks have a written contract
+(partners, namespaces, auth, metering, billing) to follow instead of inventing it
+ad-hoc, and so the architecture can be approved before spending Opus on impl.
+
+## CO-79 — Caching layer — manifest, theme.css, hot queries + CDN strategy
+
+Completed the caching layer by wiring the L1 query-result cache into the hot
+read path. The `POST /api/v1/universes/{slug}/query` handler now consults the
+in-process query cache before touching the universe `data.db`:
+
+- Cache key = `query_cache_key(SQL + limit, universe_key, manifest_hash)` —
+  SHA-256 scoped per universe, busted automatically when the manifest content
+  hash changes or when a write invalidates the universe prefix.
+- On a hit the serialized `QueryResponse` is returned without preparing or
+  executing any SQL; on a miss the result is serialized and inserted.
+- Access is verified before the cache lookup, so a hit never leaks data to an
+  unauthorized caller, and the slug component prevents cross-universe reuse.
+
+This closes the last open deliverable of CO-79. The surrounding layers were
+already in place: the 10K-entry in-process LRU caches (manifest / theme.css /
+query), manifest-cache invalidation on universe writes, the `theme.css`
+endpoint with a 60s `Cache-Control` + ETag (never `immutable`), the in-process
+pub/sub invalidation broadcast, and the `GET /api/v1/cache/stats` metrics
+endpoint (hit/miss/eviction per layer).
+
+### Why
+
+Read-heavy workloads repeatedly ran identical SELECTs against per-universe
+`data.db` files. Routing those reads through the existing query cache lets hot
+reads serve from memory instead of re-executing SQL, reducing DB load while
+keeping results fresh via manifest-hash keying and universe-prefix invalidation.
+
+## CO-80 — Per-tier rate limiting + quota — token bucket per user/tier/operation
+
+Durably audit-log admin quota overrides. When an admin bypasses a storage or
+universe-count quota check via the `X-Admin-Override-Quota` header, the bypass is
+now persisted as an `atividade` audit entry (`entidade = "quota_override"`,
+`entidade_id = "storage" | "universe"`, with the acting `user_id`, client IP, and
+user-agent) instead of only emitting a transient `tracing::warn!`. This closes the
+"(audit logged)" half of the admin-override acceptance criterion so override abuse
+can be reviewed after the fact.
+
+`check_storage_quota` / `check_universe_quota` now take `&AppState` to enqueue the
+deferred audit write via `log_atividade` (best-effort, off the request path).
+
+The rest of CO-80 — in-process token-bucket rate limiting, tier extraction from
+JWT/API-token in middleware, per-`(identity, op)` buckets, `429` with `Retry-After`,
+`402` with quota usage details, and quota enforcement on entry write + universe
+create — was already in place.
+
+### Why
+The admin override is the only quota escape hatch; without a durable record there
+was no way to audit who bypassed a quota or when, which the acceptance criterion
+explicitly requires.
+
+
 ## [3.13.0] — 2026-06-14 — Fractal Sala + API envelope [--ignore-dod override]
 
 ## CO-399 — Sala scope expansion — all-universes /sala + subset /sala?u=a,b (fractal scope phase 2)
