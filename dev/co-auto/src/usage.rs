@@ -133,6 +133,14 @@ fn human_tokens(n: i64) -> String {
 /// the worst case is a zero-valued [`SessionUsage`].
 pub fn parse_stream_json(ndjson: &str) -> SessionUsage {
     let mut usage = SessionUsage::default();
+    // Authoritative cumulative token totals from the final `result` event, when
+    // it carries a `usage` block. Claude Code repeats per-message `usage` across
+    // multiple content blocks (thinking/text/tool_use), so summing them
+    // overcounts tokens 3-8x — a real problem once headless `-p` runs meter
+    // against the Agent-SDK credit pool (June 2026). When the result event
+    // reports the cumulative usage, it overrides the per-message sum below; the
+    // sum stays as a fallback for older `claude` builds whose result lacks usage.
+    let mut result_tokens: Option<[i64; 4]> = None;
 
     for line in ndjson.lines() {
         let line = line.trim();
@@ -144,13 +152,17 @@ pub fn parse_stream_json(ndjson: &str) -> SessionUsage {
             Err(_) => continue, // not JSON (or a partial line) — skip, never fail
         };
 
+        let is_result = value.get("type").and_then(|v| v.as_str()) == Some("result");
+
         // Per-message usage: assistant events carry `message.usage`.
         // Some event shapes nest under `message`, others put `usage` at top
-        // level — accept either.
-        if let Some(u) = value
-            .get("message")
-            .and_then(|m| m.get("usage"))
-            .or_else(|| value.get("usage"))
+        // level — accept either. Skip the `result` event here: its usage is the
+        // authoritative cumulative total, captured separately below, not another
+        // per-message increment to sum.
+        if let Some(u) = (!is_result)
+            .then_some(())
+            .and(value.get("message").and_then(|m| m.get("usage")))
+            .or_else(|| (!is_result).then(|| value.get("usage")).flatten())
         {
             usage.input_tokens += u.get("input_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
             usage.output_tokens += u.get("output_tokens").and_then(|v| v.as_i64()).unwrap_or(0);
@@ -204,7 +216,7 @@ pub fn parse_stream_json(ndjson: &str) -> SessionUsage {
         }
 
         // Final `result` event — totals.
-        if value.get("type").and_then(|v| v.as_str()) == Some("result") {
+        if is_result {
             if let Some(n) = value.get("num_turns").and_then(|v| v.as_i64()) {
                 usage.num_turns = Some(n);
             }
@@ -214,7 +226,31 @@ pub fn parse_stream_json(ndjson: &str) -> SessionUsage {
             if let Some(c) = value.get("total_cost_usd").and_then(|v| v.as_f64()) {
                 usage.total_cost_usd = Some(c);
             }
+            // Authoritative cumulative usage, if present (`message.usage` or
+            // top-level `usage`). Overrides the per-message sum after the loop.
+            if let Some(u) = value
+                .get("usage")
+                .or_else(|| value.get("message").and_then(|m| m.get("usage")))
+            {
+                let f = |k: &str| u.get(k).and_then(|v| v.as_i64()).unwrap_or(0);
+                result_tokens = Some([
+                    f("input_tokens"),
+                    f("output_tokens"),
+                    f("cache_creation_input_tokens"),
+                    f("cache_read_input_tokens"),
+                ]);
+            }
         }
+    }
+
+    // The result event's cumulative usage is authoritative — prefer it over the
+    // per-message sum (which Claude Code overcounts). Fallback: keep the sum when
+    // the result carried no usage block (older builds).
+    if let Some([i, o, cc, cr]) = result_tokens {
+        usage.input_tokens = i;
+        usage.output_tokens = o;
+        usage.cache_creation_input_tokens = cc;
+        usage.cache_read_input_tokens = cr;
     }
 
     usage
@@ -266,6 +302,35 @@ mod tests {
         assert_eq!(u.num_turns, Some(4));
         assert_eq!(u.duration_ms, Some(372000));
         assert_eq!(u.total_cost_usd, Some(0.0421));
+    }
+
+    /// June-2026 overcount guard: Claude Code repeats per-message `usage` across
+    /// content blocks, so summing inflates tokens. When the `result` event reports
+    /// the cumulative total, it MUST win over the (bloated) per-message sum.
+    #[test]
+    fn result_usage_overrides_inflated_per_message_sum() {
+        // Three assistant messages, each reporting 1000/200 (overcounted by the
+        // multi-block bug) → naive sum = 3000/600. The result's authoritative
+        // cumulative usage is 1200/250 — that's what must be reported.
+        let stream = r#"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000}}}
+{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000}}}
+{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":1000,"output_tokens":200,"cache_read_input_tokens":5000}}}
+{"type":"result","subtype":"success","num_turns":3,"total_cost_usd":0.5,"usage":{"input_tokens":1200,"output_tokens":250,"cache_creation_input_tokens":400,"cache_read_input_tokens":5000}}"#;
+        let u = parse_stream_json(stream);
+        assert_eq!(u.input_tokens, 1200, "authoritative result, not 3000 sum");
+        assert_eq!(u.output_tokens, 250, "authoritative result, not 600 sum");
+        assert_eq!(u.cache_creation_input_tokens, 400);
+        assert_eq!(u.cache_read_input_tokens, 5000, "not 15000 sum");
+        assert_eq!(u.total_cost_usd, Some(0.5));
+    }
+
+    /// Backward-compat: when the result event has NO usage block (older claude),
+    /// fall back to the per-message sum (the original behaviour).
+    #[test]
+    fn falls_back_to_sum_when_result_lacks_usage() {
+        let u = parse_stream_json(FIXTURE); // FIXTURE's result has no `usage`
+        assert_eq!(u.input_tokens, 1500); // summed fallback preserved
+        assert_eq!(u.output_tokens, 460);
     }
 
     #[test]
