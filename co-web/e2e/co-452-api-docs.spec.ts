@@ -30,7 +30,9 @@ test.describe("CO-452 — API docs", () => {
 
     // The vendored bundle (same-origin) boots Swagger UI, which fetches
     // /api/openapi.json and renders one <div> per documented operation.
-    await expect(page.locator(".swagger-ui")).toBeVisible();
+    // swagger-ui-dist nests a `.swagger-ui` wrapper inside the mount node, so
+    // the class matches >1 element — scope to the first to avoid strict-mode.
+    await expect(page.locator(".swagger-ui").first()).toBeVisible();
     await expect(page.locator(".opblock").first()).toBeVisible({
       timeout: 15000,
     });
