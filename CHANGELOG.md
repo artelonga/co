@@ -5,6 +5,189 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.10.0] — 2026-06-13 — Resilience hardening + chat/timeline polish
+
+## CO-204 — Chat message origin telemetry — track which universe context each message was sent from
+
+Every `chat_messages` row is now stamped with an optional `origin_universe_key`
+— the universe context the sender was browsing when they hit Send. This is
+distinct from `chat_rooms.universe_key` (where the *room* lives): for DM rooms,
+which have no universe of their own, the origin is the only "where did this come
+from" breadcrumb.
+
+- **Migration v80** adds the nullable `origin_universe_key` column to
+  `chat_messages` plus an index (`idx_chat_messages_origin`). Existing rows stay
+  `NULL` (no backfill — the at-the-time context can't be reconstructed).
+- **POST `…/chat/rooms/{room_slug}/messages`** gains an optional
+  `origin_universe_key` field. It is validated against the caller's
+  membership/subscription and **silently dropped** (persisted `NULL`) if they
+  don't belong to the claimed universe — privacy-respecting, so "I'm in private
+  universe X" isn't leakable just by sending. Omitted ⇒ defaults to the room's
+  universe for universe rooms, `NULL` for DM rooms.
+- **GET messages** returns `origin_universe_key` on each row.
+- **DM UI** (`modules/chat.js`) renders a small italic "via {universe}" subtext
+  when a message's origin differs from the universe the viewer is currently in;
+  suppressed for universe-room messages where origin == the room's universe.
+- **Admin telemetry**: `GET /api/v1/admin/chat/origin-breakdown` (admin-gated)
+  returns per-origin message counts + total, backing a future admin chart.
+
+### Why
+
+Lets operators answer "which universes drive the most chat" and "are people
+DMing across universe boundaries", and gives a DM recipient context for where a
+message originated — without cross-linking to any private content.
+
+## CO-396 — Project timeline lens — roadmap/gantt de um universo-projeto sobre o `<co-time-grid>`, com engine de layout compartilhada com o Yggdrasil (YG-123)
+
+A **project-timeline** (roadmap/gantt) lens: the same entries that fill a
+project's kanban board, rendered on a time axis — tasks in lanes by
+`epic`/`module`/`status`, releases and milestones as markers, and a "no date"
+backlog so a task without a date never disappears. Quadro and timeline are now
+two *forms* of the same canonical entries — no new data structure.
+
+### Shared layout engine (the central constraint)
+
+The timeline lens/layout math now lives **once**, in the path-dep crate both
+hosts consume:
+
+- New `game_core::time_layout` module. CO-387's per-lens conversion math
+  (`LensDef`, `LensPosition`, `entry_to_lens_position`, …) was **hoisted** out
+  of `co-web/src/time/conversion.rs` into it; co-web re-exports the same paths
+  so nothing else changed. On top, CO-396 adds the project-timeline layout:
+  `layout_project_timeline(entries, group_by)` → lanes + markers + backlog, and
+  `gantt_span` (duration precedence: `scheduled→due`, else `created→done`, else
+  a point).
+- `yggdrasil-core` already path-deps `game-core`, so YG-123's
+  `generators/timeline.rs` consumes the **same** engine instead of a parallel
+  implementation (the yggdrasil-side wiring lands with YG-123 in that repo).
+- `static/shared/lib/co-time.js` mirrors the engine for the client
+  (`<co-time-grid>`) — one shared lib, not a divergent fork.
+
+### co-web
+
+- `GET /api/v1/universes/{slug}/timeline?group_by=epic|module|status` — builds
+  the project timeline from the universe's entries through the shared engine
+  (inherits the content visibility gate). New `time::project_timeline` mapper
+  turns an `EntryRow` into the engine's neutral `TimelineEntry`.
+- `_calendar.yaml` lenses gain `lane_by: epic|module|status` to declare
+  themselves project-timeline lenses.
+- `<co-time-grid>` gains a `roadmap` view mode (lanes + marker rail + backlog)
+  and its `gantt` mode now uses the engine's duration semantics. New
+  `project-timeline` SPA lens registers into the CO-393 lens frame, appearing as
+  a header tab next to Kanban — the toggle quadro ⇄ timeline.
+
+### Tests
+
+- `game-core`: project-timeline + conversion engine tests (independent of
+  co-web).
+- `co-web`: entry→timeline mapper tests, `_calendar.yaml` `lane_by` parsing, and
+  a route wiring/visibility-gate test.
+- `co-web` vitest: `layoutProjectTimeline`/`ganttSpan` JS-mirror tests
+  paralleling the Rust suite so the two cannot silently diverge.
+
+### Why
+
+Roadmap and project review come out of the same markdown the board already
+uses (content × form), and the layout engine is shared with Yggdrasil's
+timeline-world rather than reimplemented per host.
+
+## CO-443 — DoD matcher can't score refactor/structural tasks — recognize Rust tests + structural assertions
+
+The DoD verifier (`co-web/scripts/dod/verify.ts`) previously matched acceptance
+items only against Playwright e2e test names. That works for `feat` tasks (HTTP
+route → e2e) but failed for `refactor` tasks whose acceptance is structural
+("promote `Universo` to core", "split `migrations.rs`", "game-core is
+axum-free") — the Mythos children CO-431..436 scored 0–25% despite being
+complete, forcing `--ignore-dod` and manual verification every wave.
+
+The matcher now scores those tasks two ways:
+
+- **Rust test recognition** — `#[test]` / `#[tokio::test]` functions are matched
+  by name, not just e2e specs.
+- **Structural proofs** (`dod_checks` frontmatter map) — an acceptance item can
+  carry deterministic, build/grep-style evidence: `grep:<regex>` (assertion
+  exists), `grep-absent:<regex>` (e.g. axum-free), `rust-test:<fn>`,
+  `e2e-test:<regex>`, `file:<path>`, each optionally scoped with `@<path>`.
+  All proofs are pure filesystem reads — no build, no network — so they stay
+  deterministic and remain advisory (an unmet proof never blocks a merge).
+
+Also fixed a latent acceptance-section parser bug: a `\z` in the section regex
+(a literal `z` in JS) truncated multi-line `## Acceptance` blocks, undercounting
+items; parsing is now line-based and joins wrapped continuation lines so the
+full criterion text is available to the matcher.
+
+Re-running the verifier on CO-431..436 now reports **100%** for each with no
+override. Docs: `docs/scrum/dod-proof-checks.md`.
+
+### Why
+
+The override existed, but every refactor release needed manual structural
+verification (contention test, raw-SQL greps, `cargo tree | grep axum`). This
+lets the gate give honest credit to structural work instead of punting it.
+
+## CO-446 — Disk-full hardening — migrations + pool degrade instead of crash-loop; pre-deploy free-space gate
+
+A full `/data` volume no longer turns a routine migration deploy into an outage.
+Two production incidents (2026-06-11, 2026-06-13) showed the same failure class:
+the boot ran a new migration, the `schema_version` insert hit `SQLITE_FULL`, the
+process panicked (`exit 101`) and crash-looped until max-restart — site dark.
+
+- **Migrations degrade, never crash-loop.** `Storage::run_migrations` now returns
+  a readable `MigrationError` instead of panicking. The migration chain runs
+  under a catch boundary, so a write that fails mid-migration (disk fills after
+  the pre-flight) becomes a controlled `FATAL (CO-446)` log + clean exit, not a
+  cryptic SQLite backtrace. `record_migration!` logs a clear disk-full ERROR
+  before aborting.
+- **Boot pre-flight for disk headroom.** Before running migrations the boot path
+  checks free bytes on `/data`; below `CO_MIGRATION_MIN_FREE_BYTES` (default
+  200 MiB) it logs `insufficient disk for migrations: X free < Y min` and aborts
+  with a message instead of failing deep inside SQLite. The guard is disabled
+  when statvfs is unavailable (non-Linux dev / CI) so it never blocks local runs.
+- **Pool I/O degrades, not panics.** Confirms the CO-405/CO-406 guarantee on the
+  disk path: a corrupt/unreadable per-universe `data.db` degrades to a
+  `PoolError` (503 for that universe) while every other universe keeps serving —
+  regression test added.
+- **Pre-deploy free-space gate.** `scripts/pipeline-deploy-gate.sh` checks
+  `df -P /data` on prod and blocks a deploy when `/data` is > 85% full
+  (`DISK_MAX_PCT`), since such a deploy can hit `SQLITE_FULL` at boot. `--no-disk`
+  skips it; `ALLOW_FULL_DISK=1` downgrades to a warning.
+- **Runbook.** `docs/OPERATIONS.md` gains a "Disk-full recovery" section
+  documenting `volumes extend` + machine **stop/start** (a plain `restart` does
+  NOT resize the filesystem — the trap that prolonged the 2026-06-13 incident).
+  The deploy CLAUDE.md links it and wires the gate into the deploy steps.
+
+### Why
+Disk-full is a silent bomb: v3.8.0 ran fine because it writes no migration row at
+boot; v3.9.0 added migrations and detonated on the already-full volume. This task
+is the safety net — the next time `/data` fills, it is a clear error and a
+one-command extend, not an outage. The real endgame remains S3 cold-tier offload
+(CO-81).
+
+## CO-447 — Security scanner CWE-89 refinement — require SQL context, stop flagging HTTP verbs / log strings
+
+The CWE-89 (SQL injection) heuristic now requires real SQL context before it
+fires. A `format!` string is only flagged when it opens with a SQL verb
+(`SELECT`/`INSERT`/`UPDATE`/`DELETE`) **and** the same string literal also
+contains a SQL clause keyword (`FROM`/`INTO`/`SET`/`WHERE`/`VALUES`).
+
+- Refined the `security-audit` grep in `.github/workflows/pr-route.yml` to
+  `format!\("(SELECT|INSERT|UPDATE|DELETE)[^"]*(FROM|INTO|SET|WHERE|VALUES)`,
+  with a comment documenting what triggers it and why.
+- Refined the Rust scanner in `co-web/src/security/audit/local_grep.rs`: the
+  four bare-substring SQL patterns are replaced by a context-aware
+  `sql_format_verb` helper kept in lock-step with the workflow regex.
+- Added scanner tests covering an HTTP-verb error string and a log string (now
+  pass), genuine interpolated SQL (still blocks), and the safe const-columns +
+  bind-params pattern (never flagged).
+
+### Why
+In the CO-445 wave the bare-verb heuristic gave false positives on strings that
+are not SQL — `format!("DELETE vault/{path}")` (a DELETE *HTTP-verb* error
+string, CO-51) and log lines like `format!("UPDATE failed for {id}")` — costing
+CI cycles to reword harmless strings. This is the "A" half of the owner's CO-433
+decision (refine the scanner). CWE-79/innerHTML is intentionally out of scope.
+
+
 ## [3.9.0] — 2026-06-13 — Post-git Sync engine [--ignore-dod override]
 
 ## CO-128 — Apple-style 4-way conflict UI (Ignore / Replace / Keep both / Apply to all)
