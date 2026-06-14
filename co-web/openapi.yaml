@@ -39,6 +39,8 @@ tags:
     description: "workspace-templates endpoints"
   - name: "calendar"
     description: "calendar endpoints"
+  - name: "scrum"
+    description: "scrum endpoints"
   - name: "suggest/review"
     description: "suggest/review endpoints"
   - name: "entries"
@@ -107,8 +109,6 @@ tags:
     description: "delivery endpoints"
   - name: "suggest/review pages"
     description: "suggest/review pages endpoints"
-  - name: "scrum"
-    description: "scrum endpoints"
   - name: "Health"
     description: "Health endpoints"
   - name: "crawl"
@@ -2634,6 +2634,89 @@ paths:
           schema:
             type: string
         - name: user_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/backlog:
+    get:
+      tags: ["scrum"]
+      summary: "`{ pbis[], total }` — `pbi` entries. Query `status=` (backlog/ready/in-sprint/done) and `sprint=` filter."
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/manifest:
+    get:
+      tags: ["scrum"]
+      summary: "Parsed `_scrum.yaml` (`enabled`, `sprint_length_days`, `sprint_start_anchor`, `release_tag_pattern`, `roles`, `default_dod`, …) plus the computed `current_sprint` (or `null` when disabled / no anchor)."
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/pbi:
+    post:
+      tags: ["scrum"]
+      summary: "Create a PBI (sugar over an entry write at `scrum/pbi/{id}.md`). Body: `{ id, title, priority, points?, status?, acceptance?[], sprint?, assignees?[], epic?, body? }`. `422` on invalid frontmatter. Returns the created entry."
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/pbi/{id}/dod:
+    patch:
+      tags: ["scrum"]
+      summary: "Check off a Definition-of-Done item. Body: `{ index, done }`. Seeds the checklist from `_scrum.yaml.default_dod` on first toggle. Returns `{ path, dod[] }`. `404` if the PBI is absent."
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/sprints:
+    get:
+      tags: ["scrum"]
+      summary: "`{ sprints[], total }` — all `sprint` entries, sorted by `number`. Each: `{ path, type, title, frontmatter, body }`."
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{key}/scrum/sprints/current:
+    get:
+      tags: ["scrum"]
+      summary: "Current sprint computed from cadence + anchor: `{ number, start_at, end_at, release_window }`. `404` when Scrum is disabled or `sprint_start_anchor` is missing."
+      parameters:
+        - name: key
           in: path
           required: true
           schema:

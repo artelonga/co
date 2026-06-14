@@ -63,6 +63,13 @@
             dashboard: 'Painel',
             conteudo: 'Conteúdo',
             workspace: 'Sala',
+            // CO-368: Scrum board
+            scrum: 'Scrum',
+            scrum_product_backlog: 'Product Backlog',
+            scrum_sprint_backlog: 'Sprint Backlog',
+            scrum_increment: 'Incremento',
+            scrum_disabled: 'Scrum não está habilitado neste universo.',
+            scrum_release_window: 'Release iminente',
             // CO-387: time-rendering primitive (<co-time-grid>)
             'lens.time_grid': 'Tempo',
             'time.lens': 'Lente',
@@ -475,6 +482,13 @@
             conteudo: 'Content',
             workspace: 'Sala',
             workspace: 'Workspace',
+            // CO-368: Scrum board
+            scrum: 'Scrum',
+            scrum_product_backlog: 'Product Backlog',
+            scrum_sprint_backlog: 'Sprint Backlog',
+            scrum_increment: 'Increment',
+            scrum_disabled: 'Scrum is not enabled in this universe.',
+            scrum_release_window: 'Release imminent',
             // CO-387: time-rendering primitive (<co-time-grid>)
             'lens.time_grid': 'Time',
             'time.lens': 'Lens',

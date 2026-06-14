@@ -497,6 +497,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-387: calendar lens config (_calendar.yaml) — public read,
             // lens metadata only (no entry data).
             .nest("/api/v1/universes", crate::time::routes::router())
+            // CO-368: per-universe Scrum artifacts (_scrum.yaml manifest, PBI/
+            // Sprint entries, current-sprint cadence).
+            .nest("/api/v1/universes", crate::scrum::universe_router())
             // 2.7.23: inline proposals mounted OUTSIDE the writer gate — the handler
             // enforces its own auth + path constraints.
             .nest("/api/v1/universes", crate::proposal_routes::inline_router())
