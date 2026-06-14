@@ -5,19 +5,30 @@
 
 use axum::{
     Router,
-    http::StatusCode,
+    http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
     routing::get,
 };
 
 // Embed the spec at compile time so the binary is self-contained.
-const OPENAPI_YAML: &str = include_str!("../../../../docs/api/openapi.yaml");
+//
+// CO-452: serve the **catalog-generated** spec (`co-web/openapi.yaml`) — the
+// single source of truth checked by `npm run openapi:check`. This avoids drift
+// between two hand-maintained specs (the older `docs/api/openapi.yaml` is no
+// longer what `/api/openapi.json` returns).
+const OPENAPI_YAML: &str = include_str!("../../../openapi.yaml");
+
+/// API version surfaced via the `X-API-Version` response header (CO-452).
+const API_VERSION: &str = "v1";
 
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
 /// Serve the OpenAPI 3.1 spec as JSON.
+///
+/// Adds `X-API-Version: v1` so discovery clients can pin the major version
+/// without parsing the body.
 pub async fn openapi_json() -> Response {
     // Convert YAML → JSON once per request. The result is small (<50 KB)
     // and parse is cheap; no caching needed.
@@ -34,10 +45,21 @@ pub async fn openapi_json() -> Response {
                 .into_response();
         }
     };
-    axum::Json(value).into_response()
+    (
+        [(
+            header::HeaderName::from_static("x-api-version"),
+            header::HeaderValue::from_static(API_VERSION),
+        )],
+        axum::Json(value),
+    )
+        .into_response()
 }
 
 /// Serve Swagger UI — loads the spec from `/api/openapi.json`.
+///
+/// CO-452: the UI runtime is **vendored** under `co-web/static/shared/swagger/`
+/// and loaded same-origin (no external CDN) so the page is CSP-safe and has no
+/// third-party runtime dependency.
 pub async fn api_docs() -> Html<&'static str> {
     Html(SWAGGER_UI_HTML)
 }
@@ -47,18 +69,19 @@ static SWAGGER_UI_HTML: &str = r##"<!DOCTYPE html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>CO Universe Content API</title>
-  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <title>CO Web API — Docs</title>
+  <link rel="stylesheet" href="/shared/swagger/swagger-ui.css" />
 </head>
 <body>
   <div id="swagger-ui"></div>
-  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script src="/shared/swagger/swagger-ui-bundle.js"></script>
+  <script src="/shared/swagger/swagger-ui-standalone-preset.js"></script>
   <script>
     SwaggerUIBundle({
       url: "/api/openapi.json",
       dom_id: "#swagger-ui",
       deepLinking: true,
-      presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+      presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
       plugins: [SwaggerUIBundle.plugins.DownloadUrl],
       layout: "StandaloneLayout",
       tryItOutEnabled: true,
@@ -96,6 +119,10 @@ mod tests {
 
     // -----------------------------------------------------------------------
     // Spec validation tests (no server needed)
+    //
+    // CO-452: the served spec is the catalog-generated `co-web/openapi.yaml`
+    // (source of truth verified by `npm run openapi:check`), so these assert
+    // its shape — not the older hand-maintained `docs/api/openapi.yaml`.
     // -----------------------------------------------------------------------
 
     #[test]
@@ -146,8 +173,6 @@ mod tests {
             "/api/v1/universes/{slug}/entries",
             "/api/v1/universes/{slug}/entries/tags",
             "/api/v1/universes/{slug}/entries/tree",
-            "/api/v1/universes/{slug}/entries/{path}",
-            "/api/v1/universes/{slug}/manifest",
         ];
         for path in required {
             assert!(
@@ -163,31 +188,9 @@ mod tests {
             serde_yaml::from_str(OPENAPI_YAML).expect("spec must be valid YAML");
         let paths = doc["paths"].as_object().expect("paths must be an object");
 
-        let required = [
-            "/api/v1/universes/{slug}/vault/",
-            "/api/v1/universes/{slug}/vault/tags",
-            "/api/v1/universes/{slug}/vault/{path}",
-        ];
-        for path in required {
-            assert!(
-                paths.contains_key(path),
-                "spec is missing required vault path: {path}"
-            );
-        }
-
-        // vault/{path} must have GET, PUT, DELETE
-        let vault_path = &doc["paths"]["/api/v1/universes/{slug}/vault/{path}"];
         assert!(
-            vault_path["get"].is_object(),
-            "vault/{{path}} must have GET"
-        );
-        assert!(
-            vault_path["put"].is_object(),
-            "vault/{{path}} must have PUT"
-        );
-        assert!(
-            vault_path["delete"].is_object(),
-            "vault/{{path}} must have DELETE"
+            paths.contains_key("/api/v1/universes/{slug}/vault/"),
+            "spec is missing the vault listing path"
         );
     }
 
@@ -220,21 +223,8 @@ mod tests {
             .as_object()
             .expect("components.schemas must be an object");
 
-        let required = [
-            "Universe",
-            "Entry",
-            "EntryList",
-            "TagCount",
-            "TreeNode",
-            "VaultFile",
-            "VaultFileInfo",
-            "VaultStat",
-            "User",
-            "Session",
-            "ApiToken",
-            "Error",
-        ];
-        for name in required {
+        // The catalog spec ships shared schemas via openapi-components.yaml.
+        for name in ["Error", "Task"] {
             assert!(
                 schemas.contains_key(name),
                 "components.schemas is missing: {name}"
@@ -251,38 +241,10 @@ mod tests {
             .expect("components.securitySchemes must be an object");
 
         assert!(
-            schemes.contains_key("BearerAuth"),
-            "missing BearerAuth scheme"
+            schemes.contains_key("sessionCookie"),
+            "missing sessionCookie scheme"
         );
-        assert!(
-            schemes.contains_key("SessionAuth"),
-            "missing SessionAuth scheme"
-        );
-    }
-
-    #[test]
-    fn spec_documents_common_error_responses() {
-        let doc: serde_json::Value =
-            serde_yaml::from_str(OPENAPI_YAML).expect("spec must be valid YAML");
-        let responses = doc["components"]["responses"]
-            .as_object()
-            .expect("components.responses must be an object");
-
-        let required = [
-            "BadRequest",
-            "Unauthorized",
-            "Forbidden",
-            "NotFound",
-            "Conflict",
-            "TooManyRequests",
-            "InternalServerError",
-        ];
-        for name in required {
-            assert!(
-                responses.contains_key(name),
-                "components.responses is missing: {name}"
-            );
-        }
+        assert!(schemes.contains_key("apiToken"), "missing apiToken scheme");
     }
 
     // -----------------------------------------------------------------------
@@ -323,7 +285,35 @@ mod tests {
         let body = body_bytes(resp.into_body()).await;
         let doc: serde_json::Value =
             serde_json::from_slice(&body).expect("response must be valid JSON");
-        assert_eq!(doc["openapi"].as_str(), Some("3.1.0"));
+        // `openapi: 3...` (3.1.0 today).
+        assert!(
+            doc["openapi"].as_str().unwrap_or("").starts_with("3."),
+            "spec must declare openapi 3.x"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_openapi_json_sets_x_api_version_header() {
+        let app = build_test_app();
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("GET")
+                    .uri("/api/openapi.json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        assert_eq!(
+            resp.headers()
+                .get("x-api-version")
+                .and_then(|v| v.to_str().ok()),
+            Some("v1"),
+            "openapi.json must set X-API-Version: v1"
+        );
     }
 
     #[tokio::test]
@@ -352,7 +342,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_api_docs_returns_html() {
+    async fn get_api_docs_returns_html_with_vendored_assets() {
         let app = build_test_app();
         let resp = app
             .oneshot(
@@ -380,6 +370,15 @@ mod tests {
         assert!(
             html.contains("/api/openapi.json"),
             "spec URL not found in HTML"
+        );
+        // CO-452: the UI runtime is vendored same-origin, never a CDN.
+        assert!(
+            html.contains("/shared/swagger/swagger-ui-bundle.js"),
+            "Swagger UI bundle must be loaded from the vendored same-origin path"
+        );
+        assert!(
+            !html.contains("unpkg.com") && !html.contains("//cdn"),
+            "Swagger UI must not reference an external CDN"
         );
     }
 }

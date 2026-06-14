@@ -112,7 +112,13 @@ function parseCatalog(md: string): CatalogEntry[] {
     }
 
     if (inTable && pastHeader && line.startsWith('|')) {
-      const cells = line.split('|').map(c => c.trim()).filter(Boolean);
+      // Split on unescaped pipes only — GFM escapes a literal pipe inside a
+      // cell as `\|`. Splitting naïvely truncates such cells mid-string and
+      // produces malformed YAML (CO-452). Unescape `\|` → `|` afterwards.
+      const cells = line
+        .split(/(?<!\\)\|/)
+        .map(c => c.replace(/\\\|/g, '|').trim())
+        .filter(Boolean);
       if (cells.length < 4) continue;
 
       const rawMethod = cells[0].toUpperCase();
@@ -359,8 +365,11 @@ function buildPathsYaml(catalog: CatalogEntry[]): string {
       .get(path)!
       .sort((a, b) => (METHOD_ORDER[a.method] ?? 9) - (METHOD_ORDER[b.method] ?? 9));
     for (const op of ops) {
-      const safeTag = op.tags[0].replace(/"/g, '\\"');
-      const safeSummary = op.summary.replace(/"/g, '\\"');
+      // Escape backslashes before quotes so a trailing/embedded `\` can't
+      // break the YAML double-quoted scalar (CO-452).
+      const yamlStr = (s: string) => s.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      const safeTag = yamlStr(op.tags[0]);
+      const safeSummary = yamlStr(op.summary);
       lines.push(`    ${op.method.toLowerCase()}:`);
       lines.push(`      tags: ["${safeTag}"]`);
       lines.push(`      summary: "${safeSummary}"`);
