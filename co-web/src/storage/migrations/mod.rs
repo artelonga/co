@@ -30,6 +30,8 @@ mod v083;
 mod v084;
 mod v085;
 mod v086;
+// CO-458 takes v086 (merged separately); CO-449 claims v087.
+mod v087;
 
 /// CO-446: minimum free bytes required on the data volume before the boot path
 /// runs migrations. Default 200 MiB. Override with `CO_MIGRATION_MIN_FREE_BYTES`.
@@ -168,6 +170,7 @@ impl Storage {
             self.migrate_v084(current_version);
             self.migrate_v085(current_version);
             self.migrate_v086(current_version);
+            self.migrate_v087(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(
@@ -318,6 +321,7 @@ mod tests {
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
     const LATEST_VERSION: i64 = 86;
+    const LATEST_VERSION: i64 = 87;
 
     fn max_version(storage: &Storage) -> i64 {
         storage

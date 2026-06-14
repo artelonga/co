@@ -42,6 +42,9 @@ percent-encoding = "2"
 flate2 = "1.0"
 tar = "0.4"
 sha2 = "0.10"
+# CO-449: telemetry cold-tier archival to Parquet (columnar + zstd, DuckDB-readable).
+arrow = "58"
+parquet = { version = "58", features = ["arrow", "zstd"] }
 hmac = "0.12"
 sha1 = "0.10"
 chacha20poly1305 = "0.10"

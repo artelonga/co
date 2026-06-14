@@ -684,6 +684,9 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
         worker_executor.spawn_worker(crate::workers::RemoteSisterRepoWorker::new(config.clone()));
         // CO-365: backup snapshot worker — disabled when CO_BACKUP_BACKEND=disabled.
         worker_executor.spawn_worker(crate::workers::BackupWorker::new(state.clone()));
+        // CO-449: telemetry cold-tier → Parquet archival. Opt-in via
+        // CO_TELEMETRY_ARCHIVE_ENABLED (the first run on a tight disk is delicate).
+        worker_executor.spawn_worker(crate::workers::TelemetryArchiveWorker::new(state.clone()));
         // CO-379: weekly u-test-* retention sweep — staging only.
         if config.is_staging() {
             worker_executor

@@ -414,3 +414,84 @@ impl Worker for StagingTestSweepWorker {
         Ok(())
     }
 }
+
+// ---------------------------------------------------------------------------
+// 10. TelemetryArchiveWorker
+//     CO-449: move the cold telemetry window (> CO_TELEMETRY_HOT_DAYS, default
+//     90d) out of meta.db into per-month Parquet files, shrinking the OLTP DB
+//     without losing any data. Opt-in (CO_TELEMETRY_ARCHIVE_ENABLED) because
+//     the FIRST run on a near-full /data is delicate (chunked, may need a
+//     temporary volume extend) — the operator enables it deliberately.
+//     Interval CO_TELEMETRY_ARCHIVE_INTERVAL_SECS (default 24h); first tick is
+//     deferred so archival never sits in the boot path.
+// ---------------------------------------------------------------------------
+
+#[derive(Clone)]
+pub struct TelemetryArchiveWorker {
+    state: AppState,
+    enabled: bool,
+    interval_secs: u64,
+}
+
+impl TelemetryArchiveWorker {
+    pub fn new(state: AppState) -> Self {
+        use crate::infra::secrets::{SecretsProviderExt, global};
+        let enabled = global().get_bool("CO_TELEMETRY_ARCHIVE_ENABLED", false);
+        let interval_secs = global().get_parsed("CO_TELEMETRY_ARCHIVE_INTERVAL_SECS", 86_400); // 24h
+        Self {
+            state,
+            enabled,
+            interval_secs,
+        }
+    }
+}
+
+#[async_trait]
+impl Worker for TelemetryArchiveWorker {
+    fn name(&self) -> &'static str {
+        "telemetry_archive"
+    }
+
+    fn interval(&self) -> Duration {
+        Duration::from_secs(self.interval_secs)
+    }
+
+    fn initial_delay(&self) -> Duration {
+        // Keep the (potentially heavy) first archival off the boot path.
+        Duration::from_secs(600)
+    }
+
+    async fn tick(&mut self) -> anyhow::Result<()> {
+        if !self.enabled {
+            return Ok(());
+        }
+        use crate::infra::secrets::{SecretsProviderExt, global};
+        let hot_days = global().get_parsed(
+            "CO_TELEMETRY_HOT_DAYS",
+            crate::telemetry_archive::DEFAULT_HOT_DAYS,
+        );
+
+        let storage = self.state.core.storage.clone();
+        // The archival is synchronous and holds the storage lock, so run it on a
+        // blocking thread. No `.await` happens while the lock is held.
+        let report = tokio::task::spawn_blocking(move || {
+            let s = storage.lock();
+            let cfg = crate::telemetry_archive::ArchiveConfig {
+                archive_dir: s.data_dir.join("telemetry-archive"),
+                hot_days,
+                now: Utc::now(),
+            };
+            crate::telemetry_archive::archive_cold_telemetry(s.conn(), &cfg)
+        })
+        .await??;
+
+        if !report.archived.is_empty() {
+            tracing::info!(
+                months = report.archived.len(),
+                rows = report.total_rows_archived,
+                "CO-449: telemetry archival run complete"
+            );
+        }
+        Ok(())
+    }
+}

@@ -30,6 +30,7 @@ pub mod server_config;
 pub mod source;
 pub mod telemetry;
 pub mod telemetry_api;
+pub mod telemetry_archive;
 pub mod theme_engine;
 pub mod universe_pool;
 pub mod vcs;
