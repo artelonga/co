@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-396",
+  "spec_title": "Project timeline lens — roadmap/gantt de um universo-projeto sobre o <co-time-grid>, com engine de layout compartilhada com o Yggdrasil (YG-123)",
+  "timestamp": "2026-06-14T00:14:39.222Z",
+  "items": [
+    {
+      "text": "Extrair layout engine pura para o crate compartilhado (sem deps de web/server)",
+      "pattern": "server|extrair|layout|engine|crate",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "API: GET workspace state returns layout_json for any caller",
+      "status": "pass"
+    },
+    {
+      "text": "Lens `project-timeline` no `_calendar.yaml`: lanes por `epic|module|status`, marcos por `type: release|milestone`",
+      "pattern": "project[- _]timeline|calendar|lanes|module",
+      "matched_file": "co-web/e2e/conflict.spec.ts",
+      "matched_test": "the modal module renders both versions in the page",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "the modal module renders both versions in the page",
+      "status": "pass"
+    },
+    {
+      "text": "Tarefa sem data não some: lane \"sem data\" (backlog) na margem",
+      "pattern": "tarefa|backlog|margem",
+      "matched_file": "co-web/e2e/universe.spec.ts",
+      "matched_test": "after universe creation the board is editable: '+ Nova Tarefa' button visible",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "after universe creation the board is editable: '+ Nova Tarefa' button visible",
+      "status": "pass"
+    },
+    {
+      "text": "Modos `timeline` + `gantt` do `<co-time-grid>` ligados ao quadro (toggle quadro ⇄ timeline no header do universo)",
+      "pattern": "co[- _]time[- _]grid|modos|timeline|gantt",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] Live timeline (CO-381) renders CI events with 🛠️ icon",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] Live timeline (CO-381) renders CI events with 🛠️ icon (stub)",
+      "status": "pending"
+    },
+    {
+      "text": "Duração no gantt: `created → done` (ou `scheduled_at → due_at` quando presentes)",
+      "pattern": "gantt|created|scheduled|quando",
+      "matched_file": "co-web/e2e/integration.spec.ts",
+      "matched_test": "created task appears on the board",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "created task appears on the board",
+      "status": "pass"
+    },
+    {
+      "text": "YG-123 passa a consumir a engine compartilhada (remover qualquer layout duplicado)",
+      "pattern": "yg[- _]123|passa|consumir|engine",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    },
+    {
+      "text": "Testes da engine no crate compartilhado (TDD), independentes de co-web",
+      "pattern": "co[- _]web|testes|engine|crate|compartilhado",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    },
+    {
+      "text": "`CHANGELOG-PENDING/CO-396.md`",
+      "pattern": "changelog[- _]pending|co[- _]396|co[- _]396.md",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    }
+  ],
+  "total": 8,
+  "passed": 4,
+  "pending": 4,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}

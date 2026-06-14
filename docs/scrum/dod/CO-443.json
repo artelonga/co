@@ -1,0 +1,33 @@
+{
+  "co_id": "CO-443",
+  "spec_title": "DoD matcher can't score refactor/structural tasks — recognize Rust tests + structural assertions",
+  "timestamp": "2026-06-14T00:14:39.445Z",
+  "items": [
+    {
+      "text": "Re-rodar o verificador nos CO-431..436 → cada um ≥ 80% sem override.",
+      "pattern": "re[- _]rodar|co[- _]431|verificador|override",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] --ignore-dod override flag exists (emergency only, logged)",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] --ignore-dod override flag exists (emergency only, logged) (stub)",
+      "status": "pending"
+    },
+    {
+      "text": "Doc curto em `docs/scrum/` de como escrever AC verificável por prova.",
+      "pattern": "scrum/|curto|scrum|escrever|verific",
+      "matched_file": "co-web/e2e-generated/co-382-dod.spec.ts",
+      "matched_test": "[acceptance] PR with title CO-N — ... triggers DoD verification workflow",
+      "is_stub": true,
+      "proofs": [],
+      "evidence": "[acceptance] PR with title CO-N — ... triggers DoD verification workflow (stub)",
+      "status": "pending"
+    }
+  ],
+  "total": 2,
+  "passed": 0,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 0
+}

@@ -1,0 +1,53 @@
+{
+  "co_id": "CO-447",
+  "spec_title": "Security scanner CWE-89 refinement — require SQL context, stop flagging HTTP verbs / log strings",
+  "timestamp": "2026-06-14T00:14:39.651Z",
+  "items": [
+    {
+      "text": "**CWE-89 exige contexto SQL.** O regex no job `security-audit` de `.github/workflows/pr-route.yml` só dispara quando o keyword é seguido (na mesma string) por token SQL real: `FROM` / `INTO` / `SET` / `WHERE` / `VALUES`. `format!(\"DELETE vault/{path}\")` e `format!(\"UPDATE failed for {id}\")` → **não** acusam; `format!(\"SELECT {C} FROM t WHERE x=?\")` → acusa.",
+      "pattern": "cwe[- _]89|security[- _]audit|pr[- _]route|workflows/pr[- _]route.yml|exige|contexto|regex",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    },
+    {
+      "text": "**O gate passa em si mesmo** (regra hard-won): rodar o scanner refinado contra o próprio diff + contra `main` atual; nenhum falso-positivo novo, e os verdadeiros-positivos históricos continuam pegos (manter os excludes de `storage/*`, `repository/*`, `security/audit/*`).",
+      "pattern": "hard[- _]won|falso[- _]positivo|verdadeiros[- _]positivos|audit/|passa|mesmo|regra",
+      "matched_file": "co-web/src/content/universo.rs",
+      "matched_test": "fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "fabrica_fake_serve_universo_nao_filesystem_pelos_mesmos_handlers",
+      "status": "pass"
+    },
+    {
+      "text": "**Teste do scanner.** Fixtures em `co-web/src/security/audit/` (ou onde os testes do grep vivem) cobrindo: HTTP-verb string (deve passar), log string (passar), SQL real com `format!` (deve falhar), SQL com colunas const + bind params (já é o padrão seguro — confirmar comportamento).",
+      "pattern": "co[- _]web|http[- _]verb|src/security/audit/|teste|scanner|fixtures",
+      "matched_file": "co-web/src/security/audit/local_grep.rs",
+      "matched_test": "no_false_positive_on_http_verb_string",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "no_false_positive_on_http_verb_string",
+      "status": "pass"
+    },
+    {
+      "text": "Documentar a heurística no comentário do job (o que dispara e por quê).",
+      "pattern": "documentar|stica|coment|dispara",
+      "matched_file": null,
+      "matched_test": null,
+      "is_stub": false,
+      "proofs": [],
+      "evidence": null,
+      "status": "pending"
+    }
+  ],
+  "total": 4,
+  "passed": 2,
+  "pending": 2,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 50
+}

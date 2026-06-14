@@ -1,0 +1,93 @@
+{
+  "co_id": "CO-204",
+  "spec_title": "Chat message origin telemetry — track which universe context each message was sent from",
+  "timestamp": "2026-06-14T00:14:39.131Z",
+  "items": [
+    {
+      "text": "Migration adds `origin_universe_key` nullable column + index.",
+      "pattern": "migration|origin|universe|nullable",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "status": "pass"
+    },
+    {
+      "text": "POST message with explicit `origin_universe_key` writes it (when caller is member/subscriber of that universe).",
+      "pattern": "subscriber|message|explicit|origin|universe",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "L2 — Sidebar 'This universe' section contains universe and project nav",
+      "status": "pass"
+    },
+    {
+      "text": "POST message with origin the caller doesn't belong to → field silently dropped, message persisted with NULL origin.",
+      "pattern": "message|origin|caller|doesn",
+      "matched_file": "co-web/e2e/co-352-sala.spec.ts",
+      "matched_test": "API: GET workspace state returns layout_json for any caller",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "API: GET workspace state returns layout_json for any caller",
+      "status": "pass"
+    },
+    {
+      "text": "POST message without origin → server defaults to room's universe_key for universe rooms, NULL for DM rooms.",
+      "pattern": "message|without|origin|server",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "GET /api/v1/auth/me without session returns 401",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "GET /api/v1/auth/me without session returns 401",
+      "status": "pass"
+    },
+    {
+      "text": "GET messages returns the field.",
+      "pattern": "messages|returns|field",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "POST /api/v1/auth/login returns 200 for any email",
+      "status": "pass"
+    },
+    {
+      "text": "DM UI shows \"via {universe_name}\" subtext for messages whose origin differs from the viewer's current universe.",
+      "pattern": "shows|universe|subtext|messages",
+      "matched_file": "co-web/e2e/board-ux.spec.ts",
+      "matched_test": "shows empty-state prompt before any project is chosen",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "shows empty-state prompt before any project is chosen",
+      "status": "pass"
+    },
+    {
+      "text": "Admin breakdown endpoint returns aggregated counts.",
+      "pattern": "admin|breakdown|endpoint|returns",
+      "matched_file": "co-web/e2e/auth.spec.ts",
+      "matched_test": "POST /api/v1/auth/login returns 200 for any email",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "POST /api/v1/auth/login returns 200 for any email",
+      "status": "pass"
+    },
+    {
+      "text": "Tests: 6+ covering origin write/read, privacy drop, default behavior, admin gate.",
+      "pattern": "read|tests|covering|origin|write",
+      "matched_file": "co-web/e2e/co-280-ia-layers.spec.ts",
+      "matched_test": "L1 — Breadcrumbs element exists in the page",
+      "is_stub": false,
+      "proofs": [],
+      "evidence": "L1 — Breadcrumbs element exists in the page",
+      "status": "pass"
+    }
+  ],
+  "total": 8,
+  "passed": 8,
+  "pending": 0,
+  "failed": 0,
+  "blocking_failures": 0,
+  "dod_pct": 100
+}
