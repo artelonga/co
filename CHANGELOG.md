@@ -5,6 +5,83 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.1] — 2026-06-15 — Migration self-containment + OpenAPI contract + ops accuracy
+
+## CO-330 — Migration self-containment sweep (post-outage hardening)
+
+Follow-up to the 3.15.0 migration-ordering fixes (v51/`remote_url`, v088/`jobs`).
+Audited every meta-DB and per-universe migration for the same bug class — a step
+that references schema created only inside an earlier `if current_version < N`
+guard, which production passed long ago (so it never got it, while fresh-DB CI
+hides the gap). No further *live* breakage was found, but two structurally
+fragile spots — one retroactive guard edit away from a repeat — are now hardened:
+
+- **v085** `workspace_states.scope`: the table's only CREATE is in v70's guard;
+  `migrate_v085` now `CREATE TABLE IF NOT EXISTS workspace_states` before
+  `ensure_column`.
+- **v030** `subscriptions.pinned_state`: same shape vs v20's CREATE; v30 now
+  recreates the table defensively first.
+
+Both gain a regression test that drops the table and re-runs the migration. Also
+hardened `scripts/pipeline-deploy-gate.sh`: it no longer requires a UAT pipeline
+report (UAT is decommissioned) — it gates on the local (+ optional prod-smoke)
+report, so the documented "real gate" actually passes.
+
+### Why
+A migration must be self-contained: a fresh top-to-bottom run must succeed, not
+just an already-advanced prod DB. `ensure_column` is column-safe but ALTERs a
+missing *table* — so the base table must be ensured in the same block.
+
+## CO-452 — OpenAPI spec becomes a real contract (schemas, version, auth)
+
+The generated `co-web/openapi.yaml` (served at `/api/docs` and `/api/openapi.json`)
+was a bare endpoint inventory: every operation emitted only `200 OK`, the ~34
+component schemas in `openapi-components.yaml` were defined but never referenced,
+auth was hardcoded to `sessionCookie`, and `info.version` was pinned at a stale
+`2.40.0`. The generator now produces a usable contract:
+
+- **`info.version`** is read from the workspace `Cargo.toml` (now 3.15.0), not hardcoded.
+- **Security schemes** are mapped correctly per catalog auth tag (`bearerJWT`,
+  `apiToken`, `sessionCookie`, `sharedSecret`) with OR-semantics, instead of
+  labelling everything `sessionCookie`.
+- **Request/response schemas** are wired via a sidecar `SCHEMA_MAP` in the
+  generator (the catalog markdown and the catalog↔code drift check are untouched):
+  mapped operations emit a `requestBody` + typed success response + a `default`
+  `Error` response, all `$ref`-ing existing component schemas. 24 high-confidence
+  endpoints wired (auth, tasks, gestão eventos/validar/publicar/manifesto,
+  quilombo auth/perfil/mensagens/missões/eventos/comentários); the rest stay bare
+  and can be annotated incrementally.
+
+`npm run openapi:check` stays green (no drift); the spec validates as OpenAPI 3.1
+with zero dangling `$ref`s.
+
+### Why
+A schema-less spec gives Swagger UI no "try it out" payloads and no documented
+errors. Wiring the already-defined component schemas turns the served spec into a
+real, explorable contract without touching the source-of-truth catalog.
+
+## CO-78 — Hotfix: migration v088 must create the `jobs` table, not assume it
+
+The 3.15.0 prod deploy crash-looped at boot: migration **v088** ran
+`ALTER TABLE jobs ADD COLUMN timeout_secs` but `jobs` did not exist on the
+production DB (`no such table: jobs`), and the CO-446 guard aborted boot.
+
+Root cause: the base `jobs` CREATE lives in v025 (CO-72) inside an
+`if current_version < 25` guard. Any DB already past v25 — i.e. production —
+never re-runs it, so the table was never created there. A fresh test DB runs
+v25 from scratch and has the table, which hid the gap through CI.
+
+v088 now creates the `jobs` base table + its base indexes with
+`CREATE TABLE IF NOT EXISTS` before altering it, making the migration
+self-contained on any DB (no-op where the table already exists). Adds a
+regression test that drops `jobs` and re-runs v088.
+
+### Why
+A migration step must never assume schema produced by an *earlier* version's
+guarded block — production may have advanced past that guard before the schema
+was added. Same failure class as the v51 `remote_url` ordering fix in this wave.
+
+
 ## [3.15.0] — 2026-06-14 — Telemetry archival, job queue & native OTel [--ignore-dod override]
 
 ## CO-330 — Fix migration v51 ordering: `remote_url` written before the column exists
