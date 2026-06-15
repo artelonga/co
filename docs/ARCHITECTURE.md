@@ -1,6 +1,6 @@
 # Arquitetura — CO Platform
 
-Este documento descreve como o CO funciona internamente: componentes, fluxo de dados e decisões de design da versão **1.34.x** (2026-05). Leia-o antes de contribuir com o servidor (`co-web`) ou entender como os dados trafegam entre cliente e armazenamento. Para rodar localmente, veja [ONBOARDING.md](ONBOARDING.md). Para operar em produção, veja [OPERATIONS.md](OPERATIONS.md).
+Este documento descreve como o CO funciona internamente: componentes, fluxo de dados e decisões de design. **Atual em 2026-06 (app v3.15.0).** A fonte da verdade da versão é o `Cargo.toml`, e do número de schema é o diretório `co-web/src/storage/migrations/` — prefira consultá-los a confiar nos números de exemplo abaixo. Leia este doc antes de contribuir com o servidor (`co-web`) ou entender como os dados trafegam entre cliente e armazenamento. Para rodar localmente, veja [ONBOARDING.md](ONBOARDING.md). Para operar em produção, veja [OPERATIONS.md](OPERATIONS.md).
 
 > _English translation is welcome — open a PR._
 >
@@ -18,7 +18,7 @@ Não há microserviços, filas externas ou armazenamento em nuvem na arquitetura
 
 ```mermaid
 C4Context
-  title CO — Visão de componentes (1.34.x)
+  title CO — Visão de componentes (v3.15.0)
 
   Person(visitor, "Visitante", "Navegador ou cliente API")
   Person(editor, "Editor", "Obsidian / co-cli / co-token")
@@ -91,9 +91,22 @@ Leituras: o servidor abre conexões por universo via `universe_pool`. Escritas: 
 
 ### Migrações idempotentes (CO-137)
 
-Toda `ALTER TABLE ADD COLUMN` em `run_migrations()` usa `ensure_column(conn, table, col, def)`. Toda `CREATE TABLE` usa `ensure_table(conn, name, sql)`. Ambos consultam `pragma_table_info` / `sqlite_master` antes de emitir DDL — re-executar uma migração parcialmente aplicada é seguro. Schema atual: **versão 28** (após CO-142 + CO-121).
+Toda `ALTER TABLE ADD COLUMN` em `run_migrations()` usa `ensure_column(conn, table, col, def)`. Toda `CREATE TABLE` usa `ensure_table(conn, name, sql)`. Ambos consultam `pragma_table_info` / `sqlite_master` antes de emitir DDL — re-executar uma migração parcialmente aplicada é seguro. Schema atual: **versão 88** (fonte da verdade: `co-web/src/storage/migrations/` — o maior `vNNN`).
 
 `schema_version` usa `INSERT OR IGNORE` — uma linha v22 órfã (do incidente CO-137) não panica o binário no boot seguinte.
+
+**Invariante de auto-contenção (CO-330).** Um passo de migração **nunca** pode
+referenciar ou alterar um schema (tabela/coluna) criado apenas dentro de um guard
+`if current_version < N` *anterior*. Produção avança além daquele guard e nunca o
+recebe, enquanto o CI de DB-novo (que roda tudo de cima a baixo) esconde a lacuna —
+foi exatamente assim que um outage de prod aconteceu. Cada migração deve ser
+auto-contida: faça `CREATE TABLE IF NOT EXISTS` / `ensure_column` *antes* de usar.
+O teste real é que uma migração fresca do topo ao fim tem de funcionar, não só uma
+DB de prod já avançada.
+
+> Relacionado: o caminho de boot aborta com `FATAL (CO-446)` (em vez de panicar)
+> quando `/data` não tem espaço para gravar a linha de `schema_version` de uma
+> migração — ver [OPERATIONS.md → "Disk-full recovery (CO-446)"](OPERATIONS.md).
 
 ### Conteúdo arbitrário por universo (CO-71, CO-70)
 
@@ -178,7 +191,7 @@ Categorias adicionadas desde 1.21.x:
 
 ## Service worker
 
-`co-web/static/sw.js` — `CACHE_NAME = 'co-v4-offline'` (atualizado em 1.28.0 para CO-69 PWA offline):
+`co-web/static/sw.js` — `CACHE_NAME = 'co-v6-offline'` (CO-69 PWA offline; o `CACHE_NAME` é a fonte da verdade, incrementado a cada mudança de comportamento do SW):
 
 | Recurso | Estratégia | Fallback |
 |---------|-----------|---------|

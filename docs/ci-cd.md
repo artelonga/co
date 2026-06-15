@@ -9,7 +9,7 @@ What runs, what breaks it, and how to catch each failure *before* it goes red.
 | `ci.yml` → `test` | push/PR to `main` | system deps → `cargo build` → `cargo test` → `cargo clippy -- -D warnings` → `cargo fmt --all -- --check` |
 | `ci.yml` → `e2e` | after `test` | Playwright (`chromium-desktop`); warns if a spec file > 30 tests |
 | `openapi-check.yml` | PR touching `*_routes.rs` / `openapi*.yaml` / generator | `npm run openapi:check` (spec drift) |
-| `staging-deploy.yml` | push to `main` | `flyctl deploy --config fly.staging.toml` |
+| `staging-deploy.yml` | push to `main` | **No-op by design** — `FLY_API_TOKEN` is intentionally not a repo secret, so the job skips the deploy and exits green. Staging is a **manual, optional** preview (`flyctl deploy --config fly.staging.toml`), never a required gate. There is no UAT. The release gate is the read-only CO-421 prod-usability suite + `scripts/smoke-prod.sh` (see [`docs/OPERATIONS.md`](OPERATIONS.md)). |
 | `release.yml`, `backup.yml`, `co-agent-publish.yml` | — | release/backup/publish |
 
 ## Known failure causes → prevention

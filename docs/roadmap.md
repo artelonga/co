@@ -1,4 +1,4 @@
-# CO Roadmap — Wave-based; v3.0.0 → v3.4.0 shipped — next: v3.5.0 (security gate + ops hardening + prod-e2e)
+# CO Roadmap — Wave-based; v3.0.0 → v3.15.0 shipped (full history in `CHANGELOG.md`) — next: TBD (owner to sequence)
 
 Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/docs/intelligence-as-a-service.html`](https://artelonga.com.br/docs/intelligence-as-a-service.html), renamed from BaaS 2026-06-06).
 
@@ -8,14 +8,16 @@ Framed by the **IaaS** thesis (Intelligence as a Service — see [`ArteLonga/doc
 
 **`yuri`** is the reference brain. **`artelonga`** is the business. **CO** is the bounded service — identity · warehouse · payment · sync · event bus.
 
-## Current state (2026-06-12)
+## Current state (2026-06-15)
 
-- **Version**: **prod = v3.4.0** (released 2026-06-12 — source:github adapter + time-grid lens + render-review-publish traceback). Shipped since launch: v3.0.0 (06-10 public launch) → v3.1.0 → v3.2.0 → v3.3.0 → v3.3.1 → v3.4.0. **v3.5.0 is pending on `main`** carrying CO-388 (security gate), CO-406 (graceful degradation), CO-407 (uptime alerting), CO-408 (ops small-batch), CO-420 (Yggdrasil docs) — `CHANGELOG-PENDING/` holds CO-388/407/408/420
-- **Production**: `https://co-artelonga.fly.dev` — single Fly app, shared-cpu-1x, 512 MB
-- **Staging** (post-CO-379): `https://staging.co.artelonga.com.br` — hand-deployed, auto-stops; PR-level contract probe is advisory for this reason (strict gate lives in release.yml)
-- **Cadence**: bi-weekly Thursday 15:00 BRT releases (PR cutoff Wed 23:59 BRT); CO-382 release-gate cron live since #180
-- **Release gate**: CO-382 DoD gate in `release-commit.sh` — blocks on `blocking_failures > 0` or missing `docs/scrum/dod/CO-N.json`; all current pending entries have reports at 0 blocking
+- **Version**: **prod = v3.15.0** (released 2026-06-14 — telemetry cold-tier archival to Parquet, job queue + worker pool, native-OTel usage capture, folder-as-sub-sala). **`CHANGELOG.md` is the source of truth for what shipped** — the per-wave table below was last reconciled at v3.4.0 and lags the changelog; treat the changelog as authoritative for 3.5.0 → 3.15.0. Shipped 3.5.0–3.15.0 (see CHANGELOG): security gate + ops resilience (3.5.0), fleet observability + model routing (3.6.0), composable architecture (3.7.0), payment/onboarding (3.8.0), post-git sync engine (3.9.0), resilience + chat/timeline (3.10.0), token scopes + scrum board (3.11.0), federation + public API (3.12.0), fractal sala + API envelope (3.13.0), StaaS storage foundation (3.14.0), telemetry/job-queue/OTel (3.15.0).
+- **Production**: `https://co-artelonga.fly.dev` (Fly `gru`) — the only required deploy target.
+- **Staging**: `co-artelonga-staging` exists but is a **manual/optional preview** (`flyctl deploy --config fly.staging.toml`), NOT a release gate. **UAT is decommissioned** (`co-artelonga-uat` destroyed 2026-06-01). Authoritative env/deploy description: [`docs/OPERATIONS.md` → "Environments & Deploy"](OPERATIONS.md).
+- **Deploy**: prod-direct — local checks → CO-421 read-only prod-usability gate → `scripts/pipeline-deploy-gate.sh` (CO-446 disk gate + fresh green local pipeline report) → `flyctl deploy` → `scripts/smoke-prod.sh`.
+- **Release gate**: CO-382 DoD gate in `release-commit.sh` — blocks on `blocking_failures > 0` or missing `docs/scrum/dod/CO-N.json` (override `--ignore-dod` when per-PR `dod-verify` already passed but the persisted JSON isn't on main; recent releases used this).
 - **Per-wave DoD**: `docs/release-checklist.md`
+
+> **Forward plan is stale and needs owner sequencing.** The wave table below predates 3.5.0–3.15.0; several "planned" items have since shipped — notably **Wave 8 (scale)**: CO-78 job queue (shipped 3.15.0) and the CO-449 telemetry cold-tier/storage work (3.14.0/3.15.0). Re-sequence against `work/co/ROADMAP.md` (canonical ordering) before relying on the table.
 
 ## Wave-aligned releases
 
