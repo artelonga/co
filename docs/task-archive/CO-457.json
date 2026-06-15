@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-457",
+  "title": "Replace co-auto's bespoke usage capture with Claude Code native OTel — fold into the CO-291 OTLP path",
+  "type": "refactor",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-457.md",
+  "branch": "feat/CO-457-replace-co-auto-s-bespoke-usage-capture-",
+  "merge_sha": "ac8ee8ba16a3aabe4a90f0affd7b8f1f08a6d9ee",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/269",
+    "number": 269
+  },
+  "started_at": "2026-06-14T00:00:00Z",
+  "merged_at": "2026-06-15T01:09:55Z",
+  "files_changed": 16,
+  "lines_added": 894,
+  "lines_removed": 752,
+  "labels": [
+    "refactor",
+    "module:co-auto",
+    "module:co-web",
+    "telemetry"
+  ],
+  "changelog_entry": "## CO-457 — Replace co-auto's bespoke usage capture with Claude Code native OTel\n\nFolded agent token-usage telemetry onto the OTLP rails CO-291 already laid,\ndeleting ~400 lines of hand-rolled NDJSON parsing.\n\n- **Producer (co-auto):** removed `dev/co-auto/src/usage.rs` (the 401-line\n  stream-json parser — `SessionUsage`, `parse_stream_json`, `assistant_text`)\n  and its driver (`post_usage_to_co`, `parse_pr_url`, `human_duration`, the\n  `--output-format stream-json --verbose` re-parse). `launch_claude` now turns\n  on Claude Code's **native OTel exporter** via env vars\n  (`CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_METRICS_EXPORTER=otlp`,\n  `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, a 1 s export interval, **delta**\n  temporality, and `OTEL_RESOURCE_ATTRIBUTES` carrying `task.key`,\n  `universe.key`, `model`, `machine`). Opt-in and config-compatible: reuses the\n  existing `CO_USAGE_ENDPOINT` / `CO_SESSION_TOKEN`, so it's a no-op when unset.\n- **Receiver (co-web):** new OTLP/HTTP metrics endpoint `POST /v1/metrics`\n  (`content/usage/otlp.rs`) that decodes an `ExportMetricsServiceRequest`\n  (reusing CO-291's `opentelemetry-proto`/`prost` stack), maps the native\n  `claude_code.token.usage` metric — splitting the `type`\n  (`input`/`output`/`cacheRead`/`cacheCreation`) and `model` attributes — plus\n  `claude_code.cost.usage`, and writes into the **existing** `usage_sessions`\n  ledger. **No migration**: delta temporality means each export is an increment\n  that `usage_summary` SUMs, so the CO-426 dashboard, `/usage/summary`,\n  `/usage/active`, and the CO-427 5h-window downshift keep reading the same\n  table unchanged.\n\n### Why\nClaude Code already emits usage as native OTel metrics, making co-auto's bespoke\nstream-json capture redundant. Moving ingestion onto the OTLP path shrinks the\nsurface (~400 fewer lines) while preserving the queryable `/usage/summary` that\nOTel's push-only model can't answer. Accepted minor losses: `pr_url` only when\nco-auto already knows it, and `cost_usd` may be 0/NULL under keychain auth\n(token counts — what the CO-427 budget math needs — always flow).",
+  "summary": "Contexto O co-auto hoje captura usage por **stream-json** e o re-parseia à mão (`dev/co-auto/src/usage.rs`, **401 linhas** de NDJSON defensivo) antes de reportar ao CO. O Claude Code já **emite usage ",
+  "co_auto_version": "0.1.0"
+}
