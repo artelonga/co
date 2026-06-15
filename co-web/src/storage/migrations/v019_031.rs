@@ -431,6 +431,22 @@ impl Storage {
             // as of state X". The rewind-view behavior (serving entries
             // as of the pinned state) is NOT implemented yet — Phase 7.
             // This migration is just the data layer.
+            //
+            // Self-contained guard (CO-330 invariant): `subscriptions` is CREATEd
+            // in the v20 block above; recreate defensively (no-op where present) so
+            // `ensure_column` never ALTERs a missing table on a DB whose v20 block
+            // pre-dated the table's creation.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS subscriptions (
+                        user_id TEXT NOT NULL,
+                        universe_key TEXT NOT NULL,
+                        subscribed_at TEXT NOT NULL,
+                        PRIMARY KEY (user_id, universe_key),
+                        FOREIGN KEY (universe_key) REFERENCES universes(key) ON DELETE CASCADE
+                    );",
+                )
+                .expect("migration v30: ensure subscriptions base table");
             ensure_column(&self.conn, "subscriptions", "pinned_state", "TEXT")
                 .expect("migration v30: subscriptions.pinned_state column");
 
