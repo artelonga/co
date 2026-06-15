@@ -1,7 +1,10 @@
 # CO — Release Checklist (Wave-Based)
 
 **Versão:** vivo, atualizado por release  
-**URLs:** <https://co-artelonga.fly.dev> (prod) · <https://staging.co.artelonga.com.br> (staging, post-CO-379)  
+**URL:** <https://co.artelonga.com.br> (prod — único alvo obrigatório)  
+**Ambientes e deploy:** ver [`docs/OPERATIONS.md` → "Environments & Deploy"](OPERATIONS.md)
+(fonte única da verdade). Resumo: deploy **prod-direto**; não há UAT; staging
+(`co-artelonga-staging`) é **preview manual opcional**, não um gate.  
 **Cadência:** bi-semanal, quinta-feira 15:00 BRT (corte de PR quarta 23:59 BRT)
 
 Este documento é o gate de cada release. Cada wave consolida múltiplos PRs em UMA tag git semver. A checklist roda antes do `scripts/release-commit.sh`.
@@ -59,7 +62,7 @@ Critérios de pronto (DoD por entregável):
 
 #### Substrate gates
 
-- [ ] **CO-379** Staging Fly app responde 200 em `staging.co.artelonga.com.br/api/health`
+- [ ] **CO-379** _(histórico — staging é preview manual opcional, não gate; ver OPERATIONS.md)_ Staging Fly app `co-artelonga-staging` responde 200 em `/api/health` quando deployado à mão
 - [ ] **CO-365** Backup backend trait + LocalFsBackend gravam snapshot diário em `/data/backups/`
 - [ ] **CO-278-B** `X-RateLimit-Limit` + `X-RateLimit-Remaining` presentes em todas as respostas `/api/v1/*`
 - [ ] **CO-360** `/gestao/resumo` renderiza 4 abas (Resumo / Conteúdo / Usuários / Atividades) a partir de um único endpoint
@@ -94,10 +97,9 @@ Critérios de pronto (DoD por entregável):
 
 #### Identity + contract gates
 
-- [ ] **CO-377** Token de prod aceito em staging (curl test)
-- [ ] **CO-377** Token de staging aceito em prod (curl test)
+- [ ] **CO-377** Token de prod aceito (curl test) — _cross-env com staging só se staging estiver deployado à mão_
 - [ ] **CO-374** Playwright cobre: A → A/B → A/B/C recursão; promoção de A/B a root B; funil discover→register; rotas gerais
-- [ ] **CO-375** Probe de contrato em staging detecta drift; CI bloqueia merge se detectado
+- [ ] **CO-375** Probe de contrato (OpenAPI drift) verde — roda contra localhost/prod, não exige staging
 - [ ] **CO-376** PR com migração nova passa por snapshot+migrate+smoke antes de mergeavel
 
 ---
@@ -131,11 +133,10 @@ Critérios de pronto (DoD por entregável):
 
 ### 2. Cadastro e login
 
-- [ ] Magic-code chega via e-mail (ou log em staging)
+- [ ] Magic-code chega via e-mail (ou log do servidor)
 - [ ] Verificação de código avança signup-source lead para `in_progress` (CO-370)
 - [ ] Password login funciona para admin (yuri)
-- [ ] Google OAuth funciona em prod + staging
-- [ ] Cross-env: token de prod válido em staging (CO-377)
+- [ ] Google OAuth funciona em prod
 - [ ] Logout limpa cookie + volta para anônimo
 
 ### 3. Universos
@@ -188,7 +189,7 @@ Critérios de pronto (DoD por entregável):
 - [ ] Privacidade: paths `noindex` agrupados em `🔒 (private)` (CO-378)
 - [ ] `?include_private=true` requer admin auth
 - [ ] Atividades log (CO-361) mostra eventos recentes
-- [ ] Schema versions visível: "DB schema v62 / app v3.0.0"
+- [ ] Schema versions visível: "DB schema vN / app vX.Y.Z" (ex.: DB schema v88 / app v3.15.0 — número de schema vem de `co-web/src/storage/migrations/`)
 
 ### 9. Backup + restore
 
@@ -199,7 +200,7 @@ Critérios de pronto (DoD por entregável):
 
 ### 10. Segurança + privacidade
 
-- [ ] TLS válido em ambos prod + staging
+- [ ] TLS válido em prod
 - [ ] HSTS habilitado
 - [ ] `X-RateLimit-*` headers em todas as `/api/v1/*` (CO-278-B)
 - [ ] 61 requests/min anônimo → 429 (CO-278-B)

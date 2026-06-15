@@ -21,9 +21,15 @@ PR opened
  │
  └── Merged to main
       │
-      ├── Step 7: Deploy to staging    (staging-deploy.yml)
-      ├── Step 8: Contract probe       (staging-suite.yml)
-      └── Step 9: E2E staging suite    (staging-suite.yml)
+      ├── Step 7: Deploy to staging    (staging-deploy.yml — NO-OP by design*)
+      ├── Step 8: Contract probe       (OpenAPI drift, localhost/prod)
+      └── Step 9: E2E suite            (CO-421 prod-usability, read-only)
+
+  * staging-deploy.yml is a deliberate no-op: FLY_API_TOKEN is intentionally not
+    a repo secret, so the deploy is skipped (exits green). Staging
+    (co-artelonga-staging) is a MANUAL, OPTIONAL preview, not a release gate, and
+    there is no UAT. The real release gate is the CO-421 read-only prod-usability
+    suite + scripts/smoke-prod.sh — see docs/OPERATIONS.md.
 
 Thursday 14:00 BRT
  │

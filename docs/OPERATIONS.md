@@ -2,35 +2,39 @@
 
 Runbook for deploying, verifying, and recovering the CO platform.
 
-## Environments
+## Environments & Deploy
 
-| Env | App | URL |
-|-----|-----|-----|
-| **Production** | `co-artelonga` | `https://co.artelonga.com.br` |
-| **UAT** | `co-artelonga-uat` | `https://co-artelonga-uat.fly.dev` |
+> **This section is the single source of truth** for environments and the deploy
+> flow. CLAUDE.md, `docs/ci-cd.md`, `docs/delivery-pipeline.md`, and
+> `docs/release-checklist.md` reference it rather than restating it.
 
-**Deploy order: always UAT first.** Never push to production without a passing UAT smoke test.
+| Env | App | URL | Role |
+|-----|-----|-----|------|
+| **Production** | `co-artelonga` (Fly `gru`) | `https://co.artelonga.com.br` (`co-artelonga.fly.dev`) | The only **required** deploy target. Public-facing. |
+| **Staging** (optional) | `co-artelonga-staging` | `https://co-artelonga-staging.fly.dev` | **Manual preview only**, deployed by hand via `flyctl deploy --config fly.staging.toml`. NOT a release gate. The `staging-deploy.yml` workflow is a deliberate no-op — `FLY_API_TOKEN` is intentionally not a repo secret. |
+
+**There is no UAT environment** (decommissioned). `fly.uat.toml` is dead — do not
+deploy it. Deploy is **prod-direct**: there is no "UAT-first" step. The release
+gate is the read-only CO-421 prod-usability suite plus `scripts/smoke-prod.sh`,
+not a separate environment. See "Deploy procedure" below.
 
 ---
 
 ## Smoke test post-deploy
 
-After every deploy, run the smoke script to verify invariants.
+After every prod deploy, run the smoke script to verify invariants.
 
 ```bash
-# UAT (run after flyctl deploy --config fly.uat.toml)
-bash scripts/smoke-uat.sh
-
 # Production (run after flyctl deploy)
 bash scripts/smoke-prod.sh
 ```
 
-Both scripts exit 0 on full pass, 1 on any failure. Output is grep-friendly:
+The script exits 0 on full pass, 1 on any failure. Output is grep-friendly:
 
 ```
 Smoke test: https://co.artelonga.com.br
 
-✓ [01] /api/health → 200 (version 1.21.2)
+✓ [01] /api/health → 200 (version 3.15.0)
 ✓ [02] /api/health/deep → 200 (db=ok disk=ok)
 ✓ [03] /api/v1/universes/template name=CO
 ✓ [04] /api/v1/universes/tempo visibility=public-static
@@ -58,7 +62,7 @@ On failure:
 | 04 | `GET /api/v1/universes/{key}/entries?type=event` | Event counts pinned at 21/26/28 |
 | 05 | `GET /api/v1/themes/modern` | Returns `text/css` containing `--accent: #6366f1` |
 | 06 | `GET /`, `/app.js`, `/shared/timeline.html` | Static assets reachable with correct content-types |
-| 07 | `GET /sw.js` | Body contains the current `CACHE_NAME` (`co-v3-network-first`) |
+| 07 | `GET /sw.js` | Body contains the current `CACHE_NAME` (`co-v6-offline`) |
 | 08 | `POST /api/v1/auth/password-login` (bogus) | Returns 401, not 5xx — proves auth is reachable |
 | 09 | `GET /api/v1/universes/template/entries` | `total >= 14` template entries present |
 | 10 | `GET /favicon.svg` | Returns 200 |
@@ -79,7 +83,7 @@ Event counts for the timeline trio are pinned at the top of each smoke script:
 EXPECTED_TEMPO_EVENTS=21
 EXPECTED_HUMANITY_EVENTS=26
 EXPECTED_UNIVERSO_EVENTS=28
-EXPECTED_SW_CACHE_NAME='co-v3-network-first'
+EXPECTED_SW_CACHE_NAME='co-v6-offline'
 ```
 
 When the seed JSON is edited (events added/removed), update the smoke script **in the same commit**.
@@ -87,7 +91,8 @@ When the seed JSON is edited (events added/removed), update the smoke script **i
 ### Wave 2 regression gate (CO-138)
 
 ```bash
-BASE_URL=https://co-artelonga-uat.fly.dev npx playwright test e2e/wave-2/ --project=chromium-desktop
+# Against localhost (default) or prod via BASE_URL — read-only suite
+BASE_URL=https://co.artelonga.com.br npx playwright test e2e/wave-2/ --project=chromium-desktop
 ```
 
 Covers: CO-98 sidebar tree nesting, CO-107 Mermaid SVG rendering, CO-99 onboarding banner lifecycle.
@@ -127,28 +132,31 @@ from the old `/co/co-dev/telemetria` in CO-142 Phase A).
 
 ---
 
-## Deploy procedure
+## Deploy procedure (prod-direct, canonical)
+
+There is no UAT step. The release gate is the read-only CO-421 prod-usability
+suite plus the disk gate, then prod deploy, then the prod smoke test.
 
 ```bash
-# 1. Run local tests
-cargo test -p co-web
-cargo clippy -p co-web -- -D warnings
+# 1. Local checks
+cargo test
+cargo clippy -- -D warnings
 
-# 2. Deploy to UAT
-flyctl deploy --config fly.uat.toml
+# 2. CO-421 read-only Playwright prod-usability gate (anonymous; never mutates prod)
+cd co-web && BASE_URL=https://co.artelonga.com.br \
+  npx playwright test e2e/prod-usability.spec.ts --project=desktop-chromium --workers=2
 
-# 3. Smoke-test UAT — gate on exit 0
-bash scripts/smoke-uat.sh || { echo "UAT smoke FAILED — abort"; exit 1; }
-
-# 4. Pre-deploy gate — blocks if prod /data is too full for a safe migration (CO-446)
+# 3. Pre-deploy gate — CO-446 disk check + a fresh green local pipeline report
 bash scripts/pipeline-deploy-gate.sh || { echo "deploy gate FAILED — abort"; exit 1; }
 
-# 5. Deploy to production
+# 4. Deploy to production
 flyctl deploy
 
-# 6. Smoke-test production
+# 5. Smoke-test production
 bash scripts/smoke-prod.sh
 ```
+
+Optional manual staging preview (not a gate): `flyctl deploy --config fly.staging.toml`.
 
 > **CO-446 — always gate disk before a migration deploy.** A release that adds a
 > migration writes a `schema_version` row at boot. On a near-full `/data` that
@@ -208,24 +216,16 @@ crash-loop continues. This bit us on 2026-06-13 — the live fix was
 
 ---
 
-## UAT credentials
+## Admin login in production (CO-85)
 
-| Field | Value |
-|-------|-------|
-| Email | `yuri@uat.local` |
-| Password | `uat` |
-| Endpoint | `POST /api/v1/auth/uat-login` |
-
-The `uat-login` endpoint returns 404 in production.
-
----
-
-## UAT database reset
+Admin users with a `password_hash` log in via `POST /api/v1/auth/password-login`
+in any environment. There is no UAT login.
 
 ```bash
-flyctl ssh console -a co-artelonga-uat -C "touch /data/uat-reset.flag"
-flyctl machine restart -a co-artelonga-uat
-flyctl logs -a co-artelonga-uat --no-tail | grep "UAT: reset"
+curl -sc cookies.txt -X POST https://co-artelonga.fly.dev/api/v1/auth/password-login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"yuri@artelonga.com.br","password":"<your-password>"}'
+# → 200, Set-Cookie: session=<JWT>
 ```
 
 ---
@@ -235,9 +235,6 @@ flyctl logs -a co-artelonga-uat --no-tail | grep "UAT: reset"
 ```bash
 # Production
 flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a co-artelonga
-
-# UAT
-flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a co-artelonga-uat
 ```
 
 ---
@@ -246,7 +243,6 @@ flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a co-artelonga-uat
 
 ```bash
 flyctl logs -a co-artelonga          # Production live
-flyctl logs -a co-artelonga-uat      # UAT live
 flyctl status -a co-artelonga        # Machine state
 flyctl ssh console -a co-artelonga   # Shell access
 ```
@@ -283,15 +279,15 @@ APP=co-artelonga BUCKET=artelonga-co-backups ./scripts/backup-prod.sh
 ### Restoring a backup
 
 ```bash
-# Restore from S3 into UAT (safe — no prod guard triggered).
-BUCKET=artelonga-co-backups ./scripts/restore.sh 20260501-031700 co-artelonga-uat
+# Restore from S3 into staging (safe — no prod guard triggered).
+BUCKET=artelonga-co-backups ./scripts/restore.sh 20260501-031700 co-artelonga-staging
 
 # Restore from S3 into PROD (requires explicit confirmation flag).
 BUCKET=artelonga-co-backups ./scripts/restore.sh 20260501-031700 co-artelonga \
   --yes-i-want-to-overwrite-prod
 
 # Restore a local .db file (used by restore-drill.sh).
-./scripts/restore.sh backups/co-prod-20260501_031700.db co-artelonga-uat
+./scripts/restore.sh backups/co-prod-20260501_031700.db co-artelonga-staging
 ```
 
 The script refuses to target `co-artelonga` (production) without the explicit
@@ -345,7 +341,7 @@ A scheduled agent handles this — see the `schedule` entry in `.claude/settings
 1. Run `infra/s3/setup.sh` to create the bucket and apply the lifecycle policy.
 2. Generate a dedicated IAM user (PutObject + GetObject only); store creds in cron app secrets.
 3. Run `scripts/backup-prod.sh` manually; verify both artifacts appear in S3.
-4. Run `scripts/restore.sh <date> co-artelonga-uat`; smoke-test UAT.
+4. Run `scripts/restore.sh <date> co-artelonga-staging`; smoke-test staging.
 5. Deploy the cron app (Option A) or enable the GH Actions workflow (Option B).
 6. After the first automated run, confirm the new objects appear in S3.
 
@@ -369,7 +365,7 @@ Each universe is a self-contained `.tar.zst` bundle:
 ```
 <universe_key>/
 ├── manifest.json    — provenance: source path, commit, sha256, schema version
-├── co.db            — SQLite: universe row (+ entries for prod/uat mode)
+├── co.db            — SQLite: universe row (+ entries for prod mode)
 ├── seed.sql         — one-shot universe registration (local mode only)
 ├── entries/         — full markdown source tree
 └── README.md        — human-readable provenance
@@ -402,16 +398,12 @@ bash scripts/backup-to-disk.sh /Volumes/Backup --from local
 
 # Archive from deployed prod state (requires flyctl + prod access)
 bash scripts/backup-to-disk.sh /Volumes/Backup --from prod
-
-# Archive from UAT
-bash scripts/backup-to-disk.sh /Volumes/Backup --from uat
 ```
 
 | Mode | What gets archived |
 |------|-------------------|
 | `--from local` | Local markdown files only; synthetic co.db; useful before first deploy |
 | `--from prod` | Prod's deployed SQLite + markdown files via `flyctl ssh` |
-| `--from uat` | UAT's deployed state |
 
 ### Restoring from an HD archive
 

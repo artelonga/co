@@ -11,7 +11,7 @@ CO-398 introduced a **delivery pipeline** for project universes: task status is 
 
 However the statuses are spelled, the pipeline is always the same three gestures, in this order:
 
-1. **Review on localhost.** The change is seen *running* — `co serve`, a Quartz preview, or UAT — not just read as a diff. This is why a `review` card without a `preview_url` is signalled as incomplete.
+1. **Review on localhost.** The change is seen *running* — `co serve`, a Quartz preview, or an optional manual staging preview (`co-artelonga-staging`) — not just read as a diff. This is why a `review` card without a `preview_url` is signalled as incomplete.
 2. **Approve.** The stakeholder says yes to what they saw. Approval is a human gate: automation fills statuses, it never grants approval.
 3. **Merge.** The merge is the durable record of that approval — and the only thing that may trigger a production deploy. Prod follows merge, never precedes it.
 
@@ -21,9 +21,9 @@ CO speaks two version-control vocabularies — traditional git (code universes, 
 |---|---|---|
 | Open work | branch `feat/CO-<n>-…` | `jj new` — the working copy is itself a change, snapshotted automatically |
 | Iterate | conventional commits, pushed | `jj commit -m "tipo(escopo): …"` — states on the universe |
-| **Review on localhost** | PR opened (`CO-<n>` in title) + reviewer runs it (`co serve` / UAT), `preview_url` attached | proposal (proposta) open + stakeholder sees it served locally (`co serve` / `co construir` preview) |
+| **Review on localhost** | PR opened (`CO-<n>` in title) + reviewer runs it (`co serve` / optional staging preview), `preview_url` attached | proposal (proposta) open + stakeholder sees it served locally (`co serve` / `co construir` preview) |
 | **Approve** | PR approval, given after seeing the preview | stakeholder approves the proposta (visitors go through suggest/review) |
-| **Merge ⇒ deploy** | PR merged = the approval record; UAT→prod deploy follows | mesclar / `jj bookmark set main -r @-` + `jj git push`; then `co push` or `construir` publishes |
+| **Merge ⇒ deploy** | PR merged = the approval record; prod-direct deploy follows | mesclar / `jj bookmark set main -r @-` + `jj git push`; then `co push` or `construir` publishes |
 
 ### Example — a code change, the git way
 
@@ -31,7 +31,7 @@ CO speaks two version-control vocabularies — traditional git (code universes, 
 git checkout -b feat/CO-412-novo-filtro     # card → started
 # … TDD commits …                            # card → in_progress
 gh pr create --title "feat: novo filtro (CO-412)"   # card → review
-co serve                                     # reviewer sees it RUN on localhost
+co serve                                     # reviewer sees it RUN on localhost (or optional staging preview)
 # approval happens here, looking at the running thing
 scripts/safe-merge-pr.sh artelonga/co <pr>   # card → done ⇒ deploy
 ```
@@ -131,4 +131,4 @@ Response example:
 | `task.status_changed` | Any status transition (manual or automated) | `{path, title, from, to, trigger}` |
 | `deploy.triggered` | When a task reaches `done` | `{entry_path, universe_key, trigger}` |
 
-Subscribe to `deploy.triggered` to hook CO-395 `construir` (content universes) or trigger a UAT→prod deploy for code universes.
+Subscribe to `deploy.triggered` to hook CO-395 `construir` (content universes) or trigger a prod-direct deploy for code universes.

@@ -27,8 +27,32 @@ const OPENAPI_OUT = join(WEB_DIR, 'openapi.yaml');
 const COMPONENTS_PATH = join(WEB_DIR, 'openapi-components.yaml');
 const SRC_DIR = join(WEB_DIR, 'src');
 
+const CARGO_TOML_PATH = join(REPO_ROOT, 'Cargo.toml');
+
 const CHECK_MODE = process.argv.includes('--check');
 const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
+
+// ---------------------------------------------------------------------------
+// Workspace version — read from Cargo.toml ([workspace.package] or [package])
+// ---------------------------------------------------------------------------
+
+function readWorkspaceVersion(): string {
+  const toml = readFileSync(CARGO_TOML_PATH, 'utf8');
+  let section = '';
+  for (const raw of toml.split('\n')) {
+    const line = raw.trim();
+    const sec = line.match(/^\[([^\]]+)\]/);
+    if (sec) {
+      section = sec[1];
+      continue;
+    }
+    if (section === 'workspace.package' || section === 'package') {
+      const m = line.match(/^version\s*=\s*"([^"]+)"/);
+      if (m) return m[1];
+    }
+  }
+  throw new Error('Could not read version from Cargo.toml');
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -333,10 +357,64 @@ const METHOD_ORDER: Record<string, number> = {
   GET: 0, POST: 1, PUT: 2, PATCH: 3, DELETE: 4,
 };
 
+// Map a catalog auth tag to a list of acceptable security schemes. Each inner
+// array is one OpenAPI "alternative" (any one satisfies the operation). An empty
+// outer array means no security (anonymous). Schemes named here MUST exist in
+// openapi-components.yaml securitySchemes.
+function authToSchemes(auth: string): string[][] {
+  const a = (auth || '').trim().toLowerCase();
+
+  // Anonymous / no-auth variants
+  if (a === '' || a === '-' || a === 'anon' || a === 'anon (in-handler)') return [];
+
+  // Server-to-server shared secret (e.g. log drains)
+  if (a.startsWith('shared-secret')) return [['sharedSecret']];
+
+  // Scoped / read tokens (telemetry:read, chat:read, *:read, etc.) — JWT or API token
+  if (a.endsWith(':read') || a.includes(':read')) return [['bearerJWT'], ['apiToken']];
+
+  // JWT cookie OR long-lived API token (vault + blob)
+  if (a === 'token-or-jwt' || a === 'token') return [['bearerJWT'], ['apiToken']];
+
+  // OTLP / bearer metrics receiver
+  if (a.startsWith('bearer')) return [['bearerJWT']];
+
+  // owner / visibility / admin gates — session cookie or JWT
+  if (
+    a.startsWith('owner') ||
+    a.startsWith('visibility') ||
+    a.startsWith('admin')
+  ) {
+    return [['sessionCookie'], ['bearerJWT']];
+  }
+
+  // Generic authenticated — session cookie or JWT (alternatives)
+  // Covers 'authed' and any 'authed (...)' / 'authed-if-private' variants.
+  if (a.startsWith('authed')) return [['sessionCookie'], ['bearerJWT']];
+
+  // Mixed anon/authed tags (e.g. 'anon-if-public, authed-if-private') still
+  // accept an authenticated caller.
+  if (a.includes('authed')) return [['sessionCookie'], ['bearerJWT']];
+
+  // Unknown / bridge / HMAC webhook tags: leave unsecured rather than guess.
+  return [];
+}
+
 function authToSecurity(auth: string): string {
-  if (!auth || auth === 'anon' || auth === '-' || auth === 'anon (in-handler)') return '';
-  if (auth.startsWith('shared-secret')) return '      security:\n        - sharedSecret: []\n';
-  return '      security:\n        - sessionCookie: []\n';
+  const schemes = authToSchemes(auth);
+  if (schemes.length === 0) return '';
+  const lines = ['      security:'];
+  for (const alt of schemes) {
+    if (alt.length === 1) {
+      lines.push(`        - ${alt[0]}: []`);
+    } else {
+      // Multiple schemes required together (AND) — first key with "- ", rest aligned
+      alt.forEach((s, i) => {
+        lines.push(`        ${i === 0 ? '-' : ' '} ${s}: []`);
+      });
+    }
+  }
+  return lines.join('\n') + '\n';
 }
 
 function pathParams(path: string): string {
@@ -348,6 +426,52 @@ function pathParams(path: string): string {
   );
   return `      parameters:\n${lines.join('\n')}\n`;
 }
+
+// Sidecar request/response schema wiring. Keyed by "METHOD /absolute/path"
+// (exactly as the path appears in the catalog). Each value names component
+// schemas that exist in openapi-components.yaml. `status` overrides the success
+// code (default "200"). The catalog stays the single source of truth for which
+// routes exist; this map only enriches them with typed bodies — unmapped ops
+// keep the bare "200 OK".
+const SCHEMA_MAP: Record<string, { req?: string; resp?: string; status?: string }> = {
+  // --- Health ---
+  'GET /api/health': { resp: 'HealthResponse' },
+  'GET /api/v1/health': { resp: 'HealthResponse' },
+
+  // --- Auth ---
+  'POST /api/v1/auth/login': { req: 'LoginUsuario', resp: 'LoginResponse' },
+  'POST /api/v1/auth/password-login': { req: 'LoginUsuario', resp: 'LoginResponse' },
+  'POST /api/v1/auth/signup': { req: 'CriarUsuario', resp: 'LoginResponse', status: '201' },
+  'GET /api/v1/auth/me': { resp: 'Usuario' },
+
+  // --- Board (legacy) tasks ---
+  'GET /api/projects/{key}/tasks/{id}': { resp: 'Task' },
+  'POST /api/projects/{key}/tasks': { req: 'CreateTask', resp: 'Task', status: '201' },
+
+  // --- Gestão content CRUD ---
+  'POST /api/v1/gestao/eventos': { req: 'CriarEvento', resp: 'Evento', status: '201' },
+  'PUT /api/v1/gestao/eventos/{id}': { req: 'AtualizarEvento', resp: 'Evento' },
+  'POST /api/v1/gestao/validar': { resp: 'ValidarResponse' },
+  'POST /api/v1/gestao/publicar': { req: 'PublicarRequest', resp: 'PublicarResponse' },
+  'GET /api/v1/gestao/manifesto': { resp: 'Manifest' },
+
+  // --- Quilombo ---
+  'POST /api/v1/quilombo/auth/login': { req: 'LoginUsuario', resp: 'LoginResponse' },
+  'POST /api/v1/quilombo/auth/cadastro': { req: 'CriarUsuario', resp: 'LoginResponse', status: '201' },
+  'GET /api/v1/quilombo/perfil': { resp: 'Usuario' },
+  'PUT /api/v1/quilombo/perfil': { req: 'AtualizarPerfil', resp: 'Usuario' },
+  'POST /api/v1/quilombo/mensagens': { req: 'CriarMensagem', resp: 'Mensagem', status: '201' },
+  'POST /api/v1/quilombo/missoes/criar': { req: 'CriarMissao', resp: 'Missao', status: '201' },
+  'PUT /api/v1/quilombo/missoes/{id}/participacoes/{uid}': {
+    req: 'AtualizarParticipacao',
+    resp: 'Participacao',
+  },
+  'POST /api/v1/quilombo/eventos/criar': { req: 'CriarEvento', resp: 'Evento', status: '201' },
+  'PUT /api/v1/quilombo/eventos/{id}/editar': { req: 'AtualizarEvento', resp: 'Evento' },
+  'POST /api/v1/quilombo/comentarios': { req: 'CriarComentario', resp: 'Comentario', status: '201' },
+};
+
+const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 
 function buildPathsYaml(catalog: CatalogEntry[]): string {
   const byPath = new Map<string, CatalogEntry[]>();
@@ -377,9 +501,38 @@ function buildPathsYaml(catalog: CatalogEntry[]): string {
       if (security) lines.push(security.trimEnd());
       const params = pathParams(path);
       if (params) lines.push(params.trimEnd());
-      lines.push('      responses:');
-      lines.push('        "200":');
-      lines.push('          description: OK');
+
+      const mapping = SCHEMA_MAP[`${op.method} ${path}`];
+      if (mapping) {
+        if (mapping.req && BODY_METHODS.has(op.method)) {
+          lines.push('      requestBody:');
+          lines.push('        required: true');
+          lines.push('        content:');
+          lines.push('          application/json:');
+          lines.push('            schema:');
+          lines.push(`              $ref: "#/components/schemas/${mapping.req}"`);
+        }
+        const status = mapping.status ?? '200';
+        lines.push('      responses:');
+        lines.push(`        "${status}":`);
+        lines.push('          description: OK');
+        if (mapping.resp) {
+          lines.push('          content:');
+          lines.push('            application/json:');
+          lines.push('              schema:');
+          lines.push(`                $ref: "#/components/schemas/${mapping.resp}"`);
+        }
+        lines.push('        default:');
+        lines.push('          description: Error');
+        lines.push('          content:');
+        lines.push('            application/json:');
+        lines.push('              schema:');
+        lines.push('                $ref: "#/components/schemas/Error"');
+      } else {
+        lines.push('      responses:');
+        lines.push('        "200":');
+        lines.push('          description: OK');
+      }
     }
   }
   return lines.join('\n');
@@ -404,7 +557,8 @@ function buildTagsYaml(catalog: CatalogEntry[]): string {
   return lines.join('\n');
 }
 
-const OPENAPI_HEADER = `\
+function openApiHeader(version: string): string {
+  return `\
 openapi: 3.1.0
 info:
   title: CO Web API
@@ -428,7 +582,7 @@ info:
     \`Accept: application/vnd.co.v1+json\`) para receber o corpo embrulhado no
     schema \`Envelope\` (\`{ data, meta, errors }\`). Sem o marcador o corpo é
     idêntico ao formato legado; respostas não-JSON nunca são embrulhadas.
-  version: "2.40.0"
+  version: "${version}"
   contact:
     name: Arte Longa
     email: yuri@artelonga.com.br
@@ -441,11 +595,12 @@ servers:
   - url: http://localhost:8742
     description: Local
 `;
+}
 
-function buildOpenApi(catalog: CatalogEntry[], componentsYaml: string): string {
+function buildOpenApi(catalog: CatalogEntry[], componentsYaml: string, version: string): string {
   const tags = buildTagsYaml(catalog);
   const paths = buildPathsYaml(catalog);
-  return `${OPENAPI_HEADER}\n${tags}\n\n${paths}\n${componentsYaml ? '\n' + componentsYaml : ''}`;
+  return `${openApiHeader(version)}\n${tags}\n\n${paths}\n${componentsYaml ? '\n' + componentsYaml : ''}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -467,7 +622,9 @@ function main() {
     componentsYaml = readFileSync(COMPONENTS_PATH, 'utf8');
   }
 
-  const generated = buildOpenApi(catalog, componentsYaml);
+  const version = readWorkspaceVersion();
+  console.log(`[generate-openapi]   workspace version: ${version}`);
+  const generated = buildOpenApi(catalog, componentsYaml, version);
   const drift = detectDrift(catalog, codeRoutes, generated);
 
   let hasDrift = false;

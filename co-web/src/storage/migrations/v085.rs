@@ -27,6 +27,32 @@ impl Storage {
     /// single-universe semantics.
     pub(super) fn migrate_v085(&mut self, current_version: i64) {
         if current_version < 85 {
+            // Self-contained guard (CO-330 invariant): `workspace_states` is only
+            // CREATEd inside v70's `if current_version < 70` block, which a DB
+            // already past v70 never re-runs — so `ensure_column` here would try to
+            // ALTER a possibly-missing table ("no such table: workspace_states").
+            // Recreate it defensively (no-op where it exists) before altering, the
+            // same self-containment fix applied to v088/jobs after the prod outage.
+            self.conn
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS workspace_states (
+                       id             TEXT PRIMARY KEY,
+                       universe_key   TEXT NOT NULL,
+                       workspace_slug TEXT NOT NULL,
+                       user_id        TEXT NOT NULL,
+                       layout_json    TEXT NOT NULL DEFAULT '{\"nodes\":[],\"edges\":[]}',
+                       is_public      INTEGER NOT NULL DEFAULT 0,
+                       share_token    TEXT,
+                       created_at     TEXT NOT NULL,
+                       updated_at     TEXT NOT NULL,
+                       UNIQUE (universe_key, workspace_slug, user_id)
+                     );
+                     CREATE INDEX IF NOT EXISTS idx_workspace_states_user
+                       ON workspace_states (user_id);
+                     CREATE INDEX IF NOT EXISTS idx_workspace_states_token
+                       ON workspace_states (share_token) WHERE share_token IS NOT NULL;",
+                )
+                .expect("migration v85: ensure workspace_states base table");
             ensure_column(
                 &self.conn,
                 "workspace_states",
@@ -97,5 +123,30 @@ mod tests {
             )
             .unwrap();
         assert_eq!(scope, "a,b");
+    }
+
+    #[test]
+    fn recreates_workspace_states_when_missing() {
+        // CO-330 regression: workspace_states' only CREATE is gated behind v70, so
+        // a DB past v70 without the table must still migrate cleanly at v85.
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(dir.path());
+        storage
+            .conn()
+            .execute_batch("DROP TABLE workspace_states;")
+            .expect("drop workspace_states to simulate prod");
+
+        storage.migrate_v085(84); // current_version < 85 → must recreate, then alter
+
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO workspace_states \
+                 (id, universe_key, workspace_slug, user_id, layout_json, is_public, scope, \
+                  created_at, updated_at) \
+                 VALUES ('r1', 'u', 'default', 'usr', '{}', 0, '*', 'now', 'now')",
+                [],
+            )
+            .expect("workspace_states must exist with scope after v85");
     }
 }

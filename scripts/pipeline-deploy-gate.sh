@@ -2,10 +2,14 @@
 #
 # pipeline-deploy-gate.sh — CO-88d pre-prod-deploy gate.
 #
-# Blocks a production deploy unless the latest UAT pipeline report is:
+# Blocks a production deploy unless the latest pipeline report is:
 #   1. present and younger than 24h,
 #   2. free of failed matrix cells (no decode/round-trip errors),
 #   3. free of regressions beyond 20% vs the previous run.
+#
+# NOTE: UAT was decommissioned (the co-artelonga-uat Fly app no longer exists).
+# The report is produced from the local path (`--paths local`), optionally with a
+# prod read-only smoke (`--paths local,prod`). There is no UAT path anymore.
 #
 # CO-446: also checks prod `/data` free space before a deploy. A deploy that
 # adds a migration writes a `schema_version` row at boot; on a near-full volume
@@ -13,7 +17,7 @@
 # 2026-06-13 outages). The gate blocks when `/data` is > DISK_MAX_PCT% full.
 #
 # On a passing gate (and when invoked with `--smoke`), runs the prod read-only
-# smoke (Path D) and appends its report alongside the UAT one.
+# smoke (Path D) and appends its report alongside the local one.
 #
 # Usage:
 #   scripts/pipeline-deploy-gate.sh                 # gate report + prod disk
@@ -95,7 +99,11 @@ fi
 report="$(ls -t "$REPORTS_DIR"/co-pipeline-report-*.yaml 2>/dev/null | head -1 || true)"
 if [ -z "$report" ]; then
   echo "GATE FAIL: no pipeline report found in $REPORTS_DIR" >&2
-  echo "Run: cargo run -p co-pipeline -- run --paths local,uat --uat-base \$UAT_BASE" >&2
+  # UAT was decommissioned (no co-artelonga-uat app), so the report is produced
+  # from the local path (optionally a prod read-only smoke). Do NOT ask for a UAT
+  # report that can never be generated.
+  echo "Run: cargo run -p co-pipeline -- run --paths local --out dev/reports" >&2
+  echo "  (or add a prod smoke: --paths local,prod --prod-base $PROD_BASE)" >&2
   exit 1
 fi
 echo "Gating on: $report"
@@ -109,7 +117,7 @@ if ! cargo run -q -p co-pipeline -- "${gate_args[@]}"; then
   echo "GATE FAIL: pipeline gate blocked the deploy" >&2
   exit 1
 fi
-echo "GATE: pass — UAT pipeline report is green, fresh, and within tolerance."
+echo "GATE: pass — pipeline report is green, fresh, and within tolerance."
 
 if [ "$run_smoke" = true ]; then
   echo "Running prod read-only smoke (Path D) against $PROD_BASE ..."
