@@ -288,7 +288,12 @@ jobs:
               # pre-existing SQL string-building is falsely blocked (CWE-89
               # false positive on unchanged code; CO-406 hit this on
               # universe_pool.rs pragma_table_info queries it never wrote).
-              ADDED=$(git diff "origin/main...HEAD" -- "$file" 2>/dev/null | grep '^+' | grep -v '^+++')
+              #
+              # CO-457: trailing `|| true` — a deletion-only changed file (lines
+              # removed, none added, e.g. dropping a `mod x;`) makes the final grep
+              # exit 1, which under `set -e` silently aborted the whole gate. A file
+              # with no added lines simply has nothing to scan, so empty is correct.
+              ADDED=$(git diff "origin/main...HEAD" -- "$file" 2>/dev/null | grep '^+' | grep -v '^+++' || true)
               # CWE-89 (SQL injection) — REQUIRES SQL CONTEXT (CO-447).
               #
               # Fires only when a `format!` string opens with a SQL verb
