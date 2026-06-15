@@ -4994,6 +4994,15 @@ paths:
       responses:
         "200":
           description: OK
+  /v1/metrics:
+    post:
+      tags: ["usage"]
+      summary: "OTLP/HTTP metrics receiver — ingests Claude Code native `claude_code.*` telemetry into `usage_sessions` (CO-457)"
+      security:
+        - sessionCookie: []
+      responses:
+        "200":
+          description: OK
   /{slug}/review:
     get:
       tags: ["suggest/review pages"]

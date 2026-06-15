@@ -613,6 +613,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
                     crate::auth::require_auth_with_token,
                 )),
             )
+            // CO-457: OTLP metrics receiver — Claude Code native telemetry lands
+            // at the standard `/v1/metrics` root path (no /api prefix), folding
+            // `claude_code.*` into the same usage_sessions ledger. Self-auths via
+            // the OTLP bearer header, so no auth layer here.
+            .merge(crate::usage_otlp::router())
             // CO-453: public telemetry/analytics API (CO-278-E). Read-only;
             // each handler self-gates via `Scoped<TelemetryRead>` (CO-448
             // `telemetry:read`), so no auth middleware layer is needed here.

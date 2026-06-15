@@ -1713,6 +1713,7 @@ dependencies = [
  "nix",
  "opentelemetry",
  "opentelemetry-otlp",
+ "opentelemetry-proto",
  "opentelemetry_sdk",
  "p256",
  "parking_lot",
