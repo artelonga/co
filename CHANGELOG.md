@@ -5,6 +5,191 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.0] — 2026-06-14 — Telemetry archival, job queue & native OTel [--ignore-dod override]
+
+## CO-330 — Fix migration v51 ordering: `remote_url` written before the column exists
+
+A 2026-06-14 hotfix (`df79d6a`, "remote_url for quilomboaraucaria content cloning")
+added `remote_url=…, remote_ref=…` to the **v51** universe→repo backfill. But those
+columns are only added at **v56** (CO-337). On production the column already existed
+(the DB was past v56), so the write succeeded — but any *fresh* sequential migration
+(UAT reset, anonymous clone, every `Storage::new` in tests) died at v51 with
+`no such column: remote_url`, which the CO-446 guard escalates to a `FATAL` process
+abort. This surfaced as the `cargo test -p co-web --lib security` binary "exiting
+abnormally" (the `pbi_backlogger` tests build a fresh DB), failing the security-audit
+gate on every PR.
+
+The fix keeps v51 writing only the columns it owns (`local_repo_path`,
+`content_subdirs`) and moves the `remote_url`/`remote_ref` backfill to *after* the
+v56 columns are guaranteed to exist, idempotent via `WHERE … remote_url IS NULL`.
+
+### Why
+Migration steps must never reference a column added by a later step — a fresh
+top-to-bottom migration has to succeed, not just an already-advanced production DB.
+
+## CO-449 — Telemetry cold-tier archival to Parquet — keep all data, shrink the live meta.db
+
+The `meta.db` OLTP database is dominated by `telemetry_events` (append-only,
+high-volume — 11 GB of a 20 GB volume at 71% full in prod, 2026-06-14). The owner
+decision is **keep 100% of the telemetry** (all of it is relevant) but move the
+**cold window** out of SQLite into a columnar, compressed, still-queryable format.
+
+This adds an idempotent, verify-before-delete archival job:
+
+- **Export** — events in any month strictly older than the hot window
+  (`CO_TELEMETRY_HOT_DAYS`, default 90d) are exported, oldest month first, to
+  **Parquet (zstd)** partitioned as `telemetry-archive/year=YYYY/month=MM/part-<hash>.parquet`.
+  The Parquet schema mirrors `telemetry_events` (CO-46 columns + CO-178 geo) and is
+  read directly by DuckDB (`read_parquet('…/telemetry/**/*.parquet')`).
+- **Verify before delete** — the job only deletes a month after the Parquet file
+  exists and its footer row count equals the SQLite count for that month; it also
+  records a sha256. A mismatch leaves the rows untouched in `meta.db`.
+- **Shrink without a 2× peak** — after each month's delete, `PRAGMA incremental_vacuum`
+  returns freed pages to the OS without the full-`VACUUM` rebuild prod can't fit
+  (~5.6 GB free for an 11 GB DB). Migration **v087** opts the DB into
+  `auto_vacuum=INCREMENTAL` (latent on an existing DB until a one-time full VACUUM).
+- **Manifest** — every archived month is recorded in the new `telemetry_archives`
+  table (year, month, s3_key/path, rows, sha256, bytes, archived_at) for
+  traceability and dedupe; re-running the job skips months already listed.
+- **Hot window untouched** — recent events stay in `telemetry_events`, so the
+  CO-360 `/gestao/resumo` dashboards are unaffected and total (hot + cold) row
+  count equals the historical total (zero loss).
+
+The job runs as the opt-in `TelemetryArchiveWorker` (enable with
+`CO_TELEMETRY_ARCHIVE_ENABLED=1`, interval `CO_TELEMETRY_ARCHIVE_INTERVAL_SECS`,
+default 24h). It is per-month chunked so the delicate first run on a tight disk
+never materializes the whole table at once.
+
+### Why
+
+Local-first reframe (2026-06-14): the destination is the local filesystem today so
+the `meta.db` shrink lands now; uploading the same Parquet files to S3 (CO-81) and a
+federated hot+cold query endpoint are follow-ups. This is the pragmatic
+single-operator slice of the Theme F data-lake — Parquet + DuckDB, without the heavy
+ClickHouse/Iceberg/Flink stack.
+
+## CO-454 — Folder-as-sub-sala — pasta nodes are descendable; align CO fractal layer with Yggdrasil /mundo rooms (1:1 convergence)
+
+A **pasta** node on the sala canvas is now *descendable* into its own **sub-sala**
+(double-tap, or its panel's *Descer* button), reusing the CO-400 descend/ascend +
+breadcrumb machinery — but recursing at the **folder** layer instead of the
+universe layer.
+
+- **Descend into a folder** stacks the camera (`sala_stack`) and opens the
+  sub-sala whose scope is that pasta. The child slug appends the pasta to the
+  current slug path (`default` → `default/jardim` → `default/jardim/estufa`), so
+  parent/child is a slug **prefix** — the same enter/exit nesting Yggdrasil
+  `/mundo` walks through doors (YG-146).
+- **Identity = just a deeper slug (CO-352).** No new table, no migration: the
+  folder path rides one percent-encoded URL segment (`default%2Fjardim`) so the
+  page, state-API, and realtime-WS routes match unchanged and the server decodes
+  the slash back into the opaque `workspace_slug`. The UNIQUE
+  `(universe_key, workspace_slug, user_id)` keeps each depth an independent row.
+- **Presence is per-sub-sala (CO-353):** the realtime room key
+  `"{universe_key}/{workspace_slug}"` accepts the `/`, so a pasta's sub-sala has
+  its own roster — 1:1 with a YG `/mundo` room.
+- **Inert cases** mirror CO-400: the root pasta `/` (no name) is a soft no-op;
+  ascending restores the parent slug + camera via `sala_restore_cam`.
+- Documented in `docs/architecture/sala-surface.md` ("Folder-sub-sala ↔ YG room
+  (1:1)"); covered by unit tests (distinct-row slug, folder-path room key) and an
+  e2e spec (descend → child slug → ascend → camera + parent scope restored).
+
+### Why
+CO and the Yggdrasil content rooms were not 1:1 because they recursed at
+different layers — CO by universe, YG `/mundo` by folder (pasta=sala). The owner
+approved **Option A** (2026-06-14): converge by making CO folders descendable
+sub-salas, not by promoting every room to a universe (Option B / CO-98,
+rejected). This closes the layer mismatch the federation round-trip
+(CO-413 ↔ YG-146 Fatia 2) needs to persist `pos{room,x,y}` unambiguously.
+
+## CO-457 — Replace co-auto's bespoke usage capture with Claude Code native OTel
+
+Folded agent token-usage telemetry onto the OTLP rails CO-291 already laid,
+deleting ~400 lines of hand-rolled NDJSON parsing.
+
+- **Producer (co-auto):** removed `dev/co-auto/src/usage.rs` (the 401-line
+  stream-json parser — `SessionUsage`, `parse_stream_json`, `assistant_text`)
+  and its driver (`post_usage_to_co`, `parse_pr_url`, `human_duration`, the
+  `--output-format stream-json --verbose` re-parse). `launch_claude` now turns
+  on Claude Code's **native OTel exporter** via env vars
+  (`CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_METRICS_EXPORTER=otlp`,
+  `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, a 1 s export interval, **delta**
+  temporality, and `OTEL_RESOURCE_ATTRIBUTES` carrying `task.key`,
+  `universe.key`, `model`, `machine`). Opt-in and config-compatible: reuses the
+  existing `CO_USAGE_ENDPOINT` / `CO_SESSION_TOKEN`, so it's a no-op when unset.
+- **Receiver (co-web):** new OTLP/HTTP metrics endpoint `POST /v1/metrics`
+  (`content/usage/otlp.rs`) that decodes an `ExportMetricsServiceRequest`
+  (reusing CO-291's `opentelemetry-proto`/`prost` stack), maps the native
+  `claude_code.token.usage` metric — splitting the `type`
+  (`input`/`output`/`cacheRead`/`cacheCreation`) and `model` attributes — plus
+  `claude_code.cost.usage`, and writes into the **existing** `usage_sessions`
+  ledger. **No migration**: delta temporality means each export is an increment
+  that `usage_summary` SUMs, so the CO-426 dashboard, `/usage/summary`,
+  `/usage/active`, and the CO-427 5h-window downshift keep reading the same
+  table unchanged.
+
+### Why
+Claude Code already emits usage as native OTel metrics, making co-auto's bespoke
+stream-json capture redundant. Moving ingestion onto the OTLP path shrinks the
+surface (~400 fewer lines) while preserving the queryable `/usage/summary` that
+OTel's push-only model can't answer. Accepted minor losses: `pr_url` only when
+co-auto already knows it, and `cost_usd` may be 0/NULL under keychain auth
+(token counts — what the CO-427 budget math needs — always flow).
+
+## CO-461 — co-auto: authoritative token usage (June-15 credit-pool readiness)
+
+`dev/co-auto` now reads the cumulative token usage from Claude Code's final
+`result` event instead of summing per-message `usage` blocks (which Claude Code
+repeats across content blocks → 3-8x overcount). Falls back to the sum for older
+`claude` builds. From 2026-06-15 headless `claude -p` runs meter against the
+separate Agent-SDK credit pool, so accurate counts now matter for cost tracking.
+
+### Why
+Interim, correct-on-day-one fix ahead of the native-OpenTelemetry path (CO-457).
+Dev-tooling only — no co-web change, no production deploy. Activate locally with
+`cargo install --path dev/co-auto`.
+
+## CO-78 — Job queue + worker pool — doc gen, sync, indexing, changelog
+
+Generalized the single-kind CO-72 doc-gen queue into a multi-kind, rate-limited,
+metered job queue + worker pool so CPU-heavy non-real-time work (doc generation,
+search-index rebuilds, changelog regeneration, full-universe re-syncs, webhook
+dispatch, cleanup) scales off the request threads.
+
+- **Migration v088** — adds `jobs.timeout_secs` (per-job wall-time budget), the
+  composite claim index `(status, run_at, universe_key)`, and the
+  `(universe_key, kind, created_at)` rate-limit index. The base `jobs` table and
+  its other indexes already exist from v25 (CO-72); this migration is additive
+  and idempotent.
+- **Internal submit API** — `enqueue_job(universe_key, kind, payload, dedupe_key)`
+  enqueues any `JobKind` (`doc_gen`, `index_rebuild`, `changelog_regen`,
+  `sync_pull`, `webhook_dispatch`, `cleanup`). `enqueue_doc_gen` now delegates to
+  it. Content-derived `dedupe_key` makes resubmission a no-op (idempotent).
+- **Per-universe rate limiting (CO-80)** — each kind carries a per-universe
+  hourly cap; heavy kinds (`index_rebuild`, `changelog_regen`) are stricter.
+  Over-limit submits return `429 TooManyRequests`; deduped no-ops don't consume
+  budget.
+- **Per-job timeout** — default 5 min, configurable per kind via
+  `JobKind::default_timeout_secs` (stamped into `jobs.timeout_secs` at enqueue),
+  enforced by the worker's wall-time wrapper.
+- **Reliability** — workers claim the oldest pending job atomically
+  (`UPDATE … RETURNING`) in FIFO order with starvation protection; failures
+  retry with exponential backoff; 5 failures move a job to the dead-letter
+  queue. A reaper reclaims jobs whose worker died mid-run, and the dead-letter
+  queue is pruned to its 100-row cap each tick.
+- **Metrics** — `GET /metrics` exposes queue depth, running count, dead-letter
+  count, the autoscale recommendation, and per-kind success rate + p99 latency.
+- **Worker-pool autoscale** — `desired_worker_count` recommends 4–16 machines
+  scaling one per 100 backlog jobs (surfaced as `desired_workers` in `/metrics`)
+  for Fly autoscaling to consume.
+
+### Why
+At scale, doc-gen / re-index / changelog / re-sync jobs are CPU-heavy and must
+not block API request threads. A durable SQLite-backed queue with idempotency,
+backoff, dead-lettering, and per-universe fairness lets these run on a dedicated,
+autoscaling worker pool without degrading API latency.
+
+
 ## [3.14.0] — 2026-06-14 — Storage-as-a-Service foundation [--ignore-dod override]
 
 ## CO-458 — Storage backend abstraction — pluggable StorageBackend trait + LocalFsBackend (StaaS keystone; S3/partner plug in later)
