@@ -121,6 +121,16 @@ pub struct GeoRow {
     pub sessions: i64,
 }
 
+/// Per-site engagement breakdown. `site` is the `universe_key` stored on each
+/// event (the marketing beacon writes its `site` field there).
+#[derive(Debug, Serialize, Clone)]
+pub struct SiteRow {
+    pub site: String,
+    pub views: i64,
+    pub visitors: i64,
+    pub sessions: i64,
+}
+
 #[derive(Debug, Serialize, Clone)]
 pub struct PublicSummary {
     pub as_of: String,
@@ -136,6 +146,9 @@ pub struct PublicSummary {
     pub timeseries: Vec<TimeseriesBucket>,
     pub top_pages: Vec<TopPage>,
     pub geo: Vec<GeoRow>,
+    /// Per-site engagement breakdown (one row per distinct `site`/`universe_key`).
+    /// When the summary is scoped to a single `?site=`, this contains just that site.
+    pub sites: Vec<SiteRow>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -202,13 +215,14 @@ type SummaryCacheMap = Mutex<HashMap<(String, u32, bool), SummaryCacheEntry>>;
 
 // keyed by (universe, days, include_private)
 static SUMMARY_CACHE: OnceLock<SummaryCacheMap> = OnceLock::new();
-static RECENT_CACHE: OnceLock<Mutex<HashMap<u32, RecentCacheEntry>>> = OnceLock::new();
+// keyed by (site, limit)
+static RECENT_CACHE: OnceLock<Mutex<HashMap<(String, u32), RecentCacheEntry>>> = OnceLock::new();
 
 fn summary_cache() -> &'static SummaryCacheMap {
     SUMMARY_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-fn recent_cache() -> &'static Mutex<HashMap<u32, RecentCacheEntry>> {
+fn recent_cache() -> &'static Mutex<HashMap<(String, u32), RecentCacheEntry>> {
     RECENT_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -221,6 +235,9 @@ pub struct SummaryParams {
     pub days: Option<u32>,
     /// Universe a consultar. Default "artelonga" (rede).
     pub universe: Option<String>,
+    /// Scope all metrics to a single `site` (the `universe_key` stored per event).
+    /// Takes precedence over `universe` when present (same underlying column).
+    pub site: Option<String>,
     /// CO-378: include private paths in top_pages (redacted). Requires admin auth.
     pub include_private: Option<bool>,
 }
@@ -228,6 +245,8 @@ pub struct SummaryParams {
 #[derive(Debug, Deserialize)]
 pub struct RecentParams {
     pub limit: Option<u32>,
+    /// Scope recent events to a single `site` (the `universe_key` stored per event).
+    pub site: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -482,12 +501,23 @@ pub fn query_universe_summary(
         )
         .unwrap_or(0);
 
+    // Dwell / average session duration.
+    //
+    // Marketing beacons don't carry a per-event `duration_ms` (it's always NULL),
+    // so the old `AVG(duration_ms)` was always 0. Instead, derive each session's
+    // duration as `max(timestamp) - min(timestamp)` over its events, then average
+    // those durations across sessions. Sessions with a single event have a 0-ms
+    // span and are excluded so they don't drag the average to ~0.
     let session_avg_ms: i64 = conn
         .query_row(
             &format!(
-                "SELECT COALESCE(CAST(AVG(duration_ms) AS INTEGER), 0) \
-                 FROM telemetry_events \
-                 WHERE {m} AND duration_ms > 0 {win}"
+                "SELECT COALESCE(CAST(AVG(span_ms) AS INTEGER), 0) FROM (\
+                   SELECT (julianday(MAX(timestamp)) - julianday(MIN(timestamp))) * 86400000.0 AS span_ms \
+                   FROM telemetry_events \
+                   WHERE {m} AND session_id IS NOT NULL {win} \
+                   GROUP BY session_id \
+                   HAVING COUNT(*) > 1\
+                 )"
             ),
             [],
             |r| r.get(0),
@@ -562,6 +592,8 @@ pub fn query_universe_summary(
         })
         .unwrap_or_default();
 
+    let sites = query_sites_breakdown(conn, &m, &win);
+
     if !rollups.is_empty() {
         views += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
         events_total += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
@@ -591,7 +623,37 @@ pub fn query_universe_summary(
         timeseries,
         top_pages,
         geo,
+        sites,
     }
+}
+
+/// Per-site engagement breakdown grouped by `universe_key` (the stored `site`).
+/// Reuses the same match predicate `m` + window `win` as the parent summary, so
+/// when the summary is scoped to one site this returns that single row.
+fn query_sites_breakdown(conn: &Connection, m: &str, win: &str) -> Vec<SiteRow> {
+    conn.prepare(&format!(
+        "SELECT universe_key, \
+                COUNT(*) FILTER (WHERE event_type = 'pageview') AS views, \
+                COUNT(DISTINCT visitor_token) AS visitors, \
+                COUNT(DISTINCT session_id) AS sessions \
+         FROM telemetry_events \
+         WHERE {m} AND universe_key IS NOT NULL {win} \
+         GROUP BY universe_key ORDER BY views DESC, visitors DESC LIMIT 100"
+    ))
+    .ok()
+    .and_then(|mut stmt| {
+        stmt.query_map([], |r| {
+            Ok(SiteRow {
+                site: r.get(0)?,
+                views: r.get(1)?,
+                visitors: r.get(2)?,
+                sessions: r.get(3)?,
+            })
+        })
+        .ok()
+        .map(|rows| rows.filter_map(|r| r.ok()).collect())
+    })
+    .unwrap_or_default()
 }
 
 /// Funnel report: total views (including private) + per-path breakdown (public only).
@@ -776,16 +838,23 @@ pub async fn rollups_ingest_handler(
 }
 
 pub fn query_public_recent(conn: &Connection, limit: u32) -> PublicRecent {
+    query_universe_recent(conn, UNIVERSE_KEY, limit)
+}
+
+/// Recent events for one site (`universe_key`). Populates `country`/`city` from
+/// the stored geo columns (resolved server-side at ingest, CO-178) — no raw IPs.
+pub fn query_universe_recent(conn: &Connection, site: &str, limit: u32) -> PublicRecent {
+    let u = sanitize_universe(site);
     let events: Vec<RecentEvent> = conn
         .prepare(&format!(
             "SELECT \
                CAST((julianday(timestamp) - 2440587.5) * 86400000 AS INTEGER) AS ts, \
                event_name, \
                path, \
-               NULL AS country, \
-               NULL AS city \
+               country, \
+               city \
              FROM telemetry_events \
-             WHERE universe_key = '{UNIVERSE_KEY}' \
+             WHERE universe_key = '{u}' \
              ORDER BY timestamp DESC \
              LIMIT {limit}"
         ))
@@ -830,7 +899,14 @@ pub async fn summary_handler(
             .into_response());
     }
     let days = raw.min(365);
-    let universe = sanitize_universe(params.universe.as_deref().unwrap_or(UNIVERSE_KEY));
+    // `?site=` scopes to a single site; it takes precedence over `?universe=`
+    // (both resolve to the `universe_key` column). Falls back to the apex default.
+    let scope = params
+        .site
+        .as_deref()
+        .or(params.universe.as_deref())
+        .unwrap_or(UNIVERSE_KEY);
+    let universe = sanitize_universe(scope);
     let include_private = params.include_private.unwrap_or(false) && is_admin_authed(&headers);
 
     if include_private {
@@ -892,10 +968,12 @@ pub async fn recent_handler(
     Query(params): Query<RecentParams>,
 ) -> Json<PublicRecent> {
     let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let site = sanitize_universe(params.site.as_deref().unwrap_or(UNIVERSE_KEY));
+    let key = (site.clone(), limit);
 
     {
         let cache = recent_cache().lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(entry) = cache.get(&limit)
+        if let Some(entry) = cache.get(&key)
             && entry.fetched_at.elapsed() < CACHE_TTL
         {
             return Json(entry.data.clone());
@@ -904,13 +982,13 @@ pub async fn recent_handler(
 
     let data = {
         let storage = state.core.storage.lock();
-        query_public_recent(storage.conn(), limit)
+        query_universe_recent(storage.conn(), &site, limit)
     };
 
     {
         let mut cache = recent_cache().lock().unwrap_or_else(|e| e.into_inner());
         cache.insert(
-            limit,
+            key,
             RecentCacheEntry {
                 data: data.clone(),
                 fetched_at: Instant::now(),
@@ -1189,7 +1267,9 @@ mod tests {
                 ip_hash TEXT,
                 ua_device TEXT,
                 ua_browser TEXT,
-                ua_os TEXT
+                ua_os TEXT,
+                country TEXT,
+                city TEXT
             );",
         )
         .unwrap();
@@ -1213,6 +1293,168 @@ mod tests {
             rusqlite::params![visitor, session, universe, path],
         )
         .unwrap();
+    }
+
+    /// Insert an event with explicit timestamp + geo, for dwell/geo/site tests.
+    #[allow(clippy::too_many_arguments)]
+    fn insert_event_full(
+        conn: &Connection,
+        site: &str,
+        visitor: &str,
+        session: &str,
+        path: &str,
+        timestamp: &str,
+        country: Option<&str>,
+        city: Option<&str>,
+    ) {
+        conn.execute(
+            "INSERT INTO telemetry_events \
+             (timestamp, visitor_token, session_id, event_type, event_name, universe_key, path, country, city) \
+             VALUES (?1, ?2, ?3, 'pageview', 'page_view', ?4, ?5, ?6, ?7)",
+            rusqlite::params![timestamp, visitor, session, site, path, country, city],
+        )
+        .unwrap();
+    }
+
+    // --- telemetry data-quality (per-site, geo, dwell) ---
+
+    #[test]
+    fn test_summary_site_filter_scopes_metrics() {
+        let conn = create_test_db();
+        // Two sites in the same table.
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/a", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/b", 0);
+        insert_pageview(&conn, "retroumarizal", "v3", "s3", "/menu", 0);
+
+        let all = query_universe_summary(&conn, "artelonga", 30, false);
+        assert_eq!(all.views, 2, "artelonga scope sees only its own 2 views");
+
+        let retro = query_universe_summary(&conn, "retroumarizal", 30, false);
+        assert_eq!(retro.views, 1, "retroumarizal scope sees only its 1 view");
+        assert_eq!(retro.visitors, 1);
+    }
+
+    #[test]
+    fn test_summary_sites_breakdown() {
+        let conn = create_test_db();
+        insert_pageview(&conn, "artelonga", "v1", "s1", "/a", 0);
+        insert_pageview(&conn, "artelonga", "v2", "s2", "/b", 0);
+        insert_pageview(&conn, "retroumarizal", "v3", "s3", "/menu", 0);
+
+        // Unscoped summary on apex still only matches apex rows (universe_key='artelonga'),
+        // so its sites[] holds just artelonga. To see multiple sites in one call the
+        // breakdown groups by universe_key over whatever the match predicate selects.
+        let m = "1=1"; // match all rows
+        let win = "AND timestamp >= datetime('now', '-30 days')";
+        let sites = query_sites_breakdown(&conn, m, win);
+        let by: std::collections::HashMap<&str, &SiteRow> =
+            sites.iter().map(|s| (s.site.as_str(), s)).collect();
+        assert_eq!(by["artelonga"].views, 2);
+        assert_eq!(by["artelonga"].visitors, 2);
+        assert_eq!(by["retroumarizal"].views, 1);
+        assert_eq!(by["retroumarizal"].sessions, 1);
+    }
+
+    #[test]
+    fn test_recent_populates_geo_from_columns() {
+        let conn = create_test_db();
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v1",
+            "s1",
+            "/a",
+            "2026-06-10T12:00:00Z",
+            Some("BR"),
+            Some("Belém"),
+        );
+        let recent = query_universe_recent(&conn, "artelonga", 50);
+        assert_eq!(recent.events.len(), 1);
+        assert_eq!(recent.events[0].country.as_deref(), Some("BR"));
+        assert_eq!(recent.events[0].city.as_deref(), Some("Belém"));
+    }
+
+    #[test]
+    fn test_recent_site_scope() {
+        let conn = create_test_db();
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v1",
+            "s1",
+            "/a",
+            "2026-06-10T12:00:00Z",
+            None,
+            None,
+        );
+        insert_event_full(
+            &conn,
+            "retroumarizal",
+            "v2",
+            "s2",
+            "/menu",
+            "2026-06-10T12:00:00Z",
+            None,
+            None,
+        );
+        let retro = query_universe_recent(&conn, "retroumarizal", 50);
+        assert_eq!(retro.events.len(), 1);
+        assert_eq!(retro.events[0].path.as_deref(), Some("/menu"));
+    }
+
+    #[test]
+    fn test_session_avg_ms_from_timestamps() {
+        let conn = create_test_db();
+        // Session s1: two events 60s apart → 60000ms span.
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v1",
+            "s1",
+            "/a",
+            "2026-06-10T12:00:00Z",
+            None,
+            None,
+        );
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v1",
+            "s1",
+            "/b",
+            "2026-06-10T12:01:00Z",
+            None,
+            None,
+        );
+        // Session s2: two events 120s apart → 120000ms span.
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v2",
+            "s2",
+            "/a",
+            "2026-06-10T12:00:00Z",
+            None,
+            None,
+        );
+        insert_event_full(
+            &conn,
+            "artelonga",
+            "v2",
+            "s2",
+            "/c",
+            "2026-06-10T12:02:00Z",
+            None,
+            None,
+        );
+        // days window must be large enough to include the fixed dates.
+        let s = query_universe_summary(&conn, "artelonga", 3650, false);
+        // avg(60000, 120000) = 90000ms (allow ±1ms for float rounding).
+        assert!(
+            (s.session_avg_ms - 90_000).abs() <= 1,
+            "expected ~90000ms, got {}",
+            s.session_avg_ms
+        );
     }
 
     // --- CO-378: privacy helpers ---
