@@ -145,7 +145,7 @@ struct ChangePasswordRequest {
 // -------------------------------------------------------------------------
 
 /// Validate a `return_to` URL for the `/recover` redirect.
-/// Accepts `*.artelonga.com.br`, `quilomboaraucaria.com.br`, and localhost
+/// Accepts `*.artelonga.com.br`, `quilomboaraucaria.org`, and localhost
 /// (for `co serve` local distribution — CO-282).
 /// Called server-side from `server::serve_recover` and mirrored client-side
 /// in `login.js::isAllowedReturnTo`.
@@ -162,7 +162,9 @@ pub(crate) fn is_allowed_return_to(url: &str) -> bool {
     };
     host == "localhost"
         || host == "127.0.0.1"
-        || host == "quilomboaraucaria.com.br"
+        // quilomboaraucaria.com.br removed: it is a DEAD, unregistered domain — keeping
+        // it allowlisted is an open-redirect/phishing risk if anyone re-registers it.
+        // The live site is quilomboaraucaria.org.
         || host == "quilomboaraucaria.org"
         || host == "artelonga.com.br"
         || host.ends_with(".artelonga.com.br")
