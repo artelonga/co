@@ -9,7 +9,13 @@ dashboard's data source. Read-only, no schema/ingest-contract changes.
   `site` value the marketing beacon stores in the `universe_key` column). It
   takes precedence over `?universe=` (same underlying column).
 - The summary response gains a `sites: [{site, views, visitors, sessions}]`
-  array — per-site engagement in a single call, grouped by `universe_key`.
+  array — **network-wide** per-site engagement in a single call, grouped by
+  `universe_key`. The breakdown is window-only (not scoped to the summary's
+  universe), so it lists every site regardless of `?site=`/`?universe=` — the
+  initial cut reused the parent's universe predicate and could only ever return
+  the one site being summarized.
+- `/recent` events now carry a `site` field (the `universe_key`) instead of
+  reporting `null`, so a feed can identify each event's origin.
 
 ### Geo on records
 - `/recent` now populates `country`/`city` per event from the stored geo columns

@@ -154,6 +154,9 @@ pub struct PublicSummary {
 #[derive(Debug, Serialize, Clone)]
 pub struct RecentEvent {
     pub ts: i64,
+    /// The site (`universe_key`) this event belongs to — so a cross-site feed
+    /// can identify each event's origin instead of returning `site: null`.
+    pub site: String,
     pub name: String,
     pub path: Option<String>,
     pub country: Option<String>,
@@ -592,7 +595,11 @@ pub fn query_universe_summary(
         })
         .unwrap_or_default();
 
-    let sites = query_sites_breakdown(conn, &m, &win);
+    // Network-wide breakdown: one row per site (`universe_key`) across ALL events
+    // in the window — NOT scoped to the parent summary's `m` predicate (which is
+    // pinned to a single universe). Otherwise the breakdown could only ever return
+    // the one site being summarized, so "engagement for all sites" showed just one.
+    let sites = query_sites_breakdown(conn, days);
 
     if !rollups.is_empty() {
         views += rollups.iter().map(|(_, x)| x.pageviews).sum::<i64>();
@@ -627,17 +634,19 @@ pub fn query_universe_summary(
     }
 }
 
-/// Per-site engagement breakdown grouped by `universe_key` (the stored `site`).
-/// Reuses the same match predicate `m` + window `win` as the parent summary, so
-/// when the summary is scoped to one site this returns that single row.
-fn query_sites_breakdown(conn: &Connection, m: &str, win: &str) -> Vec<SiteRow> {
+/// Network-wide per-site engagement breakdown grouped by `universe_key` (the
+/// stored `site`). Scoped only to the time window — one row per distinct site
+/// across ALL events — so it answers "engagement for every site", independent of
+/// whichever single universe the parent summary is reporting.
+fn query_sites_breakdown(conn: &Connection, days: u32) -> Vec<SiteRow> {
+    let win = format!("AND timestamp >= datetime('now', '-{days} days')");
     conn.prepare(&format!(
         "SELECT universe_key, \
                 COUNT(*) FILTER (WHERE event_type = 'pageview') AS views, \
                 COUNT(DISTINCT visitor_token) AS visitors, \
                 COUNT(DISTINCT session_id) AS sessions \
          FROM telemetry_events \
-         WHERE {m} AND universe_key IS NOT NULL {win} \
+         WHERE universe_key IS NOT NULL {win} \
          GROUP BY universe_key ORDER BY views DESC, visitors DESC LIMIT 100"
     ))
     .ok()
@@ -863,6 +872,7 @@ pub fn query_universe_recent(conn: &Connection, site: &str, limit: u32) -> Publi
             stmt.query_map([], |r| {
                 Ok(RecentEvent {
                     ts: r.get(0)?,
+                    site: u.clone(),
                     name: r.get(1)?,
                     path: r.get(2)?,
                     country: r.get(3)?,
@@ -1341,18 +1351,24 @@ mod tests {
         insert_pageview(&conn, "artelonga", "v2", "s2", "/b", 0);
         insert_pageview(&conn, "retroumarizal", "v3", "s3", "/menu", 0);
 
-        // Unscoped summary on apex still only matches apex rows (universe_key='artelonga'),
-        // so its sites[] holds just artelonga. To see multiple sites in one call the
-        // breakdown groups by universe_key over whatever the match predicate selects.
-        let m = "1=1"; // match all rows
-        let win = "AND timestamp >= datetime('now', '-30 days')";
-        let sites = query_sites_breakdown(&conn, m, win);
+        // The breakdown is network-wide (window-only, not scoped to one universe),
+        // so it surfaces every site in one call regardless of the parent scope.
+        let sites = query_sites_breakdown(&conn, 30);
         let by: std::collections::HashMap<&str, &SiteRow> =
             sites.iter().map(|s| (s.site.as_str(), s)).collect();
         assert_eq!(by["artelonga"].views, 2);
         assert_eq!(by["artelonga"].visitors, 2);
         assert_eq!(by["retroumarizal"].views, 1);
         assert_eq!(by["retroumarizal"].sessions, 1);
+
+        // ...and a summary scoped to ONE site still carries the full network in `sites`.
+        let scoped = query_universe_summary(&conn, "artelonga", 30, false);
+        let scoped_sites: std::collections::HashMap<&str, &SiteRow> =
+            scoped.sites.iter().map(|s| (s.site.as_str(), s)).collect();
+        assert!(
+            scoped_sites.contains_key("retroumarizal"),
+            "per-site breakdown must be network-wide even when summary is scoped to artelonga"
+        );
     }
 
     #[test]
@@ -1400,6 +1416,10 @@ mod tests {
         let retro = query_universe_recent(&conn, "retroumarizal", 50);
         assert_eq!(retro.events.len(), 1);
         assert_eq!(retro.events[0].path.as_deref(), Some("/menu"));
+        assert_eq!(
+            retro.events[0].site, "retroumarizal",
+            "recent event carries its site"
+        );
     }
 
     #[test]
