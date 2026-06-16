@@ -5,6 +5,30 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.15.3] — 2026-06-16 — event_log bridge-flood fix — stop the disk refill at source
+
+## CO-435 — Stop persisting bridge transport events to event_log (prod disk flood)
+
+The EDA bridge emits a `bridge.event_sent` / `bridge.event_received` event for
+*every* event it relays (~73/sec in prod). `AtividadesPersistor` persisted
+**every** EDA event to `event_log`, so these transport events flooded the table
+to **38M rows / 18 GB in 6 days — 99.1% of all rows** — which filled the prod
+`/data` volume to 88%+ (deploy-blocking, near the SQLITE_FULL crash-loop).
+
+`AtividadesPersistor` now skips the high-frequency transport events
+(`bridge.event_sent`, `bridge.event_received`) before persisting — they are pure
+bus-transport telemetry, not domain events worth durable replay; the in-memory
+observability ring buffer / live layer still sees them. Low-frequency bridge
+lifecycle events (`bridge.connected`/`disconnected`) and all domain events are
+unaffected. With transport events suppressed, `event_log` drops to ~58K rows/day,
+so the existing 30-day retention is comfortably sufficient.
+
+### Why
+Durable, indexed persistence of a 73/sec internal relay signal is never the right
+default. This stops the growth at the source; the pre-existing bloat is reclaimed
+separately (30-day retention prune, or a one-time meta.db compaction).
+
+
 ## [3.15.2] — 2026-06-16 — Recover-404 fix + return_to allowlist hardening
 
 ## CO-172 — Fix quilombo forgot-password 404 (return_to allowlist sync)
