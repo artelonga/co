@@ -1380,11 +1380,14 @@ async fn test_reset_propagates_to_quilombo() {
 fn test_return_to_safelist() {
     use super::is_allowed_return_to;
 
-    assert!(is_allowed_return_to("https://quilomboaraucaria.com.br"));
-    assert!(is_allowed_return_to(
+    // quilomboaraucaria.com.br is a DEAD, unregistered domain — it must NOT be
+    // allowlisted (an allowlisted unregistered domain is an open-redirect/phishing
+    // vector if re-registered). The live site is quilomboaraucaria.org.
+    assert!(!is_allowed_return_to("https://quilomboaraucaria.com.br"));
+    assert!(!is_allowed_return_to(
         "https://quilomboaraucaria.com.br/login"
     ));
-    // CO-176: production quilombo also serves on .org.
+    // CO-176: production quilombo serves on .org.
     assert!(is_allowed_return_to("https://quilomboaraucaria.org"));
     assert!(is_allowed_return_to(
         "https://quilomboaraucaria.org/auth/co-handover"

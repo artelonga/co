@@ -528,11 +528,16 @@ export function setupLoginModal() {
     function isAllowedReturnTo(url) {
         try {
             const { hostname } = new URL(url);
+            // Mirror the server safelist in recovery_routes.rs::is_allowed_return_to.
+            // quilomboaraucaria.org (NOT the dead .com.br) is the live domain — it was
+            // missing here, so a correct .org return_to was rejected client-side.
             return hostname === 'localhost'
                 || hostname === '127.0.0.1'
-                || hostname === 'quilomboaraucaria.com.br'
+                || hostname === 'quilomboaraucaria.org'
                 || hostname === 'artelonga.com.br'
-                || hostname.endsWith('.artelonga.com.br');
+                || hostname.endsWith('.artelonga.com.br')
+                || hostname === 'yggdrasil-artelonga.fly.dev'
+                || hostname === 'yggdrasil.artelonga.com.br';
         } catch (_) { return false; }
     }
 
