@@ -15,9 +15,10 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
-  # TEMPORARY maintenance window for the one-time event_log reclaim. CO_MAINTENANCE_MODE
-  # 503s all traffic except /api/health (no storage lock), so the reclaim's VACUUM runs
-  # with zero request contention. REVERT BOTH to "0" once the reclaim logs success.
+  # TEMPORARY maintenance window: 503 all traffic + run the one-time reclaim. Paired
+  # with grace_period=60m on the health check below so Fly won't restart the machine
+  # while the I/O-heavy delete+VACUUM runs to completion. REVERT BOTH to "0" (and
+  # grace_period to "90s") once the reclaim logs success and meta.db shrinks.
   CO_MAINTENANCE_MODE = "1"
   CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
 
@@ -45,4 +46,7 @@ primary_region = "gru"
     path = "/api/health"
     interval = "30s"
     timeout = "10s"
-    grace_period = "90s"
+    # TEMPORARY: 60m grace so Fly does NOT restart the machine while the one-time
+    # event_log reclaim saturates disk I/O and briefly makes /api/health unresponsive
+    # (the restart-at-90s loop aborted every prior attempt). RESTORE to "90s" after.
+    grace_period = "60m"

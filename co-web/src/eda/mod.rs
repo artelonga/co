@@ -86,11 +86,11 @@ pub async fn event_log_retention_task(state: crate::server::AppState) {
 pub async fn event_log_reclaim_boot_task(state: crate::server::AppState) {
     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
 
-    // Large batches: this runs inside the CO_MAINTENANCE_MODE window (all traffic
-    // 503'd, zero lock contention), so the only goal is to bound the WAL between
-    // checkpoints — 1M-row batches mean ~tens of checkpoints, not thousands. The
-    // per-batch checkpoint at 20k was ~1900 fsyncs and crawled on the shared disk.
-    const BATCH: usize = 1_000_000;
+    // Runs inside the CO_MAINTENANCE_MODE window (traffic 503'd) with a 60m health
+    // grace so Fly won't restart mid-run. 200k balances I/O burst (1M saturated the
+    // shared disk → fully unresponsive) against checkpoint count (20k = ~1900 fsyncs,
+    // too slow). ~190 batches.
+    const BATCH: usize = 200_000;
     let outcome = tokio::task::spawn_blocking(move || {
         let before = state.core.storage.lock().db_size_bytes();
         if state.core.storage.lock().count_event_log_transport_rows() < 1000 {
