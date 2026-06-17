@@ -123,6 +123,60 @@ pub fn is_bot(ua: &str) -> bool {
     BOT_UA_PATTERNS.iter().any(|p| ua_lc.contains(p))
 }
 
+/// First-path-segment patterns that are automated exploit/vuln probes, not real
+/// pageviews. co-web serves the SPA shell (HTTP 200) for *any* unknown slug
+/// (see `serve_deep_link`), so these slip past both the UA and status filters
+/// and would otherwise be recorded as bogus traffic. Matched on the first path
+/// segment and dropped before any telemetry is written. (Paths containing a `.`
+/// — `/.env`, `/.git/...` — are already skipped earlier by the extension check.)
+const SCANNER_PATH_SEGMENTS: &[&str] = &[
+    "wp-admin",
+    "wp-includes",
+    "wp-content",
+    "wp-json",
+    "wp-login",
+    "wordpress",
+    "xmlrpc",
+    "cgi-bin",
+    "actuator",
+    "debugbar",
+    "_debugbar",
+    "_ignition",
+    "telescope",
+    "phpmyadmin",
+    "vendor",
+    "credentials",
+    "aws-credentials",
+    "env",
+    "debug",
+    "console",
+    "solr",
+];
+
+/// True when the first path segment looks like an automated exploit probe.
+pub fn is_scanner_path(path: &str) -> bool {
+    let seg = path.split('/').nth(1).unwrap_or("").to_ascii_lowercase();
+    SCANNER_PATH_SEGMENTS.contains(&seg.as_str())
+}
+
+/// The platform's own site key. Every route on co.artelonga.com.br that is NOT a
+/// registered-universe content path (`/yuri/...`, `/grcsamazonia/...`) belongs to
+/// the platform itself, so its server-side pageviews bucket here.
+pub const PLATFORM_SITE_KEY: &str = "co";
+
+/// Resolve the stored `universe_key` for a server-side pageview. A top-level path
+/// segment counts as a distinct *site* only when it is a registered universe;
+/// every other co-web route (`/agora`, `/sala`, `/recover`, `/entrar`, …) buckets
+/// under [`PLATFORM_SITE_KEY`] so the per-site engagement breakdown stops showing
+/// SPA route names (and scanner noise) as fake sites. The full `path` is still
+/// stored, so top-pages keeps per-route detail.
+fn resolve_site_key(storage: &crate::storage::Storage, candidate: Option<&str>) -> String {
+    match candidate {
+        Some(c) if storage.get_universe(c).is_some() => c.to_string(),
+        _ => PLATFORM_SITE_KEY.to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Cookie / header helpers
 // ---------------------------------------------------------------------------
@@ -530,6 +584,13 @@ pub async fn telemetry_middleware(
         return next.run(req).await;
     }
 
+    // Drop exploit/vuln scanner probes (`/wp-admin`, `/env`, `/cgi-bin`, …). They
+    // hit the SPA shell with 200 so neither the UA nor a status filter catches
+    // them; recording them pollutes the per-site engagement breakdown.
+    if is_scanner_path(&path) {
+        return next.run(req).await;
+    }
+
     let ua = req
         .headers()
         .get(header::USER_AGENT)
@@ -620,10 +681,16 @@ pub async fn telemetry_middleware(
     let eda_event_name = ev.event_name.clone();
     let eda_duration_ms = ev.duration_ms;
 
-    // OLTP write (primary store — CO-46)
+    // OLTP write (primary store — CO-46). Resolve the stored `universe_key` under
+    // the lock we already take here: a top-level segment is a real site only if it
+    // is a registered universe, otherwise the pageview belongs to the platform
+    // (`"co"`). Keeps co-web's own SPA routes out of the per-site breakdown without
+    // adding a lock to the response hot path.
     let state_clone = state.clone();
     tokio::spawn(async move {
         let storage = state_clone.core.storage.lock();
+        let mut ev = ev;
+        ev.universe_key = Some(resolve_site_key(&storage, ev.universe_key.as_deref()));
         insert_event(storage.conn(), &ev);
     });
 
@@ -1256,6 +1323,61 @@ mod tests {
         assert!(!is_bot(
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
         ));
+    }
+
+    #[test]
+    fn test_is_scanner_path() {
+        // Exploit probes that hit the SPA shell with 200 → must be dropped.
+        for p in [
+            "/wp-admin",
+            "/wp-admin/setup-config.php",
+            "/wp-includes/x",
+            "/env",
+            "/cgi-bin/",
+            "/credentials",
+            "/aws-credentials",
+            "/actuator/health",
+            "/phpmyadmin",
+            "/xmlrpc",
+        ] {
+            assert!(is_scanner_path(p), "{p} should be a scanner path");
+        }
+        // Real co-web routes and universe paths are NOT scanner paths.
+        for p in [
+            "/",
+            "/agora",
+            "/sala/x",
+            "/entrar",
+            "/yuri/nota",
+            "/recover",
+        ] {
+            assert!(!is_scanner_path(p), "{p} should NOT be a scanner path");
+        }
+    }
+
+    #[test]
+    fn test_resolve_site_key_only_registered_universes_are_sites() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut storage = crate::storage::Storage::new(dir.path());
+        storage
+            .create_universe(
+                crate::models::CreateUniverse {
+                    key: "yuri".into(),
+                    name: "Yuri".into(),
+                    description: String::new(),
+                },
+                "owner-1",
+            )
+            .unwrap();
+
+        // A registered universe stays its own site.
+        assert_eq!(resolve_site_key(&storage, Some("yuri")), "yuri");
+        // co-web's own SPA routes and unknown/scanner segments bucket under "co".
+        assert_eq!(resolve_site_key(&storage, Some("agora")), "co");
+        assert_eq!(resolve_site_key(&storage, Some("deployments")), "co");
+        assert_eq!(resolve_site_key(&storage, Some("wp-admin")), "co");
+        // Root / reserved (None candidate) → the platform.
+        assert_eq!(resolve_site_key(&storage, None), "co");
     }
 
     #[test]
