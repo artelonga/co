@@ -84,6 +84,10 @@ pub struct CoServerConfig {
     pub backup_boot_delay_secs: u64,
     /// `CO_REMOTE_SYNC_INTERVAL_SECS` — remote sister-repo sync. Default: `900`.
     pub remote_sync_interval_secs: u64,
+    /// `CO_MAINTENANCE_RECLAIM_EVENT_LOG` — when `1`/`true`, run a one-time
+    /// boot-time reclaim of the `bridge.*` transport bloat in `event_log`
+    /// (batched delete + VACUUM). Idempotent; safe to leave on (no-op once clean).
+    pub maintenance_reclaim_event_log: bool,
 
     // --- Seeding / admin -------------------------------------------------
     /// `CO_SEED_ADMIN_EMAIL` — admin email gating dev/lead routes.
@@ -201,6 +205,8 @@ impl CoServerConfig {
             backup_interval_hours: secrets.get_parsed("CO_BACKUP_INTERVAL_HOURS", 24),
             backup_boot_delay_secs: secrets.get_parsed("CO_BACKUP_BOOT_DELAY_SECS", 600),
             remote_sync_interval_secs: secrets.get_parsed("CO_REMOTE_SYNC_INTERVAL_SECS", 900),
+            maintenance_reclaim_event_log: secrets
+                .get_bool("CO_MAINTENANCE_RECLAIM_EVENT_LOG", false),
 
             seed_admin_email: secrets.get_nonempty("CO_SEED_ADMIN_EMAIL"),
             dev_owner: secrets.get_nonempty("CO_DEV_OWNER"),

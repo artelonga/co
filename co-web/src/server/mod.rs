@@ -745,6 +745,11 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     // CO-380: nightly 30-day event_log retention purge.
     tokio::spawn(crate::eda::event_log_retention_task(state.clone()));
 
+    // One-time bridge-flood reclaim (CO_MAINTENANCE_RECLAIM_EVENT_LOG). Idempotent.
+    if state.core.server_config.maintenance_reclaim_event_log {
+        tokio::spawn(crate::eda::event_log_reclaim_boot_task(state.clone()));
+    }
+
     // CO-183: daily LGPD lead retention purge (24-month closed leads).
     tokio::spawn(crate::lead_routes::retention_task(state.clone()));
 

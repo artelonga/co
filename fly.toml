@@ -15,6 +15,10 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
+  # One-time bridge-flood reclaim: batch-deletes dead bridge.* event_log rows +
+  # VACUUM at boot (~20s in), reclaiming ~18 GB and activating auto_vacuum.
+  # Idempotent (no-op once clean) — safe to leave; remove on a later deploy.
+  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
 
 [http_service]
   internal_port = 3000
