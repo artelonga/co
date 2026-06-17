@@ -649,6 +649,7 @@ CO-260 cross-version changelog viewer.
 | GET | `/api/v1/changelog` | anon | Changelog entries |
 | GET | `/api/v1/changelog/feed` | anon | Changelog Atom/RSS feed |
 | GET | `/api/v1/changelog/repos` | anon | Repositories in changelog |
+| GET | `/changelog/embed` | anon | Iframeable releases-as-sprints view (CSP frame-ancestors *.artelonga.com.br) |
 
 ---
 
