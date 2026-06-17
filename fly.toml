@@ -15,10 +15,11 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
-  # One-time bridge-flood reclaim, now via spawn_blocking + per-batch lock release
-  # (the synchronous v1 starved the 2-CPU runtime). Runs ~20s after boot; the async
-  # runtime + /api/health stay responsive. Idempotent; set back to 0 after it runs.
-  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
+  # Reclaim DISABLED again — even spawn_blocking + per-batch delete starves the
+  # 2-CPU runtime: the VACUUM's continuous storage-lock hold blocks request handlers
+  # on both workers. In-process reclaim is not viable on 2 CPUs; use off-box swap or
+  # temporarily scale CPUs. Do NOT re-enable without that.
+  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "0"
 
 [http_service]
   internal_port = 3000
