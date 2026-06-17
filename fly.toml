@@ -15,12 +15,12 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
-  # TEMPORARY maintenance window: 503 all traffic + run the one-time reclaim. Paired
-  # with grace_period=60m on the health check below so Fly won't restart the machine
-  # while the I/O-heavy delete+VACUUM runs to completion. REVERT BOTH to "0" (and
-  # grace_period to "90s") once the reclaim logs success and meta.db shrinks.
-  CO_MAINTENANCE_MODE = "1"
-  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
+  # Both OFF. In-process reclaim is infeasible on this shared-cpu machine even with a
+  # 60m health grace + maintenance mode: 40+ min, no completion, disk degraded to 85%
+  # (WAL/VACUUM-temp growth) and the machine became unreachable. Reclaim must be done
+  # off the live machine (temp Fly machine with sqlite3, or off-box) — see task #17.
+  CO_MAINTENANCE_MODE = "0"
+  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "0"
 
 [http_service]
   internal_port = 3000
@@ -46,7 +46,4 @@ primary_region = "gru"
     path = "/api/health"
     interval = "30s"
     timeout = "10s"
-    # TEMPORARY: 60m grace so Fly does NOT restart the machine while the one-time
-    # event_log reclaim saturates disk I/O and briefly makes /api/health unresponsive
-    # (the restart-at-90s loop aborted every prior attempt). RESTORE to "90s" after.
-    grace_period = "60m"
+    grace_period = "90s"
