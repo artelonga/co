@@ -183,7 +183,13 @@ impl CoServerConfig {
                 .get_parsed::<f64>("CO_TELEMETRY_SAMPLING_RATIO", 1.0)
                 .clamp(0.0, 1.0),
 
-            alert_from: secrets.get_or("CO_ALERT_FROM", "CO Alertas <alertas@artelonga.com.br>"),
+            // Sender must be on a Resend-verified domain. `artelonga.com.br` is NOT
+            // verified (alerts silently failed / spam-foldered); `seguranca.artelonga.com.br`
+            // is the verified domain used for password mail (`senhas@…`).
+            alert_from: secrets.get_or(
+                "CO_ALERT_FROM",
+                "CO Alertas <alertas@seguranca.artelonga.com.br>",
+            ),
             alert_to: secrets.get_or("CO_ALERT_TO", "yuri@artelonga.com.br"),
             alert_debounce_hours: secrets.get_parsed("CO_ALERT_DEBOUNCE_HOURS", 2),
 
