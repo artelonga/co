@@ -15,10 +15,10 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
-  # Reclaim DISABLED — the in-process boot reclaim starved the 2-CPU runtime
-  # (synchronous delete+VACUUM under the storage lock failed /api/health, crash-loop
-  # risk). Re-implement with spawn_blocking + per-batch lock release before re-enabling.
-  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "0"
+  # One-time bridge-flood reclaim, now via spawn_blocking + per-batch lock release
+  # (the synchronous v1 starved the 2-CPU runtime). Runs ~20s after boot; the async
+  # runtime + /api/health stay responsive. Idempotent; set back to 0 after it runs.
+  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
 
 [http_service]
   internal_port = 3000

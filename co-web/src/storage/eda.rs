@@ -33,70 +33,84 @@ impl Storage {
         )
     }
 
-    /// One-time reclaim of the `bridge.*` transport-event bloat in `event_log`
-    /// (CO: the bridge flood left ~18 GB of `bridge.event_sent`/`bridge.event_received`
-    /// rows that the 30-day retention won't drop yet and that don't shrink the file).
-    ///
-    /// Safe to run on a near-full prod disk: deletes in WAL-checkpointed batches so
-    /// the write-ahead log never balloons past a single batch, then runs a full
-    /// `VACUUM` (rewrites only the small live remainder → ~GBs reclaimed, and it
-    /// also *activates* `auto_vacuum=INCREMENTAL`, latent since the v087 migration,
-    /// so future retention reclaims pages automatically).
-    ///
-    /// Idempotent: once the bloat is gone the initial COUNT short-circuits to a
-    /// no-op. Returns `(rows_deleted, bytes_before, bytes_after)`.
-    pub fn reclaim_event_log_transport_bloat(&self) -> Result<(usize, i64, i64)> {
-        const TRANSPORT_TYPES: &str = "'bridge.event_sent','bridge.event_received'";
-        const BATCH: usize = 20_000;
+    /// Transport (`bridge.*`) event types that flooded `event_log`.
+    const TRANSPORT_TYPES_SQL: &'static str = "'bridge.event_sent','bridge.event_received'";
+
+    /// meta.db size in bytes (`page_count * page_size`).
+    pub fn db_size_bytes(&self) -> i64 {
         let conn = self.conn();
+        let pc: i64 = conn
+            .query_row("PRAGMA page_count", [], |r| r.get(0))
+            .unwrap_or(0);
+        let ps: i64 = conn
+            .query_row("PRAGMA page_size", [], |r| r.get(0))
+            .unwrap_or(0);
+        pc * ps
+    }
 
-        let db_bytes = |c: &rusqlite::Connection| -> i64 {
-            let pc: i64 = c
-                .query_row("PRAGMA page_count", [], |r| r.get(0))
-                .unwrap_or(0);
-            let ps: i64 = c
-                .query_row("PRAGMA page_size", [], |r| r.get(0))
-                .unwrap_or(0);
-            pc * ps
-        };
-        let bytes_before = db_bytes(conn);
-
-        let remaining: i64 = conn
+    /// Count remaining `bridge.*` transport rows in `event_log`.
+    pub fn count_event_log_transport_rows(&self) -> i64 {
+        self.conn()
             .query_row(
-                &format!("SELECT COUNT(*) FROM event_log WHERE event_type IN ({TRANSPORT_TYPES})"),
+                &format!(
+                    "SELECT COUNT(*) FROM event_log WHERE event_type IN ({})",
+                    Self::TRANSPORT_TYPES_SQL
+                ),
                 [],
                 |r| r.get(0),
             )
-            .unwrap_or(0);
-        if remaining < BATCH as i64 / 4 {
-            // Nothing meaningful to reclaim — keep boot cheap.
-            return Ok((0, bytes_before, bytes_before));
-        }
+            .unwrap_or(0)
+    }
 
+    /// Delete one batch of `bridge.*` transport rows, then truncate the WAL so
+    /// disk use stays bounded. Returns rows deleted (0 when none remain).
+    ///
+    /// Designed to be called in a loop by a caller that **re-acquires the storage
+    /// lock per batch** (so request handlers interleave between batches instead of
+    /// blocking for the whole multi-GB delete).
+    pub fn delete_event_log_transport_batch(&self, limit: usize) -> Result<usize> {
+        let n = self.conn().execute(
+            &format!(
+                "DELETE FROM event_log WHERE rowid IN \
+                 (SELECT rowid FROM event_log WHERE event_type IN ({}) LIMIT {limit})",
+                Self::TRANSPORT_TYPES_SQL
+            ),
+            [],
+        )?;
+        if n > 0 {
+            let _ = self.conn().execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        }
+        Ok(n)
+    }
+
+    /// Full `VACUUM` — rewrites the live remainder compactly (temp ≈ live size,
+    /// not the bloated file size, so it fits a tight volume) and activates the
+    /// `auto_vacuum=INCREMENTAL` latent since v087. Holds the DB lock for its
+    /// duration; the caller must run it off the async runtime (`spawn_blocking`).
+    pub fn vacuum(&self) -> Result<()> {
+        self.conn().execute_batch("VACUUM;")
+    }
+
+    /// Single-lock convenience wrapper (delete all transport rows + VACUUM) for
+    /// tests and the off-box compact path. The boot task instead drives the
+    /// granular methods with per-batch lock release — see
+    /// `eda::event_log_reclaim_boot_task`. Returns `(rows_deleted, before, after)`.
+    pub fn reclaim_event_log_transport_bloat(&self) -> Result<(usize, i64, i64)> {
+        const BATCH: usize = 20_000;
+        let before = self.db_size_bytes();
+        if self.count_event_log_transport_rows() < BATCH as i64 / 4 {
+            return Ok((0, before, before));
+        }
         let mut deleted = 0usize;
         loop {
-            let n = conn.execute(
-                &format!(
-                    "DELETE FROM event_log WHERE rowid IN \
-                     (SELECT rowid FROM event_log WHERE event_type IN ({TRANSPORT_TYPES}) LIMIT {BATCH})"
-                ),
-                [],
-            )?;
+            let n = self.delete_event_log_transport_batch(BATCH)?;
             deleted += n;
-            // Truncate the WAL after each batch so disk use stays bounded even
-            // though we just freed gigabytes of pages.
-            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
             if n == 0 {
                 break;
             }
         }
-
-        // Full VACUUM: rewrites the (now small) live data and activates the
-        // INCREMENTAL auto_vacuum set by v087. Temp file ~= live size, not the
-        // bloated file size, so it fits on a tight volume.
-        conn.execute_batch("VACUUM;")?;
-
-        Ok((deleted, bytes_before, db_bytes(conn)))
+        self.vacuum()?;
+        Ok((deleted, before, self.db_size_bytes()))
     }
 
     /// Append an event to `event_log` (idempotent on id).
