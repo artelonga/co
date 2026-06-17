@@ -86,10 +86,14 @@ pub async fn event_log_retention_task(state: crate::server::AppState) {
 pub async fn event_log_reclaim_boot_task(state: crate::server::AppState) {
     tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
 
-    const BATCH: usize = 20_000;
+    // Large batches: this runs inside the CO_MAINTENANCE_MODE window (all traffic
+    // 503'd, zero lock contention), so the only goal is to bound the WAL between
+    // checkpoints — 1M-row batches mean ~tens of checkpoints, not thousands. The
+    // per-batch checkpoint at 20k was ~1900 fsyncs and crawled on the shared disk.
+    const BATCH: usize = 1_000_000;
     let outcome = tokio::task::spawn_blocking(move || {
         let before = state.core.storage.lock().db_size_bytes();
-        if state.core.storage.lock().count_event_log_transport_rows() < BATCH as i64 / 4 {
+        if state.core.storage.lock().count_event_log_transport_rows() < 1000 {
             return Ok::<_, rusqlite::Error>((0usize, before, before));
         }
         let mut deleted = 0usize;
@@ -103,9 +107,6 @@ pub async fn event_log_reclaim_boot_task(state: crate::server::AppState) {
             if n == 0 {
                 break;
             }
-            // Lock released here; yield so request handlers (and other contenders)
-            // get a turn before the next batch.
-            std::thread::sleep(std::time::Duration::from_millis(50));
         }
         state.core.storage.lock().vacuum()?;
         let after = state.core.storage.lock().db_size_bytes();
