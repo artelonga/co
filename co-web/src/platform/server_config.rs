@@ -183,7 +183,13 @@ impl CoServerConfig {
                 .get_parsed::<f64>("CO_TELEMETRY_SAMPLING_RATIO", 1.0)
                 .clamp(0.0, 1.0),
 
-            alert_from: secrets.get_or("CO_ALERT_FROM", "CO Alertas <alertas@artelonga.com.br>"),
+            // Sender must be on a Resend-verified domain. `artelonga.com.br` is NOT
+            // verified (alerts silently failed / spam-foldered); `seguranca.artelonga.com.br`
+            // is the verified domain used for password mail (`senhas@…`).
+            alert_from: secrets.get_or(
+                "CO_ALERT_FROM",
+                "CO Alertas <alertas@seguranca.artelonga.com.br>",
+            ),
             alert_to: secrets.get_or("CO_ALERT_TO", "yuri@artelonga.com.br"),
             alert_debounce_hours: secrets.get_parsed("CO_ALERT_DEBOUNCE_HOURS", 2),
 
@@ -217,7 +223,10 @@ impl CoServerConfig {
                 "NOTIF_FROM_EMAIL",
                 "notificacoes@seguranca.artelonga.com.br",
             ),
-            resend_from: secrets.get_or("RESEND_FROM", "CO <noreply@quilomboaraucaria.com.br>"),
+            // quilomboaraucaria.com.br is a dead domain (DNS does not resolve) and is
+            // not Resend-verified, so this channel's mail couldn't send. Default to the
+            // verified seguranca.artelonga.com.br domain (overridable via RESEND_FROM).
+            resend_from: secrets.get_or("RESEND_FROM", "CO <noreply@seguranca.artelonga.com.br>"),
             vapid_subject: secrets.get_or("VAPID_SUBJECT", "mailto:noreply@co.artelonga.com.br"),
             evolution_api_url: secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com"),
             evolution_instance: secrets.get_or("EVOLUTION_INSTANCE", "default"),
