@@ -88,6 +88,27 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+/// Maintenance gate (outermost layer). When `CO_MAINTENANCE_MODE` is set, every
+/// request EXCEPT `/api/health` gets an immediate `503` **without touching the
+/// storage lock** — so a one-time exclusive DB op (e.g. the event_log reclaim's
+/// `VACUUM`) can run with zero request contention instead of piling blocked
+/// handlers onto the worker pool. `/api/health` still returns `200` so Fly keeps
+/// the machine alive. Read from the global secrets provider so it can be toggled
+/// without a code change.
+pub async fn maintenance_gate(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    if req.uri().path() != "/api/health"
+        && crate::infra::secrets::global().get_bool("CO_MAINTENANCE_MODE", false)
+    {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::RETRY_AFTER, "120")],
+            "CO está em manutenção — voltamos em instantes.",
+        )
+            .into_response();
+    }
+    next.run(req).await
+}
+
 async fn health_check_deep(State(core): State<Arc<CoreState>>) -> impl IntoResponse {
     let (db_status, disk_status) = {
         let storage = core.storage.lock();

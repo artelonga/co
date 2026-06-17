@@ -704,4 +704,8 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         .layer(TraceLayer::new_for_http())
         .layer(PropagateRequestIdLayer::x_request_id())
         .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
+        // Outermost: maintenance gate. When CO_MAINTENANCE_MODE is set, 503s every
+        // request except /api/health WITHOUT touching storage, so a one-time
+        // exclusive DB op (event_log reclaim VACUUM) runs with zero contention.
+        .layer(axum::middleware::from_fn(crate::server::maintenance_gate))
 }

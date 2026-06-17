@@ -15,11 +15,11 @@ primary_region = "gru"
   RUST_LOG = "co_web=info,tower_http=info"
   LITEFS_DIR = "/data"
   LITEFS_URL = "http://localhost:20202"
-  # Reclaim DISABLED again — even spawn_blocking + per-batch delete starves the
-  # 2-CPU runtime: the VACUUM's continuous storage-lock hold blocks request handlers
-  # on both workers. In-process reclaim is not viable on 2 CPUs; use off-box swap or
-  # temporarily scale CPUs. Do NOT re-enable without that.
-  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "0"
+  # TEMPORARY maintenance window for the one-time event_log reclaim. CO_MAINTENANCE_MODE
+  # 503s all traffic except /api/health (no storage lock), so the reclaim's VACUUM runs
+  # with zero request contention. REVERT BOTH to "0" once the reclaim logs success.
+  CO_MAINTENANCE_MODE = "1"
+  CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"
 
 [http_service]
   internal_port = 3000
