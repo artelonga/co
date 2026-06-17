@@ -223,7 +223,10 @@ impl CoServerConfig {
                 "NOTIF_FROM_EMAIL",
                 "notificacoes@seguranca.artelonga.com.br",
             ),
-            resend_from: secrets.get_or("RESEND_FROM", "CO <noreply@quilomboaraucaria.com.br>"),
+            // quilomboaraucaria.com.br is a dead domain (DNS does not resolve) and is
+            // not Resend-verified, so this channel's mail couldn't send. Default to the
+            // verified seguranca.artelonga.com.br domain (overridable via RESEND_FROM).
+            resend_from: secrets.get_or("RESEND_FROM", "CO <noreply@seguranca.artelonga.com.br>"),
             vapid_subject: secrets.get_or("VAPID_SUBJECT", "mailto:noreply@co.artelonga.com.br"),
             evolution_api_url: secrets.get_or("EVOLUTION_API_URL", "https://api.evolution-api.com"),
             evolution_instance: secrets.get_or("EVOLUTION_INSTANCE", "default"),

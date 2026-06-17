@@ -9,3 +9,7 @@ degradation alert emails (CO-422) failed to send or were spam-foldered.
 `seguranca.artelonga.com.br` is the verified domain already used for password and
 notification mail (`senhas@`, `notificacoes@`). Overridable via the `CO_ALERT_FROM`
 secret.
+
+Also fixed `RESEND_FROM` default — it pointed at `noreply@quilomboaraucaria.com.br`,
+a dead/unverified domain, so that notification channel couldn't send either. Now
+defaults to `CO <noreply@seguranca.artelonga.com.br>`.
