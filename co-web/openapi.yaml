@@ -5477,6 +5477,13 @@ paths:
       responses:
         "200":
           description: OK
+  /changelog/embed:
+    get:
+      tags: ["changelog"]
+      summary: "Iframeable releases-as-sprints view (CSP frame-ancestors *.artelonga.com.br)"
+      responses:
+        "200":
+          description: OK
   /gestao:
     get:
       tags: ["gestao"]
