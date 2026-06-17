@@ -33,6 +33,72 @@ impl Storage {
         )
     }
 
+    /// One-time reclaim of the `bridge.*` transport-event bloat in `event_log`
+    /// (CO: the bridge flood left ~18 GB of `bridge.event_sent`/`bridge.event_received`
+    /// rows that the 30-day retention won't drop yet and that don't shrink the file).
+    ///
+    /// Safe to run on a near-full prod disk: deletes in WAL-checkpointed batches so
+    /// the write-ahead log never balloons past a single batch, then runs a full
+    /// `VACUUM` (rewrites only the small live remainder → ~GBs reclaimed, and it
+    /// also *activates* `auto_vacuum=INCREMENTAL`, latent since the v087 migration,
+    /// so future retention reclaims pages automatically).
+    ///
+    /// Idempotent: once the bloat is gone the initial COUNT short-circuits to a
+    /// no-op. Returns `(rows_deleted, bytes_before, bytes_after)`.
+    pub fn reclaim_event_log_transport_bloat(&self) -> Result<(usize, i64, i64)> {
+        const TRANSPORT_TYPES: &str = "'bridge.event_sent','bridge.event_received'";
+        const BATCH: usize = 20_000;
+        let conn = self.conn();
+
+        let db_bytes = |c: &rusqlite::Connection| -> i64 {
+            let pc: i64 = c
+                .query_row("PRAGMA page_count", [], |r| r.get(0))
+                .unwrap_or(0);
+            let ps: i64 = c
+                .query_row("PRAGMA page_size", [], |r| r.get(0))
+                .unwrap_or(0);
+            pc * ps
+        };
+        let bytes_before = db_bytes(conn);
+
+        let remaining: i64 = conn
+            .query_row(
+                &format!("SELECT COUNT(*) FROM event_log WHERE event_type IN ({TRANSPORT_TYPES})"),
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if remaining < BATCH as i64 / 4 {
+            // Nothing meaningful to reclaim — keep boot cheap.
+            return Ok((0, bytes_before, bytes_before));
+        }
+
+        let mut deleted = 0usize;
+        loop {
+            let n = conn.execute(
+                &format!(
+                    "DELETE FROM event_log WHERE rowid IN \
+                     (SELECT rowid FROM event_log WHERE event_type IN ({TRANSPORT_TYPES}) LIMIT {BATCH})"
+                ),
+                [],
+            )?;
+            deleted += n;
+            // Truncate the WAL after each batch so disk use stays bounded even
+            // though we just freed gigabytes of pages.
+            let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+            if n == 0 {
+                break;
+            }
+        }
+
+        // Full VACUUM: rewrites the (now small) live data and activates the
+        // INCREMENTAL auto_vacuum set by v087. Temp file ~= live size, not the
+        // bloated file size, so it fits on a tight volume.
+        conn.execute_batch("VACUUM;")?;
+
+        Ok((deleted, bytes_before, db_bytes(conn)))
+    }
+
     /// Append an event to `event_log` (idempotent on id).
     #[allow(clippy::too_many_arguments)]
     pub fn insert_event_log(
@@ -150,5 +216,87 @@ impl Storage {
                 triggered_at,
             ],
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Storage;
+
+    #[test]
+    fn reclaim_drops_transport_rows_keeps_domain_and_shrinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+
+        // Enough transport rows to exceed the no-op threshold, plus domain rows.
+        for i in 0..6_000 {
+            storage
+                .insert_event_log(
+                    &format!("t{i}"),
+                    "bridge.event_sent",
+                    None,
+                    None,
+                    "{}",
+                    "Public",
+                    "2026-06-17T00:00:00Z",
+                )
+                .unwrap();
+        }
+        for i in 0..50 {
+            storage
+                .insert_event_log(
+                    &format!("d{i}"),
+                    "entry.updated",
+                    Some("neuro"),
+                    None,
+                    "{}",
+                    "Public",
+                    "2026-06-17T00:00:00Z",
+                )
+                .unwrap();
+        }
+
+        let (deleted, _before, _after) = storage.reclaim_event_log_transport_bloat().unwrap();
+        assert_eq!(deleted, 6_000, "all transport rows deleted");
+
+        let transport: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type LIKE 'bridge.%'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(transport, 0, "no transport rows remain");
+
+        let domain: i64 = storage
+            .conn()
+            .query_row(
+                "SELECT COUNT(*) FROM event_log WHERE event_type = 'entry.updated'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(domain, 50, "domain rows preserved");
+    }
+
+    #[test]
+    fn reclaim_is_a_noop_when_not_bloated() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        storage
+            .insert_event_log(
+                "d1",
+                "entry.updated",
+                None,
+                None,
+                "{}",
+                "Public",
+                "2026-06-17T00:00:00Z",
+            )
+            .unwrap();
+        let (deleted, before, after) = storage.reclaim_event_log_transport_bloat().unwrap();
+        assert_eq!(deleted, 0);
+        assert_eq!(before, after, "no-op leaves the file untouched");
     }
 }

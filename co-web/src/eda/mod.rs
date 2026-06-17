@@ -68,6 +68,33 @@ pub async fn event_log_retention_task(state: crate::server::AppState) {
     }
 }
 
+/// One-shot boot maintenance: reclaim the `bridge.*` transport bloat in
+/// `event_log` (CO bridge-flood cleanup). Gated by
+/// `CO_MAINTENANCE_RECLAIM_EVENT_LOG`. Runs ~20 s after boot so the server binds
+/// and passes its health check first; the VACUUM then briefly holds the storage
+/// lock (acceptable one-time slowdown, not a restart-time outage). Idempotent —
+/// a no-op once the bloat is gone, so the flag can be left set.
+pub async fn event_log_reclaim_boot_task(state: crate::server::AppState) {
+    tokio::time::sleep(tokio::time::Duration::from_secs(20)).await;
+    let result = {
+        let storage = state.core.storage.lock();
+        storage.reclaim_event_log_transport_bloat()
+    };
+    match result {
+        Ok((0, _, _)) => {
+            tracing::info!("maintenance: event_log reclaim — nothing to do (no transport bloat)")
+        }
+        Ok((deleted, before, after)) => tracing::warn!(
+            "maintenance: event_log reclaim — deleted {deleted} transport rows, \
+             meta.db {} MiB → {} MiB (reclaimed {} MiB)",
+            before / 1_048_576,
+            after / 1_048_576,
+            (before - after) / 1_048_576,
+        ),
+        Err(e) => tracing::error!("maintenance: event_log reclaim FAILED (non-fatal): {e}"),
+    }
+}
+
 /// Build the configured `EdaBus` from [`CoServerConfig::eda_backend`].
 ///
 /// Returns `Arc<dyn EdaBus>` backed by `TokioBroadcastBus` for CO-380.
