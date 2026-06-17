@@ -297,6 +297,12 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/changelog",
             get(crate::changelog_routes::serve_changelog_page),
         )
+        // Iframe-friendly "releases as sprints" view (embedded by the static
+        // artelonga.com.br article). Frame headers handled by `frame_headers`.
+        .route(
+            "/changelog/embed",
+            get(crate::changelog_routes::serve_changelog_embed),
+        )
         .route("/admin", get(crate::admin_routes::serve_admin_page))
         // CO-361: gestao SPA — GitHub PAT auth is handled client-side
         .route("/gestao", get(crate::gestao_routes::serve_gestao_page))
@@ -683,10 +689,11 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         ))
         .layer(CompressionLayer::new())
         .layer(cors)
-        .layer(SetResponseHeaderLayer::overriding(
-            header::X_FRAME_OPTIONS,
-            HeaderValue::from_static("DENY"),
-        ))
+        // Frame headers: `X-Frame-Options: DENY` for everything EXCEPT
+        // /changelog/embed, which instead gets `CSP: frame-ancestors *.artelonga.com.br`
+        // so the static site can iframe the live releases dashboard. (Replaces the
+        // blanket overriding X-Frame-Options layer.)
+        .layer(axum::middleware::from_fn(crate::server::frame_headers))
         .layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static("x-content-type-options"),
             HeaderValue::from_static("nosniff"),

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>CO — Releases (live)</title>
+<meta name="description" content="Releases do CO como sprints — feed ao vivo, embutível.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root{ --bg:#fbf9f6; --text:#161413; --muted:#938b85; --accent:#9a3b2e; --line:#e7e1da; --card:#fff; }
+  *{box-sizing:border-box}
+  body{background:var(--bg);color:var(--text);font-family:'Fraunces',Georgia,serif;
+    margin:0;padding:1.4rem 5vw 3rem;line-height:1.55;max-width:860px;margin:0 auto}
+  .cle-head{border-bottom:2px solid var(--text);padding-bottom:.7rem;margin-bottom:1.4rem}
+  .cle-head h1{font-family:'Space Mono',monospace;font-size:1.25rem;letter-spacing:-.02em;margin:0}
+  .cle-head .sub{font-family:'Space Mono',monospace;font-size:.68rem;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--muted);margin-top:.35rem}
+  .sprint{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:10px;padding:1rem 1.15rem;margin-bottom:1rem}
+  .sprint-top{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  .sprint-ver{font-family:'Space Mono',monospace;font-weight:700;font-size:1.05rem}
+  .sprint-date{font-family:'Space Mono',monospace;font-size:.72rem;color:var(--muted)}
+  .sprint-theme{font-style:italic;color:var(--accent);margin:.25rem 0 .6rem;font-size:.98rem}
+  .sprint-repo{display:inline-block;font-family:'Space Mono',monospace;font-size:.62rem;
+    text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);
+    border-radius:999px;padding:.05rem .5rem;margin-left:.4rem;vertical-align:middle}
+  .sprint-body{font-size:.92rem}
+  .sprint-body h2,.sprint-body h3{font-family:'Space Mono',monospace;font-size:.8rem;
+    text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:.7rem 0 .3rem}
+  .sprint-body ul{margin:.2rem 0 .2rem 1.1rem;padding:0}
+  .sprint-body li{margin:.15rem 0}
+  .cle-empty,.cle-err{color:var(--muted);font-style:italic;padding:1rem 0}
+  .cle-foot{margin-top:1.4rem;font-family:'Space Mono',monospace;font-size:.66rem;color:var(--muted)}
+  .cle-foot a{color:var(--accent);text-decoration:none}
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#14110f; --text:#ece6df; --muted:#8a817a; --accent:#e07a5f; --line:#2a2420; --card:#1c1815; }
+  }
+</style>
+</head>
+<body>
+  <header class="cle-head">
+    <h1>Releases</h1>
+    <div class="sub">CO · sprints entregues (feed ao vivo)</div>
+  </header>
+  <div id="feed"><div class="cle-empty">Carregando releases…</div></div>
+  <div class="cle-foot">Atualizado <span id="asof">—</span> · fonte: <a href="/changelog">changelog completo</a></div>
+
+<script>
+(function(){
+  var feed = document.getElementById('feed');
+  var asof = document.getElementById('asof');
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, function(c){
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  fetch('/api/v1/changelog/feed')
+    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+    .then(function(d){
+      var items = (d && (d.items || d.releases || d.feed)) || [];
+      if(!items.length){ feed.innerHTML = '<div class="cle-empty">Nenhum release ainda.</div>'; return; }
+      feed.innerHTML = items.map(function(it){
+        var body = it.body_html || (it.theme ? '' : '<p class="cle-empty">Sem notas.</p>');
+        return '<article class="sprint">'
+          + '<div class="sprint-top"><span class="sprint-ver">'+esc(it.version)
+          + (it.repo ? '<span class="sprint-repo">'+esc(it.repo)+'</span>' : '')
+          + '</span><span class="sprint-date">'+esc(it.date)+'</span></div>'
+          + (it.theme ? '<div class="sprint-theme">'+esc(it.theme)+'</div>' : '')
+          + '<div class="sprint-body">'+body+'</div>'
+          + '</article>';
+      }).join('');
+      try { asof.textContent = new Date().toLocaleString('pt-BR'); } catch(e){}
+    })
+    .catch(function(e){ feed.innerHTML = '<div class="cle-err">Não foi possível carregar os releases ('+esc(e.message)+').</div>'; });
+})();
+</script>
+</body>
+</html>

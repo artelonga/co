@@ -27,6 +27,11 @@ use super::changelog_parser::parse_keep_a_changelog;
 
 const CHANGELOG_MD: &str = include_str!("../../../CHANGELOG.md");
 const CHANGELOG_PAGE_HTML: &str = include_str!("../../static/variants/a/changelog.html");
+/// Iframe-friendly "releases as sprints" view (public, embedded by the static
+/// artelonga.com.br article). Iframe-ability is handled by `frame_headers` in the
+/// router (CSP `frame-ancestors` for `*.artelonga.com.br` instead of the global
+/// `X-Frame-Options: DENY`).
+const CHANGELOG_EMBED_HTML: &str = include_str!("../../static/variants/a/changelog-embed.html");
 
 // " — " separator used throughout CHANGELOG.md (space + U+2014 em-dash + space)
 const SEP: &str = " \u{2014} ";
@@ -331,6 +336,20 @@ pub async fn serve_changelog_page() -> Response {
             (header::CACHE_CONTROL, "no-store"),
         ],
         CHANGELOG_PAGE_HTML,
+    )
+        .into_response()
+}
+
+/// GET /changelog/embed — iframe-friendly releases-as-sprints view (public).
+/// Short cache so the embedding static article picks up new releases without a deploy.
+pub async fn serve_changelog_embed() -> Response {
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=300"),
+        ],
+        CHANGELOG_EMBED_HTML,
     )
         .into_response()
 }

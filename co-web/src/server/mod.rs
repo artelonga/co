@@ -88,6 +88,29 @@ async fn health_check() -> Json<HealthResponse> {
     })
 }
 
+/// Clickjacking protection. Default: `X-Frame-Options: DENY` (no embedding). The
+/// one exception is `/changelog/embed`, which is *meant* to be iframed by the
+/// static artelonga.com.br site — it gets a CSP `frame-ancestors` allowlist
+/// (the modern, origin-scoped equivalent) and no `X-Frame-Options` (which has no
+/// cross-origin allow value and would otherwise block the iframe).
+pub async fn frame_headers(req: axum::extract::Request, next: axum::middleware::Next) -> Response {
+    let embeddable = req.uri().path() == "/changelog/embed";
+    let mut resp = next.run(req).await;
+    let h = resp.headers_mut();
+    if embeddable {
+        h.remove(header::X_FRAME_OPTIONS);
+        h.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static(
+                "frame-ancestors 'self' https://artelonga.com.br https://*.artelonga.com.br",
+            ),
+        );
+    } else {
+        h.insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    }
+    resp
+}
+
 async fn health_check_deep(State(core): State<Arc<CoreState>>) -> impl IntoResponse {
     let (db_status, disk_status) = {
         let storage = core.storage.lock();
