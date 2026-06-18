@@ -694,6 +694,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
         // so the static site can iframe the live releases dashboard. (Replaces the
         // blanket overriding X-Frame-Options layer.)
         .layer(axum::middleware::from_fn(crate::server::frame_headers))
+        // Maintenance gate (CO_MAINTENANCE_MODE): 503 all traffic except /api/health,
+        // without touching storage — for planned-maintenance windows. Inert by default.
+        .layer(axum::middleware::from_fn(crate::server::maintenance_gate))
         .layer(SetResponseHeaderLayer::overriding(
             HeaderName::from_static("x-content-type-options"),
             HeaderValue::from_static("nosniff"),
