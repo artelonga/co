@@ -155,6 +155,17 @@ pub fn run_startup_seeds(config: &WebConfig) {
 pub fn run_sister_repo_seeds(config: &WebConfig) {
     let mut storage = Storage::new(&config.data_dir);
 
+    // Workspace mode (local dev only): auto-register any top-level folder under
+    // CO_LOCAL_REPOS_DIR (e.g. ~/projects/<name>) that carries a `_universe.yaml`,
+    // so dropping/moving a folder in promotes it to a universe with no code change.
+    // CO_LOCAL_REPOS_DIR is unset in prod, so this never runs there.
+    if let Some(dir) = crate::infra::secrets::global().get("CO_LOCAL_REPOS_DIR") {
+        let n = storage.register_universes_from_local_dir(std::path::Path::new(&dir));
+        if n > 0 {
+            tracing::info!("workspace: auto-registered {n} universe(s) from {dir}");
+        }
+    }
+
     // Read universe→repo bindings from DB (CO-330).
     let mut rows: Vec<(String, String, Option<String>)> = {
         let conn = storage.conn();

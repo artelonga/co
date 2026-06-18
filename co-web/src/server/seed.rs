@@ -808,6 +808,86 @@ impl Storage {
     /// Owned by 'system', private, scholarly-dark, board layout.
     /// `ensure_admin_universe_memberships` makes Yuri a member so it appears
     /// in his sidebar. Idempotent via INSERT OR IGNORE.
+    /// Local-dev workspace: register every top-level folder under `dir` that
+    /// carries a `_universe.yaml` as a universe (key = folder name). This makes
+    /// the `~/projects` tree a universe workspace — dropping/moving a folder in
+    /// (e.g. `~/projects/yuri`) promotes it to a universe with no code change and
+    /// no deploy. DB-driven (idempotent `INSERT OR IGNORE`); the existing
+    /// `run_sister_repo_seeds` then ingests each folder's content for localhost.
+    ///
+    /// Gated by the caller on `CO_LOCAL_REPOS_DIR` being set, so it only ever
+    /// runs in local dev — prod (which never sets that env) is untouched.
+    /// Returns the number of newly-registered universes.
+    pub fn register_universes_from_local_dir(&mut self, dir: &std::path::Path) -> usize {
+        let now = Utc::now().to_rfc3339();
+        let mut registered = 0usize;
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return 0;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            // Opt-in marker: a `_universe.yaml` at the folder root. Software repos
+            // (co, yggdrasil) without one are NOT auto-registered here.
+            let manifest_path = path.join("_universe.yaml");
+            if !manifest_path.exists() {
+                continue;
+            }
+            let Some(dirname) = path.file_name().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            // key = sanitized folder name ([a-z0-9-], ≤64).
+            let key: String = dirname
+                .to_lowercase()
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+                .trim_matches('-')
+                .chars()
+                .take(64)
+                .collect();
+            if key.is_empty() {
+                continue;
+            }
+            // name (+ parent) from the manifest; fall back to the folder name.
+            let (name, parent) = std::fs::read(&manifest_path)
+                .ok()
+                .and_then(|b| co::manifest::parse(&b).ok())
+                .map(|r| (r.manifest.name, r.manifest.parent))
+                .unwrap_or_else(|| (dirname.to_string(), None));
+            // Index `content/` if present (the canonical mirror dir), else root.
+            let subdirs = if path.join("content").is_dir() {
+                r#"["content"]"#
+            } else {
+                r#"[""]"#
+            };
+            let local = path.to_string_lossy().to_string();
+            let inserted = self
+                .conn
+                .execute(
+                    "INSERT OR IGNORE INTO universes \
+                     (key, name, description, owner_id, created_at, is_template, is_public, \
+                      visibility, theme_preset, layout, content_count, parent_key, \
+                      local_repo_path, content_subdirs) \
+                     VALUES (?1, ?2, '', 'system', ?3, 0, 0, 'private', 'scholarly-light', \
+                      'board', 0, ?4, ?5, ?6)",
+                    rusqlite::params![key, name, now, parent, local, subdirs],
+                )
+                .unwrap_or(0);
+            if inserted > 0 {
+                self.seed_default_project_if_missing(&key);
+                registered += 1;
+                tracing::info!(
+                    "workspace: registered universe '{key}' from {} (_universe.yaml)",
+                    local
+                );
+            }
+        }
+        registered
+    }
+
     /// Ensure admin-owned content universes exist — idempotent, runs every boot.
     ///
     /// Creates artelonga, rfq, and co universes owned by any admin-tier user so
@@ -2137,6 +2217,32 @@ mod tests {
              priority: high\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-02-01T00:00:00Z\n\
              labels:\n  - type:feat\n---\n\nBody of CO-{n}.",
         )
+    }
+
+    #[test]
+    fn test_register_universes_from_local_dir() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+
+        // Fake workspace: one folder WITH a manifest, one WITHOUT.
+        let ws = tempfile::tempdir().unwrap();
+        let uni = ws.path().join("my-universe");
+        std::fs::create_dir_all(uni.join("content")).unwrap();
+        std::fs::write(
+            uni.join("_universe.yaml"),
+            "schema_version: 1\nname: My Universe\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(ws.path().join("not-a-universe")).unwrap(); // no manifest
+
+        let n = storage.register_universes_from_local_dir(ws.path());
+        assert_eq!(n, 1, "only the folder with _universe.yaml registers");
+        let u = storage.get_universe("my-universe").expect("registered");
+        assert_eq!(u.name, "My Universe");
+        assert!(storage.get_universe("not-a-universe").is_none());
+
+        // Idempotent: a second scan registers nothing new.
+        assert_eq!(storage.register_universes_from_local_dir(ws.path()), 0);
     }
 
     #[test]
