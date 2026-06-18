@@ -74,6 +74,7 @@ pub fn login(email: Option<String>, profile: Option<String>) {
     auth::run(
         auth::AuthAction::Login {
             email,
+            password: false, // top-level `co login` = passwordless email magic-code
             save_token: true,
         },
         profile,
