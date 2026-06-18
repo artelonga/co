@@ -408,10 +408,7 @@ fn do_login(
             &serde_json::json!({ "email": email, "password": password }),
         )?
     } else {
-        client.post_raw(
-            "/api/v1/auth/login",
-            &serde_json::json!({ "email": email }),
-        )?;
+        client.post_raw("/api/v1/auth/login", &serde_json::json!({ "email": email }))?;
         println!(
             "{} A 6-digit code was sent to {}. Check your email.",
             "→".cyan(),
