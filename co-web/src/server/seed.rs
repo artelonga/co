@@ -2220,6 +2220,35 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_personal_universe() {
+        let data_dir = tempfile::tempdir().unwrap();
+        let mut storage = Storage::new(data_dir.path().to_str().unwrap());
+        let user = storage.create_user("alice@example.com", "Alice").unwrap();
+
+        // First login → private universe keyed by the email local-part.
+        let key = storage
+            .ensure_personal_universe(&user.id, "alice@example.com", "Alice")
+            .unwrap();
+        assert_eq!(key.as_deref(), Some("alice"));
+        let u = storage.get_universe("alice").expect("created");
+        assert_eq!(u.visibility, "private");
+        assert!(
+            storage
+                .list_owned_universes(&user.id)
+                .iter()
+                .any(|x| x.universe.key == "alice")
+        );
+
+        // Idempotent — they already own one, so a second call is a no-op.
+        assert_eq!(
+            storage
+                .ensure_personal_universe(&user.id, "alice@example.com", "Alice")
+                .unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_register_universes_from_local_dir() {
         let data_dir = tempfile::tempdir().unwrap();
         let mut storage = Storage::new(data_dir.path().to_str().unwrap());
