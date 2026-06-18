@@ -5,6 +5,169 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.16.0] — 2026-06-18 — Per-site telemetry, ops hardening, universe workspace & passwordless CLI
+
+## alert-from-verified-domain — degradation alerts send from a Resend-verified domain
+
+Changed the default `CO_ALERT_FROM` from `CO Alertas <alertas@artelonga.com.br>`
+to `CO Alertas <alertas@seguranca.artelonga.com.br>`.
+
+### Why
+`artelonga.com.br` is not a Resend-verified sending domain, so disk-pressure /
+degradation alert emails (CO-422) failed to send or were spam-foldered.
+`seguranca.artelonga.com.br` is the verified domain already used for password and
+notification mail (`senhas@`, `notificacoes@`). Overridable via the `CO_ALERT_FROM`
+secret.
+
+Also fixed `RESEND_FROM` default — it pointed at `noreply@quilomboaraucaria.com.br`,
+a dead/unverified domain, so that notification channel couldn't send either. Now
+defaults to `CO <noreply@seguranca.artelonga.com.br>`.
+
+## changelog-embed — public, iframeable "releases as sprints" view
+
+New `GET /changelog/embed` — a public (anonymous) page that renders the release
+feed as scrum-style sprint cards (version · date · theme · notes), pulling the
+already-public `GET /api/v1/changelog/feed`. Styled to match the artelonga
+aesthetic (Fraunces/Space Mono, light+dark) so it blends into the embedding page.
+
+Designed to be **iframed by the static artelonga.com.br site** — a live dashboard
+inside a static article. Frame headers are handled by a new `frame_headers`
+middleware that keeps `X-Frame-Options: DENY` everywhere by default, but serves
+`/changelog/embed` with `Content-Security-Policy: frame-ancestors 'self'
+https://artelonga.com.br https://*.artelonga.com.br` instead (X-Frame-Options has
+no cross-origin allow value, so it's dropped for this one route). 5-minute cache
+so new releases surface without redeploying the static site.
+
+Embed with: `<iframe src="https://co.artelonga.com.br/changelog/embed" …>`.
+
+## cli-email-login — `co login` by emailed magic-code (passwordless)
+
+`co login` now defaults to **passwordless email login**: enter your email, a
+6-digit code is sent to your inbox (`POST /api/v1/auth/login`), you type it in,
+and you're authenticated (`/api/v1/auth/verify`) with a saved session/API token.
+Works for brand-new signups too — no password to set first. `co login --password`
+(and `co auth login --password`) keep the classic password flow.
+
+### Why
+The CLI previously only did password-login, which a magic-code signup user has no
+password for — blocking the "install the CLI and sync" onboarding. This makes the
+CLI usable by any user the moment they have an email, matching the web onboarding.
+
+## reclaim-event-log-bloat — one-time boot reclaim of the bridge-flood event_log bloat
+
+The EDA bridge flood left ~18 GB of `bridge.event_sent`/`bridge.event_received`
+rows in `event_log` (meta.db ≈ 19 GB). They're under the 30-day retention window
+so they won't age out yet, and SQLite won't shrink the file in place — the prod
+volume kept hitting disk-pressure.
+
+### What changed
+- New `Storage::reclaim_event_log_transport_bloat()`: deletes the `bridge.*`
+  transport rows in **WAL-checkpointed batches** (so the write-ahead log can't
+  balloon past one batch on a near-full disk), then runs a full `VACUUM`. The
+  VACUUM rewrites only the small live remainder (temp ≈ live size, not the bloated
+  file size, so it fits a tight volume) **and activates the `auto_vacuum=INCREMENTAL`**
+  that's been latent since v087 — so future retention reclaims pages automatically.
+- A one-shot boot task (`event_log_reclaim_boot_task`) runs it ~20 s after boot
+  (server already bound + passing the storage-free `/api/health` check), gated by
+  the new `CO_MAINTENANCE_RECLAIM_EVENT_LOG` flag. Idempotent — a no-op once the
+  bloat is gone, so the flag is safe to leave set.
+- `fly.toml` sets `CO_MAINTENANCE_RECLAIM_EVENT_LOG = "1"` so the next prod deploy
+  performs the reclaim. Remove it on a later deploy once confirmed.
+
+### Why
+Reclaims the volume without the ~30-minute download-and-swap outage, and fixes the
+root cause of the recurring disk-pressure (the file now shrinks and stays shrunk).
+
+## telemetry-data-quality — Per-site breakdown, geo on records, real dwell
+
+Fixed three data-quality gaps in the public (unauthenticated) analytics read path
+(`GET /api/v1/analytics/public/summary` and `/recent`), which is the apex
+dashboard's data source. Read-only, no schema/ingest-contract changes.
+
+### Per-site breakdown
+- `?site=<name>` now scopes **all** summary/recent metrics to that site (the
+  `site` value the marketing beacon stores in the `universe_key` column). It
+  takes precedence over `?universe=` (same underlying column).
+- The summary response gains a `sites: [{site, views, visitors, sessions}]`
+  array — **network-wide** per-site engagement in a single call, grouped by
+  `universe_key`. The breakdown is window-only (not scoped to the summary's
+  universe), so it lists every site regardless of `?site=`/`?universe=` — the
+  initial cut reused the parent's universe predicate and could only ever return
+  the one site being summarized.
+- `/recent` events now carry a `site` field (the `universe_key`) instead of
+  reporting `null`, so a feed can identify each event's origin.
+
+### Geo on records
+- `/recent` now populates `country`/`city` per event from the stored geo columns
+  (resolved server-side at ingest, CO-178) instead of always returning `null`.
+  No raw IPs are exposed.
+
+### Dwell
+- `session_avg_ms` is computed as the average per-session span
+  (`max(timestamp) − min(timestamp)` per `session_id`, single-event sessions
+  excluded). Previously it was `AVG(duration_ms)`, which is always 0 for
+  marketing beacons (they don't carry a per-event `duration_ms`).
+
+### Why
+The apex dashboard could only see one global aggregate, recent events showed no
+geography, and dwell was permanently 0 — so per-site engagement, visitor
+geography, and session depth were all invisible despite the data being present.
+
+## telemetry-site-attribution — co-web routes bucket under "co"; drop scanner probes
+
+Fixed the write-side `universe_key` pollution that made the per-site engagement
+breakdown list co-web's own SPA routes and exploit-scanner probes as if they were
+separate sites.
+
+### What changed
+- The server-side pageview middleware now resolves `universe_key` to a distinct
+  site **only when the first path segment is a registered universe** (`/yuri/…`,
+  `/grcsamazonia/…`). Every other route on co.artelonga.com.br (`/agora`,
+  `/sala`, `/deployments`, `/recover`, `/entrar`, root) buckets under the
+  platform key `"co"`. The full `path` is still stored, so top-pages keeps
+  per-route detail.
+- Exploit/vuln scanner probes are dropped before any telemetry is written
+  (`/wp-admin`, `/wp-includes`, `/env`, `/cgi-bin`, `/credentials`, `/actuator`,
+  `/phpmyadmin`, `/xmlrpc`, …). They reach the SPA shell with HTTP 200, so
+  neither the User-Agent nor a status filter caught them.
+
+### Why
+With `universe_key = first-path-segment`, the network-wide breakdown surfaced
+~40 bogus "sites" (SPA route names + bot probes), drowning the real surfaces.
+Resolution is DB-driven (registered universes), so adding a universe needs no
+code change. The site key is resolved under the storage lock already taken for
+the insert — no new lock on the response hot path.
+
+### Note
+Historical events (last 30d) keep their old `universe_key`; they age out via
+telemetry retention. New traffic is attributed correctly immediately.
+
+## workspace-universes — ~/projects as a universe workspace (folder = universe)
+
+Local dev can now treat every top-level folder under `CO_LOCAL_REPOS_DIR`
+(`~/projects`) that carries a `_universe.yaml` as a CO universe — **no code change,
+no deploy, no git required**. Move/drop a folder in (e.g. `~/projects/yuri`) and it
+registers as a universe (key = folder name) on the next `co serve`, with content
+ingested for localhost and full CRUD via the web editor + Vault API + `co sync`.
+
+### What changed
+- `Storage::register_universes_from_local_dir(dir)` — scans top-level folders,
+  registers each `_universe.yaml`-bearing one (`INSERT OR IGNORE`, idempotent;
+  name/parent from the manifest; indexes `content/` if present, else root).
+- Wired into `run_sister_repo_seeds`, **gated on `CO_LOCAL_REPOS_DIR`** — so it runs
+  only in local dev. Prod never sets that env, so prod is untouched (inert).
+- Replaces the need to hand-edit the hardcoded key→path bootstrap list for new
+  content universes (DB-driven; aligns with the no-hardcoded-mappings rule).
+- `scripts/co-local.sh` — serve the whole workspace on localhost in one command.
+- `scripts/co-deploy.sh` — one-word CO-app deploy to prod (gate + deploy + smoke).
+  (Universe *content* deploys CO-natively via `co sync push <key>`.)
+
+### Verified
+Booting locally with `CO_LOCAL_REPOS_DIR=~/projects` auto-registered miguel, mse,
+nlp, grcsamazonia from their manifests (others already seeded). Unit test
+`test_register_universes_from_local_dir` covers register + idempotency.
+
+
 ## [3.15.3] — 2026-06-16 — event_log bridge-flood fix — stop the disk refill at source
 
 ## CO-435 — Stop persisting bridge transport events to event_log (prod disk flood)
