@@ -5,6 +5,24 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.17.0] — 2026-06-18 — Default private personal universe on signup (CO-465)
+
+## personal-universe-on-signup — every new user gets a private universe (CO-465)
+
+On first login, a new user is automatically given **their own private personal
+universe** (key = sanitised email local-part, collision-suffixed), owned by them,
+with a default project + a welcome page. Private by default — only they see it.
+Pairs with the existing public-subscribable discovery (`GET /api/v1/universes/public`):
+a freshly-invited user lands in their own space *and* can browse + subscribe to
+public universes.
+
+### How
+`Storage::ensure_personal_universe(user_id, email, display_name)` —
+idempotent (no-op if they already own one), called best-effort from the magic-code
+`verify` handler so it can never block login. Reuses `create_universe`
+(private + owner membership + default project).
+
+
 ## [3.16.0] — 2026-06-18 — Per-site telemetry, ops hardening, universe workspace & passwordless CLI
 
 ## alert-from-verified-domain — degradation alerts send from a Resend-verified domain
