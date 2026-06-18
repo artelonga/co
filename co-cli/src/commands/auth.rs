@@ -68,6 +68,8 @@ pub type Credentials = HashMap<String, Profile>;
 pub enum AuthAction {
     Login {
         email: Option<String>,
+        /// Use password login instead of the default emailed magic-code.
+        password: bool,
         save_token: bool,
     },
     ResetPassword {
@@ -95,7 +97,11 @@ pub enum AuthAction {
 pub fn run(action: AuthAction, profile_name: Option<String>) {
     let profile = profile_name.as_deref().unwrap_or("default");
     match action {
-        AuthAction::Login { email, save_token } => cmd_login(email, save_token, profile),
+        AuthAction::Login {
+            email,
+            password,
+            save_token,
+        } => cmd_login(email, password, save_token, profile),
         AuthAction::ResetPassword { email } => cmd_reset_password(email, profile),
         AuthAction::ChangePassword => cmd_change_password(profile),
         AuthAction::Status => cmd_status(profile),
@@ -374,25 +380,49 @@ fn confirm(msg: &str) -> bool {
 
 // ─── Subcommand: login ────────────────────────────────────────────────────────
 
-fn cmd_login(email: Option<String>, save_token: bool, profile_name: &str) {
-    if let Err(e) = do_login(email, save_token, profile_name) {
+fn cmd_login(email: Option<String>, password: bool, save_token: bool, profile_name: &str) {
+    if let Err(e) = do_login(email, password, save_token, profile_name) {
         eprintln!("{} {}", "error:".red().bold(), e);
         std::process::exit(1);
     }
 }
 
-fn do_login(email: Option<String>, save_token: bool, profile_name: &str) -> Result<()> {
+fn do_login(
+    email: Option<String>,
+    use_password: bool,
+    save_token: bool,
+    profile_name: &str,
+) -> Result<()> {
     let mut creds = load_credentials();
     let base_url = base_url_for(&creds, profile_name);
 
     let email = email.unwrap_or_else(|| prompt("Email"));
-    let password = prompt_password("Password");
-
     let client = ApiClient::new(&base_url, None);
-    let resp = client.post_raw(
-        "/api/v1/auth/password-login",
-        &serde_json::json!({ "email": email, "password": password }),
-    )?;
+
+    // Default: passwordless email magic-code (works for any user, including fresh
+    // signups). `--password` opts into the classic password login.
+    let resp = if use_password {
+        let password = prompt_password("Password");
+        client.post_raw(
+            "/api/v1/auth/password-login",
+            &serde_json::json!({ "email": email, "password": password }),
+        )?
+    } else {
+        client.post_raw(
+            "/api/v1/auth/login",
+            &serde_json::json!({ "email": email }),
+        )?;
+        println!(
+            "{} A 6-digit code was sent to {}. Check your email.",
+            "→".cyan(),
+            email.cyan()
+        );
+        let code = prompt("Code");
+        client.post_raw(
+            "/api/v1/auth/verify",
+            &serde_json::json!({ "email": email, "code": code.trim() }),
+        )?
+    };
 
     let status = resp.status();
     let session_jwt = extract_session_jwt(resp.headers());

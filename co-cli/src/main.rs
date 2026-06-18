@@ -1001,14 +1001,19 @@ enum EngineSubcommand {
 
 #[derive(Subcommand)]
 enum AuthSubcommand {
-    /// Interactive password login
+    /// Log in by email (a 6-digit code is sent to your inbox — no password needed).
     ///
-    /// Prompts for password with hidden input. With --save-token, also creates
-    /// a 90-day API token and writes it to ~/.config/co/credentials.
+    /// Default is passwordless email magic-code (works for fresh signups too).
+    /// Use --password for the classic password login. With --save-token, also
+    /// creates a 90-day API token and writes it to ~/.config/co/credentials.
     Login {
         /// Email address
         #[arg(long)]
         email: Option<String>,
+
+        /// Use password login instead of the emailed magic-code
+        #[arg(long)]
+        password: bool,
 
         /// Create and save a 90-day API token after login
         #[arg(long)]
@@ -2061,9 +2066,15 @@ fn main() {
         }
         Commands::Auth { action, profile } => {
             let auth_action = match action {
-                AuthSubcommand::Login { email, save_token } => {
-                    commands::auth::AuthAction::Login { email, save_token }
-                }
+                AuthSubcommand::Login {
+                    email,
+                    password,
+                    save_token,
+                } => commands::auth::AuthAction::Login {
+                    email,
+                    password,
+                    save_token,
+                },
                 AuthSubcommand::ResetPassword { email } => {
                     commands::auth::AuthAction::ResetPassword { email }
                 }
