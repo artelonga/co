@@ -8,6 +8,89 @@ use super::Storage;
 use super::schema::{parse_datetime, upsert_entry_row};
 
 impl Storage {
+    /// CO-465: ensure a fresh user has their own **private personal universe**
+    /// (key = sanitised email local-part, collision-suffixed). Idempotent — a no-op
+    /// when the user already owns any universe. Seeds a welcome entry so the
+    /// universe isn't empty. Returns the key when one is created.
+    ///
+    /// Best-effort by contract: callers on the signup/login path must log + continue
+    /// on `Err` (a failure here must never block authentication).
+    pub fn ensure_personal_universe(
+        &mut self,
+        user_id: &str,
+        email: &str,
+        display_name: &str,
+    ) -> anyhow::Result<Option<String>> {
+        if !self.list_owned_universes(user_id).is_empty() {
+            return Ok(None); // already has a universe — leave it alone
+        }
+        let base: String = email
+            .split('@')
+            .next()
+            .unwrap_or("user")
+            .to_lowercase()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect::<String>()
+            .trim_matches('-')
+            .chars()
+            .take(40)
+            .collect();
+        let base = if base.is_empty() {
+            "user".to_string()
+        } else {
+            base
+        };
+        // Collision-suffix against existing universe keys.
+        let mut key = base.clone();
+        let mut n = 1;
+        while self.get_universe(&key).is_some() {
+            n += 1;
+            if n > 50 {
+                return Ok(None);
+            }
+            key = format!("{base}-{n}");
+        }
+        let name = if display_name.trim().is_empty() {
+            key.clone()
+        } else {
+            display_name.to_string()
+        };
+        self.create_universe(
+            crate::models::CreateUniverse {
+                key: key.clone(),
+                name,
+                description: "Seu universo pessoal — privado por padrão.".to_string(),
+            },
+            user_id,
+        )?;
+        // Seed a welcome page so the personal universe opens to something.
+        let now_str = Utc::now().to_rfc3339();
+        let fm = json!({
+            "type": "page",
+            "title": "Bem-vindo",
+            "created": now_str,
+            "modified": now_str,
+            "tags": []
+        });
+        let body = format!(
+            "# Bem-vindo, {}\n\nEste é o **seu universo pessoal** — privado por padrão, \
+             só você vê. Crie tarefas e notas, edite no navegador ou sincronize local \
+             com `co sync`. Para descobrir universos públicos e assinar, veja a busca de \
+             universos.\n",
+            if display_name.trim().is_empty() {
+                "👋"
+            } else {
+                display_name
+            }
+        );
+        let entry = make_entry("content/bem-vindo.md", fm, &body);
+        let root = self.universe_root(&key);
+        let _ = co::entry::write_entry(&root, &entry);
+        let _ = upsert_entry_row(&self.conn, &key, &entry);
+        Ok(Some(key))
+    }
+
     pub fn create_universe(
         &mut self,
         create: crate::models::CreateUniverse,

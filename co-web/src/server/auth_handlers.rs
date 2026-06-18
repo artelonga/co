@@ -217,6 +217,7 @@ pub(super) async fn verify_handler(
     }
 
     // Code matches — resolve or create user.
+    let mut is_new_user = false;
     let (user_id, display_name, tier) = match entry.user_id {
         Some(ref id) => {
             let storage = lock_storage(&state);
@@ -234,6 +235,7 @@ pub(super) async fn verify_handler(
         }
         None => {
             // First-time user — auto-register.
+            is_new_user = true;
             let display_name = email.split('@').next().unwrap_or("user").to_string();
             let user = {
                 let mut storage = lock_storage(&state);
@@ -283,6 +285,21 @@ pub(super) async fn verify_handler(
             tracing::warn!(
                 "CO-184 ensure_quilombo_user_for_co failed for {user_id} (magic-link continues): {e}"
             );
+        }
+    }
+
+    // CO-465: give a fresh user their own private personal universe — best-effort,
+    // must never block login. Idempotent (no-op if they already own one).
+    if is_new_user {
+        let mut storage = lock_storage(&state);
+        match storage.ensure_personal_universe(&user_id, &email, &display_name) {
+            Ok(Some(key)) => {
+                tracing::info!("CO-465: created personal universe '{key}' for {user_id}")
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!(
+                "CO-465 ensure_personal_universe failed for {user_id} (login continues): {e}"
+            ),
         }
     }
 
