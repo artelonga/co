@@ -49,12 +49,17 @@ Pre-built binaries are available for macOS (Intel + Apple Silicon), Linux (x86_6
 ### Option A — CLI (Rust)
 
 ```bash
-cargo install co-cli
+# Install the `co` CLI from GitHub (AGPL-3.0). A crates.io release
+# (`cargo install co-cli`) is pending — see CO-464.
+cargo install --git https://github.com/artelonga/co co-cli
+
 co init meu-projeto
 cd meu-projeto
 co new task "primeira tarefa"
 co show board
 ```
+
+CO is free software under the **GNU Affero GPL v3** (see [`LICENSE`](LICENSE)).
 
 ### Option B — Docker
 
