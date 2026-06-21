@@ -31,3 +31,10 @@ status: todo
    server log; a `co serve --print-login` or first-run token would be friendlier.
 5. Fold `scripts/co-local.sh` / `co-login.sh` into `co serve` proper so a stranger
    doesn't need repo scripts.
+
+## Acceptance
+- [ ] README install uses a working command (`cargo install --git …`) and documents the crates.io blocker (path-deps) or resolves it.
+- [ ] `co-cli` carries publishable crates.io metadata (license, description, repository, readme, keywords, categories).
+- [ ] A getting-started doc covers the three personas: hosted (email signup → web), CLI (`co login` + `co sync`), self-host (`co serve` / folder=universe).
+- [ ] Self-host login UX documented (no-RESEND magic-code-to-stdout path) or a `co serve --print-login` helper.
+- [ ] `cargo build -p co-cli` clean; no behavior regressions.
