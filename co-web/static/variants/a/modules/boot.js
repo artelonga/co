@@ -32,27 +32,47 @@ export function injectBootCallbacks(callbacks) {
 // filters by `parent_key === slug`. Returns '' when there are no children, so
 // callers can append unconditionally. Each card links to the child at `/<slug>`,
 // matching the SPA's universe URL scheme (see setUniverseSlugInUrl).
-async function buildExplorarPanelHtml(slug) {
+// Returns an HTMLElement (the panel) or null when there are no children.
+// Built via DOM APIs (textContent) — XSS-safe by construction, no innerHTML.
+async function buildExplorarPanel(slug) {
     let universes = [];
     try {
         universes = await apiFetch('/api/v1/universes/public', {}, true) || [];
     } catch (_) {
-        return '';
+        return null;
     }
     const children = universes
         .filter(u => u.parent_key === slug)
         .sort((a, b) => (a.name || a.key).localeCompare(b.name || b.key));
-    if (children.length === 0) return '';
-    const cards = children.map(c => `
-        <a class="explorar-card" href="/${esc(c.key)}">
-            <span class="explorar-card-name">${esc(c.name || c.key)}</span>
-            ${c.description ? `<span class="explorar-card-desc">${esc(c.description)}</span>` : ''}
-        </a>`).join('');
-    return `
-        <section class="universe-home-explorar" aria-label="Explorar este universo">
-            <h2 class="explorar-title">Explorar este universo</h2>
-            <div class="explorar-cards">${cards}</div>
-        </section>`;
+    if (children.length === 0) return null;
+
+    const section = document.createElement('section');
+    section.className = 'universe-home-explorar';
+    section.setAttribute('aria-label', 'Explorar este universo');
+    const h2 = document.createElement('h2');
+    h2.className = 'explorar-title';
+    h2.textContent = 'Explorar este universo';
+    const cardsWrap = document.createElement('div');
+    cardsWrap.className = 'explorar-cards';
+    for (const c of children) {
+        const a = document.createElement('a');
+        a.className = 'explorar-card';
+        a.href = `/${encodeURIComponent(c.key)}`;
+        const nameEl = document.createElement('span');
+        nameEl.className = 'explorar-card-name';
+        nameEl.textContent = c.name || c.key;
+        a.appendChild(nameEl);
+        if (c.description) {
+            const descEl = document.createElement('span');
+            descEl.className = 'explorar-card-desc';
+            descEl.textContent = c.description;
+            a.appendChild(descEl);
+        }
+        cardsWrap.appendChild(a);
+    }
+    section.appendChild(h2);
+    section.appendChild(cardsWrap);
+    return section;
 }
 
 // Universe home — fallback when no project exists
@@ -67,7 +87,7 @@ export async function renderUniverseHome() {
     // an "Explorar" panel listing their direct children. Built once here and
     // injected into whichever home layout renders below (markdown or empty).
     const isParent = info.is_template === true || slug === 'template';
-    const explorarHtml = isParent ? await buildExplorarPanelHtml(slug) : '';
+    const explorarPanel = isParent ? await buildExplorarPanel(slug) : null;
 
     content.className = 'content universe-home-view';
     content.innerHTML = `
@@ -117,14 +137,14 @@ export async function renderUniverseHome() {
             }
         } catch (_) {}
         // CO-98: append the Explorar panel below the rendered index page.
-        if (explorarHtml) body.insertAdjacentHTML('beforeend', explorarHtml);
+        if (explorarPanel) body.appendChild(explorarPanel);
         return;
     }
 
     // CO-98: on a parent universe with children, the empty-state hint is
     // replaced by the Explorar panel so the home page is never blank.
-    if (explorarHtml) {
-        body.innerHTML = explorarHtml;
+    if (explorarPanel) {
+        body.replaceChildren(explorarPanel);
         return;
     }
 
