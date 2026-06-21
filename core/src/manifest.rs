@@ -18,6 +18,9 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "schema_version",
     "name",
+    "parent",
+    "surface_dns",
+    "visibility",
     "content_types",
     "doc_generators",
     "relationships",
