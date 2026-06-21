@@ -59,11 +59,13 @@ a:hover{text-decoration:underline}
         <th>Estado</th>
         <th>Último deploy</th>
         <th>Saúde</th>
+        <th title="cost = machine_size × uptime_ratio × Fly hourly rate × 730 h/mês">Est. custo mensal</th>
       </tr>
     </thead>
     <tbody id="units-body">
-      <tr><td colspan="9" style="color:var(--dim);text-align:center;padding:20px">Carregando…</td></tr>
+      <tr><td colspan="10" style="color:var(--dim);text-align:center;padding:20px">Carregando…</td></tr>
     </tbody>
+    <tfoot id="units-foot"></tfoot>
   </table>
 </div>
 
@@ -105,14 +107,21 @@ function relTime(iso){
   return Math.floor(diff/86400)+'d atrás';
 }
 
+function fmtCost(c){
+  if(typeof c!=='number'||c===0)return '—';
+  return '$'+c.toFixed(2);
+}
+
 function render(data){
   var now=new Date(data.refreshed_at);
   document.getElementById('as-of').textContent='Atualizado: '+now.toLocaleString('pt-BR');
   hide_err();
 
   var tb=document.getElementById('units-body');
+  var tf=document.getElementById('units-foot');
   if(!data.units||!data.units.length){
-    tb.innerHTML='<tr><td colspan="9" style="color:var(--dim);text-align:center">Sem dados</td></tr>';
+    tb.innerHTML='<tr><td colspan="10" style="color:var(--dim);text-align:center">Sem dados</td></tr>';
+    tf.innerHTML='';
     return;
   }
 
@@ -130,8 +139,9 @@ function render(data){
     row+='<td>'+statusDot(stateText)+stateText+'</td>';
     row+='<td title="'+esc(u.last_deploy_at)+'">'+deployRel+'</td>';
     row+='<td>'+healthDot+(u.health_status||'—')+'</td>';
+    row+='<td>'+fmtCost(u.monthly_cost_usd)+'</td>';
     row+='</tr>';
-    row+='<tr class="detail-row" id="detail-'+i+'" style="display:none"><td colspan="9">';
+    row+='<tr class="detail-row" id="detail-'+i+'" style="display:none"><td colspan="10">';
     row+='<strong>Machine ID:</strong> '+esc(u.machine_id||'—')+'<br>';
     row+='<strong>Image:</strong> '+esc(u.image||'—')+'<br>';
     row+='<strong>Último deploy:</strong> '+esc(u.last_deploy_at||'—')+'<br>';
@@ -140,6 +150,10 @@ function render(data){
     row+='</td></tr>';
     return row;
   }).join('');
+
+  var total=typeof data.total_monthly_cost_usd==='number'?data.total_monthly_cost_usd:0;
+  tf.innerHTML='<tr><td colspan="9" style="text-align:right;padding:8px 10px;color:var(--dim);font-size:.75rem"><em>Estimated total monthly Fly spend:</em></td>'
+    +'<td style="padding:8px 10px;font-weight:600;color:var(--accent)">$'+total.toFixed(2)+'</td></tr>';
 }
 
 function toggleDetail(i){
