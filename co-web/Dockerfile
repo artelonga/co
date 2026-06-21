@@ -9,8 +9,10 @@
 FROM rust:1.94-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    protobuf-compiler pkg-config libssl-dev g++ \
+    protobuf-compiler libprotobuf-dev pkg-config libssl-dev g++ \
     && rm -rf /var/lib/apt/lists/*
+# libprotobuf-dev ships the well-known types (google/protobuf/struct.proto, …)
+# that CO-86's proto/co_format.proto imports; protobuf-compiler alone lacks them.
 
 WORKDIR /usr/src/co
 
