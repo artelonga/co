@@ -609,14 +609,25 @@ fn write_raw_vault_file(
             .ok_or_else(|| AppError::NotFound(format!("Universe '{universe_key}' not found")))?;
         storage.universe_root(universe_key)
     };
-    let full_path = universe_root.join(path);
-    if let Some(parent) = full_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| AppError::Internal(e.to_string()))?;
-    }
-    // Atomic: tmp + rename.
-    let tmp_path = full_path.with_extension("co-tmp");
-    std::fs::write(&tmp_path, body).map_err(|e| AppError::Internal(e.to_string()))?;
-    std::fs::rename(&tmp_path, &full_path).map_err(|e| AppError::Internal(e.to_string()))?;
+    // CO-87 pilot: route the raw-byte disk write through a composed protocol
+    // Stack rather than ad-hoc `fs::write`. The stack here is a single
+    // `FilesystemBytes` layer (atomic tmp+rename, mkdir -p) wrapped with a
+    // `PassthroughPlain` privacy layer — demonstrating call-site composition.
+    // Behavior is byte-identical to the previous inline write; swapping in
+    // encryption/signing later is a layer change, not a rewrite of this fn.
+    use co::layer::{Layer, LayerExt};
+    let stack = co::layer::physical::FilesystemBytes::new(universe_root)
+        .stack(co::layer::privacy::PassthroughPlain);
+    let cofile = co::proto::sync::CoFile {
+        path: path.to_string(),
+        content: body.as_bytes().to_vec(),
+        sha256: String::new(),
+        mime_type: String::new(),
+        modified_ns: 0,
+    };
+    stack
+        .write(cofile)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
     Ok(())
 }
 

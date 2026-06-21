@@ -23,6 +23,13 @@ walkdir = { workspace = true }
 
 # Compression
 zstd = { workspace = true }
+brotli = "8"
+
+# CO-87 protocol-stack layers: cache + sqlite backend.
+# (crypto deps chacha20poly1305 / ed25519-dalek / rand are shared with the
+#  CO-86 `.co` format block below — declared once there with rand_core feature.)
+lru = { workspace = true }
+rusqlite = { workspace = true }
 
 # Time
 chrono = { workspace = true }

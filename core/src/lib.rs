@@ -50,6 +50,8 @@ pub mod github;
 pub mod graph;
 pub mod index;
 pub mod language;
+/// CO-87: composable protocol stack — `Layer` trait + `Stack` composer.
+pub mod layer;
 pub mod mail;
 pub mod manifest;
 pub mod node;
