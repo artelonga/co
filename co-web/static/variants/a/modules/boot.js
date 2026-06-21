@@ -86,6 +86,22 @@ export async function renderUniverseHome() {
         return;
     }
 
+    // CO-98: if the universe has children (direct sub-universes), show an
+    // Explorar panel instead of the generic empty-state message.
+    const allUniverses = state.userUniverses || [];
+    const children = allUniverses.filter(u => u.parent_key === slug);
+    if (children.length > 0) {
+        const listHtml = children
+            .map(c => `<li><a class="universe-home-child-link" href="/co?u=${encodeURIComponent(c.key)}">${esc(c.name || c.key)}${c.description ? ` — <span class="universe-home-child-desc">${esc(c.description)}</span>` : ''}</a></li>`)
+            .join('');
+        body.innerHTML = `
+            <div class="universe-home-explorar">
+                <h2 class="universe-home-explorar-title">Explorar este universo</h2>
+                <ul class="universe-home-explorar-list">${listHtml}</ul>
+            </div>`;
+        return;
+    }
+
     const totalEntries = (info.content_count || state.projects?.length || 0);
     body.innerHTML = `
         <div class="universe-home-empty">

@@ -316,6 +316,62 @@ impl Storage {
             .is_ok()
     }
 
+    /// CO-98: list the direct children of a universe (universes whose
+    /// `parent_key` equals `parent`). Returns a flat list — callers build the
+    /// tree client-side. Deleted/archived children are excluded. Panic-free.
+    pub fn list_children_of_universe(&self, parent: &str) -> Vec<crate::models::Universe> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, name, description, owner_id, created_at, is_template, is_public, \
+             COALESCE(content_count, 0), COALESCE(requires_login, 0), \
+             COALESCE(visibility, 'private') \
+             FROM universes \
+             WHERE parent_key = ?1 \
+               AND deleted_at IS NULL AND archived_at IS NULL \
+             ORDER BY name ASC",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_children_of_universe prepare: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map(params![parent], |row| {
+            Ok(crate::models::Universe {
+                key: row.get(0)?,
+                name: row.get(1)?,
+                description: row.get(2).unwrap_or_default(),
+                owner_id: row.get(3).unwrap_or_default(),
+                created_at: row
+                    .get::<_, String>(4)
+                    .ok()
+                    .and_then(|s| {
+                        chrono::DateTime::parse_from_rfc3339(&s)
+                            .ok()
+                            .map(|d| d.with_timezone(&chrono::Utc))
+                    })
+                    .unwrap_or_else(chrono::Utc::now),
+                is_template: row.get::<_, i64>(5).unwrap_or(0) != 0,
+                is_public: row.get::<_, i64>(6).unwrap_or(0) != 0,
+                content_count: row.get(7)?,
+                requires_login: row.get::<_, i64>(8).unwrap_or(0) != 0,
+                visibility: row.get(9)?,
+                parent_key: Some(parent.to_owned()),
+                anon_published_only: false,
+                source_kind: None,
+                source_url: None,
+                source_last_event_at: None,
+                source_mode: None,
+                surface_dns: None,
+            })
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_children_of_universe query: {e}");
+                Vec::new()
+            }
+        }
+    }
+
     /// CO-383: stamp the last-received event timestamp for an event-bus universe.
     pub fn touch_universe_last_event_at(&self, key: &str, ts: &str) {
         if let Err(e) = self.conn.execute(
@@ -1204,5 +1260,105 @@ impl Storage {
         let projects = query_count("SELECT COUNT(*) FROM entries WHERE entry_type = 'project'");
 
         (pages, tasks, projects)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::Storage;
+
+    fn make_storage() -> (Storage, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path().to_str().unwrap());
+        (storage, dir)
+    }
+
+    /// CO-98: setting `parent_key` on a universe and reading it back via
+    /// `get_universe` preserves the value (round-trip test).
+    #[test]
+    fn test_parent_key_round_trip() {
+        let (storage, _dir) = make_storage();
+
+        // Create two universes via direct SQL (Storage has no public create API
+        // without an owner, but we can seed via raw connection).
+        let now = chrono::Utc::now().to_rfc3339();
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, visibility) \
+                 VALUES ('parent-u', 'Parent', '', 'usr1', ?1, 0, 1, 'public-static'), \
+                        ('child-u',  'Child',  '', 'usr1', ?1, 0, 1, 'public-static')",
+                rusqlite::params![now],
+            )
+            .unwrap();
+
+        // Set parent_key on child.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET parent_key = 'parent-u' WHERE key = 'child-u'",
+                [],
+            )
+            .unwrap();
+
+        // Round-trip: get_universe should return parent_key.
+        let child = storage.get_universe("child-u").expect("child must exist");
+        assert_eq!(
+            child.parent_key.as_deref(),
+            Some("parent-u"),
+            "get_universe must return the stored parent_key"
+        );
+
+        let parent = storage.get_universe("parent-u").expect("parent must exist");
+        assert!(
+            parent.parent_key.is_none(),
+            "top-level universe must have no parent_key"
+        );
+    }
+
+    /// CO-98: `list_children_of_universe` returns only direct children of the
+    /// given parent and excludes deleted/archived universes.
+    #[test]
+    fn test_list_children_of_universe() {
+        let (storage, _dir) = make_storage();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes \
+                 (key, name, description, owner_id, created_at, is_template, is_public, visibility, parent_key) \
+                 VALUES \
+                   ('hub',      'Hub',      '', 'usr1', ?1, 0, 1, 'public-static', NULL), \
+                   ('child-a',  'Child A',  '', 'usr1', ?1, 0, 1, 'public-static', 'hub'), \
+                   ('child-b',  'Child B',  '', 'usr1', ?1, 0, 1, 'public-static', 'hub'), \
+                   ('orphan',   'Orphan',   '', 'usr1', ?1, 0, 1, 'public-static', NULL), \
+                   ('deleted',  'Deleted',  '', 'usr1', ?1, 0, 1, 'public-static', 'hub')",
+                rusqlite::params![now],
+            )
+            .unwrap();
+
+        // Soft-delete the 'deleted' child so it should be excluded.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET deleted_at = ?1 WHERE key = 'deleted'",
+                rusqlite::params![now],
+            )
+            .unwrap();
+
+        let children = storage.list_children_of_universe("hub");
+        assert_eq!(children.len(), 2, "exactly two live children expected");
+        let keys: Vec<&str> = children.iter().map(|u| u.key.as_str()).collect();
+        assert!(keys.contains(&"child-a"), "child-a must appear");
+        assert!(keys.contains(&"child-b"), "child-b must appear");
+        assert!(!keys.contains(&"deleted"), "deleted child must be excluded");
+
+        // Top-level universe has no children.
+        assert!(
+            storage.list_children_of_universe("orphan").is_empty(),
+            "top-level universe must return empty children list"
+        );
     }
 }

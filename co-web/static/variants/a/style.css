@@ -2795,6 +2795,15 @@ body.co-single-universe-mode .hamburger-btn {
     font-size: 12px;
 }
 
+/* CO-98: Explorar panel (universe children list on home) */
+.universe-home-explorar { margin-top: 8px; }
+.universe-home-explorar-title { font-size: 16px; font-weight: 600; margin: 0 0 12px; color: var(--text, #111); }
+.universe-home-explorar-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.universe-home-explorar-list li { padding: 10px 14px; background: var(--bg-hover, #f9fafb); border: 1px solid var(--border, #e5e7eb); border-radius: 6px; }
+.universe-home-child-link { text-decoration: none; color: var(--text, #111); font-weight: 500; }
+.universe-home-child-link:hover { text-decoration: underline; }
+.universe-home-child-desc { font-weight: 400; color: var(--text-secondary, #6b7280); }
+
 /* ===== Conteúdo List (CO-42) ===== */
 .conteudo-list { max-width: 800px; }
 
