@@ -37,6 +37,8 @@ mod v087;
 mod v088;
 // CO-89: git-backed universes — git_source/git_branch/git_last_synced_* columns.
 mod v089;
+// CO-93: universe-type architecture — `accepts_proposals` opt-in (private-dynamic).
+mod v090;
 
 /// CO-446: minimum free bytes required on the data volume before the boot path
 /// runs migrations. Default 200 MiB. Override with `CO_MIGRATION_MIN_FREE_BYTES`.
@@ -178,6 +180,7 @@ impl Storage {
             self.migrate_v087(current_version);
             self.migrate_v088(current_version);
             self.migrate_v089(current_version);
+            self.migrate_v090(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(

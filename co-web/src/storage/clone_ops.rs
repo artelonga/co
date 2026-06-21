@@ -974,6 +974,7 @@ impl Storage {
             git_branch: None,
             git_last_synced_sha: None,
             git_last_synced_at: None,
+            accepts_proposals: false,
         })
     }
 
@@ -1219,6 +1220,7 @@ impl Storage {
             git_branch: None,
             git_last_synced_sha: None,
             git_last_synced_at: None,
+            accepts_proposals: false,
         })
     }
 }

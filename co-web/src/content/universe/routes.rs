@@ -318,6 +318,7 @@ pub async fn list_public_universes(
                 git_branch: None,
                 git_last_synced_sha: None,
                 git_last_synced_at: None,
+                accepts_proposals: false,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;

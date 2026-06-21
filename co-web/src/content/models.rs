@@ -433,10 +433,117 @@ pub struct Universe {
     /// CO-89: ISO-8601 timestamp of the last successful git-sync.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git_last_synced_at: Option<String>,
+    /// CO-93: opt-in flag that turns a public-subscribable (private) universe
+    /// into a **private-dynamic** one — subscribers may submit pending edits via
+    /// the proposal flow. Default `false` (the universe is static for its read
+    /// audience). The canonical [`Universe::universe_type`] is derived from
+    /// `visibility` + this flag; there is no denormalized `universe_type` column.
+    #[serde(default)]
+    pub accepts_proposals: bool,
 }
 
 fn default_visibility() -> String {
     "private".into()
+}
+
+/// CO-93: the three first-class universe types (plus the system-owned `template`
+/// flavor of public-static). This is the canonical, user-facing taxonomy that
+/// unifies the orthogonal axes previously conflated under `visibility`:
+/// **read visibility** (public vs private), **edit model** (members write
+/// directly), **proposal model** (only `private-dynamic` accepts subscriber
+/// proposals), and **encryption-at-rest** (on for private types).
+///
+/// The type is *derived* deterministically from `visibility` + `accepts_proposals`
+/// — see [`Universe::universe_type`] for the mapping — so it stays consistent
+/// with the legacy column instead of drifting like the old
+/// `is_template`/`is_public`/`requires_login` trio did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UniverseType {
+    /// Read by anyone (no auth); members edit directly; no proposals; no
+    /// encryption; pre-renderable to a CDN.
+    PublicStatic,
+    /// Read by members only (auth required); members edit directly; no
+    /// proposals; encrypted at rest.
+    PrivateStatic,
+    /// Read by members + subscribers; members edit directly; subscribers submit
+    /// proposals via the review queue; encrypted at rest.
+    PrivateDynamic,
+    /// System-owned public-static (read anyone, write system-only, no human
+    /// owner) — the `template` universe.
+    Template,
+}
+
+impl UniverseType {
+    /// Canonical kebab-case wire string.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UniverseType::PublicStatic => "public-static",
+            UniverseType::PrivateStatic => "private-static",
+            UniverseType::PrivateDynamic => "private-dynamic",
+            UniverseType::Template => "template",
+        }
+    }
+
+    /// Whether content of this type is encrypted at rest on the server
+    /// (ciphertext-only). True for the two private types.
+    pub fn encrypted_at_rest(self) -> bool {
+        matches!(
+            self,
+            UniverseType::PrivateStatic | UniverseType::PrivateDynamic
+        )
+    }
+
+    /// Whether anonymous (no-auth) reads are allowed. True for the public types.
+    pub fn public_read(self) -> bool {
+        matches!(self, UniverseType::PublicStatic | UniverseType::Template)
+    }
+
+    /// Whether subscribers may submit proposals (only `private-dynamic`).
+    pub fn accepts_proposals(self) -> bool {
+        matches!(self, UniverseType::PrivateDynamic)
+    }
+
+    /// Whether the read path can be pre-rendered and cached at a CDN edge
+    /// (public types only — private content must never hit a shared cache).
+    pub fn static_exportable(self) -> bool {
+        self.public_read()
+    }
+}
+
+impl std::fmt::Display for UniverseType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl Universe {
+    /// CO-93: derive the canonical [`UniverseType`] from the legacy `visibility`
+    /// column plus the `accepts_proposals` opt-in flag. This is the single source
+    /// of truth for the three-types taxonomy — see the "Today → after CO-93"
+    /// mapping:
+    ///
+    /// | `visibility`                       | `accepts_proposals` | `universe_type`  |
+    /// |------------------------------------|---------------------|------------------|
+    /// | `template`                         | (any)               | `template`       |
+    /// | `public-subscribable`              | `true`              | `private-dynamic`|
+    /// | `public-subscribable`              | `false`             | `public-static`  |
+    /// | `private`                          | (any)               | `private-static` |
+    /// | `requires_login`                   | (any)               | `private-static` |
+    /// | anything else (unknown/legacy)     | (any)               | `private-static` |
+    ///
+    /// `requires_login` is subsumed: any logged-in user is treated as a member of
+    /// a login-gated universe, so it collapses to `private-static`.
+    pub fn universe_type(&self) -> UniverseType {
+        match self.visibility.as_str() {
+            "template" => UniverseType::Template,
+            "public-subscribable" if self.accepts_proposals => UniverseType::PrivateDynamic,
+            "public-subscribable" => UniverseType::PublicStatic,
+            // `private`, `requires_login`, and any unknown/legacy value all map to
+            // the safe private-static default (fail closed).
+            _ => UniverseType::PrivateStatic,
+        }
+    }
 }
 
 /// CO-191: Universe with resolved role for the requesting user.
@@ -744,4 +851,127 @@ pub struct VerifyResponse {
     pub email: String,
     pub display_name: String,
     pub expires_at: DateTime<Utc>,
+}
+
+#[cfg(test)]
+mod universe_type_tests {
+    use super::*;
+
+    /// Minimal `Universe` fixture parameterised on the two axes that drive the
+    /// CO-93 type derivation: `visibility` + `accepts_proposals`.
+    fn universe(visibility: &str, accepts_proposals: bool) -> Universe {
+        Universe {
+            key: "k".into(),
+            name: "K".into(),
+            description: String::new(),
+            owner_id: "u1".into(),
+            created_at: Utc::now(),
+            is_template: visibility == "template",
+            is_public: false,
+            content_count: 0,
+            requires_login: visibility == "requires_login",
+            visibility: visibility.into(),
+            parent_key: None,
+            anon_published_only: false,
+            source_kind: None,
+            source_url: None,
+            source_last_event_at: None,
+            source_mode: None,
+            surface_dns: None,
+            git_source: None,
+            git_branch: None,
+            git_last_synced_sha: None,
+            git_last_synced_at: None,
+            accepts_proposals,
+        }
+    }
+
+    /// CO-93: every row of the "Today → after CO-93" mapping table resolves to
+    /// the canonical type. This is the single source of truth for the taxonomy.
+    #[test]
+    fn derives_each_universe_type_from_visibility_and_flag() {
+        // private → private-static (the legacy default)
+        assert_eq!(
+            universe("private", false).universe_type(),
+            UniverseType::PrivateStatic
+        );
+        // public-subscribable, no proposals → public-static
+        assert_eq!(
+            universe("public-subscribable", false).universe_type(),
+            UniverseType::PublicStatic
+        );
+        // public-subscribable, proposals opted in → private-dynamic
+        assert_eq!(
+            universe("public-subscribable", true).universe_type(),
+            UniverseType::PrivateDynamic
+        );
+        // requires_login is subsumed by membership → private-static
+        assert_eq!(
+            universe("requires_login", false).universe_type(),
+            UniverseType::PrivateStatic
+        );
+        // template stays a special public-static flavor (even if a stray flag is set)
+        assert_eq!(
+            universe("template", true).universe_type(),
+            UniverseType::Template
+        );
+        // unknown / legacy values fail closed → private-static
+        assert_eq!(
+            universe("something-weird", false).universe_type(),
+            UniverseType::PrivateStatic
+        );
+    }
+
+    /// CO-93: `accepts_proposals` only promotes `public-subscribable` to dynamic.
+    /// It must NOT turn a `private` or `template` universe into private-dynamic.
+    #[test]
+    fn accepts_proposals_only_promotes_public_subscribable() {
+        assert_eq!(
+            universe("private", true).universe_type(),
+            UniverseType::PrivateStatic,
+            "a private universe with the flag set is still private-static"
+        );
+        assert_eq!(
+            universe("template", true).universe_type(),
+            UniverseType::Template,
+            "the system template is never private-dynamic"
+        );
+    }
+
+    /// CO-93: the type's capability accessors encode the access-model matrix —
+    /// encryption-at-rest, anonymous read, proposal flow, CDN exportability.
+    #[test]
+    fn type_capabilities_match_the_access_matrix() {
+        // public types: anonymous read + static-exportable, never encrypted.
+        for t in [UniverseType::PublicStatic, UniverseType::Template] {
+            assert!(t.public_read());
+            assert!(t.static_exportable());
+            assert!(!t.encrypted_at_rest());
+            assert!(!t.accepts_proposals());
+        }
+        // private types: encrypted at rest, no anonymous read, not exportable.
+        for t in [UniverseType::PrivateStatic, UniverseType::PrivateDynamic] {
+            assert!(t.encrypted_at_rest());
+            assert!(!t.public_read());
+            assert!(!t.static_exportable());
+        }
+        // only private-dynamic accepts proposals.
+        assert!(UniverseType::PrivateDynamic.accepts_proposals());
+        assert!(!UniverseType::PrivateStatic.accepts_proposals());
+    }
+
+    /// CO-93: canonical kebab-case wire strings (serde + `as_str`/`Display`).
+    #[test]
+    fn wire_strings_are_canonical_kebab_case() {
+        assert_eq!(UniverseType::PublicStatic.as_str(), "public-static");
+        assert_eq!(UniverseType::PrivateStatic.as_str(), "private-static");
+        assert_eq!(UniverseType::PrivateDynamic.as_str(), "private-dynamic");
+        assert_eq!(UniverseType::Template.as_str(), "template");
+        assert_eq!(UniverseType::PrivateDynamic.to_string(), "private-dynamic");
+        // serde round-trips through the same kebab-case representation.
+        let json = serde_json::to_string(&UniverseType::PrivateDynamic).unwrap();
+        assert_eq!(json, "\"private-dynamic\"");
+        let back: UniverseType = serde_json::from_str("\"public-static\"").unwrap();
+        assert_eq!(back, UniverseType::PublicStatic);
+    }
 }
