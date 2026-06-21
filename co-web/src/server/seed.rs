@@ -866,7 +866,17 @@ impl Storage {
                         })
                     })
                     .unwrap_or(false);
-            if !has_manifest && !has_content {
+            // CO-467: skip pure software/infra repos — a code-project manifest at
+            // root with NO `_universe.yaml` and NO `content/` dir. Their README
+            // markdown tripped the content heuristic and over-registered dormant
+            // repos (aws, prediction-market, rfq-gateway, …) as universes.
+            let is_code_repo = !has_manifest
+                && !path.join("content").is_dir()
+                && (path.join("Cargo.toml").exists()
+                    || path.join("package.json").exists()
+                    || path.join("pyproject.toml").exists()
+                    || path.join("go.mod").exists());
+            if (!has_manifest && !has_content) || is_code_repo {
                 continue;
             }
             // key = sanitized folder name ([a-z0-9-], ≤64).
@@ -882,16 +892,20 @@ impl Storage {
             if key.is_empty() {
                 continue;
             }
-            // name (+ parent) from the manifest when present; else folder name.
-            let (name, parent) = if has_manifest {
+            // name + parent + visibility from the manifest when present.
+            let (name, parent, visibility) = if has_manifest {
                 std::fs::read(&manifest_path)
                     .ok()
                     .and_then(|b| co::manifest::parse(&b).ok())
-                    .map(|r| (r.manifest.name, r.manifest.parent))
-                    .unwrap_or_else(|| (dirname.to_string(), None))
+                    .map(|r| (r.manifest.name, r.manifest.parent, r.manifest.visibility))
+                    .unwrap_or_else(|| (dirname.to_string(), None, None))
             } else {
-                (dirname.to_string(), None)
+                (dirname.to_string(), None, None)
             };
+            // CO-467: honor the manifest's declared visibility (default private).
+            // `public-*` → is_public=1 so it surfaces in the public list.
+            let vis = visibility.as_deref().unwrap_or("private");
+            let is_public: i64 = if vis.starts_with("public") { 1 } else { 0 };
             // Index `content/` if present (the canonical mirror dir), else root.
             let subdirs = if path.join("content").is_dir() {
                 r#"["content"]"#
@@ -906,11 +920,23 @@ impl Storage {
                      (key, name, description, owner_id, created_at, is_template, is_public, \
                       visibility, theme_preset, layout, content_count, parent_key, \
                       local_repo_path, content_subdirs) \
-                     VALUES (?1, ?2, '', 'system', ?3, 0, 0, 'private', 'scholarly-light', \
+                     VALUES (?1, ?2, '', 'system', ?3, 0, ?7, ?8, 'scholarly-light', \
                       'board', 0, ?4, ?5, ?6)",
-                    rusqlite::params![key, name, now, parent, local, subdirs],
+                    rusqlite::params![key, name, now, parent, local, subdirs, is_public, vis],
                 )
                 .unwrap_or(0);
+            // CO-467: reconcile an EXISTING workspace row with the manifest —
+            // `INSERT OR IGNORE` never updates, so visibility/parent declared in
+            // `_universe.yaml` drifted from a stale earlier seed (miguel/mse/
+            // grcsamazonia were stuck `private`). Only touch workspace-scanned
+            // rows (those with a `local_repo_path`), never seeded system rows.
+            if inserted == 0 && has_manifest {
+                let _ = self.conn.execute(
+                    "UPDATE universes SET visibility = ?2, is_public = ?3, parent_key = ?4 \
+                     WHERE key = ?1 AND local_repo_path IS NOT NULL AND local_repo_path != ''",
+                    rusqlite::params![key, vis, is_public, parent],
+                );
+            }
             if inserted > 0 {
                 self.seed_default_project_if_missing(&key);
                 registered += 1;
@@ -919,7 +945,9 @@ impl Storage {
                 } else {
                     "content"
                 };
-                tracing::info!("workspace: registered universe '{key}' from {local} ({src})");
+                tracing::info!(
+                    "workspace: registered universe '{key}' from {local} ({src}, {vis})"
+                );
             }
         }
         registered
@@ -2292,12 +2320,12 @@ mod tests {
 
         // Fake workspace exercising "all folders are universes":
         let ws = tempfile::tempdir().unwrap();
-        // 1) folder WITH a manifest → name comes from the manifest
+        // 1) folder WITH a manifest declaring visibility → honored (CO-467)
         let uni = ws.path().join("my-universe");
         std::fs::create_dir_all(uni.join("content")).unwrap();
         std::fs::write(
             uni.join("_universe.yaml"),
-            "schema_version: 1\nname: My Universe\n",
+            "schema_version: 1\nname: My Universe\nvisibility: public-subscribable\n",
         )
         .unwrap();
         // 2) folder WITHOUT a manifest but WITH markdown content → still a universe
@@ -2310,15 +2338,26 @@ mod tests {
         std::fs::write(target.join("readme.md"), "noise").unwrap();
         // 4) empty/non-content folder → skipped
         std::fs::create_dir_all(ws.path().join("not-a-universe")).unwrap();
+        // 5) CO-467: pure code repo (Cargo.toml + README, no manifest, no content/) → skipped
+        let coderepo = ws.path().join("some-rust-tool");
+        std::fs::create_dir_all(&coderepo).unwrap();
+        std::fs::write(coderepo.join("Cargo.toml"), "[package]\nname=\"x\"\n").unwrap();
+        std::fs::write(coderepo.join("README.md"), "# tool").unwrap();
 
         let n = storage.register_universes_from_local_dir(ws.path());
         assert_eq!(n, 2, "manifest folder + markdown-content folder register");
         let u = storage.get_universe("my-universe").expect("registered");
         assert_eq!(u.name, "My Universe");
+        assert_eq!(
+            u.visibility, "public-subscribable",
+            "manifest visibility honored"
+        );
+        assert!(u.is_public, "public-* → is_public");
         let p = storage
             .get_universe("plain-notes")
             .expect("content registers");
         assert_eq!(p.name, "plain-notes", "name falls back to folder name");
+        assert_eq!(p.visibility, "private", "no manifest → default private");
         assert!(
             storage.get_universe("target").is_none(),
             "build dir skipped"
@@ -2327,9 +2366,25 @@ mod tests {
             storage.get_universe("not-a-universe").is_none(),
             "empty skipped"
         );
+        assert!(
+            storage.get_universe("some-rust-tool").is_none(),
+            "pure code repo skipped (CO-467)"
+        );
 
         // Idempotent: a second scan registers nothing new.
         assert_eq!(storage.register_universes_from_local_dir(ws.path()), 0);
+
+        // CO-467: editing the manifest's visibility + re-scanning reconciles the
+        // existing row (INSERT OR IGNORE alone never would).
+        std::fs::write(
+            uni.join("_universe.yaml"),
+            "schema_version: 1\nname: My Universe\nvisibility: private\n",
+        )
+        .unwrap();
+        storage.register_universes_from_local_dir(ws.path());
+        let u2 = storage.get_universe("my-universe").expect("still there");
+        assert_eq!(u2.visibility, "private", "re-scan reconciles visibility");
+        assert!(!u2.is_public, "reconciled to non-public");
     }
 
     #[test]

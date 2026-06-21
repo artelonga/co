@@ -140,6 +140,7 @@ fn test_backfill_no_affected_types_is_noop() {
         name: "X".to_string(),
         parent: None,
         surface_dns: None,
+        visibility: None,
         content_types: vec![ContentType {
             name: "tarefa".to_string(),
             schema: BTreeMap::new(),
