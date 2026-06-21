@@ -794,6 +794,49 @@ enum Commands {
         #[arg(long, global = true)]
         auto_approve: bool,
     },
+
+    /// Encode a markdown file into the `.co` wire format (CO-86)
+    ///
+    /// Wraps markdown into a self-describing protobuf envelope. Optionally
+    /// compresses the body with zstd.
+    ///
+    /// Examples:
+    ///   co encode sobre.md -o sobre.co
+    ///   co encode sobre.md -o sobre.co --compress
+    Encode {
+        /// Input markdown file
+        input: String,
+
+        /// Output `.co` file (default: input with `.co` extension)
+        #[arg(short, long)]
+        output: Option<String>,
+
+        /// Compress the body with zstd
+        #[arg(long)]
+        compress: bool,
+    },
+
+    /// Decode a `.co` file back into markdown (CO-86)
+    ///
+    /// Examples:
+    ///   co decode sobre.co -o sobre.md
+    Decode {
+        /// Input `.co` file
+        input: String,
+
+        /// Output markdown file (default: stdout)
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+
+    /// Inspect a `.co` file's envelope metadata (CO-86)
+    ///
+    /// Shows version, content_type, sizes, signed/encrypted flags and the
+    /// attachment count without writing the body anywhere.
+    Inspect {
+        /// Input `.co` file
+        input: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -2148,6 +2191,15 @@ fn main() {
             };
             commands::engine::run(engine_action, vault, auto_approve)
         }
+        Commands::Encode {
+            input,
+            output,
+            compress,
+        } => commands::cofile::run_encode(&input, output.as_deref(), compress),
+        Commands::Decode { input, output } => {
+            commands::cofile::run_decode(&input, output.as_deref())
+        }
+        Commands::Inspect { input } => commands::cofile::run_inspect(&input),
     }
 }
 

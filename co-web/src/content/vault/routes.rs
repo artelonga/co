@@ -807,7 +807,7 @@ pub async fn get_vault_file(
     State(state): State<AppState>,
     Path((slug, path)): Path<(String, String)>,
     headers: HeaderMap,
-) -> Result<Json<VaultFile>, AppError> {
+) -> Result<axum::response::Response, AppError> {
     vault_auth(&state, &headers)?;
 
     // CO-88b: record content-pipeline telemetry when the caller announces a
@@ -839,13 +839,80 @@ pub async fn get_vault_file(
     );
     let tags = extract_tags(&row.frontmatter);
 
-    Ok(Json(VaultFile {
-        path,
-        content,
-        frontmatter: row.frontmatter,
-        tags,
-        stat,
-    }))
+    // CO-86 content negotiation: the same entry is served as JSON (default),
+    // raw markdown, or the `.co` protobuf envelope based on `Accept`. Markdown
+    // stays the authoring surface; `.co` is the transport-optimized binary.
+    match negotiated_format(&headers) {
+        NegotiatedFormat::CoProtobuf => {
+            let mut co = co::co_format::from_markdown(&content);
+            co.universe_key = slug.clone();
+            co.entry_path = path.clone();
+            let bytes = co::co_format::to_bytes(&co);
+
+            // Server-side telemetry: record bytes-on-wire vs uncompressed per
+            // universe (feeds CO-88's pipeline summary).
+            let metrics = crate::pipeline::PipelineMetrics {
+                co_format: "co/protobuf".to_string(),
+                compression: "raw".to_string(),
+                encryption: "none".to_string(),
+                combo: "co-negotiated".to_string(),
+                size_uncompressed: content.len() as i64,
+                size_on_wire: bytes.len() as i64,
+                encode_ns: None,
+                decode_ns: None,
+            };
+            crate::pipeline::emit_pipeline_event(&state, &slug, &path, "get", &metrics, &headers);
+
+            Ok((
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, co::co_format::MIME_TYPE)],
+                bytes,
+            )
+                .into_response())
+        }
+        NegotiatedFormat::Markdown => Ok((
+            StatusCode::OK,
+            [(
+                axum::http::header::CONTENT_TYPE,
+                "text/markdown; charset=utf-8",
+            )],
+            content,
+        )
+            .into_response()),
+        NegotiatedFormat::Json => Ok(Json(VaultFile {
+            path,
+            content,
+            frontmatter: row.frontmatter,
+            tags,
+            stat,
+        })
+        .into_response()),
+    }
+}
+
+/// Which representation the caller asked for via `Accept` (CO-86).
+enum NegotiatedFormat {
+    Json,
+    Markdown,
+    CoProtobuf,
+}
+
+/// Pick a representation from the `Accept` header. The `.co` protobuf mime and
+/// `text/markdown` are honored when explicitly requested; everything else
+/// (including `*/*`, `application/json`, or a missing header) keeps the
+/// backward-compatible JSON `VaultFile`.
+fn negotiated_format(headers: &HeaderMap) -> NegotiatedFormat {
+    let accept = headers
+        .get(axum::http::header::ACCEPT)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if accept.contains(co::co_format::MIME_TYPE) {
+        NegotiatedFormat::CoProtobuf
+    } else if accept.contains("text/markdown") {
+        NegotiatedFormat::Markdown
+    } else {
+        NegotiatedFormat::Json
+    }
 }
 
 /// Returns true when the Content-Type indicates binary (non-text) content that

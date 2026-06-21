@@ -5,6 +5,7 @@ pub mod analyze;
 pub mod archive;
 pub mod auth;
 pub mod board;
+pub mod cofile;
 pub mod collab;
 pub mod conduct;
 pub mod config;

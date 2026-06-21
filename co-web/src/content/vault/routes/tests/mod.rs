@@ -3,6 +3,7 @@
 mod auth;
 mod code_files;
 mod crud;
+mod negotiation;
 mod obsidian;
 pub(crate) mod support;
 mod units;

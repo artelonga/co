@@ -38,6 +38,7 @@
 
 pub mod agent;
 pub mod archive;
+pub mod co_format;
 pub mod config;
 pub mod content;
 pub mod deploy;
@@ -72,6 +73,11 @@ pub mod proto {
     /// CO-151: SyncDelta, SyncBatch, CoFile — protobuf wire types for delta sync.
     pub mod sync {
         include!(concat!(env!("OUT_DIR"), "/co.v1.rs"));
+    }
+    /// CO-86: the rich `.co` content envelope (CoFile, Frontmatter, Form,
+    /// Attachment, Encrypted, Signature, Telemetry, …).
+    pub mod co_format {
+        include!(concat!(env!("OUT_DIR"), "/co.format.v1.rs"));
     }
 }
 
