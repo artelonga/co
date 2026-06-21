@@ -314,6 +314,10 @@ pub async fn list_public_universes(
                 source_last_event_at: None,
                 source_mode: None,
                 surface_dns: None,
+                git_source: None,
+                git_branch: None,
+                git_last_synced_sha: None,
+                git_last_synced_at: None,
             })
         })
         .map_err(|e| AppError::Internal(e.to_string()))?;

@@ -157,6 +157,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     let telemetry_public = crate::telemetry::router();
     let universe_api = crate::universe_routes::router(state.clone());
 
+    // CO-89: git-backed universes — git-sync, analytics recompute, Mermaid views.
+    let gitsync_api = crate::gitsync_routes::router(state.clone());
+
     let universe_invitation_api = crate::invitation_routes::universe_invitation_router().layer(
         axum::middleware::from_fn_with_state(state.clone(), crate::auth::require_auth),
     );
@@ -468,6 +471,7 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             // CO-204: chat origin telemetry (admin-gated via AdminUser extractor).
             .nest("/api/v1/admin", chat_admin_api)
             .nest("/api/v1/universes", universe_api)
+            .nest("/api/v1/universes", gitsync_api)
             .nest("/api/v1/universes", universe_invitation_api)
             .nest("/api/v1/universes", universe_invites_api)
             .nest("/api/v1/invitations", invitation_api)

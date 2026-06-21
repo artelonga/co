@@ -21,7 +21,7 @@ info:
     `Accept: application/vnd.co.v1+json`) para receber o corpo embrulhado no
     schema `Envelope` (`{ data, meta, errors }`). Sem o marcador o corpo é
     idêntico ao formato legado; respostas não-JSON nunca são embrulhadas.
-  version: "3.15.3"
+  version: "3.18.0"
   contact:
     name: Arte Longa
     email: yuri@artelonga.com.br
@@ -39,6 +39,8 @@ tags:
     description: "auth endpoints"
   - name: "universes"
     description: "universes endpoints"
+  - name: "git-sync"
+    description: "git-sync endpoints"
   - name: "graph-views"
     description: "graph-views endpoints"
   - name: "workspace"
@@ -3931,6 +3933,22 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/commit-timeline:
+    get:
+      tags: ["git-sync"]
+      summary: "Mermaid timeline of recent commits, grouped by day (CO-89)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/config:
     get:
       tags: ["universes"]
@@ -4216,6 +4234,54 @@ paths:
     delete:
       tags: ["entries"]
       summary: "Delete entry"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/gantt:
+    get:
+      tags: ["git-sync"]
+      summary: "Mermaid gantt of in-flight tasks, swimlane by assignee (CO-89)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/git-source:
+    post:
+      tags: ["git-sync"]
+      summary: "Set/clear `git_source` + `git_branch` (CO-89)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/git-sync:
+    post:
+      tags: ["git-sync"]
+      summary: "Ingest `git log` now → commit/profile entries + analytics (CO-89)"
       security:
         - sessionCookie: []
         - bearerJWT: []
@@ -4604,6 +4670,22 @@ paths:
     post:
       tags: ["entries"]
       summary: "CO-244 SQL query (read-only, auth required)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/recompute-analytics:
+    post:
+      tags: ["git-sync"]
+      summary: "Recompute every profile's analytics struct (CO-89)"
       security:
         - sessionCookie: []
         - bearerJWT: []

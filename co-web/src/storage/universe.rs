@@ -174,6 +174,10 @@ impl Storage {
             source_last_event_at: None,
             source_mode: None,
             surface_dns: None,
+            git_source: None,
+            git_branch: None,
+            git_last_synced_sha: None,
+            git_last_synced_at: None,
         })
     }
 
@@ -211,6 +215,10 @@ impl Storage {
                         source_last_event_at: None,
                         source_mode: None,
                         surface_dns: None,
+                        git_source: None,
+                        git_branch: None,
+                        git_last_synced_sha: None,
+                        git_last_synced_at: None,
                     })
                 },
             )
@@ -264,7 +272,93 @@ impl Storage {
             )
             .ok()
             .flatten();
+        // CO-89: git-source config (v89 columns). Queried separately so a pre-v89
+        // DB (columns absent) degrades to `None`/markdown-only without nulling the
+        // other fields.
+        if let Ok((src, branch, sha, at)) = self.conn.query_row(
+            "SELECT git_source, git_branch, git_last_synced_sha, git_last_synced_at \
+             FROM universes WHERE key = ?1",
+            params![key],
+            |row| {
+                Ok((
+                    row.get::<_, Option<String>>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                ))
+            },
+        ) {
+            universe.git_source = src;
+            universe.git_branch = branch;
+            universe.git_last_synced_sha = sha;
+            universe.git_last_synced_at = at;
+        }
         Some(universe)
+    }
+
+    /// CO-89: set this universe's git source + branch (opt-in git ingestion).
+    /// `Some(source)` enables git-sync from that remote; `None` disables it
+    /// (back to markdown-only). Returns rows updated (0 if `key` is unknown).
+    pub fn set_universe_git_source(
+        &self,
+        key: &str,
+        source: Option<&str>,
+        branch: Option<&str>,
+    ) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE universes SET git_source = ?2, \
+             git_branch = COALESCE(?3, git_branch) WHERE key = ?1",
+            params![key, source, branch],
+        )
+    }
+
+    /// CO-89: every universe with a `git_source` configured, as
+    /// `(key, git_source, git_branch, git_last_synced_sha)`. Drives the hourly
+    /// [`GitSyncWorker`]. Panic-free under the storage mutex: any SQLite error
+    /// degrades to an empty list (see `feedback_no_panic_under_mutex`).
+    ///
+    /// [`GitSyncWorker`]: crate::gitsync::worker::GitSyncWorker
+    pub fn list_git_backed_universes(&self) -> Vec<(String, String, String, Option<String>)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, git_source, COALESCE(git_branch, 'main'), git_last_synced_sha \
+             FROM universes \
+             WHERE git_source IS NOT NULL AND git_source != '' \
+               AND deleted_at IS NULL AND archived_at IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_git_backed_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_git_backed_universes query: {e}");
+                Vec::new()
+            }
+        }
+    }
+
+    /// CO-89: advance the incremental-sync cursor after a successful ingest.
+    pub fn set_universe_git_synced(
+        &self,
+        key: &str,
+        last_sha: &str,
+        synced_at: &str,
+    ) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE universes SET git_last_synced_sha = ?2, git_last_synced_at = ?3 \
+             WHERE key = ?1",
+            params![key, last_sha, synced_at],
+        )
     }
 
     /// CO-338: every universe's `(key, parent_key, surface_dns)` — the registry
@@ -470,6 +564,10 @@ impl Storage {
                     source_last_event_at: None,
                     source_mode: None,
                     surface_dns: None,
+                    git_source: None,
+                    git_branch: None,
+                    git_last_synced_sha: None,
+                    git_last_synced_at: None,
                 })
             })
             .expect("Failed to list universes for user")
@@ -645,6 +743,10 @@ impl Storage {
                 source_last_event_at: None,
                 source_mode: None,
                 surface_dns: None,
+                git_source: None,
+                git_branch: None,
+                git_last_synced_sha: None,
+                git_last_synced_at: None,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))
@@ -1319,6 +1421,10 @@ mod tests {
             source_last_event_at: None,
             source_mode: None,
             surface_dns: None,
+            git_source: None,
+            git_branch: None,
+            git_last_synced_sha: None,
+            git_last_synced_at: None,
         }
     }
 
