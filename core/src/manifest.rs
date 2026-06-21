@@ -109,6 +109,11 @@ pub struct Manifest {
     /// `yggdrasil.artelonga.com.br`). `None` = inherits a deploying ancestor.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_dns: Option<String>,
+    /// CO-467: declared visibility (`private` | `public-subscribable` |
+    /// `public-static` | `unlisted`). `None` = inherit/default `private`. The
+    /// workspace scan honors this on register AND reconciles existing rows.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub content_types: Vec<ContentType>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -563,6 +568,7 @@ pub fn default_manifest(name: impl Into<String>) -> Manifest {
         name: name.into(),
         parent: None,
         surface_dns: None,
+        visibility: None,
         content_types: vec![ContentType {
             name: "task".to_string(),
             schema,
@@ -906,6 +912,7 @@ content_types:
             name: "X".to_string(),
             parent: None,
             surface_dns: None,
+            visibility: None,
             content_types: vec![],
             doc_generators: vec![],
             relationships: vec![],

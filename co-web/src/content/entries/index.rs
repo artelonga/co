@@ -1045,6 +1045,7 @@ mod tests {
             name: "Test".to_string(),
             parent: None,
             surface_dns: None,
+            visibility: None,
             content_types: vec![ContentType {
                 name: "evento".to_string(),
                 schema,
