@@ -15,7 +15,7 @@ BASE_URL="${BASE_URL:-https://co.artelonga.com.br}"
 EXPECTED_TEMPO_EVENTS=21
 EXPECTED_HUMANITY_EVENTS=26
 EXPECTED_UNIVERSO_EVENTS=28
-EXPECTED_SW_CACHE_NAME='co-v5-offline'
+EXPECTED_SW_CACHE_NAME='co-v6-offline'
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=./smoke-lib.sh
