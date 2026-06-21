@@ -808,11 +808,13 @@ impl Storage {
     /// Owned by 'system', private, scholarly-dark, board layout.
     /// `ensure_admin_universe_memberships` makes Yuri a member so it appears
     /// in his sidebar. Idempotent via INSERT OR IGNORE.
-    /// Local-dev workspace: register every top-level folder under `dir` that
-    /// carries a `_universe.yaml` as a universe (key = folder name). This makes
-    /// the `~/projects` tree a universe workspace — dropping/moving a folder in
-    /// (e.g. `~/projects/yuri`) promotes it to a universe with no code change and
-    /// no deploy. DB-driven (idempotent `INSERT OR IGNORE`); the existing
+    /// Local-dev workspace: register every top-level content folder under `dir`
+    /// as a universe (key = folder name). "All folders are universes" — a folder
+    /// qualifies if it has a `_universe.yaml` OR holds markdown content; build and
+    /// system dirs (target, node_modules, backups, dot-dirs, …) are skipped. This
+    /// makes the `~/projects` tree a universe workspace — dropping/moving a folder
+    /// in (e.g. `~/projects/yuri`) promotes it to a universe with no registry, no
+    /// code change and no deploy. DB-driven (idempotent `INSERT OR IGNORE`); the existing
     /// `run_sister_repo_seeds` then ingests each folder's content for localhost.
     ///
     /// Gated by the caller on `CO_LOCAL_REPOS_DIR` being set, so it only ever
@@ -829,15 +831,44 @@ impl Storage {
             if !path.is_dir() {
                 continue;
             }
-            // Opt-in marker: a `_universe.yaml` at the folder root. Software repos
-            // (co, yggdrasil) without one are NOT auto-registered here.
-            let manifest_path = path.join("_universe.yaml");
-            if !manifest_path.exists() {
-                continue;
-            }
             let Some(dirname) = path.file_name().and_then(|s| s.to_str()) else {
                 continue;
             };
+            // Skip system/build/non-content dirs — never universes.
+            const SKIP: &[&str] = &[
+                "target",
+                "node_modules",
+                "dist",
+                "build",
+                "backups",
+                ".git",
+                ".worktrees",
+            ];
+            if dirname.starts_with('.') || SKIP.contains(&dirname) {
+                continue;
+            }
+            // "All folders are universes" — no registry/co-create ceremony. A
+            // folder qualifies if it carries a `_universe.yaml` (for metadata
+            // like parent/visibility) OR simply holds markdown content
+            // (`content/` dir, `index.md`, or any root `*.md`). Dropping a
+            // content folder into the workspace is enough to promote it.
+            let manifest_path = path.join("_universe.yaml");
+            let has_manifest = manifest_path.exists();
+            let has_content = path.join("content").is_dir()
+                || path.join("index.md").exists()
+                || std::fs::read_dir(&path)
+                    .map(|rd| {
+                        rd.flatten().any(|e| {
+                            e.path()
+                                .extension()
+                                .and_then(|x| x.to_str())
+                                .is_some_and(|x| x.eq_ignore_ascii_case("md"))
+                        })
+                    })
+                    .unwrap_or(false);
+            if !has_manifest && !has_content {
+                continue;
+            }
             // key = sanitized folder name ([a-z0-9-], ≤64).
             let key: String = dirname
                 .to_lowercase()
@@ -851,12 +882,16 @@ impl Storage {
             if key.is_empty() {
                 continue;
             }
-            // name (+ parent) from the manifest; fall back to the folder name.
-            let (name, parent) = std::fs::read(&manifest_path)
-                .ok()
-                .and_then(|b| co::manifest::parse(&b).ok())
-                .map(|r| (r.manifest.name, r.manifest.parent))
-                .unwrap_or_else(|| (dirname.to_string(), None));
+            // name (+ parent) from the manifest when present; else folder name.
+            let (name, parent) = if has_manifest {
+                std::fs::read(&manifest_path)
+                    .ok()
+                    .and_then(|b| co::manifest::parse(&b).ok())
+                    .map(|r| (r.manifest.name, r.manifest.parent))
+                    .unwrap_or_else(|| (dirname.to_string(), None))
+            } else {
+                (dirname.to_string(), None)
+            };
             // Index `content/` if present (the canonical mirror dir), else root.
             let subdirs = if path.join("content").is_dir() {
                 r#"["content"]"#
@@ -879,10 +914,12 @@ impl Storage {
             if inserted > 0 {
                 self.seed_default_project_if_missing(&key);
                 registered += 1;
-                tracing::info!(
-                    "workspace: registered universe '{key}' from {} (_universe.yaml)",
-                    local
-                );
+                let src = if has_manifest {
+                    "_universe.yaml"
+                } else {
+                    "content"
+                };
+                tracing::info!("workspace: registered universe '{key}' from {local} ({src})");
             }
         }
         registered
@@ -2253,8 +2290,9 @@ mod tests {
         let data_dir = tempfile::tempdir().unwrap();
         let mut storage = Storage::new(data_dir.path().to_str().unwrap());
 
-        // Fake workspace: one folder WITH a manifest, one WITHOUT.
+        // Fake workspace exercising "all folders are universes":
         let ws = tempfile::tempdir().unwrap();
+        // 1) folder WITH a manifest → name comes from the manifest
         let uni = ws.path().join("my-universe");
         std::fs::create_dir_all(uni.join("content")).unwrap();
         std::fs::write(
@@ -2262,13 +2300,33 @@ mod tests {
             "schema_version: 1\nname: My Universe\n",
         )
         .unwrap();
-        std::fs::create_dir_all(ws.path().join("not-a-universe")).unwrap(); // no manifest
+        // 2) folder WITHOUT a manifest but WITH markdown content → still a universe
+        let plain = ws.path().join("plain-notes");
+        std::fs::create_dir_all(&plain).unwrap();
+        std::fs::write(plain.join("hello.md"), "# Hi").unwrap();
+        // 3) build dir → skipped even though it may contain files
+        let target = ws.path().join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("readme.md"), "noise").unwrap();
+        // 4) empty/non-content folder → skipped
+        std::fs::create_dir_all(ws.path().join("not-a-universe")).unwrap();
 
         let n = storage.register_universes_from_local_dir(ws.path());
-        assert_eq!(n, 1, "only the folder with _universe.yaml registers");
+        assert_eq!(n, 2, "manifest folder + markdown-content folder register");
         let u = storage.get_universe("my-universe").expect("registered");
         assert_eq!(u.name, "My Universe");
-        assert!(storage.get_universe("not-a-universe").is_none());
+        let p = storage
+            .get_universe("plain-notes")
+            .expect("content registers");
+        assert_eq!(p.name, "plain-notes", "name falls back to folder name");
+        assert!(
+            storage.get_universe("target").is_none(),
+            "build dir skipped"
+        );
+        assert!(
+            storage.get_universe("not-a-universe").is_none(),
+            "empty skipped"
+        );
 
         // Idempotent: a second scan registers nothing new.
         assert_eq!(storage.register_universes_from_local_dir(ws.path()), 0);
