@@ -108,6 +108,10 @@ impl Storage {
                 source_last_event_at: None,
                 source_mode: None,
                 surface_dns: None,
+                git_source: None,
+                git_branch: None,
+                git_last_synced_sha: None,
+                git_last_synced_at: None,
             })
         })
         .map(|rows| rows.filter_map(|r| r.ok()).collect())

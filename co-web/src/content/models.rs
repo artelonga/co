@@ -418,6 +418,21 @@ pub struct Universe {
     /// ancestor's DNS. Drives `key::path` surface-ref resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface_dns: Option<String>,
+    /// CO-89: opt-in git source for this universe (e.g.
+    /// `github.com/artelonga/co.git`). When set, a background job ingests the
+    /// repo's `git log` as `commit`/`profile`/`event` content entries. `None` =
+    /// markdown-only universe (behaves exactly as before CO-89).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_source: Option<String>,
+    /// CO-89: branch ingested by git-sync. Defaults to `main`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_branch: Option<String>,
+    /// CO-89: SHA of the last commit imported — the incremental-sync cursor.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_last_synced_sha: Option<String>,
+    /// CO-89: ISO-8601 timestamp of the last successful git-sync.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git_last_synced_at: Option<String>,
 }
 
 fn default_visibility() -> String {
