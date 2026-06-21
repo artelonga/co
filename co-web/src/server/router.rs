@@ -331,6 +331,14 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             "/co/co-dev/pipeline",
             get(crate::pipeline::serve_pipeline_dashboard),
         )
+        // CO-93 Phase 4: static export — server-rendered, CDN-cacheable HTML for
+        // public-static (and template) universes. Private universes get a 403 so
+        // encrypted-at-rest content never leaks through a shared edge cache. The
+        // static "/co" prefix wins over the SPA "/{slug}/{*subpath}" wildcard.
+        .route(
+            "/co/{slug}/{*path}",
+            get(crate::static_export_routes::serve_static_html),
+        )
         .route("/settings/sync", get(serve_sync_settings))
         .route("/yggdrasil/{game}", get(serve_co_index))
         .route("/notifications", get(serve_co_index))

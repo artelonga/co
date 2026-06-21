@@ -78,7 +78,10 @@ mod tests {
                 |r| r.get(0),
             )
             .unwrap();
-        assert_eq!(accepts, 0, "accepts_proposals defaults to 0 (private-static)");
+        assert_eq!(
+            accepts, 0,
+            "accepts_proposals defaults to 0 (private-static)"
+        );
     }
 
     #[test]
