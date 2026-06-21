@@ -309,6 +309,8 @@ Remaining v1.0 work:
 > **Single source of truth:** [`docs/OPERATIONS.md` → "Environments & Deploy"](docs/OPERATIONS.md)
 > is the authoritative description of environments and the deploy flow. The summary
 > below mirrors it — if they ever disagree, OPERATIONS.md wins.
+>
+> **Fly ops runbook** (suspend/scale/sidecar patterns + reverts): [`docs/infra/fly-runbook.md`](docs/infra/fly-runbook.md)
 
 ### Environments
 

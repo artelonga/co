@@ -18,6 +18,57 @@ use crate::admin::admin_routes::{check_admin_email, extract_claims};
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
+// Cost estimation (CO-288)
+// ---------------------------------------------------------------------------
+
+/// Base Fly.io hourly rate in USD for a shared-cpu-1x with 256 MB RAM.
+/// Derived from the published $1.94/mo / 730 hrs/mo ≈ $0.002658/hr.
+const FLY_BASE_HOURLY_USD: f32 = 0.002_658;
+
+/// Estimate the monthly Fly.io compute cost for a single machine.
+///
+/// Formula: `ram_factor × cpu_factor × uptime_ratio × FLY_BASE_HOURLY_USD × 730`
+/// where `ram_factor = ram_mb / 256`.
+pub fn estimate_monthly_cost(machine_size_factor: f32, ram_mb: u32, uptime_ratio: f32) -> f32 {
+    let ram_factor = ram_mb as f32 / 256.0;
+    let cpu_factor = machine_size_factor;
+    ram_factor * cpu_factor * uptime_ratio * FLY_BASE_HOURLY_USD * 730.0
+}
+
+/// Parse `vm_size` (format `"{cpu_kind}-{cpus}x-{memory_mb}mb"`, e.g.
+/// `"shared-1x-512mb"`) into `(machine_size_factor, ram_mb)`.
+fn vm_size_factors(vm_size: &str) -> (f32, u32) {
+    let parts: Vec<&str> = vm_size.split('-').collect();
+    let cpu_kind = parts.first().copied().unwrap_or("shared");
+    let cpus: f32 = parts
+        .get(1)
+        .and_then(|s| s.strip_suffix('x'))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1.0);
+    let ram_mb: u32 = parts
+        .get(2)
+        .and_then(|s| s.strip_suffix("mb"))
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(256);
+    // Performance/dedicated CPUs are priced ~4× higher than shared per core.
+    let machine_size_factor = match cpu_kind {
+        "performance" | "dedicated" => cpus * 4.0,
+        _ => cpus,
+    };
+    (machine_size_factor, ram_mb)
+}
+
+/// Convert a Fly machine `state` string to an expected uptime ratio.
+fn state_uptime_ratio(state: &str) -> f32 {
+    match state {
+        "started" => 1.0,
+        "stopped" => 0.1,
+        "suspended" => 0.05,
+        _ => 1.0,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // API response shape
 // ---------------------------------------------------------------------------
 
@@ -36,12 +87,14 @@ pub struct DeploymentSnapshot {
     pub last_deploy_at: String,
     pub health_status: String,
     pub error_msg: String,
+    pub monthly_cost_usd: f32,
 }
 
 #[derive(Debug, Serialize)]
 pub struct DeploymentListResponse {
     pub units: Vec<DeploymentSnapshot>,
     pub refreshed_at: String,
+    pub total_monthly_cost_usd: f32,
 }
 
 // ---------------------------------------------------------------------------
@@ -64,6 +117,10 @@ pub(crate) fn load_snapshots(storage: &crate::storage::Storage) -> Vec<Deploymen
         )
         .and_then(|mut stmt| {
             stmt.query_map([], |row| {
+                let vm_size: String = row.get(4)?;
+                let state: String = row.get(5)?;
+                let (msf, ram_mb) = vm_size_factors(&vm_size);
+                let cost = estimate_monthly_cost(msf, ram_mb, state_uptime_ratio(&state));
                 Ok((
                     row.get::<_, String>(0)?,
                     DeploymentSnapshot {
@@ -73,13 +130,14 @@ pub(crate) fn load_snapshots(storage: &crate::storage::Storage) -> Vec<Deploymen
                         snapshot_at: row.get(1)?,
                         machine_id: row.get(2)?,
                         region: row.get(3)?,
-                        vm_size: row.get(4)?,
-                        state: row.get(5)?,
+                        vm_size,
+                        state,
                         image: row.get(6)?,
                         version: row.get(7)?,
                         last_deploy_at: row.get(8)?,
                         health_status: row.get(9)?,
                         error_msg: row.get(10)?,
+                        monthly_cost_usd: cost,
                     },
                 ))
             })
@@ -108,6 +166,7 @@ pub(crate) fn load_snapshots(storage: &crate::storage::Storage) -> Vec<Deploymen
                     last_deploy_at: String::new(),
                     health_status: "unknown".to_string(),
                     error_msg: String::new(),
+                    monthly_cost_usd: 0.0,
                 });
             s.display = u.display.clone();
             s.url = u.url.clone();
@@ -141,9 +200,11 @@ pub async fn list_handler(
         load_snapshots(&storage)
     };
 
+    let total_monthly_cost_usd = units.iter().map(|u| u.monthly_cost_usd).sum();
     Ok(Json(DeploymentListResponse {
         units,
         refreshed_at: Utc::now().to_rfc3339(),
+        total_monthly_cost_usd,
     }))
 }
 
@@ -177,9 +238,11 @@ pub async fn refresh_handler(
         load_snapshots(&storage)
     };
 
+    let total_monthly_cost_usd = units.iter().map(|u| u.monthly_cost_usd).sum();
     Ok(Json(DeploymentListResponse {
         units,
         refreshed_at: Utc::now().to_rfc3339(),
+        total_monthly_cost_usd,
     }))
 }
 
@@ -239,6 +302,52 @@ pub fn router() -> Router<AppState> {
 mod tests {
     use super::*;
     use crate::storage::Storage;
+
+    #[test]
+    fn estimate_monthly_cost_base_case() {
+        // shared-cpu-1x 256MB always-on → ~$1.94/mo
+        let cost = estimate_monthly_cost(1.0, 256, 1.0);
+        assert!(
+            (cost - 1.94).abs() < 0.05,
+            "expected ~$1.94 but got {cost:.2}"
+        );
+    }
+
+    #[test]
+    fn estimate_monthly_cost_scales_with_ram() {
+        // 512MB should be ~2× 256MB
+        let cost_256 = estimate_monthly_cost(1.0, 256, 1.0);
+        let cost_512 = estimate_monthly_cost(1.0, 512, 1.0);
+        assert!((cost_512 / cost_256 - 2.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn estimate_monthly_cost_uptime_ratio_zero() {
+        let cost = estimate_monthly_cost(1.0, 512, 0.0);
+        assert_eq!(cost, 0.0);
+    }
+
+    #[test]
+    fn vm_size_factors_shared_1x_512mb() {
+        let (msf, ram) = vm_size_factors("shared-1x-512mb");
+        assert_eq!(msf, 1.0);
+        assert_eq!(ram, 512);
+    }
+
+    #[test]
+    fn vm_size_factors_empty_defaults() {
+        let (msf, ram) = vm_size_factors("");
+        assert_eq!(msf, 1.0);
+        assert_eq!(ram, 256);
+    }
+
+    #[test]
+    fn state_uptime_ratio_values() {
+        assert_eq!(state_uptime_ratio("started"), 1.0);
+        assert!(state_uptime_ratio("stopped") < 0.5);
+        assert!(state_uptime_ratio("suspended") < state_uptime_ratio("stopped"));
+        assert_eq!(state_uptime_ratio("unknown"), 1.0);
+    }
 
     /// CO-338: `load_snapshots` now reads the unit registry from `Storage`
     /// (surface rows) rather than a bare connection. A fresh Storage has no
