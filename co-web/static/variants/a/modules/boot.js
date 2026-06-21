@@ -27,6 +27,34 @@ export function injectBootCallbacks(callbacks) {
     if (callbacks.onUniverseInfoLoaded) _onUniverseInfoLoaded = callbacks.onUniverseInfoLoaded;
 }
 
+// CO-98: build the "Explorar este universo" panel listing a universe's direct
+// children (hierarchical universes). Fetches the anonymous-safe public list and
+// filters by `parent_key === slug`. Returns '' when there are no children, so
+// callers can append unconditionally. Each card links to the child at `/<slug>`,
+// matching the SPA's universe URL scheme (see setUniverseSlugInUrl).
+async function buildExplorarPanelHtml(slug) {
+    let universes = [];
+    try {
+        universes = await apiFetch('/api/v1/universes/public', {}, true) || [];
+    } catch (_) {
+        return '';
+    }
+    const children = universes
+        .filter(u => u.parent_key === slug)
+        .sort((a, b) => (a.name || a.key).localeCompare(b.name || b.key));
+    if (children.length === 0) return '';
+    const cards = children.map(c => `
+        <a class="explorar-card" href="/${esc(c.key)}">
+            <span class="explorar-card-name">${esc(c.name || c.key)}</span>
+            ${c.description ? `<span class="explorar-card-desc">${esc(c.description)}</span>` : ''}
+        </a>`).join('');
+    return `
+        <section class="universe-home-explorar" aria-label="Explorar este universo">
+            <h2 class="explorar-title">Explorar este universo</h2>
+            <div class="explorar-cards">${cards}</div>
+        </section>`;
+}
+
 // Universe home — fallback when no project exists
 export async function renderUniverseHome() {
     const content = document.querySelector('#content');
@@ -35,6 +63,11 @@ export async function renderUniverseHome() {
     const info = state.universeInfo || {};
     const name = info.name || slug || '';
     const description = info.description || '';
+    // CO-98: parent universes (e.g. the template hosting the timeline trio) get
+    // an "Explorar" panel listing their direct children. Built once here and
+    // injected into whichever home layout renders below (markdown or empty).
+    const isParent = info.is_template === true || slug === 'template';
+    const explorarHtml = isParent ? await buildExplorarPanelHtml(slug) : '';
 
     content.className = 'content universe-home-view';
     content.innerHTML = `
@@ -83,6 +116,15 @@ export async function renderUniverseHome() {
                 if (article) article.appendChild(section);
             }
         } catch (_) {}
+        // CO-98: append the Explorar panel below the rendered index page.
+        if (explorarHtml) body.insertAdjacentHTML('beforeend', explorarHtml);
+        return;
+    }
+
+    // CO-98: on a parent universe with children, the empty-state hint is
+    // replaced by the Explorar panel so the home page is never blank.
+    if (explorarHtml) {
+        body.innerHTML = explorarHtml;
         return;
     }
 
