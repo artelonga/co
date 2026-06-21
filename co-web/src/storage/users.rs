@@ -446,6 +446,33 @@ impl Storage {
                 added += 1;
             }
         }
+
+        // CO-466: workspace-scanned universes (those with a `local_repo_path`)
+        // are owned by 'system' at registration time, so the seeded admin can
+        // READ them but not CRUD via the vault. Grant admin membership on every
+        // such universe — DB-driven, no hardcoded key list (the `~/projects`
+        // workspace changes without a deploy). Idempotent via INSERT OR IGNORE.
+        if let Ok(mut stmt) = self.conn.prepare(
+            "SELECT key FROM universes \
+             WHERE local_repo_path IS NOT NULL AND local_repo_path != ''",
+        ) {
+            let keys: Vec<String> = stmt
+                .query_map([], |row| row.get::<_, String>(0))
+                .map(|rows| rows.filter_map(|r| r.ok()).collect())
+                .unwrap_or_default();
+            for key in keys {
+                let n = self.conn.execute(
+                    "INSERT OR IGNORE INTO universe_members \
+                     (universe_key, user_id, role, joined_at) \
+                     VALUES (?1, ?2, 'admin', ?3)",
+                    params![key, user_id, now],
+                )?;
+                if n > 0 {
+                    added += 1;
+                }
+            }
+        }
+
         if added > 0 {
             tracing::info!(
                 "ensure_admin_universe_memberships: added {email} to {added} universe(s) as admin"
