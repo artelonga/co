@@ -27,6 +27,7 @@ pub mod ingest;
 pub mod mermaid;
 pub mod profiles;
 pub mod routes;
+pub mod worker;
 
 use std::path::Path;
 

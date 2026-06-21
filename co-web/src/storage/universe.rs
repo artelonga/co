@@ -312,6 +312,41 @@ impl Storage {
         )
     }
 
+    /// CO-89: every universe with a `git_source` configured, as
+    /// `(key, git_source, git_branch, git_last_synced_sha)`. Drives the hourly
+    /// [`GitSyncWorker`]. Panic-free under the storage mutex: any SQLite error
+    /// degrades to an empty list (see `feedback_no_panic_under_mutex`).
+    ///
+    /// [`GitSyncWorker`]: crate::gitsync::worker::GitSyncWorker
+    pub fn list_git_backed_universes(&self) -> Vec<(String, String, String, Option<String>)> {
+        let mut stmt = match self.conn.prepare(
+            "SELECT key, git_source, COALESCE(git_branch, 'main'), git_last_synced_sha \
+             FROM universes \
+             WHERE git_source IS NOT NULL AND git_source != '' \
+               AND deleted_at IS NULL AND archived_at IS NULL",
+        ) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("list_git_backed_universes prepare: {e}");
+                return Vec::new();
+            }
+        };
+        match stmt.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+            ))
+        }) {
+            Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
+            Err(e) => {
+                tracing::error!("list_git_backed_universes query: {e}");
+                Vec::new()
+            }
+        }
+    }
+
     /// CO-89: advance the incremental-sync cursor after a successful ingest.
     pub fn set_universe_git_synced(
         &self,

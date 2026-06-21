@@ -26,7 +26,8 @@ pub const US: char = '\u{1f}';
 /// (`%b`) is multi-line and `--shortstat` appends its summary line *after* the
 /// body, so the final `US`-field carries `body + shortstat` and is split apart
 /// by [`parse_git_log`].
-pub const GIT_LOG_FORMAT: &str = "\u{1e}%H\u{1f}%aI\u{1f}%aN\u{1f}%aE\u{1f}%cN\u{1f}%cE\u{1f}%P\u{1f}%s\u{1f}%b";
+pub const GIT_LOG_FORMAT: &str =
+    "\u{1e}%H\u{1f}%aI\u{1f}%aN\u{1f}%aE\u{1f}%cN\u{1f}%cE\u{1f}%P\u{1f}%s\u{1f}%b";
 
 /// A single commit parsed from `git log`, ready to become a `commit` entry.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -343,10 +344,7 @@ mod tests {
         assert_eq!(extract_ticket_id("A-1 nope"), None);
         assert_eq!(extract_ticket_id("co-65 lower"), None);
         // First match wins.
-        assert_eq!(
-            extract_ticket_id("CO-1 and CO-2"),
-            Some("CO-1".into())
-        );
+        assert_eq!(extract_ticket_id("CO-1 and CO-2"), Some("CO-1".into()));
     }
 
     #[test]

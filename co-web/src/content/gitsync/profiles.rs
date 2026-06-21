@@ -46,7 +46,10 @@ fn profile_entry(universe_key: &str, handle: &str, rec: &CommitRecord) -> EntryD
         "role": role,
         "analytics": {},
     });
-    let body = format!("Contributor profile for **{}** (`{handle}`).", rec.author_name);
+    let body = format!(
+        "Contributor profile for **{}** (`{handle}`).",
+        rec.author_name
+    );
     EntryDomain {
         path: profile_path(handle),
         universe_key: universe_key.to_string(),
@@ -100,7 +103,10 @@ mod tests {
             .collect();
         assert_eq!(handles, vec!["claude", "yuri"]); // sorted
 
-        let yuri = profiles.iter().find(|p| p.path == "profiles/yuri.md").unwrap();
+        let yuri = profiles
+            .iter()
+            .find(|p| p.path == "profiles/yuri.md")
+            .unwrap();
         assert_eq!(yuri.entry_type, "profile");
         assert_eq!(yuri.frontmatter["role"], "owner");
         assert_eq!(yuri.frontmatter["email"], "yuri@artelonga.com.br");

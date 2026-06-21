@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::domain::EntryDomain;
 use crate::repository::EntryStore;
@@ -134,10 +134,10 @@ pub fn recompute_all_profiles(store: &dyn EntryStore, now_ns: i64) -> anyhow::Re
     let profiles = store.list("profile", &json!({}), None)?;
     let mut updated = 0;
     for profile in profiles {
-        if let Some(handle) = fm_str(&profile, "handle") {
-            if recompute_profile_analytics(store, handle, now_ns)?.is_some() {
-                updated += 1;
-            }
+        if let Some(handle) = fm_str(&profile, "handle")
+            && recompute_profile_analytics(store, handle, now_ns)?.is_some()
+        {
+            updated += 1;
         }
     }
     Ok(updated)

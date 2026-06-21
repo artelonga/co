@@ -22,7 +22,11 @@ pub fn ensure_repo(remote: &str, branch: &str, dest: &Path) -> anyhow::Result<()
             std::fs::create_dir_all(parent)?;
         }
         // Full clone (no --depth) so `git log` can walk the entire history.
-        run_git_cwd(None, &["clone", "--no-recurse-submodules", "--", remote], dest)?;
+        run_git_cwd(
+            None,
+            &["clone", "--no-recurse-submodules", "--", remote],
+            dest,
+        )?;
     }
     Ok(())
 }

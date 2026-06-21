@@ -120,4 +120,42 @@ mod tests {
         assert_eq!(sha.as_deref(), Some("abc123"));
         assert_eq!(at.as_deref(), Some("2026-06-21T00:00:00Z"));
     }
+
+    #[test]
+    fn selector_returns_only_git_backed_universes() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO users (id, email, display_name, created_at) \
+                 VALUES ('u1', 'u@e.com', 'U', 'now')",
+                [],
+            )
+            .ok();
+        // One git-backed, one plain (markdown-only).
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes (key, name, description, owner_id, created_at, git_source, git_branch) \
+                 VALUES ('co-dev', 'Co Dev', '', 'u1', 'now', 'github.com/artelonga/co.git', 'trunk')",
+                [],
+            )
+            .unwrap();
+        storage
+            .conn()
+            .execute(
+                "INSERT INTO universes (key, name, description, owner_id, created_at) \
+                 VALUES ('plain', 'Plain', '', 'u1', 'now')",
+                [],
+            )
+            .unwrap();
+
+        let targets = storage.list_git_backed_universes();
+        assert_eq!(targets.len(), 1, "only the git-backed universe is selected");
+        assert_eq!(targets[0].0, "co-dev");
+        assert_eq!(targets[0].1, "github.com/artelonga/co.git");
+        assert_eq!(targets[0].2, "trunk", "configured branch is returned");
+        assert_eq!(targets[0].3, None, "never-synced ⇒ no cursor");
+    }
 }

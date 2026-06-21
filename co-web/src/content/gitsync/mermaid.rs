@@ -45,7 +45,11 @@ fn task_id(e: &EntryDomain, index: usize) -> String {
     let raw = e
         .frontmatter
         .get("id")
-        .and_then(|v| v.as_i64().map(|n| n.to_string()).or_else(|| v.as_str().map(String::from)))
+        .and_then(|v| {
+            v.as_i64()
+                .map(|n| n.to_string())
+                .or_else(|| v.as_str().map(String::from))
+        })
         .or_else(|| fm_str(e, "parent_task").map(String::from))
         .unwrap_or_default();
     let cleaned: String = raw
@@ -149,7 +153,14 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn task(id: i64, title: &str, status: &str, assignee: &str, created: &str, due: Option<&str>) -> EntryDomain {
+    fn task(
+        id: i64,
+        title: &str,
+        status: &str,
+        assignee: &str,
+        created: &str,
+        due: Option<&str>,
+    ) -> EntryDomain {
         let mut fm = json!({
             "type": "task",
             "id": id,
@@ -177,8 +188,22 @@ mod tests {
     #[test]
     fn gantt_groups_by_assignee_with_status_tags() {
         let tasks = vec![
-            task(65, "CO-65 visibility", "done", "yuri", "2026-04-26", Some("2026-04-27")),
-            task(85, "CO-85 password-login", "doing", "yuri", "2026-04-27", Some("2026-04-29")),
+            task(
+                65,
+                "CO-65 visibility",
+                "done",
+                "yuri",
+                "2026-04-26",
+                Some("2026-04-27"),
+            ),
+            task(
+                85,
+                "CO-85 password-login",
+                "doing",
+                "yuri",
+                "2026-04-27",
+                Some("2026-04-29"),
+            ),
             task(99, "CO-99 backlog item", "todo", "ana", "2026-04-27", None),
         ];
         let g = tasks_to_gantt(&tasks, "Active sprint");
@@ -206,7 +231,14 @@ mod tests {
 
     #[test]
     fn sanitize_strips_colons() {
-        let t = task(1, "feat: a thing", "done", "yuri", "2026-04-26", Some("2026-04-27"));
+        let t = task(
+            1,
+            "feat: a thing",
+            "done",
+            "yuri",
+            "2026-04-26",
+            Some("2026-04-27"),
+        );
         let g = tasks_to_gantt(&[t], "T");
         // The colon in the title must be gone (only the mermaid field colon remains).
         assert!(g.contains("feat a thing :done"));

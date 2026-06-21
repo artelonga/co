@@ -109,7 +109,7 @@ pub fn ingest_commits(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::content::gitsync::git_log::{parse_git_log, RS, US};
+    use crate::content::gitsync::git_log::{RS, US, parse_git_log};
     use crate::universe_pool::UniversePool;
     use tempfile::tempdir;
 
@@ -180,7 +180,10 @@ mod tests {
         let again = ingest_commits(store.as_ref(), "co-dev", &recs, None).unwrap();
         // Re-running upserts the same 2 commits (no duplicates, no error).
         assert_eq!(again.commits_ingested, 2);
-        let count = store.list("commit", &serde_json::json!({}), None).unwrap().len();
+        let count = store
+            .list("commit", &serde_json::json!({}), None)
+            .unwrap()
+            .len();
         assert_eq!(count, 2);
     }
 }

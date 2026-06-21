@@ -158,6 +158,22 @@ from `.route("/", ...)` nested at `/api/v1/universes` — verified manually.
 
 ---
 
+## git-sync — `/api/v1/universes/{slug}/*` (gitsync/routes.rs — CO-89)
+
+Git-backed universes: opt-in via the `git_source` column. Ingesting `git log`
+produces `commit` + `profile` content entries with per-profile analytics, plus
+server-side Mermaid (gantt of in-flight tasks, timeline of recent commits).
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| POST | `/api/v1/universes/{slug}/git-source` | owner | Set/clear `git_source` + `git_branch` (CO-89) |
+| POST | `/api/v1/universes/{slug}/git-sync` | owner | Ingest `git log` now → commit/profile entries + analytics (CO-89) |
+| POST | `/api/v1/universes/{slug}/recompute-analytics` | owner | Recompute every profile's analytics struct (CO-89) |
+| GET | `/api/v1/universes/{slug}/gantt` | authed | Mermaid gantt of in-flight tasks, swimlane by assignee (CO-89) |
+| GET | `/api/v1/universes/{slug}/commit-timeline` | authed | Mermaid timeline of recent commits, grouped by day (CO-89) |
+
+---
+
 ## graph-views — `/api/v1/graph-views/*` (graph_view_routes.rs)
 
 CO-345: publishable saved graph views (universe + type filter + depth + root + layout seed).

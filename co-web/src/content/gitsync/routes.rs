@@ -139,9 +139,7 @@ pub async fn git_sync(
         (store, dest)
     };
 
-    let now_ns = chrono::Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_default();
+    let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let slug_for_sync = slug.clone();
     let stats = tokio::task::spawn_blocking(move || {
         super::sync_universe_git(
@@ -199,9 +197,7 @@ pub async fn recompute_analytics(
             .entry_store(&slug)
             .map_err(|e| AppError::Internal(format!("open universe store: {e}")))?
     };
-    let now_ns = chrono::Utc::now()
-        .timestamp_nanos_opt()
-        .unwrap_or_default();
+    let now_ns = chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default();
     let updated = tokio::task::spawn_blocking(move || {
         analytics::recompute_all_profiles(store.as_ref(), now_ns)
     })

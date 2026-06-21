@@ -50,6 +50,76 @@ content_types:
       event_at:
         type: date
         semantic: event_at
+      # CO-89: richer event kinds (releases, deploys, planning, retros).
+      kind:
+        type: enum
+        values: [release, deploy, planning, retro, demo, outage]
+      starts_at:
+        type: date
+        semantic: event_at
+      ends_at:
+        type: date
+        semantic: event_at
+      timezone:
+        type: string
+      summary:
+        type: string
+  # CO-89: git-backed universes — one entry per commit, written by git-sync.
+  - name: commit
+    schema:
+      sha:
+        type: string
+        required: true
+      title:
+        type: string
+        required: true
+      author_handle:
+        type: ref
+        target: profile
+      committer_handle:
+        type: ref
+        target: profile
+      committed_at:
+        type: date
+        semantic: event_at
+      committed_at_ns:
+        type: number
+      timezone:
+        type: string
+      parent_task:
+        type: ref
+        target: task
+      branch:
+        type: string
+      # tags (conventional-commit scopes) + parents are stored as JSON arrays in
+      # frontmatter; the manifest schema only declares scalar/ref fields today.
+      files_changed:
+        type: number
+      insertions:
+        type: number
+      deletions:
+        type: number
+    indexes: [sha, author_handle, committed_at, parent_task]
+  # CO-89: one entry per contributor, maintained from commit author identities.
+  - name: profile
+    schema:
+      handle:
+        type: string
+        required: true
+      title:
+        type: string
+      display_name:
+        type: string
+      email:
+        type: string
+      timezone:
+        type: string
+      role:
+        type: enum
+        values: [owner, admin, contributor, observer]
+      # `analytics` is a JSON struct in frontmatter (commits_total, frequent_scopes,
+      # …), recomputed by recompute_profile_analytics; not a scalar manifest field.
+    indexes: [handle, role]
   - name: page
     schema:
       title:
@@ -69,3 +139,26 @@ content_types:
         type: string
         required: true
   - name: doc
+# CO-89: views over the content types. `history`/`contributors`/`events` are the
+# three new views beyond the existing kanban board; `roadmap` is the Mermaid
+# gantt (validates CO-83).
+views:
+  - name: board
+    type: kanban
+    source: task
+  - name: history
+    type: timeline
+    source: commit
+    date_field: committed_at
+  - name: roadmap
+    type: gantt
+    source: task
+    date_start: created_at
+    date_end: due_at
+  - name: contributors
+    type: cards
+    source: profile
+  - name: events
+    type: calendar
+    source: event
+    date_field: starts_at
