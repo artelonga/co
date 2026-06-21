@@ -407,11 +407,7 @@ pub async fn create_universe(
     }
     if let Some(ref parent) = parent_key {
         storage
-            .conn()
-            .execute(
-                "UPDATE universes SET parent_key = ?1 WHERE key = ?2",
-                rusqlite::params![parent, ukey],
-            )
+            .set_universe_parent(&ukey, Some(parent))
             .map_err(|e| AppError::Internal(e.to_string()))?;
         universe.parent_key = Some(parent.clone());
     }
@@ -562,11 +558,7 @@ pub async fn update_universe(
         if parent.is_empty() {
             // Clear the parent → top-level universe.
             storage
-                .conn()
-                .execute(
-                    "UPDATE universes SET parent_key = NULL WHERE key = ?1",
-                    rusqlite::params![slug],
-                )
+                .set_universe_parent(&slug, None)
                 .map_err(|e| AppError::Internal(e.to_string()))?;
         } else {
             if parent == slug {
@@ -580,11 +572,7 @@ pub async fn update_universe(
                 )));
             }
             storage
-                .conn()
-                .execute(
-                    "UPDATE universes SET parent_key = ?1 WHERE key = ?2",
-                    rusqlite::params![parent, slug],
-                )
+                .set_universe_parent(&slug, Some(parent))
                 .map_err(|e| AppError::Internal(e.to_string()))?;
         }
     }

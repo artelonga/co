@@ -301,6 +301,26 @@ impl Storage {
         }
     }
 
+    /// CO-98: set (or clear) a universe's `parent_key`, linking it under a parent
+    /// for hierarchical sidebar grouping. `Some(parent)` nests this universe under
+    /// `parent`; `None` detaches it back to top-level. No FK is enforced — the
+    /// caller validates the parent exists; an orphaned `parent_key` degrades to a
+    /// top-level render. Returns the number of rows updated (0 if `key` is unknown).
+    pub fn set_universe_parent(&self, key: &str, parent: Option<&str>) -> rusqlite::Result<usize> {
+        self.conn.execute(
+            "UPDATE universes SET parent_key = ?1 WHERE key = ?2",
+            params![parent, key],
+        )
+    }
+
+    /// CO-98: the caller's universes grouped into a depth-2 parent→children tree
+    /// (see [`build_universe_tree`]). The HTTP API keeps `GET /api/v1/universes`
+    /// flat — the SPA builds the tree client-side — so this server-side mirror
+    /// exists for tests and future tree-aware endpoints.
+    pub fn list_universe_tree_for_user(&self, user_id: &str) -> Vec<UniverseTreeNode> {
+        build_universe_tree(self.list_universes_for_user(user_id))
+    }
+
     /// CO-96: true when the universe is soft-deleted or archived (i.e. in the
     /// trash). `get_universe` deliberately keeps returning these rows so the
     /// restore flow can find them by key, so public read handlers call this to
@@ -1204,5 +1224,193 @@ impl Storage {
         let projects = query_count("SELECT COUNT(*) FROM entries WHERE entry_type = 'project'");
 
         (pages, tasks, projects)
+    }
+}
+
+/// CO-98: a top-level universe paired with its direct children, for hierarchical
+/// sidebar grouping. Depth is capped at 2 — children never recurse, per the
+/// CO-98 scope.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UniverseTreeNode {
+    #[serde(flatten)]
+    pub universe: crate::models::Universe,
+    pub children: Vec<crate::models::Universe>,
+}
+
+/// CO-98: group a flat universe list into depth-2 tree nodes — the server-side
+/// mirror of the SPA's `buildChildMap`. A universe whose `parent_key` references
+/// a **top-level** universe in the list nests under it as a child; every other
+/// universe (no parent, a parent absent from the list → orphan, or a grandchild
+/// whose parent is itself a child → beyond depth 2) becomes a top-level node.
+/// Every input universe therefore appears exactly once — children are never
+/// silently dropped. Roots and children each preserve the input order.
+pub fn build_universe_tree(universes: Vec<crate::models::Universe>) -> Vec<UniverseTreeNode> {
+    use std::collections::{HashMap, HashSet};
+
+    // A universe is "top-level" when it has no parent, or its parent is absent
+    // from this list (orphan). Only these may host children (depth-2 cap).
+    let present: HashSet<&str> = universes.iter().map(|u| u.key.as_str()).collect();
+    let top_level_keys: HashSet<String> = universes
+        .iter()
+        .filter(|u| match u.parent_key.as_deref() {
+            None => true,
+            Some(p) => !present.contains(p),
+        })
+        .map(|u| u.key.clone())
+        .collect();
+
+    let is_child = |u: &crate::models::Universe| -> bool {
+        u.parent_key
+            .as_deref()
+            .map(|p| top_level_keys.contains(p))
+            .unwrap_or(false)
+    };
+
+    // First pass: every non-child universe becomes a root node.
+    let mut nodes: Vec<UniverseTreeNode> = Vec::new();
+    let mut index: HashMap<String, usize> = HashMap::new();
+    for u in &universes {
+        if !is_child(u) {
+            index.insert(u.key.clone(), nodes.len());
+            nodes.push(UniverseTreeNode {
+                universe: u.clone(),
+                children: Vec::new(),
+            });
+        }
+    }
+    // Second pass: attach each child under its (top-level) parent.
+    for u in universes {
+        if let Some(parent) = u.parent_key.as_deref()
+            && let Some(&i) = index.get(parent)
+        {
+            nodes[i].children.push(u);
+        }
+    }
+    nodes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::{CreateUniverse, Universe};
+
+    fn make_storage() -> (Storage, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let storage = Storage::new(dir.path());
+        (storage, dir)
+    }
+
+    fn universe(key: &str, parent: Option<&str>) -> Universe {
+        Universe {
+            key: key.to_string(),
+            name: key.to_string(),
+            description: String::new(),
+            owner_id: "usr_test".into(),
+            created_at: Utc::now(),
+            is_template: false,
+            is_public: false,
+            content_count: 0,
+            requires_login: false,
+            visibility: "private".into(),
+            parent_key: parent.map(|p| p.to_string()),
+            anon_published_only: false,
+            source_kind: None,
+            source_url: None,
+            source_last_event_at: None,
+            source_mode: None,
+            surface_dns: None,
+        }
+    }
+
+    #[test]
+    fn parent_key_round_trips_through_storage() {
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_user("owner@example.com", "Owner")
+            .expect("create user");
+        let owner = storage
+            .get_user_by_email("owner@example.com")
+            .expect("user exists");
+
+        storage
+            .create_universe(
+                CreateUniverse {
+                    key: "template".into(),
+                    name: "Template".into(),
+                    description: String::new(),
+                },
+                &owner.id,
+            )
+            .expect("create parent");
+        storage
+            .create_universe(
+                CreateUniverse {
+                    key: "tempo".into(),
+                    name: "Tempo".into(),
+                    description: String::new(),
+                },
+                &owner.id,
+            )
+            .expect("create child");
+
+        // Top-level by default.
+        assert_eq!(storage.get_universe("tempo").unwrap().parent_key, None);
+
+        // Set → read back.
+        assert_eq!(
+            storage
+                .set_universe_parent("tempo", Some("template"))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            storage.get_universe("tempo").unwrap().parent_key.as_deref(),
+            Some("template")
+        );
+
+        // Detach → back to top-level.
+        assert_eq!(storage.set_universe_parent("tempo", None).unwrap(), 1);
+        assert_eq!(storage.get_universe("tempo").unwrap().parent_key, None);
+    }
+
+    #[test]
+    fn build_tree_nests_children_under_parent() {
+        let flat = vec![
+            universe("template", None),
+            universe("tempo", Some("template")),
+            universe("humanity", Some("template")),
+            universe("universo", Some("template")),
+            universe("artelonga", None),
+        ];
+        let tree = build_universe_tree(flat);
+
+        // Two roots: template (with the trio) and artelonga (top-level, no children).
+        assert_eq!(tree.len(), 2);
+        let template = &tree[0];
+        assert_eq!(template.universe.key, "template");
+        let child_keys: Vec<&str> = template.children.iter().map(|c| c.key.as_str()).collect();
+        assert_eq!(child_keys, vec!["tempo", "humanity", "universo"]);
+
+        let artelonga = &tree[1];
+        assert_eq!(artelonga.universe.key, "artelonga");
+        assert!(artelonga.children.is_empty());
+    }
+
+    #[test]
+    fn build_tree_treats_orphans_and_grandchildren_as_top_level() {
+        // `lonely` points at a missing parent → orphan → top-level.
+        // `grandchild` points at `tempo`, itself a child → beyond depth 2 → top-level.
+        let flat = vec![
+            universe("template", None),
+            universe("tempo", Some("template")),
+            universe("lonely", Some("ghost")),
+            universe("grandchild", Some("tempo")),
+        ];
+        let tree = build_universe_tree(flat);
+        let root_keys: Vec<&str> = tree.iter().map(|n| n.universe.key.as_str()).collect();
+        // template hosts tempo; lonely + grandchild surface as roots (never dropped).
+        assert_eq!(root_keys, vec!["template", "lonely", "grandchild"]);
+        assert_eq!(tree[0].children.len(), 1);
+        assert_eq!(tree[0].children[0].key, "tempo");
     }
 }

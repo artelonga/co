@@ -29,3 +29,31 @@ test.describe("CO-98: sidebar universe tree", () => {
     },
   );
 });
+
+test.describe("CO-98: Explorar panel on template home", () => {
+  test(
+    "anonymous template home lists the three children as cards",
+    async ({ page }) => {
+      // renderUniverseHome only renders when no board project is selected.
+      // Stub the template's projects to empty so the universe home (with the
+      // Explorar panel) renders deterministically instead of the tutorial board.
+      await page.route("**/api/v1/universes/template/projects", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: "[]",
+        }),
+      );
+      await page.goto(`${BASE_URL}/co?u=template`);
+
+      const explorar = page.locator(".universe-home-explorar");
+      await expect(explorar).toBeVisible();
+      // The timeline trio renders as cards linking to /<slug>.
+      for (const slug of ["tempo", "universo", "humanity"]) {
+        await expect(
+          explorar.locator(`a.explorar-card[href="/${slug}"]`),
+        ).toBeVisible();
+      }
+    },
+  );
+});

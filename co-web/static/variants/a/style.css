@@ -2795,6 +2795,44 @@ body.co-single-universe-mode .hamburger-btn {
     font-size: 12px;
 }
 
+/* ===== Explorar panel — hierarchical universes (CO-98) ===== */
+.universe-home-explorar { margin-top: 24px; }
+.universe-home-explorar .explorar-title {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    color: var(--text-primary, #111827);
+}
+.explorar-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+}
+.explorar-card {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 12px 14px;
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+    text-decoration: none;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.explorar-card:hover {
+    border-color: var(--accent, #6366f1);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+.explorar-card-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary, #111827);
+}
+.explorar-card-desc {
+    font-size: 12px;
+    color: var(--text-secondary, #6b7280);
+}
+
 /* ===== Conteúdo List (CO-42) ===== */
 .conteudo-list { max-width: 800px; }
 

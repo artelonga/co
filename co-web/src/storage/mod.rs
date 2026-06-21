@@ -248,3 +248,7 @@ pub use workspace_states::WorkspaceState;
 
 pub use schema::parse_datetime;
 pub use schema::seed_data;
+
+// CO-98: hierarchical-universe tree helper — public so callers (and tests)
+// can group a flat universe list into depth-2 parent → children nodes.
+pub use universe::{UniverseTreeNode, build_universe_tree};
