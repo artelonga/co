@@ -5,6 +5,207 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.18.0] — 2026-06-21 — Universos sem cerimônia — workspace no-registry + CRUD do dono · formato .co + protocol stack · hierarquia [--ignore-dod override]
+
+## CO-288 — CO-281 Phase 4 — cost panel in /admin/deployments + Fly runbook
+
+Added an estimated monthly cost column to the `/admin/deployments` dashboard
+and a new `docs/infra/fly-runbook.md` ops guide covering suspend, memory
+right-sizing, and sidecar extraction.
+
+### What changed
+
+- **Backend**: `estimate_monthly_cost(machine_size_factor, ram_mb, uptime_ratio)`
+  helper in `deployment_dashboard.rs` (formula: `ram_factor × cpu_factor ×
+  uptime_ratio × $0.002658/hr × 730`). `DeploymentSnapshot` now carries a
+  `monthly_cost_usd` field; `DeploymentListResponse` includes
+  `total_monthly_cost_usd` (sum across all units). `vm_size` strings (format
+  `"{cpu_kind}-{cpus}x-{mb}mb"`) are parsed into RAM and CPU factors; machine
+  `state` maps to an uptime ratio.
+- **Frontend**: new "Est. custo mensal" column in the dashboard table, tooltip
+  explaining the formula, and a footer row showing the aggregate Fly spend.
+- **Runbook**: `docs/infra/fly-runbook.md` documents how to suspend an app,
+  scale memory (with an observation-window protocol), and when/how to extract
+  a sidecar, each with a revert path.
+- **CLAUDE.md**: deployment section now links to the new runbook.
+
+### Why
+
+Operators needed a quick read of approximate monthly Fly cost per unit without
+leaving the admin panel. The runbook codifies the CO-281 Phase 1–3 patterns so
+future contributors don't rediscover them from scratch.
+
+## CO-466 — No registry: every content folder is a universe
+
+The local-dev workspace scan (`register_universes_from_local_dir`, gated on
+`CO_LOCAL_REPOS_DIR`) no longer requires a `_universe.yaml` opt-in marker.
+
+### What changed
+
+- A top-level folder registers as a universe when it has a `_universe.yaml`
+  **or** simply holds markdown content (`content/` dir, `index.md`, or any root
+  `*.md`). No registry / `co create` ceremony — dropping a content folder into
+  the workspace promotes it.
+- `_universe.yaml`, when present, still supplies metadata (name, `parent`,
+  visibility); when absent, the universe name falls back to the folder name and
+  it registers as a top-level private universe.
+- Build/system dirs are explicitly skipped: `target`, `node_modules`, `dist`,
+  `build`, `backups`, `.git`, `.worktrees`, and any dot-prefixed folder.
+- Test extended: a manifest folder **and** a plain markdown folder both register;
+  a `target/` build dir and an empty folder are skipped; scan stays idempotent.
+- **Owner can CRUD workspace universes.** Workspace-scanned universes are owned
+  by `'system'` at registration, so the seeded admin could read but not write
+  (vault `PUT`/`DELETE` → 403). `ensure_admin_universe_memberships` now also
+  grants admin membership on **every** universe with a `local_repo_path` —
+  DB-driven, no hardcoded key list (the `~/projects` workspace changes without a
+  deploy). Verified end-to-end: logged in as the owner, read + write + delete a
+  note under `yuri/content/co/`.
+
+### Why
+
+Owner directive: "we don't need a universe registry — all folders are universes,
+all it takes to be a universe is being a folder." This removes the last opt-in
+gate so the `~/projects` tree is a live universe workspace with zero ceremony.
+Local-dev only (prod never sets `CO_LOCAL_REPOS_DIR`).
+
+## CO-64 — Post-GitHub cleanup — remove dead git_sync.rs, formalize ARCHITECTURE.md
+
+Removed the git-clone-on-server path (CO-50, CO-55) that was superseded by the Vault REST API pivot:
+
+- Deleted `co-web/src/git_sync.rs` (365 lines of dead code)
+- Removed `UniverseGitConfig`, `SetGitConfig`, `GithubWebhookPush` structs from models
+- Removed git storage methods: `get_universe_git_config`, `set_universe_git_config`, `update_universe_git_sync`, `set_universe_git_error`, `upsert_entries_from_sync`
+- Removed route handlers: `GET/PUT /api/v1/universes/:slug/git`, `POST /api/v1/universes/:slug/sync`, `POST /api/v1/universes/:slug/webhook`
+- Migration v23: `ALTER TABLE universes DROP COLUMN` for all six `git_*` columns
+- Fixed migration v51 backfill referencing `remote_url` before v56 adds the column
+- Marked CO-50 and CO-55 as `status: deprecated`
+- Added `docs/ARCHITECTURE.md` documenting the post-GitHub data model, Vault API as canonical sync path, and forward refs to CO-77 (per-universe SQLite) and CO-70 (manifest)
+- Linked `docs/ARCHITECTURE.md` from `README.md`
+
+### Why
+
+The git-clone-on-server path was a serialization bottleneck (each clone/pull held the storage mutex). The Vault REST API replaced it as the canonical write path. Leaving the dead code in place confused contributors about which sync mechanism was current.
+
+## CO-86 — .co file format — protobuf-wrapped markdown for transport-optimized, encrypted, self-describing content
+
+Added the `.co` content envelope: a self-describing protobuf wrapper around
+markdown that carries typed frontmatter, presentation form, the markdown body,
+attachments, an Ed25519 signature, and wire telemetry as one binary. Markdown
+stays the authoring surface; `.co` becomes the transport surface across every
+channel (filesystem, Vault API, sync, mobile, peer-to-peer).
+
+- **Wire schema** (`core/proto/co_format.proto`, package `co.format.v1`): `CoFile`
+  with a cleartext header, typed `Frontmatter` (+ `Struct extra` lossless
+  carrier), `Form`, a `oneof` body (raw markdown / zstd-compressed / encrypted /
+  composite), attachments, signature, and telemetry.
+- **`core/src/co_format/`**: encode/decode with a 4-byte magic (`co\x01\x00`),
+  faithful markdown round-trip (byte-identical body, frontmatter equivalence),
+  validation, and bare-markdown auto-wrap for backward compatibility.
+  - `codec` — zstd compression layer.
+  - `encryption` — ChaCha20-Poly1305 AEAD body encryption (whole-body, v1).
+  - `signature` — Ed25519 detached signatures over the content hash.
+  - `telemetry` — uncompressed/compressed/on-wire sizes + codec, feeding CO-88.
+- **CLI**: `co encode <in.md> [-o out.co] [--compress]`, `co decode <in.co>
+  [-o out.md]`, `co inspect <in.co>` (version, content_type, sizes, signed,
+  encrypted, attachment_count).
+- **Vault API content negotiation** on `GET /api/v1/universes/{slug}/vault/{*path}`:
+  `Accept: application/vnd.co+protobuf` returns `.co` bytes, `Accept:
+  text/markdown` returns markdown, anything else keeps the JSON `VaultFile`.
+  Serving a `.co` records a per-universe `pipeline.transfer` telemetry event
+  (bytes-on-wire vs uncompressed).
+- **Tests + bench**: a round-trip corpus modeled on real quilomboaraucaria +
+  ArteLonga frontmatter shapes (`core/tests/co_format_roundtrip.rs`),
+  encryption/signature/inspect acceptance tests, a Vault content-negotiation
+  integration test, and a criterion encode/decode throughput + compression-ratio
+  benchmark (`core/benches/co_format_bench.rs`).
+
+### Why
+
+Plain `.md` over HTTP is untyped, un-versioned, un-signed, has no native
+encryption envelope, and references attachments by path the receiver may lack. A
+protobuf-wrapped envelope makes content typed, versioned, integrity-checked, and
+optionally compressed/encrypted/signed — composable layers around one shape —
+while keeping markdown as the authoring medium.
+
+## CO-87 — Composable protocol stack — hardware → cache → storage → network → privacy → security as Layer traits
+
+Introduce `co::layer`, a composable protocol stack that models every read/write of
+a `CoFile` as a chain of small, independently-testable `Layer`s. Each layer
+transforms a `CoFile` in one direction (write flows top→bottom toward the durable
+home; read flows bottom→top toward the consumer) and reverses it on the other, so
+any call site can declare its stack — e.g. `Filesystem → Signed → Encrypted →
+Compressed → LRU` — and adding a new concern is a new trait impl, not a refactor.
+
+### What's included
+
+- **`Layer` trait + `Stack<B, T>` composer + `StackError`** (`layer/mod.rs`) — a
+  fluent `bottom.stack(top)` builder (`LayerExt`), `Source`/`Sink` markers, and a
+  diagnostic error that names the failing layer (no silent fallbacks).
+- **Physical** (`physical.rs`): `FilesystemBytes` (atomic tmp+rename, mkdir -p),
+  `HttpBytes` over an injected `HttpEndpoint` (sync, port-free, testable).
+- **Cache** (`cache.rs`): in-process `LruCache` keyed by `CoFile.path`.
+- **Storage** (`storage.rs`): `SqliteStorage` (per-universe SQLite, CO-77) and
+  content-addressed `BlobStore` (sha-256, CO-81).
+- **Network** (`transport.rs`): `VaultApiTransport` mapping to the canonical
+  `/api/v1/universes/:slug/vault/*` routes.
+- **Privacy** (`privacy.rs`): `PassthroughPlain` and `ChaCha20Encrypted`
+  (ChaCha20-Poly1305 AEAD, per-write random nonce).
+- **Security** (`security.rs`): `UnverifiedTrusted` and `Ed25519Signed` (detached
+  signature framed ahead of `content`; sign-the-ciphertext composition).
+- **Compression** (`compression.rs`): `ZstdCompressed`, `BrotliCompressed`.
+- **Cross-cutting** (`tee.rs`, `measured.rs`): `Tee` fan-out writer / fall-back
+  reader (LiteFS / multi-tier mirrors) and `Measured` telemetry wrapper exposing
+  per-layer `encode_ns` / `decode_ns` counters.
+- **Pilot refactor**: `vault_routes::write_raw_vault_file` (the raw-data branch of
+  `put_vault_file`) now persists through a `FilesystemBytes → PassthroughPlain`
+  stack instead of an inline `fs::write` — byte-identical behavior, no integration
+  regressions.
+- **Tests + bench**: a 5-layer round-trip (bit-perfect), a layer-swap test, mock
+  layers in isolation, the round-trip property over compression × encryption ×
+  signing, and `examples/layer_bench.rs` reporting per-layer throughput.
+
+### Why
+
+The concerns crossed on every `CoFile` read/write — disk/net, cache, storage,
+transport, encryption, signing — were smeared across `storage.rs`, the vault
+routes, and ad-hoc helpers. Expressing each as a `Layer` gives one mental model
+for the whole data path, makes every concern unit-testable in isolation, and lets
+different deployments wire different stacks (no-encryption self-host vs. mandatory
+encryption multi-tenant) without touching call sites. It composes around the
+existing CO-86 `CoFile` rather than reinventing the file format.
+
+## CO-98 — Hierarchical universes — parent → children for sidebar grouping and discovery
+
+Universes can now express a parent → children hierarchy so curated trios (like
+the timeline universes `tempo`, `humanity`, `universo`) group under `template`
+instead of cluttering a flat list.
+
+- **Storage**: added `set_universe_parent(key, parent)` (link/detach a child;
+  `None` returns it to top-level) and `build_universe_tree(universes)` — the
+  depth-2 tree-list helper that mirrors the SPA's `buildChildMap` server-side,
+  with orphans and grandchildren degrading to top-level so every universe
+  appears exactly once. The `parent_key` column/index, API serialization
+  (`GET`/`PUT` `/api/v1/universes`), and the timeline seed
+  (`seed_all_timeline_universes` sets `parent_key='template'`) were already in
+  place; the reparent route now goes through `set_universe_parent`.
+- **SPA**: a parent universe's home (`renderUniverseHome`, e.g. the template)
+  now shows an **Explorar este universo** panel — a card list of the parent's
+  direct children, each linking to `/<slug>`. It replaces the empty-state hint
+  and is appended below a seeded `index.md` so a parent universe is never blank.
+- **Tests**: storage round-trip + tree-list helper unit tests in
+  `storage/universe.rs`, an integration test covering the
+  `seed_all_timeline_universes` → `parent_key='template'` path and the
+  `list_surface_nodes` relationship registry, plus a Playwright test asserting
+  the logged-in sidebar nests the timeline trio under `template`.
+
+### Why
+
+The flat universe list didn't scale as curated trios grew, and there was no
+discovery surface pointing visitors from a parent universe to its children.
+`parent_key` reuses the existing column rather than inventing a separate
+"category" abstraction.
+
+
 ## [3.17.1] — 2026-06-18 — Maintenance-mode gate + compact-swap ops script
 
 ## maintenance-gate — CO_MAINTENANCE_MODE planned-maintenance gate
