@@ -42,6 +42,14 @@ sha2 = "0.10"
 
 # Protobuf (wire format for Entry)
 prost = "0.13"
+# CO-86 — well-known types (google.protobuf.Struct) for the `.co` envelope's
+# typed-frontmatter `extra` field.
+prost-types = "0.13"
+
+# CO-86 — `.co` format crypto layers (composed around the protobuf envelope).
+chacha20poly1305 = "0.10"                                   # body encryption (AEAD)
+ed25519-dalek = { version = "2", features = ["rand_core"] } # detached signatures
+rand = { workspace = true }                                 # key generation
 
 # Graph
 petgraph = { workspace = true }
@@ -67,6 +75,12 @@ prost-build = "0.13"
 tempfile = { workspace = true }
 mockall = "0.13"
 tokio = { workspace = true }
+# CO-86 — encode/decode throughput + compression-ratio benchmark
+criterion = "0.5"
+
+[[bench]]
+name = "co_format_bench"
+harness = false
 
 [features]
 default = []

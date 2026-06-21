@@ -1,0 +1,130 @@
+syntax = "proto3";
+
+// CO-86 — the `.co` content envelope: protobuf-wrapped markdown for
+// transport-optimized, encrypted, self-describing content.
+//
+// NOTE: this lives in its own package (`co.format.v1`) so the rich CO-86
+// envelope does not collide with the lightweight `co.v1.CoFile` sync frame
+// (core/proto/co.proto, used by core/proto/sync.proto + core/src/sync/delta.rs).
+package co.format.v1;
+
+import "google/protobuf/struct.proto";
+
+// Top-level container. Every transport carries one of these per logical file.
+message CoFile {
+    // --- Header: always cleartext for routing/dispatch ---
+    string version = 1;             // semver of the schema, e.g. "1.0.0"
+    string content_type = 2;        // "co/markdown", "co/composite", "co/encrypted"
+    string content_hash = 3;        // SHA-256 (hex) of the canonical body bytes (post-decrypt)
+    int64  created_at_ns = 4;       // nanos since epoch UTC
+    int64  modified_at_ns = 5;
+    string author_id = 6;           // who wrote this revision
+    string universe_key = 7;        // scoping namespace
+    string entry_path = 8;          // logical path within universe (e.g. "sobre.md")
+
+    // --- Metadata: typed frontmatter ---
+    Frontmatter frontmatter = 9;
+
+    // --- Form: presentation hints (CO-63 manifest declares the schema) ---
+    Form form = 10;
+
+    // --- Body: the actual content (one of) ---
+    oneof body {
+        bytes markdown = 11;        // raw UTF-8 markdown
+        bytes compressed = 12;      // zstd-compressed markdown
+        Encrypted encrypted = 13;   // chacha20-poly1305 envelope
+        Composite composite = 14;   // multipart (e.g. markdown + many attachments)
+    }
+
+    // --- Attachments graph (images, embeds, transcripts) ---
+    repeated Attachment attachments = 15;
+
+    // --- Signatures (Ed25519 by default) ---
+    Signature signature = 16;
+
+    // --- Wire-level telemetry (server populates; clients may include) ---
+    Telemetry telemetry = 17;
+}
+
+message Frontmatter {
+    // Common typed fields. Anything else lands in `extra` (Struct = JSON-like).
+    string title = 1;
+    string description = 2;
+    string entry_type = 3;          // "page", "task", "evento", "doc.scala", …
+    repeated string tags = 4;
+    string status = 5;              // "todo", "doing", "done", or content-type-specific
+    string priority = 6;
+    string parent = 7;              // parent entry path
+    string assignee = 8;            // user id (CO-74 ref:pessoa)
+
+    // Temporal (CO-73)
+    int64 created_at_ns = 20;
+    int64 due_at_ns = 21;
+    int64 scheduled_at_ns = 22;
+    int64 event_at_ns = 23;
+    int64 published_at_ns = 24;
+    int64 expires_at_ns = 25;
+    int64 effective_at_ns = 26;
+    string timezone_iana = 27;      // "America/Sao_Paulo" — needed when human-meaningful
+
+    // Open extension for content-type-specific fields, validated against
+    // the universe's manifest (CO-70).
+    google.protobuf.Struct extra = 30;
+}
+
+message Form {
+    string theme = 1;               // palette key
+    string layout = 2;              // "board", "list", "calendar", "graph", "gantt"
+    string view_hint = 3;           // free-form layout token
+    google.protobuf.Struct overrides = 4;  // CSS custom-property overrides
+}
+
+message Attachment {
+    string id = 1;                  // stable id (sha256 of content; matches blob CAS)
+    string name = 2;                // "diagram.png", "audio.mp3"
+    string mime = 3;                // "image/png"
+    int64  size_bytes = 4;
+    AttachmentSource source = 5;
+    Encryption encryption = 6;      // optional per-attachment envelope
+}
+
+message AttachmentSource {
+    oneof source {
+        bytes inline = 1;           // small attachments (<256 KB) inline
+        string blob_ref = 2;        // CO-81 blob store: "sha256:abcd..."
+        string url = 3;             // external (signed url, etc.)
+    }
+}
+
+message Composite {
+    bytes markdown = 1;             // primary body
+    // attachments referenced by id from the markdown lend coherence
+}
+
+message Encrypted {
+    string algo = 1;                // "chacha20-poly1305"
+    bytes  ciphertext = 2;
+    bytes  nonce = 3;
+    bytes  encrypted_key = 4;       // wrapped per recipient
+    string key_recipient = 5;       // recipient's public key id
+}
+
+message Encryption {
+    string algo = 1;
+    bytes  encrypted_key = 2;
+}
+
+message Signature {
+    string algo = 1;                // "ed25519"
+    bytes  signature = 2;
+    string signer_pubkey_id = 3;
+}
+
+message Telemetry {
+    int64 size_uncompressed = 1;
+    int64 size_compressed = 2;
+    int64 size_on_wire = 3;         // post-encryption
+    string codec = 4;               // "raw" | "zstd-3" | "zstd-19" | "br-11"
+    int64  encode_ns = 5;
+    int64  decode_ns = 6;
+}
