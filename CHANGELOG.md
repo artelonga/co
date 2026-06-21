@@ -5,6 +5,112 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.19.0] — 2026-06-21 — Git-backed universes + workspace reconcile (CO-89 commits/profiles/events/analytics · CO-467 manifest visibility) [--ignore-dod override]
+
+## CO-467 — Manifest visibility + workspace reconcile + code-repo skip
+
+Follow-ups to CO-466 (the no-registry workspace scan), fixing the
+manifest↔DB visibility drift and the over-registration of dormant code repos.
+
+### What changed
+
+- **Manifest `visibility`**: `co::manifest::Manifest` now parses an optional
+  `visibility` field (`private` | `public-subscribable` | `public-static` |
+  `unlisted`). Previously the field in `_universe.yaml` was silently dropped.
+- **Scan honors visibility**: `register_universes_from_local_dir` inserts the
+  manifest's declared visibility (default `private`) and sets `is_public` for
+  `public-*`, instead of hardcoding `private`.
+- **Reconcile existing rows**: `INSERT OR IGNORE` never updated, so universes
+  whose visibility/parent changed in the manifest stayed stale (miguel, mse,
+  grcsamazonia were stuck `private` despite declaring `public-subscribable`).
+  The scan now `UPDATE`s visibility/is_public/parent on existing **workspace**
+  rows (those with a `local_repo_path`; never seeded system rows).
+- **Code-repo skip**: a folder with a code-project manifest at root
+  (`Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod`), **no** `_universe.yaml`,
+  and **no** `content/` dir is skipped — its README markdown alone no longer
+  over-registers dormant repos (aws, prediction-market, rfq-gateway, …) as
+  universes.
+- Tests: manifest visibility honored, default-private fallback, code-repo skip,
+  and re-scan reconciliation of an edited visibility.
+
+### Why
+
+Closes the two reconciliation flags surfaced by the universe index: stale DB
+visibility and CO-466's accidental dormant-repo registrations. Local-dev only
+(prod never sets `CO_LOCAL_REPOS_DIR`).
+
+## CO-86 — Dockerfile: install libprotobuf-dev for well-known protos
+
+Deploy hotfix. `proto/co_format.proto` (CO-86, the `.co` envelope) imports
+`google/protobuf/struct.proto`. The builder image installed `protobuf-compiler`
+but not `libprotobuf-dev`, which ships the well-known `.proto` files — so the
+Docker build failed with `google/protobuf/struct.proto: File not found` even
+though CI (host has the protos) was green. Added `libprotobuf-dev` to the
+co-web builder stage. (Dockerfile-not-exercised-in-CI drift.)
+
+## CO-89 — Git-backed universes — every repo-backed universe gets commits, profiles, events, analytics, Mermaid views
+
+Any universe can now opt into **git-source ingestion**: its `git log` becomes
+first-class content. This makes `co-dev` (and any future repo-backed universe)
+a uniform git-like changelog with real stats and live diagrams, instead of a
+special case. Markdown-only universes are completely untouched.
+
+### What's new
+
+- **Schema (migration v89):** opt-in `git_source`, `git_branch`,
+  `git_last_synced_sha`, `git_last_synced_at` columns on `universes`. A NULL
+  `git_source` = markdown-only (behaves exactly as before). The `Universe` model
+  + `get_universe` read them (separate query, degrades to `None` on pre-v89 DBs);
+  `set_universe_git_source` / `set_universe_git_synced` manage them.
+- **Ingestion pipeline (`co-web/src/content/gitsync/`):**
+  - `git_log` — a pure parser turning `git log` (custom `--pretty` + `--shortstat`)
+    into `CommitRecord`s: sha, author/committer handles, author-local timezone
+    offset, parents, `parent_task` (`CO-65` parsed from the subject), conventional-
+    commit scope tags, and insertions/deletions. No `regex` dependency — hand-rolled
+    + fully unit-tested.
+  - `git_runner` — full-history `git clone/fetch/log` (kept separate so the side
+    effects are isolated; tested against a local `file://` repo, no network).
+  - `ingest` — one `commit` content entry per commit (`commits/<sha>.md`),
+    idempotent + incremental from the last-synced SHA.
+  - `profiles` — one `profile` entry per contributor (`profiles/<handle>.md`),
+    handle derived from email (`yuri@…` → `yuri`, `noreply@anthropic.com` → `claude`,
+    GitHub-noreply `id+login` → `login`).
+  - `analytics` — per-profile struct (commits total + last-30d, lines added/removed,
+    first/last commit, frequent scopes, mean commit size) folded over `commit`
+    entries; `now` is injected for deterministic tests.
+  - `mermaid` — server-side Mermaid (validates CO-83): a **gantt** of in-flight
+    tasks (swimlane by assignee, status → done/active tags) and a **timeline** of
+    recent commits grouped by author-local day.
+- **Routes** (`/api/v1/universes/{slug}/…`, owner-gated writes):
+  `POST /git-source`, `POST /git-sync`, `POST /recompute-analytics`,
+  `GET /gantt`, `GET /commit-timeline`. The git-sync handler runs the blocking
+  git work on `spawn_blocking` and never holds the storage lock across it.
+- **Hourly worker** (`GitSyncWorker`): incrementally syncs every git-backed
+  universe (first tick deferred 2 min to stay out of the boot path), recomputes
+  analytics, and emits a `pipeline.git_sync` telemetry event (feeds the CO-88
+  pipeline dashboard). The manual route emits the same event.
+- **Manifest** (`work/co/_universe.yaml`): `commit` + `profile` content types
+  (commit→task and commit→profile typed refs), enriched `event` (release/deploy/
+  planning/retro/demo/outage), and the five `views` (board, history timeline,
+  roadmap gantt, contributors cards, events calendar).
+
+### Why
+
+`co-dev` was just markdown indexed by SQLite — zero visibility into development
+history. CO-89 is the first proof point for the content-type-pack model and
+validates the temporal (CO-73), relation (CO-74), and Mermaid (CO-83) work on a
+real use case, while generalizing to any user's repo-backed universe.
+
+### Scope notes
+
+Backend is complete and tested (parser, runner, ingest, profiles, analytics,
+mermaid generation, routes, worker, telemetry, migration). The SPA surfaces that
+*render* these views (history/contributors/events tabs, profile detail page,
+analytics dashboard) and the deploy/tag git-hooks that auto-create `event`
+entries with `kind=deploy`/`kind=release` are follow-on work — the data, content
+types, and endpoints they consume all land here.
+
+
 ## [3.18.0] — 2026-06-21 — Universos sem cerimônia — workspace no-registry + CRUD do dono · formato .co + protocol stack · hierarquia [--ignore-dod override]
 
 ## CO-288 — CO-281 Phase 4 — cost panel in /admin/deployments + Fly runbook
