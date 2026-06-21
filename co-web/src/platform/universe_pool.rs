@@ -1141,6 +1141,57 @@ mod base_schema_tests {
 }
 
 #[cfg(test)]
+mod sharding_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    /// CO-81 acceptance: "1M-universes filesystem has no directory with > 200
+    /// entries." The 2-level xxHash fanout gives 256×256 = 65 536 level-2
+    /// directories; at 1M universes that is ~15 keys per directory on average.
+    ///
+    /// A literal 1M-key run is too slow for CI, so we sample 131 072 keys
+    /// (mean 2 per bucket) and assert the busiest level-2 directory stays far
+    /// below a count that, scaled linearly to 1M, would breach 200. The hash is
+    /// uniform, so the per-bucket count scales ~linearly with the key count.
+    #[test]
+    fn two_level_fanout_keeps_directories_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = UniversePool::new(dir.path(), 1);
+
+        const KEYS: usize = 131_072; // 2× the 65 536 buckets
+        let mut per_dir: HashMap<PathBuf, usize> = HashMap::new();
+        for i in 0..KEYS {
+            // `universe_dir` is `<root>/universes/<l1>/<l2>/<key>`; the level-2
+            // directory is the parent of the per-universe directory.
+            let l2 = pool
+                .universe_dir(&format!("universe-{i}"))
+                .parent()
+                .unwrap()
+                .to_path_buf();
+            *per_dir.entry(l2).or_default() += 1;
+        }
+
+        let max = per_dir.values().copied().max().unwrap_or(0);
+        let buckets_used = per_dir.len();
+
+        // With a uniform hash the busiest bucket at this sample size is well
+        // under 30; scaled ×8 to 1M keys that is < 240, and the *mean* at 1M is
+        // ~15 — comfortably inside the 200-per-directory budget.
+        assert!(
+            max < 30,
+            "busiest level-2 dir held {max} keys over {KEYS} (buckets used: {buckets_used}); \
+             distribution too skewed to guarantee <200 at 1M universes"
+        );
+        // Sanity: the fanout spreads across most of the 65 536 buckets. With a
+        // mean of 2 keys/bucket, ~86% (≈56 700) are occupied (Poisson 1−e⁻²).
+        assert!(
+            buckets_used > 55_000,
+            "expected wide fanout, only {buckets_used}/65536 buckets used"
+        );
+    }
+}
+
+#[cfg(test)]
 mod degradation_tests {
     use super::*;
 

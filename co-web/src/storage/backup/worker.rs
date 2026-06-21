@@ -217,7 +217,8 @@ async fn register_manifest_blob(data_dir: &std::path::Path, snapshot: &super::Sn
         }
     };
 
-    let store = match backend::from_config(data_dir, crate::infra::secrets::global().as_ref()) {
+    let store = match backend::from_config(data_dir, crate::infra::secrets::global().as_ref()).await
+    {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("backup: StorageBackend unavailable, skipping manifest ledger: {e}");
