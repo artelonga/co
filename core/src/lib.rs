@@ -37,6 +37,7 @@
 //! ```
 
 pub mod agent;
+pub mod agent_relay;
 pub mod archive;
 pub mod co_format;
 pub mod config;
