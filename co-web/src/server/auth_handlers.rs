@@ -303,6 +303,23 @@ pub(super) async fn verify_handler(
         }
     }
 
+    // CO-466: the seeded admin can CRUD every workspace universe. Memberships
+    // are granted at boot, but with passwordless login the admin user doesn't
+    // exist until first login — so (re-)grant here. Idempotent; gated to the
+    // seeded admin email (workspace universes only exist in local dev, where
+    // CO_SEED_ADMIN_EMAIL is set; prod has no `local_repo_path` universes).
+    if std::env::var("CO_SEED_ADMIN_EMAIL")
+        .map(|a| a.trim().eq_ignore_ascii_case(email.trim()))
+        .unwrap_or(false)
+    {
+        let mut storage = lock_storage(&state);
+        if let Err(e) = storage.ensure_admin_universe_memberships(&email) {
+            tracing::warn!(
+                "CO-466 ensure_admin_universe_memberships on login failed (login continues): {e}"
+            );
+        }
+    }
+
     // CO-156: emit auth.login telemetry
     crate::telemetry::emit_crud_event(
         &state,

@@ -57,3 +57,4 @@ co-lsp/target/
 
 # CO-375: contract probe report (generated artifact — not committed)
 contract-probe-report.json
+playground/compute-dashboard.html
