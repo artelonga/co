@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-464",
+  "title": "Distribution: serve /install.sh + getting-started + crates.io decision",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-464.md",
+  "branch": "feat/CO-464-distribution-install",
+  "merge_sha": "3ce73eba89cd8bea246c5988dee578ad3d02ef7c",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/301",
+    "number": 301
+  },
+  "started_at": "2026-06-20T00:00:00Z",
+  "merged_at": "2026-06-23T01:33:19Z",
+  "files_changed": 5,
+  "lines_added": 185,
+  "lines_removed": 2,
+  "labels": [
+    "distribution",
+    "docs",
+    "install"
+  ],
+  "changelog_entry": "## CO-464 — Distribution: serve /install.sh + getting-started + crates.io decision\n\nMakes the documented install paths real and records the distribution decision.\n\n### What changed\n\n- **`/install.sh` now serves** (was 404): the binary installer lives at\n  `co-web/static/install.sh`, served at the root the README's one-liner points\n  at (`curl -fsSL https://co.artelonga.com.br/install.sh | sh`).\n- **`docs/getting-started.md`**: one page covering the three personas — hosted\n  (e-mail signup → web), CLI (`co login` + `co sync`), self-host (`co serve`).\n- **crates.io decision (README)**: there will be **no `cargo install co-cli`**\n  from crates.io — `co serve` embeds the full server (`co-web`), so the CLI is\n  not an idiomatic crates.io library. `cargo install --git` and the one-line\n  installer are the supported installs.\n\n### Why / follow-ups\n\n- The blocker was structural: `co-cli` path-depends on `co-web` (storage layer\n  + `co serve` starts the server). Slimming it off `co-web` would mean dropping\n  `co serve` and relocating `co_web::storage::Storage` to core — a large refactor\n  with no user benefit, since the working install paths already exist.\n- **Open follow-up**: `scripts/release-commit.sh` cuts the version commit but\n  does not push a `v<x.y.z>` tag, so `release.yml` (which builds per-target\n  binaries) hasn't produced release assets since v3.11.0. Tagging releases will\n  keep the `install.sh` binary current. Tracked separately.",
+  "summary": "GIVEN the README advertises install paths (`curl … /install.sh | sh`, `cargo install`) that were not all real — `/install.sh` returned 404 and there was no single getting-started page or a recorded de",
+  "co_auto_version": "0.1.0"
+}
