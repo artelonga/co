@@ -5,6 +5,389 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.20.0] — 2026-06-23 — Blocks, canonical interfaces & unified threads — block model (CO-470/473) · search/connections API (CO-471) · comments-as-messages (CO-472) · storage foundations (CO-81/93/110) · hardening (CO-468/469/474) [--ignore-dod override]
+
+## CO-110 — Filesystem-as-Web — encrypted remote file editing via verified Co pages
+
+Phase 1 (protocol design) of the Filesystem-as-Web architecture: a browser renders
+a live, editable mirror of a remote PC's filesystem while the Co server acts as a
+**verified relay only** — it sees opaque ciphertext and pairing IDs, never content.
+
+### What landed
+
+- **`core::agent_relay`** — a deterministic, side-effect-free protocol core (no I/O,
+  no sockets), so the security-critical shapes can be specified, unit-tested, and
+  reviewed in isolation before any server/daemon wiring:
+  - `frame` — the versioned wire frame the relay multiplexes. `ServerView` parses
+    **only** routing metadata (pairing id, direction, seq); the payload is opaque —
+    the structural guarantee that the relay cannot read content.
+  - `pairing` — the `(page, browser, agent)` pairing record + total state machine
+    (Pending → Active → Expired/Revoked) and per-operation scope authorization.
+  - `relay` — the pure forward / queue / reject routing decision the server is
+    allowed to make from header metadata + pairing state + caller identity alone
+    (no ciphertext argument, by construction).
+  - `scope` — agent-side lexical path scoping under configured roots; rejects
+    absolute paths, `../` traversal, Windows prefixes, and NUL bytes.
+  - `session` — the end-to-end ChaCha20-Poly1305 session (reusing the CO-86 AEAD
+    primitive) with a per-direction counter nonce for replay protection, plus the
+    short-authentication-string ("6-word phrase") that lets the trust ceremony
+    detect a MITM. The ECDH shared secret is an input — it is never on the server.
+- **Phase-1 design docs**:
+  - `docs/specs/co-110-frame-format.md` — versioned header + AEAD ciphertext, key
+    schedule, op-set, replay rule, "what the server sees".
+  - `docs/specs/co-110-pairing-handshake.md` — the full pairing state machine and
+    failure modes (the trust ceremony).
+  - `docs/specs/co-110-crypto-review.md` — library/primitive choice (X25519 +
+    ChaCha20-Poly1305 + HKDF-SHA256 + Ed25519) and the libsodium / age / MLS
+    trade-off.
+  - `docs/threat-models/co-110-filesystem-as-web.md` — threat model.
+
+### Why
+
+CO-110 is long-horizon (v3+) work that is **out of scope for v1.0**, but specifying
+the protocol now means the tickets it touches — CO-86 (`.co` envelope encryption),
+CO-87 (composable layer stack), and CO-49 (access model) — land in shapes that do
+not have to be redone. The transport deliberately reuses CO-86's AEAD primitive so
+the `.co` envelope and this relay share one crypto core. Server relay endpoints, the
+`agent_pairings` table, the browser library, and the `co-agent` daemon are the later,
+infrastructure-bearing phases that build directly on this core.
+
+## CO-464 — Distribution: serve /install.sh + getting-started + crates.io decision
+
+Makes the documented install paths real and records the distribution decision.
+
+### What changed
+
+- **`/install.sh` now serves** (was 404): the binary installer lives at
+  `co-web/static/install.sh`, served at the root the README's one-liner points
+  at (`curl -fsSL https://co.artelonga.com.br/install.sh | sh`).
+- **`docs/getting-started.md`**: one page covering the three personas — hosted
+  (e-mail signup → web), CLI (`co login` + `co sync`), self-host (`co serve`).
+- **crates.io decision (README)**: there will be **no `cargo install co-cli`**
+  from crates.io — `co serve` embeds the full server (`co-web`), so the CLI is
+  not an idiomatic crates.io library. `cargo install --git` and the one-line
+  installer are the supported installs.
+
+### Why / follow-ups
+
+- The blocker was structural: `co-cli` path-depends on `co-web` (storage layer
+  + `co serve` starts the server). Slimming it off `co-web` would mean dropping
+  `co serve` and relocating `co_web::storage::Storage` to core — a large refactor
+  with no user benefit, since the working install paths already exist.
+- **Open follow-up**: `scripts/release-commit.sh` cuts the version commit but
+  does not push a `v<x.y.z>` tag, so `release.yml` (which builds per-target
+  binaries) hasn't produced release assets since v3.11.0. Tagging releases will
+  keep the `install.sh` binary current. Tracked separately.
+
+## CO-468 — WebSocket fan-out: serialize each event once, not once per client
+
+Network/data-transfer review of all six WebSocket surfaces, plus fixes for the
+per-client re-serialization found on the JSON fan-out paths.
+
+### Fixed
+- **`/api/v1/events` (LiveTimeline, CO-380/381):** the broadcast channel carried
+  `Arc<Event>` and every connected socket re-ran `serde_json::to_string` on the
+  *same* event — N identical serializations for N clients. The channel now
+  carries a `TimelineFrame { event, json: Arc<str> }` serialized **once** at the
+  single fan-out point (`TimelineForwarder`); sockets reuse the shared bytes and
+  keep their per-client `can_see` visibility filter. Serialization is independent
+  of visibility level, so this is byte-for-byte equivalent.
+- **Chat rooms (`…/chat/rooms/{room}/ws`, CO-194):** same pattern — the room
+  channel carried the typed `ChatEvent` and each socket re-serialized it. The
+  channel now carries pre-serialized `Arc<str>` (`ChatBroadcast`), produced once
+  via the new `broadcast_event` helper at each of the 8 publish sites
+  (messages created/edited/deleted, presence join/leave, typing start/stop).
+
+### Reviewed (no change needed)
+- **`/api/v1/sync/ws` (CO-151)** and **`/ws/doc/...` (CRDT)** already encode each
+  frame once as binary and share the bytes across subscribers — efficient.
+- **`/ws/sala/...` (CO-353)** already serializes once into `RoomMsg.json: Arc<str>`.
+
+### Documented
+- **Single-machine fan-out guard.** The LiveTimeline and sync-room channels are
+  in-process `tokio::broadcast` — they reach clients on *this* machine only.
+  Correct today (`co-artelonga` runs one Fly machine, `min_machines_running=1`),
+  but horizontal scale-out (≥2 machines) would silently drop cross-machine
+  same-universe events; documented prominently in `events_ws.rs`/`sync_ws.rs`.
+  Cross-machine pub/sub (or per-universe sticky routing) is a tracked follow-up.
+
+### Follow-ups (not in this change)
+- Cross-machine event distribution for horizontal scale-out.
+- `permessage-deflate`/binary encoding for `/api/v1/events` (axum doesn't expose
+  compression cleanly today).
+
+### Why
+On a busy universe the LiveTimeline stream is the hottest JSON fan-out path;
+serializing per-client wastes CPU linearly with connection count and adds
+latency under load. Serialize-once matches the binary paths' existing design.
+
+## CO-469 — Auth hardening: JWT_SECRET production boot guard
+
+### Fixed
+- **The server now refuses to boot in a non-local/test environment when
+  `JWT_SECRET` is unset.** Previously it fell back to the hardcoded
+  `dev-secret-change-me`, making every session JWT forgeable by anyone who reads
+  the source. `start_server_inner` now fails closed with a clear `FATAL (CO-469)`
+  message + remediation hint before binding the listener. Local/test envs keep
+  using the dev fallback for convenience.
+
+### Changed
+- The dev fallback is now a single shared const (`DEV_JWT_SECRET_FALLBACK`),
+  used by both `jwt_secret_from` and `recovery_crypto` instead of duplicated
+  string literals.
+
+### Why
+First and highest-severity item from the auth security review: a forgeable JWT
+secret in production is a full authentication bypass. Fail-closed-at-boot is the
+safest mitigation. The remaining review findings (CO_ENV fail-open, vault
+path-traversal audit, hashing legacy magic-codes at rest, and retiring the
+duplicate redb auth store) are tracked in `work/co/CO-469.md` for follow-up PRs.
+
+## CO-470 — Block model over markdown (Phase 1: parser + serializer + read API)
+
+First slice of the Notion-class block model, built **over** markdown so CO stays
+markdown-canonical and portable (Notion/others are future adapters, never a
+dependency — see `work/co/CO-470.md`).
+
+### Added
+- **`co::block`** (core): a `Block` tree (`id`, `type`, `attrs`, `text`,
+  `children`) with `parse_blocks(md)` and `serialize_blocks(&[Block])`. Phase 1
+  models the standard CommonMark/GFM set (paragraph, heading, bulleted/numbered/
+  to-do list items with nesting, quote, code, divider); any unmodeled construct
+  (tables, HTML…) is preserved verbatim as a `Raw` block so round-trips never
+  lose data. Inline content is kept as a markdown string (annotation spans land
+  in Phase 2). Parser: pure-Rust `markdown` crate (mdast); no C deps.
+- **`GET /api/v1/universes/{slug}/entries/blocks?path=…`** — returns the entry's
+  body parsed into the block tree. The body is canonical decrypted markdown at
+  this layer (CO-86/87 privacy layers decode below `storage_trait`); the block
+  tree is a derived view. Query-param `path` follows the `history`/`versions`/
+  `diff` convention to avoid the greedy `entries/{*path}` wildcard.
+
+### Tested
+- Idempotence invariant `parse(serialize(parse(md))) == parse(md)` over mixed
+  input; already-canonical markdown serializes back byte-for-byte; list markers,
+  nesting, todo state, and Raw passthrough; integration test for the route
+  (create entry → GET blocks → assert tree) + 404 path.
+
+### Reconciliation
+No new wire format or crypto: markdown = portable text form, `.co` (CO-86) =
+binary/encrypted carrier, block tree = derived editing view. Only markdown and
+`.co` are persisted/transported.
+
+### Not yet (Phase 2+)
+Extended blocks (callout/toggle/columns/child_page) via fenced-directive syntax,
+rich-text annotation spans, `PATCH /blocks` write ops over the CO-468 CRDT, block
+editor UI, multi-view over CO-93 data sources, import/export adapters.
+
+## CO-471 — Canonical one-word interfaces: `search` + `connections`
+
+Establishes a clean one-word noun per public interface — the stable contract that
+import/export adapters (Notion, Obsidian, Logseq, Quartz) wrap, keeping CO's API
+the portable superset rather than any tool's data model.
+
+### Added
+- **`GET /{slug}/connections?path=…`** — the canonical typed-link interface
+  (*conexões* — the **Conectar** brand pillar). Returns an entry's outbound +
+  inbound CO-74 relations. A thin wrapper over the relation repository (same data
+  the entry detail embeds, now first-class). The `graph` route remains the HTML
+  visualization; this is the data API. Named **connections**, not "relations".
+- **`GET /{slug}/search`** — canonical name for the CO-74 query-DSL interface, a
+  true alias of `query`.
+
+### Changed
+- `query` is now a **deprecated alias** of `search` (kept one release).
+- `docs/architecture/api-catalog.md` records `search`, `connections`, and the
+  CO-470 `entries/blocks` route; `openapi.yaml` regenerated.
+
+### Why
+One noun = one interface lets adapters map mechanically and lets CO's surface
+read in its own voice. Brand vocabulary (Conectar → connections) over generic
+technical terms for public surfaces.
+
+## CO-472 — Unified thread model: comments compose with messages
+
+Comments and chat messages are now ONE primitive. A **message is a comment in a
+thread**, powered by the existing chat/live-comms architecture — there is no
+separate comments store.
+
+The chat room is generalized into a **thread** (migration v092, additive +
+idempotent — every existing room/DM keeps working): a thread belongs to a
+universe, may be **anchored** to an entry (and optional block) so that anchored
+thread IS the entry's comments, may be **recursive** (`parent_thread_id` — a
+message spawns a child thread of nested replies), and is scoped to **all members**,
+a **subset**, or **self** (private notes-to-self).
+
+The CO-471 `comments` interface ships as a VIEW over the anchored thread:
+
+- `GET  /api/v1/universes/{slug}/comments?path=<entry>[&block_id=…]` — the
+  threaded view (top-level comments + recursive child threads).
+- `POST /api/v1/universes/{slug}/comments?path=<entry>` — append a comment
+  (auto-creates the thread on the first comment); `parent_id` spawns a recursive
+  reply child; `block_id` anchors to a block.
+
+Posting a comment publishes a `ChatEvent::MessageCreated` over the same
+serialize-once broadcast bus chat uses (CO-468), so connected members receive it
+live through the event queue — no new delivery path.
+
+### Why
+Comments and messages were drifting toward two parallel systems. Unifying them
+on the thread primitive means one storage path, one live-delivery path, and one
+permission model (universe membership for anchored comments; explicit membership
+for subset/self threads), and makes the `comments` interface a thin, portable
+view rather than a net-new subsystem.
+
+## CO-473 — Block model Phase 2: extended blocks + `PATCH /blocks` write path
+
+Built on the CO-470 `co::block` module (Phase 1).
+
+- **Extended container blocks.** Added `callout`, `toggle`, `columns`/`column`,
+  and `child_page` to `BlockType`, serialized/parsed with the portable
+  fenced-directive container syntax (`:::name {attrs}` … `:::`, Pandoc /
+  `remark-directive` style). A focused container pre-parse pass splits `:::`
+  regions out of the markdown body (the `markdown` crate does not model
+  directives) and recurses into their inner content; the serializer re-emits
+  them. Unknown `:::name` directives degrade to `Raw` so plain markdown tools
+  are unaffected. The Phase 1 idempotence invariant
+  (`parse(serialize(parse(md))) == parse(md)`) now covers the extended blocks.
+- **Deterministic block ids.** `co::block::assign_ids` assigns stable `blk_…`
+  ids (depth-first ordinal paths) so an editor can address blocks. Ids serialize
+  into the directive `{id=…}` slot for extended blocks and an unobtrusive
+  `{#blk_…}` trailer for standard blocks — only when present, so unreferenced
+  prose stays clean and byte-for-byte identical.
+- **`PATCH /api/v1/universes/{slug}/entries/blocks?path=<path>`.** Applies
+  id-addressed ops (`replace` / `insert_after` / `delete` / `move`) by
+  parse → assign_ids → apply → serialize → vault-write, reusing the exact write
+  path `update_entry` uses (version snapshot, re-index, event-bus + EDA publish,
+  query-cache invalidation). Owner/member write gate; unknown ids / malformed
+  ops return 4xx. No new wire format, no database migration — the block tree is
+  a derived view of the canonical markdown body.
+
+### Why
+Phase 1 made the block tree readable; Phase 2 makes it structured (Notion-class
+container vocabulary) and writable (a surgical, id-addressed PATCH) while keeping
+CO markdown-canonical, lossless, and edit-anywhere.
+
+## CO-474 — Auth hardening II (CO_ENV fail-open, vault path-traversal, hashed magic-codes)
+
+Three contained security fixes, the follow-up to CO-469's JWT_SECRET boot guard.
+
+- **CO_ENV fails closed.** `WebConfig::is_local_or_test()` no longer treats an
+  empty `CO_ENV` as local/test. A deploy that left `CO_ENV` unset previously
+  leaked the inline `dev_code` magic-login code (and reached other non-prod-only
+  paths); empty now resolves to prod-safe. The production constructor already
+  defaults `CO_ENV` to `prod`, so this only tightens the explicitly-empty case.
+
+- **Vault path-traversal guard.** A new `is_safe_vault_path` rejects any vault
+  `{*path}` that is empty, absolute (`/` or `\`), contains a `:` (Windows drive
+  / alternate stream), has a `..` path segment, or contains a NUL byte. It is
+  applied to every vault file handler (GET/PUT/POST/PATCH/DELETE) and returns
+  `400 Bad Request` before any filesystem access — closing read/overwrite/delete
+  escapes outside the universe content root (including percent-encoded `%2e%2e`).
+
+- **Magic-codes hashed at rest.** The redb `AuthStore` now stores an Argon2id
+  hash of each 6-digit verification code instead of the plaintext value, using
+  the same scheme as the CO-190 onboarding store. `verify_handler` compares the
+  submitted code against the stored hash. Attempts, expiry and rate-limit logic
+  are unchanged; the off-prod inline `dev_code` (plaintext at generation time)
+  still works.
+
+### Why
+
+Defense-in-depth on the most sensitive subsystem: a misconfigured deploy no
+longer leaks login codes, the vault REST surface can no longer be coaxed into
+touching files outside a universe, and a read of the auth database can no longer
+recover a live login code.
+
+### Deferred
+
+The larger "retire the legacy redb `AuthStore`" refactor (making `/auth/login`
+a thin adapter over the SQLite onboarding store) is intentionally **not** in this
+change. The parallel game-auth verify path (`game_routes.rs`, a separate
+`VerifyCodeData` store) is likewise out of scope and folded into that future work.
+
+## CO-81 — Object storage for blobs + filesystem sharding
+
+Adds an S3-compatible object-storage backend so blob storage scales past the
+~500 GB ceiling of Fly volumes, with content-addressed dedupe, a local hot-blob
+cache, a filesystem→object-storage migration, and 30-day garbage collection.
+
+### What changed
+
+- **S3 `StorageBackend`** (`co-web/src/storage/backend/s3.rs`) — the remote
+  counterpart to CO-458's `LocalFsBackend`, implemented over the
+  `co::deploy::S3Backend` trait so it works against Cloudflare R2, Tigris, and
+  AWS S3. Blobs live at the content-addressed key
+  `blobs/sha256/<aa>/<bb>/<hash>`; the refcounted `blob_refs` ledger stays the
+  dedupe/billing source of truth. Wired into `backend::from_config`
+  (`CO_STORAGE_BACKEND=s3`, gated behind the `blob-r2` feature; falls back to
+  `local` when the feature is off).
+- **Content-addressed put** — new blobs are `head_object`-checked before upload
+  and skipped if the bytes already sit in the bucket, so the same image used in
+  N universes is stored once (one `blob_refs` row, one S3 object).
+- **Local LRU blob cache** (`blob_cache.rs`) at `/data/blob-cache/` — every GET
+  checks the cache (~1 ms) before falling back to S3 (~30 ms) and warms it;
+  byte-bounded LRU eviction keeps it within a configurable budget
+  (`CO_BLOB_CACHE_BYTES`, default 10 GiB).
+- **Filesystem→object-storage migration** — `S3Backend::import_from_local`
+  walks every `backend='local'` ledger row, uploads (content-addressed skip),
+  flips the row to `'s3'`, and unlinks the local file. Idempotent.
+- **Garbage collection** — `delete` defers physical removal: on the
+  refcount-zero drop it stamps `blob_refs.unreferenced_at` (migration **v090**)
+  instead of a network DELETE; `gc_unreferenced(now, grace)` reclaims rows
+  whose stamp is older than the 30-day grace, deleting the S3 object and the
+  row. A re-`put` within the window revives the blob. `delete_object` was added
+  to the `co::deploy::S3Backend` trait to support this.
+- **Filesystem sharding** — the 2-level hex fanout on `universe_key`
+  (`universe_pool::universe_dir`, from CO-77) is verified by a new distribution
+  test: 131 072 universes spread across >55 000 of the 65 536 level-2
+  directories with the busiest under 30 entries, well inside the
+  200-entries-per-directory budget at 1M universes.
+
+### Why
+
+Millions of small blobs on a single Fly volume degrade ext4 lookups and cap out
+on volume size. Moving bytes to S3-compatible object storage (already redundant,
+PB-scalable) with content addressing dedupes across universes, while the local
+LRU cache keeps hot reads fast and deferred GC avoids per-delete network
+round-trips and protects content-addressed bytes during the grace period.
+
+## CO-93 — Universe types + sync + deployment — unified architecture (public-static / private-static / private-dynamic)
+
+Made the three first-class **universe types** — `public-static`, `private-static`,
+`private-dynamic` (plus the system-owned `template`) — the canonical taxonomy that
+unifies the orthogonal access axes previously conflated under the `visibility` enum:
+read visibility, edit model, proposal model, and encryption-at-rest.
+
+The type is **derived** deterministically from the existing `visibility` column plus
+a new `accepts_proposals` opt-in flag, rather than denormalized into a fourth raw
+column — the legacy `is_template`/`is_public`/`requires_login` trio already drifted
+from `visibility` once (reconciled in v20), so the canonical type stays computed.
+
+- Migration **v089**: additive, idempotent `universes.accepts_proposals`
+  (`INTEGER NOT NULL DEFAULT 0`); existing rows default to static, so behavior is
+  unchanged until an owner opts a universe into the dynamic proposal flow.
+- New `UniverseType` enum + `Universe::universe_type()` derivation implementing the
+  "today → after CO-93" mapping (`private`/`requires_login` → `private-static`;
+  `public-subscribable` → `public-static`, or `private-dynamic` when proposals are
+  opted in; `template` stays a system-owned public-static flavor). `requires_login`
+  is subsumed by membership. Unknown/legacy values fail closed to `private-static`.
+- Capability accessors encode the access matrix: `encrypted_at_rest()`,
+  `public_read()`, `accepts_proposals()`, `static_exportable()`.
+- `accepts_proposals` is loaded via the established separate-query pattern (degrades
+  to `false` on pre-v89 DBs) and serialized on the universe API payload.
+- The inline-proposal flow now gates on the type: outside subscribers may only
+  propose to `private-dynamic` universes; owner + members still edit directly.
+
+### Why
+
+CO-93 gives the platform one canonical access model. It supports the north-star goal
+of open-sourcing the codebase while keeping content private at rest: the encryption
+layer (CO-86 / CO-87) is the default for the two private types, and the proposal flow
+(CO-60) is the only path for subscriber edits to `private-dynamic` universes. Each
+universe now has a clean, single answer to "is this static or dynamic, public or
+private."
+
+
 ## [3.19.0] — 2026-06-21 — Git-backed universes + workspace reconcile (CO-89 commits/profiles/events/analytics · CO-467 manifest visibility) [--ignore-dod override]
 
 ## CO-467 — Manifest visibility + workspace reconcile + code-repo skip
