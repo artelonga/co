@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-473",
+  "title": "Block model Phase 2 — extended blocks + PATCH /blocks write path",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-473.md",
+  "branch": "feat/CO-473-block-phase2",
+  "merge_sha": "88bc8ea3f22abd8f5abd87314b70ea74cefa0dbf",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/309",
+    "number": 309
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T12:06:04Z",
+  "files_changed": 8,
+  "lines_added": 1104,
+  "lines_removed": 6,
+  "labels": [
+    "architecture",
+    "content",
+    "editor",
+    "portability"
+  ],
+  "changelog_entry": "## CO-473 — Block model Phase 2: extended blocks + `PATCH /blocks` write path\n\nBuilt on the CO-470 `co::block` module (Phase 1).\n\n- **Extended container blocks.** Added `callout`, `toggle`, `columns`/`column`,\n  and `child_page` to `BlockType`, serialized/parsed with the portable\n  fenced-directive container syntax (`:::name {attrs}` … `:::`, Pandoc /\n  `remark-directive` style). A focused container pre-parse pass splits `:::`\n  regions out of the markdown body (the `markdown` crate does not model\n  directives) and recurses into their inner content; the serializer re-emits\n  them. Unknown `:::name` directives degrade to `Raw` so plain markdown tools\n  are unaffected. The Phase 1 idempotence invariant\n  (`parse(serialize(parse(md))) == parse(md)`) now covers the extended blocks.\n- **Deterministic block ids.** `co::block::assign_ids` assigns stable `blk_…`\n  ids (depth-first ordinal paths) so an editor can address blocks. Ids serialize\n  into the directive `{id=…}` slot for extended blocks and an unobtrusive\n  `{#blk_…}` trailer for standard blocks — only when present, so unreferenced\n  prose stays clean and byte-for-byte identical.\n- **`PATCH /api/v1/universes/{slug}/entries/blocks?path=<path>`.** Applies\n  id-addressed ops (`replace` / `insert_after` / `delete` / `move`) by\n  parse → assign_ids → apply → serialize → vault-write, reusing the exact write\n  path `update_entry` uses (version snapshot, re-index, event-bus + EDA publish,\n  query-cache invalidation). Owner/member write gate; unknown ids / malformed\n  ops return 4xx. No new wire format, no database migration — the block tree is\n  a derived view of the canonical markdown body.\n\n### Why\nPhase 1 made the block tree readable; Phase 2 makes it structured (Notion-class\ncontainer vocabulary) and writable (a surgical, id-addressed PATCH) while keeping\nCO markdown-canonical, lossless, and edit-anywhere.",
+  "summary": "GIVEN CO-470 (Phase 1) shipped the block model over markdown — `Block`, `parse_blocks`, `serialize_blocks`, the standard CommonMark/GFM `BlockType` set, and a read-only `GET /blocks` projection — but ",
+  "co_auto_version": "0.1.0"
+}
