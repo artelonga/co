@@ -143,8 +143,8 @@ pub struct RealtimeState {
     /// CO-151: protobuf SyncDelta rooms — keyed by universe_key.
     pub sync_rooms: crate::sync_ws::SyncRoomManager,
     /// CO-194: per-room broadcast channels for chat WebSocket fan-out.
-    pub chat_rooms_broadcast:
-        Mutex<HashMap<String, tokio::sync::broadcast::Sender<crate::chat::ChatEvent>>>,
+    /// CO-468: carries pre-serialized JSON (`Arc<str>`) — see [`crate::chat::ChatBroadcast`].
+    pub chat_rooms_broadcast: Mutex<HashMap<String, crate::chat::ChatBroadcast>>,
     /// CO-194: per-room presence refcounts (room_id → user_id → connection count).
     pub chat_presence: Mutex<HashMap<String, HashMap<String, u32>>>,
 }

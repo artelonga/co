@@ -22,8 +22,8 @@ pub mod ws;
 // Re-exports consumed by server/state.rs and server/router.rs
 pub use admin::chat_admin_router;
 pub use routes::chat_router;
-pub use ws::ChatEvent;
 pub use ws::chat_ws_handler;
+pub use ws::{ChatBroadcast, ChatEvent, broadcast_event};
 
 #[cfg(test)]
 mod tests;
