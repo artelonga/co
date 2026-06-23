@@ -1793,6 +1793,142 @@ pub async fn entry_blocks_handler(
     ))
 }
 
+/// Request body for `PATCH /api/v1/universes/:slug/entries/blocks?path=…`.
+///
+/// CO-473: id-addressed block ops. The server loads the entry body, parses the
+/// block tree, assigns deterministic ids, applies the ops, re-serializes to
+/// markdown, and writes back through the *same* vault path as an entry update —
+/// one write, re-indexed. No new wire format, no migration: the block tree is a
+/// derived view of the canonical markdown body.
+#[derive(Debug, serde::Deserialize)]
+pub struct BlockPatchBody {
+    pub ops: Vec<co::block::BlockOp>,
+}
+
+/// PATCH /api/v1/universes/:slug/entries/blocks?path=…
+///
+/// CO-473: apply id-addressed block ops (replace / insert_after / delete / move)
+/// and persist the result. Owner/member write access is enforced the same way as
+/// `update_entry` (event-bus write-allowed check); the universe visibility gate
+/// applies on this router. Returns the updated block tree.
+pub async fn entry_blocks_patch_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EntryBlocksQuery>,
+    headers: HeaderMap,
+    Json(patch): Json<BlockPatchBody>,
+) -> Result<impl IntoResponse, AppError> {
+    // Mirror update_entry's write-permission gate (CO-383/CO-413).
+    let (universe_root, source_co_edit) = {
+        let storage = lock_storage(&state);
+        let universe = storage
+            .get_universe(&slug)
+            .ok_or_else(|| AppError::NotFound(format!("Universe '{}' not found", slug)))?;
+        EntryService::check_write_allowed(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+            universe.source_url.clone(),
+        )?;
+        let source_co_edit = EntryService::is_bidirectional_event_bus(
+            universe.source_kind.as_deref(),
+            universe.source_mode.as_deref(),
+        );
+        (storage.universe_root(&slug), source_co_edit)
+    };
+
+    let existing = entry_repo(&state, &slug)
+        .get(&slug, &q.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", q.path)))?;
+
+    // Parse → assign ids → apply ops → serialize. A bad op (unknown id) is a 4xx.
+    let mut blocks = co::block::parse_blocks(&existing.body);
+    co::block::assign_ids(&mut blocks);
+    co::block::apply_ops(&mut blocks, &patch.ops)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let new_body = co::block::serialize_blocks(&blocks);
+    let new_fm = existing.frontmatter.clone();
+
+    // Idempotent no-op: ops that don't change the body don't write (mirror update_entry).
+    if new_body == existing.body {
+        return Ok(Json(serde_json::json!({ "path": q.path, "blocks": blocks })).into_response());
+    }
+
+    // CO-79: load manifest once from L1 cache and validate frontmatter (unchanged
+    // here, but keeps the write path identical to update_entry).
+    let manifest_arc = load_manifest_cached(&state, &slug, &universe_root).await;
+    let entry_type_for_validation = new_fm
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    validate_against_manifest(manifest_arc.as_deref(), entry_type_for_validation, &new_fm)?;
+
+    // CO-54: snapshot the previous version before overwriting (same as update_entry).
+    {
+        let actor = crate::auth::resolve_user_id(&state, &headers);
+        let prev_fm_json = serde_json::to_string(&existing.frontmatter).unwrap_or_default();
+        let storage = lock_storage(&state);
+        if let Err(e) = storage.save_entry_version(
+            &slug,
+            &q.path,
+            &existing.body,
+            &prev_fm_json,
+            actor.as_deref(),
+        ) {
+            tracing::warn!("entry_versions snapshot failed for {slug}/{}: {e}", q.path);
+        }
+    }
+
+    let entry = make_entry(&q.path, new_fm.clone(), &new_body);
+    co::write_entry(&universe_root, &entry).map_err(|e| AppError::Internal(e.to_string()))?;
+
+    entry_repo(&state, &slug)
+        .index_entry_update(
+            &slug,
+            &q.path,
+            &entry,
+            &new_fm,
+            &new_body,
+            manifest_arc.as_deref(),
+            &universe_root,
+        )
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    if source_co_edit {
+        lock_storage(&state).stamp_entry_source_marker(&slug, &q.path, "co-edit");
+    }
+
+    // CO-220: route the write through the event bus (embedding + other workers).
+    state
+        .core
+        .event_bus
+        .publish(crate::events::DomainEvent::EntryWritten {
+            universe_key: slug.clone(),
+            path: q.path.clone(),
+            body: new_body.clone(),
+            body_hash: entry.body_hash.clone(),
+        });
+    // CO-380: EDA observability.
+    state.core.eda_bus.publish(crate::eda::Event::new(
+        "entry.updated",
+        Some(slug.clone()),
+        None,
+        co_edit_payload(
+            serde_json::json!({ "path": q.path, "entry_type": entry.entry_type }),
+            source_co_edit,
+        ),
+        crate::eda::Visibility::UniverseMembers,
+    ));
+
+    // CO-79: invalidate the query cache for this universe after a write.
+    state
+        .index
+        .cache
+        .query
+        .invalidate_prefix(&format!("{slug}:"));
+
+    Ok(Json(serde_json::json!({ "path": q.path, "blocks": blocks })).into_response())
+}
+
 // ---------------------------------------------------------------------------
 // CO-471: connections — typed links (CO-74) as the canonical "Conectar" interface
 // ---------------------------------------------------------------------------
@@ -2160,7 +2296,11 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/entries/diff", get(entry_diff_handler))
         // CO-470: parse an entry body into its block tree. ?path= for the same
         // wildcard-avoidance reason as /history, /versions, /diff.
-        .route("/{slug}/entries/blocks", get(entry_blocks_handler))
+        // CO-473: PATCH applies id-addressed block ops and re-writes the body.
+        .route(
+            "/{slug}/entries/blocks",
+            get(entry_blocks_handler).patch(entry_blocks_patch_handler),
+        )
         // CO-75: auto-generated Keep-a-Changelog for the whole universe.
         .route("/{slug}/changelog", get(changelog_handler))
         .route(

@@ -129,3 +129,191 @@ fn empty_body_yields_no_blocks() {
     assert!(parse_blocks("").is_empty());
     assert_eq!(serialize_blocks(&[]), "");
 }
+
+// ---------------------------------------------------------------------------
+// CO-473 — extended blocks (fenced directives), id assignment, PATCH ops
+// ---------------------------------------------------------------------------
+
+#[test]
+fn parses_callout_directive() {
+    let md = ":::callout {icon=\"💡\"}\ninner **markdown**\n:::\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].block_type, BlockType::Callout);
+    assert_eq!(blocks[0].attrs.get("icon").unwrap(), "💡");
+    assert_eq!(blocks[0].children.len(), 1);
+    assert_eq!(blocks[0].children[0].block_type, BlockType::Paragraph);
+    assert_eq!(
+        blocks[0].children[0].text.as_deref(),
+        Some("inner **markdown**")
+    );
+}
+
+#[test]
+fn parses_toggle_with_summary_and_id() {
+    let md = ":::toggle {summary=\"Details\" id=blk_t}\nhidden\n:::\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks[0].block_type, BlockType::Toggle);
+    assert_eq!(blocks[0].attrs.get("summary").unwrap(), "Details");
+    assert_eq!(blocks[0].id.as_deref(), Some("blk_t"));
+}
+
+#[test]
+fn parses_nested_columns() {
+    let md = ":::columns\n::: column\nleft\n:::\n::: column\nright\n:::\n:::\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].block_type, BlockType::Columns);
+    assert_eq!(blocks[0].children.len(), 2);
+    assert_eq!(blocks[0].children[0].block_type, BlockType::Column);
+    assert_eq!(blocks[0].children[1].block_type, BlockType::Column);
+    assert_eq!(
+        blocks[0].children[0].children[0].text.as_deref(),
+        Some("left")
+    );
+    assert_eq!(
+        blocks[0].children[1].children[0].text.as_deref(),
+        Some("right")
+    );
+}
+
+#[test]
+fn unknown_directive_degrades_to_raw() {
+    // A non-CO directive a plain markdown tool might use is preserved verbatim,
+    // not lost — graceful degradation.
+    let md = ":::aside {note=\"x\"}\nsome text\n:::\n";
+    let blocks = parse_blocks(md);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].block_type, BlockType::Raw);
+    assert!(blocks[0].text.as_deref().unwrap().contains(":::aside"));
+    assert!(blocks[0].text.as_deref().unwrap().contains("some text"));
+}
+
+#[test]
+fn extended_blocks_round_trip_idempotent() {
+    let inputs = [
+        ":::callout {icon=\"💡\"}\ninner **markdown**\n:::\n",
+        ":::toggle {summary=\"Details\"}\nhidden\n:::\n",
+        ":::columns\n::: column\nleft\n:::\n::: column\nright\n:::\n:::\n",
+        ":::child_page {title=\"Sub\"}\n# Sub page\n\nbody\n:::\n",
+        // Mixed: prose before/after a directive.
+        "intro para\n\n:::callout {icon=\"⚠️\"}\nwatch out\n:::\n\noutro para\n",
+    ];
+    for md in inputs {
+        let once = parse_blocks(md);
+        let twice = parse_blocks(&serialize_blocks(&once));
+        assert_eq!(once, twice, "not idempotent for input: {md:?}");
+    }
+}
+
+#[test]
+fn assign_ids_is_deterministic_and_stable() {
+    let md = "# T\n\npara\n\n:::callout {icon=\"i\"}\ninner\n:::\n";
+    let mut a = parse_blocks(md);
+    let mut b = parse_blocks(md);
+    assign_ids(&mut a);
+    assign_ids(&mut b);
+    assert_eq!(a, b, "id assignment must be deterministic");
+    assert!(a.iter().all(|blk| blk.id.is_some()));
+    // Ids survive a serialize→parse cycle.
+    let reparsed = parse_blocks(&serialize_blocks(&a));
+    let ids_before: Vec<_> = a.iter().map(|blk| blk.id.clone()).collect();
+    let ids_after: Vec<_> = reparsed.iter().map(|blk| blk.id.clone()).collect();
+    assert_eq!(ids_before, ids_after, "ids must round-trip");
+}
+
+#[test]
+fn assign_ids_preserves_existing() {
+    let mut blocks = parse_blocks(":::toggle {id=blk_keep}\nx\n:::\n");
+    assign_ids(&mut blocks);
+    assert_eq!(blocks[0].id.as_deref(), Some("blk_keep"));
+}
+
+#[test]
+fn ids_absent_for_unreferenced_prose() {
+    // Plain serialize never injects anchors when ids are None.
+    let md = "# T\n\npara\n";
+    let serialized = serialize_blocks(&parse_blocks(md));
+    assert_eq!(serialized, md);
+    assert!(!serialized.contains("{#"));
+}
+
+#[test]
+fn apply_replace_op() {
+    let mut blocks = parse_blocks("para one\n\npara two\n");
+    assign_ids(&mut blocks);
+    let target_id = blocks[0].id.clone().unwrap();
+    let new = Block {
+        id: None,
+        block_type: BlockType::Paragraph,
+        attrs: Default::default(),
+        text: Some("replaced".into()),
+        children: vec![],
+    };
+    apply_ops(
+        &mut blocks,
+        &[BlockOp::Replace {
+            id: target_id.clone(),
+            block: new,
+        }],
+    )
+    .unwrap();
+    assert_eq!(blocks[0].text.as_deref(), Some("replaced"));
+    assert_eq!(blocks[0].id.as_deref(), Some(target_id.as_str()));
+}
+
+#[test]
+fn apply_insert_after_and_delete_and_move() {
+    let mut blocks = parse_blocks("a\n\nb\n\nc\n");
+    assign_ids(&mut blocks);
+    let id_a = blocks[0].id.clone().unwrap();
+    let id_c = blocks[2].id.clone().unwrap();
+    let inserted = Block {
+        id: Some("blk_new".into()),
+        block_type: BlockType::Paragraph,
+        attrs: Default::default(),
+        text: Some("inserted".into()),
+        children: vec![],
+    };
+    apply_ops(
+        &mut blocks,
+        &[BlockOp::InsertAfter {
+            id: id_a.clone(),
+            block: inserted,
+        }],
+    )
+    .unwrap();
+    assert_eq!(blocks[1].text.as_deref(), Some("inserted"));
+
+    // Move the inserted block after c.
+    apply_ops(
+        &mut blocks,
+        &[BlockOp::Move {
+            id: "blk_new".into(),
+            after: id_c,
+        }],
+    )
+    .unwrap();
+    assert_eq!(blocks.last().unwrap().text.as_deref(), Some("inserted"));
+
+    // Delete a.
+    apply_ops(&mut blocks, &[BlockOp::Delete { id: id_a }]).unwrap();
+    assert!(blocks.iter().all(|b| b.text.as_deref() != Some("a")));
+}
+
+#[test]
+fn apply_op_missing_id_errors() {
+    let mut blocks = parse_blocks("a\n");
+    assign_ids(&mut blocks);
+    let err = apply_ops(&mut blocks, &[BlockOp::Delete { id: "nope".into() }]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn ops_address_nested_blocks() {
+    let mut blocks = parse_blocks(":::callout {icon=\"i\"}\ninner\n:::\n");
+    assign_ids(&mut blocks);
+    let inner_id = blocks[0].children[0].id.clone().unwrap();
+    apply_ops(&mut blocks, &[BlockOp::Delete { id: inner_id }]).unwrap();
+    assert!(blocks[0].children.is_empty());
+}
