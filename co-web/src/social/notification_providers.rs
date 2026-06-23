@@ -233,6 +233,96 @@ impl ChannelProvider for EvolutionApiProvider {
 }
 
 // ---------------------------------------------------------------------------
+// CloudApiProvider (CO-479) — official WhatsApp Business Platform (Cloud API)
+// ---------------------------------------------------------------------------
+
+/// Sends WhatsApp text via Meta's **official** WhatsApp Cloud API (Graph API).
+///
+/// This is the enterprise-compliant channel, in contrast to the unofficial
+/// [`EvolutionApiProvider`] (Baileys/WhatsApp-Web, against WhatsApp ToS). It
+/// requires a verified WhatsApp Business Account + a Graph API access token.
+///
+/// Requires env vars:
+/// - `WHATSAPP_CLOUD_TOKEN`     — System User access token (sent as `Bearer`).
+/// - `WHATSAPP_PHONE_NUMBER_ID` — the WABA phone-number id.
+///
+/// Optional:
+/// - `WHATSAPP_GRAPH_VERSION`   — Graph API version (default `v21.0`).
+///
+/// NOTE: free-form `text` is only valid inside the 24-hour customer-service
+/// window. Business-initiated messages outside it must use **approved templates**
+/// (tracked as a follow-up).
+pub struct CloudApiProvider {
+    token: String,
+    phone_number_id: String,
+    graph_version: String,
+}
+
+impl CloudApiProvider {
+    /// Construct from env. Returns `None` if the token or phone-number id is absent.
+    pub fn from_env() -> Option<Self> {
+        let secrets = crate::infra::secrets::global();
+        let token = secrets.get("WHATSAPP_CLOUD_TOKEN")?;
+        let phone_number_id = secrets.get("WHATSAPP_PHONE_NUMBER_ID")?;
+        let graph_version = secrets.get_or("WHATSAPP_GRAPH_VERSION", "v21.0");
+        Some(Self {
+            token,
+            phone_number_id,
+            graph_version,
+        })
+    }
+
+    /// The Graph API messages endpoint for this WABA phone number.
+    pub fn messages_url(&self) -> String {
+        format!(
+            "https://graph.facebook.com/{}/{}/messages",
+            self.graph_version, self.phone_number_id
+        )
+    }
+}
+
+#[async_trait]
+impl ChannelProvider for CloudApiProvider {
+    fn name(&self) -> &'static str {
+        "whatsapp"
+    }
+
+    async fn send(
+        &self,
+        client: &reqwest::Client,
+        recipient: &str,
+        payload: &str,
+    ) -> Result<(), String> {
+        let request_body = serde_json::json!({
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": recipient,
+            "type": "text",
+            "text": { "preview_url": false, "body": payload },
+        });
+
+        let resp = client
+            .post(self.messages_url())
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Content-Type", "application/json")
+            .json(&request_body)
+            .send()
+            .await
+            .map_err(|e| format!("WhatsApp Cloud API request failed: {e}"))?;
+
+        if resp.status().is_success() {
+            info!(recipient = %recipient, "CloudApiProvider: WhatsApp message delivered");
+            Ok(())
+        } else {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            warn!(recipient = %recipient, status = %status, body = %text, "CloudApiProvider: delivery failed");
+            Err(format!("WhatsApp Cloud API {status}: {text}"))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Payload encoding helpers (used by emit_event)
 // ---------------------------------------------------------------------------
 
@@ -249,6 +339,23 @@ pub fn encode_email_payload(subject: &str, body: &str) -> String {
 mod tests {
     use super::*;
     use std::sync::{Arc, Mutex};
+
+    // --- CO-479: WhatsApp Cloud API provider ---
+
+    #[test]
+    fn cloud_api_messages_url_uses_version_and_phone_id() {
+        let p = CloudApiProvider {
+            token: "tok".into(),
+            phone_number_id: "123456".into(),
+            graph_version: "v21.0".into(),
+        };
+        assert_eq!(
+            p.messages_url(),
+            "https://graph.facebook.com/v21.0/123456/messages"
+        );
+        // Same channel name as Evolution → it is a drop-in compliant replacement.
+        assert_eq!(p.name(), "whatsapp");
+    }
 
     // --- template rendering ---
 

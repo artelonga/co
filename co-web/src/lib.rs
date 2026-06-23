@@ -127,6 +127,7 @@ pub use integrations::oidc_routes;
 pub use integrations::webhook;
 pub use integrations::webhook_routes;
 pub use integrations::webhook_worker;
+pub use integrations::whatsapp_cloud_routes;
 
 // platform context
 pub use platform::ab;

@@ -289,25 +289,36 @@ async fn deliver_email_code(to: &str, code: &str) {
     }
 }
 
-/// WhatsApp delivery cascade: Evolution API → log.
+/// WhatsApp delivery cascade: Cloud API (compliant) → Evolution API → log.
 async fn deliver_whatsapp_code(to: &str, code: &str) {
-    use crate::notification_providers::{ChannelProvider, EvolutionApiProvider};
+    use crate::notification_providers::{ChannelProvider, CloudApiProvider, EvolutionApiProvider};
 
     let body = format!("🔐 *Código de recuperação CO*\n\n{code}\n\nExpira em 10 minutos.");
 
-    if let Some(provider) = EvolutionApiProvider::from_env() {
+    // CO-479: prefer the official WhatsApp Cloud API (enterprise-compliant);
+    // fall back to the unofficial Evolution provider if Cloud isn't configured.
+    let provider: Option<(Box<dyn ChannelProvider>, &str)> =
+        if let Some(p) = CloudApiProvider::from_env() {
+            Some((Box::new(p), "WhatsApp Cloud API"))
+        } else if let Some(p) = EvolutionApiProvider::from_env() {
+            Some((Box::new(p), "Evolution API"))
+        } else {
+            None
+        };
+
+    if let Some((provider, label)) = provider {
         let client = reqwest::Client::new();
         match provider.send(&client, to, &body).await {
             Ok(()) => {
                 tracing::info!(
-                    "Recovery code sent to WhatsApp {} via Evolution API",
+                    "Recovery code sent to WhatsApp {} via {label}",
                     redact_phone(to)
                 );
                 return;
             }
             Err(e) => {
                 tracing::warn!(
-                    "Evolution API delivery to {} failed: {e}. Code logged: {} (dev fallback)",
+                    "{label} delivery to {} failed: {e}. Code logged: {} (dev fallback)",
                     redact_phone(to),
                     code
                 );
@@ -317,7 +328,7 @@ async fn deliver_whatsapp_code(to: &str, code: &str) {
     }
 
     tracing::info!(
-        "Recovery code for WhatsApp {}: {} [no Evolution API key — code logged]",
+        "Recovery code for WhatsApp {}: {} [no WhatsApp provider configured — code logged]",
         to,
         code
     );

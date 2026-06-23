@@ -472,6 +472,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             .nest("/api/v1/gestao", crate::billing::routes::admin_router())
             // CO-366: billing webhook (HMAC-verified in-handler, no auth gate).
             .nest("/api/v1", crate::billing::routes::webhook_router())
+            // CO-479: WhatsApp Cloud API inbound webhook (Meta HMAC-verified
+            // in-handler, no auth gate — same posture as the billing webhook).
+            .nest("/api/v1", crate::whatsapp_cloud_routes::router())
             // CO-388: Security findings API (admin-gated).
             .nest("/api/v1/gestao/security", security_admin)
             // CO-142 Phase A: dev board moved to /api/v1/admin to un-shadow universe_api.
