@@ -337,6 +337,15 @@ async fn start_server_inner(config: WebConfig, bind_host: &str) {
     crate::infra::secrets::init_global(Arc::clone(&secrets));
     let server_config = Arc::new(crate::CoServerConfig::from_secrets(&*secrets));
 
+    // CO-469: fail closed at boot if a non-local/test env would run with the
+    // insecure development JWT fallback — otherwise every session is forgeable.
+    if let Err(msg) = crate::auth::ensure_jwt_secret_safe(
+        config.is_local_or_test(),
+        &crate::auth::jwt_secret_from(&*secrets),
+    ) {
+        panic!("FATAL (CO-469): {msg} [CO_ENV={}]", config.co_env);
+    }
+
     // Initialise tracing — guard must be held until the server exits so that
     // any pending OTLP spans are flushed before the process terminates.
     let _telemetry = crate::infra::telemetry::init_subscriber(

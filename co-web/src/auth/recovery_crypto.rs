@@ -24,7 +24,7 @@ fn master_key(secrets: &dyn SecretsProvider) -> [u8; 32] {
     let raw = secrets
         .get("CO_RECOVERY_KEY")
         .or_else(|| secrets.get("JWT_SECRET"))
-        .unwrap_or_else(|| "dev-secret-change-me".to_string());
+        .unwrap_or_else(|| super::DEV_JWT_SECRET_FALLBACK.to_string());
     *blake3::hash(raw.as_bytes()).as_bytes()
 }
 

@@ -101,11 +101,33 @@ pub fn jwt_secret() -> String {
     jwt_secret_from(&*crate::infra::secrets::global())
 }
 
+/// The insecure development fallback used when `JWT_SECRET` is unset. Sessions
+/// signed with this are forgeable by anyone who reads the source, so it must
+/// never be used in a non-local/test environment (enforced by
+/// [`ensure_jwt_secret_safe`] at boot — CO-469).
+pub const DEV_JWT_SECRET_FALLBACK: &str = "dev-secret-change-me";
+
 /// Reads `JWT_SECRET` from the given provider, falling back to a development default.
 pub fn jwt_secret_from(secrets: &dyn crate::infra::secrets::SecretsProvider) -> String {
     secrets
         .get("JWT_SECRET")
-        .unwrap_or_else(|| "dev-secret-change-me".into())
+        .unwrap_or_else(|| DEV_JWT_SECRET_FALLBACK.into())
+}
+
+/// CO-469: boot guard. Returns `Err` when a non-local/test environment would
+/// run with the insecure development JWT fallback — the caller refuses to boot
+/// rather than silently accept forgeable sessions. Local/test envs are allowed
+/// to use the fallback for convenience.
+pub fn ensure_jwt_secret_safe(is_local_or_test: bool, secret: &str) -> Result<(), String> {
+    if !is_local_or_test && secret == DEV_JWT_SECRET_FALLBACK {
+        return Err(
+            "JWT_SECRET is unset — refusing to boot with the insecure development fallback \
+             (sessions would be forgeable). Set it, e.g.: \
+             flyctl secrets set JWT_SECRET=$(openssl rand -base64 48) -a <app>"
+                .to_string(),
+        );
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -923,6 +945,24 @@ pub mod recovery_routes;
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn jwt_guard_blocks_dev_fallback_in_prod() {
+        // CO-469: prod (not local/test) with the dev fallback must refuse to boot.
+        let err = ensure_jwt_secret_safe(false, DEV_JWT_SECRET_FALLBACK);
+        assert!(err.is_err(), "prod + dev fallback must be rejected");
+    }
+
+    #[test]
+    fn jwt_guard_allows_real_secret_in_prod() {
+        assert!(ensure_jwt_secret_safe(false, "a-real-long-random-production-secret").is_ok());
+    }
+
+    #[test]
+    fn jwt_guard_allows_dev_fallback_in_local_or_test() {
+        // Local/test convenience: the fallback is permitted off-prod.
+        assert!(ensure_jwt_secret_safe(true, DEV_JWT_SECRET_FALLBACK).is_ok());
+    }
 
     #[test]
     fn test_generate_code_is_six_digits() {
