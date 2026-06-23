@@ -44,6 +44,9 @@ dirs = "5"
 # JSON Schema generation
 schemars = "0.8"
 
+# CO-470 block model: CommonMark/GFM AST parser (pure Rust, no C deps).
+markdown = "1"
+
 # Hashing (for body_hash in Entry)
 sha2 = "0.10"
 

@@ -1758,6 +1758,42 @@ pub async fn entry_versions_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-470: block model — parse an entry body into its block tree
+// ---------------------------------------------------------------------------
+
+/// Query params for the blocks endpoint. `path` is a query arg (not a path
+/// segment) to avoid the greedy `entries/{*path}` wildcard, matching the
+/// `history`/`versions`/`diff` convention.
+#[derive(Debug, serde::Deserialize)]
+pub struct EntryBlocksQuery {
+    pub path: String,
+}
+
+/// GET /api/v1/universes/:slug/entries/blocks?path=…
+///
+/// CO-470: returns the entry's content parsed into the block tree. The entry
+/// body is canonical markdown (decrypted plaintext at this layer — CO-86/87
+/// privacy layers decode below `storage_trait`); the block tree is a derived
+/// view. Markdown and the `.co` envelope remain the persisted/transported forms.
+/// Access is enforced by the `universe_visibility_gate` middleware on this router.
+pub async fn entry_blocks_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<EntryBlocksQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    let entry = state
+        .core
+        .storage_trait
+        .get_entry(&slug, &q.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Entry '{}' not found", q.path)))?;
+    let blocks = co::block::parse_blocks(&entry.body);
+    Ok(Json(
+        serde_json::json!({ "path": q.path, "blocks": blocks }),
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // CO-75: version reconstruction — per-entry diff + universe auto-changelog
 // ---------------------------------------------------------------------------
 
@@ -2071,6 +2107,9 @@ pub fn router() -> Router<AppState> {
         // CO-75: per-entry op-level diff between two instants. ?path= for the
         // same wildcard-avoidance reason as /history and /versions.
         .route("/{slug}/entries/diff", get(entry_diff_handler))
+        // CO-470: parse an entry body into its block tree. ?path= for the same
+        // wildcard-avoidance reason as /history, /versions, /diff.
+        .route("/{slug}/entries/blocks", get(entry_blocks_handler))
         // CO-75: auto-generated Keep-a-Changelog for the whole universe.
         .route("/{slug}/changelog", get(changelog_handler))
         .route(
