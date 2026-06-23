@@ -186,6 +186,33 @@ impl Storage {
         )
         .expect("CO-198: chat_rooms.kind");
 
+        // CO-472: unified thread model — a chat room IS a thread. These columns
+        // let it also serve as an entry-anchored "comments" thread, a recursive
+        // reply child, or a scoped (subset / self) thread. NULL/`universe`
+        // defaults preserve the legacy chat-room semantics. Mirrored in
+        // migration v092 for existing DBs (this path is for fresh creates).
+        ensure_column(&self.conn, "chat_rooms", "anchor_entry_path", "TEXT")
+            .expect("CO-472: chat_rooms.anchor_entry_path");
+        ensure_column(&self.conn, "chat_rooms", "anchor_block_id", "TEXT")
+            .expect("CO-472: chat_rooms.anchor_block_id");
+        ensure_column(&self.conn, "chat_rooms", "parent_thread_id", "TEXT")
+            .expect("CO-472: chat_rooms.parent_thread_id");
+        ensure_column(
+            &self.conn,
+            "chat_rooms",
+            "scope",
+            "TEXT NOT NULL DEFAULT 'universe'",
+        )
+        .expect("CO-472: chat_rooms.scope");
+        self.conn
+            .execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_chat_rooms_anchor
+                     ON chat_rooms(universe_key, anchor_entry_path);
+                 CREATE INDEX IF NOT EXISTS idx_chat_rooms_parent
+                     ON chat_rooms(parent_thread_id);",
+            )
+            .expect("CO-472: chat_rooms thread indexes");
+
         // CO-198: generic membership table (subsumes universe + dm read-state).
         ensure_table(
             &self.conn,

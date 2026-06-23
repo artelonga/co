@@ -228,6 +228,7 @@ pub mod snapshot;
 pub(crate) mod subscriptions;
 pub mod sweep;
 pub(crate) mod tasks;
+pub(crate) mod threads;
 pub mod tool;
 pub(crate) mod universe;
 pub mod usage_sessions;

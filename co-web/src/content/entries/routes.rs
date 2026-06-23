@@ -1840,6 +1840,199 @@ pub async fn connections_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-472: comments — a VIEW over the entry's anchored thread (unified model)
+// ---------------------------------------------------------------------------
+
+/// Query params for the `comments` interface (`?path=`, `?block_id=` per the
+/// wildcard-avoidance convention shared with blocks/connections/history).
+#[derive(Debug, serde::Deserialize)]
+pub struct CommentsQuery {
+    pub path: String,
+    /// Optional block anchor — comments scoped to a specific block of the entry.
+    #[serde(default)]
+    pub block_id: Option<String>,
+}
+
+/// POST body for adding a comment into an entry's anchored thread.
+#[derive(Debug, serde::Deserialize)]
+pub struct PostCommentRequest {
+    pub body: String,
+    /// Optional block anchor (same semantics as the GET `block_id`).
+    #[serde(default)]
+    pub block_id: Option<String>,
+    /// CO-472: reply target. A message id ⇒ a *recursive child thread* spawned
+    /// from that message (nested replies). Absent ⇒ a top-level comment.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+/// Resolve the caller's universe role + whether they may post (member or above).
+/// Returns `(has_role, can_post)`.
+fn comment_access(storage: &crate::storage::Storage, slug: &str, user_id: &str) -> (bool, bool) {
+    match crate::chat::resolve_role(storage, slug, user_id) {
+        Some(r) => (crate::chat::can_read(&r), crate::chat::can_post(&r)),
+        None => (false, false),
+    }
+}
+
+/// GET /api/v1/universes/:slug/comments?path=…[&block_id=…]
+///
+/// CO-472: the `comments` interface (CO-471 contract) is a **VIEW over the
+/// anchored thread** for an entry — NOT a separate store. Returns the
+/// top-level anchored thread's messages plus its recursive child threads
+/// (nested replies), threaded for display. If no comment has ever been posted
+/// the thread does not exist yet and an empty view is returned (200).
+///
+/// Access follows the universe visibility gate (this router) plus membership.
+pub async fn comments_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<CommentsQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    // The entry must exist (a 404 here matches /blocks + /connections).
+    let entry = state
+        .core
+        .storage_trait
+        .get_entry(&slug, &q.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    if entry.is_none() {
+        return Err(AppError::NotFound(format!("Entry '{}' not found", q.path)));
+    }
+
+    let storage = lock_storage(&state);
+
+    let thread = storage.find_anchored_thread(&slug, &q.path, q.block_id.as_deref());
+    let Some(thread) = thread else {
+        // No comments yet — empty view, not an error.
+        return Ok(Json(serde_json::json!({
+            "path": q.path,
+            "block_id": q.block_id,
+            "thread_id": serde_json::Value::Null,
+            "comments": [],
+        })));
+    };
+
+    let top = storage.list_chat_messages(&thread.id, None, 200);
+
+    // Recursive child threads (nested replies) anchored under this thread.
+    let child_ids = storage.list_child_thread_ids(&thread.id);
+    let children: Vec<serde_json::Value> = child_ids
+        .iter()
+        .map(|cid| {
+            let msgs = storage.list_chat_messages(cid, None, 200);
+            serde_json::json!({ "thread_id": cid, "comments": msgs })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "path": q.path,
+        "block_id": q.block_id,
+        "thread_id": thread.id,
+        "comments": top,
+        "replies": children,
+    })))
+}
+
+/// POST /api/v1/universes/:slug/comments?path=… (or path in body via query)
+///
+/// CO-472: post a message into the entry's anchored thread (auto-creating it on
+/// the first comment). `parent_id` spawns a recursive child thread (nested
+/// replies). Posting publishes a `ChatEvent::MessageCreated` via the same
+/// `broadcast_event` path chat uses, so connected members receive it live.
+pub async fn post_comment_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<CommentsQuery>,
+    headers: HeaderMap,
+    Json(body): Json<PostCommentRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required to comment".into()))?;
+
+    let trimmed = body.body.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest("Comment body cannot be empty".into()));
+    }
+    if trimmed.len() > 4000 {
+        return Err(AppError::BadRequest(
+            "Comment body must be 4000 characters or fewer".into(),
+        ));
+    }
+
+    let block_id = body.block_id.clone().or_else(|| q.block_id.clone());
+
+    // Entry must exist. Done BEFORE taking the storage lock: `storage_trait`
+    // shares the same `parking_lot::Mutex` as `lock_storage`, so calling it
+    // while the lock is held would re-entrantly deadlock.
+    if state
+        .core
+        .storage_trait
+        .get_entry(&slug, &q.path)
+        .map_err(|e| AppError::Internal(e.to_string()))?
+        .is_none()
+    {
+        return Err(AppError::NotFound(format!("Entry '{}' not found", q.path)));
+    }
+
+    let (msg_id, broadcast_payload) = {
+        let storage = lock_storage(&state);
+
+        // Universe membership gate (anchored threads = all-universe scope).
+        let (has_role, can_post) = comment_access(&storage, &slug, &user_id);
+        if !has_role {
+            return Err(AppError::Forbidden(
+                "Comments are only available to universe members".into(),
+            ));
+        }
+        if !can_post {
+            return Err(AppError::Forbidden(
+                "Viewers and subscribers cannot post comments".into(),
+            ));
+        }
+
+        // Resolve (or create) the anchored thread for this entry/block.
+        let anchored = storage
+            .get_or_create_anchored_thread(&slug, &q.path, block_id.as_deref(), &user_id)
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        // CO-472 recursive reply: a parent_id spawns a child thread.
+        let target_thread = if let Some(_parent_msg) = body.parent_id.as_deref() {
+            storage
+                .create_reply_thread(&anchored.id, &user_id)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+        } else {
+            anchored
+        };
+
+        let msg_id = storage
+            .post_chat_message(
+                &target_thread.id,
+                &user_id,
+                &trimmed,
+                body.parent_id.as_deref(),
+                Some(&slug),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let full = storage.get_chat_message_by_id(&msg_id);
+        (msg_id, full.map(|m| (m, target_thread.id.clone())))
+    };
+
+    // Live delivery — same fan-out path as chat (CO-468 serialize-once).
+    if let Some((msg, thread_id)) = broadcast_payload
+        && let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
+        && let Some(tx) = map.get(&thread_id)
+    {
+        crate::chat::broadcast_event(tx, &crate::chat::ChatEvent::MessageCreated { message: msg });
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": msg_id })),
+    ))
+}
+
+// ---------------------------------------------------------------------------
 // CO-75: version reconstruction — per-entry diff + universe auto-changelog
 // ---------------------------------------------------------------------------
 
@@ -2139,6 +2332,14 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/search", get(query_handler))
         // CO-471: `connections` — canonical typed-link ("conexões") data interface.
         .route("/{slug}/connections", get(connections_handler))
+        // CO-472: `comments` — a VIEW over an entry's anchored thread (unified
+        // thread model). GET returns the threaded view; POST appends a message
+        // (auto-creating the thread on first comment; `parent_id` ⇒ recursive
+        // reply). `?path=` avoids the `entries/{*path}` wildcard.
+        .route(
+            "/{slug}/comments",
+            get(comments_handler).post(post_comment_handler),
+        )
         .route("/{slug}/entries/popular", get(popular_entries))
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))

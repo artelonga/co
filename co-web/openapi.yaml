@@ -3935,6 +3935,37 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/comments:
+    get:
+      tags: ["entries"]
+      summary: "Threaded comments for an entry — a VIEW over its anchored thread (CO-472)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["entries"]
+      summary: "Add a comment to an entry's anchored thread; auto-creates it; `parent_id` ⇒ recursive reply (CO-472)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/commit-timeline:
     get:
       tags: ["git-sync"]
