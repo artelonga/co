@@ -252,7 +252,9 @@ mod tests {
 
     #[test]
     fn from_env_uses_default_when_var_absent() {
-        // Safety: single-threaded test; no other thread reads this var concurrently.
+        // CO-477: hold the process-wide env lock across remove → read so a
+        // concurrent env-mutating test can't interleave.
+        let _env = crate::test_support::env_lock_blocking();
         unsafe { std::env::remove_var("CO_CACHE_TEST_CACHE_MAX_ENTRIES") };
         let c: InProcessLruCache<String, u32> = InProcessLruCache::from_env("test-cache", 77);
         assert_eq!(c.capacity(), 77);

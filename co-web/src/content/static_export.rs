@@ -290,8 +290,10 @@ mod route_tests {
     use tower::ServiceExt;
 
     fn build_state(dir: &std::path::Path) -> crate::server::AppState {
-        // SAFETY: single-threaded test environment.
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        // SAFETY: test-only. CO-477: share the canonical "test-jwt-secret" with
+        // every other co-web test so concurrent JWT_SECRET writes can never
+        // produce a value mismatch (no test removes JWT_SECRET).
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
         let config = crate::config::WebConfig {
             data_dir: dir.to_str().unwrap().to_string(),
             port: 0,

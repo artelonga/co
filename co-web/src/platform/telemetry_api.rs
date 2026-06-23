@@ -725,6 +725,10 @@ mod tests {
                 .insert_usage_session(&sample_usage("CO-1", "opus", 1000))
                 .unwrap();
         }
+        // CO-477: hold the process-wide env lock across the whole set →
+        // request → remove window so a concurrent test can't observe (or be
+        // observed through) the transient CO_AUTO_SOFT_LIMIT_5H_TOKENS value.
+        let _env = crate::test_support::env_lock().await;
         unsafe { std::env::set_var("CO_AUTO_SOFT_LIMIT_5H_TOKENS", "10000") };
         let app = app(state);
 

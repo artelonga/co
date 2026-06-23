@@ -857,7 +857,11 @@ mod tests {
     use crate::storage::Storage;
 
     fn isolate_env() {
-        unsafe { std::env::set_var("JWT_SECRET", "test-feedback-secret") };
+        // CO-477: share the canonical "test-jwt-secret" with every other co-web
+        // test so concurrent JWT_SECRET writes can never produce a value
+        // mismatch (no test removes JWT_SECRET). The signing key below must
+        // match this value.
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
     }
 
     fn test_config(dir: &std::path::Path) -> WebConfig {
@@ -1100,7 +1104,7 @@ mod tests {
                 tier: "player".into(),
                 usuario: user_id.to_string(),
             },
-            &EncodingKey::from_secret(b"test-feedback-secret"),
+            &EncodingKey::from_secret(b"test-jwt-secret"), // CO-477: canonical test secret
         )
         .unwrap()
     }

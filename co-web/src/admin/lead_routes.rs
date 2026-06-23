@@ -613,9 +613,10 @@ mod tests {
 
     // CO_SEED_ADMIN_EMAIL is process-global; the two tests below mutate it.
     // Without serialization, one test's remove_var lands mid-request of the
-    // other and the admin check 403s (flaked in CI 2026-06-10). Tokio tests
-    // hold the guard across .await, so use tokio::sync::Mutex.
-    static ADMIN_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    // other and the admin check 403s (flaked in CI 2026-06-10).
+    // CO-477: use the single process-wide env lock (crate::test_support) so we
+    // also serialize against env-mutating tests in *other* modules, not just
+    // this one.
     use crate::server::{CoreState, IndexState, IntegrationsState, RealtimeState};
     use std::sync::{Arc, Mutex};
 
@@ -871,7 +872,7 @@ mod tests {
         drop(storage);
 
         // Sign as admin (set CO_SEED_ADMIN_EMAIL to match)
-        let _env_guard = ADMIN_ENV_LOCK.lock().await;
+        let _env_guard = crate::test_support::env_lock().await;
         unsafe { std::env::set_var("CO_SEED_ADMIN_EMAIL", "admin@test.local") };
         let secret = crate::auth::jwt_secret();
         let (token, _) =
@@ -912,7 +913,7 @@ mod tests {
         let lead_id: i64 = storage.conn().last_insert_rowid();
         drop(storage);
 
-        let _env_guard = ADMIN_ENV_LOCK.lock().await;
+        let _env_guard = crate::test_support::env_lock().await;
         unsafe { std::env::set_var("CO_SEED_ADMIN_EMAIL", "admin@test.local") };
         let secret = crate::auth::jwt_secret();
         let (token, _) =

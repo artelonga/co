@@ -807,10 +807,9 @@ mod tests {
 
     // --- direct channel enqueuing ---
 
-    /// Mutex to serialize env-var-dependent tests so concurrent test threads
-    /// cannot interfere with each other's RESEND_API_KEY / EVOLUTION_* vars.
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    // CO-477: env-var-dependent tests serialize on the single process-wide lock
+    // in crate::test_support (acquired in each test below), so they also exclude
+    // env-mutating tests in *other* modules — a per-file mutex did not.
     struct EnvGuard {
         key: String,
         original: Option<String>,
@@ -819,7 +818,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &str, value: &str) -> Self {
             let original = std::env::var(key).ok();
-            // SAFETY: test-only, guarded by ENV_MUTEX
+            // SAFETY: test-only, guarded by the process-wide test env lock (CO-477)
             unsafe { std::env::set_var(key, value) };
             Self {
                 key: key.to_string(),
@@ -829,7 +828,7 @@ mod tests {
 
         fn remove(key: &str) -> Self {
             let original = std::env::var(key).ok();
-            // SAFETY: test-only, guarded by ENV_MUTEX
+            // SAFETY: test-only, guarded by the process-wide test env lock (CO-477)
             unsafe { std::env::remove_var(key) };
             Self {
                 key: key.to_string(),
@@ -849,7 +848,7 @@ mod tests {
 
     #[test]
     fn emit_event_enqueues_email_when_resend_configured() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::set("RESEND_API_KEY", "test-key");
         let (storage, _tmp) = make_storage();
 
@@ -875,7 +874,7 @@ mod tests {
 
     #[test]
     fn emit_event_no_email_when_resend_key_absent() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::remove("RESEND_API_KEY");
         let (storage, _tmp) = make_storage();
 
@@ -901,7 +900,7 @@ mod tests {
 
     #[test]
     fn emit_event_enqueues_whatsapp_when_evolution_configured() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard_key = EnvGuard::set("EVOLUTION_API_KEY", "test-key");
         let _guard_url = EnvGuard::set("EVOLUTION_API_URL", "https://api.example.com");
         let _guard_instance = EnvGuard::set("EVOLUTION_INSTANCE", "test");
@@ -929,7 +928,7 @@ mod tests {
 
     #[test]
     fn emit_event_no_whatsapp_when_evolution_key_absent() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::remove("EVOLUTION_API_KEY");
         let (storage, _tmp) = make_storage();
 

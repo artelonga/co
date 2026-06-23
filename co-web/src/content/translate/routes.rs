@@ -641,6 +641,9 @@ mod route_tests {
 
     #[tokio::test]
     async fn anon_translate_is_unauthorized() {
+        // CO-477: hold the env lock across remove → request so the backend-config
+        // read during the request sees a stable (absent) CO_TRANSLATE_BACKEND.
+        let _env = crate::test_support::env_lock().await;
         // Ensure no backend is configured for this test (default path).
         unsafe {
             std::env::remove_var("CO_TRANSLATE_BACKEND");
@@ -667,6 +670,8 @@ mod route_tests {
 
     #[tokio::test]
     async fn owner_translate_unconfigured_backend_returns_503() {
+        // CO-477: hold the env lock across remove → request (see sibling test).
+        let _env = crate::test_support::env_lock().await;
         unsafe {
             std::env::remove_var("CO_TRANSLATE_BACKEND");
         }
