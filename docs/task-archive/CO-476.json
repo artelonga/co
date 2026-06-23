@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-476",
+  "title": "Standalone scoped-thread REST routes — complete the thread interface CO-472 deferred",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-476.md",
+  "branch": "feat/CO-476-thread-routes",
+  "merge_sha": "fa85cac022ce80be3869ead7616edbeccb9accbd",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/313",
+    "number": 313
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T13:51:29Z",
+  "files_changed": 8,
+  "lines_added": 1025,
+  "lines_removed": 4,
+  "labels": [
+    "api",
+    "architecture",
+    "social",
+    "realtime"
+  ],
+  "changelog_entry": "## CO-476 — Standalone scoped-thread REST routes\n\nCompleted the unified-thread interface CO-472 deferred. New REST routes on the\nvisibility-gated universe router expose the standalone (non-anchored) threads\nwhose storage primitives already shipped in CO-472:\n\n- `GET /{slug}/threads` — list the threads the caller can access (`?include_archived`).\n- `POST /{slug}/threads` — create a thread scoped to `all`, a `subset` of members, or `self` (a private note).\n- `GET /{slug}/threads/{thread_id}` — read its messages and recursive child threads (replies).\n- `POST /{slug}/threads/{thread_id}/messages` — post a message; `parent_id` spawns a recursive reply thread.\n- `POST /{slug}/threads/{thread_id}/archive` — archive / un-archive (creator or universe manager).\n\nSubset threads reject non-members (403); self threads stay private to the\ncreator. Every post fans out a `ChatEvent` over the same CO-468 serialize-once\nbroadcast bus chat uses, so connected members receive thread messages live.\n\n### Why\n\nCO-472 unified comments and chat into one thread primitive but only shipped the\nentry-anchored `comments` view, deferring the standalone scoped-thread surface.\nThis adds that surface with no schema change (reuses the v092 thread columns and\nthe existing `archived_at`). Resolve/unresolve as a *separate* state is deferred\n— it would require a net-new `resolved_at` column (a migration beyond v092);\narchive covers the close-a-thread need today.",
+  "summary": "GIVEN CO-472 generalized chat into a unified **thread** model (migration v092 — anchored / recursive / scoped threads on `chat_rooms`) and shipped the entry-anchored `comments` view plus the storage p",
+  "co_auto_version": "0.1.0"
+}
