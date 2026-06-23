@@ -9,7 +9,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
-    routing::get,
+    routing::{get, post},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
@@ -2169,6 +2169,280 @@ pub async fn post_comment_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-476: standalone scoped threads — the REST surface CO-472 deferred.
+//
+// A *message is a comment in a thread*. CO-472 shipped the entry-anchored
+// `comments` view + the storage primitives for scoped threads
+// (`create_scoped_thread`, `create_reply_thread`, `can_access_thread`). CO-476
+// exposes the **standalone** (non-anchored) threads over HTTP, reusing the same
+// `ChatEvent` broadcast for live delivery on every post.
+//
+// Routes (one-word noun `threads`, consistent with `/{slug}/comments`):
+//   GET  /{slug}/threads                          list accessible threads
+//   POST /{slug}/threads                          create (scope: all|subset|self)
+//   GET  /{slug}/threads/{thread_id}              read messages + recursive replies
+//   POST /{slug}/threads/{thread_id}/messages     post a message / reply
+//   POST /{slug}/threads/{thread_id}/archive      archive / un-archive
+// ---------------------------------------------------------------------------
+
+/// Query params for `GET /{slug}/threads`.
+#[derive(Debug, Deserialize)]
+pub struct ListThreadsQuery {
+    /// Include archived threads in the listing (default: false).
+    #[serde(default)]
+    pub include_archived: bool,
+}
+
+/// POST body for `POST /{slug}/threads`.
+#[derive(Debug, Deserialize)]
+pub struct CreateThreadRequest {
+    /// `all` (every universe member) · `subset` (explicit members) · `self`
+    /// (creator-only note). Mapped to storage scopes `universe`/`subset`/`self`.
+    pub scope: String,
+    /// For `subset`: the additional member ids who may read/post. Ignored for
+    /// `all`/`self`. The creator is always a member.
+    #[serde(default)]
+    pub members: Vec<String>,
+}
+
+/// POST body for `POST /{slug}/threads/{thread_id}/messages`.
+#[derive(Debug, Deserialize)]
+pub struct PostThreadMessageRequest {
+    pub body: String,
+    /// A message id ⇒ a *recursive child thread* (nested replies). Absent ⇒ a
+    /// top-level message in this thread.
+    #[serde(default)]
+    pub parent_id: Option<String>,
+}
+
+/// POST body for `POST /{slug}/threads/{thread_id}/archive`.
+#[derive(Debug, Deserialize)]
+pub struct ArchiveThreadRequest {
+    /// `true` ⇒ archive; `false` ⇒ un-archive. Defaults to `true`.
+    #[serde(default = "default_true")]
+    pub archived: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Map the public scope name (`all`) to the storage scope (`universe`).
+fn map_scope(public: &str) -> Result<&'static str, AppError> {
+    match public {
+        "all" | "universe" => Ok("universe"),
+        "subset" => Ok("subset"),
+        "self" => Ok("self"),
+        other => Err(AppError::BadRequest(format!(
+            "scope must be one of all|subset|self (got '{other}')"
+        ))),
+    }
+}
+
+/// Resolve the caller's universe role; 403 when anonymous / non-member.
+fn require_role(
+    storage: &crate::storage::Storage,
+    slug: &str,
+    user_id: &str,
+) -> Result<String, AppError> {
+    crate::chat::resolve_role(storage, slug, user_id)
+        .ok_or_else(|| AppError::Forbidden("Threads are only available to universe members".into()))
+}
+
+/// GET /api/v1/universes/:slug/threads — list standalone threads the caller can access.
+pub async fn list_threads_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(q): Query<ListThreadsQuery>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required".into()))?;
+
+    let storage = lock_storage(&state);
+    let role = require_role(&storage, &slug, &user_id)?;
+    let has_role = crate::chat::can_read(&role);
+    let threads = storage.list_threads_for_user(&slug, &user_id, has_role, q.include_archived);
+    Ok(Json(serde_json::json!({ "threads": threads })))
+}
+
+/// POST /api/v1/universes/:slug/threads — create a standalone scoped thread.
+pub async fn create_thread_handler(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    headers: HeaderMap,
+    Json(body): Json<CreateThreadRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required to create a thread".into()))?;
+    let scope = map_scope(&body.scope)?;
+
+    let storage = lock_storage(&state);
+    let role = require_role(&storage, &slug, &user_id)?;
+    if !crate::chat::can_post(&role) {
+        return Err(AppError::Forbidden(
+            "Viewers and subscribers cannot create threads".into(),
+        ));
+    }
+    let thread = storage
+        .create_scoped_thread(&slug, scope, &user_id, &body.members)
+        .map_err(|e| AppError::Internal(e.to_string()))?;
+    Ok((StatusCode::CREATED, Json(thread)))
+}
+
+/// GET /api/v1/universes/:slug/threads/:thread_id — read a thread's messages + replies.
+pub async fn get_thread_handler(
+    State(state): State<AppState>,
+    Path((slug, thread_id)): Path<(String, String)>,
+    headers: HeaderMap,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required".into()))?;
+
+    let storage = lock_storage(&state);
+    let role = require_role(&storage, &slug, &user_id)?;
+    let has_role = crate::chat::can_read(&role);
+
+    let thread = storage
+        .get_thread_by_id(&thread_id)
+        .filter(|t| t.universe_key == slug)
+        .ok_or_else(|| AppError::NotFound(format!("Thread '{thread_id}' not found")))?;
+    if !storage.can_access_thread(&thread, &user_id, has_role) {
+        return Err(AppError::Forbidden("You cannot access this thread".into()));
+    }
+
+    let messages = storage.list_chat_messages(&thread.id, None, 200);
+    let child_ids = storage.list_child_thread_ids(&thread.id);
+    let replies: Vec<serde_json::Value> = child_ids
+        .iter()
+        .map(|cid| {
+            let msgs = storage.list_chat_messages(cid, None, 200);
+            serde_json::json!({ "thread_id": cid, "messages": msgs })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "thread": thread,
+        "messages": messages,
+        "replies": replies,
+    })))
+}
+
+/// POST /api/v1/universes/:slug/threads/:thread_id/messages — post a message / reply.
+///
+/// Live delivery reuses the chat `broadcast_event` path (CO-468 serialize-once),
+/// so connected members receive the message exactly like a chat message.
+pub async fn post_thread_message_handler(
+    State(state): State<AppState>,
+    Path((slug, thread_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<PostThreadMessageRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required to post".into()))?;
+
+    let trimmed = body.body.trim().to_string();
+    if trimmed.is_empty() {
+        return Err(AppError::BadRequest("Message body cannot be empty".into()));
+    }
+    if trimmed.len() > 4000 {
+        return Err(AppError::BadRequest(
+            "Message body must be 4000 characters or fewer".into(),
+        ));
+    }
+
+    let (msg_id, broadcast_payload) = {
+        let storage = lock_storage(&state);
+        let role = require_role(&storage, &slug, &user_id)?;
+        let has_role = crate::chat::can_read(&role);
+
+        let thread = storage
+            .get_thread_by_id(&thread_id)
+            .filter(|t| t.universe_key == slug)
+            .ok_or_else(|| AppError::NotFound(format!("Thread '{thread_id}' not found")))?;
+        if !storage.can_access_thread(&thread, &user_id, has_role) {
+            return Err(AppError::Forbidden("You cannot post to this thread".into()));
+        }
+        // `universe`-scope threads still require posting privileges; subset/self
+        // membership already implies the caller may participate.
+        if thread.scope == "universe" && !crate::chat::can_post(&role) {
+            return Err(AppError::Forbidden(
+                "Viewers and subscribers cannot post".into(),
+            ));
+        }
+
+        // A parent_id spawns a recursive child thread (nested replies).
+        let target_thread = if body.parent_id.is_some() {
+            storage
+                .create_reply_thread(&thread.id, &user_id)
+                .map_err(|e| AppError::Internal(e.to_string()))?
+        } else {
+            thread
+        };
+
+        let msg_id = storage
+            .post_chat_message(
+                &target_thread.id,
+                &user_id,
+                &trimmed,
+                body.parent_id.as_deref(),
+                Some(&slug),
+            )
+            .map_err(|e| AppError::Internal(e.to_string()))?;
+
+        let full = storage.get_chat_message_by_id(&msg_id);
+        (msg_id, full.map(|m| (m, target_thread.id.clone())))
+    };
+
+    // Live delivery — same fan-out path as chat (CO-468 serialize-once).
+    if let Some((msg, target_id)) = broadcast_payload
+        && let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
+        && let Some(tx) = map.get(&target_id)
+    {
+        crate::chat::broadcast_event(tx, &crate::chat::ChatEvent::MessageCreated { message: msg });
+    }
+
+    Ok((
+        StatusCode::CREATED,
+        Json(serde_json::json!({ "id": msg_id })),
+    ))
+}
+
+/// POST /api/v1/universes/:slug/threads/:thread_id/archive — archive / un-archive.
+pub async fn archive_thread_handler(
+    State(state): State<AppState>,
+    Path((slug, thread_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    Json(body): Json<ArchiveThreadRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let user_id = crate::auth::resolve_user_id(&state, &headers)
+        .ok_or_else(|| AppError::Forbidden("Authentication required".into()))?;
+
+    let storage = lock_storage(&state);
+    let role = require_role(&storage, &slug, &user_id)?;
+    let has_role = crate::chat::can_read(&role);
+
+    let thread = storage
+        .get_thread_by_id(&thread_id)
+        .filter(|t| t.universe_key == slug)
+        .ok_or_else(|| AppError::NotFound(format!("Thread '{thread_id}' not found")))?;
+    if !storage.can_access_thread(&thread, &user_id, has_role) {
+        return Err(AppError::Forbidden("You cannot manage this thread".into()));
+    }
+    // Only the creator or a universe manager (owner/admin) may archive.
+    if thread.created_by != user_id && !crate::chat::can_manage_rooms(&role) {
+        return Err(AppError::Forbidden(
+            "Only the thread creator or a universe manager may archive a thread".into(),
+        ));
+    }
+
+    let updated = storage
+        .set_thread_archived(&thread.id, body.archived)
+        .ok_or_else(|| AppError::NotFound(format!("Thread '{thread_id}' not found")))?;
+    Ok(Json(updated))
+}
+
+// ---------------------------------------------------------------------------
 // CO-75: version reconstruction — per-entry diff + universe auto-changelog
 // ---------------------------------------------------------------------------
 
@@ -2475,6 +2749,21 @@ pub fn router() -> Router<AppState> {
         .route(
             "/{slug}/comments",
             get(comments_handler).post(post_comment_handler),
+        )
+        // CO-476: standalone scoped threads (the REST surface CO-472 deferred).
+        // `threads` is the one-word noun, consistent with `comments`.
+        .route(
+            "/{slug}/threads",
+            get(list_threads_handler).post(create_thread_handler),
+        )
+        .route("/{slug}/threads/{thread_id}", get(get_thread_handler))
+        .route(
+            "/{slug}/threads/{thread_id}/messages",
+            post(post_thread_message_handler),
+        )
+        .route(
+            "/{slug}/threads/{thread_id}/archive",
+            post(archive_thread_handler),
         )
         .route("/{slug}/entries/popular", get(popular_entries))
         .route("/{slug}/entries/tags", get(list_entry_tags))

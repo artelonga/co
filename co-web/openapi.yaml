@@ -5140,6 +5140,100 @@ paths:
       responses:
         "200":
           description: OK
+  /api/v1/universes/{slug}/threads:
+    get:
+      tags: ["entries"]
+      summary: "List standalone scoped threads the caller can access; `?include_archived` (CO-476)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+    post:
+      tags: ["entries"]
+      summary: "Create a standalone thread — `scope: all|subset|self` (`+ members` for subset) (CO-476)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/threads/{thread_id}:
+    get:
+      tags: ["entries"]
+      summary: "Read a thread's messages + recursive child threads (replies) (CO-476)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/threads/{thread_id}/archive:
+    post:
+      tags: ["entries"]
+      summary: "Archive / un-archive a thread — creator or universe manager (CO-476)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+  /api/v1/universes/{slug}/threads/{thread_id}/messages:
+    post:
+      tags: ["entries"]
+      summary: "Post a message into a thread; `parent_id` ⇒ recursive reply (CO-476)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: thread_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/timeline:
     get:
       tags: ["entries"]

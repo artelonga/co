@@ -284,6 +284,11 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | GET | `/{slug}/connections` | visibility | Typed links / conexões for an entry — outbound + inbound (CO-471, wraps CO-74) |
 | GET | `/{slug}/comments` | visibility | Threaded comments for an entry — a VIEW over its anchored thread (CO-472) |
 | POST | `/{slug}/comments` | visibility | Add a comment to an entry's anchored thread; auto-creates it; `parent_id` ⇒ recursive reply (CO-472) |
+| GET | `/{slug}/threads` | visibility | List standalone scoped threads the caller can access; `?include_archived` (CO-476) |
+| POST | `/{slug}/threads` | visibility | Create a standalone thread — `scope: all\|subset\|self` (`+ members` for subset) (CO-476) |
+| GET | `/{slug}/threads/{thread_id}` | visibility | Read a thread's messages + recursive child threads (replies) (CO-476) |
+| POST | `/{slug}/threads/{thread_id}/messages` | visibility | Post a message into a thread; `parent_id` ⇒ recursive reply (CO-476) |
+| POST | `/{slug}/threads/{thread_id}/archive` | visibility | Archive / un-archive a thread — creator or universe manager (CO-476) |
 | GET | `/{slug}/entries/blocks` | visibility | Entry content parsed into the block tree (CO-470) |
 | PATCH | `/{slug}/entries/blocks` | owner | Apply id-addressed block ops (replace/insert_after/delete/move) and re-write the body (CO-473) |
 | GET | `/{slug}/entries` | visibility | List entries (filter by type) |
