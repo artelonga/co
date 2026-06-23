@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-472",
+  "title": "Unified thread model — comments compose with messages (one primitive)",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-472.md",
+  "branch": "feat/CO-472-threads-comments",
+  "merge_sha": "3fef42552124a828700b8dd653ac4956e54606d2",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/311",
+    "number": 311
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T12:32:26Z",
+  "files_changed": 12,
+  "lines_added": 1363,
+  "lines_removed": 1,
+  "labels": [
+    "api",
+    "architecture",
+    "social",
+    "realtime"
+  ],
+  "changelog_entry": "## CO-472 — Unified thread model: comments compose with messages\n\nComments and chat messages are now ONE primitive. A **message is a comment in a\nthread**, powered by the existing chat/live-comms architecture — there is no\nseparate comments store.\n\nThe chat room is generalized into a **thread** (migration v092, additive +\nidempotent — every existing room/DM keeps working): a thread belongs to a\nuniverse, may be **anchored** to an entry (and optional block) so that anchored\nthread IS the entry's comments, may be **recursive** (`parent_thread_id` — a\nmessage spawns a child thread of nested replies), and is scoped to **all members**,\na **subset**, or **self** (private notes-to-self).\n\nThe CO-471 `comments` interface ships as a VIEW over the anchored thread:\n\n- `GET  /api/v1/universes/{slug}/comments?path=<entry>[&block_id=…]` — the\n  threaded view (top-level comments + recursive child threads).\n- `POST /api/v1/universes/{slug}/comments?path=<entry>` — append a comment\n  (auto-creates the thread on the first comment); `parent_id` spawns a recursive\n  reply child; `block_id` anchors to a block.\n\nPosting a comment publishes a `ChatEvent::MessageCreated` over the same\nserialize-once broadcast bus chat uses (CO-468), so connected members receive it\nlive through the event queue — no new delivery path.\n\n### Why\nComments and messages were drifting toward two parallel systems. Unifying them\non the thread primitive means one storage path, one live-delivery path, and one\npermission model (universe membership for anchored comments; explicit membership\nfor subset/self threads), and makes the `comments` interface a thin, portable\nview rather than a net-new subsystem.",
+  "summary": "GIVEN CO already has a chat/message system (rooms, messages, DMs, a serialize-once broadcast bus — CO-193/198/204/468) AND the CO-471 contract reserved a `comments` interface, but comments and chat we",
+  "co_auto_version": "0.1.0"
+}
