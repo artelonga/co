@@ -56,3 +56,32 @@ fn test_patch_block_replace() {
     );
     assert!(!result.contains("Some paragraph"), "Got: {result}");
 }
+
+// -----------------------------------------------------------------------
+// CO-474 (F3): vault path-traversal guard
+// -----------------------------------------------------------------------
+
+#[test]
+fn test_is_safe_vault_path_accepts_normal_paths() {
+    assert!(is_safe_vault_path("notes/hello.md"));
+    assert!(is_safe_vault_path("a/b/c/deep.md"));
+    assert!(is_safe_vault_path("file.md"));
+    assert!(is_safe_vault_path("_universe.yaml"));
+    // A literal ".." substring inside a segment name is fine; only a `..`
+    // *segment* is a traversal.
+    assert!(is_safe_vault_path("my..notes/file.md"));
+}
+
+#[test]
+fn test_is_safe_vault_path_rejects_traversal_and_absolute() {
+    assert!(!is_safe_vault_path(""));
+    assert!(!is_safe_vault_path(".."));
+    assert!(!is_safe_vault_path("../secret"));
+    assert!(!is_safe_vault_path("notes/../../etc/passwd"));
+    assert!(!is_safe_vault_path("a/b/../../../c"));
+    assert!(!is_safe_vault_path("/etc/passwd")); // absolute
+    assert!(!is_safe_vault_path("\\windows\\system")); // backslash absolute
+    assert!(!is_safe_vault_path("..\\..\\secret")); // backslash traversal
+    assert!(!is_safe_vault_path("C:/Windows")); // drive letter
+    assert!(!is_safe_vault_path("file\0.md")); // NUL byte
+}

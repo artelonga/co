@@ -360,3 +360,76 @@ async fn test_vault_clipper_post() {
             .contains(&serde_json::json!("web-clip"))
     );
 }
+
+// -----------------------------------------------------------------------
+// CO-474 (F3): path-traversal guard — handler rejects unsafe {*path}
+// -----------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_vault_rejects_path_traversal() {
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "trav-vault");
+    let app = build_test_router(dir.path());
+    let bearer = test_bearer();
+
+    // Percent-encoded `../` — axum decodes `%2e%2e` to `..` into the {*path}
+    // capture without router-level normalization, so this reaches the handler.
+    let encoded_traversal = "/api/v1/universes/trav-vault/vault/%2e%2e/%2e%2e/etc/passwd";
+
+    // GET must be rejected with 400 (not 401, not 404, not a file read).
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(encoded_traversal)
+                .header(header::AUTHORIZATION, &bearer)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "GET with encoded ../ traversal must be 400"
+    );
+
+    // PUT (write) must be rejected with 400 — no file created outside the root.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(encoded_traversal)
+                .header(header::AUTHORIZATION, &bearer)
+                .header(header::CONTENT_TYPE, "text/plain")
+                .body(Body::from("pwned"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "PUT with encoded ../ traversal must be 400"
+    );
+
+    // DELETE must be rejected with 400.
+    let resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("DELETE")
+                .uri(encoded_traversal)
+                .header(header::AUTHORIZATION, &bearer)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        resp.status(),
+        StatusCode::BAD_REQUEST,
+        "DELETE with encoded ../ traversal must be 400"
+    );
+}
