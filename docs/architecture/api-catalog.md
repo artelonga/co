@@ -269,8 +269,11 @@ CO-354: entry lifecycle (draft → reviewed → published) with anon submissions
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
 | GET | `/{slug}/manifest` | visibility | Universe manifest (all entries) |
-| GET | `/{slug}/query` | visibility | Query DSL (CO-74) |
+| GET | `/{slug}/query` | visibility | Query DSL (CO-74) — deprecated alias of `search` (CO-471) |
 | POST | `/{slug}/query` | authed | CO-244 SQL query (read-only, auth required) |
+| GET | `/{slug}/search` | visibility | Search — canonical name for the query DSL interface (CO-471) |
+| GET | `/{slug}/connections` | visibility | Typed links / conexões for an entry — outbound + inbound (CO-471, wraps CO-74) |
+| GET | `/{slug}/entries/blocks` | visibility | Entry content parsed into the block tree (CO-470) |
 | GET | `/{slug}/entries` | visibility | List entries (filter by type) |
 | POST | `/{slug}/entries` | owner | Create entry |
 | GET | `/{slug}/entries/tags` | visibility | Tag counts |

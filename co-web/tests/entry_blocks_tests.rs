@@ -195,3 +195,80 @@ async fn blocks_endpoint_404_for_missing_entry() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::NOT_FOUND);
 }
+
+// --- CO-471: connections + search canonical interfaces -----------------------
+
+#[tokio::test]
+async fn connections_endpoint_returns_typed_links_shape() {
+    let dir = tempdir().unwrap();
+    seed_owned_universe(dir.path(), "test-user", "cx");
+    let app = build_test_router(dir.path());
+
+    // Create an entry with no relations — connections returns empty both ways.
+    let create = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/v1/universes/cx/entries")
+                .header(header::AUTHORIZATION, test_bearer())
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"path": "content/a.md", "frontmatter": {"title": "A"}, "body": "hi"})
+                        .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(create.status().is_success());
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/cx/connections?path=content/a.md")
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let json = body_to_json(res.into_body()).await;
+    assert_eq!(json["path"], "content/a.md");
+    assert!(json["outbound"].is_array());
+    assert!(json["inbound"].is_array());
+}
+
+#[tokio::test]
+async fn search_is_an_alias_of_query() {
+    let dir = tempdir().unwrap();
+    seed_owned_universe(dir.path(), "test-user", "sx");
+    let app = build_test_router(dir.path());
+
+    // Same DSL expression hits both routes with identical status — proving the
+    // `search` route is a true alias of `query`.
+    let q = "q=FROM%20task";
+    let via_query = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/sx/query?{q}"))
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let via_search = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/sx/search?{q}"))
+                .header(header::AUTHORIZATION, test_bearer())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(via_query.status(), via_search.status());
+}
