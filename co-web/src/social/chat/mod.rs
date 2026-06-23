@@ -23,7 +23,7 @@ pub mod ws;
 pub use admin::chat_admin_router;
 // CO-472: the comments interface (a view over an anchored thread) reuses the
 // chat role-permission helpers so comment access matches chat exactly.
-pub use permissions::{can_post, can_read, resolve_role};
+pub use permissions::{can_manage_rooms, can_post, can_read, resolve_role};
 pub use routes::chat_router;
 pub use ws::chat_ws_handler;
 pub use ws::{ChatBroadcast, ChatEvent, broadcast_event};

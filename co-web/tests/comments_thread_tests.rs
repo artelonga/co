@@ -402,3 +402,364 @@ async fn non_member_rejected_member_accepted() {
         "non-member must be rejected"
     );
 }
+
+// ===========================================================================
+// CO-476 — standalone scoped-thread REST routes (deferred by CO-472).
+// ===========================================================================
+
+async fn create_thread(
+    app: &axum::Router,
+    slug: &str,
+    user: &str,
+    scope: &str,
+    members: &[&str],
+) -> (StatusCode, Value) {
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/universes/{slug}/threads"))
+                .header(header::AUTHORIZATION, bearer(user))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(
+                    json!({"scope": scope, "members": members}).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let status = res.status();
+    (status, body_to_json(res.into_body()).await)
+}
+
+async fn post_thread_message(
+    app: &axum::Router,
+    slug: &str,
+    user: &str,
+    thread_id: &str,
+    body: Value,
+) -> StatusCode {
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/v1/universes/{slug}/threads/{thread_id}/messages"
+                ))
+                .header(header::AUTHORIZATION, bearer(user))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn create_all_subset_self_threads_and_list() {
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "owner", "th", &["member"]);
+    let (app, _state) = build_test_router(dir.path());
+
+    // scope: all
+    let (st, all) = create_thread(&app, "th", "owner", "all", &[]).await;
+    assert_eq!(st, StatusCode::CREATED, "create all-scope thread");
+    assert_eq!(all["scope"], "universe");
+
+    // scope: subset with member
+    let (st, subset) = create_thread(&app, "th", "owner", "subset", &["member"]).await;
+    assert_eq!(st, StatusCode::CREATED);
+    assert_eq!(subset["scope"], "subset");
+
+    // scope: self
+    let (st, selfn) = create_thread(&app, "th", "owner", "self", &[]).await;
+    assert_eq!(st, StatusCode::CREATED);
+    assert_eq!(selfn["scope"], "self");
+
+    // owner lists all three.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/th/threads")
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let j = body_to_json(res.into_body()).await;
+    assert_eq!(
+        j["threads"].as_array().unwrap().len(),
+        3,
+        "owner sees all 3"
+    );
+
+    // member sees the universe + subset thread, NOT the owner's self note.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/th/threads")
+                .header(header::AUTHORIZATION, bearer("member"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let j = body_to_json(res.into_body()).await;
+    assert_eq!(
+        j["threads"].as_array().unwrap().len(),
+        2,
+        "member excluded from owner's self note"
+    );
+}
+
+#[tokio::test]
+async fn subset_thread_non_member_forbidden() {
+    let dir = tempdir().unwrap();
+    // member is in the subset; stranger is a universe member but NOT in the subset.
+    seed_universe(dir.path(), "owner", "su", &["member", "stranger"]);
+    let (app, _state) = build_test_router(dir.path());
+
+    let (_st, subset) = create_thread(&app, "su", "owner", "subset", &["member"]).await;
+    let tid = subset["id"].as_str().unwrap();
+
+    // member (in subset) can post.
+    assert_eq!(
+        post_thread_message(&app, "su", "member", tid, json!({"body": "hi"})).await,
+        StatusCode::CREATED,
+        "subset member may post"
+    );
+
+    // stranger (not in subset, even though a universe member) is forbidden.
+    assert_eq!(
+        post_thread_message(&app, "su", "stranger", tid, json!({"body": "let me in"})).await,
+        StatusCode::FORBIDDEN,
+        "non-subset-member rejected"
+    );
+
+    // stranger cannot even GET the subset thread.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/su/threads/{tid}"))
+                .header(header::AUTHORIZATION, bearer("stranger"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        res.status(),
+        StatusCode::FORBIDDEN,
+        "GET subset 403 for outsider"
+    );
+}
+
+#[tokio::test]
+async fn self_thread_private_to_creator() {
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "owner", "sf", &["member"]);
+    let (app, _state) = build_test_router(dir.path());
+
+    let (_st, selfn) = create_thread(&app, "sf", "owner", "self", &[]).await;
+    let tid = selfn["id"].as_str().unwrap();
+
+    // creator can post + read.
+    assert_eq!(
+        post_thread_message(&app, "sf", "owner", tid, json!({"body": "note to self"})).await,
+        StatusCode::CREATED
+    );
+    // another universe member cannot access the self note.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/sf/threads/{tid}"))
+                .header(header::AUTHORIZATION, bearer("member"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN, "self note is private");
+}
+
+#[tokio::test]
+async fn thread_post_and_recursive_reply() {
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "owner", "pr2", &[]);
+    let (app, _state) = build_test_router(dir.path());
+
+    let (_st, t) = create_thread(&app, "pr2", "owner", "all", &[]).await;
+    let tid = t["id"].as_str().unwrap();
+
+    // Top-level message.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/universes/pr2/threads/{tid}/messages"))
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"body": "root"}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::CREATED);
+    let parent_id = body_to_json(res.into_body()).await["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // Reply → recursive child thread.
+    assert_eq!(
+        post_thread_message(
+            &app,
+            "pr2",
+            "owner",
+            tid,
+            json!({"body": "a reply", "parent_id": parent_id})
+        )
+        .await,
+        StatusCode::CREATED
+    );
+
+    // GET shows 1 top-level message + 1 recursive child thread under replies.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/v1/universes/pr2/threads/{tid}"))
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let j = body_to_json(res.into_body()).await;
+    assert_eq!(j["messages"].as_array().unwrap().len(), 1, "1 top-level");
+    let replies = j["replies"].as_array().unwrap();
+    assert_eq!(replies.len(), 1, "one recursive child thread");
+    assert_eq!(
+        replies[0]["messages"].as_array().unwrap()[0]["body"],
+        "a reply"
+    );
+}
+
+#[tokio::test]
+async fn thread_archive_and_unarchive() {
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "owner", "ar", &[]);
+    let (app, _state) = build_test_router(dir.path());
+
+    let (_st, t) = create_thread(&app, "ar", "owner", "all", &[]).await;
+    let tid = t["id"].as_str().unwrap();
+
+    // Archive.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/universes/ar/threads/{tid}/archive"))
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"archived": true}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        !body_to_json(res.into_body()).await["archived_at"].is_null(),
+        "archived_at set"
+    );
+
+    // Default list excludes it.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/ar/threads")
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let j = body_to_json(res.into_body()).await;
+    assert_eq!(j["threads"].as_array().unwrap().len(), 0, "archived hidden");
+
+    // include_archived=true returns it.
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/v1/universes/ar/threads?include_archived=true")
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let j = body_to_json(res.into_body()).await;
+    assert_eq!(j["threads"].as_array().unwrap().len(), 1);
+
+    // Un-archive.
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(format!("/api/v1/universes/ar/threads/{tid}/archive"))
+                .header(header::AUTHORIZATION, bearer("owner"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(json!({"archived": false}).to_string()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(
+        body_to_json(res.into_body()).await["archived_at"].is_null(),
+        "archived_at cleared"
+    );
+}
+
+#[tokio::test]
+async fn posting_to_thread_publishes_chat_event() {
+    use co_web::chat::ChatBroadcast;
+    use tokio::sync::broadcast;
+
+    let dir = tempdir().unwrap();
+    seed_universe(dir.path(), "owner", "lvt", &[]);
+    let (app, state) = build_test_router(dir.path());
+
+    let (_st, t) = create_thread(&app, "lvt", "owner", "all", &[]).await;
+    let tid = t["id"].as_str().unwrap().to_string();
+
+    // Subscribe to the thread's broadcast channel before posting.
+    let mut rx = {
+        let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
+        let tx: &ChatBroadcast = map
+            .entry(tid.clone())
+            .or_insert_with(|| broadcast::channel::<Arc<str>>(64).0);
+        tx.subscribe()
+    };
+
+    assert_eq!(
+        post_thread_message(&app, "lvt", "owner", &tid, json!({"body": "live thread!"})).await,
+        StatusCode::CREATED
+    );
+
+    let raw = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("broadcast within 2s")
+        .expect("a broadcast event");
+    let evt: Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(evt["type"], "message.created");
+    assert_eq!(evt["message"]["body"], "live thread!");
+}
