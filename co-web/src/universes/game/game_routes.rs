@@ -67,6 +67,22 @@ fn jwt_secret() -> String {
     crate::auth::jwt_secret()
 }
 
+/// CO-475: build the `VerifyCodeData` to persist, hashing the freshly generated
+/// `code` with Argon2id (reusing the CO-474 `auth::hash_code` scheme) so the
+/// live login code is never stored at rest. The plaintext `code` is only ever
+/// used to build the email body; what lands in `game_storage` is a one-way hash.
+fn new_verify_code_data(code: &str, user_id: String, expires_at: i64) -> VerifyCodeData {
+    // On the (practically impossible) hash error, store a sentinel that no input
+    // can verify against rather than falling back to the plaintext code.
+    let hashed = crate::auth::hash_code(code).unwrap_or_else(|_| "$invalid$".to_string());
+    VerifyCodeData {
+        code: hashed,
+        user_id,
+        expires_at,
+        attempts: 0,
+    }
+}
+
 // ---- Health (unauthenticated) ----
 
 pub async fn health() -> Json<HealthResponse> {
@@ -150,12 +166,9 @@ pub async fn login(
             format!("{n:06}")
         };
 
-        let verify = VerifyCodeData {
-            code: code.clone(),
-            user_id,
-            expires_at: now + CODE_TTL_SECS,
-            attempts: 0,
-        };
+        // CO-475: persist an Argon2id hash of the code, never the plaintext.
+        // The plaintext `code` is only used below to build the email body.
+        let verify = new_verify_code_data(&code, user_id, now + CODE_TTL_SECS);
         storage.save_verify_code(&email, &serde_json::to_string(&verify).unwrap_or_default())?;
 
         Ok(Some((email.clone(), code)))
@@ -216,8 +229,9 @@ pub async fn verify(
             return Ok(Err(("expired", 0, String::new(), String::new())));
         }
 
-        // Wrong code?
-        if entry.code != code {
+        // Wrong code? CO-475: `entry.code` is an Argon2id hash at rest; compare
+        // the submitted plaintext against it via the shared verify helper.
+        if !crate::auth::verify_code(&code, &entry.code) {
             entry.attempts += 1;
             if entry.attempts >= MAX_ATTEMPTS {
                 let _ = storage.delete_verify_code(&email);
@@ -923,5 +937,51 @@ pub async fn get_player_profile(
             }))
         }
         Err(_) => Err(not_found("Player not found")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// CO-475: the value persisted for a game verify code is an Argon2id hash,
+    /// never the plaintext code; the correct code verifies and a wrong one fails.
+    #[test]
+    fn game_verify_code_hashed_at_rest() {
+        let entry = new_verify_code_data("123456", "user-1".to_string(), 9_999_999_999);
+
+        // Never store the plaintext code.
+        assert_ne!(entry.code, "123456", "plaintext code must not be persisted");
+        assert!(
+            entry.code.starts_with("$argon2"),
+            "stored value should be an Argon2 PHC string: {}",
+            entry.code
+        );
+
+        // Expiry/attempts preserved exactly.
+        assert_eq!(entry.expires_at, 9_999_999_999);
+        assert_eq!(entry.attempts, 0);
+        assert_eq!(entry.user_id, "user-1");
+
+        // Correct code verifies; wrong code does not.
+        assert!(
+            crate::auth::verify_code("123456", &entry.code),
+            "correct code must verify against the stored hash"
+        );
+        assert!(
+            !crate::auth::verify_code("000000", &entry.code),
+            "wrong code must not verify"
+        );
+    }
+
+    /// CO-475: each minted entry uses a fresh salt, so two entries for the same
+    /// code produce distinct stored hashes (both still verify the code).
+    #[test]
+    fn game_verify_code_salted_per_entry() {
+        let a = new_verify_code_data("654321", "u".to_string(), 1);
+        let b = new_verify_code_data("654321", "u".to_string(), 1);
+        assert_ne!(a.code, b.code, "each entry must use a fresh salt");
+        assert!(crate::auth::verify_code("654321", &a.code));
+        assert!(crate::auth::verify_code("654321", &b.code));
     }
 }
