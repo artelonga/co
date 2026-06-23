@@ -49,8 +49,10 @@ Pre-built binaries are available for macOS (Intel + Apple Silicon), Linux (x86_6
 ### Option A — CLI (Rust)
 
 ```bash
-# Install the `co` CLI from GitHub (AGPL-3.0). A crates.io release
-# (`cargo install co-cli`) is pending — see CO-464.
+# Install the `co` CLI from GitHub (AGPL-3.0). This is the canonical source
+# install. NOTE: there is no `cargo install co-cli` from crates.io — `co serve`
+# embeds the full web server (`co-web`), so the CLI is not an idiomatic crates.io
+# library. Use this git install, or the one-line binary installer above. (CO-464)
 cargo install --git https://github.com/artelonga/co co-cli
 
 co init meu-projeto
