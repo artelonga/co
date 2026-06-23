@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-478",
+  "title": "E2E pipeline: universe CRUD + connections + YouTube-reference ingestion → Quartz",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-478.md",
+  "branch": "feat/CO-478-youtube-reference-pipeline",
+  "merge_sha": "187b17a445aeb0baa68f83f43fd9ddc1a738a5b2",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/315",
+    "number": 315
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T17:09:12Z",
+  "files_changed": 4,
+  "lines_added": 259,
+  "lines_removed": 0,
+  "labels": [
+    "pipeline",
+    "references",
+    "ingestion",
+    "quartz"
+  ],
+  "changelog_entry": "## CO-478 — YouTube-reference ingestion pipeline + Quartz publish (e2e)\n\n### Added\n- **`scripts/ingest-youtube-reference.sh`** — the reusable \"yt-summarizer\": given\n  a YouTube URL, yt-dlp fetches metadata + full description + top comments +\n  bestaudio, Whisper transcribes it, and it writes a `reference` card\n  (`youtube-<id>.md`, mbya/refs format) with the transcript embedded and the\n  substantive description links lifted into `connections:` (store/tracking links\n  filtered). Optional pt-BR summary via `--summary-ollama`.\n- **`docs/pipelines/youtube-reference.md`** — the documented e2e runbook:\n  universe CRUD → `referencias/` → ingest → author synthesis → Quartz publish\n  (grcsamazonia/miguel pattern), with prerequisites and the gated deploy.\n\n### Worked example (not in this repo — local universe)\n- The **agroecologia** universe (`~/projects/agroecologia`): a synthesis document\n  *Raízes Pensantes* (pt-BR, for agroecologists — the plant-behavior/consciousness/\n  neurobiology debate, Darwin's root-brain → Gagliano → \"no brain, no gain\" →\n  distributed cognition) + two ingested video reference cards, built to a Quartz\n  static site (title *Raízes Pensantes*).\n\n### Why\nMake external media first-class, connected, publishable knowledge in any universe,\nrepeatably — markdown stays canonical; audio/venv are working artifacts only.",
+  "summary": "GIVEN turning external media (YouTube talks) into first-class, connected, publishable knowledge in a CO universe was ad-hoc, and the prior art was a single stub card (`mbya/refs/youtube-*.md`), WHEN w",
+  "co_auto_version": "0.1.0"
+}
