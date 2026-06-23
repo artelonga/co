@@ -1,0 +1,28 @@
+{
+  "task_id": "CO-470",
+  "title": "Block model over markdown — portable, forward-compatible content tree",
+  "type": "user-story",
+  "status": "todo",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-470.md",
+  "branch": "feat/CO-470-block-model-phase1",
+  "merge_sha": "c6ffc9cf66222b561747283b4ab6dbd953a3cce1",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/307",
+    "number": 307
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T10:35:51Z",
+  "files_changed": 9,
+  "lines_added": 960,
+  "lines_removed": 0,
+  "labels": [
+    "architecture",
+    "content",
+    "editor",
+    "portability"
+  ],
+  "changelog_entry": "## CO-470 — Block model over markdown (Phase 1: parser + serializer + read API)\n\nFirst slice of the Notion-class block model, built **over** markdown so CO stays\nmarkdown-canonical and portable (Notion/others are future adapters, never a\ndependency — see `work/co/CO-470.md`).\n\n### Added\n- **`co::block`** (core): a `Block` tree (`id`, `type`, `attrs`, `text`,\n  `children`) with `parse_blocks(md)` and `serialize_blocks(&[Block])`. Phase 1\n  models the standard CommonMark/GFM set (paragraph, heading, bulleted/numbered/\n  to-do list items with nesting, quote, code, divider); any unmodeled construct\n  (tables, HTML…) is preserved verbatim as a `Raw` block so round-trips never\n  lose data. Inline content is kept as a markdown string (annotation spans land\n  in Phase 2). Parser: pure-Rust `markdown` crate (mdast); no C deps.\n- **`GET /api/v1/universes/{slug}/entries/blocks?path=…`** — returns the entry's\n  body parsed into the block tree. The body is canonical decrypted markdown at\n  this layer (CO-86/87 privacy layers decode below `storage_trait`); the block\n  tree is a derived view. Query-param `path` follows the `history`/`versions`/\n  `diff` convention to avoid the greedy `entries/{*path}` wildcard.\n\n### Tested\n- Idempotence invariant `parse(serialize(parse(md))) == parse(md)` over mixed\n  input; already-canonical markdown serializes back byte-for-byte; list markers,\n  nesting, todo state, and Raw passthrough; integration test for the route\n  (create entry → GET blocks → assert tree) + 404 path.\n\n### Reconciliation\nNo new wire format or crypto: markdown = portable text form, `.co` (CO-86) =\nbinary/encrypted carrier, block tree = derived editing view. Only markdown and\n`.co` are persisted/transported.\n\n### Not yet (Phase 2+)\nExtended blocks (callout/toggle/columns/child_page) via fenced-directive syntax,\nrich-text annotation spans, `PATCH /blocks` write ops over the CO-468 CRDT, block\neditor UI, multi-view over CO-93 data sources, import/export adapters.",
+  "summary": "GIVEN CO stores an entry's content as a flat markdown body, so the platform cannot offer block-level editing (slash menu, drag-reorder, toggles, callouts, nested pages, inline collections, multi-colum",
+  "co_auto_version": "0.1.0"
+}
