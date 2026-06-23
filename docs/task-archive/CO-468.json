@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-468",
+  "title": "WebSocket fan-out: serialize each event once, not once per client",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-468.md",
+  "branch": "fix/CO-468-ws-serialize-once",
+  "merge_sha": "52cb6db7b9653e5d78b5badf08ebb13e5d82ec83",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/304",
+    "number": 304
+  },
+  "started_at": "2026-06-22T00:00:00Z",
+  "merged_at": "2026-06-23T01:33:50Z",
+  "files_changed": 11,
+  "lines_added": 282,
+  "lines_removed": 71,
+  "labels": [
+    "performance",
+    "websocket",
+    "eda"
+  ],
+  "changelog_entry": "## CO-468 — WebSocket fan-out: serialize each event once, not once per client\n\nNetwork/data-transfer review of all six WebSocket surfaces, plus fixes for the\nper-client re-serialization found on the JSON fan-out paths.\n\n### Fixed\n- **`/api/v1/events` (LiveTimeline, CO-380/381):** the broadcast channel carried\n  `Arc<Event>` and every connected socket re-ran `serde_json::to_string` on the\n  *same* event — N identical serializations for N clients. The channel now\n  carries a `TimelineFrame { event, json: Arc<str> }` serialized **once** at the\n  single fan-out point (`TimelineForwarder`); sockets reuse the shared bytes and\n  keep their per-client `can_see` visibility filter. Serialization is independent\n  of visibility level, so this is byte-for-byte equivalent.\n- **Chat rooms (`…/chat/rooms/{room}/ws`, CO-194):** same pattern — the room\n  channel carried the typed `ChatEvent` and each socket re-serialized it. The\n  channel now carries pre-serialized `Arc<str>` (`ChatBroadcast`), produced once\n  via the new `broadcast_event` helper at each of the 8 publish sites\n  (messages created/edited/deleted, presence join/leave, typing start/stop).\n\n### Reviewed (no change needed)\n- **`/api/v1/sync/ws` (CO-151)** and **`/ws/doc/...` (CRDT)** already encode each\n  frame once as binary and share the bytes across subscribers — efficient.\n- **`/ws/sala/...` (CO-353)** already serializes once into `RoomMsg.json: Arc<str>`.\n\n### Documented\n- **Single-machine fan-out guard.** The LiveTimeline and sync-room channels are\n  in-process `tokio::broadcast` — they reach clients on *this* machine only.\n  Correct today (`co-artelonga` runs one Fly machine, `min_machines_running=1`),\n  but horizontal scale-out (≥2 machines) would silently drop cross-machine\n  same-universe events; documented prominently in `events_ws.rs`/`sync_ws.rs`.\n  Cross-machine pub/sub (or per-universe sticky routing) is a tracked follow-up.\n\n### Follow-ups (not in this change)\n- Cross-machine event distribution for horizontal scale-out.\n- `permessage-deflate`/binary encoding for `/api/v1/events` (axum doesn't expose\n  compression cleanly today).\n\n### Why\nOn a busy universe the LiveTimeline stream is the hottest JSON fan-out path;\nserializing per-client wastes CPU linearly with connection count and adds\nlatency under load. Serialize-once matches the binary paths' existing design.",
+  "summary": "GIVEN the JSON WebSocket fan-out paths (`/api/v1/events` LiveTimeline and chat rooms) re-serialized the *same* event inside each per-connection loop — N identical `serde_json::to_string` calls for N c",
+  "co_auto_version": "0.1.0"
+}
