@@ -12,7 +12,6 @@ use tower::ServiceExt;
 use crate::storage::Storage;
 
 use super::support::*;
-use crate::chat::ChatEvent;
 
 // --- 23. DELETE by author → 200 ---
 
@@ -291,7 +290,8 @@ async fn test_edit_broadcasts_message_edited_event() {
         (mid, room.id.clone())
     };
 
-    let (tx, mut rx) = broadcast::channel::<ChatEvent>(64);
+    // CO-468: the room channel now carries pre-serialized JSON (`Arc<str>`).
+    let (tx, mut rx) = broadcast::channel::<std::sync::Arc<str>>(64);
     {
         let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_id.clone(), tx);
@@ -317,14 +317,14 @@ async fn test_edit_broadcasts_message_edited_event() {
 
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let evt = tokio::time::timeout(Duration::from_millis(200), rx.recv())
+    let raw = tokio::time::timeout(Duration::from_millis(200), rx.recv())
         .await
         .expect("timeout waiting for broadcast")
         .unwrap();
-
-    assert!(
-        matches!(evt, ChatEvent::MessageEdited { .. }),
-        "expected MessageEdited, got {evt:?}"
+    let evt: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        evt["type"], "message.edited",
+        "expected message.edited, got {raw}"
     );
 }
 
@@ -350,7 +350,8 @@ async fn test_delete_broadcasts_message_deleted_event() {
         (mid, room.id.clone())
     };
 
-    let (tx, mut rx) = broadcast::channel::<ChatEvent>(64);
+    // CO-468: the room channel now carries pre-serialized JSON (`Arc<str>`).
+    let (tx, mut rx) = broadcast::channel::<std::sync::Arc<str>>(64);
     {
         let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_id.clone(), tx);
@@ -375,14 +376,14 @@ async fn test_delete_broadcasts_message_deleted_event() {
 
     assert_eq!(resp.status(), StatusCode::OK);
 
-    let evt = tokio::time::timeout(Duration::from_millis(200), rx.recv())
+    let raw = tokio::time::timeout(Duration::from_millis(200), rx.recv())
         .await
         .expect("timeout waiting for broadcast")
         .unwrap();
-
-    assert!(
-        matches!(evt, ChatEvent::MessageDeleted { .. }),
-        "expected MessageDeleted, got {evt:?}"
+    let evt: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(
+        evt["type"], "message.deleted",
+        "expected message.deleted, got {raw}"
     );
 }
 

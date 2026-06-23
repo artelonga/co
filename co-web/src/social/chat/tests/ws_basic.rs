@@ -16,7 +16,6 @@ use crate::storage::Storage;
 
 use super::support::{add_member, insert_universe, insert_user, isolate_env, make_jwt};
 use super::ws_support::{make_state, spawn_server, ws_connect, ws_try_connect};
-use crate::chat::ChatEvent;
 
 // --- 1. Unauthenticated → HTTP 401 before upgrade ---------------------------
 
@@ -184,7 +183,8 @@ async fn test_ws_broadcast_to_all_subscribers() {
             .id
     };
 
-    let (tx, mut rx1) = broadcast::channel::<ChatEvent>(64);
+    // CO-468: the room channel now carries pre-serialized JSON (`Arc<str>`).
+    let (tx, mut rx1) = broadcast::channel::<std::sync::Arc<str>>(64);
     let mut rx2 = tx.subscribe();
     {
         let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
@@ -222,14 +222,10 @@ async fn test_ws_broadcast_to_all_subscribers() {
     .await
     .expect("rx2 timeout");
 
-    assert!(
-        matches!(&evt1, ChatEvent::MessageCreated { .. }),
-        "rx1: expected MessageCreated, got {evt1:?}"
-    );
-    assert!(
-        matches!(&evt2, ChatEvent::MessageCreated { .. }),
-        "rx2: expected MessageCreated, got {evt2:?}"
-    );
+    let v1: serde_json::Value = serde_json::from_str(&evt1).unwrap();
+    let v2: serde_json::Value = serde_json::from_str(&evt2).unwrap();
+    assert_eq!(v1["type"], "message.created", "rx1: got {evt1}");
+    assert_eq!(v2["type"], "message.created", "rx2: got {evt2}");
 }
 
 // --- 7. No broadcast to other rooms ------------------------------------------
@@ -256,7 +252,7 @@ async fn test_ws_no_broadcast_to_other_rooms() {
     };
 
     // Subscribe only to room B
-    let (tx_b, mut rx_b) = broadcast::channel::<ChatEvent>(64);
+    let (tx_b, mut rx_b) = broadcast::channel::<std::sync::Arc<str>>(64);
     {
         let mut map = state.realtime.chat_rooms_broadcast.lock().unwrap();
         map.insert(room_b_id.clone(), tx_b);
