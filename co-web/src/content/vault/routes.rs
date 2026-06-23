@@ -278,6 +278,42 @@ fn lock_storage(state: &AppState) -> parking_lot::MutexGuard<'_, crate::storage:
     state.core.storage.lock()
 }
 
+/// CO-474 (F3): reject vault paths that could escape the universe content root.
+///
+/// The `{*path}` capture is joined onto the universe root on disk by several
+/// handlers (`write_vault_entry`, `delete_vault_file`, the raw/binary writers),
+/// so a `..` segment or an absolute path would let a caller read, overwrite, or
+/// delete files outside their universe. We reject anything that:
+///   - is empty;
+///   - is absolute (leading `/` or `\`) or contains a `:` (Windows drive / ADS);
+///   - contains a `..` path segment (after splitting on both `/` and `\`);
+///   - contains a NUL byte.
+///
+/// axum percent-decodes the captured path before it reaches the handler, so an
+/// encoded `%2e%2e` arrives here as `..` and is caught by the same check.
+pub(crate) fn is_safe_vault_path(path: &str) -> bool {
+    if path.is_empty() || path.contains('\0') {
+        return false;
+    }
+    if path.starts_with('/') || path.starts_with('\\') || path.contains(':') {
+        return false;
+    }
+    // Split on BOTH separators so `..\..` is caught on every platform.
+    !path.split(['/', '\\']).any(|segment| segment == "..")
+}
+
+/// CO-474 (F3): guard a captured `{*path}` before any filesystem use, returning
+/// a 400 `BadRequest` when the path is unsafe.
+fn guard_vault_path(path: &str) -> Result<(), AppError> {
+    if is_safe_vault_path(path) {
+        Ok(())
+    } else {
+        Err(AppError::BadRequest(format!(
+            "Unsafe vault path rejected: {path:?}"
+        )))
+    }
+}
+
 /// Build a VaultStat from optional ISO-8601 datetime strings and body size.
 fn make_stat(created_at: Option<&str>, updated_at: Option<&str>, size: usize) -> VaultStat {
     let parse_ms = |s: &str| -> i64 {
@@ -825,6 +861,7 @@ pub async fn get_vault_file(
     headers: HeaderMap,
 ) -> Result<axum::response::Response, AppError> {
     vault_auth(&state, &headers)?;
+    guard_vault_path(&path)?; // CO-474 (F3)
 
     // CO-88b: record content-pipeline telemetry when the caller announces a
     // layer combo via X-Co-* headers (the co-pipeline UAT runner does).
@@ -965,6 +1002,7 @@ pub async fn put_vault_file(
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+    guard_vault_path(&path)?; // CO-474 (F3)
 
     // CO-88b: record content-pipeline telemetry when the caller announces a
     // layer combo via X-Co-* headers (the co-pipeline UAT runner does).
@@ -1171,6 +1209,7 @@ pub async fn post_vault_file(
     body: String,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+    guard_vault_path(&path)?; // CO-474 (F3)
 
     let (existing_fm, existing_body) = {
         let uc = {
@@ -1211,6 +1250,7 @@ pub async fn patch_vault_file(
     body: String,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+    guard_vault_path(&path)?; // CO-474 (F3)
 
     let target_type = headers
         .get("target-type")
@@ -1391,6 +1431,7 @@ pub async fn delete_vault_file(
     Query(q): Query<DeleteQuery>,
 ) -> Result<impl IntoResponse, AppError> {
     vault_auth(&state, &headers)?;
+    guard_vault_path(&path)?; // CO-474 (F3)
 
     let (universe_root, entry_exists) = {
         let uc = {

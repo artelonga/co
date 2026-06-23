@@ -93,8 +93,14 @@ impl WebConfig {
     /// When true, magic-code login responses include the generated code inline
     /// (CO-303: `dev_code` field) so developers can complete login without
     /// email delivery. Production sets `CO_ENV=prod` explicitly.
+    ///
+    /// CO-474 (F2): an **empty** `CO_ENV` fails **closed** (treated as prod).
+    /// Previously `""` matched here, so a deploy that left `CO_ENV` unset would
+    /// leak the inline `dev_code` login code. The production constructor
+    /// (`WebConfig::from`) already defaults `CO_ENV` to `"prod"`, so this only
+    /// tightens the case where `CO_ENV` is explicitly set to an empty string.
     pub fn is_local_or_test(&self) -> bool {
-        matches!(self.co_env.as_str(), "test" | "uat" | "dev" | "local" | "")
+        matches!(self.co_env.as_str(), "test" | "uat" | "dev" | "local")
     }
 }
 
@@ -125,7 +131,7 @@ mod tests {
 
     #[test]
     fn is_local_or_test_non_prod_envs() {
-        for env in &["test", "uat", "dev", "local", ""] {
+        for env in &["test", "uat", "dev", "local"] {
             assert!(
                 config_with_env(env).is_local_or_test(),
                 "expected is_local_or_test() == true for CO_ENV={env:?}"
@@ -141,6 +147,16 @@ mod tests {
                 "expected is_local_or_test() == false for CO_ENV={env:?}"
             );
         }
+    }
+
+    /// CO-474 (F2): empty `CO_ENV` must fail CLOSED (treated as prod), so a
+    /// deploy that leaves `CO_ENV` unset never leaks the inline `dev_code`.
+    #[test]
+    fn is_local_or_test_empty_env_fails_closed() {
+        assert!(
+            !config_with_env("").is_local_or_test(),
+            "empty CO_ENV must NOT be treated as local/test (fail closed → prod-safe)"
+        );
     }
 
     #[test]

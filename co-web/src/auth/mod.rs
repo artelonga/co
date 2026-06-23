@@ -922,8 +922,43 @@ pub fn decode_claims(token: &str, secret: &str) -> anyhow::Result<Claims> {
     Ok(data.claims)
 }
 
+/// CO-474 (F4): hash a magic-code at rest with Argon2id, mirroring the CO-190
+/// onboarding store (`onboarding_routes::hash_code`). The plaintext code is only
+/// ever delivered by email (or returned inline as `dev_code` off-prod); what we
+/// persist in redb must be a one-way hash so a database read cannot recover a
+/// live login code.
+pub fn hash_code(code: &str) -> anyhow::Result<String> {
+    use argon2::Argon2;
+    use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+    let salt = SaltString::generate(&mut OsRng);
+    let hash = Argon2::default()
+        .hash_password(code.as_bytes(), &salt)
+        .map_err(|e| anyhow::anyhow!("{e}"))?
+        .to_string();
+    Ok(hash)
+}
+
+/// CO-474 (F4): constant-time verify of a plaintext `code` against the stored
+/// Argon2 `hash`. Returns `false` for a malformed hash or a mismatch.
+pub fn verify_code(code: &str, hash: &str) -> bool {
+    use argon2::Argon2;
+    use argon2::password_hash::{PasswordHash, PasswordVerifier};
+    PasswordHash::new(hash)
+        .ok()
+        .and_then(|h| Argon2::default().verify_password(code.as_bytes(), &h).ok())
+        .is_some()
+}
+
 /// Creates a new VerifyCodeEntry for the given user.
+///
+/// CO-474 (F4): the supplied plaintext `code` is hashed (Argon2id) before being
+/// placed in `VerifyCodeEntry.code`, so the value persisted via
+/// [`AuthStore::store_code`] is never the live login code. Verify with
+/// [`verify_code`] against the stored hash.
 pub fn new_code_entry(user_id: Option<String>, code: String) -> VerifyCodeEntry {
+    // Never fall back to storing the plaintext code: on the (practically
+    // impossible) hash error, store a sentinel that no input can verify against.
+    let code = hash_code(&code).unwrap_or_else(|_| "$invalid$".to_string());
     VerifyCodeEntry {
         code,
         user_id,
@@ -990,13 +1025,54 @@ mod tests {
 
         // Retrieve it.
         let retrieved = store.get_code("user@example.com").unwrap().unwrap();
-        assert_eq!(retrieved.code, "123456");
+        // CO-474 (F4): the stored value is an Argon2 hash, NOT the plaintext code.
+        assert_ne!(
+            retrieved.code, "123456",
+            "code must not be stored in plaintext"
+        );
+        assert!(
+            verify_code("123456", &retrieved.code),
+            "stored hash must verify the original code"
+        );
         assert_eq!(retrieved.user_id, Some("user-123".to_string()));
         assert_eq!(retrieved.attempts, 3);
 
         // Delete it.
         store.delete_code("user@example.com").unwrap();
         assert!(store.get_code("user@example.com").unwrap().is_none());
+    }
+
+    /// CO-474 (F4): a freshly minted code entry stores an Argon2 hash, never the
+    /// plaintext code; the right code verifies and a wrong code does not.
+    #[test]
+    fn test_magic_code_hashed_at_rest() {
+        let entry = new_code_entry(Some("user-9".to_string()), "654321".to_string());
+        assert_ne!(entry.code, "654321", "plaintext code must not be persisted");
+        assert!(
+            entry.code.starts_with("$argon2"),
+            "stored value should be an Argon2 PHC string: {}",
+            entry.code
+        );
+        assert!(
+            verify_code("654321", &entry.code),
+            "correct code must verify"
+        );
+        assert!(
+            !verify_code("000000", &entry.code),
+            "wrong code must not verify"
+        );
+    }
+
+    /// CO-474 (F4): hash_code/verify_code round-trip; distinct salts per call.
+    #[test]
+    fn test_hash_code_roundtrip_and_salted() {
+        let h1 = hash_code("123456").unwrap();
+        let h2 = hash_code("123456").unwrap();
+        assert_ne!(h1, h2, "each hash must use a fresh salt");
+        assert!(verify_code("123456", &h1));
+        assert!(verify_code("123456", &h2));
+        assert!(!verify_code("123457", &h1));
+        assert!(!verify_code("123456", "not-a-valid-phc-hash"));
     }
 
     #[test]

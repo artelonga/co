@@ -192,7 +192,16 @@ pub(super) async fn verify_handler(
         return Err(AppError::Gone("Code has expired".into()));
     }
 
-    if entry.code != code {
+    // CO-474 (F4): the stored value is an Argon2 hash, not the plaintext code.
+    // Verify off the async runtime (Argon2 is CPU-bound), as onboarding does.
+    let code_ok = {
+        let code = code.clone();
+        let hash = entry.code.clone();
+        tokio::task::spawn_blocking(move || crate::auth::verify_code(&code, &hash))
+            .await
+            .map_err(|_| AppError::Internal("Task join error".into()))?
+    };
+    if !code_ok {
         let new_attempts = entry.attempts.saturating_sub(1);
 
         if new_attempts == 0 {
