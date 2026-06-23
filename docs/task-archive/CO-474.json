@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-474",
+  "title": "Auth hardening II — CO_ENV fail-open, vault path-traversal, hashed magic-codes",
+  "type": "user-story",
+  "status": "in-progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-474.md",
+  "branch": "fix/CO-474-auth-hardening-2",
+  "merge_sha": "2dede088a40c53b91dd6baff6ba8db0d86ada08b",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/310",
+    "number": 310
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T12:07:41Z",
+  "files_changed": 8,
+  "lines_added": 355,
+  "lines_removed": 4,
+  "labels": [
+    "security",
+    "auth"
+  ],
+  "changelog_entry": "## CO-474 — Auth hardening II (CO_ENV fail-open, vault path-traversal, hashed magic-codes)\n\nThree contained security fixes, the follow-up to CO-469's JWT_SECRET boot guard.\n\n- **CO_ENV fails closed.** `WebConfig::is_local_or_test()` no longer treats an\n  empty `CO_ENV` as local/test. A deploy that left `CO_ENV` unset previously\n  leaked the inline `dev_code` magic-login code (and reached other non-prod-only\n  paths); empty now resolves to prod-safe. The production constructor already\n  defaults `CO_ENV` to `prod`, so this only tightens the explicitly-empty case.\n\n- **Vault path-traversal guard.** A new `is_safe_vault_path` rejects any vault\n  `{*path}` that is empty, absolute (`/` or `\\`), contains a `:` (Windows drive\n  / alternate stream), has a `..` path segment, or contains a NUL byte. It is\n  applied to every vault file handler (GET/PUT/POST/PATCH/DELETE) and returns\n  `400 Bad Request` before any filesystem access — closing read/overwrite/delete\n  escapes outside the universe content root (including percent-encoded `%2e%2e`).\n\n- **Magic-codes hashed at rest.** The redb `AuthStore` now stores an Argon2id\n  hash of each 6-digit verification code instead of the plaintext value, using\n  the same scheme as the CO-190 onboarding store. `verify_handler` compares the\n  submitted code against the stored hash. Attempts, expiry and rate-limit logic\n  are unchanged; the off-prod inline `dev_code` (plaintext at generation time)\n  still works.\n\n### Why\n\nDefense-in-depth on the most sensitive subsystem: a misconfigured deploy no\nlonger leaks login codes, the vault REST surface can no longer be coaxed into\ntouching files outside a universe, and a read of the auth database can no longer\nrecover a live login code.\n\n### Deferred\n\nThe larger \"retire the legacy redb `AuthStore`\" refactor (making `/auth/login`\na thin adapter over the SQLite onboarding store) is intentionally **not** in this\nchange. The parallel game-auth verify path (`game_routes.rs`, a separate\n`VerifyCodeData` store) is likewise out of scope and folded into that future work.",
+  "summary": "GIVEN the three CONTAINED auth findings tracked under CO-469 (F2 `CO_ENV` fail-open, F3 vault path-traversal, F4 plaintext magic-codes at rest), each one a small, localized hardening, WHEN the server ",
+  "co_auto_version": "0.1.0"
+}
