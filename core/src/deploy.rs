@@ -708,6 +708,12 @@ pub trait S3Backend: Send + Sync {
         bucket: &str,
         key: &str,
     ) -> Result<Option<String>, DeployAdapterError>;
+
+    /// Delete the object at `key`. Deleting a missing key is **not** an error
+    /// (S3 `DeleteObject` is idempotent). Used by content-addressed garbage
+    /// collection (CO-81) to reclaim blobs that have been unreferenced past the
+    /// grace period.
+    async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), DeployAdapterError>;
 }
 
 // ─── AwsS3Backend ─────────────────────────────────────────────────────────────
@@ -833,6 +839,18 @@ impl S3Backend for AwsS3Backend {
             Err(e) => Err(DeployAdapterError::Upload(e.to_string())),
         }
     }
+
+    async fn delete_object(&self, bucket: &str, key: &str) -> Result<(), DeployAdapterError> {
+        // S3 DeleteObject is idempotent — a missing key returns 204, not an error.
+        self.client
+            .delete_object()
+            .bucket(bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| DeployAdapterError::Other(e.to_string()))?;
+        Ok(())
+    }
 }
 
 // ─── Disabled S3 backend (stub when deploy-r2 feature is off) ─────────────────
@@ -865,6 +883,11 @@ impl S3Backend for DisabledS3Backend {
         ))
     }
     async fn head_object(&self, _: &str, _: &str) -> Result<Option<String>, DeployAdapterError> {
+        Err(DeployAdapterError::Other(
+            "R2 deployer disabled — rebuild with --features deploy-r2".into(),
+        ))
+    }
+    async fn delete_object(&self, _: &str, _: &str) -> Result<(), DeployAdapterError> {
         Err(DeployAdapterError::Other(
             "R2 deployer disabled — rebuild with --features deploy-r2".into(),
         ))
@@ -1225,6 +1248,11 @@ mod adapter_tests {
         ) -> Result<Option<String>, DeployAdapterError> {
             let objects = self.objects.lock().unwrap();
             Ok(objects.get(key).map(|_| "\"test-etag\"".to_string()))
+        }
+
+        async fn delete_object(&self, _bucket: &str, key: &str) -> Result<(), DeployAdapterError> {
+            self.objects.lock().unwrap().remove(key);
+            Ok(())
         }
     }
 

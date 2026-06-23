@@ -12,7 +12,7 @@ use crate::error::AppError;
 use crate::server::AppState;
 
 use super::permissions::{can_post, can_read, lock_storage, resolve_role};
-use super::ws::ChatEvent;
+use super::ws::{ChatEvent, broadcast_event};
 
 // ---------------------------------------------------------------------------
 // Types
@@ -305,7 +305,7 @@ pub async fn post_message_handler(
         && let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
-        let _ = tx.send(ChatEvent::MessageCreated { message: msg });
+        broadcast_event(tx, &ChatEvent::MessageCreated { message: msg });
     }
 
     Ok((
@@ -389,9 +389,12 @@ pub async fn edit_message_handler(
     if let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
-        let _ = tx.send(ChatEvent::MessageEdited {
-            message: updated_msg.clone(),
-        });
+        broadcast_event(
+            tx,
+            &ChatEvent::MessageEdited {
+                message: updated_msg.clone(),
+            },
+        );
     }
 
     Ok(axum::Json(updated_msg))
@@ -460,10 +463,13 @@ pub async fn delete_message_handler(
     if let Ok(map) = state.realtime.chat_rooms_broadcast.lock()
         && let Some(tx) = map.get(&room_id)
     {
-        let _ = tx.send(ChatEvent::MessageDeleted {
-            message_id: msg_id.clone(),
-            deleted_at: deleted_at_str.clone(),
-        });
+        broadcast_event(
+            tx,
+            &ChatEvent::MessageDeleted {
+                message_id: msg_id.clone(),
+                deleted_at: deleted_at_str.clone(),
+            },
+        );
     }
 
     Ok(axum::Json(DeleteMessageResponse {

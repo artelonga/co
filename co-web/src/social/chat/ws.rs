@@ -53,6 +53,23 @@ use super::permissions::{can_read, resolve_role};
 /// and lagging subscribers receive a `RecvError::Lagged` that triggers a close.
 pub const BROADCAST_CAPACITY: usize = 256;
 
+/// CO-468: a chat room's fan-out channel carries each event **serialized to
+/// JSON once** (`Arc<str>`) instead of the typed [`ChatEvent`]. With the typed
+/// payload, every connected socket re-ran `serde_json::to_string` on the same
+/// event (N serializations for N sockets); now we serialize once per broadcast
+/// and every socket sends the shared bytes. Use [`broadcast_event`] to publish.
+pub type ChatBroadcast = broadcast::Sender<Arc<str>>;
+
+/// Serialize a [`ChatEvent`] once and fan it out to every socket in the room.
+pub fn broadcast_event(tx: &ChatBroadcast, event: &ChatEvent) {
+    match serde_json::to_string(event) {
+        Ok(json) => {
+            let _ = tx.send(Arc::from(json));
+        }
+        Err(e) => tracing::warn!("chat: failed to serialize event: {e}"),
+    }
+}
+
 const PING_INTERVAL: Duration = Duration::from_secs(30);
 /// Drop the connection if the client hasn't sent any frame (or Pong) for this
 /// long. Checked each time the PING_INTERVAL timer fires.
@@ -246,7 +263,7 @@ pub async fn chat_ws_handler(
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         };
         map.entry(room_id.clone())
-            .or_insert_with(|| broadcast::channel::<ChatEvent>(BROADCAST_CAPACITY).0)
+            .or_insert_with(|| broadcast::channel::<Arc<str>>(BROADCAST_CAPACITY).0)
             .clone()
     };
 
@@ -268,14 +285,17 @@ async fn handle_ws(
     user_id: String,
     your_role: String,
     author: ChatAuthor,
-    tx: broadcast::Sender<ChatEvent>,
+    tx: ChatBroadcast,
 ) {
     // 1. Register presence; broadcast join if first connection for this user.
     let is_first = join_presence(&state, &room_id, &user_id);
     if is_first {
-        let _ = tx.send(ChatEvent::PresenceJoin {
-            user: author.clone(),
-        });
+        broadcast_event(
+            &tx,
+            &ChatEvent::PresenceJoin {
+                user: author.clone(),
+            },
+        );
     }
 
     // 2. Build current presence list for the `ready` event.
@@ -301,9 +321,12 @@ async fn handle_ws(
     if ws_tx.send(Message::Text(ready_json.into())).await.is_err() {
         let is_last = leave_presence(&state, &room_id, &user_id);
         if is_last {
-            let _ = tx.send(ChatEvent::PresenceLeave {
-                user_id: user_id.clone(),
-            });
+            broadcast_event(
+                &tx,
+                &ChatEvent::PresenceLeave {
+                    user_id: user_id.clone(),
+                },
+            );
         }
         return;
     }
@@ -322,9 +345,10 @@ async fn handle_ws(
             tokio::select! {
                 evt = rx.recv() => {
                     match evt {
-                        Ok(event) => {
-                            let json = serde_json::to_string(&event).unwrap_or_default();
-                            if ws_tx.send(Message::Text(json.into())).await.is_err() {
+                        Ok(json) => {
+                            // CO-468: bytes already serialized once at broadcast
+                            // time; this is a cheap copy, not a re-serialize.
+                            if ws_tx.send(Message::Text(json.as_ref().into())).await.is_err() {
                                 break;
                             }
                         }
@@ -377,15 +401,21 @@ async fn handle_ws(
                                     .map(|mut l| l.check(&key, 1).is_ok())
                                     .unwrap_or(false);
                                 if allowed {
-                                    let _ = tx_r.send(ChatEvent::TypingStart {
-                                        user_id: user_id_r.clone(),
-                                    });
+                                    broadcast_event(
+                                        &tx_r,
+                                        &ChatEvent::TypingStart {
+                                            user_id: user_id_r.clone(),
+                                        },
+                                    );
                                 }
                             }
                             ClientMsg::TypingStop => {
-                                let _ = tx_r.send(ChatEvent::TypingStop {
-                                    user_id: user_id_r.clone(),
-                                });
+                                broadcast_event(
+                                    &tx_r,
+                                    &ChatEvent::TypingStop {
+                                        user_id: user_id_r.clone(),
+                                    },
+                                );
                             }
                         }
                     }
@@ -408,8 +438,11 @@ async fn handle_ws(
     // 10. Clean up presence and broadcast leave event if last connection.
     let is_last = leave_presence(&state, &room_id, &user_id);
     if is_last {
-        let _ = tx.send(ChatEvent::PresenceLeave {
-            user_id: user_id.clone(),
-        });
+        broadcast_event(
+            &tx,
+            &ChatEvent::PresenceLeave {
+                user_id: user_id.clone(),
+            },
+        );
     }
 }

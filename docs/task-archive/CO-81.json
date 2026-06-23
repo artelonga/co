@@ -1,0 +1,27 @@
+{
+  "task_id": "CO-81",
+  "title": "Object storage for blobs + filesystem sharding",
+  "type": "user-story",
+  "status": "done",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-81.md",
+  "branch": "feat/CO-81-object-storage-for-blobs-filesystem-shar",
+  "merge_sha": "f6bd0338c9d9a6795f4fe7166d0b1fd28af8eeca",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/303",
+    "number": 303
+  },
+  "started_at": "2026-04-26T00:00:00Z",
+  "merged_at": "2026-06-23T01:32:32Z",
+  "files_changed": 10,
+  "lines_added": 1302,
+  "lines_removed": 17,
+  "labels": [
+    "storage",
+    "blobs",
+    "s3"
+  ],
+  "changelog_entry": "## CO-81 — Object storage for blobs + filesystem sharding\n\nAdds an S3-compatible object-storage backend so blob storage scales past the\n~500 GB ceiling of Fly volumes, with content-addressed dedupe, a local hot-blob\ncache, a filesystem→object-storage migration, and 30-day garbage collection.\n\n### What changed\n\n- **S3 `StorageBackend`** (`co-web/src/storage/backend/s3.rs`) — the remote\n  counterpart to CO-458's `LocalFsBackend`, implemented over the\n  `co::deploy::S3Backend` trait so it works against Cloudflare R2, Tigris, and\n  AWS S3. Blobs live at the content-addressed key\n  `blobs/sha256/<aa>/<bb>/<hash>`; the refcounted `blob_refs` ledger stays the\n  dedupe/billing source of truth. Wired into `backend::from_config`\n  (`CO_STORAGE_BACKEND=s3`, gated behind the `blob-r2` feature; falls back to\n  `local` when the feature is off).\n- **Content-addressed put** — new blobs are `head_object`-checked before upload\n  and skipped if the bytes already sit in the bucket, so the same image used in\n  N universes is stored once (one `blob_refs` row, one S3 object).\n- **Local LRU blob cache** (`blob_cache.rs`) at `/data/blob-cache/` — every GET\n  checks the cache (~1 ms) before falling back to S3 (~30 ms) and warms it;\n  byte-bounded LRU eviction keeps it within a configurable budget\n  (`CO_BLOB_CACHE_BYTES`, default 10 GiB).\n- **Filesystem→object-storage migration** — `S3Backend::import_from_local`\n  walks every `backend='local'` ledger row, uploads (content-addressed skip),\n  flips the row to `'s3'`, and unlinks the local file. Idempotent.\n- **Garbage collection** — `delete` defers physical removal: on the\n  refcount-zero drop it stamps `blob_refs.unreferenced_at` (migration **v090**)\n  instead of a network DELETE; `gc_unreferenced(now, grace)` reclaims rows\n  whose stamp is older than the 30-day grace, deleting the S3 object and the\n  row. A re-`put` within the window revives the blob. `delete_object` was added\n  to the `co::deploy::S3Backend` trait to support this.\n- **Filesystem sharding** — the 2-level hex fanout on `universe_key`\n  (`universe_pool::universe_dir`, from CO-77) is verified by a new distribution\n  test: 131 072 universes spread across >55 000 of the 65 536 level-2\n  directories with the busiest under 30 entries, well inside the\n  200-entries-per-directory budget at 1M universes.\n\n### Why\n\nMillions of small blobs on a single Fly volume degrade ext4 lookups and cap out\non volume size. Moving bytes to S3-compatible object storage (already redundant,\nPB-scalable) with content addressing dedupes across universes, while the local\nLRU cache keeps hot reads fast and deferred GC avoids per-delete network\nround-trips and protects content-addressed bytes during the grace period.",
+  "summary": "GIVEN blob storage (images, attachments, generated docs) doesn't scale on Fly volumes (~500 GB cost-effectively), and millions of small files in one directory degrade ext4 lookups, WHEN we move blobs ",
+  "co_auto_version": "0.1.0"
+}

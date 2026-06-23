@@ -15,6 +15,14 @@
 //! On reconnect with `X-Sync-Resume`, server replays missed frames in order.
 //! If the token is stale (>24h or unknown) it sends a single snapshot-needed
 //! hint so the client can request a full vault dump via the REST API.
+//!
+//! ⚠️ **Single-machine fan-out (CO-468).** Each universe room is an in-process
+//! `tokio::broadcast`; it reaches clients on *this* machine only. Safe today
+//! (`co-artelonga` runs one Fly machine), but horizontal scale-out (≥2
+//! machines) needs cross-machine distribution or per-universe sticky routing,
+//! or two editors on different machines won't see each other's deltas. The
+//! 24h ring-log is also per-machine, so a reconnect that lands on a different
+//! machine falls back to a full snapshot. See `eda/events_ws.rs` for detail.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;

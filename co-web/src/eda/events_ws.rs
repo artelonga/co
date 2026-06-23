@@ -14,6 +14,17 @@
 //!
 //! The LiveTimeline broadcast channel feeds this handler; the handler applies
 //! per-connection visibility gates before forwarding.
+//!
+//! ⚠️ **Single-machine fan-out (CO-468).** The LiveTimeline channel is an
+//! in-process `tokio::broadcast`. It reaches every client connected *to this
+//! machine* and no further. Today `co-artelonga` runs a single Fly machine
+//! (`min_machines_running = 1`), so this delivers to everyone. If the app is
+//! ever scaled horizontally (≥2 machines), Fly load-balances connections
+//! across them and same-universe events will NOT cross machines — clients on
+//! machine B won't see events published on machine A. Scaling out therefore
+//! requires either sticky routing per universe or a cross-machine pub/sub
+//! (Redis/NATS) or self-bridging. The `/api/v1/events/bridge` (CO-384) bridge
+//! federates *separate deployments* (co ↔ yggdrasil), NOT machines of one app.
 
 use std::sync::Arc;
 
@@ -26,7 +37,7 @@ use tokio::sync::broadcast;
 use tracing::debug;
 
 use crate::eda::event::{Event, Visibility};
-use crate::eda::subscribers::timeline::TimelineSender;
+use crate::eda::subscribers::timeline::{TimelineFrame, TimelineSender};
 use crate::server::AppState;
 
 // ---------------------------------------------------------------------------
@@ -149,7 +160,7 @@ fn derive_client_level(state: &AppState, params: &EventsQuery, headers: &HeaderM
 
 async fn handle_socket(
     mut socket: WebSocket,
-    mut rx: broadcast::Receiver<Arc<Event>>,
+    mut rx: broadcast::Receiver<Arc<TimelineFrame>>,
     scope: String,
     level: ClientLevel,
 ) {
@@ -166,18 +177,17 @@ async fn handle_socket(
             }
             ev = rx.recv() => {
                 match ev {
-                    Ok(ev) => {
-                        if !level.can_see(&ev, &scope) {
+                    Ok(frame) => {
+                        if !level.can_see(&frame.event, &scope) {
                             continue;
                         }
-                        let json = match serde_json::to_string(&*ev) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                tracing::warn!("EDA: failed to serialize event: {e}");
-                                continue;
-                            }
-                        };
-                        if socket.send(Message::Text(json.into())).await.is_err() {
+                        // CO-468: reuse the JSON serialized once at the fan-out
+                        // point; this is a cheap byte copy, not a re-serialize.
+                        if socket
+                            .send(Message::Text(frame.json.as_ref().into()))
+                            .await
+                            .is_err()
+                        {
                             break;
                         }
                     }
