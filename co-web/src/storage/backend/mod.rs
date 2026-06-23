@@ -26,7 +26,9 @@ use async_trait::async_trait;
 use crate::error::AppError;
 use crate::infra::secrets::SecretsProvider;
 
+pub mod blob_cache;
 pub mod local_fs;
+pub mod s3;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -110,21 +112,22 @@ pub trait StorageBackend: Send + Sync {
 /// | Value               | Behaviour                                   |
 /// |---------------------|---------------------------------------------|
 /// | `local` (or missing)| [`local_fs::LocalFsBackend`] under `data_dir/blobs` |
-/// | `s3`                | reserved for CO-81 — currently an error      |
+/// | `s3`                | [`s3::S3Backend`] (CO-81; needs the `blob-r2` feature + R2/S3 secrets) |
 /// | anything else       | error                                        |
 ///
 /// `data_dir` is the server data root (e.g. `/data`); blobs live under
 /// `data_dir/blobs/` and the `blob_refs` ledger lives in `data_dir/meta.db`.
-pub fn from_config(
+///
+/// `async` because the S3 client is built asynchronously; the `local` path does
+/// no I/O beyond opening the ledger connection.
+pub async fn from_config(
     data_dir: &Path,
     secrets: &dyn SecretsProvider,
 ) -> Result<Box<dyn StorageBackend>, AppError> {
     let kind = secrets.get_or("CO_STORAGE_BACKEND", "local");
     match kind.as_str() {
         "local" => Ok(Box::new(local_fs::LocalFsBackend::open(data_dir)?)),
-        "s3" => Err(AppError::ServiceUnavailable(
-            "CO_STORAGE_BACKEND=s3 is not implemented yet (CO-81); use `local`".to_string(),
-        )),
+        "s3" => Ok(Box::new(s3::from_secrets(data_dir, secrets).await?)),
         other => Err(AppError::BadRequest(format!(
             "unknown CO_STORAGE_BACKEND={other:?} (expected `local` or `s3`)"
         ))),
@@ -136,28 +139,32 @@ mod tests {
     use super::*;
     use crate::infra::secrets::StaticSecretsProvider;
 
-    #[test]
-    fn from_config_defaults_to_local() {
+    #[tokio::test]
+    async fn from_config_defaults_to_local() {
         let dir = tempfile::tempdir().unwrap();
         crate::storage::Storage::new(dir.path()); // run migrations (creates blob_refs)
         let secrets = StaticSecretsProvider::new(Vec::<(&str, &str)>::new());
-        let backend = from_config(dir.path(), secrets.as_ref()).unwrap();
+        let backend = from_config(dir.path(), secrets.as_ref()).await.unwrap();
         assert_eq!(backend.name(), "local");
     }
 
-    #[test]
-    fn from_config_s3_is_not_yet_implemented() {
+    /// Without the `blob-r2` feature the S3 backend is reported unavailable so
+    /// the caller can fall back to `local`. (With the feature, missing
+    /// credentials surface as `BadRequest` instead — see `s3::from_secrets`.)
+    #[cfg(not(feature = "blob-r2"))]
+    #[tokio::test]
+    async fn from_config_s3_requires_feature() {
         let dir = tempfile::tempdir().unwrap();
         let secrets = StaticSecretsProvider::new([("CO_STORAGE_BACKEND", "s3")]);
-        let result = from_config(dir.path(), secrets.as_ref());
+        let result = from_config(dir.path(), secrets.as_ref()).await;
         assert!(matches!(result, Err(AppError::ServiceUnavailable(_))));
     }
 
-    #[test]
-    fn from_config_rejects_unknown_backend() {
+    #[tokio::test]
+    async fn from_config_rejects_unknown_backend() {
         let dir = tempfile::tempdir().unwrap();
         let secrets = StaticSecretsProvider::new([("CO_STORAGE_BACKEND", "ftp")]);
-        let result = from_config(dir.path(), secrets.as_ref());
+        let result = from_config(dir.path(), secrets.as_ref()).await;
         assert!(matches!(result, Err(AppError::BadRequest(_))));
     }
 }
