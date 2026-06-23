@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-475",
+  "title": "Auth hardening III — hash game-auth magic-codes at rest",
+  "type": "user-story",
+  "status": "in-progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-475.md",
+  "branch": "fix/CO-475-game-auth-hash",
+  "merge_sha": "d6631d209a3ad6e3fa90e38b3ceee163ebdf4c37",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/312",
+    "number": 312
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T13:45:39Z",
+  "files_changed": 3,
+  "lines_added": 127,
+  "lines_removed": 8,
+  "labels": [
+    "security",
+    "auth"
+  ],
+  "changelog_entry": "## CO-475 — Hash game-auth magic-codes at rest\n\nClosed the second plaintext magic-code path flagged during CO-474. The game-auth\nflow (`co-web/src/universes/game/game_routes.rs`) stores its own `VerifyCodeData`\nin `game_storage`, separate from the redb `AuthStore` that CO-474 hashed. It was\nstill persisting the 6-digit login code in plaintext and doing a plaintext\ncompare on verify.\n\nThe game `login` handler now hashes the generated code with Argon2id\n(`auth::hash_code`) before storing it; the plaintext is used only to build the\nemail body. The `verify` handler compares the submitted code against the stored\nhash via `auth::verify_code`. Expiry and attempt-counting behavior are unchanged.\n\n### Why\nA database read (backup, dump, or compromise) must not recover a live login code.\nBoth magic-code stores in the codebase now hash at rest with the same Argon2id\nscheme.",
+  "summary": "GIVEN CO-474 hashed the redb `AuthStore` magic-codes (Argon2id via `auth::hash_code`/`auth::verify_code`) but the SEPARATE game-auth path persists its own `VerifyCodeData` in `game_storage` and still ",
+  "co_auto_version": "0.1.0"
+}
