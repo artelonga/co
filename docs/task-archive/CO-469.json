@@ -1,0 +1,26 @@
+{
+  "task_id": "CO-469",
+  "title": "Auth hardening: JWT_SECRET prod boot guard (+ tracked auth backlog)",
+  "type": "user-story",
+  "status": "in-progress",
+  "semver_bump": null,
+  "spec_path": "work/co/CO-469.md",
+  "branch": "fix/CO-469-auth-hardening",
+  "merge_sha": "7e2449745f413e37d6ce4edc18c8fdf3d65cb4b7",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/305",
+    "number": 305
+  },
+  "started_at": "2026-06-22T00:00:00Z",
+  "merged_at": "2026-06-23T01:50:55Z",
+  "files_changed": 5,
+  "lines_added": 117,
+  "lines_removed": 2,
+  "labels": [
+    "security",
+    "auth"
+  ],
+  "changelog_entry": "## CO-469 — Auth hardening: JWT_SECRET production boot guard\n\n### Fixed\n- **The server now refuses to boot in a non-local/test environment when\n  `JWT_SECRET` is unset.** Previously it fell back to the hardcoded\n  `dev-secret-change-me`, making every session JWT forgeable by anyone who reads\n  the source. `start_server_inner` now fails closed with a clear `FATAL (CO-469)`\n  message + remediation hint before binding the listener. Local/test envs keep\n  using the dev fallback for convenience.\n\n### Changed\n- The dev fallback is now a single shared const (`DEV_JWT_SECRET_FALLBACK`),\n  used by both `jwt_secret_from` and `recovery_crypto` instead of duplicated\n  string literals.\n\n### Why\nFirst and highest-severity item from the auth security review: a forgeable JWT\nsecret in production is a full authentication bypass. Fail-closed-at-boot is the\nsafest mitigation. The remaining review findings (CO_ENV fail-open, vault\npath-traversal audit, hashing legacy magic-codes at rest, and retiring the\nduplicate redb auth store) are tracked in `work/co/CO-469.md` for follow-up PRs.",
+  "summary": "GIVEN `jwt_secret_from` falls back to the hardcoded `dev-secret-change-me` when `JWT_SECRET` is unset, and nothing stops a production deployment from booting with it — making every session JWT forgeab",
+  "co_auto_version": "0.1.0"
+}
