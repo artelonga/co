@@ -452,6 +452,14 @@ async function probe(
 
 // ─── Drift classification ─────────────────────────────────────────────────────
 
+// Optionally-configured features return a specific non-2xx in prod *by design* —
+// this is expected, not drift. `auth/github/start` returns 503 when GitHub OAuth
+// is intentionally not configured (prod runs without it). Documented-benign; a
+// DIFFERENT status (or a different route drifting) still fails the probe.
+const OPTIONAL_FEATURE_STATUS: Record<string, number[]> = {
+  'GET /api/v1/auth/github/start': [503],
+};
+
 function classifyDrift(
   method: string,
   endpointKey: string,
@@ -461,6 +469,12 @@ function classifyDrift(
   hasToken: boolean,
   body: unknown,
 ): { drift: boolean; drift_type?: DriftType; detail?: string } {
+  // Optionally-configured feature returning its expected non-2xx: not drift.
+  const optionalOk = OPTIONAL_FEATURE_STATUS[endpointKey];
+  if (optionalOk && optionalOk.includes(actual)) {
+    return { drift: false };
+  }
+
   // Server error is always drift — the endpoint crashed
   if (actual >= 500) {
     return { drift: true, drift_type: 'server_error', detail: `HTTP ${actual} (server error)` };

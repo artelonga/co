@@ -1794,6 +1794,52 @@ pub async fn entry_blocks_handler(
 }
 
 // ---------------------------------------------------------------------------
+// CO-471: connections — typed links (CO-74) as the canonical "Conectar" interface
+// ---------------------------------------------------------------------------
+
+/// Query params for the connections endpoint (`?path=` per the wildcard-avoidance
+/// convention shared with blocks/history/versions/diff).
+#[derive(Debug, serde::Deserialize)]
+pub struct ConnectionsQuery {
+    pub path: String,
+}
+
+/// GET /api/v1/universes/:slug/connections?path=…
+///
+/// CO-471: the canonical typed-link interface ("conexões" — the **Conectar**
+/// pillar). Returns an entry's outbound and inbound CO-74 relations. A thin
+/// wrapper over the relation repository — the same data the entry detail embeds,
+/// exposed as a first-class interface. The `graph` route remains the HTML
+/// visualization; this is the data API.
+pub async fn connections_handler(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    axum::extract::Query(q): axum::extract::Query<ConnectionsQuery>,
+) -> Result<impl IntoResponse, AppError> {
+    use crate::repository::RelationRepository;
+    let repo = crate::repository::SqliteRelationRepository::new(
+        state.core.storage_trait.universe_conn(&slug),
+    );
+    let outbound: Vec<_> = repo
+        .outbound(&slug, &q.path)
+        .unwrap_or_default()
+        .iter()
+        .map(crate::mapper::RelationMapper::domain_to_row)
+        .collect();
+    let inbound: Vec<_> = repo
+        .inbound(&slug, &q.path)
+        .unwrap_or_default()
+        .iter()
+        .map(crate::mapper::RelationMapper::domain_to_row)
+        .collect();
+    Ok(Json(serde_json::json!({
+        "path": q.path,
+        "outbound": outbound,
+        "inbound": inbound,
+    })))
+}
+
+// ---------------------------------------------------------------------------
 // CO-75: version reconstruction — per-entry diff + universe auto-changelog
 // ---------------------------------------------------------------------------
 
@@ -2088,6 +2134,11 @@ pub fn router() -> Router<AppState> {
         .route("/{slug}/manifest", get(get_manifest))
         // CO-74: query DSL endpoint
         .route("/{slug}/query", get(query_handler))
+        // CO-471: `search` is the canonical name for the query interface;
+        // `query` kept as a deprecated alias for one release.
+        .route("/{slug}/search", get(query_handler))
+        // CO-471: `connections` — canonical typed-link ("conexões") data interface.
+        .route("/{slug}/connections", get(connections_handler))
         .route("/{slug}/entries/popular", get(popular_entries))
         .route("/{slug}/entries/tags", get(list_entry_tags))
         .route("/{slug}/entries/tree", get(entry_tree))
