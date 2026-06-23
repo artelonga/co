@@ -143,13 +143,14 @@ async fn body_to_json(body: Body) -> Value {
 #[tokio::test]
 async fn inline_proposal_lands_in_target_proposals_folder() {
     let dir = tempdir().unwrap();
+    // CO-93: only private-dynamic universes accept proposals from non-members.
+    seed_owned_universe(dir.path(), "owner-uid", "target-uni");
     let app = build_test_router(dir.path());
 
-    // template universe is seeded by seed_data; any authed user can
-    // propose into it even though they don't own it.
+    // A non-owner authed user proposes into a private-dynamic universe.
     let req = Request::builder()
         .method("POST")
-        .uri("/api/v1/universes/template/proposals/inline")
+        .uri("/api/v1/universes/target-uni/proposals/inline")
         .header(header::AUTHORIZATION, test_bearer())
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(
@@ -179,7 +180,7 @@ async fn inline_proposal_lands_in_target_proposals_folder() {
         proposal_path.ends_with(".md"),
         "proposal path must end .md, got: {proposal_path}"
     );
-    assert_eq!(body["target_universe"], "template");
+    assert_eq!(body["target_universe"], "target-uni");
     assert_eq!(body["target_path"], "content/sobre.md");
     assert_eq!(body["author"], "test-user");
     assert_eq!(body["status"], "open");
@@ -190,7 +191,7 @@ async fn inline_proposal_lands_in_target_proposals_folder() {
     let encoded = proposal_path.to_string();
     let fetch_req = Request::builder()
         .method("GET")
-        .uri(format!("/api/v1/universes/template/entries/{encoded}"))
+        .uri(format!("/api/v1/universes/target-uni/entries/{encoded}"))
         .body(Body::empty())
         .unwrap();
     let fetch_res = app.clone().oneshot(fetch_req).await.unwrap();
@@ -200,7 +201,7 @@ async fn inline_proposal_lands_in_target_proposals_folder() {
     assert_eq!(fm["type"], "proposal");
     assert_eq!(fm["kind"], "inline");
     assert_eq!(fm["target_path"], "content/sobre.md");
-    assert_eq!(fm["target_universe"], "template");
+    assert_eq!(fm["target_universe"], "target-uni");
     assert_eq!(fm["status"], "open");
     assert_eq!(fm["author"], "test-user");
     assert_eq!(fm["note"], "tiny tweak");
@@ -261,9 +262,12 @@ fn seed_owned_universe(dir: &std::path::Path, owner_id: &str, slug: &str) {
     storage
         .conn()
         .execute(
+            // CO-93: proposals are accepted only by private-dynamic universes
+            // (public-subscribable + accepts_proposals). Set the opt-in flag so
+            // a non-owner third party can submit an inline proposal here.
             "INSERT OR IGNORE INTO universes \
-             (key, name, description, owner_id, created_at, is_public, visibility) \
-             VALUES (?1, ?2, 'owned by test', ?3, '2026-01-01', 1, 'public-subscribable')",
+             (key, name, description, owner_id, created_at, is_public, visibility, accepts_proposals) \
+             VALUES (?1, ?2, 'owned by test', ?3, '2026-01-01', 1, 'public-subscribable', 1)",
             rusqlite::params![slug, format!("Owned-{slug}"), owner_id],
         )
         .unwrap();
@@ -482,11 +486,13 @@ async fn inline_proposal_server_overrides_smuggled_frontmatter() {
     // (if it ignores them) the resulting entry still has the right
     // server-controlled author/status.
     let dir = tempdir().unwrap();
+    // CO-93: only private-dynamic universes accept proposals from non-members.
+    seed_owned_universe(dir.path(), "owner-uid", "target-uni");
     let app = build_test_router(dir.path());
 
     let req = Request::builder()
         .method("POST")
-        .uri("/api/v1/universes/template/proposals/inline")
+        .uri("/api/v1/universes/target-uni/proposals/inline")
         .header(header::AUTHORIZATION, test_bearer())
         .header(header::CONTENT_TYPE, "application/json")
         .body(Body::from(

@@ -201,11 +201,27 @@ pub async fn create_inline_proposal(
 
     // Verify target universe exists (anyone can see public-subscribable
     // universes; the visibility gate is enforced at the route layer).
+    //
+    // CO-93: the proposal flow is the canonical path only for **private-dynamic**
+    // universes (`accepts_proposals`). Owner + members of any universe edit
+    // directly (they may legitimately draft via this route too), but an outside
+    // subscriber can only propose when the target opted into the dynamic flow —
+    // the two static types have no proposal flow at all.
     {
         let storage = state.core.storage.lock();
-        if storage.get_universe(&target_slug).is_none() {
+        let Some(universe) = storage.get_universe(&target_slug) else {
             return Err(AppError::NotFound(format!(
                 "Universe '{target_slug}' not found"
+            )));
+        };
+        let is_owner_or_member = universe.owner_id == author
+            || storage
+                .universe_member_role(&target_slug, &author)
+                .is_some();
+        if !universe.universe_type().accepts_proposals() && !is_owner_or_member {
+            return Err(AppError::Forbidden(format!(
+                "Universe '{target_slug}' does not accept proposals \
+                 (only private-dynamic universes do)"
             )));
         }
     }

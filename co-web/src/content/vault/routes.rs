@@ -746,6 +746,11 @@ pub(crate) fn write_vault_entry(
         crate::eda::Visibility::UniverseOwner,
     ));
 
+    // CO-93 Phase 4: best-effort CDN purge for public-static universes so the
+    // edge refreshes the just-written page. No-op unless `CO_CDN_PURGE_URL` is
+    // set and the universe is static-exportable; never blocks the write path.
+    crate::static_export_routes::maybe_purge_cdn(state, universe_key, path);
+
     Ok(crate::entry_index::EntryRow {
         path: path.to_string(),
         universe_key: universe_key.to_string(),

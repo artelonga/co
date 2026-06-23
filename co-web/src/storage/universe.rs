@@ -178,6 +178,7 @@ impl Storage {
             git_branch: None,
             git_last_synced_sha: None,
             git_last_synced_at: None,
+            accepts_proposals: false,
         })
     }
 
@@ -219,6 +220,7 @@ impl Storage {
                         git_branch: None,
                         git_last_synced_sha: None,
                         git_last_synced_at: None,
+                        accepts_proposals: false,
                     })
                 },
             )
@@ -293,6 +295,19 @@ impl Storage {
             universe.git_last_synced_sha = sha;
             universe.git_last_synced_at = at;
         }
+        // CO-93: accepts_proposals (v90 column). Queried separately so a pre-v89
+        // DB (column absent) degrades to `false` (private-static / public-static)
+        // without disturbing the other fields. Drives `Universe::universe_type`
+        // → `private-dynamic` when set.
+        universe.accepts_proposals = self
+            .conn
+            .query_row(
+                "SELECT accepts_proposals FROM universes WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|v| v != 0)
+            .unwrap_or(false);
         Some(universe)
     }
 
@@ -568,6 +583,7 @@ impl Storage {
                     git_branch: None,
                     git_last_synced_sha: None,
                     git_last_synced_at: None,
+                    accepts_proposals: false,
                 })
             })
             .expect("Failed to list universes for user")
@@ -747,6 +763,7 @@ impl Storage {
                 git_branch: None,
                 git_last_synced_sha: None,
                 git_last_synced_at: None,
+                accepts_proposals: false,
             },
             row.get::<_, Option<String>>(10).unwrap_or(None),
         ))
@@ -1425,6 +1442,7 @@ mod tests {
             git_branch: None,
             git_last_synced_sha: None,
             git_last_synced_at: None,
+            accepts_proposals: false,
         }
     }
 
@@ -1477,6 +1495,56 @@ mod tests {
         // Detach → back to top-level.
         assert_eq!(storage.set_universe_parent("tempo", None).unwrap(), 1);
         assert_eq!(storage.get_universe("tempo").unwrap().parent_key, None);
+    }
+
+    /// CO-93: the `accepts_proposals` flag round-trips through `get_universe`
+    /// (separate-query load) and flips the derived `universe_type` from
+    /// public-static to private-dynamic — proving the v89 column is wired end to
+    /// end, not dead state.
+    #[test]
+    fn accepts_proposals_round_trips_and_derives_private_dynamic() {
+        use crate::models::UniverseType;
+        let (mut storage, _dir) = make_storage();
+        storage
+            .create_user("owner@example.com", "Owner")
+            .expect("create user");
+        let owner = storage
+            .get_user_by_email("owner@example.com")
+            .expect("user exists");
+        storage
+            .create_universe(
+                CreateUniverse {
+                    key: "garden".into(),
+                    name: "Garden".into(),
+                    description: String::new(),
+                },
+                &owner.id,
+            )
+            .expect("create universe");
+
+        // Make it a public-subscribable universe → public-static by default.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET visibility = 'public-subscribable' WHERE key = 'garden'",
+                [],
+            )
+            .unwrap();
+        let u = storage.get_universe("garden").unwrap();
+        assert!(!u.accepts_proposals, "defaults to false");
+        assert_eq!(u.universe_type(), UniverseType::PublicStatic);
+
+        // Owner opts into the dynamic proposal flow.
+        storage
+            .conn()
+            .execute(
+                "UPDATE universes SET accepts_proposals = 1 WHERE key = 'garden'",
+                [],
+            )
+            .unwrap();
+        let u = storage.get_universe("garden").unwrap();
+        assert!(u.accepts_proposals, "flag loaded via separate query");
+        assert_eq!(u.universe_type(), UniverseType::PrivateDynamic);
     }
 
     #[test]
