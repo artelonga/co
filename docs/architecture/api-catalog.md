@@ -208,6 +208,15 @@ CO-399: scope expansion — `/sala` (every visible universe) and `/sala?u=a,b` (
 | GET | `/u/{universe}/sala/{workspace_slug}` | anon | Sala SPA shell (specific workspace) |
 | GET | `/sala` | anon | CO-399: Sala SPA shell — every caller-visible universe (`/sala?u=a,b` for a subset) |
 
+## pages — SPA shells (router.rs)
+
+Page routes (no `/api/v1` prefix) that serve the SPA HTML shell. Heading has no
+backticked path so the generator treats these as page routes, not API endpoints.
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| GET | `/co/{slug}/{*path}` | anon | Universe SPA shell — deep-links into a universe entry/board path |
+
 ## workspace-templates — `/api/v1/universes/{slug}/workspace-templates/*` (workspace_template_routes.rs)
 
 CO-355: per-universe `_workspace.yaml` template registry — seeds Sala layouts.

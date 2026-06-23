@@ -45,6 +45,8 @@ tags:
     description: "graph-views endpoints"
   - name: "workspace"
     description: "workspace endpoints"
+  - name: "pages"
+    description: "pages endpoints"
   - name: "workspace-templates"
     description: "workspace-templates endpoints"
   - name: "calendar"
@@ -5611,6 +5613,19 @@ paths:
     get:
       tags: ["changelog"]
       summary: "Iframeable releases-as-sprints view (CSP frame-ancestors *.artelonga.com.br)"
+      responses:
+        "200":
+          description: OK
+  /co/{slug}/{*path}:
+    get:
+      tags: ["pages"]
+      summary: "Universe SPA shell — deep-links into a universe entry/board path"
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         "200":
           description: OK
