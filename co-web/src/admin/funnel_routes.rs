@@ -980,9 +980,12 @@ mod tests {
         assert_eq!(resp.status(), AxumStatus::UNAUTHORIZED);
     }
 
-    // All admin HTTP tests use the same email so concurrent set_var calls are idempotent.
     const ADMIN_EMAIL: &str = "admin@co371-funnel.invalid";
 
+    // CO-477: callers MUST hold the process-wide env lock
+    // (`crate::test_support::env_lock().await`) across this call AND the request
+    // that consumes the token, so a concurrent test's CO_SEED_ADMIN_EMAIL
+    // remove_var can't land mid-request and turn the expected 200 into a 403.
     fn admin_token() -> String {
         unsafe { std::env::set_var("CO_SEED_ADMIN_EMAIL", ADMIN_EMAIL) };
         let secret = crate::auth::jwt_secret();
@@ -994,6 +997,9 @@ mod tests {
     async fn test_acquisition_funnel_window_30d_returns_8_steps() {
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
+        // CO-477: hold the env lock across token mint + request so the admin
+        // gate sees a stable CO_SEED_ADMIN_EMAIL — lets us assert a strict 200.
+        let _env = crate::test_support::env_lock().await;
         let token = admin_token();
         let resp = app
             .oneshot(
@@ -1006,27 +1012,22 @@ mod tests {
             )
             .await
             .unwrap();
-        // Accept 200 or 403 — env var may race with other parallel tests.
-        // The unit tests verify logic; this test primarily verifies route + shape.
-        let status = resp.status();
-        if status == AxumStatus::OK {
-            let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
-                .await
-                .unwrap();
-            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(json["steps"].as_array().unwrap().len(), 8);
-            assert!(json["kpis"].is_object());
-            assert!(json["window"]["start"].is_string());
-            assert_eq!(json["breakdown"], "none");
-        } else {
-            assert_eq!(status, AxumStatus::FORBIDDEN);
-        }
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["steps"].as_array().unwrap().len(), 8);
+        assert!(json["kpis"].is_object());
+        assert!(json["window"]["start"].is_string());
+        assert_eq!(json["breakdown"], "none");
     }
 
     #[tokio::test]
     async fn test_acquisition_funnel_breakdown_source() {
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
+        let _env = crate::test_support::env_lock().await; // CO-477
         let token = admin_token();
         let resp = app
             .oneshot(
@@ -1039,23 +1040,20 @@ mod tests {
             )
             .await
             .unwrap();
-        let status = resp.status();
-        if status == AxumStatus::OK {
-            let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
-                .await
-                .unwrap();
-            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(json["breakdown"], "source");
-            assert!(json["by_source"].is_object());
-        } else {
-            assert_eq!(status, AxumStatus::FORBIDDEN);
-        }
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["breakdown"], "source");
+        assert!(json["by_source"].is_object());
     }
 
     #[tokio::test]
     async fn test_acquisition_funnel_breakdown_day() {
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
+        let _env = crate::test_support::env_lock().await; // CO-477
         let token = admin_token();
         let resp = app
             .oneshot(
@@ -1068,23 +1066,20 @@ mod tests {
             )
             .await
             .unwrap();
-        let status = resp.status();
-        if status == AxumStatus::OK {
-            let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
-                .await
-                .unwrap();
-            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(json["breakdown"], "day");
-            assert!(json["by_day"].is_array());
-        } else {
-            assert_eq!(status, AxumStatus::FORBIDDEN);
-        }
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["breakdown"], "day");
+        assert!(json["by_day"].is_array());
     }
 
     #[tokio::test]
     async fn test_acquisition_funnel_breakdown_country() {
         let dir = tempdir().unwrap();
         let app = build_test_router(dir.path());
+        let _env = crate::test_support::env_lock().await; // CO-477
         let token = admin_token();
         let resp = app
             .oneshot(
@@ -1097,16 +1092,12 @@ mod tests {
             )
             .await
             .unwrap();
-        let status = resp.status();
-        if status == AxumStatus::OK {
-            let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
-                .await
-                .unwrap();
-            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(json["breakdown"], "country");
-            assert!(json["by_country"].is_array());
-        } else {
-            assert_eq!(status, AxumStatus::FORBIDDEN);
-        }
+        assert_eq!(resp.status(), AxumStatus::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1_048_576)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["breakdown"], "country");
+        assert!(json["by_country"].is_array());
     }
 }

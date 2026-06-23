@@ -20,6 +20,11 @@ pub mod time;
 // Universe-specific extensions
 pub mod universes;
 
+// CO-477: shared, process-wide env lock for tests that mutate std::env.
+// Compiled only under `cfg(test)` — never shipped in release builds.
+#[cfg(test)]
+pub mod test_support;
+
 // CO-390 spike: layered architecture proof-of-concept (entries module).
 // These modules demonstrate the domain/dto/repository/service/mapper pattern.
 // NOT merged to main — archival only. See docs/spikes/library-manager-decision.md.

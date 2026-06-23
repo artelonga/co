@@ -319,9 +319,9 @@ mod tests {
 
     // --- env var override for templates ---
 
-    /// Mutex to serialize env-var-dependent tests.
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
+    // CO-477: env-var-dependent tests serialize on the single process-wide lock
+    // in crate::test_support (acquired in each test below), excluding env-mutating
+    // tests in other modules too — a per-file mutex did not.
     struct EnvGuard {
         key: String,
         original: Option<String>,
@@ -330,7 +330,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &str, value: &str) -> Self {
             let original = std::env::var(key).ok();
-            // SAFETY: test-only, guarded by ENV_MUTEX
+            // SAFETY: test-only, guarded by the process-wide test env lock (CO-477)
             unsafe { std::env::set_var(key, value) };
             Self {
                 key: key.to_string(),
@@ -340,7 +340,7 @@ mod tests {
 
         fn remove(key: &str) -> Self {
             let original = std::env::var(key).ok();
-            // SAFETY: test-only, guarded by ENV_MUTEX
+            // SAFETY: test-only, guarded by the process-wide test env lock (CO-477)
             unsafe { std::env::remove_var(key) };
             Self {
                 key: key.to_string(),
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn get_template_reads_env_var_override() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::set(
             "CO_TPL_QUILOMBO_EVENTO_CRIADO_EMAIL_SUBJECT",
             "Override: {{titulo}}",
@@ -373,7 +373,7 @@ mod tests {
 
     #[test]
     fn resend_provider_from_env_returns_none_without_api_key() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::remove("RESEND_API_KEY");
         let provider = ResendProvider::from_env();
         assert!(provider.is_none());
@@ -392,7 +392,7 @@ mod tests {
 
     #[test]
     fn evolution_provider_from_env_returns_none_without_api_key() {
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _env = crate::test_support::env_lock_blocking();
         let _guard = EnvGuard::remove("EVOLUTION_API_KEY");
         let provider = EvolutionApiProvider::from_env();
         assert!(provider.is_none());

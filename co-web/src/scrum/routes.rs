@@ -441,7 +441,10 @@ mod tests {
     use tower::ServiceExt;
 
     fn build_test_router(dir: &std::path::Path) -> axum::Router {
-        unsafe { std::env::set_var("JWT_SECRET", "test-secret") };
+        // CO-477: share the canonical "test-jwt-secret" with every other co-web
+        // test so concurrent JWT_SECRET writes can never produce a value
+        // mismatch (no test removes JWT_SECRET, so identical writes are safe).
+        unsafe { std::env::set_var("JWT_SECRET", "test-jwt-secret") };
         let config = crate::config::WebConfig {
             data_dir: dir.to_str().unwrap().to_string(),
             port: 0,

@@ -319,7 +319,8 @@ mod tests {
 
     #[test]
     fn backend_from_env_disabled() {
-        // SAFETY: test-only, single-threaded context.
+        // CO-477: hold the process-wide env lock across set → read → remove.
+        let _env = crate::test_support::env_lock_blocking();
         unsafe { std::env::set_var("CO_BACKUP_BACKEND", "disabled") };
         let result = backend_from_env(Path::new("/data"));
         unsafe { std::env::remove_var("CO_BACKUP_BACKEND") };

@@ -967,8 +967,9 @@ mod tests {
     use tempfile::tempdir;
     use tower::ServiceExt;
 
-    // Serialize tests that mutate env vars to avoid race conditions under parallel test execution.
-    static ENV_LOCK: StdMutex<()> = StdMutex::new(());
+    // CO-477: env-mutating tests serialize on the single process-wide lock in
+    // crate::test_support, so they also exclude env-mutating tests in other
+    // modules (a per-module mutex only serialized this file).
 
     fn build_test_router(dir: &std::path::Path) -> axum::Router {
         let config = crate::config::WebConfig {
@@ -1029,7 +1030,7 @@ mod tests {
 
     #[tokio::test]
     async fn ingest_without_token_returns_503() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::test_support::env_lock().await;
         // Ensure CO_KB_TOKEN is not set
         // SAFETY: test-only single-threaded env mutation
         unsafe { std::env::remove_var("CO_KB_TOKEN") };
@@ -1053,7 +1054,7 @@ mod tests {
 
     #[tokio::test]
     async fn ingest_with_wrong_token_returns_401() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::test_support::env_lock().await;
         // SAFETY: test-only single-threaded env mutation
         unsafe { std::env::set_var("CO_KB_TOKEN", "correct-token") };
         let dir = tempdir().unwrap();
@@ -1079,7 +1080,7 @@ mod tests {
 
     #[tokio::test]
     async fn ingest_with_valid_token_returns_202() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::test_support::env_lock().await;
         // SAFETY: test-only single-threaded env mutation
         unsafe { std::env::set_var("CO_KB_TOKEN", "test-kb-token") };
         let dir = tempdir().unwrap();
@@ -1167,7 +1168,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_break_resilience_local_entry_write_succeeds_without_kb() {
-        let _env = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _env = crate::test_support::env_lock().await;
         // Simulate: CO_KB_TOKEN is not set (KB endpoint down), but local entry write must succeed.
         // SAFETY: test-only single-threaded env mutation
         unsafe { std::env::remove_var("CO_KB_TOKEN") };
