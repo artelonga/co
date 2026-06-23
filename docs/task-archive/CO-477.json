@@ -1,0 +1,23 @@
+{
+  "task_id": "CO-477",
+  "title": "De-flake co-web lib tests: process-wide env lock + single JWT_SECRET value",
+  "type": "fix",
+  "status": "done",
+  "semver_bump": "patch",
+  "spec_path": "work/co/CO-477.md",
+  "branch": "fix/CO-477-flaky-env-tests",
+  "merge_sha": "52a178058f5929ceb5b62c7abd7443513523b7c6",
+  "pr": {
+    "url": "https://github.com/artelonga/co/pull/314",
+    "number": 314
+  },
+  "started_at": "2026-06-23T00:00:00Z",
+  "merged_at": "2026-06-23T14:08:59Z",
+  "files_changed": 19,
+  "lines_added": 277,
+  "lines_removed": 88,
+  "labels": [],
+  "changelog_entry": "## CO-477 — De-flake co-web lib test suite under parallel `cargo test`\n\nSeveral `co-web` lib tests failed intermittently **only** under parallel\n`cargo test` (they passed in isolation) because they mutate the shared process\nenvironment via `std::env::set_var`/`remove_var`, racing other tests. The most\nvisible offender, `platform::telemetry_api::tests::jwt_session_passes_gate`,\nasserted `200` but observed `401` when a concurrent test rewrote `JWT_SECRET`\nbetween token-sign time and gate-validation time (the gate re-reads `JWT_SECRET`\nfrom the live environment).\n\n### Fixed\n- **Single canonical test secret.** Every test that writes `JWT_SECRET` now uses\n  the same value `\"test-jwt-secret\"` (previously `\"test-secret\"` /\n  `\"test-feedback-secret\"` diverged). No test removes `JWT_SECRET`, so\n  identical-value concurrent writes are race-safe — eliminating the JWT flake at\n  its source.\n- **One process-wide env lock.** Added `co_web::test_support` with\n  `env_lock()` (async) and `env_lock_blocking()` (sync), both guarding a single\n  `tokio::sync::Mutex`. Tests that mutate non-JWT env vars with `remove_var` or\n  unique values (`CO_KB_TOKEN`, `CO_SEED_ADMIN_EMAIL`,\n  `CO_AUTO_SOFT_LIMIT_5H_TOKENS`, `CO_TRANSLATE_BACKEND`, `CO_BACKUP_BACKEND`,\n  `CO_CACHE_TEST_CACHE_MAX_ENTRIES`) now hold this one lock across their full\n  set → build-state → request → assert window.\n- **Replaced fragmented per-module locks** (`ENV_LOCK` in `kb_routes`,\n  `ADMIN_ENV_LOCK` in `lead_routes`, `ENV_MUTEX` in `webhook` /\n  `notification_providers`) with the shared lock, so env-mutating tests are now\n  serialized **across** modules, not just within one file.\n- **Strengthened `funnel_routes` assertions.** The acquisition-funnel admin\n  tests previously accepted `200 OR 403` to mask the env race; they now hold the\n  env lock and assert a strict `200`.\n\n### Why\nFragmented per-module mutexes did not serialize against each other, and divergent\n`JWT_SECRET` values let one test's write invalidate another's already-signed\ntoken. The result was false CI reds and re-run noise. No test was `#[ignore]`-d\nand no assertion was weakened — `cargo test -p co-web --lib` now runs reliably\ngreen under default parallelism.",
+  "summary": "Contexto Vários testes de `co-web` falhavam de forma intermitente **apenas** sob `cargo test` paralelo (passavam isolados) porque mutam o **ambiente compartilhado do processo** via `std::env::set_var`",
+  "co_auto_version": "0.1.0"
+}
