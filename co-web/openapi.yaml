@@ -4122,6 +4122,21 @@ paths:
       responses:
         "200":
           description: OK
+    patch:
+      tags: ["entries"]
+      summary: "Apply id-addressed block ops (replace/insert_after/delete/move) and re-write the body (CO-473)"
+      security:
+        - sessionCookie: []
+        - bearerJWT: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
   /api/v1/universes/{slug}/entries/diff:
     get:
       tags: ["entries"]
