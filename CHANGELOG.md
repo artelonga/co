@@ -5,6 +5,215 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.21.0] — 2026-06-24 — self-host security + compliant WhatsApp [--ignore-dod override]
+
+## CO-475 — Hash game-auth magic-codes at rest
+
+Closed the second plaintext magic-code path flagged during CO-474. The game-auth
+flow (`co-web/src/universes/game/game_routes.rs`) stores its own `VerifyCodeData`
+in `game_storage`, separate from the redb `AuthStore` that CO-474 hashed. It was
+still persisting the 6-digit login code in plaintext and doing a plaintext
+compare on verify.
+
+The game `login` handler now hashes the generated code with Argon2id
+(`auth::hash_code`) before storing it; the plaintext is used only to build the
+email body. The `verify` handler compares the submitted code against the stored
+hash via `auth::verify_code`. Expiry and attempt-counting behavior are unchanged.
+
+### Why
+A database read (backup, dump, or compromise) must not recover a live login code.
+Both magic-code stores in the codebase now hash at rest with the same Argon2id
+scheme.
+
+## CO-476 — Standalone scoped-thread REST routes
+
+Completed the unified-thread interface CO-472 deferred. New REST routes on the
+visibility-gated universe router expose the standalone (non-anchored) threads
+whose storage primitives already shipped in CO-472:
+
+- `GET /{slug}/threads` — list the threads the caller can access (`?include_archived`).
+- `POST /{slug}/threads` — create a thread scoped to `all`, a `subset` of members, or `self` (a private note).
+- `GET /{slug}/threads/{thread_id}` — read its messages and recursive child threads (replies).
+- `POST /{slug}/threads/{thread_id}/messages` — post a message; `parent_id` spawns a recursive reply thread.
+- `POST /{slug}/threads/{thread_id}/archive` — archive / un-archive (creator or universe manager).
+
+Subset threads reject non-members (403); self threads stay private to the
+creator. Every post fans out a `ChatEvent` over the same CO-468 serialize-once
+broadcast bus chat uses, so connected members receive thread messages live.
+
+### Why
+
+CO-472 unified comments and chat into one thread primitive but only shipped the
+entry-anchored `comments` view, deferring the standalone scoped-thread surface.
+This adds that surface with no schema change (reuses the v092 thread columns and
+the existing `archived_at`). Resolve/unresolve as a *separate* state is deferred
+— it would require a net-new `resolved_at` column (a migration beyond v092);
+archive covers the close-a-thread need today.
+
+## CO-477 — De-flake co-web lib test suite under parallel `cargo test`
+
+Several `co-web` lib tests failed intermittently **only** under parallel
+`cargo test` (they passed in isolation) because they mutate the shared process
+environment via `std::env::set_var`/`remove_var`, racing other tests. The most
+visible offender, `platform::telemetry_api::tests::jwt_session_passes_gate`,
+asserted `200` but observed `401` when a concurrent test rewrote `JWT_SECRET`
+between token-sign time and gate-validation time (the gate re-reads `JWT_SECRET`
+from the live environment).
+
+### Fixed
+- **Single canonical test secret.** Every test that writes `JWT_SECRET` now uses
+  the same value `"test-jwt-secret"` (previously `"test-secret"` /
+  `"test-feedback-secret"` diverged). No test removes `JWT_SECRET`, so
+  identical-value concurrent writes are race-safe — eliminating the JWT flake at
+  its source.
+- **One process-wide env lock.** Added `co_web::test_support` with
+  `env_lock()` (async) and `env_lock_blocking()` (sync), both guarding a single
+  `tokio::sync::Mutex`. Tests that mutate non-JWT env vars with `remove_var` or
+  unique values (`CO_KB_TOKEN`, `CO_SEED_ADMIN_EMAIL`,
+  `CO_AUTO_SOFT_LIMIT_5H_TOKENS`, `CO_TRANSLATE_BACKEND`, `CO_BACKUP_BACKEND`,
+  `CO_CACHE_TEST_CACHE_MAX_ENTRIES`) now hold this one lock across their full
+  set → build-state → request → assert window.
+- **Replaced fragmented per-module locks** (`ENV_LOCK` in `kb_routes`,
+  `ADMIN_ENV_LOCK` in `lead_routes`, `ENV_MUTEX` in `webhook` /
+  `notification_providers`) with the shared lock, so env-mutating tests are now
+  serialized **across** modules, not just within one file.
+- **Strengthened `funnel_routes` assertions.** The acquisition-funnel admin
+  tests previously accepted `200 OR 403` to mask the env race; they now hold the
+  env lock and assert a strict `200`.
+
+### Why
+Fragmented per-module mutexes did not serialize against each other, and divergent
+`JWT_SECRET` values let one test's write invalidate another's already-signed
+token. The result was false CI reds and re-run noise. No test was `#[ignore]`-d
+and no assertion was weakened — `cargo test -p co-web --lib` now runs reliably
+green under default parallelism.
+
+## CO-478 — YouTube-reference ingestion pipeline + Quartz publish (e2e)
+
+### Added
+- **`scripts/ingest-youtube-reference.sh`** — the reusable "yt-summarizer": given
+  a YouTube URL, yt-dlp fetches metadata + full description + top comments +
+  bestaudio, Whisper transcribes it, and it writes a `reference` card
+  (`youtube-<id>.md`, mbya/refs format) with the transcript embedded and the
+  substantive description links lifted into `connections:` (store/tracking links
+  filtered). Optional pt-BR summary via `--summary-ollama`.
+- **`docs/pipelines/youtube-reference.md`** — the documented e2e runbook:
+  universe CRUD → `referencias/` → ingest → author synthesis → Quartz publish
+  (grcsamazonia/miguel pattern), with prerequisites and the gated deploy.
+
+### Worked example (not in this repo — local universe)
+- The **agroecologia** universe (`~/projects/agroecologia`): a synthesis document
+  *Raízes Pensantes* (pt-BR, for agroecologists — the plant-behavior/consciousness/
+  neurobiology debate, Darwin's root-brain → Gagliano → "no brain, no gain" →
+  distributed cognition) + two ingested video reference cards, built to a Quartz
+  static site (title *Raízes Pensantes*).
+
+### Why
+Make external media first-class, connected, publishable knowledge in any universe,
+repeatably — markdown stays canonical; audio/venv are working artifacts only.
+
+## CO-479 — Enterprise-compliant WhatsApp (official Cloud API)
+
+Added a `CloudApiProvider` for Meta's **official WhatsApp Business Platform**
+(Cloud API / Graph API) alongside the existing unofficial `EvolutionApiProvider`,
+plus the inbound webhook Meta calls. WhatsApp recovery-code delivery now prefers
+the compliant Cloud API and falls back to Evolution.
+
+- **Outbound**: `CloudApiProvider` (channel `whatsapp`) sends via
+  `graph.facebook.com/{ver}/{phone_number_id}/messages` with a Bearer token.
+  Env: `WHATSAPP_CLOUD_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, optional
+  `WHATSAPP_GRAPH_VERSION` (default `v21.0`).
+- **Inbound**: `GET/POST /api/v1/whatsapp/webhook` — GET verification handshake
+  (`WHATSAPP_VERIFY_TOKEN`); POST verifies `X-Hub-Signature-256` against
+  `WHATSAPP_APP_SECRET` (constant-time) and parses inbound messages. No auth
+  gate — security is the HMAC signature, matching the billing-webhook posture.
+- Onboarding runbook at `docs/integrations/whatsapp-cloud-api.md`.
+
+### Why
+
+The Evolution/Baileys provider violates WhatsApp's ToS (ban risk, no SLA/DPA) —
+fine for a personal/prototype bot, not for a business. This makes compliant
+WhatsApp a drop-in provider swap behind the `ChannelProvider` trait, ready the
+moment a verified WhatsApp Business Account + number exist. Reply auto-routing to
+the bot brain is a follow-up (CO-480).
+
+## CO-480 — WhatsApp Cloud webhook → bot brain → auto-reply
+
+Closed the loop on the compliant WhatsApp channel: an inbound message on the
+Cloud API webhook (CO-479) is now forwarded to the bot brain (`CO_BOT_BRAIN_URL`,
+default the `whatsapp-bot` bridge `/api/chat`) and the reply is sent back via
+`CloudApiProvider`.
+
+- Reply runs **asynchronously** (`tokio::spawn`) so Meta still gets its required
+  fast 200 ack while the model call runs in the background.
+- Falls back to a fixed ack if the brain is unreachable; no-ops (logged) when the
+  Cloud API isn't configured.
+- New pure `parse_brain_reply` + unit test; `CO_BOT_BRAIN_URL` config.
+
+### Why
+
+CO-479 only verified + logged inbound messages. This makes WhatsApp a working
+CO-aware front-end over the official transport — same brain as the companion app.
+Intent logic + score write-back stay in the bridge (single source of truth).
+
+## CO-481 — Auth hardening: `Secure` on the login session cookie
+
+The JWT-bearing session cookie (`build_session_cookie`) now sets the `Secure`
+attribute in every TLS environment, closing a gap where it was emitted as
+`HttpOnly; SameSite=Lax` only — the logout clear-cookie already set `Secure`, so
+the cookie that *carries* the session token was the unprotected one (session
+theft on HTTP downgrade / mixed-content; OWASP A05/A07).
+
+- `Secure` is omitted only for the plain-HTTP local envs (`local`/`dev`/`test`),
+  so local login keeps working; an unset/empty `CO_ENV` **fails closed** to `Secure`.
+- New pure helper `cookie_secure_for_env()` + unit test.
+
+### Why
+
+Found by the auth/login security-compliance review (`infra/e2e/SECURITY-REVIEW.md`,
+finding F1, HIGH). `SameSite` stays `Lax` on login (intentional — `Strict` logs
+users out on cross-site top-level navigation). CSP (F2) is tracked separately.
+
+## CO-482 — Content-Security-Policy (report-only)
+
+Added a baseline `Content-Security-Policy-Report-Only` header to every response,
+closing the gap flagged by the auth/login security review (F2, no CSP). Report-only
+mode means browsers evaluate the policy and report violations **without blocking**
+— so it hardens XSS containment with zero risk to the inline-script SPA, the
+esm.sh-loaded atlas, or the served gardens.
+
+- Policy: `default-src 'self'`; inline + esm.sh allowed for scripts; `https:`/`wss:`
+  for `connect-src`; `frame-ancestors 'self' https://*.artelonga.com.br`;
+  `object-src 'none'`.
+- Sits in the global header layer next to `X-Content-Type-Options` / `Referrer-Policy`.
+
+### Why
+
+Defense-in-depth from the security-compliance review (`infra/e2e/SECURITY-REVIEW.md`).
+Report-only is the safe first step; promotion to an enforcing `Content-Security-Policy`
+(with nonce/hash scripts) is a follow-up once violation reports are clean.
+
+## CO-483 — Authenticated chat proxy (bot bridge stays off the network)
+
+Added `POST /api/v1/bot/chat` behind `require_auth` (JWT session/Bearer) + the
+global rate limiter, which proxies to the loopback bot brain
+(`CO_BOT_BRAIN_URL`). The companion app now chats through this authenticated route
+instead of calling the bridge directly — so the unauthenticated bridge **never
+leaves loopback**, and chat still works for authenticated remote/guest users.
+
+- Unauth → 401; brain unreachable → 503; no reply → 502.
+- Pure `parse_reply` (reply + intent) with unit tests.
+- Companion app updated to call the proxy with `credentials:'include'` + a login
+  hint on 401.
+
+### Why
+
+The bridge is loopback-only + unauthenticated; exposing it to the LAN to enable
+guest chat would be an open model+CO-write endpoint. This makes co-web the single
+authenticated front door (verified: the bridge stays out of the firewall allowlist,
+per `infra/e2e/exposure-scan.sh`). Closes the R1→R2 blocker.
+
+
 ## [3.20.0] — 2026-06-23 — Blocks, canonical interfaces & unified threads — block model (CO-470/473) · search/connections API (CO-471) · comments-as-messages (CO-472) · storage foundations (CO-81/93/110) · hardening (CO-468/469/474) [--ignore-dod override]
 
 ## CO-110 — Filesystem-as-Web — encrypted remote file editing via verified Co pages
