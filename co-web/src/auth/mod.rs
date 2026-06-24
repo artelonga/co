@@ -301,8 +301,23 @@ pub fn decode_claims_any(
 /// When `domain` is `Some(".artelonga.com.br")` the cookie is shared across
 /// all subdomains. When `None` (dev default), no `Domain` attribute is added
 /// and the cookie only works for the current host.
+/// CO-481: whether the session cookie should carry the `Secure` attribute for a
+/// given deployment env. Plain-HTTP local envs (`local`/`dev`/`test`) must NOT
+/// set it — browsers drop `Secure` cookies over `http://`, which would break
+/// local login. Every other env (incl. `prod`, `staging`, `uat`, and an
+/// unset/empty `CO_ENV`, which **fails closed**) gets `Secure`.
+pub fn cookie_secure_for_env(co_env: &str) -> bool {
+    !matches!(co_env, "local" | "dev" | "test")
+}
+
 pub fn build_session_cookie(token: &str, domain: Option<&str>, max_age: u64) -> String {
+    let co_env = crate::infra::secrets::global().get_or("CO_ENV", "production");
     let mut cookie = format!("session={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age}");
+    // CO-481 (F1): the cookie carries the session JWT — it must be `Secure` in
+    // every TLS env so it can't be sent over plain HTTP (downgrade/mixed-content).
+    if cookie_secure_for_env(&co_env) {
+        cookie.push_str("; Secure");
+    }
     if let Some(d) = domain {
         cookie.push_str("; Domain=");
         cookie.push_str(d);
@@ -1175,6 +1190,23 @@ mod tests {
     }
 
     /// build_session_cookie without domain does not include Domain attribute.
+    /// CO-481 (F1): `Secure` is set in every TLS env and omitted only for the
+    /// plain-HTTP local envs; unset/empty `CO_ENV` fails closed (Secure).
+    #[test]
+    fn test_cookie_secure_for_env() {
+        // plain-HTTP local envs → no Secure (else local login breaks)
+        assert!(!cookie_secure_for_env("local"));
+        assert!(!cookie_secure_for_env("dev"));
+        assert!(!cookie_secure_for_env("test"));
+        // TLS envs → Secure
+        assert!(cookie_secure_for_env("prod"));
+        assert!(cookie_secure_for_env("staging"));
+        assert!(cookie_secure_for_env("uat"));
+        // fail closed on unset/empty/unknown
+        assert!(cookie_secure_for_env(""));
+        assert!(cookie_secure_for_env("production"));
+    }
+
     #[test]
     fn test_build_session_cookie_no_domain() {
         let cookie = build_session_cookie("tok123", None, 604800);
