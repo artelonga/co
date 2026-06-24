@@ -666,6 +666,10 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // CO-328: AI provider endpoints (Ollama + Claude Code hook).
     router = router.nest("/api/v1", crate::ai_routes::router(state.clone()));
 
+    // CO-483: authenticated chat proxy → the loopback bot brain (keeps the
+    // unauthenticated bridge off the network; only this require_auth'd route reaches it).
+    router = router.nest("/api/v1", crate::bot_proxy_routes::router(state.clone()));
+
     // CO-332: Public chat + deployment-status endpoints (non-Claude LLM, no auth).
     router = router.nest("/api/v1", crate::chat_routes::router(state.clone()));
 

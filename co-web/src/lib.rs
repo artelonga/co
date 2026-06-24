@@ -116,6 +116,7 @@ pub use admin::uat_routes;
 
 // integrations context
 pub use integrations::ai_routes;
+pub use integrations::bot_proxy_routes;
 pub use integrations::chat_routes;
 pub use integrations::email_smtp;
 pub use integrations::feedback_routes;
