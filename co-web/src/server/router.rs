@@ -673,6 +673,9 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
     // unauthenticated bridge off the network; only this require_auth'd route reaches it).
     router = router.nest("/api/v1", crate::bot_proxy_routes::router(state.clone()));
 
+    // CO-487: birthday greetings — consent capture (authed) + admin trigger.
+    router = router.nest("/api/v1", crate::birthday::router(state.clone()));
+
     // CO-332: Public chat + deployment-status endpoints (non-Claude LLM, no auth).
     router = router.nest("/api/v1", crate::chat_routes::router(state.clone()));
 

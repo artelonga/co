@@ -41,6 +41,8 @@ mod v089;
 mod v090;
 // CO-93: universe-type architecture — `accepts_proposals` opt-in (private-dynamic).
 mod v091;
+// CO-487: birthday greetings — users.birthday/consent/whatsapp/greeted_year.
+mod v093;
 // CO-472: unified thread model — chat_rooms anchor/parent/scope columns.
 mod v092;
 
@@ -187,6 +189,7 @@ impl Storage {
             self.migrate_v090(current_version);
             self.migrate_v091(current_version);
             self.migrate_v092(current_version);
+            self.migrate_v093(current_version);
         })
         .inspect_err(|e| {
             tracing::error!(
@@ -336,7 +339,7 @@ mod tests {
     /// Latest migration version applied by the aggregated runner. Bump this in
     /// lockstep with the highest `if current_version < N` block (version-claim
     /// protocol) so the split stays anchored to the real schema.
-    const LATEST_VERSION: i64 = 92;
+    const LATEST_VERSION: i64 = 93;
 
     fn max_version(storage: &Storage) -> i64 {
         storage

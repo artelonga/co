@@ -85,6 +85,7 @@ pub use content::workspace_template_routes;
 pub use content::workspace_ws;
 
 // social context
+pub use social::birthday;
 pub use social::chat;
 pub use social::contact_routes;
 pub use social::dm_routes;

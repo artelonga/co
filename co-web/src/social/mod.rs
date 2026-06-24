@@ -1,3 +1,4 @@
+pub mod birthday;
 pub mod chat;
 pub mod contact_routes;
 pub mod dm_routes;
