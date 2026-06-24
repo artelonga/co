@@ -5,6 +5,29 @@ All notable changes to CO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.22.0] — 2026-06-24 — birthday greetings [--ignore-dod override]
+
+## CO-487 — Birthday greetings (opt-in WhatsApp)
+
+A warm, consent-gated touch: users opt in at login (birthday `MM-DD` + WhatsApp
+number, an LGPD opt-in) and a daily job sends "🎉 Feliz aniversário" on the day via
+the compliant WhatsApp provider cascade (Cloud API → Evolution), once per year.
+
+- Migration **v093**: `users.birthday` / `birthday_consent` / `whatsapp` /
+  `birthday_greeted_year`.
+- `POST /api/v1/auth/birthday-consent` (authed) captures the opt-in.
+- `run_birthday_job` selects today's consented birthdays → greets → marks (no lock
+  across the network await); `POST /api/v1/admin/birthday/run` triggers it.
+- Pure `compose_greeting`/`valid_mmdd` + an e2e test (consenting user greeted,
+  non-consenting skipped) via a mock provider.
+
+### Why
+
+Opt-in delight over the official transport. Delivery is gated on a configured
+WhatsApp channel (Evolution/Cloud); without one the job logs a dev-fallback and
+greets none — real messages send the moment a channel exists.
+
+
 ## [3.21.0] — 2026-06-24 — self-host security + compliant WhatsApp [--ignore-dod override]
 
 ## CO-475 — Hash game-auth magic-codes at rest
