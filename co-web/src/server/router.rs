@@ -717,6 +717,24 @@ pub fn build_router(state: AppState, plugin_routes: Option<Router<AppState>>) ->
             HeaderName::from_static("referrer-policy"),
             HeaderValue::from_static("strict-origin-when-cross-origin"),
         ))
+        // CO-482 (security F2): baseline Content-Security-Policy in REPORT-ONLY
+        // mode. Browsers evaluate + report violations without blocking, so it
+        // can't break the inline-script SPA, the esm.sh-loaded atlas, or the
+        // served gardens. `connect-src` allows wss: for the WS surfaces. Promote
+        // to an enforcing `content-security-policy` header once reports are clean.
+        .layer(SetResponseHeaderLayer::if_not_present(
+            HeaderName::from_static("content-security-policy-report-only"),
+            HeaderValue::from_static(
+                "default-src 'self'; \
+                 script-src 'self' 'unsafe-inline' https://esm.sh; \
+                 style-src 'self' 'unsafe-inline'; \
+                 img-src 'self' data: https:; \
+                 font-src 'self' data:; \
+                 connect-src 'self' https: wss:; \
+                 frame-ancestors 'self' https://*.artelonga.com.br; \
+                 base-uri 'self'; object-src 'none'",
+            ),
+        ))
         // CO-397: server version on all responses so LLM agents can identify
         // the CO release they are talking to.
         .layer(SetResponseHeaderLayer::if_not_present(
