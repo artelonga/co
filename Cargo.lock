@@ -1555,7 +1555,7 @@ checksum = "3f88a43d011fc4a6876cb7344703e297c71dda42494fee094d5f7c76bf13f746"
 
 [[package]]
 name = "co"
-version = "3.20.0"
+version = "3.21.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1596,7 +1596,7 @@ dependencies = [
 
 [[package]]
 name = "co-agent"
-version = "3.20.0"
+version = "3.21.0"
 dependencies = [
  "anyhow",
  "axum 0.8.9",
@@ -1647,7 +1647,7 @@ dependencies = [
 
 [[package]]
 name = "co-cli"
-version = "3.20.0"
+version = "3.21.0"
 dependencies = [
  "anyhow",
  "assert_cmd",
@@ -1680,7 +1680,7 @@ dependencies = [
 
 [[package]]
 name = "co-engine"
-version = "3.20.0"
+version = "3.21.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -1731,7 +1731,7 @@ dependencies = [
 
 [[package]]
 name = "co-web"
-version = "3.20.0"
+version = "3.21.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
