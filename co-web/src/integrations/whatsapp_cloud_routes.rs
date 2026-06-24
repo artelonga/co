@@ -11,10 +11,10 @@
 //! - `WHATSAPP_VERIFY_TOKEN` — shared secret echoed during GET verification.
 //! - `WHATSAPP_APP_SECRET`   — Meta app secret; verifies POST signatures.
 //!
-//! The reply path (forward inbound text to the bot brain, answer via
-//! [`crate::notification_providers::CloudApiProvider`]) is a follow-up; this
-//! scaffold verifies, parses, and logs inbound messages so the compliant
-//! transport is ready the moment a WABA + number exist.
+//! CO-480: inbound messages are forwarded to the bot brain (`CO_BOT_BRAIN_URL`,
+//! default the `whatsapp-bot` bridge) and the reply is sent via
+//! [`crate::notification_providers::CloudApiProvider`] — **asynchronously**, so
+//! Meta still gets its fast 200 ack while the model call runs in the background.
 
 use std::collections::HashMap;
 
@@ -82,12 +82,71 @@ async fn event_handler(headers: HeaderMap, body: Bytes) -> Response {
         return StatusCode::UNAUTHORIZED.into_response();
     }
 
-    for m in parse_inbound(&body) {
-        tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
-        // TODO(CO-480): forward to the bot brain + reply via CloudApiProvider.
+    let msgs = parse_inbound(&body);
+    if !msgs.is_empty() {
+        // CO-480: reply ASYNCHRONOUSLY. Meta requires a fast 200 (it retries on
+        // delay), and the brain/model call takes seconds — so never block the ack
+        // on it. Spawn the reply loop and return 200 immediately.
+        tokio::spawn(async move {
+            for m in msgs {
+                tracing::info!(from = %m.from, "WhatsApp Cloud inbound: {}", m.text);
+                if let Err(e) = reply_to(&m).await {
+                    tracing::warn!(from = %m.from, "WhatsApp Cloud reply failed: {e}");
+                }
+            }
+        });
     }
 
     StatusCode::OK.into_response()
+}
+
+// ---------------------------------------------------------------------------
+// CO-480 — inbound → bot brain → reply (via the official Cloud API)
+// ---------------------------------------------------------------------------
+
+/// The bot brain endpoint (the `whatsapp-bot` bridge's `/api/chat`, or any
+/// `{text}→{reply}` JSON service). Same brain the companion app uses.
+fn brain_url() -> String {
+    crate::infra::secrets::global().get_or("CO_BOT_BRAIN_URL", "http://localhost:8765/api/chat")
+}
+
+/// Inbound message → brain reply → send via [`CloudApiProvider`]. No-op (logged)
+/// when the Cloud API isn't configured; falls back to a fixed ack if the brain
+/// is unreachable so the user always gets a response.
+async fn reply_to(msg: &InboundMsg) -> Result<(), String> {
+    use crate::notification_providers::{ChannelProvider, CloudApiProvider};
+    let provider = CloudApiProvider::from_env()
+        .ok_or("CloudApiProvider not configured (WHATSAPP_CLOUD_TOKEN/PHONE_NUMBER_ID)")?;
+    let client = reqwest::Client::new();
+    let reply = fetch_brain_reply(&client, &brain_url(), &msg.text)
+        .await
+        .unwrap_or_else(|| "Recebi sua mensagem — já te respondo! 🙂".to_string());
+    provider.send(&client, &msg.from, &reply).await
+}
+
+/// POST `{text}` to the brain, return its `reply`. `None` on any transport/parse
+/// failure (caller substitutes a fallback).
+async fn fetch_brain_reply(client: &reqwest::Client, url: &str, text: &str) -> Option<String> {
+    let resp = client
+        .post(url)
+        .json(&serde_json::json!({ "text": text, "sender": "whatsapp" }))
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.bytes().await.ok()?;
+    parse_brain_reply(&body)
+}
+
+/// Extract the non-empty `reply` string from the brain's JSON response.
+pub fn parse_brain_reply(body: &[u8]) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_slice(body).ok()?;
+    v.get("reply")
+        .and_then(|r| r.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from)
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +231,19 @@ mod tests {
         let status =
             br#"{"entry":[{"changes":[{"value":{"statuses":[{"status":"delivered"}]}}]}]}"#;
         assert!(parse_inbound(status).is_empty());
+    }
+
+    #[test]
+    fn parse_brain_reply_extracts_reply() {
+        assert_eq!(
+            parse_brain_reply(
+                r#"{"reply":"Tua próxima tarefa é X","intent":"next_task"}"#.as_bytes()
+            ),
+            Some("Tua próxima tarefa é X".to_string())
+        );
+        assert_eq!(parse_brain_reply(br#"{"reply":""}"#), None); // empty → fallback
+        assert_eq!(parse_brain_reply(br#"{"intent":"chat"}"#), None); // missing
+        assert_eq!(parse_brain_reply(b"not json"), None);
     }
 
     #[test]
