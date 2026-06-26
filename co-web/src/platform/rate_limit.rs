@@ -465,6 +465,14 @@ fn is_vault_path(path: &str) -> bool {
     path.contains("/vault/") || path.ends_with("/vault")
 }
 
+/// CO-490: paths authenticated by HMAC signature (not IP/session), which must be
+/// exempt from the IP-keyed rate limiter — otherwise the provider's few source
+/// IPs share the anonymous-write budget and get throttled into a disabled
+/// subscription. Currently the Meta WhatsApp inbound webhook.
+fn is_hmac_webhook_path(path: &str) -> bool {
+    path == "/api/v1/whatsapp/webhook"
+}
+
 fn has_admin_override(headers: &HeaderMap) -> bool {
     headers
         .get("x-admin-override-quota")
@@ -620,6 +628,16 @@ pub async fn rate_limit_middleware(
 
     // Skip: non-API routes, CORS preflight, health endpoints.
     if !path.starts_with("/api/") || method == Method::OPTIONS || path.starts_with("/api/health") {
+        return next.run(req).await;
+    }
+
+    // CO-490: the Meta WhatsApp webhook authenticates by HMAC signature, not by
+    // IP/session — its callers are Meta's small set of source IPs, which the
+    // anonymous-write bucket (5/min, shared across all users) would throttle
+    // almost immediately, and Meta disables the subscription on sustained 429s.
+    // The signature is the auth boundary (verified in the handler), so exempt it
+    // from the IP limiter, mirroring the billing webhook's HMAC trust model.
+    if is_hmac_webhook_path(path) {
         return next.run(req).await;
     }
 
@@ -849,6 +867,15 @@ mod tests {
         // Storage quota stays unlimited; rate limits are applied in middleware separately.
         assert!(lim.storage_entries.is_none());
         assert!(lim.max_universes.is_none());
+    }
+
+    #[test]
+    fn test_hmac_webhook_path_exempt() {
+        // CO-490: only the HMAC-verified Meta webhook is exempt — not its siblings.
+        assert!(is_hmac_webhook_path("/api/v1/whatsapp/webhook"));
+        assert!(!is_hmac_webhook_path("/api/v1/whatsapp/link/start"));
+        assert!(!is_hmac_webhook_path("/api/v1/whatsapp/webhook/"));
+        assert!(!is_hmac_webhook_path("/api/v1/universes/co/entries"));
     }
 
     #[test]
